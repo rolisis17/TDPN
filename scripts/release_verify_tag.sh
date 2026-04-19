@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/release_verify_tag.sh --version vX.Y.Z [--require-head-match 0|1] [--require-signature 0|1]
+  ./scripts/release_verify_tag.sh --version vX.Y.Z [--require-head-match 0|1] [--require-signature 0|1] [--require-contained-in-ref REF]
 
 Examples:
   ./scripts/release_verify_tag.sh --version v0.1.0
@@ -16,6 +16,7 @@ Examples:
 Notes:
   - Enforces existence of an annotated tag (lightweight tags are rejected).
   - `--require-signature 1` runs `git tag -v` and fails if signature verification fails.
+  - `--require-contained-in-ref origin/main` enforces that tag commit is reachable from the protected base ref.
 USAGE
 }
 
@@ -32,6 +33,7 @@ require_cmds() {
 version=""
 require_head_match=0
 require_signature=0
+require_contained_in_ref=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --require-signature)
       require_signature="${2:-}"
+      shift 2
+      ;;
+    --require-contained-in-ref)
+      require_contained_in_ref="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -76,6 +82,10 @@ if [[ "$require_signature" != "0" && "$require_signature" != "1" ]]; then
   echo "--require-signature must be 0 or 1"
   exit 1
 fi
+if [[ -n "$require_contained_in_ref" && ! "$require_contained_in_ref" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+  echo "--require-contained-in-ref must be a simple git ref name (e.g. origin/main)"
+  exit 1
+fi
 
 require_cmds
 
@@ -97,6 +107,24 @@ if [[ "$require_head_match" == "1" && "$tag_commit" != "$head_commit" ]]; then
   exit 1
 fi
 
+if [[ -n "$require_contained_in_ref" ]]; then
+  if ! git rev-parse -q --verify "${require_contained_in_ref}^{commit}" >/dev/null 2>&1; then
+    if [[ "$require_contained_in_ref" == origin/* ]]; then
+      remote_branch="${require_contained_in_ref#origin/}"
+      git fetch --no-tags origin "${remote_branch}:refs/remotes/origin/${remote_branch}" >/dev/null 2>&1 || true
+    fi
+  fi
+  required_ref_commit="$(git rev-parse -q --verify "${require_contained_in_ref}^{commit}" 2>/dev/null || true)"
+  if [[ -z "$required_ref_commit" ]]; then
+    echo "required ref not found: ${require_contained_in_ref}"
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor "$tag_commit" "$required_ref_commit"; then
+    echo "tag ${version} commit ${tag_commit} is not contained in ${require_contained_in_ref} (${required_ref_commit})"
+    exit 1
+  fi
+fi
+
 if [[ "$require_signature" == "1" ]]; then
   if ! git tag -v "$version" >/tmp/release_verify_tag_signature.log 2>&1; then
     echo "tag signature verification failed for ${version}"
@@ -105,5 +133,5 @@ if [[ "$require_signature" == "1" ]]; then
   fi
 fi
 
-echo "[release-verify-tag] version=${version} annotated=1 commit=${tag_commit} head=${head_commit} require_signature=${require_signature}"
+echo "[release-verify-tag] version=${version} annotated=1 commit=${tag_commit} head=${head_commit} require_signature=${require_signature} contained_in_ref=${require_contained_in_ref:-none}"
 echo "[release-verify-tag] ok"

@@ -16,6 +16,9 @@ Usage:
     [--run-three-machine-docker-readiness auto|0|1] \
     [--three-machine-docker-readiness-run-validate 0|1] \
     [--three-machine-docker-readiness-run-soak 0|1] \
+    [--three-machine-docker-readiness-run-peer-failover 0|1] \
+    [--three-machine-docker-readiness-peer-failover-downtime-sec N] \
+    [--three-machine-docker-readiness-peer-failover-timeout-sec N] \
     [--three-machine-docker-readiness-soak-rounds N] \
     [--three-machine-docker-readiness-soak-pause-sec N] \
     [--three-machine-docker-readiness-path-profile speed|balanced|private] \
@@ -49,6 +52,9 @@ Purpose:
 Behavior notes:
   - In profile signoff auto mode, if campaign artifacts are missing the script
     forces one refresh pass to bootstrap those artifacts.
+  - `--profile-compare-campaign-signoff-refresh-campaign 1` means "attempt
+    campaign refresh now"; `0` means "reuse existing artifacts" unless auto
+    mode escalates to refresh for stale/missing data.
 USAGE
 }
 
@@ -142,6 +148,9 @@ step_timeout_sec="${SINGLE_MACHINE_STEP_TIMEOUT_SEC:-5400}"
 run_three_machine_docker_readiness="auto"
 three_machine_docker_readiness_run_validate="1"
 three_machine_docker_readiness_run_soak="1"
+three_machine_docker_readiness_run_peer_failover="1"
+three_machine_docker_readiness_peer_failover_downtime_sec="8"
+three_machine_docker_readiness_peer_failover_timeout_sec="45"
 three_machine_docker_readiness_soak_rounds="6"
 three_machine_docker_readiness_soak_pause_sec="3"
 three_machine_docker_readiness_path_profile="balanced"
@@ -200,6 +209,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --three-machine-docker-readiness-run-soak)
       three_machine_docker_readiness_run_soak="${2:-}"
+      shift 2
+      ;;
+    --three-machine-docker-readiness-run-peer-failover)
+      three_machine_docker_readiness_run_peer_failover="${2:-}"
+      shift 2
+      ;;
+    --three-machine-docker-readiness-peer-failover-downtime-sec)
+      three_machine_docker_readiness_peer_failover_downtime_sec="${2:-}"
+      shift 2
+      ;;
+    --three-machine-docker-readiness-peer-failover-timeout-sec)
+      three_machine_docker_readiness_peer_failover_timeout_sec="${2:-}"
       shift 2
       ;;
     --three-machine-docker-readiness-soak-rounds)
@@ -334,6 +355,7 @@ fi
 tri_state_or_die "--run-three-machine-docker-readiness" "$run_three_machine_docker_readiness"
 bool_arg_or_die "--three-machine-docker-readiness-run-validate" "$three_machine_docker_readiness_run_validate"
 bool_arg_or_die "--three-machine-docker-readiness-run-soak" "$three_machine_docker_readiness_run_soak"
+bool_arg_or_die "--three-machine-docker-readiness-run-peer-failover" "$three_machine_docker_readiness_run_peer_failover"
 bool_arg_or_die "--three-machine-docker-readiness-keep-stacks" "$three_machine_docker_readiness_keep_stacks"
 if ! [[ "$three_machine_docker_readiness_soak_rounds" =~ ^[0-9]+$ ]]; then
   echo "--three-machine-docker-readiness-soak-rounds must be an integer"
@@ -341,6 +363,14 @@ if ! [[ "$three_machine_docker_readiness_soak_rounds" =~ ^[0-9]+$ ]]; then
 fi
 if ! [[ "$three_machine_docker_readiness_soak_pause_sec" =~ ^[0-9]+$ ]]; then
   echo "--three-machine-docker-readiness-soak-pause-sec must be an integer"
+  exit 2
+fi
+if ! [[ "$three_machine_docker_readiness_peer_failover_downtime_sec" =~ ^[0-9]+$ ]]; then
+  echo "--three-machine-docker-readiness-peer-failover-downtime-sec must be an integer"
+  exit 2
+fi
+if ! [[ "$three_machine_docker_readiness_peer_failover_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--three-machine-docker-readiness-peer-failover-timeout-sec must be an integer"
   exit 2
 fi
 case "$three_machine_docker_readiness_path_profile" in
@@ -566,7 +596,7 @@ else
   skip_step "runtime_fix_record" "Runtime hygiene recorded fix" "$(printf '%q' "$runtime_fix_record_script") --prune-wg-only-dir 1 --print-summary-json 1" "disabled by flag"
 fi
 
-three_machine_docker_readiness_cmd="$(printf '%q' "$three_machine_docker_readiness_script") --run-validate $three_machine_docker_readiness_run_validate --run-soak $three_machine_docker_readiness_run_soak --soak-rounds $three_machine_docker_readiness_soak_rounds --soak-pause-sec $three_machine_docker_readiness_soak_pause_sec --path-profile $(printf '%q' "$three_machine_docker_readiness_path_profile") --keep-stacks $three_machine_docker_readiness_keep_stacks --summary-json $(printf '%q' "$three_machine_docker_readiness_summary_json") --print-summary-json 0"
+three_machine_docker_readiness_cmd="$(printf '%q' "$three_machine_docker_readiness_script") --run-validate $three_machine_docker_readiness_run_validate --run-soak $three_machine_docker_readiness_run_soak --run-peer-failover $three_machine_docker_readiness_run_peer_failover --peer-failover-downtime-sec $three_machine_docker_readiness_peer_failover_downtime_sec --peer-failover-timeout-sec $three_machine_docker_readiness_peer_failover_timeout_sec --soak-rounds $three_machine_docker_readiness_soak_rounds --soak-pause-sec $three_machine_docker_readiness_soak_pause_sec --path-profile $(printf '%q' "$three_machine_docker_readiness_path_profile") --keep-stacks $three_machine_docker_readiness_keep_stacks --summary-json $(printf '%q' "$three_machine_docker_readiness_summary_json") --print-summary-json 0"
 three_machine_docker_bin="${THREE_MACHINE_DOCKER_DOCKER_BIN:-docker}"
 case "$run_three_machine_docker_readiness" in
   auto)
@@ -1024,6 +1054,9 @@ summary_payload="$({
     --arg run_three_machine_docker_readiness "$run_three_machine_docker_readiness" \
     --arg three_machine_docker_readiness_run_validate "$three_machine_docker_readiness_run_validate" \
     --arg three_machine_docker_readiness_run_soak "$three_machine_docker_readiness_run_soak" \
+    --arg three_machine_docker_readiness_run_peer_failover "$three_machine_docker_readiness_run_peer_failover" \
+    --arg three_machine_docker_readiness_peer_failover_downtime_sec "$three_machine_docker_readiness_peer_failover_downtime_sec" \
+    --arg three_machine_docker_readiness_peer_failover_timeout_sec "$three_machine_docker_readiness_peer_failover_timeout_sec" \
     --arg three_machine_docker_readiness_soak_rounds "$three_machine_docker_readiness_soak_rounds" \
     --arg three_machine_docker_readiness_soak_pause_sec "$three_machine_docker_readiness_soak_pause_sec" \
     --arg three_machine_docker_readiness_path_profile "$three_machine_docker_readiness_path_profile" \
@@ -1115,6 +1148,9 @@ summary_payload="$({
         run_three_machine_docker_readiness: $run_three_machine_docker_readiness,
         three_machine_docker_readiness_run_validate: ($three_machine_docker_readiness_run_validate == "1"),
         three_machine_docker_readiness_run_soak: ($three_machine_docker_readiness_run_soak == "1"),
+        three_machine_docker_readiness_run_peer_failover: ($three_machine_docker_readiness_run_peer_failover == "1"),
+        three_machine_docker_readiness_peer_failover_downtime_sec: ($three_machine_docker_readiness_peer_failover_downtime_sec | tonumber),
+        three_machine_docker_readiness_peer_failover_timeout_sec: ($three_machine_docker_readiness_peer_failover_timeout_sec | tonumber),
         three_machine_docker_readiness_soak_rounds: ($three_machine_docker_readiness_soak_rounds | tonumber),
         three_machine_docker_readiness_soak_pause_sec: ($three_machine_docker_readiness_soak_pause_sec | tonumber),
         three_machine_docker_readiness_path_profile: $three_machine_docker_readiness_path_profile,

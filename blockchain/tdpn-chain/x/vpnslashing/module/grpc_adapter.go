@@ -143,6 +143,7 @@ func moduleEvidenceToProto(record modtypes.SlashEvidence) *pb.SlashEvidence {
 		EvidenceId:      record.EvidenceID,
 		SessionId:       record.SessionID,
 		ProviderId:      record.ProviderID,
+		ViolationType:   record.ViolationType,
 		Kind:            record.Kind,
 		ProofHash:       record.ProofHash,
 		SubmittedAtUnix: record.SubmittedAtUnix,
@@ -158,6 +159,7 @@ func protoEvidenceToModule(record *pb.SlashEvidence) modtypes.SlashEvidence {
 		EvidenceID:      record.GetEvidenceId(),
 		SessionID:       record.GetSessionId(),
 		ProviderID:      record.GetProviderId(),
+		ViolationType:   record.GetViolationType(),
 		Kind:            record.GetKind(),
 		ProofHash:       record.GetProofHash(),
 		SubmittedAtUnix: record.GetSubmittedAtUnix(),
@@ -186,7 +188,6 @@ func protoPenaltyToModule(record *pb.PenaltyDecision) modtypes.PenaltyDecision {
 		SlashBasisPoint: record.GetSlashBasisPoint(),
 		Jailed:          record.GetJailed(),
 		AppliedAtUnix:   record.GetAppliedAtUnix(),
-		Status:          protoStatusToModule(record.GetStatus()),
 	}
 }
 

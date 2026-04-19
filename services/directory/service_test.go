@@ -44,6 +44,31 @@ func TestHandleHealthMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigPublicBindAdminTokenRequiresMTLS(t *testing.T) {
+	s := &Service{
+		addr:       "0.0.0.0:8081",
+		adminToken: "super-secret-admin-token",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public bind rejection without mTLS for admin-token mode")
+	}
+	if !strings.Contains(err.Error(), "public bind with DIRECTORY_ADMIN_TOKEN requires MTLS_ENABLE=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindAdminTokenAllowsDangerousOverride(t *testing.T) {
+	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND", "1")
+	s := &Service{
+		addr:       "0.0.0.0:8081",
+		adminToken: "super-secret-admin-token",
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected explicit dangerous override to allow config, got %v", err)
+	}
+}
+
 func TestParseDNSSeedsNormalizesAndFilters(t *testing.T) {
 	got := parseDNSSeeds([]string{
 		" Example.com. ",
@@ -71,7 +96,7 @@ func TestParseDNSPeerHintRecordKeyValue(t *testing.T) {
 	if !ok {
 		t.Fatal("expected record to parse")
 	}
-	if hint.URL != "http://dir.example.com" {
+	if hint.URL != "https://dir.example.com" {
 		t.Fatalf("unexpected url: %q", hint.URL)
 	}
 	if hint.Operator != "op-a" {
@@ -99,8 +124,48 @@ func TestParseDNSPeerHintRecordRejectsInvalidURL(t *testing.T) {
 	if _, ok := parseDNSPeerHintRecord("url=localhost:8081;operator=op-a"); ok {
 		t.Fatal("expected localhost discovery url to be rejected")
 	}
+	if _, ok := parseDNSPeerHintRecord("url=http://127.0.0.1:8081;operator=op-a"); ok {
+		t.Fatal("expected loopback discovery url to be rejected")
+	}
+	if _, ok := parseDNSPeerHintRecord("url=http://169.254.169.254:80;operator=op-a"); ok {
+		t.Fatal("expected link-local discovery url to be rejected")
+	}
+	if _, ok := parseDNSPeerHintRecord("url=https://10.0.0.10:8081;operator=op-a"); ok {
+		t.Fatal("expected private discovery url to be rejected")
+	}
+	if _, ok := parseDNSPeerHintRecord("url=http://127.1:8081;operator=op-a"); ok {
+		t.Fatal("expected loopback alias discovery url to be rejected")
+	}
+	if _, ok := parseDNSPeerHintRecord("url=http://2130706433:8081;operator=op-a"); ok {
+		t.Fatal("expected numeric loopback alias discovery url to be rejected")
+	}
+	if _, ok := parseDNSPeerHintRecord("url=https://[fe80::1%25eth0]:8081;operator=op-a"); ok {
+		t.Fatal("expected zoned ipv6 discovery url to be rejected")
+	}
 	if _, ok := parseDNSPeerHintRecord("this is not a valid record"); ok {
 		t.Fatal("expected invalid record to be rejected")
+	}
+}
+
+func TestStrictControlHostRejectsAmbiguousNumericAliases(t *testing.T) {
+	tests := []string{"127.1", "2130706433", "localhost.", "fe80::1%eth0"}
+	for _, host := range tests {
+		if !isDisallowedStrictControlHost(host) {
+			t.Fatalf("expected strict control host %q to be rejected", host)
+		}
+	}
+}
+
+func TestParseDNSPeerHintRecordAllowsPublicIPAddress(t *testing.T) {
+	hint, ok := parseDNSPeerHintRecord("url=https://8.8.8.8:8443;operator=op-public")
+	if !ok {
+		t.Fatal("expected public ip discovery url to parse")
+	}
+	if hint.URL != "https://8.8.8.8:8443" {
+		t.Fatalf("unexpected url: %q", hint.URL)
+	}
+	if hint.Operator != "op-public" {
+		t.Fatalf("unexpected operator: %q", hint.Operator)
 	}
 }
 
@@ -120,7 +185,7 @@ func TestParseDNSPeerHintsMergesDuplicateURLHints(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 hints, got %d", len(got))
 	}
-	if got[0].URL != "http://dir.example.com" {
+	if got[0].URL != "https://dir.example.com" {
 		t.Fatalf("unexpected first url: %q", got[0].URL)
 	}
 	if got[0].Operator != "op-a" {

@@ -391,11 +391,36 @@ if [[ -z "$status_json_payload" ]]; then
               non_root_refresh_blocked: false,
               stale_non_refreshed: false,
               refresh_campaign: false,
-              next_command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+              insufficient_evidence: false,
+              docker_rehearsal_hint_available: false,
+              docker_rehearsal_hint_source: null,
+              next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command_source: "default_non_sudo",
+              next_command_sudo_only_reason: null,
+              next_command_candidates: [
+                {
+                  id: "primary",
+                  command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+                  requires_sudo: false
+                },
+                {
+                  id: "sudo_fallback",
+                  command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+                  requires_sudo: true
+                }
+              ],
               artifacts: {
                 campaign_summary_json: "",
                 campaign_report_md: "",
-                campaign_check_summary_json: ""
+                campaign_check_summary_json: "",
+                campaign_summary_json_resolved: "",
+                campaign_report_md_resolved: "",
+                campaign_check_summary_json_resolved: "",
+                docker_rehearsal_matrix_summary_json: null,
+                docker_rehearsal_profile_summary_json: null,
+                docker_rehearsal_receipt_json: null,
+                docker_rehearsal_check_command: null
               }
             },
             profile_default_ready: false,
@@ -464,7 +489,32 @@ if ! printf '%s\n' "$status_json_payload" | jq -e . >/dev/null 2>&1; then
             pre_machine_c_gate: { ready: false, blockers: ["manual_validation_status_timeout_invalid_json"], next_check_id: "machine_c_vpn_smoke", next_label: "Machine C VPN smoke test", next_command: "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" },
             local_gate: { ready: false, check_ids: [], blockers: ["manual_validation_status_timeout_invalid_json"], next_check_id: "manual_validation_status_timeout_invalid_json" },
             real_host_gate: { ready: false, check_ids: ["machine_c_vpn_smoke", "three_machine_prod_signoff"], blockers: ["machine_c_vpn_smoke", "three_machine_prod_signoff"], next_check_id: "machine_c_vpn_smoke", next_label: "Machine C VPN smoke test", next_command: "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country" },
-            profile_default_gate: { enabled: true, available: false, valid_json: false, status: "pending", notes: "profile compare campaign signoff status unavailable due manual-validation-status timeout", next_command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1" },
+            profile_default_gate: {
+              enabled: true,
+              available: false,
+              valid_json: false,
+              status: "pending",
+              notes: "profile compare campaign signoff status unavailable due manual-validation-status timeout",
+              next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command_source: "default_non_sudo",
+              next_command_candidates: [
+                { id: "primary", command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY", requires_sudo: false },
+                { id: "sudo_fallback", command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY", requires_sudo: true }
+              ],
+              artifacts: {
+                campaign_summary_json: "",
+                campaign_report_md: "",
+                campaign_check_summary_json: "",
+                campaign_summary_json_resolved: "",
+                campaign_report_md_resolved: "",
+                campaign_check_summary_json_resolved: "",
+                docker_rehearsal_matrix_summary_json: null,
+                docker_rehearsal_profile_summary_json: null,
+                docker_rehearsal_receipt_json: null,
+                docker_rehearsal_check_command: null
+              }
+            },
             profile_default_ready: false,
             docker_rehearsal_gate: { check_id: "three_machine_docker_readiness", status: "pending", notes: "status unavailable due manual-validation-status timeout", command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1", next_command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1", ready: false },
             real_wg_privileged_gate: { check_id: "real_wg_privileged_matrix", status: "pending", notes: "status unavailable due manual-validation-status timeout", command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1", next_command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1", ready: false },
@@ -537,6 +587,8 @@ next_action_remediations_csv="$(printf '%s\n' "$next_action_remediations_json" |
 machine_c_smoke_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.ready // false')"
 machine_c_smoke_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.pre_machine_c_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
 machine_c_smoke_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.next_command // ""')"
+machine_c_smoke_blocker_class="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.blocker_class // ""')"
+machine_c_smoke_next_sudo_command="$(printf '%s\n' "$report_json" | jq -r '.summary.pre_machine_c_gate.next_sudo_command // ""')"
 single_machine_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.single_machine_ready // false')"
 roadmap_stage="$(printf '%s\n' "$report_json" | jq -r '.summary.roadmap_stage // ""')"
 real_host_gate_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.real_host_gate.ready // false')"
@@ -548,7 +600,14 @@ profile_default_gate_decision="$(printf '%s\n' "$report_json" | jq -r '.summary.
 profile_default_gate_recommended_profile="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.recommended_profile // ""')"
 profile_default_gate_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.summary_json // ""')"
 profile_default_gate_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.next_command // ""')"
+profile_default_gate_next_command_sudo="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.next_command_sudo // ""')"
+profile_default_gate_next_command_source="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.next_command_source // ""')"
 profile_default_gate_notes="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.notes // ""')"
+profile_default_gate_docker_hint_available="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.docker_rehearsal_hint_available // false')"
+profile_default_gate_docker_hint_source="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.docker_rehearsal_hint_source // ""')"
+profile_default_gate_campaign_check_summary_json_resolved="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved // ""')"
+profile_default_gate_docker_matrix_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json // ""')"
+profile_default_gate_docker_profile_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json // ""')"
 docker_rehearsal_status="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.status // ""')"
 docker_rehearsal_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.ready // false')"
 docker_rehearsal_command="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.command // ""')"
@@ -621,8 +680,14 @@ report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
   printf '\n## Pre-Machine-C Gate\n\n'
   printf -- '- Machine C smoke ready: `%s`\n' "$machine_c_smoke_ready"
   printf -- '- Blockers: `%s`\n' "$machine_c_smoke_blockers"
+  if [[ -n "$machine_c_smoke_blocker_class" ]]; then
+    printf -- '- Blocker class: `%s`\n' "$machine_c_smoke_blocker_class"
+  fi
   if [[ -n "$machine_c_smoke_next_command" ]]; then
     printf -- '- Next machine-C smoke command: `%s`\n' "$machine_c_smoke_next_command"
+  fi
+  if [[ -n "$machine_c_smoke_next_sudo_command" ]]; then
+    printf -- '- Next sudo command: `%s`\n' "$machine_c_smoke_next_sudo_command"
   fi
   printf '\n## Profile Default Gate\n\n'
   if [[ -n "$profile_default_gate_status" ]]; then
@@ -643,6 +708,25 @@ report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
   fi
   if [[ -n "$profile_default_gate_next_command" ]]; then
     printf -- '- Next profile signoff command: `%s`\n' "$profile_default_gate_next_command"
+  fi
+  if [[ -n "$profile_default_gate_next_command_sudo" ]]; then
+    printf -- '- Next profile signoff sudo fallback: `%s`\n' "$profile_default_gate_next_command_sudo"
+  fi
+  if [[ -n "$profile_default_gate_next_command_source" ]]; then
+    printf -- '- Next command source: `%s`\n' "$profile_default_gate_next_command_source"
+  fi
+  printf -- '- Docker hint available: `%s`\n' "$profile_default_gate_docker_hint_available"
+  if [[ -n "$profile_default_gate_docker_hint_source" ]]; then
+    printf -- '- Docker hint source: `%s`\n' "$profile_default_gate_docker_hint_source"
+  fi
+  if [[ -n "$profile_default_gate_campaign_check_summary_json_resolved" ]]; then
+    printf -- '- Campaign-check summary (resolved): `%s`\n' "$profile_default_gate_campaign_check_summary_json_resolved"
+  fi
+  if [[ -n "$profile_default_gate_docker_matrix_summary_json" ]]; then
+    printf -- '- Docker matrix summary JSON: `%s`\n' "$profile_default_gate_docker_matrix_summary_json"
+  fi
+  if [[ -n "$profile_default_gate_docker_profile_summary_json" ]]; then
+    printf -- '- Docker profile summary JSON: `%s`\n' "$profile_default_gate_docker_profile_summary_json"
   fi
   printf '\n## Docker Rehearsal (Optional)\n\n'
   if [[ -n "$docker_rehearsal_status" ]]; then
@@ -712,8 +796,14 @@ echo "[manual-validation-report] source_status_timeout_guard_available=$status_t
 echo "[manual-validation-report] source_status_payload_synthesized=$status_payload_synthesized"
 echo "[manual-validation-report] machine_c_smoke_ready=$machine_c_smoke_ready"
 echo "[manual-validation-report] machine_c_smoke_blockers=$machine_c_smoke_blockers"
+if [[ -n "$machine_c_smoke_blocker_class" ]]; then
+  echo "[manual-validation-report] machine_c_smoke_blocker_class=$machine_c_smoke_blocker_class"
+fi
 if [[ -n "$machine_c_smoke_next_command" ]]; then
   echo "[manual-validation-report] machine_c_smoke_next_command=$machine_c_smoke_next_command"
+fi
+if [[ -n "$machine_c_smoke_next_sudo_command" ]]; then
+  echo "[manual-validation-report] machine_c_smoke_next_sudo_command=$machine_c_smoke_next_sudo_command"
 fi
 echo "[manual-validation-report] single_machine_ready=$single_machine_ready"
 if [[ -n "$roadmap_stage" ]]; then
@@ -739,6 +829,25 @@ if [[ -n "$profile_default_gate_summary_json" ]]; then
 fi
 if [[ -n "$profile_default_gate_next_command" ]]; then
   echo "[manual-validation-report] profile_default_gate_next_command=$profile_default_gate_next_command"
+fi
+if [[ -n "$profile_default_gate_next_command_sudo" ]]; then
+  echo "[manual-validation-report] profile_default_gate_next_command_sudo=$profile_default_gate_next_command_sudo"
+fi
+if [[ -n "$profile_default_gate_next_command_source" ]]; then
+  echo "[manual-validation-report] profile_default_gate_next_command_source=$profile_default_gate_next_command_source"
+fi
+echo "[manual-validation-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available"
+if [[ -n "$profile_default_gate_docker_hint_source" ]]; then
+  echo "[manual-validation-report] profile_default_gate_docker_hint_source=$profile_default_gate_docker_hint_source"
+fi
+if [[ -n "$profile_default_gate_campaign_check_summary_json_resolved" ]]; then
+  echo "[manual-validation-report] profile_default_gate_campaign_check_summary_json_resolved=$profile_default_gate_campaign_check_summary_json_resolved"
+fi
+if [[ -n "$profile_default_gate_docker_matrix_summary_json" ]]; then
+  echo "[manual-validation-report] profile_default_gate_docker_matrix_summary_json=$profile_default_gate_docker_matrix_summary_json"
+fi
+if [[ -n "$profile_default_gate_docker_profile_summary_json" ]]; then
+  echo "[manual-validation-report] profile_default_gate_docker_profile_summary_json=$profile_default_gate_docker_profile_summary_json"
 fi
 if [[ -n "$docker_rehearsal_status" ]]; then
   echo "[manual-validation-report] docker_rehearsal_status=$docker_rehearsal_status"

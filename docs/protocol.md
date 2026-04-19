@@ -138,12 +138,33 @@ Serialization for MVP:
 - `POST /v1/admin/revoke-token`
 - `POST /v1/admin/slash/evidence`
   - Issuer admin endpoint for objective, machine-verifiable slash evidence submission into settlement control-plane tracking.
+  - v1 requires `evidence_ref`/proof reference in canonical format: `sha256:<value>` or `obj://<path>`.
+  - Non-objective/subjective abuse inputs are out of scope for automated v1 slashing and remain policy-governed.
 - `GET /v1/settlement/status`
   - Issuer admin-protected settlement status endpoint; returns reconciliation/backlog counters and can return degraded `503` status details if reconcile fails.
+  - Includes shadow settlement telemetry fields:
+    - `shadow_adapter_configured`
+    - `shadow_attempted_operations`
+    - `shadow_submitted_operations`
+    - `shadow_failed_operations`
 - `GET /v1/settlement/status`
   - Exit settlement status/backlog snapshot endpoint; remains fail-soft and can return stale snapshot metadata when reconciliation fails.
+  - Includes shadow settlement telemetry fields:
+    - `shadow_adapter_configured`
+    - `shadow_attempted_operations`
+    - `shadow_submitted_operations`
+    - `shadow_failed_operations`
 - `GET /v1/revocations`
 - `GET /v1/metrics` (exit counters)
+
+Settlement lifecycle semantics (Cosmos control-plane):
+- Settlement/reward/sponsor/slash operation statuses use `pending|submitted|confirmed|failed`.
+- Initial control-plane writes are tracked as `pending`; fail-soft adapter errors keep operations deferred for reconcile replay.
+- Reconcile submission advances `pending -> submitted` when bridge/chain write acceptance is observed.
+- Reconcile query-by-id promotes `submitted -> confirmed` once corresponding records are observed on bridge/chain surfaces.
+- This query-by-id confirmation capability is exposed via optional adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
+- `failed` remains an explicit reconciliation state for operator visibility and controlled replay/remediation flows.
+- Phase5 settlement CI includes first-class `settlement_adapter_roundtrip` coverage (`scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`).
 
 Revocation feed shape:
 ```json

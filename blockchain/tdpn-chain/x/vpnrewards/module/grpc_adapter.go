@@ -160,13 +160,14 @@ func protoAccrualToModule(record *pb.RewardAccrual) modtypes.RewardAccrual {
 	}
 
 	return modtypes.RewardAccrual{
-		AccrualID:      record.GetAccrualId(),
-		SessionID:      record.GetSessionId(),
-		ProviderID:     record.GetProviderId(),
-		AssetDenom:     record.GetAssetDenom(),
-		Amount:         record.GetAmount(),
-		AccruedAtUnix:  record.GetAccruedAtUnix(),
-		OperationState: protoStatusToModule(record.GetOperationState()),
+		AccrualID:     record.GetAccrualId(),
+		SessionID:     record.GetSessionId(),
+		ProviderID:    record.GetProviderId(),
+		AssetDenom:    record.GetAssetDenom(),
+		Amount:        record.GetAmount(),
+		AccruedAtUnix: record.GetAccruedAtUnix(),
+		// OperationState is server-owned lifecycle metadata and must not be client-injectable.
+		OperationState: "",
 	}
 }
 
@@ -190,7 +191,8 @@ func protoDistributionToModule(record *pb.DistributionRecord) modtypes.Distribut
 		AccrualID:      record.GetAccrualId(),
 		PayoutRef:      record.GetPayoutRef(),
 		DistributedAt:  record.GetDistributedAt(),
-		Status:         protoStatusToModule(record.GetStatus()),
+		// Status is server-owned lifecycle metadata and must not be client-injectable.
+		Status: "",
 	}
 }
 

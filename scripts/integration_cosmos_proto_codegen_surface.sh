@@ -51,6 +51,12 @@ generated_checks=(
   "$CHAIN_DIR/proto/gen/go/tdpn/vpnslashing/v1/query_grpc.pb.go:ListPenaltyDecisions"
   "$CHAIN_DIR/proto/gen/go/tdpn/vpnsponsor/v1/query_grpc.pb.go:ListSponsorAuthorizations"
   "$CHAIN_DIR/proto/gen/go/tdpn/vpnsponsor/v1/query_grpc.pb.go:ListDelegatedSessionCredits"
+  "$CHAIN_DIR/proto/gen/go/tdpn/vpnvalidator/v1/query_grpc.pb.go:ListValidatorEligibilities"
+  "$CHAIN_DIR/proto/gen/go/tdpn/vpnvalidator/v1/query_grpc.pb.go:ListValidatorStatusRecords"
+  "$CHAIN_DIR/proto/gen/go/tdpn/vpnvalidator/v1/query_grpc.pb.go:PreviewEpochSelection"
+  "$CHAIN_DIR/proto/gen/go/tdpn/vpngovernance/v1/query_grpc.pb.go:ListGovernancePolicies"
+  "$CHAIN_DIR/proto/gen/go/tdpn/vpngovernance/v1/query_grpc.pb.go:ListGovernanceDecisions"
+  "$CHAIN_DIR/proto/gen/go/tdpn/vpngovernance/v1/query_grpc.pb.go:ListGovernanceAuditActions"
 )
 
 for check in "${generated_checks[@]}"; do

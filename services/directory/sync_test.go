@@ -90,6 +90,51 @@ func TestFetchPeerPubKeyRejectsSignedHintMismatch(t *testing.T) {
 	}
 }
 
+func TestFetchPeerRelaysRejectsOversizedResponseBody(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	oversizedBody := `{"relays":[],"padding":"` + strings.Repeat("a", int(remoteResponseMaxBodyBytes)) + `"}`
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		peerURL + "/v1/relays": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(oversizedBody)),
+			}, nil
+		},
+	}
+	s := &Service{httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}}}
+	if _, err := s.fetchPeerRelays(context.Background(), peerURL); err == nil || !strings.Contains(err.Error(), "response body too large") {
+		t.Fatalf("expected oversized response body rejection, got %v", err)
+	}
+}
+
+func TestFetchIssuerPubKeysRejectsOversizedResponseBody(t *testing.T) {
+	issuerURL := "http://issuer.local"
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	oversizedBody := `{"issuer":"issuer-a","pub_keys":["` + base64.RawURLEncoding.EncodeToString(pub) + `"],"padding":"` + strings.Repeat("a", int(remoteResponseMaxBodyBytes)) + `"}`
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(oversizedBody)),
+			}, nil
+		},
+	}
+	s := &Service{httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}}}
+	if _, _, err := s.fetchIssuerPubKeys(context.Background(), issuerURL); err == nil || !strings.Contains(err.Error(), "response body too large") {
+		t.Fatalf("expected oversized response body rejection, got %v", err)
+	}
+}
+
 func TestSyncPeerRelaysMergesSources(t *testing.T) {
 	urlA := "http://peer-a.local"
 	urlB := "http://peer-b.local"
@@ -302,7 +347,7 @@ func TestEnforcePeerTrustTOFUPins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load peer trusted keys: %v", err)
 	}
-	if got := loaded["http://peer-a.local"]; got != pubB64 {
+	if got := loaded["https://peer-a.local"]; got != pubB64 {
 		t.Fatalf("expected pinned key, got %q", got)
 	}
 }
@@ -327,6 +372,93 @@ func TestEnforcePeerTrustRejectsMismatch(t *testing.T) {
 	}
 	if err := s.enforcePeerTrust("http://peer-a.local", base64.RawURLEncoding.EncodeToString(pubB)); err == nil {
 		t.Fatalf("expected peer trust mismatch rejection")
+	}
+}
+
+func TestFetchPeerPubKeysStrictFiltersUntrustedKeyset(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	trustedPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("trusted keygen: %v", err)
+	}
+	untrustedPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("untrusted keygen: %v", err)
+	}
+	trustedB64 := base64.RawURLEncoding.EncodeToString(trustedPub)
+	untrustedB64 := base64.RawURLEncoding.EncodeToString(untrustedPub)
+
+	file := filepath.Join(t.TempDir(), "peer_trusted_keys.txt")
+	if err := appendPeerTrustedKey(file, peerURL, trustedB64); err != nil {
+		t.Fatalf("append trusted key: %v", err)
+	}
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			PubKeys: []string{untrustedB64, trustedB64},
+		}),
+	}
+	s := &Service{
+		peerTrustStrict: true,
+		peerTrustTOFU:   false,
+		peerTrustFile:   file,
+		httpClient:      &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	keys, _, err := s.fetchPeerPubKeys(context.Background(), peerURL)
+	if err != nil {
+		t.Fatalf("fetchPeerPubKeys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected exactly one trusted verification key, got %d", len(keys))
+	}
+	if got := base64.RawURLEncoding.EncodeToString(keys[0]); got != trustedB64 {
+		t.Fatalf("expected trusted key %s, got %s", trustedB64, got)
+	}
+}
+
+func TestFetchPeerPubKeysTOFUPinsAndUsesSingleKey(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pubA, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	pubAB64 := base64.RawURLEncoding.EncodeToString(pubA)
+	pubBB64 := base64.RawURLEncoding.EncodeToString(pubB)
+	file := filepath.Join(t.TempDir(), "peer_trusted_keys.txt")
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			PubKeys: []string{pubAB64, pubBB64},
+		}),
+	}
+	s := &Service{
+		peerTrustStrict: true,
+		peerTrustTOFU:   true,
+		peerTrustFile:   file,
+		httpClient:      &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	keys, _, err := s.fetchPeerPubKeys(context.Background(), peerURL)
+	if err != nil {
+		t.Fatalf("fetchPeerPubKeys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected TOFU to keep exactly one pinned key, got %d", len(keys))
+	}
+	if got := base64.RawURLEncoding.EncodeToString(keys[0]); got != pubAB64 {
+		t.Fatalf("expected pinned first key %s, got %s", pubAB64, got)
+	}
+	loaded, err := loadPeerTrustedKeys(file)
+	if err != nil {
+		t.Fatalf("load peer trusted keys: %v", err)
+	}
+	if got := loaded[normalizePeerURL(peerURL)]; got != pubAB64 {
+		t.Fatalf("expected TOFU pinned key %s, got %q", pubAB64, got)
 	}
 }
 
@@ -2092,6 +2224,45 @@ func TestIngestDiscoveredPeersRequireHint(t *testing.T) {
 	}
 }
 
+func TestIngestDiscoveredPeersRejectsDisallowedNetworkHints(t *testing.T) {
+	now := time.Now().UTC()
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerURLs:              []string{"http://seed-a.local"},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      16,
+		peerDiscoveryMinVotes: 1,
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		discoveredPeerHealth:  make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+	}
+	hints := []proto.DirectoryPeerHint{
+		{URL: "http://127.0.0.1:8081", Operator: "op-loopback"},
+		{URL: "http://169.254.169.254", Operator: "op-link-local"},
+		{URL: "https://10.0.0.50:8081", Operator: "op-private"},
+		{URL: "https://peer-allowed.local:8081", Operator: "op-allowed"},
+	}
+	if imported := s.ingestDiscoveredPeers("http://seed-a.local", "op-seed-a", hints, now); imported != 1 {
+		t.Fatalf("expected only one allowed peer admitted, got imported=%d", imported)
+	}
+	peers := s.snapshotSyncPeers(now.Add(time.Second))
+	if containsString(peers, "http://127.0.0.1:8081") {
+		t.Fatalf("did not expect loopback discovered peer to be admitted")
+	}
+	if containsString(peers, "http://169.254.169.254") {
+		t.Fatalf("did not expect link-local discovered peer to be admitted")
+	}
+	if containsString(peers, "https://10.0.0.50:8081") {
+		t.Fatalf("did not expect private discovered peer to be admitted")
+	}
+	if !containsString(peers, "https://peer-allowed.local:8081") {
+		t.Fatalf("expected allowed discovered peer to be admitted")
+	}
+}
+
 func TestIngestDiscoveredPeersStoresSourceHintMetadata(t *testing.T) {
 	now := time.Now().UTC()
 	sourceURL := "http://seed-a.local"
@@ -2320,6 +2491,133 @@ func TestHandleGossipRelaysImportsVerifiedDescriptors(t *testing.T) {
 	}
 	if relays[0].HopCount != 1 {
 		t.Fatalf("expected hop-count increment to 1, got %d", relays[0].HopCount)
+	}
+}
+
+func TestHandleGossipRelaysUsesCachedPeerPubKeyWithoutOutboundFetch(t *testing.T) {
+	peerURL := "http://peer-cache.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	desc := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-peer-cache",
+		Role:       "exit",
+		OperatorID: "op-peer-cache",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+	}
+	s := &Service{
+		operatorID:      "op-local",
+		peerURLs:        []string{peerURL},
+		peerRelays:      make(map[string]proto.RelayDescriptor),
+		peerPubKeyCache: make(map[string]peerPubKeyCacheEntry),
+		peerMaxHops:     3,
+		httpClient:      &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	body, _ := json.Marshal(proto.RelayGossipPushRequest{
+		PeerURL: peerURL,
+		Relays:  []proto.RelayDescriptor{desc},
+	})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected first request 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	delete(handlers, peerURL+"/v1/pubkey")
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected cached pubkey path to avoid outbound fetch and return 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestFetchPeerPubKeyForGossipRefreshCooldown(t *testing.T) {
+	peerURL := "http://peer-cooldown.local"
+	s := &Service{
+		peerPubKeyCache: map[string]peerPubKeyCacheEntry{
+			normalizePeerURL(peerURL): {lastFetchAttempt: time.Now().UTC()},
+		},
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: map[string]func(*http.Request) (*http.Response, error){}}},
+	}
+	_, err := s.fetchPeerPubKeyForGossip(context.Background(), peerURL, time.Now().UTC())
+	if err == nil {
+		t.Fatalf("expected gossip pubkey refresh cooldown error")
+	}
+	if !strings.Contains(err.Error(), "refresh cooldown") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHandleGossipRelaysRejectsUnknownField(t *testing.T) {
+	s := &Service{}
+	body := []byte(`{"peer_url":"http://peer-a.local","relays":[],"unexpected":"x"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown field, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "invalid json") {
+		t.Fatalf("expected invalid json response, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleGossipRelaysRejectsTrailingJSON(t *testing.T) {
+	s := &Service{}
+	body := []byte(`{"peer_url":"http://peer-a.local","relays":[]}{"extra":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for trailing json, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "invalid json") {
+		t.Fatalf("expected invalid json response, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleGossipRelaysRejectsOversizedBody(t *testing.T) {
+	s := &Service{}
+	oversizedPeer := strings.Repeat("a", int(gossipRelaysMaxBodyBytes)+1024)
+	body := []byte(`{"peer_url":"http://` + oversizedPeer + `.local","relays":[]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized body, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "invalid json") {
+		t.Fatalf("expected invalid json response, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleGossipRelaysRejectsTooManyDescriptors(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	relays := make([]proto.RelayDescriptor, gossipRelaysMaxDescriptors+1)
+	body, _ := json.Marshal(proto.RelayGossipPushRequest{
+		PeerURL: peerURL,
+		Relays:  relays,
+	})
+	s := &Service{
+		peerURLs: []string{peerURL},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for too many relays, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "too many relays") {
+		t.Fatalf("expected too many relays response, got %q", rr.Body.String())
 	}
 }
 

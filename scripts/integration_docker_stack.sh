@@ -4,9 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$ROOT_DIR/deploy"
 
-export DIRECTORY_ADMIN_TOKEN="${DIRECTORY_ADMIN_TOKEN:-docker-stack-directory-admin-token-001}"
-export ISSUER_ADMIN_TOKEN="${ISSUER_ADMIN_TOKEN:-docker-stack-issuer-admin-token-001}"
-export ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-docker-stack-entry-puzzle-secret-001}"
+random_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+    return
+  fi
+  head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+export DIRECTORY_ADMIN_TOKEN="${DIRECTORY_ADMIN_TOKEN:-$(random_secret)}"
+export ISSUER_ADMIN_TOKEN="${ISSUER_ADMIN_TOKEN:-$(random_secret)}"
+export ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-$(random_secret)}"
 export ENTRY_EXIT_USER="${ENTRY_EXIT_USER:-0:0}"
 
 if ! command -v docker >/dev/null 2>&1; then

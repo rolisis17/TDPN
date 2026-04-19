@@ -362,4 +362,15 @@ if ! rg -q '^--run-soak 0 --keep-stacks 1$' "$FORWARD_CAPTURE"; then
   exit 1
 fi
 
+: >"$FORWARD_CAPTURE"
+FAKE_FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_FORWARD" \
+./scripts/easy_node.sh three-machine-docker-readiness --run-peer-failover 1 --peer-failover-downtime-sec 5 --peer-failover-timeout-sec 20 >/tmp/integration_three_machine_docker_readiness_forward_peer_failover.log 2>&1
+if ! rg -q '^--run-peer-failover 1 --peer-failover-downtime-sec 5 --peer-failover-timeout-sec 20$' "$FORWARD_CAPTURE"; then
+  echo "easy_node forwarding failed for peer-failover args"
+  cat "$FORWARD_CAPTURE"
+  cat /tmp/integration_three_machine_docker_readiness_forward_peer_failover.log
+  exit 1
+fi
+
 echo "three-machine docker readiness integration check ok"

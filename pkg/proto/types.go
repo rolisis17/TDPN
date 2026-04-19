@@ -26,12 +26,14 @@ type RelayDescriptor struct {
 	BondScore      float64   `json:"bond_score,omitempty"`
 	StakeScore     float64   `json:"stake_score,omitempty"`
 	Capabilities   []string  `json:"capabilities"`
+	HopRoles       []string  `json:"hop_roles,omitempty"`
 	ValidUntil     time.Time `json:"valid_until"`
 	Signature      string    `json:"signature"`
 }
 
 type PathOpenRequest struct {
 	ExitID          string `json:"exit_id"`
+	MiddleRelayID   string `json:"middle_relay_id,omitempty"`
 	Token           string `json:"token"`
 	TokenProof      string `json:"token_proof,omitempty"`
 	TokenProofNonce string `json:"token_proof_nonce,omitempty"`
@@ -66,18 +68,64 @@ type RelayListResponse struct {
 }
 
 type IssueTokenRequest struct {
-	Tier      int      `json:"tier"`
-	Subject   string   `json:"subject,omitempty"`
-	TokenType string   `json:"token_type,omitempty"`
-	PopPubKey string   `json:"pop_pub_key,omitempty"`
-	ExitScope []string `json:"exit_scope,omitempty"`
-	AnonCred  string   `json:"anon_cred,omitempty"`
+	Tier         int                  `json:"tier"`
+	Subject      string               `json:"subject,omitempty"`
+	TokenType    string               `json:"token_type,omitempty"`
+	PopPubKey    string               `json:"pop_pub_key,omitempty"`
+	ExitScope    []string             `json:"exit_scope,omitempty"`
+	AnonCred     string               `json:"anon_cred,omitempty"`
+	PaymentProof *SponsorPaymentProof `json:"payment_proof,omitempty"`
 }
 
 type IssueTokenResponse struct {
 	Token   string `json:"token"`
 	Expires int64  `json:"expires"`
 	JTI     string `json:"jti,omitempty"`
+}
+
+type SponsorPaymentProof struct {
+	ReservationID string `json:"reservation_id"`
+	SponsorID     string `json:"sponsor_id,omitempty"`
+	Subject       string `json:"subject,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+}
+
+type SponsorQuoteRequest struct {
+	SponsorID string `json:"sponsor_id,omitempty"`
+	Subject   string `json:"subject"`
+	Currency  string `json:"currency,omitempty"`
+}
+
+type SponsorQuoteResponse struct {
+	Subject           string `json:"subject"`
+	PricePerMiBMicros int64  `json:"price_per_mib_micros"`
+	Currency          string `json:"currency"`
+	QuotedAt          int64  `json:"quoted_at"`
+	ExpiresAt         int64  `json:"expires_at"`
+}
+
+type SponsorReserveRequest struct {
+	ReservationID string `json:"reservation_id"`
+	SponsorID     string `json:"sponsor_id"`
+	Subject       string `json:"subject"`
+	SessionID     string `json:"session_id,omitempty"`
+	AmountMicros  int64  `json:"amount_micros"`
+	Currency      string `json:"currency,omitempty"`
+}
+
+type SponsorReserveResponse struct {
+	Accepted      bool   `json:"accepted"`
+	Reason        string `json:"reason,omitempty"`
+	ReservationID string `json:"reservation_id,omitempty"`
+	SponsorID     string `json:"sponsor_id,omitempty"`
+	Subject       string `json:"subject,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	AmountMicros  int64  `json:"amount_micros,omitempty"`
+	Currency      string `json:"currency,omitempty"`
+	Status        string `json:"status,omitempty"`
+	CreatedAt     int64  `json:"created_at,omitempty"`
+	ExpiresAt     int64  `json:"expires_at,omitempty"`
+	ConsumedAt    int64  `json:"consumed_at,omitempty"`
 }
 
 type IssueAnonymousCredentialRequest struct {
@@ -130,7 +178,8 @@ type InnerPacket struct {
 }
 
 type PathCloseRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID    string `json:"session_id"`
+	SessionKeyID string `json:"session_key_id,omitempty"`
 }
 
 type PathCloseResponse struct {
@@ -218,6 +267,35 @@ type OpenAppealRequest struct {
 type ResolveAppealRequest struct {
 	Subject string `json:"subject"`
 	Reason  string `json:"reason,omitempty"`
+}
+
+type SubmitSlashEvidenceRequest struct {
+	EvidenceID    string `json:"evidence_id"`
+	Subject       string `json:"subject"`
+	SessionID     string `json:"session_id,omitempty"`
+	ViolationType string `json:"violation_type"`
+	EvidenceRef   string `json:"evidence_ref"`
+	SlashMicros   int64  `json:"slash_micros,omitempty"`
+	Currency      string `json:"currency,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+type SubmitSlashEvidenceResponse struct {
+	Accepted           bool   `json:"accepted"`
+	Reason             string `json:"reason,omitempty"`
+	EvidenceID         string `json:"evidence_id,omitempty"`
+	Subject            string `json:"subject,omitempty"`
+	SessionID          string `json:"session_id,omitempty"`
+	ViolationType      string `json:"violation_type,omitempty"`
+	EvidenceRef        string `json:"evidence_ref,omitempty"`
+	SlashMicros        int64  `json:"slash_micros,omitempty"`
+	Currency           string `json:"currency,omitempty"`
+	Status             string `json:"status,omitempty"`
+	AdapterSubmitted   bool   `json:"adapter_submitted,omitempty"`
+	AdapterReferenceID string `json:"adapter_reference_id,omitempty"`
+	AdapterDeferred    bool   `json:"adapter_deferred,omitempty"`
+	IdempotentReplay   bool   `json:"idempotent_replay,omitempty"`
+	ObservedAt         int64  `json:"observed_at,omitempty"`
 }
 
 type AuditEvent struct {
@@ -431,23 +509,26 @@ type DirectoryGovernanceStatusResponse struct {
 }
 
 type ProviderRelayUpsertRequest struct {
-	Token         string   `json:"token,omitempty"`
-	RelayID       string   `json:"relay_id"`
-	Role          string   `json:"role"`
-	PubKey        string   `json:"pub_key"`
-	Endpoint      string   `json:"endpoint"`
-	ControlURL    string   `json:"control_url"`
-	CountryCode   string   `json:"country_code,omitempty"`
-	GeoConfidence float64  `json:"geo_confidence,omitempty"`
-	Region        string   `json:"region,omitempty"`
-	Capabilities  []string `json:"capabilities,omitempty"`
-	Reputation    float64  `json:"reputation_score,omitempty"`
-	Uptime        float64  `json:"uptime_score,omitempty"`
-	Capacity      float64  `json:"capacity_score,omitempty"`
-	AbusePenalty  float64  `json:"abuse_penalty,omitempty"`
-	BondScore     float64  `json:"bond_score,omitempty"`
-	StakeScore    float64  `json:"stake_score,omitempty"`
-	ValidForSec   int64    `json:"valid_for_sec,omitempty"`
+	Token           string   `json:"token,omitempty"`
+	TokenProof      string   `json:"token_proof,omitempty"`
+	TokenProofNonce string   `json:"token_proof_nonce,omitempty"`
+	RelayID         string   `json:"relay_id"`
+	Role            string   `json:"role"`
+	PubKey          string   `json:"pub_key"`
+	Endpoint        string   `json:"endpoint"`
+	ControlURL      string   `json:"control_url"`
+	CountryCode     string   `json:"country_code,omitempty"`
+	GeoConfidence   float64  `json:"geo_confidence,omitempty"`
+	Region          string   `json:"region,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
+	HopRoles        []string `json:"hop_roles,omitempty"`
+	Reputation      float64  `json:"reputation_score,omitempty"`
+	Uptime          float64  `json:"uptime_score,omitempty"`
+	Capacity        float64  `json:"capacity_score,omitempty"`
+	AbusePenalty    float64  `json:"abuse_penalty,omitempty"`
+	BondScore       float64  `json:"bond_score,omitempty"`
+	StakeScore      float64  `json:"stake_score,omitempty"`
+	ValidForSec     int64    `json:"valid_for_sec,omitempty"`
 }
 
 type ProviderRelayUpsertResponse struct {

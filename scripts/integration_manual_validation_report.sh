@@ -14,7 +14,12 @@ done
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-STATE_DIR="$TMP_DIR/state"
+TEST_LOG_DIR="$TMP_DIR/easy-node-logs"
+STATE_DIR="$TMP_DIR/manual-validation-state"
+mkdir -p "$TEST_LOG_DIR" "$STATE_DIR"
+export EASY_NODE_LOG_DIR="$TEST_LOG_DIR"
+export EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR"
+
 PROFILE_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary.json"
 FAKE_DOCTOR="$TMP_DIR/fake_runtime_doctor.sh"
 SUMMARY_JSON="$TMP_DIR/manual_validation_readiness_summary.json"
@@ -32,6 +37,7 @@ CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
 FAKE_STATUS_TIMEOUT="$TMP_DIR/fake_manual_validation_status_timeout.sh"
+FAKE_STATUS_ROOT_DEFER="$TMP_DIR/fake_manual_validation_status_root_defer.sh"
 
 cat >"$FAKE_DOCTOR" <<'EOF_DOCTOR'
 #!/usr/bin/env bash
@@ -60,6 +66,94 @@ cat <<'OUT'
 OUT
 EOF_DOCTOR
 chmod +x "$FAKE_DOCTOR"
+
+cat >"$FAKE_STATUS_ROOT_DEFER" <<'EOF_STATUS_ROOT_DEFER'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "/tmp/manual-validation-state",
+  "status_json": "/tmp/manual-validation-status.json",
+  "runtime_doctor_exit_code": 0,
+  "runtime_doctor": {
+    "version": 1,
+    "generated_at_utc": "2026-03-15T11:00:00Z",
+    "status": "OK",
+    "summary": {
+      "findings_total": 0,
+      "warnings_total": 0,
+      "failures_total": 0
+    },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 1,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 1,
+    "pending_checks": 0,
+    "next_action_check_id": "machine_c_vpn_smoke",
+    "next_action_label": "Machine C VPN smoke test",
+    "next_action_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country",
+    "next_action_remediations": ["rerun with sudo"],
+    "pre_machine_c_gate": {
+      "ready": false,
+      "blockers": ["wg_only_stack_selftest"],
+      "next_check_id": "machine_c_vpn_smoke",
+      "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country",
+      "blocker_class": "root_required_deferred_blocker",
+      "next_sudo_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+    },
+    "local_gate": {
+      "ready": false,
+      "check_ids": [],
+      "blockers": ["wg_only_stack_selftest"],
+      "next_check_id": "machine_c_vpn_smoke"
+    },
+    "real_host_gate": {
+      "ready": false,
+      "check_ids": ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+      "blockers": ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+      "next_check_id": "machine_c_vpn_smoke",
+      "next_label": "Machine C VPN smoke test",
+      "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+    },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": false,
+      "valid_json": false,
+      "status": "pending",
+      "notes": "profile compare campaign signoff unavailable",
+      "next_command": ""
+    },
+    "profile_default_ready": false,
+    "docker_rehearsal_gate": {
+      "check_id": "three_machine_docker_readiness",
+      "status": "pending",
+      "notes": "status unavailable",
+      "command": "",
+      "next_command": "",
+      "ready": false
+    },
+    "real_wg_privileged_gate": {
+      "check_id": "real_wg_privileged_matrix",
+      "status": "skip",
+      "notes": "status unavailable",
+      "command": "",
+      "next_command": "",
+      "ready": true
+    },
+    "single_machine_ready": false,
+    "roadmap_stage": "BLOCKED_LOCAL",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_ROOT_DEFER
+chmod +x "$FAKE_STATUS_ROOT_DEFER"
 
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
 ./scripts/manual_validation_record.sh \
@@ -520,6 +614,8 @@ if ! printf '%s\n' "$profile_blocked_report_json" | jq -e '
   and .summary.profile_default_gate.failure_stage == "campaign"
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "manual validation report profile-blocked JSON missing expected profile_default_gate fields"
@@ -572,10 +668,149 @@ if ! printf '%s\n' "$profile_stale_report_json" | jq -e '
   and .summary.profile_default_gate.stale_non_refreshed == true
   and .summary.profile_default_gate.refresh_campaign == false
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "manual validation report profile-stale JSON missing expected profile_default_gate fields"
   printf '%s\n' "$profile_stale_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default pending/no-go guidance prefers docker no-sudo path when rehearsal artifacts exist"
+PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON="$TMP_DIR/three_machine_docker_profile_matrix_record_hint_matrix.json"
+PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON="$TMP_DIR/three_machine_docker_readiness_hint_2hop.json"
+PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_check_insufficient.json"
+cat >"$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" <<'EOF_PROFILE_DOCKER_HINT_PROFILE'
+{
+  "version": 1,
+  "status": "pass",
+  "endpoints": {
+    "directory_a": "http://127.0.0.1:18081",
+    "directory_b": "http://127.0.0.1:28081",
+    "issuer_a": "http://127.0.0.1:18082",
+    "entry": "http://127.0.0.1:18083",
+    "exit": "http://127.0.0.1:18084"
+  }
+}
+EOF_PROFILE_DOCKER_HINT_PROFILE
+cat >"$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" <<EOF_PROFILE_DOCKER_HINT_MATRIX
+{
+  "version": 1,
+  "status": "pass",
+  "profiles": [
+    {
+      "profile": "2hop",
+      "status": "pass",
+      "artifacts": {
+        "summary_json": "$(basename "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON")"
+      }
+    }
+  ]
+}
+EOF_PROFILE_DOCKER_HINT_MATRIX
+cat >"$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON" <<'EOF_PROFILE_NO_GO_INSUFFICIENT_CHECK'
+{
+  "version": 1,
+  "status": "fail",
+  "decision": "NO-GO",
+  "inputs": {
+    "policy": {
+      "require_min_runs_total": 3,
+      "require_min_runs_with_summary": 3
+    }
+  },
+  "observed": {
+    "campaign_status": "pass",
+    "trend_status": "warn",
+    "runs_total": 2,
+    "runs_with_summary": 2
+  }
+}
+EOF_PROFILE_NO_GO_INSUFFICIENT_CHECK
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  },
+  "artifacts": {
+    "campaign_check_summary_json": "$(basename "$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON")"
+  }
+}
+EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id three_machine_docker_readiness \
+  --status pass \
+  --notes "docker rehearsal endpoints available" \
+  --artifact "$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" \
+  --artifact "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" \
+  --command "./scripts/three_machine_docker_profile_matrix_record.sh --print-summary-json 1" \
+  --show-json 0 >/dev/null
+
+PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_no_go_insufficient.log"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/profile_no_go_insufficient_summary.json" \
+  --report-md "$TMP_DIR/profile_no_go_insufficient_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >$PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_next_command_sudo=sudo \./scripts/easy_node\.sh profile-default-gate-run' $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG; then
+  echo "manual validation report no-go-insufficient run missing profile_default_gate_next_command_sudo line"
+  cat $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG
+  exit 1
+fi
+profile_no_go_insufficient_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG)"
+if [[ -z "$profile_no_go_insufficient_report_json" ]]; then
+  echo "manual validation report no-go-insufficient run missing JSON payload"
+  cat $PROFILE_NO_GO_INSUFFICIENT_REPORT_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_no_go_insufficient_report_json" | jq -e --arg matrix "$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" --arg profile "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" --arg check_summary "$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON" '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.insufficient_evidence == true
+  and .summary.profile_default_gate.docker_rehearsal_hint_available == true
+  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker") | not)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack") | not)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls") | not)
+  and (.summary.profile_default_gate.next_command | contains("--refresh-campaign") | not)
+  and (.summary.profile_default_gate.next_command | contains("--fail-on-no-go") | not)
+  and (.summary.profile_default_gate.next_command | contains("18081"))
+  and (.summary.profile_default_gate.next_command | contains("28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-issuer-url http://127.0.0.1:18082"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-entry-url http://127.0.0.1:18083"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-execution-mode docker") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-start-local-stack") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-directory-urls") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--refresh-campaign") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--fail-on-no-go") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command_source | test("docker"))
+  and .summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json == $matrix
+  and .summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json == $profile
+  and .summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved == $check_summary
+' >/dev/null; then
+  echo "manual validation report no-go-insufficient JSON missing docker-hint guidance fields"
+  printf '%s\n' "$profile_no_go_insufficient_report_json"
   exit 1
 fi
 
@@ -605,7 +840,22 @@ if ! printf '%s\n' "$profile_invalid_summary_report_json" | jq -e '
   and .summary.profile_default_gate.available == true
   and .summary.profile_default_gate.valid_json == false
   and (.summary.profile_default_gate.notes | contains("summary JSON is invalid"))
-  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (
+    (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+    or
+    (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  )
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "manual validation report profile-invalid-summary JSON missing expected profile_default_gate fields"
@@ -723,6 +973,10 @@ EOF_STATUS_TIMEOUT
     and .summary.next_action_check_id == "manual_validation_status_timeout"
     and .summary.local_gate.next_check_id == "manual_validation_status_timeout"
     and .summary.roadmap_stage == "BLOCKED_LOCAL"
+    and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+    and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+    and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+    and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
     and ((.runtime_doctor.findings[0].code // "") == "manual_validation_status_timeout")
   ' "$TMP_DIR/timeout_status_summary.json" >/dev/null; then
     echo "manual validation report timeout run JSON missing expected timeout fallback fields"
@@ -779,5 +1033,41 @@ for expected in \
     exit 1
   fi
 done
+
+ROOT_DEFER_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_root_defer.log"
+ROOT_DEFER_REPORT_MD="$TMP_DIR/manual_validation_readiness_root_defer_report.md"
+ROOT_DEFER_REPORT_JSON="$TMP_DIR/manual_validation_readiness_root_defer_summary.json"
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_ROOT_DEFER" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$ROOT_DEFER_REPORT_JSON" \
+  --report-md "$ROOT_DEFER_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 1 >"$ROOT_DEFER_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] machine_c_smoke_blocker_class=root_required_deferred_blocker' "$ROOT_DEFER_REPORT_LOG"; then
+  echo "manual validation report missing blocker class line"
+  cat "$ROOT_DEFER_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-report\] machine_c_smoke_next_sudo_command=sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country' "$ROOT_DEFER_REPORT_LOG"; then
+  echo "manual validation report missing next sudo command line"
+  cat "$ROOT_DEFER_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q '^## Pre-Machine-C Gate$' "$ROOT_DEFER_REPORT_MD"; then
+  echo "manual validation report root-defer markdown missing pre-machine-c gate section"
+  cat "$ROOT_DEFER_REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Blocker class: `root_required_deferred_blocker`' "$ROOT_DEFER_REPORT_MD"; then
+  echo "manual validation report root-defer markdown missing blocker class entry"
+  cat "$ROOT_DEFER_REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Next sudo command: `sudo \./scripts/easy_node\.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api\.ipify\.org --country-url https://ipinfo\.io/country`' "$ROOT_DEFER_REPORT_MD"; then
+  echo "manual validation report root-defer markdown missing next sudo command entry"
+  cat "$ROOT_DEFER_REPORT_MD"
+  exit 1
+fi
 
 echo "manual validation report integration check ok"

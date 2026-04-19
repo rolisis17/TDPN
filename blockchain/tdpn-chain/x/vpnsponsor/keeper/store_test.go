@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -266,5 +267,109 @@ func TestNewFileStoreInvalidPath(t *testing.T) {
 	_, err := NewFileStore(t.TempDir())
 	if err == nil {
 		t.Fatal("expected NewFileStore to fail for directory path")
+	}
+}
+
+func TestFileStoreListOrderingAndGetPaths(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "vpnsponsor-store-ordering.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	authIDs := []string{"auth-2", "auth-10", "auth-1"}
+	for i, id := range authIDs {
+		store.UpsertAuthorization(types.SponsorAuthorization{
+			AuthorizationID: id,
+			SponsorID:       "sponsor-ordering",
+			AppID:           "app-ordering",
+			MaxCredits:      int64(100 + i),
+			Status:          chaintypes.ReconciliationPending,
+		})
+	}
+	delegationIDs := []string{"res-2", "res-10", "res-1"}
+	for i, id := range delegationIDs {
+		store.UpsertDelegation(types.DelegatedSessionCredit{
+			ReservationID:   id,
+			AuthorizationID: "auth-1",
+			SponsorID:       "sponsor-ordering",
+			AppID:           "app-ordering",
+			EndUserID:       "user-ordering",
+			SessionID:       "session-ordering",
+			Credits:         int64(10 + i),
+			Status:          chaintypes.ReconciliationSubmitted,
+		})
+	}
+
+	gotAuthorizations := store.ListAuthorizations()
+	if len(gotAuthorizations) != len(authIDs) {
+		t.Fatalf("expected %d authorizations, got %d", len(authIDs), len(gotAuthorizations))
+	}
+	expectedAuthIDs := append([]string(nil), authIDs...)
+	sort.Strings(expectedAuthIDs)
+	for i, expectedID := range expectedAuthIDs {
+		if gotAuthorizations[i].AuthorizationID != expectedID {
+			t.Fatalf("expected authorization index %d to be %q, got %q", i, expectedID, gotAuthorizations[i].AuthorizationID)
+		}
+		if _, ok := store.GetAuthorization(expectedID); !ok {
+			t.Fatalf("expected GetAuthorization(%q) to succeed", expectedID)
+		}
+	}
+
+	gotDelegations := store.ListDelegations()
+	if len(gotDelegations) != len(delegationIDs) {
+		t.Fatalf("expected %d delegations, got %d", len(delegationIDs), len(gotDelegations))
+	}
+	expectedDelegationIDs := append([]string(nil), delegationIDs...)
+	sort.Strings(expectedDelegationIDs)
+	for i, expectedID := range expectedDelegationIDs {
+		if gotDelegations[i].ReservationID != expectedID {
+			t.Fatalf("expected delegation index %d to be %q, got %q", i, expectedID, gotDelegations[i].ReservationID)
+		}
+		if _, ok := store.GetDelegation(expectedID); !ok {
+			t.Fatalf("expected GetDelegation(%q) to succeed", expectedID)
+		}
+	}
+}
+
+func TestFileStoreWhitespaceSnapshotLoadsAndPersists(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "vpnsponsor-store-whitespace.json")
+	if err := os.WriteFile(path, []byte("  \n\t  "), 0o600); err != nil {
+		t.Fatalf("write whitespace snapshot: %v", err)
+	}
+
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore with whitespace snapshot returned unexpected error: %v", err)
+	}
+	if got := store.ListAuthorizations(); len(got) != 0 {
+		t.Fatalf("expected no authorizations from whitespace snapshot, got %d", len(got))
+	}
+	if got := store.ListDelegations(); len(got) != 0 {
+		t.Fatalf("expected no delegations from whitespace snapshot, got %d", len(got))
+	}
+
+	store.UpsertAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-whitespace",
+		SponsorID:       "sponsor-whitespace",
+		AppID:           "app-whitespace",
+		MaxCredits:      77,
+		Status:          chaintypes.ReconciliationConfirmed,
+	})
+
+	reopened, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("reopen NewFileStore returned unexpected error: %v", err)
+	}
+	got, ok := reopened.GetAuthorization("auth-whitespace")
+	if !ok {
+		t.Fatal("expected persisted authorization after whitespace bootstrap")
+	}
+	if got.AuthorizationID != "auth-whitespace" || got.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("unexpected persisted authorization: %+v", got)
 	}
 }

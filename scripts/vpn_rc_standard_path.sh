@@ -20,6 +20,11 @@ Purpose:
   Run the locked VPN RC one-host execution path in one command:
     1) single-machine-prod-readiness (strict defaults + docker rehearsal)
     2) roadmap-progress-report refresh based on that output
+
+Notes:
+  - `--profile-compare-campaign-signoff-refresh-campaign 1` means attempt a
+    fresh campaign refresh; `0` means reuse existing campaign artifacts unless
+    single-machine auto mode escalates to refresh for stale/missing data.
 USAGE
 }
 
@@ -172,6 +177,9 @@ single_machine_args=(
   --three-machine-docker-readiness-soak-pause-sec 3
   --three-machine-docker-readiness-path-profile balanced
   --three-machine-docker-readiness-keep-stacks 0
+  --three-machine-docker-readiness-run-peer-failover 1
+  --three-machine-docker-readiness-peer-failover-downtime-sec 8
+  --three-machine-docker-readiness-peer-failover-timeout-sec 45
   --run-profile-compare-campaign-signoff "$run_profile_compare_campaign_signoff"
   --profile-compare-campaign-signoff-refresh-campaign "$profile_compare_campaign_signoff_refresh_campaign"
   --summary-json "$single_machine_summary_json"

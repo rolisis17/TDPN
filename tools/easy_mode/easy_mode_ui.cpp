@@ -466,6 +466,233 @@ std::string resolveRepoPath(const std::string &root, const std::string &path) {
   return (std::filesystem::path(root) / p).string();
 }
 
+bool parseConfigBool(const std::string &raw, bool fallback) {
+  std::string value = trim(raw);
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (value.empty()) {
+    return fallback;
+  }
+  if (value == "1" || value == "true" || value == "yes" || value == "y") {
+    return true;
+  }
+  if (value == "0" || value == "false" || value == "no" || value == "n") {
+    return false;
+  }
+  return fallback;
+}
+
+struct EasyModeConfigV1 {
+  std::string path;
+  bool loaded = false;
+  std::string version = "1";
+  std::string clientPathProfileChoice = "2";
+  bool clientRealVPNDefault = true;
+  std::string clientDiscoveryWaitSec = "20";
+  bool clientProdProfileAuto = true;
+  bool clientProdProfileDefault = true;
+  std::string clientInterface = "wgvpn0";
+  std::string clientReadyTimeoutSec = "35";
+  bool clientRunPreflight = true;
+  bool clientOpenTerminal = false;
+  bool clientPreflightUseSudo = true;
+  bool clientSessionUseSudo = true;
+  bool clientPromptRealVPNInSimple = false;
+
+  bool serverProdProfileDefault = true;
+  bool serverRunPreflight = true;
+  bool serverFederationWait = true;
+  std::string serverFederationReadyTimeoutSec = "90";
+  std::string serverFederationPollSec = "5";
+  std::string serverPeerIdentityStrict = "auto";
+  std::string serverPreflightTimeoutSec = "8";
+  bool serverAutoInvite = true;
+  std::string serverAutoInviteCount = "1";
+  std::string serverAutoInviteTier = "1";
+  std::string serverAutoInviteWaitSec = "10";
+  bool serverSessionUseSudo = false;
+};
+
+std::string normalizePathProfileChoice(const std::string &raw) {
+  std::string value = trim(raw);
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (value == "1" || value == "1hop" || value == "speed" || value == "speed-1hop") {
+    return "1";
+  }
+  if (value == "2" || value == "2hop" || value == "balanced") {
+    return "2";
+  }
+  if (value == "3" || value == "3hop" || value == "private" || value == "privacy") {
+    return "3";
+  }
+  return "2";
+}
+
+EasyModeConfigV1 loadEasyModeConfigV1(const std::string &root) {
+  EasyModeConfigV1 cfg;
+  const char *overridePath = std::getenv("EASY_MODE_CONFIG_V1_FILE");
+  std::string candidate = (overridePath && *overridePath)
+      ? resolveRepoPath(root, overridePath)
+      : resolveRepoPath(root, "deploy/config/easy_mode_config_v1.conf");
+  cfg.path = candidate;
+
+  std::ifstream in(candidate);
+  if (!in.is_open()) {
+    return cfg;
+  }
+
+  std::string line;
+  while (std::getline(in, line)) {
+    line = trim(line);
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+    const size_t eq = line.find('=');
+    if (eq == std::string::npos) {
+      continue;
+    }
+    const std::string key = trim(line.substr(0, eq));
+    const std::string value = trim(line.substr(eq + 1));
+    if (key == "EASY_MODE_CONFIG_VERSION") {
+      cfg.version = value;
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_PROFILE_DEFAULT") {
+      cfg.clientPathProfileChoice = normalizePathProfileChoice(value);
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_REAL_VPN_DEFAULT") {
+      cfg.clientRealVPNDefault = parseConfigBool(value, cfg.clientRealVPNDefault);
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_DISCOVERY_WAIT_SEC") {
+      if (!trim(value).empty()) {
+        cfg.clientDiscoveryWaitSec = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_PROD_PROFILE_DEFAULT") {
+      std::string mode = value;
+      std::transform(mode.begin(), mode.end(), mode.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (mode == "auto") {
+        cfg.clientProdProfileAuto = true;
+      } else {
+        cfg.clientProdProfileAuto = false;
+        cfg.clientProdProfileDefault = parseConfigBool(mode, cfg.clientProdProfileDefault);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_INTERFACE") {
+      if (!trim(value).empty()) {
+        cfg.clientInterface = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_READY_TIMEOUT_SEC") {
+      if (!trim(value).empty()) {
+        cfg.clientReadyTimeoutSec = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_RUN_PREFLIGHT") {
+      cfg.clientRunPreflight = parseConfigBool(value, cfg.clientRunPreflight);
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_OPEN_TERMINAL") {
+      cfg.clientOpenTerminal = parseConfigBool(value, cfg.clientOpenTerminal);
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_PREFLIGHT_USE_SUDO") {
+      cfg.clientPreflightUseSudo = parseConfigBool(value, cfg.clientPreflightUseSudo);
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_SESSION_USE_SUDO") {
+      cfg.clientSessionUseSudo = parseConfigBool(value, cfg.clientSessionUseSudo);
+      continue;
+    }
+    if (key == "SIMPLE_CLIENT_PROMPT_REAL_VPN_IN_SIMPLE") {
+      cfg.clientPromptRealVPNInSimple = parseConfigBool(value, cfg.clientPromptRealVPNInSimple);
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_PROD_PROFILE_DEFAULT") {
+      cfg.serverProdProfileDefault = parseConfigBool(value, cfg.serverProdProfileDefault);
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_RUN_PREFLIGHT") {
+      cfg.serverRunPreflight = parseConfigBool(value, cfg.serverRunPreflight);
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_FEDERATION_WAIT") {
+      cfg.serverFederationWait = parseConfigBool(value, cfg.serverFederationWait);
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_FEDERATION_READY_TIMEOUT_SEC") {
+      if (!trim(value).empty()) {
+        cfg.serverFederationReadyTimeoutSec = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_FEDERATION_POLL_SEC") {
+      if (!trim(value).empty()) {
+        cfg.serverFederationPollSec = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_PEER_IDENTITY_STRICT") {
+      std::string mode = trim(value);
+      if (mode == "auto" || mode == "0" || mode == "1") {
+        cfg.serverPeerIdentityStrict = mode;
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_PREFLIGHT_TIMEOUT_SEC") {
+      if (!trim(value).empty()) {
+        cfg.serverPreflightTimeoutSec = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_AUTO_INVITE") {
+      cfg.serverAutoInvite = parseConfigBool(value, cfg.serverAutoInvite);
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_AUTO_INVITE_COUNT") {
+      if (!trim(value).empty()) {
+        cfg.serverAutoInviteCount = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_AUTO_INVITE_TIER") {
+      if (!trim(value).empty()) {
+        cfg.serverAutoInviteTier = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_AUTO_INVITE_WAIT_SEC") {
+      if (!trim(value).empty()) {
+        cfg.serverAutoInviteWaitSec = trim(value);
+      }
+      continue;
+    }
+    if (key == "SIMPLE_SERVER_SESSION_USE_SUDO") {
+      cfg.serverSessionUseSudo = parseConfigBool(value, cfg.serverSessionUseSudo);
+      continue;
+    }
+  }
+
+  cfg.loaded = (cfg.version == "1");
+  if (!cfg.loaded) {
+    std::cout << "warning: easy mode config version mismatch in " << cfg.path
+              << " (expected 1, got " << cfg.version << "); using built-in defaults.\n";
+    EasyModeConfigV1 fallback;
+    fallback.path = cfg.path;
+    return fallback;
+  }
+
+  return cfg;
+}
+
 void showThreeMachineGuide() {
   std::cout << "\n3-machine quick flow\n";
   std::cout << "1) Machine A: server-up with A public IP/host and --beta-profile (IDs auto-generated)\n";
@@ -1037,29 +1264,21 @@ void runTestsInteractive(const std::string &root, const std::string &script, ABH
   }
 }
 
-void quickClientConnect(const std::string &script, ABHosts &hosts) {
+void quickClientConnect(const std::string &script, ABHosts &hosts, const EasyModeConfigV1 &config) {
   std::string defaultBootstrap = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) :
                                  (!hosts.bHost.empty() ? endpointFromHost(hosts.bHost, 8081) : "");
   std::string bootstrapDir = normalizeEndpointURL(readLine("Server IP/host or bootstrap URL", defaultBootstrap), 8081);
   std::string inviteKey = trim(readLine("Invite key", ""));
-  PathProfile pathProfile = choosePathProfile("Connection profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
-  bool realVPN = parseYesNo(readLine("Use real VPN mode (host WireGuard interface)? (Y/n)", "y"), true);
-  bool customize = parseYesNo(readLine("Need expert client overrides now? (y/N)", "n"), false);
-  std::string discoveryWait = "20";
-  bool prodProfile = realVPN;
-  bool betaProfile = true;
-  if (customize) {
-    discoveryWait = readLine("Discovery wait sec", discoveryWait);
-    prodProfile = parseYesNo(
-        readLine("Use PROD profile (mTLS + strict fail-closed)? (" + std::string(prodProfile ? "Y/n" : "y/N") + ")",
-                 prodProfile ? "y" : "n"),
-        prodProfile);
-    if (prodProfile) {
-      betaProfile = true;
-    }
+  PathProfile pathProfile = choosePathProfile("Connection profile (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)",
+                                             config.clientPathProfileChoice);
+  bool realVPN = config.clientRealVPNDefault;
+  if (config.clientPromptRealVPNInSimple) {
+    realVPN = parseYesNo(readLine("Use real VPN mode (host WireGuard interface)? (Y/n)", realVPN ? "y" : "n"), realVPN);
   }
+  std::string discoveryWait = config.clientDiscoveryWaitSec;
+  bool prodProfile = config.clientProdProfileAuto ? realVPN : config.clientProdProfileDefault;
+  bool betaProfile = true;
   enforceOneHopNonStrict(pathProfile, betaProfile, prodProfile, "quick client connect");
-  const bool oneHopProfile = isOneHopPathProfile(pathProfile);
   if (bootstrapDir.empty()) {
     std::cout << "server IP/host is required\n";
     return;
@@ -1070,33 +1289,20 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
   }
   std::ostringstream cmd;
   if (realVPN) {
-    std::string iface = "wgvpn0";
-    std::string readyTimeout = "35";
-    bool runPreflight = true;
-    bool openTerminal = false;
-    if (customize) {
-      iface = trim(readLine("VPN interface name", iface));
-      readyTimeout = readLine("VPN ready timeout sec", readyTimeout);
-      runPreflight = parseYesNo(readLine("Run VPN preflight first? (Y/n)", "y"), true);
-      openTerminal = parseYesNo(
-          readLine("Open dedicated CLIENT terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
-    }
+    std::string iface = config.clientInterface;
+    std::string readyTimeout = config.clientReadyTimeoutSec;
+    bool runPreflight = config.clientRunPreflight;
+    bool openTerminal = config.clientOpenTerminal;
     if (runPreflight) {
       std::ostringstream preflightCmd;
-      preflightCmd << shellEscape(script) << " client-vpn-preflight"
+      preflightCmd << shellEscape(script) << " simple-client-vpn-preflight"
                    << " --bootstrap-directory " << shellEscape(bootstrapDir)
                    << " --discovery-wait-sec " << shellEscape(discoveryWait)
+                   << " --path-profile " << shellEscape(pathProfile.label)
                    << " --prod-profile " << (prodProfile ? "1" : "0")
-                   << " --interface " << shellEscape(iface)
-                   << " --operator-floor-check " << (oneHopProfile ? "0" : "1")
-                   << " --operator-min-operators " << (oneHopProfile ? "1" : "2")
-                   << " --issuer-quorum-check " << (oneHopProfile ? "0" : "1")
-                   << " --issuer-min-operators " << (oneHopProfile ? "1" : "2");
+                   << " --interface " << shellEscape(iface);
       if (!isRootUser()) {
-        bool useSudoPreflight = true;
-        if (customize) {
-          useSudoPreflight = parseYesNo(readLine("Run preflight with sudo? (Y/n)", "y"), true);
-        }
+        bool useSudoPreflight = config.clientPreflightUseSudo;
         if (runCommandWithOptionalSudo(preflightCmd.str(), useSudoPreflight, "client preflight") != 0) {
           std::cout << "preflight failed; stopping client connect flow\n";
           return;
@@ -1108,33 +1314,17 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
         }
       }
     }
-    cmd << shellEscape(script) << " client-vpn-session"
+    cmd << shellEscape(script) << " simple-client-vpn-session"
         << " --bootstrap-directory " << shellEscape(bootstrapDir)
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
         << " --subject " << shellEscape(inviteKey)
-        << " --min-sources 1"
-        << " --min-operators " << (oneHopProfile ? "1" : "2")
-        << " --operator-floor-check " << (oneHopProfile ? "0" : "1")
-        << " --operator-min-operators " << (oneHopProfile ? "1" : "2")
+        << " --path-profile " << shellEscape(pathProfile.label)
         << " --beta-profile " << (betaProfile ? "1" : "0")
         << " --prod-profile " << (prodProfile ? "1" : "0")
-        << " --issuer-quorum-check " << (oneHopProfile ? "0" : "1")
-        << " --issuer-min-operators " << (oneHopProfile ? "1" : "2")
         << " --interface " << shellEscape(iface)
-        << " --ready-timeout-sec " << shellEscape(readyTimeout)
-        << " --cleanup-all 1";
-    if (oneHopProfile) {
-      // Avoid default-route hijack loops in experimental direct-exit quick mode.
-      cmd << " --install-route 0";
-      std::cout << "1-hop quick mode: forcing --install-route 0 for stable control-plane connectivity.\n";
-      std::cout << "Use expert option 34 if you want to override route behavior manually.\n";
-    }
-    appendPathProfilePreset(cmd, pathProfile);
+        << " --ready-timeout-sec " << shellEscape(readyTimeout);
     if (!isRootUser()) {
-      bool useSudo = true;
-      if (customize) {
-        useSudo = parseYesNo(readLine("Run with sudo? (Y/n)", "y"), true);
-      }
+      bool useSudo = config.clientSessionUseSudo;
       if (openTerminal) {
         launchDetachedTerminalCommandWithOptionalSudo("Privacynode CLIENT session",
                                                      cmd.str(),
@@ -1153,164 +1343,121 @@ void quickClientConnect(const std::string &script, ABHosts &hosts) {
     std::cout << "Use Other options -> 31 (preflight), 32 (status), 33 (down), 34 (expert/manual up).\n";
   } else {
     std::string timeoutSec = "45";
-    if (customize) {
-      timeoutSec = readLine("Connection timeout sec", timeoutSec);
-    }
-    cmd << shellEscape(script) << " client-test"
+    cmd << shellEscape(script) << " simple-client-test"
         << " --bootstrap-directory " << shellEscape(bootstrapDir)
         << " --discovery-wait-sec " << shellEscape(discoveryWait)
         << " --subject " << shellEscape(inviteKey)
-        << " --min-sources 1"
         << " --timeout-sec " << shellEscape(timeoutSec)
+        << " --path-profile " << shellEscape(pathProfile.label)
         << " --beta-profile " << (betaProfile ? "1" : "0")
         << " --prod-profile " << (prodProfile ? "1" : "0");
-    appendPathProfilePreset(cmd, pathProfile);
     runCommand(cmd.str());
   }
 }
 
-void quickServerConnect(const std::string &root, const std::string &script, ABHosts &hosts) {
+void quickServerConnect(const std::string &root,
+                        const std::string &script,
+                        ABHosts &hosts,
+                        const EasyModeConfigV1 &config) {
+  (void)root;
   std::string hostDefault = !hosts.aHost.empty() ? hosts.aHost : (!hosts.bHost.empty() ? hosts.bHost : "");
   std::string host = normalizePublicHostInput(readLine("Public host/IP for this server", hostDefault));
   bool authorityMode = parseYesNo(readLine("Is this your AUTHORITY admin machine? (y/N)", "n"), false);
-  bool customize = parseYesNo(readLine("Need expert server overrides now? (y/N)", "n"), false);
   std::string peerDefault = "";
   if (!host.empty() && host == hosts.aHost && !hosts.bHost.empty()) {
     peerDefault = hosts.bHost;
   } else if (!host.empty() && host == hosts.bHost && !hosts.aHost.empty()) {
     peerDefault = hosts.aHost;
   }
-  std::string peerHost = peerDefault;
-  if (authorityMode) {
-    peerHost = normalizePublicHostInput(readOptionalLine("Peer server IP/host (optional)", peerDefault));
-  }
+  // Keep simple mode low-prompt: derive peer from configured machine A/B hosts.
+  // Custom peer overrides remain available in expert/server-preflight paths.
+  std::string peerHost = normalizePublicHostInput(peerDefault);
   if (host.empty()) {
     std::cout << "public host/IP is required\n";
     return;
   }
-  bool prodProfile = true;
-  bool runPreflight = true;
-  std::string peerIdentityStrict = "auto";
-  std::string preflightTimeout = "8";
-  if (!customize && authorityMode && peerHost.empty()) {
+  bool prodProfile = config.serverProdProfileDefault;
+  bool runPreflight = config.serverRunPreflight;
+  bool federationWait = config.serverFederationWait;
+  std::string federationReadyTimeoutSec = trim(config.serverFederationReadyTimeoutSec);
+  if (federationReadyTimeoutSec.empty()) {
+    federationReadyTimeoutSec = "90";
+  }
+  std::string federationPollSec = trim(config.serverFederationPollSec);
+  if (federationPollSec.empty()) {
+    federationPollSec = "5";
+  }
+  std::string peerIdentityStrict = config.serverPeerIdentityStrict;
+  std::string preflightTimeout = config.serverPreflightTimeoutSec;
+  if (authorityMode && peerHost.empty()) {
     prodProfile = false;
     std::cout << "simple authority mode without peer defaults to non-PROD.\n";
-    std::cout << "add a peer authority host (or use customize) for strict PROD quorum.\n";
-  }
-  if (customize) {
-    prodProfile = parseYesNo(readLine("Enable PROD profile (mTLS + strict fail-closed)? (Y/n)", "y"), true);
-    runPreflight = parseYesNo(readLine("Run server preflight before startup? (Y/n)", "y"), true);
-    peerIdentityStrict = trim(readLine("Peer identity strict mode (auto/1/0)", peerIdentityStrict));
-    if (peerIdentityStrict != "auto" && peerIdentityStrict != "1" && peerIdentityStrict != "0") {
-      std::cout << "invalid peer identity strict mode; using auto\n";
-      peerIdentityStrict = "auto";
-    }
-    preflightTimeout = readLine("Preflight timeout sec", preflightTimeout);
+    std::cout << "add a peer authority host for strict PROD quorum.\n";
   }
   if (authorityMode && prodProfile && peerHost.empty()) {
     std::cout << "PROD authority mode requires at least one peer authority host for issuer quorum.\n";
-    std::cout << "set peer host in simple mode, or switch PROD off.\n";
+    std::cout << "set peer host in simple mode, or use Other options -> 35 for expert preflight/startup.\n";
     return;
   }
-  bool autoInvite = authorityMode;
-  std::string autoInviteCount = "1";
-  std::string autoInviteTier = "1";
-  std::string autoInviteWaitSec = "10";
-  if (authorityMode && customize) {
-    autoInvite = parseYesNo(readLine("Auto-generate invite key(s) when server starts? (Y/n)", "y"), true);
-    if (autoInvite) {
-      autoInviteCount = trim(readLine("Auto invite key count", "1"));
-      bool countDigits = !autoInviteCount.empty() &&
-                         std::all_of(autoInviteCount.begin(), autoInviteCount.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
-      if (!countDigits || autoInviteCount == "0") {
-        std::cout << "invalid auto invite count; using 1\n";
-        autoInviteCount = "1";
-      }
-      autoInviteTier = trim(readLine("Auto invite tier (1/2/3)", "1"));
-      if (autoInviteTier != "1" && autoInviteTier != "2" && autoInviteTier != "3") {
-        std::cout << "invalid auto invite tier; using 1\n";
-        autoInviteTier = "1";
-      }
-      autoInviteWaitSec = trim(readLine("Auto invite issuer-ready wait sec", "10"));
-      bool waitDigits = !autoInviteWaitSec.empty() &&
-                        std::all_of(autoInviteWaitSec.begin(), autoInviteWaitSec.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
-      if (!waitDigits) {
-        std::cout << "invalid auto invite wait; using 10\n";
-        autoInviteWaitSec = "10";
-      }
+  if (!authorityMode && peerHost.empty()) {
+    std::cout << "provider mode needs authority peer host to derive directory/issuer defaults.\n";
+    std::cout << "set Machine A/B hosts (Other options -> 14) or use Other options -> 35 for expert preflight/startup.\n";
+    return;
+  }
+  bool autoInvite = authorityMode ? config.serverAutoInvite : false;
+  std::string autoInviteCount = config.serverAutoInviteCount;
+  std::string autoInviteTier = config.serverAutoInviteTier;
+  std::string autoInviteWaitSec = config.serverAutoInviteWaitSec;
+  if (authorityMode && autoInvite) {
+    autoInviteCount = trim(autoInviteCount);
+    bool countDigits = !autoInviteCount.empty() &&
+                       std::all_of(autoInviteCount.begin(), autoInviteCount.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (!countDigits || autoInviteCount == "0") {
+      autoInviteCount = "1";
+    }
+    autoInviteTier = trim(autoInviteTier);
+    if (autoInviteTier != "1" && autoInviteTier != "2" && autoInviteTier != "3") {
+      autoInviteTier = "1";
+    }
+    autoInviteWaitSec = trim(autoInviteWaitSec);
+    bool waitDigits = !autoInviteWaitSec.empty() &&
+                      std::all_of(autoInviteWaitSec.begin(), autoInviteWaitSec.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (!waitDigits) {
+      autoInviteWaitSec = "10";
     }
   }
 
   std::string modeValue = authorityMode ? "authority" : "provider";
-  std::string peerDirectoriesArg = "";
-  std::string authorityDir = "";
-  std::string authorityIssuer = "";
 
   std::ostringstream cmd;
-  cmd << shellEscape(script) << " server-session"
-      << " --mode " << modeValue
+  cmd << shellEscape(script) << " simple-server-session"
+      << " --mode " << shellEscape(modeValue)
       << " --public-host " << shellEscape(host)
-      << " --beta-profile 1"
       << " --prod-profile " << (prodProfile ? "1" : "0")
       << " --peer-identity-strict " << shellEscape(peerIdentityStrict)
-      << " --cleanup-all 1";
-  if (authorityMode) {
-    cmd << " --client-allowlist 1"
-        << " --allow-anon-cred 0"
-        << " --auto-invite " << (autoInvite ? "1" : "0")
-        << " --auto-invite-count " << shellEscape(autoInviteCount)
-        << " --auto-invite-tier " << shellEscape(autoInviteTier)
-        << " --auto-invite-wait-sec " << shellEscape(autoInviteWaitSec)
-        << " --auto-invite-fail-open 0";
-    if (!peerHost.empty()) {
-      peerDirectoriesArg = endpointFromHost(peerHost, 8081);
-      cmd << " --peer-directories " << shellEscape(peerDirectoriesArg);
-    }
-  } else {
-    std::string authorityDirDefault = !peerHost.empty() ? endpointFromHost(peerHost, 8081) : "";
-    authorityDir = normalizeEndpointURL(readLine("Authority directory URL", authorityDirDefault), 8081);
-    std::string authorityIssuerDefault = "";
-    if (!authorityDir.empty()) {
-      std::string authorityHost = normalizePublicHostInput(authorityDir);
-      authorityHost = stripSchemeAndPath(authorityHost);
-      if (!authorityHost.empty()) {
-        authorityIssuerDefault = endpointFromHost(normalizePublicHostInput(authorityHost), 8082);
-      }
-    }
-    authorityIssuer = normalizeEndpointURL(readLine("Authority issuer URL", authorityIssuerDefault), 8082);
-    if (authorityDir.empty() || authorityIssuer.empty()) {
-      std::cout << "authority directory and issuer URLs are required for provider mode\n";
-      return;
-    }
-    peerDirectoriesArg = authorityDir;
-    cmd << " --authority-directory " << shellEscape(authorityDir)
-        << " --authority-issuer " << shellEscape(authorityIssuer)
-        << " --peer-directories " << shellEscape(peerDirectoriesArg);
+      << " --federation-wait " << (federationWait ? "1" : "0")
+      << " --auto-invite " << (autoInvite ? "1" : "0")
+      << " --auto-invite-count " << shellEscape(autoInviteCount)
+      << " --auto-invite-tier " << shellEscape(autoInviteTier)
+      << " --auto-invite-wait-sec " << shellEscape(autoInviteWaitSec);
+  if (federationWait) {
+    cmd << " --federation-ready-timeout-sec " << shellEscape(federationReadyTimeoutSec)
+        << " --federation-poll-sec " << shellEscape(federationPollSec);
+  }
+  if (!peerHost.empty()) {
+    cmd << " --peer-host " << shellEscape(peerHost);
   }
 
   if (runPreflight) {
-    std::string minPeerOpsDefault = peerDirectoriesArg.empty() ? "0" : "1";
-    std::string minPeerOps = minPeerOpsDefault;
-    if (customize) {
-      minPeerOps = readLine("Preflight minimum distinct peer operators", minPeerOpsDefault);
-    }
     std::ostringstream preflightCmd;
-    preflightCmd << shellEscape(script) << " server-preflight"
+    preflightCmd << shellEscape(script) << " simple-server-preflight"
                  << " --mode " << shellEscape(modeValue)
                  << " --public-host " << shellEscape(host)
-                 << " --beta-profile 1"
                  << " --prod-profile " << (prodProfile ? "1" : "0")
                  << " --peer-identity-strict " << shellEscape(peerIdentityStrict)
-                 << " --min-peer-operators " << shellEscape(minPeerOps)
                  << " --timeout-sec " << shellEscape(preflightTimeout);
-    if (!peerDirectoriesArg.empty()) {
-      preflightCmd << " --peer-directories " << shellEscape(peerDirectoriesArg);
-    }
-    if (!authorityDir.empty()) {
-      preflightCmd << " --authority-directory " << shellEscape(authorityDir);
-    }
-    if (!authorityIssuer.empty()) {
-      preflightCmd << " --authority-issuer " << shellEscape(authorityIssuer);
+    if (!peerHost.empty()) {
+      preflightCmd << " --peer-host " << shellEscape(peerHost);
     }
     if (runCommand(preflightCmd.str()) != 0) {
       std::cout << "server preflight failed; not starting server-up\n";
@@ -1319,14 +1466,7 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
   }
 
   bool openTerminal = false;
-  if (customize) {
-    openTerminal = parseYesNo(
-        readLine("Open dedicated SERVER terminal with live logs + auto cleanup on close? (Y/n)", "y"), true);
-  }
-  bool useSudo = false;
-  if (!isRootUser() && customize) {
-    useSudo = parseYesNo(readLine("Run server session with sudo? (y/N)", "n"), false);
-  }
+  bool useSudo = config.serverSessionUseSudo;
 
   int rc = 0;
   bool launchedSession = false;
@@ -1338,14 +1478,6 @@ void quickServerConnect(const std::string &root, const std::string &script, ABHo
     launchedSession = (rc == 0);
   } else {
     rc = runCommandWithOptionalSudo(cmd.str(), useSudo, "server session");
-  }
-
-  bool saveHosts = false;
-  if (customize) {
-    saveHosts = parseYesNo(readLine("Save/update Machine A/B host config? (y/N)", "n"), false);
-  }
-  if (saveHosts) {
-    configureABHostsInteractive(root, hosts, true);
   }
 
   if (launchedSession && authorityMode) {
@@ -1440,6 +1572,37 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
     std::cout << "74) Runtime fix + readiness receipt (recorded cleanup)\n";
     std::cout << "75) Single-machine PROD readiness sweep (all local gates + next action)\n";
     std::cout << "76) VPN RC standard path (single-machine sweep + roadmap report)\n";
+    std::cout << "77) Docker profile matrix signoff (campaign refresh + fail-closed gate)\n";
+    std::cout << "78) VPN RC matrix chain path (campaign refresh/check handoff)\n";
+    std::cout << "79) 3-machine Docker profile matrix (resilience defaults)\n";
+    std::cout << "80) VPN RC resilience path (resilience defaults + integration coverage)\n";
+    std::cout << "81) 3-machine Docker profile matrix record wrapper (coverage defaults)\n";
+    std::cout << "82) Phase-0 CI gate (surface simplification fast gate)\n";
+    std::cout << "83) Phase-1 resilience CI gate\n";
+    std::cout << "84) Phase-1 resilience handoff check\n";
+    std::cout << "85) Phase-1 resilience handoff run (refresh + check)\n";
+    std::cout << "86) Phase-2 Linux prod-candidate CI gate\n";
+    std::cout << "87) Phase-2 Linux prod-candidate check\n";
+    std::cout << "88) Phase-2 Linux prod-candidate run (refresh + check)\n";
+    std::cout << "89) Phase-2 Linux prod-candidate signoff (run + roadmap report)\n";
+    std::cout << "90) Phase-2 Linux prod-candidate handoff check\n";
+    std::cout << "91) Phase-2 Linux prod-candidate handoff run (signoff + check)\n";
+    std::cout << "92) Phase-3 Windows client beta CI gate\n";
+    std::cout << "93) Phase-3 Windows client beta check\n";
+    std::cout << "94) Phase-3 Windows client beta run (refresh + check)\n";
+    std::cout << "95) Phase-3 Windows client beta handoff check\n";
+    std::cout << "96) Phase-3 Windows client beta handoff run (run + check)\n";
+    std::cout << "97) Phase-4 Windows full parity CI gate\n";
+    std::cout << "98) Phase-4 Windows full parity check\n";
+    std::cout << "99) Phase-4 Windows full parity run (refresh + check)\n";
+    std::cout << "100) Phase-4 Windows full parity handoff check\n";
+    std::cout << "101) Phase-4 Windows full parity handoff run (run + check)\n";
+    std::cout << "102) Phase-5 settlement layer CI gate\n";
+    std::cout << "103) Phase-5 settlement layer check\n";
+    std::cout << "104) Phase-5 settlement layer run (refresh + check)\n";
+    std::cout << "105) Phase-5 settlement layer handoff check\n";
+    std::cout << "106) Phase-5 settlement layer handoff run (run + check)\n";
+    std::cout << "107) VPN non-blockchain fastlane (runtime+phase1-4 handoff+roadmap)\n";
     std::cout << "0) Back\n";
     std::cout << "Selection: ";
 
@@ -2297,6 +2460,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         exitUrl = normalizeEndpointURL(readLine("Exit control URL fallback", endpointFromHost(hosts.aHost, 8084)), 8084);
       }
       bool prodProfile = parseYesNo(readLine("Use PROD profile? (y/N)", "n"), false);
+      PathProfile pathProfile = choosePathProfile("Path profile for this preflight (1=1-hop Speed, 2=2-hop Balanced, 3=3-hop Private)", "2");
       bool operatorFloorCheck = parseYesNo(
           readLine("Enforce operator floor check (>=2 entry/exit operators)? (Y/n)", prodProfile ? "y" : "n"),
           prodProfile);
@@ -2316,6 +2480,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --issuer-min-operators " << shellEscape(issuerMinOperators)
           << " --interface " << shellEscape(iface)
           << " --timeout-sec " << shellEscape(timeoutSec);
+      appendPathProfilePreset(cmd, pathProfile);
       if (autoDiscover) {
         if (bootstrapDir.empty()) {
           std::cout << "bootstrap directory URL is required\n";
@@ -2469,6 +2634,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                      << " --issuer-min-operators " << shellEscape(issuerMinOperators)
                      << " --interface " << shellEscape(iface)
                      << " --timeout-sec " << shellEscape(preflightTimeout);
+        appendPathProfilePreset(preflightCmd, pathProfile);
         if (autoDiscover) {
           preflightCmd << " --bootstrap-directory " << shellEscape(bootstrapDir);
         } else {
@@ -4818,6 +4984,409 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       runCommand(cmd.str());
       continue;
     }
+    if (choice == "77") {
+      std::string reportsDir = trim(readLine("Reports dir", ".easy-node-logs/profile_compare_campaign_docker"));
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : "http://198.51.100.20:8081";
+      std::string bootstrapDir = normalizeEndpointURL(readLine("Campaign bootstrap directory URL", bootstrapDefault), 8081);
+      std::string discoveryWaitSec = trim(readLine("Campaign discovery wait sec", "20"));
+      bool refreshCampaign = parseYesNo(readLine("Refresh campaign before signoff gate? (Y/n)", "y"), true);
+      bool failOnNoGo = parseYesNo(readLine("Fail if signoff decision is NO-GO? (Y/n)", "y"), true);
+      std::string summaryJson = trim(readLine("Signoff summary JSON path (optional)",
+                                              reportsDir + "/profile_compare_campaign_signoff_summary.json"));
+      bool printSummaryJson = parseYesNo(readLine("Print signoff summary JSON payload? (y/N)", "n"), false);
+      bool showJson = parseYesNo(readLine("Show signoff check JSON payload? (y/N)", "n"), false);
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+      if (bootstrapDir.empty()) {
+        std::cout << "campaign bootstrap directory URL is required\n";
+        continue;
+      }
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " profile-compare-campaign-signoff"
+          << " --reports-dir " << shellEscape(reportsDir)
+          << " --refresh-campaign " << (refreshCampaign ? "1" : "0")
+          << " --fail-on-no-go " << (failOnNoGo ? "1" : "0")
+          << " --campaign-execution-mode docker"
+          << " --campaign-bootstrap-directory " << shellEscape(bootstrapDir)
+          << " --campaign-discovery-wait-sec " << shellEscape(discoveryWaitSec)
+          << " --subject ${CAMPAIGN_SUBJECT:-${INVITE_KEY:-INVITE_KEY}}"
+          << " --campaign-start-local-stack 0"
+          << " --print-summary-json " << (printSummaryJson ? "1" : "0")
+          << " --show-json " << (showJson ? "1" : "0");
+      if (!summaryJson.empty()) {
+        cmd << " --summary-json " << shellEscape(summaryJson);
+      }
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "78") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " vpn-rc-matrix-path"
+          << " --campaign-execution-mode docker"
+          << " --signoff-refresh-campaign 0"
+          << " --signoff-fail-on-no-go 1"
+          << " --roadmap-refresh-manual-validation 1"
+          << " --roadmap-refresh-single-machine-readiness 0"
+          << " --print-report 1"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "79") {
+      std::string bootstrapDefault = !hosts.aHost.empty() ? endpointFromHost(hosts.aHost, 8081) : "http://127.0.0.1:18081";
+      std::string dockerHostAliasDefault = !hosts.aHost.empty() ? hosts.aHost : "host.docker.internal";
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " three-machine-docker-profile-matrix"
+          << " --run-peer-failover 1"
+          << " --print-summary-json 1"
+          << " --docker-host-alias " << shellEscape(dockerHostAliasDefault)
+          << " --bootstrap-directory " << shellEscape(bootstrapDefault);
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "80") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " vpn-rc-resilience-path"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "81") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " three-machine-docker-profile-matrix-record"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "82") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " ci-phase0";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "83") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " ci-phase1-resilience";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "84") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase1-resilience-handoff-check"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "85") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase1-resilience-handoff-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "86") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " ci-phase2-linux-prod-candidate";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "87") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase2-linux-prod-candidate-check"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "88") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase2-linux-prod-candidate-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "89") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase2-linux-prod-candidate-signoff"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "90") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase2-linux-prod-candidate-handoff-check"
+          << " --show-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "91") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase2-linux-prod-candidate-handoff-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "92") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " ci-phase3-windows-client-beta";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "93") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase3-windows-client-beta-check"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "94") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase3-windows-client-beta-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "95") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase3-windows-client-beta-handoff-check"
+          << " --show-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "96") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase3-windows-client-beta-handoff-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "97") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " ci-phase4-windows-full-parity";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "98") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase4-windows-full-parity-check"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "99") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase4-windows-full-parity-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "100") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase4-windows-full-parity-handoff-check"
+          << " --show-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "101") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase4-windows-full-parity-handoff-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "102") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " ci-phase5-settlement-layer";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "103") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase5-settlement-layer-check"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "104") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase5-settlement-layer-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "105") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase5-settlement-layer-handoff-check"
+          << " --show-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "106") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " phase5-settlement-layer-handoff-run"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
+    if (choice == "107") {
+      bool runWithSudo = parseYesNo(readLine("Run with sudo? (y/N)", "n"), false);
+
+      std::ostringstream cmd;
+      if (runWithSudo) {
+        cmd << "sudo ";
+      }
+      cmd << shellEscape(script) << " vpn-non-blockchain-fastlane"
+          << " --print-summary-json 1";
+      runCommand(cmd.str());
+      continue;
+    }
 
     std::cout << "invalid selection\n";
   }
@@ -4840,10 +5409,16 @@ int main() {
 
   const std::string script = scriptPath.string();
   ABHosts hosts = loadABHosts(root);
+  EasyModeConfigV1 config = loadEasyModeConfigV1(root);
 
   std::cout << "Privacynode Easy Launcher\n";
   std::cout << "repo: " << root << "\n";
-  std::cout << "tip: set EASY_NODE_AUTO_UPDATE=1 for automatic git fast-forward updates before server/client startup commands.\n";
+  if (config.loaded) {
+    std::cout << "simple config: " << config.path << " (v" << config.version << ")\n";
+  } else if (!config.path.empty()) {
+    std::cout << "simple config: defaults (file not loaded: " << config.path << ")\n";
+  }
+  std::cout << "tip: set SIMPLE_AUTO_UPDATE=1 in deploy/config/easy_mode_config_v1.conf (or EASY_NODE_AUTO_UPDATE=1) for automatic git fast-forward updates before server/client startup commands.\n";
 
   for (;;) {
     std::cout << "\nMain menu:\n";
@@ -4861,11 +5436,11 @@ int main() {
       return 0;
     }
     if (choice == "1") {
-      quickClientConnect(script, hosts);
+      quickClientConnect(script, hosts, config);
       continue;
     }
     if (choice == "2") {
-      quickServerConnect(root, script, hosts);
+      quickServerConnect(root, script, hosts, config);
       continue;
     }
     if (choice == "3") {

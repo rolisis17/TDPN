@@ -249,6 +249,7 @@ FAKE_EASY_CAPTURE_FILE="$EASY_CAPTURE" \
 FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
 FAKE_DOCKER_IDS="demo-run-id" \
 FAKE_DOCKER_NETWORK_PRESENT="1" \
+EASY_NODE_RUNTIME_FIX_WG_ONLY_PRUNE_ALLOWLIST="/tmp/fake_wg_only" \
 EASY_NODE_RUNTIME_FIX_EUID=0 \
 ./scripts/runtime_fix.sh --prune-wg-only-dir 1 --show-json 1 >/tmp/integration_runtime_fix_orch.log 2>&1
 
@@ -295,6 +296,52 @@ fi
 if ! extract_json_payload /tmp/integration_runtime_fix_orch.log | jq -e '.doctor.before.status == "WARN" and .doctor.after.status == "OK" and (.actions.taken | index("wg-only cleanup")) != null and (.actions.taken | index("client-vpn cleanup")) != null' >/dev/null 2>&1; then
   echo "runtime-fix orchestration JSON payload missing expected action summary"
   cat /tmp/integration_runtime_fix_orch.log
+  exit 1
+fi
+
+echo "[runtime-fix] unsafe prune path blocked"
+UNSAFE_DOCTOR="$TMP_DIR/fake_doctor_unsafe_prune.sh"
+cat >"$UNSAFE_DOCTOR" <<'EOF_UNSAFE_DOCTOR'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[runtime-doctor] status=WARN findings=1 warnings=1 failures=0
+[runtime-doctor] summary_json_payload:
+{"version":1,"status":"WARN","summary":{"findings_total":1,"warnings_total":1,"failures_total":0},"paths":{"wg_only_dir":"/tmp/unsafe_wg_only_prune"},"findings":[
+{"severity":"WARN","code":"wg_only_dir_not_writable","message":"wg-only dir not writable","remediation":"prune wg-only dir"}
+]}
+OUT
+exit 0
+EOF_UNSAFE_DOCTOR
+chmod +x "$UNSAFE_DOCTOR"
+
+set +e
+PATH="$TMP_BIN:$PATH" \
+RUNTIME_DOCTOR_SCRIPT="$UNSAFE_DOCTOR" \
+MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_REPORT" \
+FAKE_MANUAL_VALIDATION_REPORT_CAPTURE_FILE="$REPORT_CAPTURE" \
+EASY_NODE_RUNTIME_FIX_EUID=0 \
+./scripts/runtime_fix.sh --prune-wg-only-dir 1 --show-json 1 >/tmp/integration_runtime_fix_unsafe_prune.log 2>&1
+unsafe_prune_rc=$?
+set -e
+if [[ "$unsafe_prune_rc" -eq 0 ]]; then
+  echo "expected runtime-fix unsafe prune path to fail"
+  cat /tmp/integration_runtime_fix_unsafe_prune.log
+  exit 1
+fi
+if ! rg -q '\[runtime-fix\] action_failed=wg-only runtime dir prune path=/tmp/unsafe_wg_only_prune reason=unsafe_path' /tmp/integration_runtime_fix_unsafe_prune.log; then
+  echo "expected runtime-fix unsafe prune refusal message not found"
+  cat /tmp/integration_runtime_fix_unsafe_prune.log
+  exit 1
+fi
+if ! rg -q 'wg-only prune refused: path is outside allowlist' /tmp/integration_runtime_fix_unsafe_prune.log; then
+  echo "expected runtime-fix unsafe prune allowlist error not found"
+  cat /tmp/integration_runtime_fix_unsafe_prune.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_fix_unsafe_prune.log | jq -e '(.actions.failed | index("wg-only runtime dir prune")) != null' >/dev/null 2>&1; then
+  echo "runtime-fix unsafe prune JSON payload missing failed prune action"
+  cat /tmp/integration_runtime_fix_unsafe_prune.log
   exit 1
 fi
 
@@ -345,6 +392,7 @@ FAKE_MANUAL_VALIDATION_REPORT_CAPTURE_FILE="$REPORT_CAPTURE" \
 FAKE_RUNUSER_CAPTURE_FILE="$RUNUSER_CAPTURE" \
 FAKE_CHOWN_CAPTURE_FILE="$CHOWN_CAPTURE_SUDO" \
 FAKE_CHMOD_CAPTURE_FILE="$CHMOD_CAPTURE_SUDO" \
+EASY_NODE_RUNTIME_FIX_WG_ONLY_PRUNE_ALLOWLIST="$SUDO_WG_ONLY_DIR" \
 EASY_NODE_RUNTIME_FIX_EUID=0 \
 SUDO_USER="$(id -un)" \
 ./scripts/runtime_fix.sh --prune-wg-only-dir 1 --show-json 1 >/tmp/integration_runtime_fix_sudo_user.log 2>&1

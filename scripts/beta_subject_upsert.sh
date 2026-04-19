@@ -7,6 +7,7 @@ Usage:
   ./scripts/beta_subject_upsert.sh \
     --issuer-url URL \
     [--admin-token TOKEN] \
+    [--admin-token-file FILE] \
     [--admin-key-file FILE --admin-key-id ID] \
     --subject ID \
     [--kind client|relay-exit] \
@@ -37,6 +38,27 @@ is_https_url() {
   [[ "$raw" == https://* ]]
 }
 
+url_host() {
+  local raw="$1"
+  local authority="${raw#*://}"
+  authority="${authority%%/*}"
+  authority="${authority##*@}"
+  if [[ "$authority" == \[* ]]; then
+    authority="${authority#\[}"
+    authority="${authority%%]*}"
+    printf '%s' "$authority"
+    return
+  fi
+  printf '%s' "${authority%%:*}"
+}
+
+is_loopback_host() {
+  local host
+  host="$(trim "$1")"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  [[ "$host" == "localhost" || "$host" == "127.0.0.1" || "$host" == "::1" ]]
+}
+
 trim() {
   local value="$1"
   value="${value#"${value%%[![:space:]]*}"}"
@@ -61,6 +83,7 @@ ensure_url_scheme() {
 
 issuer_url="${ISSUER_URL:-http://127.0.0.1:8082}"
 admin_token="${ISSUER_ADMIN_TOKEN:-}"
+admin_token_file="${ISSUER_ADMIN_TOKEN_FILE:-}"
 admin_key_file="${ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL:-}"
 admin_key_id="${ISSUER_ADMIN_SIGNING_KEY_ID:-}"
 subject=""
@@ -81,6 +104,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --admin-token)
       admin_token="${2:-}"
+      shift 2
+      ;;
+    --admin-token-file)
+      admin_token_file="${2:-}"
       shift 2
       ;;
     --admin-key-file)
@@ -141,7 +168,18 @@ done
 
 issuer_url="$(trim "${issuer_url%/}")"
 if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
-  issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
+  host_name="$(url_host "https://${issuer_url}")"
+  if is_loopback_host "$host_name"; then
+    issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
+  else
+    issuer_url="$(ensure_url_scheme "$issuer_url" "https")"
+  fi
+fi
+if [[ "$issuer_url" == http://* ]]; then
+  host_name="$(url_host "$issuer_url")"
+  if ! is_loopback_host "$host_name"; then
+    issuer_url="${issuer_url/http:\/\//https://}"
+  fi
 fi
 
 if [[ -z "$subject" ]]; then
@@ -149,13 +187,24 @@ if [[ -z "$subject" ]]; then
   usage
   exit 2
 fi
+if [[ -n "$admin_token" && -n "$admin_token_file" ]]; then
+  echo "use either --admin-token OR --admin-token-file"
+  exit 2
+fi
+if [[ -n "$admin_token_file" ]]; then
+  if [[ ! -f "$admin_token_file" ]]; then
+    echo "admin token file not found: $admin_token_file"
+    exit 2
+  fi
+  admin_token="$(tr -d '\r' <"$admin_token_file" | sed -n '1p' | xargs)"
+fi
 if [[ -n "$admin_token" && ( -n "$admin_key_file" || -n "$admin_key_id" ) ]]; then
-  echo "use either --admin-token OR --admin-key-file/--admin-key-id"
+  echo "use either --admin-token/--admin-token-file OR --admin-key-file/--admin-key-id"
   exit 2
 fi
 if [[ -z "$admin_token" ]]; then
   if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
-    echo "admin auth is required: provide --admin-token or --admin-key-file + --admin-key-id"
+    echo "admin auth is required: provide --admin-token, --admin-token-file, or --admin-key-file + --admin-key-id"
     usage
     exit 2
   fi
@@ -170,14 +219,22 @@ if [[ "$tier" != "1" && "$tier" != "2" && "$tier" != "3" ]]; then
 fi
 
 if is_https_url "$issuer_url"; then
-  if [[ -z "$mtls_ca_file" ]]; then
-    mtls_ca_file="$ROOT_DIR/deploy/tls/ca.crt"
-  fi
-  if [[ -z "$mtls_cert_file" ]]; then
-    mtls_cert_file="$ROOT_DIR/deploy/tls/client.crt"
-  fi
-  if [[ -z "$mtls_key_file" ]]; then
-    mtls_key_file="$ROOT_DIR/deploy/tls/client.key"
+  host_name="$(url_host "$issuer_url")"
+  if is_loopback_host "$host_name"; then
+    if [[ -z "$mtls_ca_file" ]]; then
+      mtls_ca_file="$ROOT_DIR/deploy/tls/ca.crt"
+    fi
+    if [[ -z "$mtls_cert_file" ]]; then
+      mtls_cert_file="$ROOT_DIR/deploy/tls/client.crt"
+    fi
+    if [[ -z "$mtls_key_file" ]]; then
+      mtls_key_file="$ROOT_DIR/deploy/tls/client.key"
+    fi
+  else
+    if [[ -z "$mtls_ca_file" || -z "$mtls_cert_file" || -z "$mtls_key_file" ]]; then
+      echo "non-loopback https issuer requires explicit --mtls-ca-file, --mtls-cert-file, and --mtls-key-file"
+      exit 2
+    fi
   fi
 fi
 
@@ -193,14 +250,16 @@ EOF
 request_upsert="${issuer_url}/v1/admin/subject/upsert"
 request_get="${issuer_url}/v1/admin/subject/get?subject=${subject}"
 
-build_header_args() {
+build_header_config_file() {
   local method="$1"
   local url="$2"
   local body_file="$3"
   local out_var="$4"
-  local -a out=()
+  local cfg_file
+  cfg_file="$(mktemp)"
+  chmod 600 "$cfg_file"
   if [[ -n "$admin_token" ]]; then
-    out+=(-H "X-Admin-Token: ${admin_token}")
+    printf 'header = "X-Admin-Token: %s"\n' "$admin_token" >>"$cfg_file"
   else
     local sign_json
     local -a sign_cmd=(
@@ -226,13 +285,13 @@ build_header_args() {
       echo "failed to generate signed admin headers" >&2
       exit 1
     fi
-    out+=(-H "X-Admin-Key-Id: ${h_key_id}")
-    out+=(-H "X-Admin-Timestamp: ${h_ts}")
-    out+=(-H "X-Admin-Nonce: ${h_nonce}")
-    out+=(-H "X-Admin-Signature: ${h_sig}")
+    printf 'header = "X-Admin-Key-Id: %s"\n' "$h_key_id" >>"$cfg_file"
+    printf 'header = "X-Admin-Timestamp: %s"\n' "$h_ts" >>"$cfg_file"
+    printf 'header = "X-Admin-Nonce: %s"\n' "$h_nonce" >>"$cfg_file"
+    printf 'header = "X-Admin-Signature: %s"\n' "$h_sig" >>"$cfg_file"
   fi
-  local -n _header_out="$out_var"
-  _header_out=("${out[@]}")
+  local -n _cfg_out="$out_var"
+  _cfg_out="$cfg_file"
 }
 
 build_tls_args() {
@@ -252,11 +311,12 @@ build_tls_args() {
 
 tmp_body_file="$(mktemp)"
 printf '%s' "$payload" >"$tmp_body_file"
-trap 'rm -f "$tmp_body_file"' EXIT
-
-declare -a upsert_header_args get_header_args tls_args
-build_header_args "POST" "$request_upsert" "$tmp_body_file" upsert_header_args
-build_header_args "GET" "$request_get" "" get_header_args
+declare -a tls_args
+local_upsert_header_cfg=""
+local_get_header_cfg=""
+build_header_config_file "POST" "$request_upsert" "$tmp_body_file" local_upsert_header_cfg
+build_header_config_file "GET" "$request_get" "" local_get_header_cfg
+trap 'rm -f "$tmp_body_file" "$local_upsert_header_cfg" "$local_get_header_cfg"' EXIT
 build_tls_args tls_args
 
 echo "upserting subject profile: subject=${subject} kind=${kind} tier=${tier}"
@@ -264,7 +324,7 @@ curl -fsS -X POST "$request_upsert" \
   --connect-timeout 4 \
   --max-time 12 \
   "${tls_args[@]}" \
-  "${upsert_header_args[@]}" \
+  --config "$local_upsert_header_cfg" \
   -H "Content-Type: application/json" \
   --data "$payload"
 echo
@@ -273,5 +333,5 @@ curl -fsS "$request_get" \
   --connect-timeout 4 \
   --max-time 12 \
   "${tls_args[@]}" \
-  "${get_header_args[@]}"
+  --config "$local_get_header_cfg"
 echo

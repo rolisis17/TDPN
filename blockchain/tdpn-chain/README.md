@@ -1,6 +1,6 @@
 # TDPN Chain Workspace (Cosmos + CometBFT)
 
-Status: scaffolding baseline for Cosmos-first rollout.
+Status: phase-1 stateful module wiring is in place; Cosmos-first rollout continues.
 
 This workspace defines the initial module boundaries for TDPN's VPN-compatible blockchain layer.
 
@@ -14,19 +14,47 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - `x/vpnrewards`: provider reward accrual/distribution events.
 - `x/vpnslashing`: objective slash evidence ingestion and deterministic penalty execution.
 - `x/vpnsponsor`: sponsor account controls and credit delegation to end-user sessions.
+- `x/vpnvalidator`: validator eligibility/state records plus deterministic epoch-selection helper logic (hard gates, warmup/cooldown, stable+rotating seats, concentration caps).
+- `x/vpngovernance`: governance/policy control-plane records including append-only admin audit actions with replay-safe idempotency.
 
 ## Governance posture (hybrid v1)
 - Objective machine-verifiable events can be enforced on-chain.
 - Subjective abuse decisions remain policy-governed/multisig during bootstrap.
+- Slash evidence in v1 must carry canonical machine-verifiable proof references: `sha256:<value>` or `obj://<path>`.
 
 ## Integration notes
 - Current app-side bridge is `pkg/settlement` with optional Cosmos adapter.
-- Issuer sponsor API endpoints map to `quote -> reserve -> token issue -> status` flow.
+- Issuer sponsor API endpoints map to `/v1/sponsor/quote -> /v1/sponsor/reserve -> /v1/sponsor/token -> /v1/sponsor/status` flow (no-wallet-signing happy path for end users).
+- dApp sponsorship quickstart (issuer sponsor API happy path): `../../docs/blockchain-app-sponsorship-quickstart.md`.
+- Reconciliation lifecycle uses canonical statuses `pending -> submitted -> confirmed`; explicit `failed` is retained for replay/reconciliation, and settlement/reward/sponsor/slash records move `submitted -> confirmed` when adapter query surfaces observe by-id bridge records.
+- Query-by-id confirmation capability is exposed through optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - Runtime env/operator wiring reference: `docs/cosmos-settlement-runtime.md`.
+- Local multi-node operator bootstrap: `docs/local-testnet.md`.
+- Local multi-node smoke integration: `scripts/integration_cosmos_local_testnet_smoke.sh`.
 - Local acceptance gate for settlement control-plane behavior: `scripts/integration_cosmos_settlement_acceptance_paths.sh`.
+- Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
+- Phase5 CI includes sponsor API live-smoke stage `issuer_sponsor_api_live_smoke` running `scripts/integration_issuer_sponsor_api_live_smoke.sh` for `/v1/sponsor/quote|reserve|token|status` no-wallet-signing happy-path coverage.
+- Phase5 CI includes issuer admin blockchain handler coverage stage `issuer_admin_blockchain_handlers_coverage` running `scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh` for `upsert/promote/reputation/bond/recompute/get-subject/anon issue+revoke/audit/revoke-token` coverage-floor validation.
+- Phase5 CI/check/run/handoff wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase5_settlement_layer_ci_summary.json`, `phase5_settlement_layer_check_summary.json`, `phase5_settlement_layer_run_summary.json`, `phase5_settlement_layer_handoff_check_summary.json`, `phase5_settlement_layer_handoff_run_summary.json`) in addition to per-run reports; these are consumed by `scripts/phase5_settlement_layer_summary_report.sh`.
+- Phase5 summary helper/report: `scripts/phase5_settlement_layer_summary_report.sh` (integration contract: `scripts/integration_phase5_settlement_layer_summary_report.sh`) aggregates CI/check/run/handoff summaries into compact operator output plus normalized JSON.
+- Sponsor live-smoke posture is propagated through phase5 wrappers for gate/report consumers: run (`signals.issuer_sponsor_api_live_smoke_*`), handoff-run (`handoff.issuer_sponsor_api_live_smoke_*`), and aggregate report (`signals.issuer_sponsor_api_live_smoke`).
+- Phase6 summary helper/report: `scripts/phase6_cosmos_l1_summary_report.sh` (integration contract: `scripts/integration_phase6_cosmos_l1_summary_report.sh`).
+- Phase7 cutover CI wrapper: `scripts/ci_phase7_mainnet_cutover.sh` (integration contract: `scripts/integration_ci_phase7_mainnet_cutover.sh`, covers check/run/handoff-check/handoff-run).
+- Phase7 summary helper/report: `scripts/phase7_mainnet_cutover_summary_report.sh` (integration contract: `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, aggregates check/run/handoff-check/handoff-run artifacts).
+- `scripts/roadmap_progress_report.sh` now consumes optional phase6 and phase7 cutover summary artifacts and surfaces `phase6_cosmos_l1_handoff` and `phase7_mainnet_cutover` status/signals under `blockchain_track`, with integration coverage in `scripts/integration_roadmap_progress_report.sh`.
+- Easy-node operator wrappers expose `./scripts/easy_node.sh phase5-settlement-layer-summary-report` and `./scripts/easy_node.sh phase6-cosmos-l1-summary-report`.
+- Easy-node operator wrappers also expose `./scripts/easy_node.sh phase7-mainnet-cutover-summary-report` for canonical cutover summary aggregation.
+- Easy-node fail-closed blockchain gate wrappers cover phase5 + phase6 + phase7 entrypoints: `./scripts/easy_node.sh ci-phase5-settlement-layer`, `./scripts/easy_node.sh phase5-settlement-layer-check`, `./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet`, `./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts`, `./scripts/easy_node.sh ci-phase7-mainnet-cutover`, `./scripts/easy_node.sh phase7-mainnet-cutover-check`, `./scripts/easy_node.sh phase7-mainnet-cutover-run`, `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check`, and `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run`.
+- Integration coverage for these gate-wrapper contracts is `scripts/integration_easy_node_blockchain_gate_wrappers.sh`; it validates phase5 + phase6 + phase7 wrappers, and wrappers remain control-plane only without changing dataplane independence.
+- Blockchain fastlane helper is `scripts/blockchain_fastlane.sh`; integration contract is `scripts/integration_blockchain_fastlane.sh`; easy-node entrypoint is `./scripts/easy_node.sh blockchain-fastlane`; this remains fail-closed control-plane wiring and preserves dataplane independence.
+- Integration coverage for easy-node blockchain summary-wrapper wiring is `scripts/integration_easy_node_blockchain_summary_reports.sh`.
+- Phase6 build/testnet/contracts/check/run/handoff/suite wrappers emit canonical summary artifacts in `.easy-node-logs` (`phase6_cosmos_l1_build_testnet_ci_summary.json`, `phase6_cosmos_l1_contracts_summary.json`, `phase6_cosmos_l1_build_testnet_check_summary.json`, `phase6_cosmos_l1_build_testnet_run_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_check_summary.json`, `phase6_cosmos_l1_build_testnet_handoff_run_summary.json`, `phase6_cosmos_l1_build_testnet_suite_summary.json`) in addition to per-run reports.
+- Phase6 build/testnet CI also exposes optional `tdpnd_comet_runtime_smoke` via `--run-tdpnd-comet-runtime-smoke` (`scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh`) as the Comet runtime-mode smoke path, while keeping VPN dataplane independent from chain liveness.
+- Phase6 summary helper fallback discovery can resolve latest timestamped CI/contracts/suite summaries when canonical/default files are not present.
+- Phase6 coverage-floor contracts enforce six module and six keeper targets (billing/rewards/slashing/sponsor/validator/governance), including validator/governance floor env overrides and package checks in `integration_cosmos_module_coverage_floor.sh` and `integration_cosmos_keeper_coverage_floor.sh`.
 
-## Scaffold status
-- Go scaffold entrypoint: `cmd/tdpnd`.
+## Workspace status
+- Go entrypoint: `cmd/tdpnd`.
 - Optional local gRPC serve mode:
   - `go run ./cmd/tdpnd --grpc-listen 127.0.0.1:9090 --state-dir ./.tdpn-chain-state`
   - optional runtime hardening flags:
@@ -48,6 +76,13 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `POST /x/vpnrewards/issues`
       - `POST /x/vpnsponsor/reservations`
       - `POST /x/vpnslashing/evidence`
+        - v1 accepts only objective machine-verifiable evidence with canonical `evidence_ref`/proof reference format `sha256:<value>` or `obj://<path>`.
+        - Bridge behavior no longer derives proof references from violation-type fallback.
+      - `POST /x/vpnvalidator/eligibilities`
+      - `POST /x/vpnvalidator/status-records`
+      - `POST /x/vpngovernance/policies`
+      - `POST /x/vpngovernance/decisions`
+      - `POST /x/vpngovernance/audit-actions`
     - query (`GET`) endpoints:
       - `GET /x/vpnbilling/reservations` and `GET /x/vpnbilling/reservations/{reservation_id}`
       - `GET /x/vpnbilling/settlements` and `GET /x/vpnbilling/settlements/{settlement_id}`
@@ -57,7 +92,12 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `GET /x/vpnsponsor/delegations` and `GET /x/vpnsponsor/delegations/{reservation_id}`
       - `GET /x/vpnslashing/evidence` and `GET /x/vpnslashing/evidence/{evidence_id}`
       - `GET /x/vpnslashing/penalties` and `GET /x/vpnslashing/penalties/{penalty_id}`
-    - bearer auth is required on `POST` endpoints only when `--settlement-http-auth-token` is set; `GET` query routes and `GET /health` remain open.
+      - `GET /x/vpnvalidator/eligibilities` and `GET /x/vpnvalidator/eligibilities/{validator_id}`
+      - `GET /x/vpnvalidator/status-records` and `GET /x/vpnvalidator/status-records/{status_id}`
+      - `GET /x/vpngovernance/policies` and `GET /x/vpngovernance/policies/{policy_id}`
+      - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
+      - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
+    - bearer auth is required on all `POST` endpoints (including validator/governance writes) only when `--settlement-http-auth-token` is set; `GET` query routes and `GET /health` remain open.
   - issuer/exit services can point `COSMOS_SETTLEMENT_ENDPOINT` to this bridge.
   - this bridge is control-plane only and does not couple VPN dataplane forwarding to chain/bridge liveness.
   - one-command local helper from repo root:
@@ -68,13 +108,24 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
       - `COSMOS_SETTLEMENT_ENDPOINT=http://...`
       - optional `COSMOS_SETTLEMENT_API_KEY=...`
       - optional `TDPN_CHAIN_STATE_DIR=...`
-- Placeholder app wiring: `app/scaffold.go`.
+- Optional Comet runtime mode (real CometBFT node lifecycle, with local ABCI app):
+  - `go run ./cmd/tdpnd --comet-home ./.tdpn-comet-home --comet-moniker tdpn-local --comet-p2p-laddr tcp://127.0.0.1:26656 --comet-rpc-laddr tcp://127.0.0.1:26657 --comet-proxy-app tdpn-local`
+  - optional side-by-side control-plane services:
+    - `--grpc-listen`
+    - `--settlement-http-listen`
+    - `--state-dir`
+- App wiring root: `app/scaffold.go`.
 - Phase-1 app wiring exposes module msg servers:
   - `ChainScaffold.BillingMsgServer()` (`CreateReservation`, `FinalizeSettlement`)
   - `ChainScaffold.RewardsMsgServer()` (`CreateAccrual`, `RecordDistribution`)
   - `ChainScaffold.SlashingMsgServer()` (`SubmitEvidence`, `ApplyPenalty`)
   - `ChainScaffold.SponsorMsgServer()` (`CreateAuthorization`, `DelegateCredit`)
-- Module stubs: `x/*/{types,keeper,module}`.
+- Runtime scaffold/module ordering now also includes `vpnvalidator` and `vpngovernance`, with state-dir files `vpnvalidator.json` and `vpngovernance.json`.
+- gRPC runtime registration now includes module namespaces `tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`.
+- Bootstrap governance/validator RPC highlights:
+  - `tdpn.vpngovernance.v1.Msg/RecordAuditAction`, `tdpn.vpngovernance.v1.Query/GovernanceAuditAction`, `tdpn.vpngovernance.v1.Query/ListGovernanceAuditActions`.
+  - `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection`.
+- Module package layout: `x/*/{types,keeper,module}`.
 - Module query servers are available for get-by-id and list read-model queries under `x/*/module/query_server.go`.
 - Protobuf contracts and generated Go/grpc surfaces are available under:
   - `proto/tdpn/*/v1/{types,tx,query}.proto`
@@ -85,14 +136,15 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - gRPC registration/runtime contract for each module is the generated pair:
   - `RegisterMsgServer(...)` from `tx_grpc.pb.go`
   - `RegisterQueryServer(...)` from `query_grpc.pb.go`
-- Proto toolchain scaffold:
+- Billing/rewards/slashing/sponsor/validator/governance all register generated `Msg`/`Query` gRPC surfaces in runtime.
+- Proto toolchain:
   - `./scripts/gen_proto.sh --lint-only` (contract validation only)
   - `./scripts/gen_proto.sh` (lint + generate when Buf toolchain is installed)
   - `./scripts/integration_cosmos_proto_grpc_surface.sh` (CI guard for local proto-module wiring + gRPC registration surface)
 - Bridge mapping details: `docs/settlement-bridge-mapping.md`.
 
 ## gRPC smoke
-- Registration expectation: each module exposes generated `Msg` + `Query` services (8 total registrations across billing/rewards/slashing/sponsor).
+- Registration expectation: runtime exposes `Msg` + `Query` services for six module namespaces (12 total registrations across billing/rewards/slashing/sponsor/validator/governance).
 - Runtime behavior with `tdpnd --grpc-listen`: gRPC health (`grpc.health.v1.Health`) and server reflection are also exposed.
 - In `--grpc-auth-token` mode:
   - module RPCs require `authorization: Bearer <token>`,
@@ -100,20 +152,26 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
   - reflection is disabled.
 - Fast local check:
   - `./scripts/integration_cosmos_proto_grpc_surface.sh`
+  - `./scripts/integration_cosmos_grpc_app_roundtrip.sh` (app-level gRPC roundtrip for billing/rewards/slashing/sponsor/validator/governance Msg+Query contracts)
   - `./scripts/integration_cosmos_tdpnd_grpc_runtime_smoke.sh`
+  - `./scripts/integration_cosmos_tdpnd_comet_runtime_smoke.sh`
   - `./scripts/integration_cosmos_tdpnd_settlement_bridge_smoke.sh`
   - `./scripts/integration_cosmos_tdpnd_state_dir_persistence.sh`
   - `./scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`
   - `./scripts/integration_cosmos_bridge_local_stack_contract.sh`
   - `./scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`
   - `./scripts/integration_cosmos_tdpnd_grpc_live_smoke.sh`
+  - `./scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`
 - CI/runtime smoke suite coverage:
-  - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior.
+  - `integration_cosmos_grpc_app_roundtrip.sh`: targeted `./app` gRPC roundtrip tests for billing/rewards/slashing/sponsor/validator/governance `Msg`/`Query` contracts.
+  - `integration_cosmos_tdpnd_grpc_runtime_smoke.sh`: targeted `cmd/tdpnd` runtime tests, including auth/TLS behavior plus validator/governance real-scaffold roundtrip, reflected core-module query-service checks, and `PreviewEpochSelection` query coverage.
   - `integration_cosmos_tdpnd_settlement_bridge_smoke.sh`: targeted settlement HTTP bridge runtime tests (`/health`, module POST write routes, module GET query/list routes, auth checks, and combined gRPC+HTTP serve mode).
   - `integration_cosmos_tdpnd_state_dir_persistence.sh`: targeted state-dir persistence runtime tests (`app` scaffold reopen + `cmd/tdpnd` state-dir wiring/error checks).
-  - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, graceful shutdown).
+  - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, billing/rewards/sponsor/slashing/validator/governance GET by-id/list query coverage, graceful shutdown).
   - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` through bridge submission paths.
-  - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, graceful shutdown).
+  - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, reflected module-service parity, billing/rewards/slashing/sponsor/validator/governance query dispatch, graceful shutdown).
+  - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live auth-token gRPC smoke (`tdpnd --grpc-auth-token`) validating token gating for billing/rewards/slashing/sponsor/validator/governance query RPCs.
+- Phase-6 build/testnet CI stage wiring includes `tdpnd_grpc_auth_live_smoke` -> `scripts/integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`.
 - Optional live smoke:
   - start `tdpnd` with `--grpc-listen` (plus optional TLS/auth flags)
   - health check (`grpcurl`): `grpcurl -d '{"service":""}' 127.0.0.1:9090 grpc.health.v1.Health/Check`
@@ -126,6 +184,6 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - `vpnbilling`: `CreateReservation` and `FinalizeSettlement` execute as stateful operations over keeper storage.
 - `vpnrewards`: `CreateAccrual` and `RecordDistribution` execute as stateful operations with accrual-confirmation advancement.
 - `vpnslashing`: `SubmitEvidence` and `ApplyPenalty` execute as stateful operations with evidence-confirmation advancement.
-- `vpnsponsor`: `CreateAuthorization` and `DelegateSessionCredit` execute as stateful operations with authorization checks.
+- `vpnsponsor`: `CreateAuthorization` and `DelegateCredit` (proto msg surface: `DelegateSessionCredit`) execute as stateful operations with authorization checks.
 - Replay safety is idempotent by operation key for each module; identical replays are accepted while conflicting duplicate payloads are rejected.
-- Storage remains an in-memory placeholder; Cosmos SDK KV store integration is still pending.
+- Storage posture: in-memory default for lightweight/local runs, optional file-backed state-dir stores for persistence, and a keeper KV-adapter seam for Cosmos SDK KV integration.

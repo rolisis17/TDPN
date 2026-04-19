@@ -82,6 +82,12 @@ if [[ "${1:-}" == "genkey" ]]; then
   echo "test-wg-private-key"
   exit 0
 fi
+if [[ "${1:-}" == "pubkey" ]]; then
+  # keep deterministic output for key-derivation paths in easy_node.sh
+  cat >/dev/null || true
+  echo "test-wg-public-key"
+  exit 0
+fi
 exit 0
 EOF_WG
 

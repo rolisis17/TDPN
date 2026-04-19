@@ -12,6 +12,7 @@ import (
 	"privacynode/services/entry"
 	"privacynode/services/exit"
 	"privacynode/services/issuer"
+	"privacynode/services/localapi"
 	"privacynode/services/wgio"
 	"privacynode/services/wgioinject"
 	"privacynode/services/wgiotap"
@@ -23,13 +24,14 @@ type Roles struct {
 	Exit       bool
 	Directory  bool
 	Issuer     bool
+	LocalAPI   bool
 	WGIO       bool
 	WGIOTap    bool
 	WGIOInject bool
 }
 
 func (r Roles) Any() bool {
-	return r.Client || r.Entry || r.Exit || r.Directory || r.Issuer || r.WGIO || r.WGIOTap || r.WGIOInject
+	return r.Client || r.Entry || r.Exit || r.Directory || r.Issuer || r.LocalAPI || r.WGIO || r.WGIOTap || r.WGIOInject
 }
 
 type Config struct {
@@ -38,6 +40,11 @@ type Config struct {
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	if strings.TrimSpace(cfg.ConfigPath) != "" {
+		if err := applyConfigFile(cfg.ConfigPath); err != nil {
+			return fmt.Errorf("load config path %s: %w", cfg.ConfigPath, err)
+		}
+	}
 	autoWireRoleURLs(cfg.Roles)
 
 	var runners []func(context.Context) error
@@ -48,6 +55,10 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if cfg.Roles.Issuer {
 		svc := issuer.New()
+		runners = append(runners, svc.Run)
+	}
+	if cfg.Roles.LocalAPI {
+		svc := localapi.New()
 		runners = append(runners, svc.Run)
 	}
 	if cfg.Roles.Entry {
@@ -122,7 +133,16 @@ func setURLFromAddrIfUnset(urlEnv string, addrEnv string) {
 		return
 	}
 	if !strings.Contains(addr, "://") {
-		addr = "http://" + addr
+		base := strings.TrimRight(addr, "/")
+		host := base
+		if cut, _, ok := strings.Cut(base, "/"); ok {
+			host = cut
+		}
+		if isLoopbackURLHost(host) {
+			addr = "http://" + base
+		} else {
+			addr = "https://" + base
+		}
 	}
 	_ = os.Setenv(urlEnv, addr)
 }

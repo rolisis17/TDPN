@@ -1,0 +1,1771 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/phase5_settlement_layer_handoff_run.sh \
+    [--reports-dir DIR] \
+    [--run-summary-json PATH] \
+    [--handoff-summary-json PATH] \
+    [--summary-json PATH] \
+    [--run-phase5-settlement-layer-run [0|1]] \
+    [--run-phase5-settlement-layer-handoff-check [0|1]] \
+    [--print-summary-json [0|1]] \
+    [--dry-run [0|1]] \
+    [--run-<arg> ...] \
+    [--handoff-<arg> ...]
+
+Purpose:
+  One-command Phase-5 settlement layer handoff runner:
+    1) phase5_settlement_layer_run.sh
+    2) phase5_settlement_layer_handoff_check.sh
+
+Notes:
+  - Wrapper-owned flags are reserved; stage pass-through uses prefixes:
+      --run-...      -> forwarded to phase5_settlement_layer_run.sh
+      --handoff-...  -> forwarded to phase5_settlement_layer_handoff_check.sh
+  - Dry-run forwards --dry-run 1 to the run stage.
+    The handoff check still executes against the generated summaries.
+  - Dry-run relaxes handoff requirements to 0 unless explicitly supplied.
+  - The handoff check runs even when the run stage fails.
+USAGE
+}
+
+trim() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+abs_path() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+resolve_path_with_base() {
+  local candidate="${1:-}"
+  local base_file="${2:-}"
+  local base_dir=""
+  if [[ -z "$candidate" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$candidate" == /* ]]; then
+    printf '%s' "$candidate"
+    return
+  fi
+  if [[ -n "$base_file" ]]; then
+    base_dir="$(cd "$(dirname "$base_file")" && pwd)"
+    if [[ -f "$base_dir/$candidate" ]]; then
+      printf '%s' "$base_dir/$candidate"
+      return
+    fi
+  fi
+  printf '%s' "$ROOT_DIR/$candidate"
+}
+
+bool_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+need_cmd() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "missing required command: $cmd"
+    exit 2
+  fi
+}
+
+print_cmd() {
+  local arg
+  for arg in "$@"; do
+    printf '%q ' "$arg"
+  done
+  printf '\n'
+}
+
+array_has_arg() {
+  local needle="$1"
+  shift
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+handoff_requirement_flag_to_canonical() {
+  local flag="$1"
+  case "$flag" in
+    --require-windows-server-packaging-ok)
+      printf '%s' "--require-settlement-failsoft-ok"
+      ;;
+    --require-windows-role-runbooks-ok)
+      printf '%s' "--require-settlement-acceptance-ok"
+      ;;
+    --require-cross-platform-interop-ok)
+      printf '%s' "--require-settlement-bridge-smoke-ok"
+      ;;
+    --require-role-combination-validation-ok)
+      printf '%s' "--require-settlement-state-persistence-ok"
+      ;;
+    --require-settlement-dual-asset-ok)
+      printf '%s' "--require-settlement-dual-asset-parity-ok"
+      ;;
+    *)
+      printf '%s' "$flag"
+      ;;
+  esac
+}
+
+handoff_requirement_flag_to_legacy() {
+  local flag="$1"
+  case "$flag" in
+    --require-settlement-failsoft-ok)
+      printf '%s' "--require-windows-server-packaging-ok"
+      ;;
+    --require-settlement-acceptance-ok)
+      printf '%s' "--require-windows-role-runbooks-ok"
+      ;;
+    --require-settlement-bridge-smoke-ok)
+      printf '%s' "--require-cross-platform-interop-ok"
+      ;;
+    --require-settlement-state-persistence-ok)
+      printf '%s' "--require-role-combination-validation-ok"
+      ;;
+    --require-settlement-dual-asset-parity-ok)
+      printf '%s' "--require-settlement-dual-asset-ok"
+      ;;
+    *)
+      printf '%s' "$flag"
+      ;;
+  esac
+}
+
+handoff_requirement_arg_present() {
+  local canonical="$1"
+  local legacy="$2"
+  local arg normalized
+  shift 2
+  for arg in "$@"; do
+    normalized="$(handoff_requirement_flag_to_canonical "$arg")"
+    if [[ "$normalized" == "$canonical" || "$normalized" == "$legacy" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+handoff_requirement_arg_value() {
+  local canonical="$1"
+  local legacy="$2"
+  local arg normalized
+  shift 2
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    shift
+    normalized="$(handoff_requirement_flag_to_canonical "$arg")"
+    if [[ "$normalized" == "$canonical" || "$normalized" == "$legacy" ]]; then
+      if [[ $# -gt 0 && ( "$1" == "0" || "$1" == "1" ) ]]; then
+        if [[ "$1" == "1" ]]; then
+          printf '%s' "true"
+        else
+          printf '%s' "false"
+        fi
+      else
+        printf '%s' "true"
+      fi
+      return
+    fi
+  done
+  printf '%s' "null"
+}
+
+adapt_handoff_requirement_flags_for_script() {
+  local supports_canonical="$1"
+  local token canonical
+  local out=()
+  shift
+  for token in "$@"; do
+    if [[ "$token" == --require-* ]]; then
+      if [[ "$supports_canonical" == "1" ]]; then
+        out+=("$token")
+      else
+        canonical="$(handoff_requirement_flag_to_canonical "$token")"
+        out+=("$(handoff_requirement_flag_to_legacy "$canonical")")
+      fi
+    else
+      out+=("$token")
+    fi
+  done
+  if ((${#out[@]} > 0)); then
+    printf '%s\n' "${out[@]}"
+  fi
+}
+
+handoff_supports_settlement_requirement_flags() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-settlement-failsoft-ok"* \
+     && "$help_out" == *"--require-settlement-acceptance-ok"* \
+     && "$help_out" == *"--require-settlement-bridge-smoke-ok"* \
+     && "$help_out" == *"--require-settlement-state-persistence-ok"* \
+     && "$help_out" == *"--require-settlement-dual-asset-parity-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_settlement_adapter_signed_tx_roundtrip_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-settlement-adapter-signed-tx-roundtrip-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_settlement_shadow_env_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-settlement-shadow-env-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_settlement_shadow_status_surface_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-settlement-shadow-status-surface-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_issuer_sponsor_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-issuer-sponsor-api-live-smoke-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_issuer_sponsor_vpn_session_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-issuer-sponsor-vpn-session-live-smoke-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_issuer_settlement_status_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-issuer-settlement-status-live-smoke-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_exit_settlement_status_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-exit-settlement-status-live-smoke-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+handoff_supports_issuer_admin_blockchain_handlers_coverage_requirement_flag() {
+  local help_out=""
+  help_out="$("$handoff_check_script" --help 2>/dev/null || true)"
+  if [[ "$help_out" == *"--require-issuer-admin-blockchain-handlers-coverage-ok"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+json_file_valid() {
+  local path="$1"
+  [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1
+}
+
+run_summary_contract_valid() {
+  local path="$1"
+  if ! json_file_valid "$path"; then
+    return 1
+  fi
+  jq -e '
+    type == "object"
+    and (.version // 0) == 1
+    and (.schema | type) == "object"
+    and (.schema.id // "") == "phase5_settlement_layer_run_summary"
+    and ((.schema.major // 0) | type) == "number"
+    and ((.schema.major // 0) | floor) == (.schema.major // 0)
+    and (.status | type) == "string"
+    and (.rc | type) == "number"
+    and (.steps.ci_phase5_settlement_layer | type) == "object"
+    and (.steps.phase5_settlement_layer_check | type) == "object"
+    and ((.steps.ci_phase5_settlement_layer.status | type) == "string")
+    and ((.steps.ci_phase5_settlement_layer.rc | type) == "number")
+    and ((.steps.ci_phase5_settlement_layer.command_rc | type) == "number")
+    and ((.steps.ci_phase5_settlement_layer.contract_valid | type) == "boolean")
+    and ((.steps.phase5_settlement_layer_check.status | type) == "string")
+    and ((.steps.phase5_settlement_layer_check.rc | type) == "number")
+    and ((.steps.phase5_settlement_layer_check.command_rc | type) == "number")
+    and ((.steps.phase5_settlement_layer_check.contract_valid | type) == "boolean")
+    and (
+      (.status == "pass" and .rc == 0)
+      or (.status == "fail" and .rc != 0)
+    )
+  ' "$path" >/dev/null 2>&1
+}
+
+handoff_summary_contract_valid() {
+  local path="$1"
+  if ! json_file_valid "$path"; then
+    return 1
+  fi
+  jq -e '
+    type == "object"
+    and (.version // 0) == 1
+    and (.schema | type) == "object"
+    and (.schema.id // "") == "phase5_settlement_layer_handoff_check_summary"
+    and ((.schema.major // 0) | type) == "number"
+    and ((.schema.major // 0) | floor) == (.schema.major // 0)
+    and (.status | type) == "string"
+    and (.rc | type) == "number"
+    and (.handoff | type) == "object"
+    and (.decision | type) == "object"
+    and (
+      (.status == "pass" and .rc == 0)
+      or (.status == "fail" and .rc != 0)
+    )
+  ' "$path" >/dev/null 2>&1
+}
+
+run_stage_capture() {
+  local label="$1"
+  local log_path="$2"
+  shift 2
+  local rc=0
+  echo "[phase5-settlement-layer-handoff-run] stage=$label status=running"
+  set +e
+  "$@" >"$log_path" 2>&1
+  rc=$?
+  if (( rc == 0 )); then
+    echo "[phase5-settlement-layer-handoff-run] stage=$label status=pass rc=0"
+  else
+    echo "[phase5-settlement-layer-handoff-run] stage=$label status=fail rc=$rc"
+  fi
+  return "$rc"
+}
+
+extract_roadmap_summary_path() {
+  local run_summary_json="$1"
+  local path=""
+  if [[ -f "$run_summary_json" ]] && jq -e . "$run_summary_json" >/dev/null 2>&1; then
+    path="$(jq -r '(.steps.phase5_settlement_layer_check.artifacts.roadmap_summary_json // .artifacts.roadmap_summary_json // empty)' "$run_summary_json" 2>/dev/null || true)"
+  fi
+  if [[ -n "$path" ]]; then
+    printf '%s' "$(resolve_path_with_base "$path" "$run_summary_json")"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_handoff_issuer_sponsor_live_smoke_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then (if .handoff.issuer_sponsor_api_live_smoke_ok then "true" else "false" end)
+       elif (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then (if .signals.issuer_sponsor_api_live_smoke_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.issuer_sponsor_api_live_smoke_status | type) == "string"
+           and (.handoff.issuer_sponsor_api_live_smoke_status | length) > 0
+       then .handoff.issuer_sponsor_api_live_smoke_status
+       elif (.signals.issuer_sponsor_api_live_smoke_status | type) == "string"
+            and (.signals.issuer_sponsor_api_live_smoke_status | length) > 0
+       then .signals.issuer_sponsor_api_live_smoke_status
+       elif (.handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then (if .handoff.issuer_sponsor_api_live_smoke_ok then "pass" else "fail" end)
+       elif (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then (if .signals.issuer_sponsor_api_live_smoke_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then (if .inputs.requirements.issuer_sponsor_api_live_smoke_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.issuer_sponsor_api_live_smoke_resolved | type) == "boolean"
+       then (if .handoff.issuer_sponsor_api_live_smoke_resolved then "1" else "0" end)
+       elif (.signals.issuer_sponsor_api_live_smoke_resolved | type) == "boolean"
+       then (if .signals.issuer_sponsor_api_live_smoke_resolved then "1" else "0" end)
+       elif (.handoff.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then "1"
+       elif (.signals.issuer_sponsor_api_live_smoke_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.issuer_sponsor_api_live_smoke_ok | type) == "string"
+           and (.handoff.sources.issuer_sponsor_api_live_smoke_ok | length) > 0
+       then .handoff.sources.issuer_sponsor_api_live_smoke_ok
+       elif (.signals.sources.issuer_sponsor_api_live_smoke_ok | type) == "string"
+            and (.signals.sources.issuer_sponsor_api_live_smoke_ok | length) > 0
+       then .signals.sources.issuer_sponsor_api_live_smoke_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_handoff_issuer_sponsor_vpn_session_live_smoke_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then (if .handoff.issuer_sponsor_vpn_session_live_smoke_ok then "true" else "false" end)
+       elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then (if .signals.issuer_sponsor_vpn_session_live_smoke_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.issuer_sponsor_vpn_session_live_smoke_status | type) == "string"
+           and (.handoff.issuer_sponsor_vpn_session_live_smoke_status | length) > 0
+       then .handoff.issuer_sponsor_vpn_session_live_smoke_status
+       elif (.signals.issuer_sponsor_vpn_session_live_smoke_status | type) == "string"
+            and (.signals.issuer_sponsor_vpn_session_live_smoke_status | length) > 0
+       then .signals.issuer_sponsor_vpn_session_live_smoke_status
+       elif (.handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then (if .handoff.issuer_sponsor_vpn_session_live_smoke_ok then "pass" else "fail" end)
+       elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then (if .signals.issuer_sponsor_vpn_session_live_smoke_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then (if .inputs.requirements.issuer_sponsor_vpn_session_live_smoke_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.issuer_sponsor_vpn_session_live_smoke_resolved | type) == "boolean"
+       then (if .handoff.issuer_sponsor_vpn_session_live_smoke_resolved then "1" else "0" end)
+       elif (.signals.issuer_sponsor_vpn_session_live_smoke_resolved | type) == "boolean"
+       then (if .signals.issuer_sponsor_vpn_session_live_smoke_resolved then "1" else "0" end)
+       elif (.handoff.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then "1"
+       elif (.signals.issuer_sponsor_vpn_session_live_smoke_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.issuer_sponsor_vpn_session_live_smoke_ok | type) == "string"
+           and (.handoff.sources.issuer_sponsor_vpn_session_live_smoke_ok | length) > 0
+       then .handoff.sources.issuer_sponsor_vpn_session_live_smoke_ok
+       elif (.signals.sources.issuer_sponsor_vpn_session_live_smoke_ok | type) == "string"
+            and (.signals.sources.issuer_sponsor_vpn_session_live_smoke_ok | length) > 0
+       then .signals.sources.issuer_sponsor_vpn_session_live_smoke_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_handoff_issuer_settlement_status_live_smoke_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .handoff.issuer_settlement_status_live_smoke_ok then "true" else "false" end)
+       elif (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .signals.issuer_settlement_status_live_smoke_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.issuer_settlement_status_live_smoke_status | type) == "string"
+           and (.handoff.issuer_settlement_status_live_smoke_status | length) > 0
+       then .handoff.issuer_settlement_status_live_smoke_status
+       elif (.signals.issuer_settlement_status_live_smoke_status | type) == "string"
+            and (.signals.issuer_settlement_status_live_smoke_status | length) > 0
+       then .signals.issuer_settlement_status_live_smoke_status
+       elif (.handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .handoff.issuer_settlement_status_live_smoke_ok then "pass" else "fail" end)
+       elif (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .signals.issuer_settlement_status_live_smoke_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .inputs.requirements.issuer_settlement_status_live_smoke_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.issuer_settlement_status_live_smoke_resolved | type) == "boolean"
+       then (if .handoff.issuer_settlement_status_live_smoke_resolved then "1" else "0" end)
+       elif (.signals.issuer_settlement_status_live_smoke_resolved | type) == "boolean"
+       then (if .signals.issuer_settlement_status_live_smoke_resolved then "1" else "0" end)
+       elif (.handoff.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then "1"
+       elif (.signals.issuer_settlement_status_live_smoke_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.issuer_settlement_status_live_smoke_ok | type) == "string"
+           and (.handoff.sources.issuer_settlement_status_live_smoke_ok | length) > 0
+       then .handoff.sources.issuer_settlement_status_live_smoke_ok
+       elif (.signals.sources.issuer_settlement_status_live_smoke_ok | type) == "string"
+            and (.signals.sources.issuer_settlement_status_live_smoke_ok | length) > 0
+       then .signals.sources.issuer_settlement_status_live_smoke_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_handoff_exit_settlement_status_live_smoke_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .handoff.exit_settlement_status_live_smoke_ok then "true" else "false" end)
+       elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .signals.exit_settlement_status_live_smoke_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.exit_settlement_status_live_smoke_status | type) == "string"
+           and (.handoff.exit_settlement_status_live_smoke_status | length) > 0
+       then .handoff.exit_settlement_status_live_smoke_status
+       elif (.signals.exit_settlement_status_live_smoke_status | type) == "string"
+            and (.signals.exit_settlement_status_live_smoke_status | length) > 0
+       then .signals.exit_settlement_status_live_smoke_status
+       elif (.handoff.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .handoff.exit_settlement_status_live_smoke_ok then "pass" else "fail" end)
+       elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .signals.exit_settlement_status_live_smoke_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .inputs.requirements.exit_settlement_status_live_smoke_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.exit_settlement_status_live_smoke_resolved | type) == "boolean"
+       then (if .handoff.exit_settlement_status_live_smoke_resolved then "1" else "0" end)
+       elif (.signals.exit_settlement_status_live_smoke_resolved | type) == "boolean"
+       then (if .signals.exit_settlement_status_live_smoke_resolved then "1" else "0" end)
+       elif (.handoff.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then "1"
+       elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.exit_settlement_status_live_smoke_ok | type) == "string"
+           and (.handoff.sources.exit_settlement_status_live_smoke_ok | length) > 0
+       then .handoff.sources.exit_settlement_status_live_smoke_ok
+       elif (.signals.sources.exit_settlement_status_live_smoke_ok | type) == "string"
+            and (.signals.sources.exit_settlement_status_live_smoke_ok | length) > 0
+       then .signals.sources.exit_settlement_status_live_smoke_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_run_exit_settlement_status_live_smoke_signal() {
+  local run_summary_json="$1"
+  if ! json_file_valid "$run_summary_json"; then
+    printf '%s\n' "null|missing|0|unresolved"
+    return
+  fi
+  jq -r '
+    [
+      (if (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .signals.exit_settlement_status_live_smoke_ok then "true" else "false" end)
+       else "null" end),
+      (if (.signals.exit_settlement_status_live_smoke_status | type) == "string"
+           and (.signals.exit_settlement_status_live_smoke_status | length) > 0
+       then .signals.exit_settlement_status_live_smoke_status
+       elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then (if .signals.exit_settlement_status_live_smoke_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.signals.exit_settlement_status_live_smoke_resolved | type) == "boolean"
+       then (if .signals.exit_settlement_status_live_smoke_resolved then "1" else "0" end)
+       elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.signals.sources.exit_settlement_status_live_smoke_ok | type) == "string"
+           and (.signals.sources.exit_settlement_status_live_smoke_ok | length) > 0
+       then .signals.sources.exit_settlement_status_live_smoke_ok
+       elif (.signals.exit_settlement_status_live_smoke_ok | type) == "boolean"
+       then "phase5_run_summary.signals.exit_settlement_status_live_smoke_ok"
+       else "unresolved" end)
+    ] | join("|")
+  ' "$run_summary_json" 2>/dev/null || printf '%s\n' "null|missing|0|unresolved"
+}
+
+extract_handoff_settlement_dual_asset_parity_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.settlement_dual_asset_parity_ok | type) == "boolean"
+       then (if .handoff.settlement_dual_asset_parity_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.settlement_dual_asset_parity_status | type) == "string"
+           and (.handoff.settlement_dual_asset_parity_status | length) > 0
+       then .handoff.settlement_dual_asset_parity_status
+       elif (.handoff.settlement_dual_asset_parity_ok | type) == "boolean"
+       then (if .handoff.settlement_dual_asset_parity_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.settlement_dual_asset_parity_ok | type) == "boolean"
+       then (if .inputs.requirements.settlement_dual_asset_parity_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.settlement_dual_asset_parity_resolved | type) == "boolean"
+       then (if .handoff.settlement_dual_asset_parity_resolved then "1" else "0" end)
+       elif (.handoff.settlement_dual_asset_parity_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.settlement_dual_asset_parity_ok | type) == "string"
+           and (.handoff.sources.settlement_dual_asset_parity_ok | length) > 0
+       then .handoff.sources.settlement_dual_asset_parity_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_handoff_settlement_signal() {
+  local handoff_summary_json="$1"
+  local stage_key="$2"
+  local fallback_required="$3"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  jq -r --arg stage_key "$stage_key" --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff[($stage_key + "_ok")] | type) == "boolean"
+       then (if .handoff[($stage_key + "_ok")] then "true" else "false" end)
+       elif (.signals[($stage_key + "_ok")] | type) == "boolean"
+       then (if .signals[($stage_key + "_ok")] then "true" else "false" end)
+       else "null" end),
+      (if (.handoff[($stage_key + "_status")] | type) == "string"
+           and (.handoff[($stage_key + "_status")] | length) > 0
+       then .handoff[($stage_key + "_status")]
+       elif (.signals[($stage_key + "_status")] | type) == "string"
+            and (.signals[($stage_key + "_status")] | length) > 0
+       then .signals[($stage_key + "_status")]
+       elif (.handoff[($stage_key + "_ok")] | type) == "boolean"
+       then (if .handoff[($stage_key + "_ok")] then "pass" else "fail" end)
+       elif (.signals[($stage_key + "_ok")] | type) == "boolean"
+       then (if .signals[($stage_key + "_ok")] then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements[($stage_key + "_ok")] | type) == "boolean"
+       then (if .inputs.requirements[($stage_key + "_ok")] then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff[($stage_key + "_resolved")] | type) == "boolean"
+       then (if .handoff[($stage_key + "_resolved")] then "1" else "0" end)
+       elif (.signals[($stage_key + "_resolved")] | type) == "boolean"
+       then (if .signals[($stage_key + "_resolved")] then "1" else "0" end)
+       elif (.handoff[($stage_key + "_ok")] | type) == "boolean"
+       then "1"
+       elif (.signals[($stage_key + "_ok")] | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources[($stage_key + "_ok")] | type) == "string"
+           and (.handoff.sources[($stage_key + "_ok")] | length) > 0
+       then .handoff.sources[($stage_key + "_ok")]
+       elif (.signals.sources[($stage_key + "_ok")] | type) == "string"
+            and (.signals.sources[($stage_key + "_ok")] | length) > 0
+       then .signals.sources[($stage_key + "_ok")]
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+extract_handoff_settlement_adapter_signed_tx_roundtrip_signal() {
+  extract_handoff_settlement_signal "$1" "settlement_adapter_signed_tx_roundtrip" "$2"
+}
+
+extract_handoff_settlement_shadow_env_signal() {
+  extract_handoff_settlement_signal "$1" "settlement_shadow_env" "$2"
+}
+
+extract_handoff_settlement_shadow_status_surface_signal() {
+  extract_handoff_settlement_signal "$1" "settlement_shadow_status_surface" "$2"
+}
+
+extract_handoff_issuer_admin_blockchain_handlers_coverage_signal() {
+  local handoff_summary_json="$1"
+  local fallback_required="$2"
+  if ! json_file_valid "$handoff_summary_json"; then
+    printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+    return
+  fi
+  # Consolidated summary source key compatibility:
+  # phase5_settlement_layer_handoff_check_summary.signals.issuer_admin_blockchain_handlers_coverage_ok
+  jq -r --arg fallback_required "$fallback_required" '
+    [
+      (if (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then (if .handoff.issuer_admin_blockchain_handlers_coverage_ok then "true" else "false" end)
+       else "null" end),
+      (if (.handoff.issuer_admin_blockchain_handlers_coverage_status | type) == "string"
+           and (.handoff.issuer_admin_blockchain_handlers_coverage_status | length) > 0
+       then .handoff.issuer_admin_blockchain_handlers_coverage_status
+       elif (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then (if .handoff.issuer_admin_blockchain_handlers_coverage_ok then "pass" else "fail" end)
+       else "missing" end),
+      (if (.inputs.requirements.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then (if .inputs.requirements.issuer_admin_blockchain_handlers_coverage_ok then "true" else "false" end)
+       elif $fallback_required != "null"
+       then $fallback_required
+       else "null" end),
+      (if (.handoff.issuer_admin_blockchain_handlers_coverage_resolved | type) == "boolean"
+       then (if .handoff.issuer_admin_blockchain_handlers_coverage_resolved then "1" else "0" end)
+       elif (.handoff.issuer_admin_blockchain_handlers_coverage_ok | type) == "boolean"
+       then "1"
+       else "0" end),
+      (if (.handoff.sources.issuer_admin_blockchain_handlers_coverage_ok | type) == "string"
+           and (.handoff.sources.issuer_admin_blockchain_handlers_coverage_ok | length) > 0
+       then .handoff.sources.issuer_admin_blockchain_handlers_coverage_ok
+       else "unresolved" end)
+    ] | join("|")
+  ' "$handoff_summary_json" 2>/dev/null || printf '%s\n' "null|missing|$fallback_required|0|unresolved"
+}
+
+need_cmd jq
+need_cmd date
+need_cmd mktemp
+need_cmd cp
+
+reports_dir="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_REPORTS_DIR:-}"
+run_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SUMMARY_JSON:-}"
+handoff_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_SUMMARY_JSON:-}"
+summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_SUMMARY_JSON:-}"
+canonical_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_run_summary.json}"
+print_summary_json="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_PRINT_SUMMARY_JSON:-1}"
+dry_run="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_DRY_RUN:-0}"
+run_phase5_settlement_layer_run="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_PHASE5_SETTLEMENT_LAYER_RUN:-1}"
+run_phase5_settlement_layer_handoff_check="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK:-1}"
+
+declare -a run_passthrough_args=()
+declare -a handoff_passthrough_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reports-dir)
+      reports_dir="${2:-}"
+      shift 2
+      ;;
+    --run-summary-json)
+      run_summary_json="${2:-}"
+      shift 2
+      ;;
+    --handoff-summary-json)
+      handoff_summary_json="${2:-}"
+      shift 2
+      ;;
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --run-phase5-settlement-layer-run)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_phase5_settlement_layer_run="${2:-}"
+        shift 2
+      else
+        run_phase5_settlement_layer_run="1"
+        shift
+      fi
+      ;;
+    --run-phase5-settlement-layer-handoff-check)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_phase5_settlement_layer_handoff_check="${2:-}"
+        shift 2
+      else
+        run_phase5_settlement_layer_handoff_check="1"
+        shift
+      fi
+      ;;
+    --print-summary-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        print_summary_json="${2:-}"
+        shift 2
+      else
+        print_summary_json="1"
+        shift
+      fi
+      ;;
+    --dry-run)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        dry_run="${2:-}"
+        shift 2
+      else
+        dry_run="1"
+        shift
+      fi
+      ;;
+    --run-*)
+      forwarded_flag="--${1#--run-}"
+      if [[ "$forwarded_flag" == "--" ]]; then
+        echo "invalid run-prefixed arg: $1"
+        exit 2
+      fi
+      if [[ $# -ge 2 && ! "${2:-}" =~ ^-- ]]; then
+        run_passthrough_args+=("$forwarded_flag" "${2:-}")
+        shift 2
+      else
+        run_passthrough_args+=("$forwarded_flag")
+        shift
+      fi
+      ;;
+    --handoff-*)
+      forwarded_flag="--${1#--handoff-}"
+      if [[ "$forwarded_flag" == "--" ]]; then
+        echo "invalid handoff-prefixed arg: $1"
+        exit 2
+      fi
+      if [[ $# -ge 2 && ! "${2:-}" =~ ^-- ]]; then
+        handoff_passthrough_args+=("$forwarded_flag" "${2:-}")
+        shift 2
+      else
+        handoff_passthrough_args+=("$forwarded_flag")
+        shift
+      fi
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown arg: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+bool_arg_or_die "--run-phase5-settlement-layer-run" "$run_phase5_settlement_layer_run"
+bool_arg_or_die "--run-phase5-settlement-layer-handoff-check" "$run_phase5_settlement_layer_handoff_check"
+bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--dry-run" "$dry_run"
+
+run_script="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_RUN_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_run.sh}"
+handoff_check_script="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_handoff_check.sh}"
+
+if [[ "$run_phase5_settlement_layer_run" == "1" && ! -x "$run_script" ]]; then
+  echo "missing executable stage script: $run_script"
+  exit 2
+fi
+if [[ "$run_phase5_settlement_layer_handoff_check" == "1" && ! -x "$handoff_check_script" ]]; then
+  echo "missing executable stage script: $handoff_check_script"
+  exit 2
+fi
+
+supports_settlement_flags="1"
+supports_settlement_adapter_signed_tx_roundtrip_requirement_flag="1"
+supports_settlement_shadow_env_requirement_flag="1"
+supports_settlement_shadow_status_surface_requirement_flag="1"
+supports_issuer_sponsor_requirement_flag="1"
+supports_issuer_sponsor_vpn_session_requirement_flag="1"
+supports_issuer_settlement_status_requirement_flag="1"
+supports_exit_settlement_status_requirement_flag="1"
+supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="1"
+if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
+  supports_settlement_flags="0"
+  if handoff_supports_settlement_requirement_flags; then
+    supports_settlement_flags="1"
+  fi
+  supports_settlement_adapter_signed_tx_roundtrip_requirement_flag="0"
+  if handoff_supports_settlement_adapter_signed_tx_roundtrip_requirement_flag; then
+    supports_settlement_adapter_signed_tx_roundtrip_requirement_flag="1"
+  fi
+  supports_settlement_shadow_env_requirement_flag="0"
+  if handoff_supports_settlement_shadow_env_requirement_flag; then
+    supports_settlement_shadow_env_requirement_flag="1"
+  fi
+  supports_settlement_shadow_status_surface_requirement_flag="0"
+  if handoff_supports_settlement_shadow_status_surface_requirement_flag; then
+    supports_settlement_shadow_status_surface_requirement_flag="1"
+  fi
+  supports_issuer_sponsor_requirement_flag="0"
+  if handoff_supports_issuer_sponsor_requirement_flag; then
+    supports_issuer_sponsor_requirement_flag="1"
+  fi
+  supports_issuer_sponsor_vpn_session_requirement_flag="0"
+  if handoff_supports_issuer_sponsor_vpn_session_requirement_flag; then
+    supports_issuer_sponsor_vpn_session_requirement_flag="1"
+  fi
+  supports_issuer_settlement_status_requirement_flag="0"
+  if handoff_supports_issuer_settlement_status_requirement_flag; then
+    supports_issuer_settlement_status_requirement_flag="1"
+  fi
+  supports_exit_settlement_status_requirement_flag="0"
+  if handoff_supports_exit_settlement_status_requirement_flag; then
+    supports_exit_settlement_status_requirement_flag="1"
+  fi
+  supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="0"
+  if handoff_supports_issuer_admin_blockchain_handlers_coverage_requirement_flag; then
+    supports_issuer_admin_blockchain_handlers_coverage_requirement_flag="1"
+  fi
+fi
+
+run_stamp="$(date -u +%Y%m%d_%H%M%S)"
+if [[ -z "$reports_dir" ]]; then
+  reports_dir="$ROOT_DIR/.easy-node-logs/phase5_settlement_layer_handoff_run_${run_stamp}"
+else
+  reports_dir="$(abs_path "$reports_dir")"
+fi
+if [[ -z "$run_summary_json" ]]; then
+  run_summary_json="$reports_dir/phase5_settlement_layer_run_summary.json"
+else
+  run_summary_json="$(abs_path "$run_summary_json")"
+fi
+if [[ -z "$handoff_summary_json" ]]; then
+  handoff_summary_json="$reports_dir/phase5_settlement_layer_handoff_check_summary.json"
+else
+  handoff_summary_json="$(abs_path "$handoff_summary_json")"
+fi
+if [[ -z "$summary_json" ]]; then
+  summary_json="$reports_dir/phase5_settlement_layer_handoff_run_summary.json"
+else
+  summary_json="$(abs_path "$summary_json")"
+fi
+canonical_summary_json="$(abs_path "$canonical_summary_json")"
+
+mkdir -p "$reports_dir" \
+  "$(dirname "$run_summary_json")" \
+  "$(dirname "$handoff_summary_json")" \
+  "$(dirname "$summary_json")" \
+  "$(dirname "$canonical_summary_json")"
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+run_log="$TMP_DIR/run_stage.log"
+handoff_log="$TMP_DIR/handoff_stage.log"
+generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+declare run_command_rc=0
+declare handoff_command_rc=0
+declare run_contract_valid=0
+declare handoff_contract_valid=0
+declare run_status="skipped"
+declare handoff_status="skipped"
+declare run_rc=0
+declare handoff_rc=0
+declare run_contract_error=""
+declare handoff_contract_error=""
+declare run_command=""
+declare handoff_command=""
+declare run_roadmap_summary_json=""
+declare handoff_require_settlement_dual_asset_parity_ok="null"
+declare handoff_settlement_dual_asset_parity_ok="null"
+declare handoff_settlement_dual_asset_parity_status="missing"
+declare handoff_settlement_dual_asset_parity_required="null"
+declare handoff_settlement_dual_asset_parity_resolved="0"
+declare handoff_settlement_dual_asset_parity_source="unresolved"
+declare handoff_require_settlement_adapter_signed_tx_roundtrip_ok="null"
+declare handoff_settlement_adapter_signed_tx_roundtrip_ok="null"
+declare handoff_settlement_adapter_signed_tx_roundtrip_status="missing"
+declare handoff_settlement_adapter_signed_tx_roundtrip_required="null"
+declare handoff_settlement_adapter_signed_tx_roundtrip_resolved="0"
+declare handoff_settlement_adapter_signed_tx_roundtrip_source="unresolved"
+declare handoff_require_settlement_shadow_env_ok="null"
+declare handoff_settlement_shadow_env_ok="null"
+declare handoff_settlement_shadow_env_status="missing"
+declare handoff_settlement_shadow_env_required="null"
+declare handoff_settlement_shadow_env_resolved="0"
+declare handoff_settlement_shadow_env_source="unresolved"
+declare handoff_require_settlement_shadow_status_surface_ok="null"
+declare handoff_settlement_shadow_status_surface_ok="null"
+declare handoff_settlement_shadow_status_surface_status="missing"
+declare handoff_settlement_shadow_status_surface_required="null"
+declare handoff_settlement_shadow_status_surface_resolved="0"
+declare handoff_settlement_shadow_status_surface_source="unresolved"
+declare handoff_require_issuer_sponsor_api_live_smoke_ok="null"
+declare handoff_issuer_sponsor_api_live_smoke_ok="null"
+declare handoff_issuer_sponsor_api_live_smoke_status="missing"
+declare handoff_issuer_sponsor_api_live_smoke_required="null"
+declare handoff_issuer_sponsor_api_live_smoke_resolved="0"
+declare handoff_issuer_sponsor_api_live_smoke_source="unresolved"
+declare handoff_require_issuer_sponsor_vpn_session_live_smoke_ok="null"
+declare handoff_issuer_sponsor_vpn_session_live_smoke_ok="null"
+declare handoff_issuer_sponsor_vpn_session_live_smoke_status="missing"
+declare handoff_issuer_sponsor_vpn_session_live_smoke_required="null"
+declare handoff_issuer_sponsor_vpn_session_live_smoke_resolved="0"
+declare handoff_issuer_sponsor_vpn_session_live_smoke_source="unresolved"
+declare handoff_require_issuer_settlement_status_live_smoke_ok="null"
+declare handoff_issuer_settlement_status_live_smoke_ok="null"
+declare handoff_issuer_settlement_status_live_smoke_status="missing"
+declare handoff_issuer_settlement_status_live_smoke_required="null"
+declare handoff_issuer_settlement_status_live_smoke_resolved="0"
+declare handoff_issuer_settlement_status_live_smoke_source="unresolved"
+declare handoff_require_exit_settlement_status_live_smoke_ok="null"
+declare handoff_exit_settlement_status_live_smoke_ok="null"
+declare handoff_exit_settlement_status_live_smoke_status="missing"
+declare handoff_exit_settlement_status_live_smoke_required="null"
+declare handoff_exit_settlement_status_live_smoke_resolved="0"
+declare handoff_exit_settlement_status_live_smoke_source="unresolved"
+declare handoff_require_issuer_admin_blockchain_handlers_coverage_ok="null"
+declare handoff_issuer_admin_blockchain_handlers_coverage_ok="null"
+declare handoff_issuer_admin_blockchain_handlers_coverage_status="missing"
+declare handoff_issuer_admin_blockchain_handlers_coverage_required="null"
+declare handoff_issuer_admin_blockchain_handlers_coverage_resolved="0"
+declare handoff_issuer_admin_blockchain_handlers_coverage_source="unresolved"
+
+declare -a run_cmd=("$run_script" --reports-dir "$reports_dir" --summary-json "$run_summary_json")
+if [[ "$dry_run" == "1" ]]; then
+  run_cmd+=(--dry-run 1)
+fi
+if ((${#run_passthrough_args[@]} > 0)); then
+  run_cmd+=("${run_passthrough_args[@]}")
+fi
+run_command="$(print_cmd "${run_cmd[@]}")"
+
+if [[ "$run_phase5_settlement_layer_run" == "1" ]]; then
+  set +e
+  run_stage_capture "phase5_settlement_layer_run" "$run_log" "${run_cmd[@]}"
+  run_command_rc=$?
+  set -e
+  if run_summary_contract_valid "$run_summary_json"; then
+    run_contract_valid=1
+    run_status="$(jq -r '.status // "fail"' "$run_summary_json" 2>/dev/null || echo fail)"
+    run_rc="$(jq -r '.rc // 0' "$run_summary_json" 2>/dev/null || echo 0)"
+    if [[ "$run_command_rc" -ne 0 ]]; then
+      run_status="fail"
+      run_rc="$run_command_rc"
+    fi
+  else
+    run_contract_valid=0
+    run_contract_error="run summary JSON is missing required fields or uses an incompatible schema"
+    run_status="fail"
+    if [[ "$run_command_rc" -ne 0 ]]; then
+      run_rc="$run_command_rc"
+    else
+      run_rc=3
+    fi
+  fi
+  run_roadmap_summary_json="$(extract_roadmap_summary_path "$run_summary_json")"
+else
+  echo "[phase5-settlement-layer-handoff-run] stage=phase5_settlement_layer_run status=skipped reason=disabled"
+fi
+
+declare -a handoff_cmd=(
+  "$handoff_check_script"
+  --phase5-run-summary-json "$run_summary_json"
+  --summary-json "$handoff_summary_json"
+)
+if [[ -n "$run_roadmap_summary_json" ]] && ! array_has_arg "--roadmap-summary-json" "${handoff_passthrough_args[@]}"; then
+  handoff_cmd+=(--roadmap-summary-json "$run_roadmap_summary_json")
+fi
+if ((${#handoff_passthrough_args[@]} > 0)); then
+  mapfile -t adapted_handoff_passthrough_args < <(adapt_handoff_requirement_flags_for_script "$supports_settlement_flags" "${handoff_passthrough_args[@]}")
+  if ((${#adapted_handoff_passthrough_args[@]} > 0)); then
+    handoff_cmd+=("${adapted_handoff_passthrough_args[@]}")
+  fi
+fi
+if ! array_has_arg "--show-json" "${handoff_cmd[@]:1}"; then
+  handoff_cmd+=(--show-json 0)
+fi
+if [[ "$dry_run" != "1" ]] \
+  && [[ "$supports_issuer_admin_blockchain_handlers_coverage_requirement_flag" == "1" ]] \
+  && ! handoff_requirement_arg_present "--require-issuer-admin-blockchain-handlers-coverage-ok" "--require-issuer-admin-blockchain-handlers-coverage-ok" "${handoff_cmd[@]:1}"; then
+  handoff_cmd+=(--require-issuer-admin-blockchain-handlers-coverage-ok 1)
+fi
+if [[ "$dry_run" == "1" ]]; then
+  if ! array_has_arg "--require-run-pipeline-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-run-pipeline-ok 0)
+  fi
+  if ! handoff_requirement_arg_present "--require-settlement-failsoft-ok" "--require-windows-server-packaging-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-failsoft-ok 0)
+    else
+      handoff_cmd+=(--require-windows-server-packaging-ok 0)
+    fi
+  fi
+  if ! handoff_requirement_arg_present "--require-settlement-acceptance-ok" "--require-windows-role-runbooks-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-acceptance-ok 0)
+    else
+      handoff_cmd+=(--require-windows-role-runbooks-ok 0)
+    fi
+  fi
+  if ! handoff_requirement_arg_present "--require-settlement-bridge-smoke-ok" "--require-cross-platform-interop-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-bridge-smoke-ok 0)
+    else
+      handoff_cmd+=(--require-cross-platform-interop-ok 0)
+    fi
+  fi
+  if ! handoff_requirement_arg_present "--require-settlement-state-persistence-ok" "--require-role-combination-validation-ok" "${handoff_cmd[@]:1}"; then
+    if [[ "$supports_settlement_flags" == "1" ]]; then
+      handoff_cmd+=(--require-settlement-state-persistence-ok 0)
+    else
+      handoff_cmd+=(--require-role-combination-validation-ok 0)
+    fi
+  fi
+  if [[ "$supports_settlement_flags" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-settlement-dual-asset-parity-ok" "--require-settlement-dual-asset-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-settlement-dual-asset-parity-ok 0)
+  fi
+  if [[ "$supports_settlement_adapter_signed_tx_roundtrip_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-settlement-adapter-signed-tx-roundtrip-ok" "--require-settlement-adapter-signed-tx-roundtrip-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-settlement-adapter-signed-tx-roundtrip-ok 0)
+  fi
+  if [[ "$supports_settlement_shadow_env_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-settlement-shadow-env-ok" "--require-settlement-shadow-env-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-settlement-shadow-env-ok 0)
+  fi
+  if [[ "$supports_settlement_shadow_status_surface_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-settlement-shadow-status-surface-ok" "--require-settlement-shadow-status-surface-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-settlement-shadow-status-surface-ok 0)
+  fi
+  if [[ "$supports_issuer_sponsor_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-issuer-sponsor-api-live-smoke-ok" "--require-issuer-sponsor-api-live-smoke-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-issuer-sponsor-api-live-smoke-ok 0)
+  fi
+  if [[ "$supports_issuer_sponsor_vpn_session_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-issuer-sponsor-vpn-session-live-smoke-ok" "--require-issuer-sponsor-vpn-session-live-smoke-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-issuer-sponsor-vpn-session-live-smoke-ok 0)
+  fi
+  if [[ "$supports_issuer_settlement_status_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-issuer-settlement-status-live-smoke-ok" "--require-issuer-settlement-status-live-smoke-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-issuer-settlement-status-live-smoke-ok 0)
+  fi
+  if [[ "$supports_exit_settlement_status_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-exit-settlement-status-live-smoke-ok" "--require-exit-settlement-status-live-smoke-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-exit-settlement-status-live-smoke-ok 0)
+  fi
+  if [[ "$supports_issuer_admin_blockchain_handlers_coverage_requirement_flag" == "1" ]] \
+    && ! handoff_requirement_arg_present "--require-issuer-admin-blockchain-handlers-coverage-ok" "--require-issuer-admin-blockchain-handlers-coverage-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-issuer-admin-blockchain-handlers-coverage-ok 0)
+  fi
+fi
+handoff_require_settlement_dual_asset_parity_ok="$(handoff_requirement_arg_value "--require-settlement-dual-asset-parity-ok" "--require-settlement-dual-asset-ok" "${handoff_cmd[@]:1}")"
+handoff_require_settlement_adapter_signed_tx_roundtrip_ok="$(handoff_requirement_arg_value "--require-settlement-adapter-signed-tx-roundtrip-ok" "--require-settlement-adapter-signed-tx-roundtrip-ok" "${handoff_cmd[@]:1}")"
+handoff_require_settlement_shadow_env_ok="$(handoff_requirement_arg_value "--require-settlement-shadow-env-ok" "--require-settlement-shadow-env-ok" "${handoff_cmd[@]:1}")"
+handoff_require_settlement_shadow_status_surface_ok="$(handoff_requirement_arg_value "--require-settlement-shadow-status-surface-ok" "--require-settlement-shadow-status-surface-ok" "${handoff_cmd[@]:1}")"
+handoff_require_issuer_sponsor_api_live_smoke_ok="$(handoff_requirement_arg_value "--require-issuer-sponsor-api-live-smoke-ok" "--require-issuer-sponsor-api-live-smoke-ok" "${handoff_cmd[@]:1}")"
+handoff_require_issuer_sponsor_vpn_session_live_smoke_ok="$(handoff_requirement_arg_value "--require-issuer-sponsor-vpn-session-live-smoke-ok" "--require-issuer-sponsor-vpn-session-live-smoke-ok" "${handoff_cmd[@]:1}")"
+handoff_require_issuer_settlement_status_live_smoke_ok="$(handoff_requirement_arg_value "--require-issuer-settlement-status-live-smoke-ok" "--require-issuer-settlement-status-live-smoke-ok" "${handoff_cmd[@]:1}")"
+handoff_require_exit_settlement_status_live_smoke_ok="$(handoff_requirement_arg_value "--require-exit-settlement-status-live-smoke-ok" "--require-exit-settlement-status-live-smoke-ok" "${handoff_cmd[@]:1}")"
+handoff_require_issuer_admin_blockchain_handlers_coverage_ok="$(handoff_requirement_arg_value "--require-issuer-admin-blockchain-handlers-coverage-ok" "--require-issuer-admin-blockchain-handlers-coverage-ok" "${handoff_cmd[@]:1}")"
+handoff_command="$(print_cmd "${handoff_cmd[@]}")"
+
+if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]]; then
+  set +e
+  run_stage_capture "phase5_settlement_layer_handoff_check" "$handoff_log" "${handoff_cmd[@]}"
+  handoff_command_rc=$?
+  set -e
+  if handoff_summary_contract_valid "$handoff_summary_json"; then
+    handoff_contract_valid=1
+    handoff_status="$(jq -r '.status // "fail"' "$handoff_summary_json" 2>/dev/null || echo fail)"
+    handoff_rc="$(jq -r '.rc // 0' "$handoff_summary_json" 2>/dev/null || echo 0)"
+    if [[ "$handoff_command_rc" -ne 0 ]]; then
+      handoff_status="fail"
+      handoff_rc="$handoff_command_rc"
+    fi
+  else
+    handoff_contract_valid=0
+    handoff_contract_error="handoff summary JSON is missing required fields or uses an incompatible schema"
+    handoff_status="fail"
+    if [[ "$handoff_command_rc" -ne 0 ]]; then
+      handoff_rc="$handoff_command_rc"
+    else
+      handoff_rc=3
+    fi
+  fi
+else
+  echo "[phase5-settlement-layer-handoff-run] stage=phase5_settlement_layer_handoff_check status=skipped reason=disabled"
+fi
+
+handoff_settlement_dual_asset_pair="$(extract_handoff_settlement_dual_asset_parity_signal "$handoff_summary_json" "$handoff_require_settlement_dual_asset_parity_ok")"
+IFS='|' read -r \
+  handoff_settlement_dual_asset_parity_ok \
+  handoff_settlement_dual_asset_parity_status \
+  handoff_settlement_dual_asset_parity_required \
+  handoff_settlement_dual_asset_parity_resolved \
+  handoff_settlement_dual_asset_parity_source <<<"$handoff_settlement_dual_asset_pair"
+if [[ -z "$handoff_settlement_dual_asset_parity_ok" ]]; then
+  handoff_settlement_dual_asset_parity_ok="null"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_status" ]]; then
+  handoff_settlement_dual_asset_parity_status="missing"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_required" ]]; then
+  handoff_settlement_dual_asset_parity_required="$handoff_require_settlement_dual_asset_parity_ok"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_resolved" ]]; then
+  handoff_settlement_dual_asset_parity_resolved="0"
+fi
+if [[ -z "$handoff_settlement_dual_asset_parity_source" ]]; then
+  handoff_settlement_dual_asset_parity_source="unresolved"
+fi
+
+handoff_settlement_adapter_signed_tx_roundtrip_pair="$(extract_handoff_settlement_adapter_signed_tx_roundtrip_signal "$handoff_summary_json" "$handoff_require_settlement_adapter_signed_tx_roundtrip_ok")"
+IFS='|' read -r \
+  handoff_settlement_adapter_signed_tx_roundtrip_ok \
+  handoff_settlement_adapter_signed_tx_roundtrip_status \
+  handoff_settlement_adapter_signed_tx_roundtrip_required \
+  handoff_settlement_adapter_signed_tx_roundtrip_resolved \
+  handoff_settlement_adapter_signed_tx_roundtrip_source <<<"$handoff_settlement_adapter_signed_tx_roundtrip_pair"
+if [[ -z "$handoff_settlement_adapter_signed_tx_roundtrip_ok" ]]; then
+  handoff_settlement_adapter_signed_tx_roundtrip_ok="null"
+fi
+if [[ -z "$handoff_settlement_adapter_signed_tx_roundtrip_status" ]]; then
+  handoff_settlement_adapter_signed_tx_roundtrip_status="missing"
+fi
+if [[ -z "$handoff_settlement_adapter_signed_tx_roundtrip_required" ]]; then
+  handoff_settlement_adapter_signed_tx_roundtrip_required="$handoff_require_settlement_adapter_signed_tx_roundtrip_ok"
+fi
+if [[ -z "$handoff_settlement_adapter_signed_tx_roundtrip_resolved" ]]; then
+  handoff_settlement_adapter_signed_tx_roundtrip_resolved="0"
+fi
+if [[ -z "$handoff_settlement_adapter_signed_tx_roundtrip_source" ]]; then
+  handoff_settlement_adapter_signed_tx_roundtrip_source="unresolved"
+fi
+
+handoff_settlement_shadow_env_pair="$(extract_handoff_settlement_shadow_env_signal "$handoff_summary_json" "$handoff_require_settlement_shadow_env_ok")"
+IFS='|' read -r \
+  handoff_settlement_shadow_env_ok \
+  handoff_settlement_shadow_env_status \
+  handoff_settlement_shadow_env_required \
+  handoff_settlement_shadow_env_resolved \
+  handoff_settlement_shadow_env_source <<<"$handoff_settlement_shadow_env_pair"
+if [[ -z "$handoff_settlement_shadow_env_ok" ]]; then
+  handoff_settlement_shadow_env_ok="null"
+fi
+if [[ -z "$handoff_settlement_shadow_env_status" ]]; then
+  handoff_settlement_shadow_env_status="missing"
+fi
+if [[ -z "$handoff_settlement_shadow_env_required" ]]; then
+  handoff_settlement_shadow_env_required="$handoff_require_settlement_shadow_env_ok"
+fi
+if [[ -z "$handoff_settlement_shadow_env_resolved" ]]; then
+  handoff_settlement_shadow_env_resolved="0"
+fi
+if [[ -z "$handoff_settlement_shadow_env_source" ]]; then
+  handoff_settlement_shadow_env_source="unresolved"
+fi
+
+handoff_settlement_shadow_status_surface_pair="$(extract_handoff_settlement_shadow_status_surface_signal "$handoff_summary_json" "$handoff_require_settlement_shadow_status_surface_ok")"
+IFS='|' read -r \
+  handoff_settlement_shadow_status_surface_ok \
+  handoff_settlement_shadow_status_surface_status \
+  handoff_settlement_shadow_status_surface_required \
+  handoff_settlement_shadow_status_surface_resolved \
+  handoff_settlement_shadow_status_surface_source <<<"$handoff_settlement_shadow_status_surface_pair"
+if [[ -z "$handoff_settlement_shadow_status_surface_ok" ]]; then
+  handoff_settlement_shadow_status_surface_ok="null"
+fi
+if [[ -z "$handoff_settlement_shadow_status_surface_status" ]]; then
+  handoff_settlement_shadow_status_surface_status="missing"
+fi
+if [[ -z "$handoff_settlement_shadow_status_surface_required" ]]; then
+  handoff_settlement_shadow_status_surface_required="$handoff_require_settlement_shadow_status_surface_ok"
+fi
+if [[ -z "$handoff_settlement_shadow_status_surface_resolved" ]]; then
+  handoff_settlement_shadow_status_surface_resolved="0"
+fi
+if [[ -z "$handoff_settlement_shadow_status_surface_source" ]]; then
+  handoff_settlement_shadow_status_surface_source="unresolved"
+fi
+
+handoff_issuer_sponsor_signal_pair="$(extract_handoff_issuer_sponsor_live_smoke_signal "$handoff_summary_json" "$handoff_require_issuer_sponsor_api_live_smoke_ok")"
+IFS='|' read -r \
+  handoff_issuer_sponsor_api_live_smoke_ok \
+  handoff_issuer_sponsor_api_live_smoke_status \
+  handoff_issuer_sponsor_api_live_smoke_required \
+  handoff_issuer_sponsor_api_live_smoke_resolved \
+  handoff_issuer_sponsor_api_live_smoke_source <<<"$handoff_issuer_sponsor_signal_pair"
+if [[ -z "$handoff_issuer_sponsor_api_live_smoke_ok" ]]; then
+  handoff_issuer_sponsor_api_live_smoke_ok="null"
+fi
+if [[ -z "$handoff_issuer_sponsor_api_live_smoke_status" ]]; then
+  handoff_issuer_sponsor_api_live_smoke_status="missing"
+fi
+if [[ -z "$handoff_issuer_sponsor_api_live_smoke_required" ]]; then
+  handoff_issuer_sponsor_api_live_smoke_required="$handoff_require_issuer_sponsor_api_live_smoke_ok"
+fi
+if [[ -z "$handoff_issuer_sponsor_api_live_smoke_resolved" ]]; then
+  handoff_issuer_sponsor_api_live_smoke_resolved="0"
+fi
+if [[ -z "$handoff_issuer_sponsor_api_live_smoke_source" ]]; then
+  handoff_issuer_sponsor_api_live_smoke_source="unresolved"
+fi
+
+handoff_issuer_sponsor_vpn_session_signal_pair="$(extract_handoff_issuer_sponsor_vpn_session_live_smoke_signal "$handoff_summary_json" "$handoff_require_issuer_sponsor_vpn_session_live_smoke_ok")"
+IFS='|' read -r \
+  handoff_issuer_sponsor_vpn_session_live_smoke_ok \
+  handoff_issuer_sponsor_vpn_session_live_smoke_status \
+  handoff_issuer_sponsor_vpn_session_live_smoke_required \
+  handoff_issuer_sponsor_vpn_session_live_smoke_resolved \
+  handoff_issuer_sponsor_vpn_session_live_smoke_source <<<"$handoff_issuer_sponsor_vpn_session_signal_pair"
+if [[ -z "$handoff_issuer_sponsor_vpn_session_live_smoke_ok" ]]; then
+  handoff_issuer_sponsor_vpn_session_live_smoke_ok="null"
+fi
+if [[ -z "$handoff_issuer_sponsor_vpn_session_live_smoke_status" ]]; then
+  handoff_issuer_sponsor_vpn_session_live_smoke_status="missing"
+fi
+if [[ -z "$handoff_issuer_sponsor_vpn_session_live_smoke_required" ]]; then
+  handoff_issuer_sponsor_vpn_session_live_smoke_required="$handoff_require_issuer_sponsor_vpn_session_live_smoke_ok"
+fi
+if [[ -z "$handoff_issuer_sponsor_vpn_session_live_smoke_resolved" ]]; then
+  handoff_issuer_sponsor_vpn_session_live_smoke_resolved="0"
+fi
+if [[ -z "$handoff_issuer_sponsor_vpn_session_live_smoke_source" ]]; then
+  handoff_issuer_sponsor_vpn_session_live_smoke_source="unresolved"
+fi
+
+handoff_issuer_settlement_status_signal_pair="$(extract_handoff_issuer_settlement_status_live_smoke_signal "$handoff_summary_json" "$handoff_require_issuer_settlement_status_live_smoke_ok")"
+IFS='|' read -r \
+  handoff_issuer_settlement_status_live_smoke_ok \
+  handoff_issuer_settlement_status_live_smoke_status \
+  handoff_issuer_settlement_status_live_smoke_required \
+  handoff_issuer_settlement_status_live_smoke_resolved \
+  handoff_issuer_settlement_status_live_smoke_source <<<"$handoff_issuer_settlement_status_signal_pair"
+if [[ -z "$handoff_issuer_settlement_status_live_smoke_ok" ]]; then
+  handoff_issuer_settlement_status_live_smoke_ok="null"
+fi
+if [[ -z "$handoff_issuer_settlement_status_live_smoke_status" ]]; then
+  handoff_issuer_settlement_status_live_smoke_status="missing"
+fi
+if [[ -z "$handoff_issuer_settlement_status_live_smoke_required" ]]; then
+  handoff_issuer_settlement_status_live_smoke_required="$handoff_require_issuer_settlement_status_live_smoke_ok"
+fi
+if [[ -z "$handoff_issuer_settlement_status_live_smoke_resolved" ]]; then
+  handoff_issuer_settlement_status_live_smoke_resolved="0"
+fi
+if [[ -z "$handoff_issuer_settlement_status_live_smoke_source" ]]; then
+  handoff_issuer_settlement_status_live_smoke_source="unresolved"
+fi
+
+handoff_exit_settlement_status_signal_pair="$(extract_handoff_exit_settlement_status_live_smoke_signal "$handoff_summary_json" "$handoff_require_exit_settlement_status_live_smoke_ok")"
+IFS='|' read -r \
+  handoff_exit_settlement_status_live_smoke_ok \
+  handoff_exit_settlement_status_live_smoke_status \
+  handoff_exit_settlement_status_live_smoke_required \
+  handoff_exit_settlement_status_live_smoke_resolved \
+  handoff_exit_settlement_status_live_smoke_source <<<"$handoff_exit_settlement_status_signal_pair"
+if [[ -z "$handoff_exit_settlement_status_live_smoke_ok" ]]; then
+  handoff_exit_settlement_status_live_smoke_ok="null"
+fi
+if [[ -z "$handoff_exit_settlement_status_live_smoke_status" ]]; then
+  handoff_exit_settlement_status_live_smoke_status="missing"
+fi
+if [[ -z "$handoff_exit_settlement_status_live_smoke_required" ]]; then
+  handoff_exit_settlement_status_live_smoke_required="$handoff_require_exit_settlement_status_live_smoke_ok"
+fi
+if [[ -z "$handoff_exit_settlement_status_live_smoke_resolved" ]]; then
+  handoff_exit_settlement_status_live_smoke_resolved="0"
+fi
+if [[ -z "$handoff_exit_settlement_status_live_smoke_source" ]]; then
+  handoff_exit_settlement_status_live_smoke_source="unresolved"
+fi
+if [[ "$handoff_exit_settlement_status_live_smoke_source" == "unresolved" ]]; then
+  run_exit_settlement_status_signal_pair="$(extract_run_exit_settlement_status_live_smoke_signal "$run_summary_json")"
+  IFS='|' read -r \
+    run_exit_settlement_status_live_smoke_ok \
+    run_exit_settlement_status_live_smoke_status \
+    run_exit_settlement_status_live_smoke_resolved \
+    run_exit_settlement_status_live_smoke_source <<<"$run_exit_settlement_status_signal_pair"
+  if [[ "$run_exit_settlement_status_live_smoke_source" != "unresolved" ]]; then
+    handoff_exit_settlement_status_live_smoke_ok="$run_exit_settlement_status_live_smoke_ok"
+    handoff_exit_settlement_status_live_smoke_status="$run_exit_settlement_status_live_smoke_status"
+    handoff_exit_settlement_status_live_smoke_resolved="$run_exit_settlement_status_live_smoke_resolved"
+    handoff_exit_settlement_status_live_smoke_source="$run_exit_settlement_status_live_smoke_source"
+    if [[ "$handoff_exit_settlement_status_live_smoke_required" == "null" ]]; then
+      handoff_exit_settlement_status_live_smoke_required="0"
+    fi
+  fi
+fi
+
+handoff_issuer_admin_blockchain_handlers_coverage_pair="$(extract_handoff_issuer_admin_blockchain_handlers_coverage_signal "$handoff_summary_json" "$handoff_require_issuer_admin_blockchain_handlers_coverage_ok")"
+IFS='|' read -r \
+  handoff_issuer_admin_blockchain_handlers_coverage_ok \
+  handoff_issuer_admin_blockchain_handlers_coverage_status \
+  handoff_issuer_admin_blockchain_handlers_coverage_required \
+  handoff_issuer_admin_blockchain_handlers_coverage_resolved \
+  handoff_issuer_admin_blockchain_handlers_coverage_source <<<"$handoff_issuer_admin_blockchain_handlers_coverage_pair"
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_ok" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_ok="null"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_status" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_status="missing"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_required" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_required="$handoff_require_issuer_admin_blockchain_handlers_coverage_ok"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_resolved" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_resolved="0"
+fi
+if [[ -z "$handoff_issuer_admin_blockchain_handlers_coverage_source" ]]; then
+  handoff_issuer_admin_blockchain_handlers_coverage_source="unresolved"
+fi
+
+final_rc=0
+if [[ "$run_phase5_settlement_layer_run" == "1" ]] && (( run_rc != 0 )) && (( final_rc == 0 )); then
+  final_rc="$run_rc"
+fi
+if [[ "$run_phase5_settlement_layer_handoff_check" == "1" ]] && (( handoff_rc != 0 )) && (( final_rc == 0 )); then
+  final_rc="$handoff_rc"
+fi
+
+final_status="pass"
+if (( final_rc != 0 )); then
+  final_status="fail"
+fi
+
+run_summary_exists="false"
+handoff_summary_exists="false"
+if [[ -f "$run_summary_json" ]]; then
+  run_summary_exists="true"
+fi
+if [[ -f "$handoff_summary_json" ]]; then
+  handoff_summary_exists="true"
+fi
+
+run_passthrough_json="$(printf '%s\n' "${run_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+handoff_passthrough_json="$(printf '%s\n' "${handoff_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+
+summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
+jq -n \
+  --arg generated_at_utc "$generated_at_utc" \
+  --arg status "$final_status" \
+  --argjson rc "$final_rc" \
+  --arg reports_dir "$reports_dir" \
+  --arg summary_json "$summary_json" \
+  --arg canonical_summary_json "$canonical_summary_json" \
+  --arg run_summary_json "$run_summary_json" \
+  --arg handoff_summary_json "$handoff_summary_json" \
+  --arg run_roadmap_summary_json "$run_roadmap_summary_json" \
+  --argjson dry_run "$dry_run" \
+  --argjson print_summary_json "$print_summary_json" \
+  --argjson run_phase5_settlement_layer_run "$run_phase5_settlement_layer_run" \
+  --argjson run_phase5_settlement_layer_handoff_check "$run_phase5_settlement_layer_handoff_check" \
+  --argjson run_passthrough_args "$run_passthrough_json" \
+  --argjson handoff_passthrough_args "$handoff_passthrough_json" \
+  --arg run_status "$run_status" \
+  --argjson run_rc "$run_rc" \
+  --argjson run_command_rc "$run_command_rc" \
+  --arg run_command "$run_command" \
+  --arg run_contract_valid "$run_contract_valid" \
+  --arg run_contract_error "$run_contract_error" \
+  --arg run_summary_exists "$run_summary_exists" \
+  --arg run_log "$run_log" \
+  --arg handoff_status "$handoff_status" \
+  --argjson handoff_rc "$handoff_rc" \
+  --argjson handoff_command_rc "$handoff_command_rc" \
+  --arg handoff_command "$handoff_command" \
+  --arg handoff_contract_valid "$handoff_contract_valid" \
+  --arg handoff_contract_error "$handoff_contract_error" \
+  --arg handoff_summary_exists "$handoff_summary_exists" \
+  --arg handoff_log "$handoff_log" \
+  --arg handoff_settlement_dual_asset_parity_ok "$handoff_settlement_dual_asset_parity_ok" \
+  --arg handoff_settlement_dual_asset_parity_status "$handoff_settlement_dual_asset_parity_status" \
+  --arg handoff_settlement_dual_asset_parity_required "$handoff_settlement_dual_asset_parity_required" \
+  --arg handoff_settlement_dual_asset_parity_resolved "$handoff_settlement_dual_asset_parity_resolved" \
+  --arg handoff_settlement_dual_asset_parity_source "$handoff_settlement_dual_asset_parity_source" \
+  --arg handoff_settlement_adapter_signed_tx_roundtrip_ok "$handoff_settlement_adapter_signed_tx_roundtrip_ok" \
+  --arg handoff_settlement_adapter_signed_tx_roundtrip_status "$handoff_settlement_adapter_signed_tx_roundtrip_status" \
+  --arg handoff_settlement_adapter_signed_tx_roundtrip_required "$handoff_settlement_adapter_signed_tx_roundtrip_required" \
+  --arg handoff_settlement_adapter_signed_tx_roundtrip_resolved "$handoff_settlement_adapter_signed_tx_roundtrip_resolved" \
+  --arg handoff_settlement_adapter_signed_tx_roundtrip_source "$handoff_settlement_adapter_signed_tx_roundtrip_source" \
+  --arg handoff_settlement_shadow_env_ok "$handoff_settlement_shadow_env_ok" \
+  --arg handoff_settlement_shadow_env_status "$handoff_settlement_shadow_env_status" \
+  --arg handoff_settlement_shadow_env_required "$handoff_settlement_shadow_env_required" \
+  --arg handoff_settlement_shadow_env_resolved "$handoff_settlement_shadow_env_resolved" \
+  --arg handoff_settlement_shadow_env_source "$handoff_settlement_shadow_env_source" \
+  --arg handoff_settlement_shadow_status_surface_ok "$handoff_settlement_shadow_status_surface_ok" \
+  --arg handoff_settlement_shadow_status_surface_status "$handoff_settlement_shadow_status_surface_status" \
+  --arg handoff_settlement_shadow_status_surface_required "$handoff_settlement_shadow_status_surface_required" \
+  --arg handoff_settlement_shadow_status_surface_resolved "$handoff_settlement_shadow_status_surface_resolved" \
+  --arg handoff_settlement_shadow_status_surface_source "$handoff_settlement_shadow_status_surface_source" \
+  --arg handoff_issuer_sponsor_api_live_smoke_ok "$handoff_issuer_sponsor_api_live_smoke_ok" \
+  --arg handoff_issuer_sponsor_api_live_smoke_status "$handoff_issuer_sponsor_api_live_smoke_status" \
+  --arg handoff_issuer_sponsor_api_live_smoke_required "$handoff_issuer_sponsor_api_live_smoke_required" \
+  --arg handoff_issuer_sponsor_api_live_smoke_resolved "$handoff_issuer_sponsor_api_live_smoke_resolved" \
+  --arg handoff_issuer_sponsor_api_live_smoke_source "$handoff_issuer_sponsor_api_live_smoke_source" \
+  --arg handoff_issuer_sponsor_vpn_session_live_smoke_ok "$handoff_issuer_sponsor_vpn_session_live_smoke_ok" \
+  --arg handoff_issuer_sponsor_vpn_session_live_smoke_status "$handoff_issuer_sponsor_vpn_session_live_smoke_status" \
+  --arg handoff_issuer_sponsor_vpn_session_live_smoke_required "$handoff_issuer_sponsor_vpn_session_live_smoke_required" \
+  --arg handoff_issuer_sponsor_vpn_session_live_smoke_resolved "$handoff_issuer_sponsor_vpn_session_live_smoke_resolved" \
+  --arg handoff_issuer_sponsor_vpn_session_live_smoke_source "$handoff_issuer_sponsor_vpn_session_live_smoke_source" \
+  --arg handoff_issuer_settlement_status_live_smoke_ok "$handoff_issuer_settlement_status_live_smoke_ok" \
+  --arg handoff_issuer_settlement_status_live_smoke_status "$handoff_issuer_settlement_status_live_smoke_status" \
+  --arg handoff_issuer_settlement_status_live_smoke_required "$handoff_issuer_settlement_status_live_smoke_required" \
+  --arg handoff_issuer_settlement_status_live_smoke_resolved "$handoff_issuer_settlement_status_live_smoke_resolved" \
+  --arg handoff_issuer_settlement_status_live_smoke_source "$handoff_issuer_settlement_status_live_smoke_source" \
+  --arg handoff_exit_settlement_status_live_smoke_ok "$handoff_exit_settlement_status_live_smoke_ok" \
+  --arg handoff_exit_settlement_status_live_smoke_status "$handoff_exit_settlement_status_live_smoke_status" \
+  --arg handoff_exit_settlement_status_live_smoke_required "$handoff_exit_settlement_status_live_smoke_required" \
+  --arg handoff_exit_settlement_status_live_smoke_resolved "$handoff_exit_settlement_status_live_smoke_resolved" \
+  --arg handoff_exit_settlement_status_live_smoke_source "$handoff_exit_settlement_status_live_smoke_source" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_ok "$handoff_issuer_admin_blockchain_handlers_coverage_ok" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_status "$handoff_issuer_admin_blockchain_handlers_coverage_status" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_required "$handoff_issuer_admin_blockchain_handlers_coverage_required" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_resolved "$handoff_issuer_admin_blockchain_handlers_coverage_resolved" \
+  --arg handoff_issuer_admin_blockchain_handlers_coverage_source "$handoff_issuer_admin_blockchain_handlers_coverage_source" \
+  '{
+    version: 1,
+    schema: {
+      id: "phase5_settlement_layer_handoff_run_summary",
+      major: 1,
+      minor: 0
+    },
+    generated_at_utc: $generated_at_utc,
+    status: $status,
+    rc: $rc,
+    metadata: {
+      contract: "phase5-settlement-layer",
+      runner_script: "phase5_settlement_layer_handoff_run.sh"
+    },
+    inputs: {
+      reports_dir: $reports_dir,
+      summary_json: $summary_json,
+      dry_run: ($dry_run == 1),
+      print_summary_json: ($print_summary_json == 1),
+      run_phase5_settlement_layer_run: ($run_phase5_settlement_layer_run == 1),
+      run_phase5_settlement_layer_handoff_check: ($run_phase5_settlement_layer_handoff_check == 1),
+      run_passthrough_args: $run_passthrough_args,
+      handoff_passthrough_args: $handoff_passthrough_args
+    },
+    steps: {
+      phase5_settlement_layer_run: {
+        enabled: ($run_phase5_settlement_layer_run == 1),
+        status: $run_status,
+        rc: $run_rc,
+        command_rc: $run_command_rc,
+        command: (if $run_command == "" then null else $run_command end),
+        contract_valid: (
+          if $run_contract_valid == "1" then true
+          elif $run_contract_valid == "0" then false
+          else null
+          end
+        ),
+        contract_error: (if $run_contract_error == "" then null else $run_contract_error end),
+        artifacts: {
+          summary_json: $run_summary_json,
+          summary_exists: ($run_summary_exists == "true"),
+          log: $run_log
+        }
+      },
+      phase5_settlement_layer_handoff_check: {
+        enabled: ($run_phase5_settlement_layer_handoff_check == 1),
+        status: $handoff_status,
+        rc: $handoff_rc,
+        command_rc: $handoff_command_rc,
+        command: (if $handoff_command == "" then null else $handoff_command end),
+        contract_valid: (
+          if $handoff_contract_valid == "1" then true
+          elif $handoff_contract_valid == "0" then false
+          else null
+          end
+        ),
+        contract_error: (if $handoff_contract_error == "" then null else $handoff_contract_error end),
+        artifacts: {
+          summary_json: $handoff_summary_json,
+          summary_exists: ($handoff_summary_exists == "true"),
+          log: $handoff_log
+        }
+      }
+    },
+    handoff: {
+      settlement_dual_asset_parity_ok: (
+        if $handoff_settlement_dual_asset_parity_ok == "true" then true
+        elif $handoff_settlement_dual_asset_parity_ok == "false" then false
+        else null
+        end
+      ),
+      settlement_dual_asset_parity_status: $handoff_settlement_dual_asset_parity_status,
+      settlement_dual_asset_parity_required: (
+        if $handoff_settlement_dual_asset_parity_required == "true" then true
+        elif $handoff_settlement_dual_asset_parity_required == "false" then false
+        else null
+        end
+      ),
+      settlement_dual_asset_parity_resolved: ($handoff_settlement_dual_asset_parity_resolved == "1"),
+      settlement_adapter_signed_tx_roundtrip_ok: (
+        if $handoff_settlement_adapter_signed_tx_roundtrip_ok == "true" then true
+        elif $handoff_settlement_adapter_signed_tx_roundtrip_ok == "false" then false
+        else null
+        end
+      ),
+      settlement_adapter_signed_tx_roundtrip_status: $handoff_settlement_adapter_signed_tx_roundtrip_status,
+      settlement_adapter_signed_tx_roundtrip_required: (
+        if $handoff_settlement_adapter_signed_tx_roundtrip_required == "true" then true
+        elif $handoff_settlement_adapter_signed_tx_roundtrip_required == "false" then false
+        else null
+        end
+      ),
+      settlement_adapter_signed_tx_roundtrip_resolved: ($handoff_settlement_adapter_signed_tx_roundtrip_resolved == "1"),
+      settlement_shadow_env_ok: (
+        if $handoff_settlement_shadow_env_ok == "true" then true
+        elif $handoff_settlement_shadow_env_ok == "false" then false
+        else null
+        end
+      ),
+      settlement_shadow_env_status: $handoff_settlement_shadow_env_status,
+      settlement_shadow_env_required: (
+        if $handoff_settlement_shadow_env_required == "true" then true
+        elif $handoff_settlement_shadow_env_required == "false" then false
+        else null
+        end
+      ),
+      settlement_shadow_env_resolved: ($handoff_settlement_shadow_env_resolved == "1"),
+      settlement_shadow_status_surface_ok: (
+        if $handoff_settlement_shadow_status_surface_ok == "true" then true
+        elif $handoff_settlement_shadow_status_surface_ok == "false" then false
+        else null
+        end
+      ),
+      settlement_shadow_status_surface_status: $handoff_settlement_shadow_status_surface_status,
+      settlement_shadow_status_surface_required: (
+        if $handoff_settlement_shadow_status_surface_required == "true" then true
+        elif $handoff_settlement_shadow_status_surface_required == "false" then false
+        else null
+        end
+      ),
+      settlement_shadow_status_surface_resolved: ($handoff_settlement_shadow_status_surface_resolved == "1"),
+      issuer_sponsor_api_live_smoke_ok: (
+        if $handoff_issuer_sponsor_api_live_smoke_ok == "true" then true
+        elif $handoff_issuer_sponsor_api_live_smoke_ok == "false" then false
+        else null
+        end
+      ),
+      issuer_sponsor_api_live_smoke_status: $handoff_issuer_sponsor_api_live_smoke_status,
+      issuer_sponsor_api_live_smoke_required: (
+        if $handoff_issuer_sponsor_api_live_smoke_required == "true" then true
+        elif $handoff_issuer_sponsor_api_live_smoke_required == "false" then false
+        else null
+        end
+      ),
+      issuer_sponsor_api_live_smoke_resolved: ($handoff_issuer_sponsor_api_live_smoke_resolved == "1"),
+      issuer_sponsor_vpn_session_live_smoke_ok: (
+        if $handoff_issuer_sponsor_vpn_session_live_smoke_ok == "true" then true
+        elif $handoff_issuer_sponsor_vpn_session_live_smoke_ok == "false" then false
+        else null
+        end
+      ),
+      issuer_sponsor_vpn_session_live_smoke_status: $handoff_issuer_sponsor_vpn_session_live_smoke_status,
+      issuer_sponsor_vpn_session_live_smoke_required: (
+        if $handoff_issuer_sponsor_vpn_session_live_smoke_required == "true" then true
+        elif $handoff_issuer_sponsor_vpn_session_live_smoke_required == "false" then false
+        else null
+        end
+      ),
+      issuer_sponsor_vpn_session_live_smoke_resolved: ($handoff_issuer_sponsor_vpn_session_live_smoke_resolved == "1"),
+      issuer_settlement_status_live_smoke_ok: (
+        if $handoff_issuer_settlement_status_live_smoke_ok == "true" then true
+        elif $handoff_issuer_settlement_status_live_smoke_ok == "false" then false
+        else null
+        end
+      ),
+      issuer_settlement_status_live_smoke_status: $handoff_issuer_settlement_status_live_smoke_status,
+      issuer_settlement_status_live_smoke_required: (
+        if $handoff_issuer_settlement_status_live_smoke_required == "true" then true
+        elif $handoff_issuer_settlement_status_live_smoke_required == "false" then false
+        else null
+        end
+      ),
+      issuer_settlement_status_live_smoke_resolved: ($handoff_issuer_settlement_status_live_smoke_resolved == "1"),
+      exit_settlement_status_live_smoke_ok: (
+        if $handoff_exit_settlement_status_live_smoke_ok == "true" then true
+        elif $handoff_exit_settlement_status_live_smoke_ok == "false" then false
+        else null
+        end
+      ),
+      exit_settlement_status_live_smoke_status: $handoff_exit_settlement_status_live_smoke_status,
+      exit_settlement_status_live_smoke_required: (
+        if $handoff_exit_settlement_status_live_smoke_required == "true" then true
+        elif $handoff_exit_settlement_status_live_smoke_required == "false" then false
+        else null
+        end
+      ),
+      exit_settlement_status_live_smoke_resolved: ($handoff_exit_settlement_status_live_smoke_resolved == "1"),
+      issuer_admin_blockchain_handlers_coverage_ok: (
+        if $handoff_issuer_admin_blockchain_handlers_coverage_ok == "true" then true
+        elif $handoff_issuer_admin_blockchain_handlers_coverage_ok == "false" then false
+        else null
+        end
+      ),
+      issuer_admin_blockchain_handlers_coverage_status: $handoff_issuer_admin_blockchain_handlers_coverage_status,
+      issuer_admin_blockchain_handlers_coverage_required: (
+        if $handoff_issuer_admin_blockchain_handlers_coverage_required == "true" then true
+        elif $handoff_issuer_admin_blockchain_handlers_coverage_required == "false" then false
+        else null
+        end
+      ),
+      issuer_admin_blockchain_handlers_coverage_resolved: ($handoff_issuer_admin_blockchain_handlers_coverage_resolved == "1"),
+      sources: {
+        settlement_dual_asset_parity_ok: $handoff_settlement_dual_asset_parity_source,
+        settlement_adapter_signed_tx_roundtrip_ok: $handoff_settlement_adapter_signed_tx_roundtrip_source,
+        settlement_shadow_env_ok: $handoff_settlement_shadow_env_source,
+        settlement_shadow_status_surface_ok: $handoff_settlement_shadow_status_surface_source,
+        issuer_sponsor_api_live_smoke_ok: $handoff_issuer_sponsor_api_live_smoke_source,
+        issuer_sponsor_vpn_session_live_smoke_ok: $handoff_issuer_sponsor_vpn_session_live_smoke_source,
+        issuer_settlement_status_live_smoke_ok: $handoff_issuer_settlement_status_live_smoke_source,
+        exit_settlement_status_live_smoke_ok: $handoff_exit_settlement_status_live_smoke_source,
+        issuer_admin_blockchain_handlers_coverage_ok: $handoff_issuer_admin_blockchain_handlers_coverage_source
+      }
+    },
+    artifacts: {
+      reports_dir: $reports_dir,
+      summary_json: $summary_json,
+      canonical_summary_json: $canonical_summary_json,
+      run_summary_json: $run_summary_json,
+      handoff_summary_json: $handoff_summary_json,
+      run_roadmap_summary_json: (if $run_roadmap_summary_json == "" then null else $run_roadmap_summary_json end),
+      run_log: $run_log,
+      handoff_log: $handoff_log
+    }
+  }' >"$summary_tmp"
+mv -f "$summary_tmp" "$summary_json"
+if [[ "$summary_json" != "$canonical_summary_json" ]]; then
+  canonical_tmp="$(mktemp "${canonical_summary_json}.tmp.XXXXXX")"
+  cp "$summary_json" "$canonical_tmp"
+  mv -f "$canonical_tmp" "$canonical_summary_json"
+fi
+
+echo "[phase5-settlement-layer-handoff-run] status=$final_status rc=$final_rc dry_run=$dry_run"
+echo "[phase5-settlement-layer-handoff-run] reports_dir=$reports_dir"
+echo "[phase5-settlement-layer-handoff-run] summary_json=$summary_json"
+echo "[phase5-settlement-layer-handoff-run] canonical_summary_json=$canonical_summary_json"
+if [[ "$print_summary_json" == "1" ]]; then
+  cat "$summary_json"
+fi
+
+exit "$final_rc"

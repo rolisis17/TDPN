@@ -4,16 +4,21 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,12 +29,14 @@ import (
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
 	"privacynode/pkg/securehttp"
+	"privacynode/pkg/settlement"
 	"privacynode/pkg/wg"
 )
 
 type sessionInfo struct {
 	claims        crypto.CapabilityClaims
 	seenNonces    map[uint64]struct{}
+	highestNonce  uint64
 	lastActivity  time.Time
 	transport     string
 	sessionKeyID  string
@@ -38,63 +45,72 @@ type sessionInfo struct {
 	peerAddr      string
 	peerLastSeen  int64
 	downNonce     uint64
+	ingressBytes  int64
+	egressBytes   int64
 }
 
 type Service struct {
-	addr                  string
-	dataAddr              string
-	issuerURL             string
-	issuerURLs            []string
-	issuerMinSources      int
-	issuerMinOperators    int
-	issuerRequireID       bool
-	revocationsURL        string
-	revocationsURLs       []string
-	dataMode              string
-	opaqueSinkAddr        string
-	opaqueSourceAddr      string
-	opaqueEcho            bool
-	wgPubKey              string
-	wgExitIP              string
-	wgMTU                 int
-	wgKeepaliveSec        int
-	ipAllocCursor         uint32
-	wgInterface           string
-	wgPrivateKey          string
-	wgListenPort          int
-	wgBackend             string
-	wgKernelProxy         bool
-	wgKernelProxyMax      int
-	wgKernelProxyIdle     time.Duration
-	sessionCleanupSec     int
-	wgKernelTargetUDP     *net.UDPAddr
-	wgManager             wg.Manager
-	liveWGMode            bool
-	wgOnlyMode            bool
-	egressBackend         string
-	egressIface           string
-	egressCIDR            string
-	egressChain           string
-	egressConfigured      bool
-	tokenProofReplayGuard bool
-	peerRebindAfter       time.Duration
-	revocationRefreshSec  int
-	accountingFile        string
-	accountingFlushSec    int
-	startupSyncTimeout    time.Duration
-	betaStrict            bool
-	prodStrict            bool
-	enforcer              *policy.Enforcer
-	httpClient            *http.Client
-	httpSrv               *http.Server
-	udpConn               *net.UDPConn
-	opaqueSourceConn      *net.UDPConn
-	opaqueSinkUDP         *net.UDPAddr
+	addr                      string
+	dataAddr                  string
+	issuerURL                 string
+	issuerURLs                []string
+	issuerMinSources          int
+	issuerMinOperators        int
+	issuerMinKeyVotes         int
+	issuerRequireID           bool
+	revocationsURL            string
+	revocationsURLs           []string
+	dataMode                  string
+	opaqueSinkAddr            string
+	opaqueSourceAddr          string
+	opaqueEcho                bool
+	wgPubKey                  string
+	wgExitIP                  string
+	wgMTU                     int
+	wgKeepaliveSec            int
+	ipAllocCursor             uint32
+	wgInterface               string
+	wgPrivateKey              string
+	wgListenPort              int
+	wgBackend                 string
+	wgKernelProxy             bool
+	wgKernelProxyMax          int
+	wgKernelProxyIdle         time.Duration
+	sessionCleanupSec         int
+	maxActiveSessions         int
+	wgKernelTargetUDP         *net.UDPAddr
+	wgManager                 wg.Manager
+	liveWGMode                bool
+	wgOnlyMode                bool
+	egressBackend             string
+	egressIface               string
+	egressCIDR                string
+	egressChain               string
+	egressConfigured          bool
+	tokenProofReplayGuard     bool
+	peerRebindAfter           time.Duration
+	revocationRefreshSec      int
+	accountingFile            string
+	tokenProofReplayStoreFile string
+	accountingFlushSec        int
+	settlementReconcileSec    int
+	startupSyncTimeout        time.Duration
+	verifyRefreshMinInterval  time.Duration
+	betaStrict                bool
+	prodStrict                bool
+	enforcer                  *policy.Enforcer
+	httpClient                *http.Client
+	httpSrv                   *http.Server
+	udpConn                   *net.UDPConn
+	opaqueSourceConn          *net.UDPConn
+	opaqueSinkUDP             *net.UDPAddr
 
 	mu                sync.RWMutex
 	issuerPub         ed25519.PublicKey
 	issuerPubs        map[string]ed25519.PublicKey
 	issuerKeyIssuer   map[string]string
+	verifyRefreshMu   sync.Mutex
+	verifyRefreshLast time.Time
 	sessions          map[string]sessionInfo
 	wgSessionProxies  map[string]*net.UDPConn
 	wgProxyLastSeen   map[string]int64
@@ -103,6 +119,9 @@ type Service struct {
 	revokedJTI        map[string]int64
 	minTokenEpoch     map[string]int64
 	revocationVersion map[string]int64
+	settlement        settlement.Service
+	sessionReserve    int64
+	settlementStatus  settlementStatusSnapshot
 }
 
 type exitMetrics struct {
@@ -134,11 +153,56 @@ type exitMetrics struct {
 	AccountingUpdatedUnix   int64  `json:"accounting_updated_unix"`
 }
 
+type settlementStatusSnapshot struct {
+	lastReport    settlement.ReconcileReport
+	lastCheckedAt time.Time
+	lastError     string
+}
+
+type settlementStatusResponse struct {
+	Enabled                   bool      `json:"enabled"`
+	Stale                     bool      `json:"stale"`
+	CheckedAt                 time.Time `json:"checked_at,omitempty"`
+	ReportGeneratedAt         time.Time `json:"report_generated_at,omitempty"`
+	PendingAdapterOperations  int       `json:"pending_adapter_operations"`
+	ShadowAdapterConfigured   bool      `json:"shadow_adapter_configured"`
+	ShadowAttemptedOperations int       `json:"shadow_attempted_operations"`
+	ShadowSubmittedOperations int       `json:"shadow_submitted_operations"`
+	ShadowFailedOperations    int       `json:"shadow_failed_operations"`
+	PendingOperations         int       `json:"pending_operations"`
+	SubmittedOperations       int       `json:"submitted_operations"`
+	ConfirmedOperations       int       `json:"confirmed_operations"`
+	FailedOperations          int       `json:"failed_operations"`
+	LastError                 string    `json:"last_error,omitempty"`
+}
+
 var deriveWGPublicKeyFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
 
 // Deterministic valid WireGuard public key used only when EXIT_WG_PUBKEY is unset
 // in non-command scaffolding modes.
 const defaultExitWGPubKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+const pathControlJSONBodyMaxBytes int64 = 64 * 1024
+const defaultMaxActiveSessions = 4096
+const sessionReplayWindowSize = 8192
+const tokenProofReplayMaxTokenIDs = 4096
+const tokenProofReplayMaxNoncesPerToken = 4096
+const tokenProofReplayStoreMaxBytes int64 = 8 * 1024 * 1024
+const capabilityTokenMaxBytes = 16 * 1024
+const capabilityTokenPayloadMaxBytes = 8 * 1024
+const serverReadHeaderTimeout = 10 * time.Second
+const allowDangerousOutboundPrivateDNS = "EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
+const serverReadTimeout = 15 * time.Second
+const serverWriteTimeout = 30 * time.Second
+const serverIdleTimeout = 60 * time.Second
+const serverMaxHeaderBytes = 1 << 20
+const remoteResponseMaxBodyBytes int64 = 1 << 20
+const defaultVerifyRefreshMinInterval = 2 * time.Second
+const allowDangerousIssuerKeysetReplacement = "EXIT_ALLOW_DANGEROUS_ISSUER_KEYSET_REPLACEMENT"
+
+var (
+	egressChainPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	egressIfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,64}$`)
+)
 
 func New() *Service {
 	addr := os.Getenv("EXIT_ADDR")
@@ -158,6 +222,13 @@ func New() *Service {
 		issuerURLs = []string{issuerURL}
 	}
 	issuerURLs = normalizeHTTPURLs(issuerURLs)
+	if len(issuerURLs) == 0 {
+		normalizedIssuerURL := normalizeHTTPURL(issuerURL)
+		if normalizedIssuerURL == "" {
+			normalizedIssuerURL = "http://127.0.0.1:8082"
+		}
+		issuerURLs = []string{normalizedIssuerURL}
+	}
 	issuerURL = issuerURLs[0]
 	issuerMinSources := 1
 	if raw := strings.TrimSpace(os.Getenv("EXIT_ISSUER_MIN_SOURCES")); raw != "" {
@@ -169,6 +240,12 @@ func New() *Service {
 	if raw := strings.TrimSpace(os.Getenv("EXIT_ISSUER_MIN_OPERATORS")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			issuerMinOperators = n
+		}
+	}
+	issuerMinKeyVotes := issuerMinSources
+	if raw := strings.TrimSpace(os.Getenv("EXIT_ISSUER_MIN_KEY_VOTES")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			issuerMinKeyVotes = n
 		}
 	}
 	revocationsURL := os.Getenv("ISSUER_REVOCATIONS_URL")
@@ -236,6 +313,12 @@ func New() *Service {
 			sessionCleanupSec = n
 		}
 	}
+	maxActiveSessions := defaultMaxActiveSessions
+	if v := strings.TrimSpace(os.Getenv("EXIT_MAX_ACTIVE_SESSIONS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxActiveSessions = n
+		}
+	}
 	var wgManager wg.Manager
 	switch wgBackend {
 	case "command":
@@ -268,7 +351,11 @@ func New() *Service {
 	if egressChain == "" {
 		egressChain = "PRIVNODE_EGRESS"
 	}
-	tokenProofReplayGuard := os.Getenv("EXIT_TOKEN_PROOF_REPLAY_GUARD") == "1"
+	tokenProofReplayGuard := os.Getenv("EXIT_TOKEN_PROOF_REPLAY_GUARD") != "0"
+	tokenProofReplayStoreFile := strings.TrimSpace(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"))
+	if tokenProofReplayStoreFile == "" {
+		tokenProofReplayStoreFile = "data/exit_token_proof_replay.json"
+	}
 	peerRebindAfter := time.Duration(0)
 	if v := os.Getenv("EXIT_PEER_REBIND_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -288,14 +375,32 @@ func New() *Service {
 			accountingFlushSec = n
 		}
 	}
+	settlementReconcileSec := 60
+	if v := os.Getenv("EXIT_SETTLEMENT_RECONCILE_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			settlementReconcileSec = n
+		}
+	}
 	startupSyncTimeout := time.Duration(0)
 	if v := strings.TrimSpace(os.Getenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			startupSyncTimeout = time.Duration(n) * time.Second
 		}
 	}
+	verifyRefreshMinInterval := defaultVerifyRefreshMinInterval
+	if v := strings.TrimSpace(os.Getenv("EXIT_VERIFY_ISSUER_REFRESH_MIN_INTERVAL_MS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			verifyRefreshMinInterval = time.Duration(n) * time.Millisecond
+		}
+	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("EXIT_PROD_STRICT") == "1"
+	sessionReserve := int64(200000)
+	if raw := strings.TrimSpace(os.Getenv("EXIT_SESSION_RESERVE_MICROS")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			sessionReserve = n
+		}
+	}
 	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("EXIT_WG_ONLY_MODE") == "1"
 	if prodStrict {
 		wgOnlyMode = true
@@ -314,59 +419,184 @@ func New() *Service {
 	}
 
 	return &Service{
-		addr:                  addr,
-		dataAddr:              dataAddr,
-		issuerURL:             issuerURL,
-		issuerURLs:            issuerURLs,
-		issuerMinSources:      issuerMinSources,
-		issuerMinOperators:    issuerMinOperators,
-		issuerRequireID:       issuerRequireID,
-		revocationsURL:        revocationsURL,
-		revocationsURLs:       revocationsURLs,
-		dataMode:              dataMode,
-		opaqueSinkAddr:        opaqueSinkAddr,
-		opaqueSourceAddr:      opaqueSourceAddr,
-		opaqueEcho:            opaqueEcho,
-		wgPubKey:              wgPubKey,
-		wgExitIP:              wgExitIP,
-		wgMTU:                 1280,
-		wgKeepaliveSec:        25,
-		ipAllocCursor:         2,
-		wgInterface:           wgInterface,
-		wgPrivateKey:          wgPrivateKey,
-		wgListenPort:          wgListenPort,
-		wgBackend:             wgBackend,
-		wgKernelProxy:         wgKernelProxy,
-		wgKernelProxyMax:      wgKernelProxyMax,
-		wgKernelProxyIdle:     wgKernelProxyIdle,
-		sessionCleanupSec:     sessionCleanupSec,
-		wgManager:             wgManager,
-		liveWGMode:            liveWGMode,
-		wgOnlyMode:            wgOnlyMode,
-		egressBackend:         egressBackend,
-		egressIface:           egressIface,
-		egressCIDR:            egressCIDR,
-		egressChain:           egressChain,
-		tokenProofReplayGuard: tokenProofReplayGuard,
-		peerRebindAfter:       peerRebindAfter,
-		revocationRefreshSec:  revocationRefreshSec,
-		accountingFile:        accountingFile,
-		accountingFlushSec:    accountingFlushSec,
-		startupSyncTimeout:    startupSyncTimeout,
-		betaStrict:            betaStrict,
-		prodStrict:            prodStrict,
-		enforcer:              policy.NewEnforcer(),
-		httpClient:            &http.Client{Timeout: 5 * time.Second},
-		issuerPubs:            make(map[string]ed25519.PublicKey),
-		issuerKeyIssuer:       make(map[string]string),
-		sessions:              make(map[string]sessionInfo),
-		wgSessionProxies:      make(map[string]*net.UDPConn),
-		wgProxyLastSeen:       make(map[string]int64),
-		proofNonceSeen:        make(map[string]map[string]int64),
-		revokedJTI:            make(map[string]int64),
-		minTokenEpoch:         make(map[string]int64),
-		revocationVersion:     make(map[string]int64),
+		addr:                      addr,
+		dataAddr:                  dataAddr,
+		issuerURL:                 issuerURL,
+		issuerURLs:                issuerURLs,
+		issuerMinSources:          issuerMinSources,
+		issuerMinOperators:        issuerMinOperators,
+		issuerMinKeyVotes:         issuerMinKeyVotes,
+		issuerRequireID:           issuerRequireID,
+		revocationsURL:            revocationsURL,
+		revocationsURLs:           revocationsURLs,
+		dataMode:                  dataMode,
+		opaqueSinkAddr:            opaqueSinkAddr,
+		opaqueSourceAddr:          opaqueSourceAddr,
+		opaqueEcho:                opaqueEcho,
+		wgPubKey:                  wgPubKey,
+		wgExitIP:                  wgExitIP,
+		wgMTU:                     1280,
+		wgKeepaliveSec:            25,
+		ipAllocCursor:             2,
+		wgInterface:               wgInterface,
+		wgPrivateKey:              wgPrivateKey,
+		wgListenPort:              wgListenPort,
+		wgBackend:                 wgBackend,
+		wgKernelProxy:             wgKernelProxy,
+		wgKernelProxyMax:          wgKernelProxyMax,
+		wgKernelProxyIdle:         wgKernelProxyIdle,
+		sessionCleanupSec:         sessionCleanupSec,
+		maxActiveSessions:         maxActiveSessions,
+		wgManager:                 wgManager,
+		liveWGMode:                liveWGMode,
+		wgOnlyMode:                wgOnlyMode,
+		egressBackend:             egressBackend,
+		egressIface:               egressIface,
+		egressCIDR:                egressCIDR,
+		egressChain:               egressChain,
+		tokenProofReplayGuard:     tokenProofReplayGuard,
+		tokenProofReplayStoreFile: tokenProofReplayStoreFile,
+		peerRebindAfter:           peerRebindAfter,
+		revocationRefreshSec:      revocationRefreshSec,
+		accountingFile:            accountingFile,
+		accountingFlushSec:        accountingFlushSec,
+		settlementReconcileSec:    settlementReconcileSec,
+		startupSyncTimeout:        startupSyncTimeout,
+		verifyRefreshMinInterval:  verifyRefreshMinInterval,
+		betaStrict:                betaStrict,
+		prodStrict:                prodStrict,
+		enforcer:                  policy.NewEnforcer(),
+		httpClient:                &http.Client{Timeout: 5 * time.Second},
+		issuerPubs:                make(map[string]ed25519.PublicKey),
+		issuerKeyIssuer:           make(map[string]string),
+		sessions:                  make(map[string]sessionInfo),
+		wgSessionProxies:          make(map[string]*net.UDPConn),
+		wgProxyLastSeen:           make(map[string]int64),
+		proofNonceSeen:            make(map[string]map[string]int64),
+		revokedJTI:                make(map[string]int64),
+		minTokenEpoch:             make(map[string]int64),
+		revocationVersion:         make(map[string]int64),
+		settlement:                newSettlementServiceFromEnv(),
+		sessionReserve:            sessionReserve,
 	}
+}
+
+func newSettlementServiceFromEnv() settlement.Service {
+	pricePerMiB := int64(1000)
+	if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_PRICE_PER_MIB_MICROS")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			pricePerMiB = n
+		}
+	}
+	currency := strings.TrimSpace(os.Getenv("SETTLEMENT_CURRENCY"))
+	if currency == "" {
+		currency = "TDPNC"
+	}
+	opts := []settlement.MemoryOption{
+		settlement.WithPricePerMiBMicros(pricePerMiB),
+		settlement.WithCurrency(currency),
+	}
+	nativeCurrency := strings.ToUpper(strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_CURRENCY")))
+	if nativeCurrency != "" && nativeCurrency != strings.ToUpper(currency) {
+		rateNumerator := int64(1)
+		rateDenominator := int64(1)
+		if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_RATE_NUMERATOR")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				rateNumerator = n
+			}
+		}
+		if raw := strings.TrimSpace(os.Getenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				rateDenominator = n
+			}
+		}
+		opts = append(opts, settlement.WithCurrencyRate(nativeCurrency, rateNumerator, rateDenominator))
+	}
+	newCosmosAdapterFromEnv := func(prefix string) (*settlement.CosmosAdapter, string, error) {
+		endpoint := strings.TrimSpace(os.Getenv(prefix + "ENDPOINT"))
+		if endpoint == "" {
+			return nil, "", nil
+		}
+		allowInsecureHTTP := false
+		if raw := strings.TrimSpace(os.Getenv(prefix + "ALLOW_INSECURE_HTTP")); raw != "" {
+			v, err := strconv.ParseBool(raw)
+			if err != nil {
+				return nil, endpoint, fmt.Errorf("%sALLOW_INSECURE_HTTP must be boolean: %w", prefix, err)
+			}
+			allowInsecureHTTP = v
+		}
+
+		queueSize := 256
+		if raw := strings.TrimSpace(os.Getenv(prefix + "QUEUE_SIZE")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				queueSize = n
+			}
+		}
+		retries := 3
+		if raw := strings.TrimSpace(os.Getenv(prefix + "MAX_RETRIES")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+				retries = n
+			}
+		}
+		backoff := 250 * time.Millisecond
+		if raw := strings.TrimSpace(os.Getenv(prefix + "BASE_BACKOFF_MS")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				backoff = time.Duration(n) * time.Millisecond
+			}
+		}
+		timeout := 4 * time.Second
+		if raw := strings.TrimSpace(os.Getenv(prefix + "HTTP_TIMEOUT_MS")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				timeout = time.Duration(n) * time.Millisecond
+			}
+		}
+		submitMode := strings.TrimSpace(os.Getenv(prefix + "SUBMIT_MODE"))
+		if submitMode == "" {
+			submitMode = settlement.CosmosSubmitModeHTTP
+		}
+		adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
+			Endpoint:              endpoint,
+			APIKey:                strings.TrimSpace(os.Getenv(prefix + "API_KEY")),
+			QueueSize:             queueSize,
+			MaxRetries:            retries,
+			BaseBackoff:           backoff,
+			HTTPTimeout:           timeout,
+			AllowInsecureHTTP:     allowInsecureHTTP,
+			SubmitMode:            submitMode,
+			SignedTxBroadcastPath: strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_BROADCAST_PATH")),
+			SignedTxChainID:       strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_CHAIN_ID")),
+			SignedTxSigner:        strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SIGNER")),
+			SignedTxSecret:        strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SECRET")),
+			SignedTxSecretFile:    strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SECRET_FILE")),
+			SignedTxKeyID:         strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_KEY_ID")),
+		})
+		if err != nil {
+			return nil, endpoint, err
+		}
+		return adapter, endpoint, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SETTLEMENT_CHAIN_ADAPTER")), "cosmos") {
+		adapter, endpoint, err := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_")
+		if endpoint == "" {
+			log.Printf("exit settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty; running memory-only mode")
+		} else if err != nil {
+			log.Printf("exit settlement: cosmos adapter init failed (%v); running memory-only mode", err)
+		} else {
+			opts = append(opts, settlement.WithChainAdapter(adapter))
+			log.Printf("exit settlement: cosmos adapter enabled endpoint=%s", endpoint)
+		}
+
+		shadowAdapter, shadowEndpoint, shadowErr := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_SHADOW_")
+		if shadowEndpoint != "" {
+			if shadowErr != nil {
+				log.Printf("exit settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter", shadowErr)
+			} else {
+				opts = append(opts, settlement.WithShadowChainAdapter(shadowAdapter))
+				log.Printf("exit settlement: cosmos shadow adapter enabled endpoint=%s", shadowEndpoint)
+			}
+		}
+	}
+	return settlement.NewMemoryService(opts...)
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -374,12 +604,21 @@ func (s *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("exit http tls init: %w", err)
 	}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	configureOutboundDialPolicy(httpClient, envEnabled(allowDangerousOutboundPrivateDNS), s.betaStrict || s.prodStrict)
 	s.httpClient = httpClient
 
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_require_id=%t wg_only=%t beta_strict=%t",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerRequireID, s.wgOnlyMode, s.betaStrict)
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
+	}
+	if s.tokenProofReplayGuard {
+		if err := s.loadTokenProofReplayStore(time.Now().Unix()); err != nil {
+			return fmt.Errorf("load token proof replay store: %w", err)
+		}
 	}
 	defer s.closeAllWGKernelSessionProxies()
 	if s.wgBackend == "command" {
@@ -424,8 +663,17 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
 	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/metrics", s.handleMetrics)
+	mux.HandleFunc("/v1/settlement/status", s.handleSettlementStatus)
 
-	s.httpSrv = &http.Server{Addr: s.addr, Handler: mux}
+	s.httpSrv = &http.Server{
+		Addr:              s.addr,
+		Handler:           mux,
+		ReadTimeout:       serverReadTimeout,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
+	}
 	errCh := make(chan error, 2)
 	go func() {
 		log.Printf("exit listening on %s", s.addr)
@@ -453,6 +701,11 @@ func (s *Service) Run(ctx context.Context) error {
 	if s.accountingFile != "" {
 		accountingTicker = time.NewTicker(time.Duration(s.accountingFlushSec) * time.Second)
 		defer accountingTicker.Stop()
+	}
+	var settlementReconcileTicker *time.Ticker
+	if s.settlementReconcileSec > 0 && s.settlement != nil {
+		settlementReconcileTicker = time.NewTicker(time.Duration(s.settlementReconcileSec) * time.Second)
+		defer settlementReconcileTicker.Stop()
 	}
 
 	for {
@@ -487,6 +740,10 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 		case <-cleanupTicker.C:
 			s.cleanupExpiredSessions(time.Now())
+		case <-tickerC(settlementReconcileTicker):
+			reconcileCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			s.reconcileSettlement(reconcileCtx)
+			cancel()
 		case <-tickerC(accountingTicker):
 			if err := s.flushAccountingSnapshot(time.Now()); err != nil {
 				log.Printf("exit accounting flush failed: %v", err)
@@ -497,6 +754,9 @@ func (s *Service) Run(ctx context.Context) error {
 
 func (s *Service) validateRuntimeConfig() error {
 	if securehttp.Enabled() {
+		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
+		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
@@ -515,6 +775,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.sessionCleanupSec == 0 {
 		s.sessionCleanupSec = 30
+	}
+	if s.settlementReconcileSec < 0 {
+		return fmt.Errorf("EXIT_SETTLEMENT_RECONCILE_SEC must be >=0")
 	}
 	if s.wgListenPort == 0 {
 		s.wgListenPort = 51831
@@ -631,6 +894,9 @@ func (s *Service) validateRuntimeConfig() error {
 			if s.issuerMinOperators < 2 {
 				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_MIN_OPERATORS>=2 when multiple ISSUER_URLS are configured")
 			}
+			if s.issuerMinKeyVotes < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_MIN_KEY_VOTES>=2 when multiple ISSUER_URLS are configured")
+			}
 			if !s.issuerRequireID {
 				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1 when multiple ISSUER_URLS are configured")
 			}
@@ -651,6 +917,9 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if s.issuerMinOperators < 2 {
 			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_MIN_OPERATORS>=2")
+		}
+		if s.issuerMinKeyVotes < 2 {
+			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_MIN_KEY_VOTES>=2")
 		}
 		if !s.issuerRequireID {
 			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1")
@@ -711,6 +980,23 @@ func (s *Service) effectiveWGKernelProxyMax() int {
 		return s.wgKernelProxyMax
 	}
 	return 2048
+}
+
+func (s *Service) effectiveMaxActiveSessions() int {
+	if s.maxActiveSessions > 0 {
+		return s.maxActiveSessions
+	}
+	return defaultMaxActiveSessions
+}
+
+func (s *Service) sessionCapacityReachedLocked(sessionID string) bool {
+	if s.sessions == nil {
+		return false
+	}
+	if _, exists := s.sessions[sessionID]; exists {
+		return false
+	}
+	return len(s.sessions) >= s.effectiveMaxActiveSessions()
 }
 
 func (s *Service) ensureCommandWGPubKey(ctx context.Context) error {
@@ -816,6 +1102,7 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 					_, _ = conn.WriteToUDP(raw, s.opaqueSinkUDP)
 				}
 				s.recordAccept(uint64(len(raw)), claims.Tier)
+				s.recordSessionIngress(sessionID, int64(len(raw)))
 			default:
 				var inner proto.InnerPacket
 				if err := json.Unmarshal(payload, &inner); err != nil {
@@ -848,6 +1135,7 @@ func (s *Service) startUDP(ctx context.Context, errCh chan<- error) error {
 				}
 				log.Printf("exit accepted packet session=%s dest_port=%d payload_len=%d", sessionID, inner.DestinationPort, len(inner.Payload))
 				s.recordAccept(uint64(len(inner.Payload)), claims.Tier)
+				s.recordSessionIngress(sessionID, int64(len(inner.Payload)))
 			}
 		}
 	}()
@@ -911,6 +1199,7 @@ func (s *Service) startOpaqueSource(ctx context.Context, errCh chan<- error) err
 				continue
 			}
 			s.recordDownlinkForward(uint64(len(payload)))
+			s.recordSessionEgress(sessionID, int64(len(payload)))
 		}
 	}()
 
@@ -1107,6 +1396,7 @@ func (s *Service) runWGSessionProxy(sessionID string, proxyConn *net.UDPConn) {
 			continue
 		}
 		s.recordDownlinkForward(uint64(len(payload)))
+		s.recordSessionEgress(sessionID, int64(len(payload)))
 	}
 }
 
@@ -1272,6 +1562,25 @@ func udpPortOf(addr string) (int, error) {
 	return udpAddr.Port, nil
 }
 
+func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
+	if maxBytes <= 0 {
+		maxBytes = pathControlJSONBodyMaxBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("invalid trailing json")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1279,7 +1588,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req proto.PathOpenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrictJSONBody(w, r, &req, pathControlJSONBodyMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1320,18 +1629,20 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(claims.ExitScope) > 0 {
-		allowed := false
-		for _, id := range claims.ExitScope {
-			if id == req.ExitID {
-				allowed = true
-				break
-			}
+	if len(claims.ExitScope) == 0 {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "token exit scope required"})
+		return
+	}
+	allowed := false
+	for _, id := range claims.ExitScope {
+		if strings.TrimSpace(id) == req.ExitID {
+			allowed = true
+			break
 		}
-		if !allowed {
-			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "exit scope denied"})
-			return
-		}
+	}
+	if !allowed {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "exit scope denied"})
+		return
 	}
 	if req.SessionID == "" {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "missing session_id"})
@@ -1361,6 +1672,11 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.allocateClientInnerIP()
 
 	s.mu.Lock()
+	if s.sessionCapacityReachedLocked(req.SessionID) {
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "session capacity reached"})
+		return
+	}
 	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
 	s.sessions[req.SessionID] = sessionInfo{
 		claims:        claims,
@@ -1376,6 +1692,11 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if staleProxy != nil {
 		_ = staleProxy.Close()
 	}
+	subjectForSettlement := strings.TrimSpace(claims.Subject)
+	if subjectForSettlement == "" {
+		subjectForSettlement = "client-anon"
+	}
+	s.reserveSettlementForSession(r.Context(), req.SessionID, subjectForSettlement)
 
 	if req.Transport == "wireguard-udp" {
 		wgCfg := wg.SessionConfig{
@@ -1402,9 +1723,10 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := proto.PathOpenResponse{
-		Accepted:   true,
-		SessionExp: claims.ExpiryUnix,
-		Transport:  req.Transport,
+		Accepted:     true,
+		SessionExp:   claims.ExpiryUnix,
+		Transport:    req.Transport,
+		SessionKeyID: sessionKeyID,
 	}
 	if req.Transport == "wireguard-udp" {
 		resp.ExitInnerPub = s.wgPubKey
@@ -1412,7 +1734,6 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		resp.ExitInnerIP = s.wgExitIP
 		resp.InnerMTU = s.wgMTU
 		resp.KeepaliveSec = s.wgKeepaliveSec
-		resp.SessionKeyID = sessionKeyID
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -1423,7 +1744,7 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.PathCloseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrictJSONBody(w, r, &req, pathControlJSONBodyMaxBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -1431,22 +1752,30 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing session_id", http.StatusBadRequest)
 		return
 	}
+	req.SessionKeyID = strings.TrimSpace(req.SessionKeyID)
 	s.mu.Lock()
 	session, exists := s.sessions[req.SessionID]
-	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
-	if exists {
-		delete(s.sessions, req.SessionID)
-		s.metrics.ActiveSessions = uint64(len(s.sessions))
+	if !exists {
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "unknown-session"})
+		return
 	}
+	if session.sessionKeyID != "" &&
+		subtle.ConstantTimeCompare([]byte(req.SessionKeyID), []byte(session.sessionKeyID)) != 1 {
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "session-key-id-mismatch"})
+		return
+	}
+	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
+	delete(s.sessions, req.SessionID)
+	s.metrics.ActiveSessions = uint64(len(s.sessions))
 	s.mu.Unlock()
 	if staleProxy != nil {
 		_ = staleProxy.Close()
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if !exists {
-		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "unknown-session"})
-		return
-	}
 	if session.transport == "wireguard-udp" {
 		wgCfg := wg.SessionConfig{
 			SessionID:     req.SessionID,
@@ -1460,6 +1789,7 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.finalizeSettlementForSession(r.Context(), req.SessionID, session)
 	log.Printf("exit closed session=%s", req.SessionID)
 	_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: true})
 }
@@ -1494,6 +1824,16 @@ func validatePathOpenClaims(claims crypto.CapabilityClaims, nowUnix int64) error
 	if strings.TrimSpace(claims.TokenID) == "" {
 		return errors.New("token id missing")
 	}
+	hasScopedExit := false
+	for _, id := range claims.ExitScope {
+		if strings.TrimSpace(id) != "" {
+			hasScopedExit = true
+			break
+		}
+	}
+	if !hasScopedExit {
+		return errors.New("token exit scope required")
+	}
 	if claims.ExpiryUnix <= 0 || nowUnix >= claims.ExpiryUnix {
 		return errors.New("token expired")
 	}
@@ -1511,6 +1851,7 @@ func verifyPathOpenTokenProof(req proto.PathOpenRequest, claims crypto.Capabilit
 	input := crypto.PathOpenProofInput{
 		Token:           req.Token,
 		ExitID:          req.ExitID,
+		MiddleRelayID:   req.MiddleRelayID,
 		TokenProofNonce: req.TokenProofNonce,
 		ClientInnerPub:  req.ClientInnerPub,
 		Transport:       req.Transport,
@@ -1550,6 +1891,12 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 	}
 	seen := s.proofNonceSeen[tokenID]
 	if seen == nil {
+		if len(s.proofNonceSeen) >= tokenProofReplayMaxTokenIDs {
+			pruneExpiredProofNonceBucketsLocked(s.proofNonceSeen, nowUnix)
+			if len(s.proofNonceSeen) >= tokenProofReplayMaxTokenIDs {
+				return errors.New("token proof replay cache saturated")
+			}
+		}
 		seen = make(map[string]int64)
 		s.proofNonceSeen[tokenID] = seen
 	}
@@ -1561,8 +1908,246 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 	if _, exists := seen[nonce]; exists {
 		return errors.New("token proof replay")
 	}
+	if len(seen) >= tokenProofReplayMaxNoncesPerToken {
+		return errors.New("token proof replay cache saturated")
+	}
 	seen[nonce] = exp
+	if err := s.persistTokenProofReplayStoreLocked(nowUnix); err != nil {
+		delete(seen, nonce)
+		if len(seen) == 0 {
+			delete(s.proofNonceSeen, tokenID)
+		}
+		return fmt.Errorf("token proof replay persistence failed: %w", err)
+	}
 	return nil
+}
+
+func pruneExpiredProofNonceBucketsLocked(buckets map[string]map[string]int64, nowUnix int64) {
+	for tokenID, seen := range buckets {
+		for nonce, until := range seen {
+			if nowUnix >= until {
+				delete(seen, nonce)
+			}
+		}
+		if len(seen) == 0 {
+			delete(buckets, tokenID)
+		}
+	}
+}
+
+type tokenProofReplayStoreSnapshot struct {
+	Version     int                         `json:"version"`
+	SavedAtUnix int64                       `json:"saved_at_unix"`
+	Buckets     map[string]map[string]int64 `json:"buckets"`
+}
+
+func (s *Service) loadTokenProofReplayStore(nowUnix int64) error {
+	path := strings.TrimSpace(s.tokenProofReplayStoreFile)
+	if path == "" {
+		return nil
+	}
+	b, err := readRegularFileBounded(path, tokenProofReplayStoreMaxBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var snapshot tokenProofReplayStoreSnapshot
+	if err := json.Unmarshal(b, &snapshot); err != nil {
+		return fmt.Errorf("invalid replay store json: %w", err)
+	}
+	buckets := snapshot.Buckets
+	if buckets == nil {
+		buckets = make(map[string]map[string]int64)
+	}
+	pruneExpiredProofNonceBucketsLocked(buckets, nowUnix)
+	buckets = trimReplayBucketsToCaps(buckets)
+
+	s.mu.Lock()
+	s.proofNonceSeen = buckets
+	s.mu.Unlock()
+	return nil
+}
+
+func trimReplayBucketsToCaps(in map[string]map[string]int64) map[string]map[string]int64 {
+	type nonceItem struct {
+		nonce string
+		until int64
+	}
+	type bucketItem struct {
+		tokenID  string
+		maxUntil int64
+		nonces   map[string]int64
+	}
+	buckets := make([]bucketItem, 0, len(in))
+	for tokenID, seen := range in {
+		if len(seen) == 0 {
+			continue
+		}
+		items := make([]nonceItem, 0, len(seen))
+		for nonce, until := range seen {
+			items = append(items, nonceItem{nonce: nonce, until: until})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].until == items[j].until {
+				return items[i].nonce < items[j].nonce
+			}
+			return items[i].until > items[j].until
+		})
+		if len(items) > tokenProofReplayMaxNoncesPerToken {
+			items = items[:tokenProofReplayMaxNoncesPerToken]
+		}
+		clamped := make(map[string]int64, len(items))
+		maxUntil := int64(0)
+		for _, item := range items {
+			clamped[item.nonce] = item.until
+			if item.until > maxUntil {
+				maxUntil = item.until
+			}
+		}
+		buckets = append(buckets, bucketItem{
+			tokenID:  tokenID,
+			maxUntil: maxUntil,
+			nonces:   clamped,
+		})
+	}
+	sort.Slice(buckets, func(i, j int) bool {
+		if buckets[i].maxUntil == buckets[j].maxUntil {
+			return buckets[i].tokenID < buckets[j].tokenID
+		}
+		return buckets[i].maxUntil > buckets[j].maxUntil
+	})
+	if len(buckets) > tokenProofReplayMaxTokenIDs {
+		buckets = buckets[:tokenProofReplayMaxTokenIDs]
+	}
+	out := make(map[string]map[string]int64, len(buckets))
+	for _, bucket := range buckets {
+		out[bucket.tokenID] = bucket.nonces
+	}
+	return out
+}
+
+func (s *Service) persistTokenProofReplayStoreLocked(nowUnix int64) error {
+	path := strings.TrimSpace(s.tokenProofReplayStoreFile)
+	if path == "" {
+		return nil
+	}
+	snapshot := tokenProofReplayStoreSnapshot{
+		Version:     1,
+		SavedAtUnix: nowUnix,
+		Buckets:     make(map[string]map[string]int64, len(s.proofNonceSeen)),
+	}
+	for tokenID, seen := range s.proofNonceSeen {
+		if len(seen) == 0 {
+			continue
+		}
+		bucket := make(map[string]int64, len(seen))
+		for nonce, until := range seen {
+			bucket[nonce] = until
+		}
+		snapshot.Buckets[tokenID] = bucket
+	}
+	b, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, b, 0o600)
+}
+
+func readRegularFileBounded(path string, maxBytes int64) ([]byte, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("file path is required")
+	}
+	lstatInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if lstatInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("file %s must not be a symlink", path)
+	}
+	if !lstatInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s must be a regular file", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, statErr := file.Stat()
+	if statErr != nil {
+		return nil, statErr
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s must be a regular file", path)
+	}
+	if !os.SameFile(lstatInfo, info) {
+		return nil, fmt.Errorf("file %s changed during open", path)
+	}
+	if maxBytes > 0 && info.Size() > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
+	}
+	limit := maxBytes
+	if limit <= 0 {
+		limit = 1
+	}
+	payload, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if maxBytes > 0 && int64(len(payload)) > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
+	}
+	return payload, nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("file %s must not be a symlink", path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("file %s must be a regular file", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	tmpDir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(tmpDir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if perm != 0 {
+		if err := tmpFile.Chmod(perm); err != nil {
+			_ = tmpFile.Close()
+			return err
+		}
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) (crypto.CapabilityClaims, error) {
@@ -1589,8 +2174,26 @@ func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) 
 		s.mu.Unlock()
 		return crypto.CapabilityClaims{}, errors.New("replay-detected")
 	}
-	if len(session.seenNonces) >= 8192 {
-		session.seenNonces = make(map[uint64]struct{}, 1024)
+	if session.highestNonce > sessionReplayWindowSize {
+		minAccepted := session.highestNonce - sessionReplayWindowSize
+		if nonce <= minAccepted {
+			s.mu.Unlock()
+			return crypto.CapabilityClaims{}, errors.New("replay-window-expired")
+		}
+	}
+	if nonce > session.highestNonce {
+		session.highestNonce = nonce
+	}
+	if len(session.seenNonces) >= sessionReplayWindowSize*2 {
+		pruneBefore := uint64(0)
+		if session.highestNonce > sessionReplayWindowSize {
+			pruneBefore = session.highestNonce - sessionReplayWindowSize
+		}
+		for existing := range session.seenNonces {
+			if existing <= pruneBefore {
+				delete(session.seenNonces, existing)
+			}
+		}
 	}
 	session.seenNonces[nonce] = struct{}{}
 	session.lastActivity = now
@@ -1658,6 +2261,11 @@ func (s *Service) cleanupExpiredSessions(now time.Time) {
 }
 
 func (s *Service) verifyToken(token string) (crypto.CapabilityClaims, string, error) {
+	token = strings.TrimSpace(token)
+	if err := validateCapabilityTokenFormat(token); err != nil {
+		return crypto.CapabilityClaims{}, "", err
+	}
+
 	snapshotKeys := func() (map[string]ed25519.PublicKey, map[string]string) {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
@@ -1684,7 +2292,7 @@ func (s *Service) verifyToken(token string) (crypto.CapabilityClaims, string, er
 	for attempt := 0; attempt < 2; attempt++ {
 		keys, keyIssuers := snapshotKeys()
 		if len(keys) == 0 {
-			if err := s.refreshIssuerKeys(context.Background()); err != nil {
+			if err := s.refreshIssuerKeysForVerify(context.Background()); err != nil {
 				lastErr = errors.New("issuer pubkey unavailable")
 				continue
 			}
@@ -1704,7 +2312,7 @@ func (s *Service) verifyToken(token string) (crypto.CapabilityClaims, string, er
 			lastErr = err
 		}
 		if attempt == 0 {
-			if err := s.refreshIssuerKeys(context.Background()); err != nil {
+			if err := s.refreshIssuerKeysForVerify(context.Background()); err != nil {
 				lastErr = err
 			}
 		}
@@ -1713,6 +2321,49 @@ func (s *Service) verifyToken(token string) (crypto.CapabilityClaims, string, er
 		lastErr = errors.New("no issuer keys available")
 	}
 	return crypto.CapabilityClaims{}, "", lastErr
+}
+
+func validateCapabilityTokenFormat(token string) error {
+	if token == "" {
+		return errors.New("missing token")
+	}
+	if len(token) > capabilityTokenMaxBytes {
+		return errors.New("token too large")
+	}
+	payloadB64, sigB64, ok := strings.Cut(token, ".")
+	if !ok || payloadB64 == "" || sigB64 == "" {
+		return errors.New("invalid token format")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(payloadB64)
+	if err != nil {
+		return errors.New("invalid token payload encoding")
+	}
+	if len(payload) == 0 || len(payload) > capabilityTokenPayloadMaxBytes {
+		return errors.New("invalid token payload size")
+	}
+	if !json.Valid(payload) {
+		return errors.New("invalid token payload json")
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
+	if err != nil {
+		return errors.New("invalid token signature encoding")
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return errors.New("invalid token signature size")
+	}
+	return nil
+}
+
+func (s *Service) refreshIssuerKeysForVerify(ctx context.Context) error {
+	s.verifyRefreshMu.Lock()
+	defer s.verifyRefreshMu.Unlock()
+	if s.verifyRefreshMinInterval > 0 && !s.verifyRefreshLast.IsZero() {
+		if time.Since(s.verifyRefreshLast) < s.verifyRefreshMinInterval {
+			return fmt.Errorf("issuer key refresh throttled")
+		}
+	}
+	s.verifyRefreshLast = time.Now()
+	return s.refreshIssuerKeys(ctx)
 }
 
 func (s *Service) refreshIssuerKeys(ctx context.Context) error {
@@ -1725,6 +2376,7 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 	updated := make(map[string]ed25519.PublicKey)
 	updatedIssuers := make(map[string]string)
 	updatedMinEpoch := make(map[string]int64)
+	keyVoters := make(map[string]map[string]struct{})
 	successSources := 0
 	successOperators := make(map[string]struct{})
 	var lastErr error
@@ -1749,6 +2401,12 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 		for _, pub := range bundle.pubs {
 			keyID := issuerKeyID(pub)
 			updated[keyID] = pub
+			voters := keyVoters[keyID]
+			if voters == nil {
+				voters = make(map[string]struct{})
+				keyVoters[keyID] = voters
+			}
+			voters[sourceOperator] = struct{}{}
 			if issuerID := strings.TrimSpace(bundle.issuerID); issuerID != "" {
 				updatedIssuers[keyID] = issuerID
 			}
@@ -1779,9 +2437,33 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 	if len(successOperators) < requiredOperators {
 		return fmt.Errorf("issuer operator quorum not met: operators=%d required=%d", len(successOperators), requiredOperators)
 	}
+	requiredKeyVotes := s.issuerMinKeyVotes
+	if requiredKeyVotes < 1 {
+		requiredKeyVotes = 1
+	}
+	filtered := make(map[string]ed25519.PublicKey, len(updated))
+	filteredIssuers := make(map[string]string, len(updatedIssuers))
+	for keyID, pub := range updated {
+		if len(keyVoters[keyID]) < requiredKeyVotes {
+			continue
+		}
+		filtered[keyID] = pub
+		if issuerID := updatedIssuers[keyID]; issuerID != "" {
+			filteredIssuers[keyID] = issuerID
+		}
+	}
+	if len(filtered) == 0 {
+		return fmt.Errorf("issuer key quorum not met: key_votes_required=%d", requiredKeyVotes)
+	}
 	s.mu.Lock()
-	s.issuerPubs = updated
-	s.issuerKeyIssuer = updatedIssuers
+	defer s.mu.Unlock()
+	if len(s.issuerPubs) > 0 &&
+		!envEnabled(allowDangerousIssuerKeysetReplacement) &&
+		!issuerKeysetHasOverlap(s.issuerPubs, filtered) {
+		return errors.New("issuer key continuity check failed: no overlap with existing trusted keys")
+	}
+	s.issuerPubs = filtered
+	s.issuerKeyIssuer = filteredIssuers
 	if s.minTokenEpoch == nil {
 		s.minTokenEpoch = make(map[string]int64)
 	}
@@ -1790,12 +2472,23 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 			s.minTokenEpoch[issuerID] = minEpoch
 		}
 	}
-	for _, pub := range updated {
+	for _, pub := range filtered {
 		s.issuerPub = pub
 		break
 	}
-	s.mu.Unlock()
 	return nil
+}
+
+func issuerKeysetHasOverlap(existing map[string]ed25519.PublicKey, next map[string]ed25519.PublicKey) bool {
+	if len(existing) == 0 || len(next) == 0 {
+		return false
+	}
+	for keyID := range existing {
+		if _, ok := next[keyID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 type issuerKeyBundle struct {
@@ -1821,7 +2514,7 @@ func (s *Service) fetchIssuerPubKeysFrom(ctx context.Context, issuerURL string) 
 		return issuerKeyBundle{}, errors.New("issuer key endpoint returned non-200")
 	}
 	var out proto.IssuerPubKeysResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return issuerKeyBundle{}, err
 	}
 	pubs := make([]ed25519.PublicKey, 0, len(out.PubKeys))
@@ -1857,7 +2550,7 @@ func (s *Service) fetchIssuerPubKeyLegacy(ctx context.Context, issuerURL string)
 		return issuerKeyBundle{}, errors.New("issuer key endpoint returned non-200")
 	}
 	var out map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return issuerKeyBundle{}, err
 	}
 	pubB64 := strings.TrimSpace(out["pub_key"])
@@ -1910,6 +2603,135 @@ func (s *Service) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(m)
 }
 
+func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := settlementStatusResponse{
+		Enabled: s.settlement != nil,
+	}
+	if s.settlement != nil {
+		reconcileCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		report, stale, checkedAt, lastError, err := s.reconcileSettlementStatus(reconcileCtx)
+		cancel()
+		if err != nil {
+			log.Printf("exit settlement status warning err=%v", err)
+		}
+		resp.CheckedAt = checkedAt
+		resp.LastError = lastError
+		resp.Stale = stale
+		resp.ReportGeneratedAt = report.GeneratedAt
+		resp.PendingAdapterOperations = report.PendingAdapterOperations
+		resp.ShadowAdapterConfigured = report.ShadowAdapterConfigured
+		resp.ShadowAttemptedOperations = report.ShadowAttemptedOperations
+		resp.ShadowSubmittedOperations = report.ShadowSubmittedOperations
+		resp.ShadowFailedOperations = report.ShadowFailedOperations
+		resp.PendingOperations = report.PendingOperations
+		resp.SubmittedOperations = report.SubmittedOperations
+		resp.ConfirmedOperations = report.ConfirmedOperations
+		resp.FailedOperations = report.FailedOperations
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) reserveSettlementForSession(ctx context.Context, sessionID string, subjectID string) {
+	if s.settlement == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	subjectID = strings.TrimSpace(subjectID)
+	if sessionID == "" || subjectID == "" {
+		return
+	}
+	amount := s.sessionReserve
+	if amount <= 0 {
+		amount = 200000
+	}
+	_, err := s.settlement.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: amount,
+	})
+	if err != nil {
+		log.Printf("exit settlement reserve warning session=%s err=%v", sessionID, err)
+	}
+}
+
+func (s *Service) finalizeSettlementForSession(ctx context.Context, sessionID string, session sessionInfo) {
+	if s.settlement == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	subjectID := strings.TrimSpace(session.claims.Subject)
+	if subjectID == "" {
+		subjectID = "client-anon"
+	}
+	if err := s.settlement.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		BytesIngress: session.ingressBytes,
+		BytesEgress:  session.egressBytes,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		log.Printf("exit settlement usage warning session=%s err=%v", sessionID, err)
+		return
+	}
+	sessionSettlement, err := s.settlement.SettleSession(ctx, sessionID)
+	if err != nil {
+		log.Printf("exit settlement finalize warning session=%s err=%v", sessionID, err)
+		return
+	}
+	rewardMicros := sessionSettlement.ChargedMicros / 2
+	if rewardMicros <= 0 {
+		return
+	}
+	providerSubjectID := "exit:" + strings.ReplaceAll(s.addr, ":", "_")
+	if _, err := s.settlement.IssueReward(ctx, settlement.RewardIssue{
+		RewardID:          "rew-" + sessionID,
+		ProviderSubjectID: providerSubjectID,
+		SessionID:         sessionID,
+		RewardMicros:      rewardMicros,
+		Currency:          sessionSettlement.Currency,
+		IssuedAt:          time.Now().UTC(),
+	}); err != nil {
+		log.Printf("exit settlement reward warning session=%s err=%v", sessionID, err)
+	}
+}
+
+func (s *Service) reconcileSettlement(ctx context.Context) {
+	report, _, _, _, err := s.reconcileSettlementStatus(ctx)
+	if err != nil {
+		log.Printf("exit settlement reconcile warning err=%v", err)
+		return
+	}
+	if report.PendingAdapterOperations > 0 || report.FailedOperations > 0 {
+		log.Printf("exit settlement reconcile pending=%d failed=%d", report.PendingAdapterOperations, report.FailedOperations)
+	}
+}
+
+func (s *Service) reconcileSettlementStatus(ctx context.Context) (settlement.ReconcileReport, bool, time.Time, string, error) {
+	if s.settlement == nil {
+		return settlement.ReconcileReport{}, false, time.Time{}, "", nil
+	}
+	report, err := s.settlement.Reconcile(ctx)
+	checkedAt := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settlementStatus.lastCheckedAt = checkedAt
+	if err != nil {
+		s.settlementStatus.lastError = err.Error()
+		return s.settlementStatus.lastReport, true, checkedAt, s.settlementStatus.lastError, err
+	}
+	s.settlementStatus.lastReport = report
+	s.settlementStatus.lastError = ""
+	return report, false, checkedAt, "", nil
+}
+
 func (s *Service) recordAccept(bytes uint64, tier int) {
 	s.mu.Lock()
 	s.metrics.AcceptedPackets++
@@ -1923,6 +2745,32 @@ func (s *Service) recordAccept(bytes uint64, tier int) {
 		s.metrics.AcceptedTier3Packets++
 	}
 	s.metrics.AccountingUpdatedUnix = time.Now().Unix()
+	s.mu.Unlock()
+}
+
+func (s *Service) recordSessionIngress(sessionID string, bytes int64) {
+	if bytes <= 0 || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		session.ingressBytes += bytes
+		s.sessions[sessionID] = session
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) recordSessionEgress(sessionID string, bytes int64) {
+	if bytes <= 0 || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		session.egressBytes += bytes
+		s.sessions[sessionID] = session
+	}
 	s.mu.Unlock()
 }
 
@@ -2022,7 +2870,11 @@ func (s *Service) configureEgress(ctx context.Context) error {
 	if s.egressBackend != "command" {
 		return nil
 	}
-	for _, cmdStr := range buildEgressSetupCommands(s.egressChain, s.egressCIDR, s.egressIface) {
+	chain, cidr, iface, err := sanitizeEgressCommandInputs(s.egressChain, s.egressCIDR, s.egressIface)
+	if err != nil {
+		return err
+	}
+	for _, cmdStr := range buildEgressSetupCommands(chain, cidr, iface) {
 		if err := runShell(ctx, cmdStr); err != nil {
 			return fmt.Errorf("egress setup failed cmd=%q: %w", cmdStr, err)
 		}
@@ -2035,14 +2887,46 @@ func (s *Service) teardownEgress(ctx context.Context) error {
 	if s.egressBackend != "command" || !s.egressConfigured {
 		return nil
 	}
+	chain, cidr, iface, err := sanitizeEgressCommandInputs(s.egressChain, s.egressCIDR, s.egressIface)
+	if err != nil {
+		return err
+	}
 	var firstErr error
-	for _, cmdStr := range buildEgressCleanupCommands(s.egressChain, s.egressCIDR, s.egressIface) {
+	for _, cmdStr := range buildEgressCleanupCommands(chain, cidr, iface) {
 		if err := runShell(ctx, cmdStr); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("egress cleanup failed cmd=%q: %w", cmdStr, err)
 		}
 	}
 	s.egressConfigured = false
 	return firstErr
+}
+
+func sanitizeEgressCommandInputs(chain string, cidr string, iface string) (string, string, string, error) {
+	chain = strings.TrimSpace(chain)
+	if chain == "" {
+		chain = "PRIVNODE_EGRESS"
+	}
+	if !egressChainPattern.MatchString(chain) || strings.HasPrefix(chain, "-") {
+		return "", "", "", fmt.Errorf("invalid EXIT_EGRESS_CHAIN: %q", chain)
+	}
+
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return "", "", "", errors.New("invalid EXIT_EGRESS_CIDR: empty")
+	}
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return "", "", "", fmt.Errorf("invalid EXIT_EGRESS_CIDR: %q", cidr)
+	}
+
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		return "", "", "", errors.New("invalid EXIT_EGRESS_IFACE: empty")
+	}
+	if !egressIfacePattern.MatchString(iface) || strings.HasPrefix(iface, "-") {
+		return "", "", "", fmt.Errorf("invalid EXIT_EGRESS_IFACE: %q", iface)
+	}
+
+	return chain, cidr, iface, nil
 }
 
 func buildEgressSetupCommands(chain string, cidr string, iface string) []string {
@@ -2105,11 +2989,7 @@ func (s *Service) flushAccountingSnapshot(now time.Time) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := s.accountingFile + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.accountingFile)
+	return writeFileAtomic(s.accountingFile, b, 0o644)
 }
 
 func tickerC(t *time.Ticker) <-chan time.Time {
@@ -2151,7 +3031,7 @@ func (s *Service) refreshRevocations(ctx context.Context) error {
 			continue
 		}
 		var out proto.RevocationListResponse
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 			_ = resp.Body.Close()
 			lastErr = err
 			continue
@@ -2172,17 +3052,53 @@ func (s *Service) refreshRevocations(ctx context.Context) error {
 	return nil
 }
 
+func decodeBoundedJSONResponse(body io.Reader, dst any, maxBytes int64) error {
+	if body == nil {
+		return fmt.Errorf("empty response body")
+	}
+	if maxBytes <= 0 {
+		return fmt.Errorf("invalid response size limit: %d", maxBytes)
+	}
+	reader := &io.LimitedReader{R: body, N: maxBytes + 1}
+	dec := json.NewDecoder(reader)
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if reader.N <= 0 {
+		return fmt.Errorf("response body exceeds %d bytes", maxBytes)
+	}
+	var trailer json.RawMessage
+	if err := dec.Decode(&trailer); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing json content")
+		}
+		return err
+	}
+	if reader.N <= 0 {
+		return fmt.Errorf("response body exceeds %d bytes", maxBytes)
+	}
+	return nil
+}
+
 func (s *Service) applyRevocationFeed(feed proto.RevocationListResponse, now int64) error {
 	keyID, err := s.verifyRevocationFeed(feed, now)
 	if err != nil {
 		return err
 	}
 	issuerID := strings.TrimSpace(feed.Issuer)
+
+	s.mu.Lock()
+	if mappedIssuer := strings.TrimSpace(s.issuerKeyIssuer[keyID]); mappedIssuer != "" {
+		if issuerID == "" {
+			issuerID = mappedIssuer
+		} else if issuerID != mappedIssuer {
+			s.mu.Unlock()
+			return fmt.Errorf("revocation feed issuer %q does not match signer issuer %q", issuerID, mappedIssuer)
+		}
+	}
 	if issuerID == "" {
 		issuerID = keyID
 	}
-
-	s.mu.Lock()
 	if s.revocationVersion == nil {
 		s.revocationVersion = make(map[string]int64)
 	}
@@ -2239,7 +3155,7 @@ func (s *Service) acceptsTokenKeyEpoch(claims crypto.CapabilityClaims, issuerKey
 
 func (s *Service) verifyRevocationFeed(feed proto.RevocationListResponse, now int64) (string, error) {
 	if feed.Signature == "" {
-		return "*", nil
+		return "", errors.New("revocation feed signature missing")
 	}
 	if feed.ExpiresAt > 0 && now >= feed.ExpiresAt {
 		return "", errors.New("revocation feed expired")
@@ -2310,15 +3226,229 @@ func splitCSV(raw string) []string {
 	return out
 }
 
+func envEnabled(name string) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeHTTPURL(raw string) string {
 	v := strings.TrimSpace(raw)
 	if v == "" {
 		return ""
 	}
-	if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
-		return strings.TrimRight(v, "/")
+	if !strings.Contains(v, "://") {
+		base := strings.TrimRight(v, "/")
+		host := base
+		if cut, _, ok := strings.Cut(base, "/"); ok {
+			host = cut
+		}
+		if isLoopbackURLHost(host) {
+			v = "http://" + base
+		} else {
+			v = "https://" + base
+		}
 	}
-	return "http://" + strings.TrimRight(v, "/")
+	parsed, err := url.Parse(v)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.Scheme == "http" &&
+		!isLoopbackURLHost(parsed.Host) &&
+		!isLocalDevelopmentURLHost(parsed.Host) &&
+		enforceHTTPSControlURL() &&
+		!allowDangerousInsecureControlURLHTTP() {
+		return ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func enforceHTTPSControlURL() bool {
+	raw := strings.TrimSpace(os.Getenv("EXIT_REQUIRE_HTTPS_CONTROL_URL"))
+	if raw == "" {
+		return true
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func allowDangerousInsecureControlURLHTTP() bool {
+	raw := strings.TrimSpace(os.Getenv("EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP"))
+	return raw == "1" || strings.EqualFold(raw, "true")
+}
+
+func isLoopbackURLHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.Count(host, ":") == 1 || strings.HasPrefix(host, "[") {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+func isLocalDevelopmentURLHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.Count(host, ":") == 1 || strings.HasPrefix(host, "[") {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	return host != "" && (host == "localhost" || strings.HasSuffix(host, ".local"))
+}
+
+type outboundIPResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+func configureOutboundDialPolicy(client *http.Client, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) {
+	if client == nil {
+		return
+	}
+	transport := cloneHTTPTransport(client.Transport)
+	transport.Proxy = nil
+	if envEnabled("MTLS_ALLOW_PROXY_FROM_ENV") {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	resolver := net.DefaultResolver
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		safeAddress, err := resolveSafeDialAddress(ctx, resolver, address, allowDangerousPrivateDNS, strictBlockPrivateLiteral)
+		if err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, safeAddress)
+	}
+	client.Transport = transport
+}
+
+func cloneHTTPTransport(base http.RoundTripper) *http.Transport {
+	if tr, ok := base.(*http.Transport); ok && tr != nil {
+		return tr.Clone()
+	}
+	if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
+		return tr.Clone()
+	}
+	return &http.Transport{}
+}
+
+func resolveSafeDialAddress(ctx context.Context, resolver outboundIPResolver, address string, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return "", fmt.Errorf("invalid outbound address %q: %w", address, err)
+	}
+	if hasZoneIdentifierHost(host) {
+		return "", fmt.Errorf("outbound host %q includes unsupported zone identifier", host)
+	}
+	host = normalizeHostForCompare(host)
+	if host == "" {
+		return "", fmt.Errorf("outbound host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isDisallowedOutboundDialIP(ip) {
+			if strictBlockPrivateLiteral {
+				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy (strict mode)", ip.String())
+			}
+			if !allowDangerousPrivateDNS {
+				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy", ip.String())
+			}
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve outbound host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("resolve outbound host %q returned no addresses", host)
+	}
+	loopbackHostname := host == "localhost"
+	if loopbackHostname && !allowDangerousPrivateDNS {
+		var selectedLoopback net.IP
+		for _, candidate := range ips {
+			ip := candidate.IP
+			if ip == nil {
+				continue
+			}
+			if !ip.IsLoopback() {
+				return "", fmt.Errorf("outbound host %q resolved to non-loopback address %q", host, ip.String())
+			}
+			if selectedLoopback == nil {
+				selectedLoopback = ip
+			}
+		}
+		if selectedLoopback == nil {
+			return "", fmt.Errorf("outbound host %q resolved only to blocked address classes", host)
+		}
+		return net.JoinHostPort(selectedLoopback.String(), port), nil
+	}
+	for _, candidate := range ips {
+		ip := candidate.IP
+		if ip == nil {
+			continue
+		}
+		if allowDangerousPrivateDNS {
+			return net.JoinHostPort(ip.String(), port), nil
+		}
+		if isDisallowedOutboundDialIP(ip) {
+			if loopbackHostname && ip.IsLoopback() {
+				return net.JoinHostPort(ip.String(), port), nil
+			}
+			continue
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	return "", fmt.Errorf("outbound host %q resolved only to blocked address classes", host)
+}
+
+func isDisallowedOutboundDialIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+}
+
+func hasZoneIdentifierHost(host string) bool {
+	normalized := strings.TrimSpace(strings.Trim(host, "[]"))
+	return strings.Contains(normalized, "%")
+}
+
+func normalizeHostForCompare(host string) string {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	return strings.TrimRight(normalized, ".")
 }
 
 func normalizeHTTPURLs(urls []string) []string {

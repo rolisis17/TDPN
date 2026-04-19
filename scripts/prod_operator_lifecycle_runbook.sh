@@ -43,6 +43,60 @@ need_cmd() {
   fi
 }
 
+declare -a sensitive_tmp_files=()
+
+register_sensitive_tmp_file() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" ]]; then
+    sensitive_tmp_files+=("$path")
+  fi
+}
+
+cleanup_sensitive_tmp_files() {
+  local path
+  for path in "${sensitive_tmp_files[@]}"; do
+    [[ -n "$path" ]] || continue
+    rm -f "$path" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup_sensitive_tmp_files EXIT
+
+append_env_handoff_kv() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  printf '%s=%q\n' "$key" "$value" >>"$env_file"
+}
+
+build_server_up_secret_env_file() {
+  local issuer_token="$1"
+  local directory_token="$2"
+  local puzzle_secret="$3"
+  if [[ -z "$issuer_token" && -z "$directory_token" && -z "$puzzle_secret" ]]; then
+    echo ""
+    return
+  fi
+
+  local old_umask tmp_file
+  old_umask="$(umask)"
+  umask 077
+  tmp_file="$(mktemp)"
+  umask "$old_umask"
+  register_sensitive_tmp_file "$tmp_file"
+  : >"$tmp_file"
+
+  append_env_handoff_kv "$tmp_file" "EASY_NODE_DIRECTORY_ADMIN_TOKEN" "$directory_token"
+  append_env_handoff_kv "$tmp_file" "EASY_NODE_ENTRY_PUZZLE_SECRET" "$puzzle_secret"
+  # Keep both names for compatibility across easy_node and invite helpers.
+  append_env_handoff_kv "$tmp_file" "EASY_NODE_ISSUER_ADMIN_TOKEN" "$issuer_token"
+  append_env_handoff_kv "$tmp_file" "ISSUER_ADMIN_TOKEN" "$issuer_token"
+  echo "$tmp_file"
+}
+
 bool_or_die() {
   local name="$1"
   local value="$2"
@@ -130,6 +184,58 @@ normalized_directory_base() {
     input="${input%/v1/relays}"
   fi
   echo "$input"
+}
+
+normalized_host_for_compare() {
+  local host
+  host="$(trim "${1:-}")"
+  host="${host#[}"
+  host="${host%]}"
+  printf '%s' "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+}
+
+is_local_host() {
+  local normalized
+  normalized="$(normalized_host_for_compare "$1")"
+  case "$normalized" in
+    ""|localhost|ip6-localhost|::1|::|0.0.0.0)
+      return 0
+      ;;
+  esac
+  if [[ "$normalized" == 127.* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+url_host_literal() {
+  local host
+  host="$(trim "${1:-}")"
+  if [[ -z "$host" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    printf '[%s]' "$host"
+    return
+  fi
+  printf '%s' "$host"
+}
+
+default_service_url() {
+  local host="$1"
+  local port="$2"
+  local path="${3:-}"
+  local scheme="https"
+  local host_literal
+  if is_local_host "$host"; then
+    scheme="http"
+  fi
+  host_literal="$(url_host_literal "$host")"
+  if [[ -n "$path" && "$path" != /* ]]; then
+    path="/$path"
+  fi
+  printf '%s://%s:%s%s' "$scheme" "$host_literal" "$port" "$path"
 }
 
 wait_http_ok() {
@@ -1003,7 +1109,7 @@ mkdir -p "$(dirname "$runtime_doctor_file")"
 resolved_directory_base="$(normalized_directory_base "$directory_url")"
 if [[ -z "$resolved_directory_base" ]]; then
   host_for_checks="${public_host:-127.0.0.1}"
-  resolved_directory_base="http://${host_for_checks}:8081"
+  resolved_directory_base="$(default_service_url "$host_for_checks" "8081")"
 fi
 
 resolved_operator_id="$(trim "$operator_id")"
@@ -1209,6 +1315,8 @@ if [[ "$action" == "onboard" ]]; then
 
   if [[ "$status" == "ok" ]]; then
     server_up_cmd=("$EASY_NODE_SH" "server-up" "--mode" "$resolved_mode")
+    server_up_secret_env_file=""
+    server_up_secret_env_file="$(build_server_up_secret_env_file "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret")"
     if [[ -n "$public_host" ]]; then
       server_up_cmd+=("--public-host" "$public_host")
     fi
@@ -1217,15 +1325,6 @@ if [[ "$action" == "onboard" ]]; then
     fi
     if [[ -n "$issuer_id" ]]; then
       server_up_cmd+=("--issuer-id" "$issuer_id")
-    fi
-    if [[ -n "$issuer_admin_token" ]]; then
-      server_up_cmd+=("--issuer-admin-token" "$issuer_admin_token")
-    fi
-    if [[ -n "$directory_admin_token" ]]; then
-      server_up_cmd+=("--directory-admin-token" "$directory_admin_token")
-    fi
-    if [[ -n "$entry_puzzle_secret" ]]; then
-      server_up_cmd+=("--entry-puzzle-secret" "$entry_puzzle_secret")
     fi
     if [[ -n "$authority_directory" ]]; then
       server_up_cmd+=("--authority-directory" "$authority_directory")
@@ -1258,7 +1357,17 @@ if [[ "$action" == "onboard" ]]; then
       server_up_cmd+=("--show-admin-token" "$show_admin_token")
     fi
     set +e
-    "${server_up_cmd[@]}"
+    if [[ -n "$server_up_secret_env_file" ]]; then
+      (
+        set -a
+        # shellcheck disable=SC1090
+        source "$server_up_secret_env_file"
+        set +a
+        "${server_up_cmd[@]}"
+      )
+    else
+      "${server_up_cmd[@]}"
+    fi
     rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -1276,19 +1385,22 @@ if [[ "$action" == "onboard" ]]; then
   if [[ "$status" == "ok" && "$health_check" == "1" ]]; then
     need_cmd "$CURL_BIN"
     host_for_health="${public_host:-127.0.0.1}"
+    issuer_health_url="$(default_service_url "$host_for_health" "8082" "/v1/pubkeys")"
+    entry_health_url="$(default_service_url "$host_for_health" "8083" "/v1/health")"
+    exit_health_url="$(default_service_url "$host_for_health" "8084" "/v1/health")"
     set +e
     wait_http_ok "${resolved_directory_base}/v1/relays" "directory" "$health_timeout_sec"
     rc=$?
     if [[ "$rc" -eq 0 && "$resolved_mode" == "authority" ]]; then
-      wait_http_ok "http://${host_for_health}:8082/v1/pubkeys" "issuer" "$health_timeout_sec"
+      wait_http_ok "$issuer_health_url" "issuer" "$health_timeout_sec"
       rc=$?
     fi
     if [[ "$rc" -eq 0 ]]; then
-      wait_http_ok "http://${host_for_health}:8083/v1/health" "entry" "$health_timeout_sec"
+      wait_http_ok "$entry_health_url" "entry" "$health_timeout_sec"
       rc=$?
     fi
     if [[ "$rc" -eq 0 ]]; then
-      wait_http_ok "http://${host_for_health}:8084/v1/health" "exit" "$health_timeout_sec"
+      wait_http_ok "$exit_health_url" "exit" "$health_timeout_sec"
       rc=$?
     fi
     set -e
@@ -1707,12 +1819,12 @@ if [[ "$incident_snapshot_on_fail" == "1" ]]; then
     incident_host="${public_host:-127.0.0.1}"
     incident_issuer_url=""
     if [[ "$resolved_mode" == "authority" ]]; then
-      incident_issuer_url="http://${incident_host}:8082"
+      incident_issuer_url="$(default_service_url "$incident_host" "8082")"
     elif [[ -n "$authority_issuer" ]]; then
       incident_issuer_url="$(trim "$authority_issuer")"
     fi
-    incident_entry_url="http://${incident_host}:8083"
-    incident_exit_url="http://${incident_host}:8084"
+    incident_entry_url="$(default_service_url "$incident_host" "8083")"
+    incident_exit_url="$(default_service_url "$incident_host" "8084")"
 
     incident_cmd=(
       "$EASY_NODE_SH" "incident-snapshot"

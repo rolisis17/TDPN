@@ -4,9 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"privacynode/pkg/proto"
 )
 
 func TestAllowSyntheticFallback(t *testing.T) {
@@ -154,6 +160,56 @@ func TestValidateRuntimeConfigKernelProxyRequiresCommandBackend(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "CLIENT_WG_BACKEND=command") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigKernelProxyRejectsNonLoopbackProxyAddr(t *testing.T) {
+	c := &Client{
+		dataMode:      "opaque",
+		innerSource:   "udp",
+		wgBackend:     "command",
+		wgPrivateKey:  "/tmp/wg.key",
+		wgKernelProxy: true,
+		wgProxyAddr:   "0.0.0.0:52999",
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected non-loopback CLIENT_WG_PROXY_ADDR validation error")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_WG_PROXY_ADDR must resolve to loopback host") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigKernelProxyRejectsEmptyHostProxyAddr(t *testing.T) {
+	c := &Client{
+		dataMode:      "opaque",
+		innerSource:   "udp",
+		wgBackend:     "command",
+		wgPrivateKey:  "/tmp/wg.key",
+		wgKernelProxy: true,
+		wgProxyAddr:   ":52999",
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected empty-host CLIENT_WG_PROXY_ADDR validation error")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_WG_PROXY_ADDR must include an explicit loopback host") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigKernelProxyAcceptsLoopbackProxyAddr(t *testing.T) {
+	c := &Client{
+		dataMode:      "opaque",
+		innerSource:   "udp",
+		wgBackend:     "command",
+		wgPrivateKey:  "/tmp/wg.key",
+		wgKernelProxy: true,
+		wgProxyAddr:   "127.0.0.1:52999",
+	}
+	if err := c.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected loopback CLIENT_WG_PROXY_ADDR to validate, got %v", err)
 	}
 }
 
@@ -460,6 +516,111 @@ func TestEnsureCommandWGPubKeySkipsDeriveWhenAlreadyValid(t *testing.T) {
 	}
 }
 
+func TestValidatePathOpenWireGuardFields(t *testing.T) {
+	validPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	tests := []struct {
+		name          string
+		exitInnerPub  string
+		clientInnerIP string
+		entryDataAddr string
+		wantErr       string
+	}{
+		{
+			name:          "valid",
+			exitInnerPub:  validPub,
+			clientInnerIP: "10.90.0.2/32",
+			entryDataAddr: "127.0.0.1:51820",
+			wantErr:       "",
+		},
+		{
+			name:          "invalid exit pubkey",
+			exitInnerPub:  "not-a-key",
+			clientInnerIP: "10.90.0.2/32",
+			entryDataAddr: "127.0.0.1:51820",
+			wantErr:       "exit_inner_pub",
+		},
+		{
+			name:          "invalid client inner cidr",
+			exitInnerPub:  validPub,
+			clientInnerIP: "10.90.0.2",
+			entryDataAddr: "127.0.0.1:51820",
+			wantErr:       "client_inner_ip",
+		},
+		{
+			name:          "invalid entry data addr",
+			exitInnerPub:  validPub,
+			clientInnerIP: "10.90.0.2/32",
+			entryDataAddr: "bad-host-port",
+			wantErr:       "entry_data_addr",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validatePathOpenWireGuardFields(tc.exitInnerPub, tc.clientInnerIP, tc.entryDataAddr)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error=%v want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidatePathOpenEntryDataAddrBinding(t *testing.T) {
+	c := &Client{
+		exitControlURL: "https://exit.example:8443",
+	}
+	pair := relayPair{
+		entry: proto.RelayDescriptor{
+			Endpoint:   "127.0.0.1:51820",
+			ControlURL: "https://entry.example:8443",
+		},
+		exit: proto.RelayDescriptor{
+			Endpoint:   "127.0.0.1:51830",
+			ControlURL: "https://exit.example:8443",
+		},
+	}
+
+	if err := c.validatePathOpenEntryDataAddrBinding("https://entry.example:8443", pair, "127.0.0.1:51820"); err != nil {
+		t.Fatalf("entry mode binding failed: %v", err)
+	}
+	if err := c.validatePathOpenEntryDataAddrBinding("https://entry.example:8443", pair, "127.0.0.1:51999"); err == nil {
+		t.Fatalf("expected entry mode mismatch rejection")
+	}
+	if err := c.validatePathOpenEntryDataAddrBinding("https://exit.example:8443", pair, "127.0.0.1:51830"); err != nil {
+		t.Fatalf("direct-exit mode binding failed: %v", err)
+	}
+	if err := c.validatePathOpenEntryDataAddrBinding("https://exit.example:8443", pair, "127.0.0.1:51820"); err == nil {
+		t.Fatalf("expected direct-exit mode mismatch rejection")
+	}
+}
+
+func TestPruneHealthCacheLockedCapsEntries(t *testing.T) {
+	c := &Client{
+		healthCacheTTL: 5 * time.Second,
+		healthCache:    make(map[string]healthProbeState, clientHealthCacheMaxEntries+64),
+	}
+	now := time.Now()
+	for i := 0; i < clientHealthCacheMaxEntries+64; i++ {
+		key := fmt.Sprintf("https://relay-%d.example:8443", i)
+		c.healthCache[key] = healthProbeState{
+			ok:        true,
+			checkedAt: now.Add(-time.Duration(i) * time.Millisecond),
+		}
+	}
+	c.pruneHealthCacheLocked(now)
+	if len(c.healthCache) > clientHealthCacheMaxEntries {
+		t.Fatalf("health cache size=%d exceeds cap=%d", len(c.healthCache), clientHealthCacheMaxEntries)
+	}
+}
+
 func TestEnsureCommandWGPubKeyRejectsMismatch(t *testing.T) {
 	original := deriveClientWGPublicFromPrivateFile
 	defer func() { deriveClientWGPublicFromPrivateFile = original }()
@@ -507,12 +668,96 @@ func TestNewClientReadsSubjectEnv(t *testing.T) {
 	}
 }
 
+func TestNewClientReadsSubjectFromFileEnv(t *testing.T) {
+	subjectFile := filepath.Join(t.TempDir(), "client.subject")
+	if err := os.WriteFile(subjectFile, []byte("file-user-123\n"), 0o600); err != nil {
+		t.Fatalf("write subject file: %v", err)
+	}
+	t.Setenv("CLIENT_SUBJECT", "")
+	t.Setenv("CLIENT_SUBJECT_FILE", subjectFile)
+	c := NewClient()
+	if c.subject != "file-user-123" {
+		t.Fatalf("expected subject from CLIENT_SUBJECT_FILE, got %q", c.subject)
+	}
+	if _, err := os.Stat(subjectFile); !os.IsNotExist(err) {
+		t.Fatalf("expected subject file cleanup, stat err=%v", err)
+	}
+}
+
+func TestNewClientRejectsSubjectFileSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "subject-target.txt")
+	if err := os.WriteFile(target, []byte("file-user-123\n"), 0o600); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+	subjectFile := filepath.Join(dir, "client.subject")
+	if err := os.Symlink(target, subjectFile); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	t.Setenv("CLIENT_SUBJECT", "")
+	t.Setenv("CLIENT_SUBJECT_FILE", subjectFile)
+	c := NewClient()
+	if c.subject != "" {
+		t.Fatalf("expected symlink subject file to be rejected, got %q", c.subject)
+	}
+	if _, err := os.Stat(subjectFile); err != nil {
+		t.Fatalf("expected symlink path to remain after rejected read: %v", err)
+	}
+}
+
+func TestNewClientRejectsOversizedSubjectFile(t *testing.T) {
+	subjectFile := filepath.Join(t.TempDir(), "client.subject")
+	oversized := strings.Repeat("a", int(clientSubjectFileMaxBytes)+1)
+	if err := os.WriteFile(subjectFile, []byte(oversized), 0o600); err != nil {
+		t.Fatalf("write oversized subject file: %v", err)
+	}
+	t.Setenv("CLIENT_SUBJECT", "")
+	t.Setenv("CLIENT_SUBJECT_FILE", subjectFile)
+	c := NewClient()
+	if c.subject != "" {
+		t.Fatalf("expected oversized subject file to be rejected, got %q", c.subject)
+	}
+	if _, err := os.Stat(subjectFile); err != nil {
+		t.Fatalf("expected oversized subject file to remain after rejected read: %v", err)
+	}
+}
+
+func TestNewClientSubjectEnvPrecedenceOverSubjectFile(t *testing.T) {
+	subjectFile := filepath.Join(t.TempDir(), "client.subject")
+	if err := os.WriteFile(subjectFile, []byte("file-user-123\n"), 0o600); err != nil {
+		t.Fatalf("write subject file: %v", err)
+	}
+	t.Setenv("CLIENT_SUBJECT", "env-user-123")
+	t.Setenv("CLIENT_SUBJECT_FILE", subjectFile)
+	c := NewClient()
+	if c.subject != "env-user-123" {
+		t.Fatalf("expected CLIENT_SUBJECT precedence, got %q", c.subject)
+	}
+}
+
+func TestNewClientDirectoryTrustTOFUDefaultsDisabled(t *testing.T) {
+	t.Setenv("DIRECTORY_TRUST_TOFU", "")
+	c := NewClient()
+	if c.trustTOFU {
+		t.Fatalf("expected DIRECTORY_TRUST_TOFU default disabled")
+	}
+}
+
+func TestNewClientDirectoryTrustTOFUOptInEnabled(t *testing.T) {
+	t.Setenv("DIRECTORY_TRUST_TOFU", "1")
+	c := NewClient()
+	if !c.trustTOFU {
+		t.Fatalf("expected DIRECTORY_TRUST_TOFU=1 to enable TOFU")
+	}
+}
+
 func TestNewClientReadsOpaqueSessionEnv(t *testing.T) {
 	t.Setenv("CLIENT_OPAQUE_SESSION_SEC", "30")
 	t.Setenv("CLIENT_OPAQUE_INITIAL_UPLINK_TIMEOUT_MS", "2400")
 	t.Setenv("CLIENT_STICKY_PAIR_SEC", "75")
 	t.Setenv("CLIENT_SESSION_REUSE", "1")
 	t.Setenv("CLIENT_SESSION_REFRESH_LEAD_SEC", "55")
+	t.Setenv("CLIENT_SESSION_MIN_REFRESH_SEC", "12")
 	c := NewClient()
 	if c.opaqueSessionSec != 30 {
 		t.Fatalf("expected CLIENT_OPAQUE_SESSION_SEC parsed, got %d", c.opaqueSessionSec)
@@ -528,6 +773,116 @@ func TestNewClientReadsOpaqueSessionEnv(t *testing.T) {
 	}
 	if c.sessionRefreshLeadSec != 55 {
 		t.Fatalf("expected CLIENT_SESSION_REFRESH_LEAD_SEC parsed, got %d", c.sessionRefreshLeadSec)
+	}
+	if c.sessionMinRefreshSec != 12 {
+		t.Fatalf("expected CLIENT_SESSION_MIN_REFRESH_SEC parsed, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientSessionReuseDefaultsEnabledWhenUnset(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "0")
+	t.Setenv("CLIENT_SESSION_REUSE", "")
+	c := NewClient()
+	if !c.sessionReuse {
+		t.Fatalf("expected session reuse enabled by default when CLIENT_SESSION_REUSE is unset")
+	}
+}
+
+func TestNewClientSessionReuseExplicitDisableWithoutDirectExitOverride(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "0")
+	t.Setenv("CLIENT_SESSION_REUSE", "0")
+	c := NewClient()
+	if c.sessionReuse {
+		t.Fatalf("expected CLIENT_SESSION_REUSE=0 to disable session reuse when direct-exit override is not active")
+	}
+}
+
+func TestNewClientForceDirectExitDefaultsSessionReuse(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_REUSE", "")
+	c := NewClient()
+	if !c.sessionReuse {
+		t.Fatalf("expected CLIENT_FORCE_DIRECT_EXIT to default CLIENT_SESSION_REUSE to true when unset")
+	}
+	if c.stickyPairSec != 300 {
+		t.Fatalf("expected CLIENT_FORCE_DIRECT_EXIT to default CLIENT_STICKY_PAIR_SEC=300, got %d", c.stickyPairSec)
+	}
+	if c.sessionMinRefreshSec != 6 {
+		t.Fatalf("expected CLIENT_FORCE_DIRECT_EXIT to default CLIENT_SESSION_MIN_REFRESH_SEC=6, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientForceDirectExitOverridesExplicitSessionReuseDisable(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_REUSE", "0")
+	c := NewClient()
+	if !c.sessionReuse {
+		t.Fatalf("expected direct-exit mode to force session reuse on by default")
+	}
+}
+
+func TestNewClientDirectExitAllowSessionChurnRespectsExplicitDisable(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_REUSE", "0")
+	t.Setenv("CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN", "1")
+	c := NewClient()
+	if c.sessionReuse {
+		t.Fatalf("expected CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1 to preserve explicit CLIENT_SESSION_REUSE=0")
+	}
+	if c.sessionMinRefreshSec != 0 {
+		t.Fatalf("expected churn mode to avoid forced CLIENT_SESSION_MIN_REFRESH_SEC default, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientForceDirectExitSessionMinRefreshExplicitOverride(t *testing.T) {
+	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "1")
+	t.Setenv("CLIENT_SESSION_MIN_REFRESH_SEC", "0")
+	c := NewClient()
+	if c.sessionMinRefreshSec != 0 {
+		t.Fatalf("expected explicit CLIENT_SESSION_MIN_REFRESH_SEC=0 to override direct-exit default, got %d", c.sessionMinRefreshSec)
+	}
+}
+
+func TestNewClientPathProfileDefaultsTo2Hop(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "")
+	c := NewClient()
+	if c.pathProfile != "2hop" {
+		t.Fatalf("expected default path profile 2hop, got %q", c.pathProfile)
+	}
+	if c.preferMiddleRelay {
+		t.Fatalf("expected middle preference disabled for default 2hop profile")
+	}
+}
+
+func TestNewClientPathProfile3HopEnablesMiddlePreference(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "3hop")
+	c := NewClient()
+	if c.pathProfile != "3hop" {
+		t.Fatalf("expected path profile 3hop, got %q", c.pathProfile)
+	}
+	if !c.preferMiddleRelay {
+		t.Fatalf("expected middle preference enabled for 3hop profile")
+	}
+	if !c.requireMiddleRelay {
+		t.Fatalf("expected 3hop profile to require middle relay by default")
+	}
+}
+
+func TestNewClientRequireMiddleRelayEnvOverrideOn(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "2hop")
+	t.Setenv("CLIENT_REQUIRE_MIDDLE_RELAY", "1")
+	c := NewClient()
+	if !c.requireMiddleRelay {
+		t.Fatalf("expected CLIENT_REQUIRE_MIDDLE_RELAY=1 to enable strict middle relay requirement")
+	}
+}
+
+func TestNewClientRequireMiddleRelayEnvOverrideOffFor3Hop(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "3hop")
+	t.Setenv("CLIENT_REQUIRE_MIDDLE_RELAY", "0")
+	c := NewClient()
+	if c.requireMiddleRelay {
+		t.Fatalf("expected CLIENT_REQUIRE_MIDDLE_RELAY=0 to disable strict middle relay requirement override")
 	}
 }
 
@@ -682,6 +1037,51 @@ func TestValidateRuntimeConfigForceDirectExitRejectsStrictModes(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRequiresTrustTOFUDisabled(t *testing.T) {
+	c := &Client{
+		betaStrict:         true,
+		trustStrict:        true,
+		trustTOFU:          true,
+		dataMode:           "opaque",
+		innerSource:        "udp",
+		wgBackend:          "command",
+		wgPrivateKey:       "/tmp/wg.key",
+		wgKernelProxy:      true,
+		wgProxyAddr:        "127.0.0.1:0",
+		liveWGMode:         true,
+		disableSynthetic:   true,
+		startupSyncTimeout: time.Second,
+		requireDistinctOps: true,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected beta strict to reject DIRECTORY_TRUST_TOFU")
+	}
+	if !strings.Contains(err.Error(), "DIRECTORY_TRUST_TOFU=0") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsDirectExitWith3HopProfile(t *testing.T) {
+	c := &Client{
+		pathProfile:              "3hop",
+		dataMode:                 "json",
+		innerSource:              "synthetic",
+		wgBackend:                "noop",
+		requireDistinctOps:       false,
+		allowDirectExitFallback:  true,
+		forceDirectExit:          true,
+		requireDistinctCountries: false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected direct-exit and 3hop profile conflict validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_PATH_PROFILE=3hop is incompatible with CLIENT_FORCE_DIRECT_EXIT=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigForceDirectExitRequiresFallbackEnabled(t *testing.T) {
 	c := &Client{
 		dataMode:                "json",
@@ -792,6 +1192,51 @@ func TestActiveSessionNeedsRefresh(t *testing.T) {
 	}
 }
 
+func TestActiveSessionNeedsRefreshDirectExitUsesAdaptiveLead(t *testing.T) {
+	now := time.Now()
+	c := &Client{
+		forceDirectExit:       true,
+		sessionRefreshLeadSec: 20,
+	}
+	session := clientActiveSession{sessionExp: now.Add(5 * time.Second).Unix()}
+	if c.activeSessionNeedsRefresh(session, now) {
+		t.Fatalf("expected short-lived direct-exit session to avoid immediate refresh churn")
+	}
+	if !c.activeSessionNeedsRefresh(session, now.Add(4*time.Second)) {
+		t.Fatalf("expected short-lived direct-exit session to refresh near expiry")
+	}
+}
+
+func TestActiveSessionNeedsRefreshMinIntervalSuppressesEarlyRefresh(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := &Client{
+		sessionRefreshLeadSec: 20,
+		sessionMinRefreshSec:  6,
+	}
+	session := clientActiveSession{
+		sessionExp:    now.Add(10 * time.Second).Unix(),
+		establishedAt: now.Add(-3 * time.Second),
+	}
+	if c.activeSessionNeedsRefresh(session, now) {
+		t.Fatalf("expected min refresh interval to suppress early refresh")
+	}
+}
+
+func TestActiveSessionNeedsRefreshNearExpiryBypassesMinInterval(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := &Client{
+		sessionRefreshLeadSec: 20,
+		sessionMinRefreshSec:  60,
+	}
+	session := clientActiveSession{
+		sessionExp:    now.Add(1 * time.Second).Unix(),
+		establishedAt: now,
+	}
+	if !c.activeSessionNeedsRefresh(session, now) {
+		t.Fatalf("expected near-expiry session to refresh even before min refresh interval")
+	}
+}
+
 func TestTryReuseActiveSessionRefreshKeepsSessionForHandoff(t *testing.T) {
 	now := time.Now()
 	c := &Client{
@@ -832,5 +1277,77 @@ func TestTryReuseActiveSessionExpiredClearsSession(t *testing.T) {
 	}
 	if _, ok := c.snapshotActiveSession(); ok {
 		t.Fatalf("expected expired active session to be cleared")
+	}
+}
+
+func TestCloseSessionPathCloseFailureIsBestEffort(t *testing.T) {
+	c := &Client{
+		httpClient: &http.Client{Timeout: 100 * time.Millisecond},
+	}
+	session := clientActiveSession{
+		sessionID:       "session-1",
+		entryControlURL: "http://127.0.0.1:1",
+		transport:       "policy-json",
+	}
+	if err := c.closeSession(context.Background(), session); err != nil {
+		t.Fatalf("expected closeSession to ignore close-path failures, got %v", err)
+	}
+}
+
+func TestNormalizeControlURLRejectsNonLoopbackHTTPInStrictMode(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "1")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	if got := normalizeControlURL("http://directory.example.invalid:8081"); got != "" {
+		t.Fatalf("expected non-loopback http URL to be rejected in strict mode, got %q", got)
+	}
+}
+
+func TestNormalizeControlURLRejectsNonLoopbackHTTPWithGlobalStrictMode(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "")
+	t.Setenv("CLIENT_PROD_STRICT", "")
+	t.Setenv("BETA_STRICT_MODE", "1")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	if got := normalizeControlURL("http://directory.example.invalid:8081"); got != "" {
+		t.Fatalf("expected global strict mode to reject non-loopback http URL, got %q", got)
+	}
+}
+
+func TestNormalizeControlURLAllowsNonLoopbackHTTPWithDangerousOverrideInStrictMode(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "1")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "1")
+	got := normalizeControlURL("http://directory.example.invalid:8081")
+	if got != "http://directory.example.invalid:8081" {
+		t.Fatalf("expected dangerous override to allow url, got %q", got)
+	}
+}
+
+func TestNormalizeControlURLAllowsLoopbackHTTPByDefault(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "1")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	got := normalizeControlURL("http://127.0.0.1:8081")
+	if got != "http://127.0.0.1:8081" {
+		t.Fatalf("expected loopback http URL to remain allowed, got %q", got)
+	}
+}
+
+func TestNormalizeControlURLRejectsNonLoopbackHTTPByDefaultOutsideStrictMode(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "")
+	t.Setenv("CLIENT_PROD_STRICT", "")
+	t.Setenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL", "")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	got := normalizeControlURL("http://directory.example.invalid:8081")
+	if got != "" {
+		t.Fatalf("expected non-loopback http URL to be rejected by default, got %q", got)
+	}
+}
+
+func TestNormalizeControlURLAllowsNonLoopbackHTTPWhenRequireHTTPSDisabled(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "")
+	t.Setenv("CLIENT_PROD_STRICT", "")
+	t.Setenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL", "0")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	got := normalizeControlURL("http://directory.example.invalid:8081")
+	if got != "http://directory.example.invalid:8081" {
+		t.Fatalf("expected CLIENT_REQUIRE_HTTPS_CONTROL_URL=0 to allow URL, got %q", got)
 	}
 }

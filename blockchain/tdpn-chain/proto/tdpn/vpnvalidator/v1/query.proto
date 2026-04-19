@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package tdpn.vpnvalidator.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpnvalidator/types";
+
+import "tdpn/vpnvalidator/v1/types.proto";
+
+service Query {
+  rpc ValidatorEligibility(QueryValidatorEligibilityRequest) returns (QueryValidatorEligibilityResponse);
+  rpc ValidatorStatusRecord(QueryValidatorStatusRecordRequest) returns (QueryValidatorStatusRecordResponse);
+  rpc ListValidatorEligibilities(QueryListValidatorEligibilitiesRequest) returns (QueryListValidatorEligibilitiesResponse);
+  rpc ListValidatorStatusRecords(QueryListValidatorStatusRecordsRequest) returns (QueryListValidatorStatusRecordsResponse);
+  rpc PreviewEpochSelection(QueryPreviewEpochSelectionRequest) returns (QueryPreviewEpochSelectionResponse);
+}
+
+message QueryValidatorEligibilityRequest {
+  string validator_id = 1;
+}
+
+message QueryValidatorEligibilityResponse {
+  ValidatorEligibility eligibility = 1;
+  bool found = 2;
+}
+
+message QueryValidatorStatusRecordRequest {
+  string status_id = 1;
+}
+
+message QueryValidatorStatusRecordResponse {
+  ValidatorStatusRecord record = 1;
+  bool found = 2;
+}
+
+message QueryListValidatorEligibilitiesRequest {}
+
+message QueryListValidatorEligibilitiesResponse {
+  repeated ValidatorEligibility eligibilities = 1;
+}
+
+message QueryListValidatorStatusRecordsRequest {}
+
+message QueryListValidatorStatusRecordsResponse {
+  repeated ValidatorStatusRecord records = 1;
+}
+
+message QueryPreviewEpochSelectionRequest {
+  EpochSelectionPolicy policy = 1;
+  repeated EpochValidatorCandidate candidates = 2;
+}
+
+message QueryPreviewEpochSelectionResponse {
+  EpochSelectionResult result = 1;
+}

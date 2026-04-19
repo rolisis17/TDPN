@@ -16,6 +16,7 @@ usage() {
 Usage:
   ./scripts/wg_only_stack_selftest_record.sh \
     [wg-only-stack-selftest args...] \
+    [--defer-no-root [0|1]] \
     [--record-result [0|1]] \
     [--manual-validation-report [0|1]] \
     [--manual-validation-report-summary-json PATH] \
@@ -71,12 +72,22 @@ print_cmd() {
   printf '\n'
 }
 
+safe_append_to_array() {
+  local array_name="$1"
+  shift
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+  local -n target_array="$array_name"
+  target_array+=("$@")
+}
+
 append_existing_artifact() {
   local array_name="$1"
   local path="$2"
   [[ -z "$path" ]] && return 0
   if [[ -e "$path" ]]; then
-    eval "$array_name+=(\"\$path\")"
+    safe_append_to_array "$array_name" "$path" || return 1
   fi
 }
 
@@ -170,6 +181,8 @@ manual_validation_report_summary_json=""
 manual_validation_report_md=""
 summary_json=""
 print_summary_json="0"
+defer_no_root="${WG_ONLY_STACK_SELFTEST_RECORD_DEFER_NO_ROOT:-0}"
+effective_uid="${WG_ONLY_STACK_SELFTEST_RECORD_EFFECTIVE_UID_OVERRIDE:-$EUID}"
 
 base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
@@ -222,6 +235,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --defer-no-root)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        defer_no_root="${2:-}"
+        shift 2
+      else
+        defer_no_root="1"
+        shift
+      fi
+      ;;
     --manual-validation-report)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         manual_validation_report_enabled="${2:-}"
@@ -265,8 +287,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--record-result" "$record_result"
+bool_arg_or_die "--defer-no-root" "$defer_no_root"
 bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+if ! [[ "$effective_uid" =~ ^[0-9]+$ ]]; then
+  echo "WG_ONLY_STACK_SELFTEST_RECORD_EFFECTIVE_UID_OVERRIDE must be an integer"
+  exit 2
+fi
 if [[ "$strict_beta" != "0" && "$strict_beta" != "1" ]]; then
   echo "--strict-beta must be 0 or 1"
   exit 2
@@ -310,6 +337,7 @@ notes=""
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+selftest_deferred_no_root="0"
 
 declare -a selftest_cmd
 selftest_cmd=("$easy_node_script" "wg-only-stack-selftest" "${selftest_args[@]}")
@@ -328,6 +356,9 @@ write_summary_json() {
     --arg client_iface "$client_iface" \
     --arg exit_iface "$exit_iface" \
     --arg strict_beta "$strict_beta" \
+    --arg defer_no_root "$defer_no_root" \
+    --arg effective_uid "$effective_uid" \
+    --arg selftest_deferred_no_root "$selftest_deferred_no_root" \
     --argjson selftest_rc "$selftest_rc" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
@@ -350,6 +381,9 @@ write_summary_json() {
       command: $command,
       selftest: {
         strict_beta: ($strict_beta == "1"),
+        defer_no_root: ($defer_no_root == "1"),
+        effective_uid: ($effective_uid | tonumber),
+        deferred_no_root: ($selftest_deferred_no_root == "1"),
         base_port: ($base_port | tonumber),
         client_iface: $client_iface,
         exit_iface: $exit_iface
@@ -441,14 +475,22 @@ record_receipt() {
 }
 
 selftest_output=""
-if run_and_capture selftest_output "${selftest_cmd[@]}"; then
+if [[ "$defer_no_root" == "1" && "$effective_uid" != "0" ]]; then
   selftest_rc=0
-  selftest_status="pass"
-  notes="WG-only stack selftest passed"
+  selftest_status="skip"
+  selftest_deferred_no_root="1"
+  notes="WG-only stack selftest deferred: requires root privileges"
+  printf '%s\n' "[selftest] deferred_no_root effective_uid=$effective_uid" >>"$summary_log"
 else
-  selftest_rc=$?
-  selftest_status="fail"
-  notes="WG-only stack selftest failed"
+  if run_and_capture selftest_output "${selftest_cmd[@]}"; then
+    selftest_rc=0
+    selftest_status="pass"
+    notes="WG-only stack selftest passed"
+  else
+    selftest_rc=$?
+    selftest_status="fail"
+    notes="WG-only stack selftest failed"
+  fi
 fi
 
 write_summary_json

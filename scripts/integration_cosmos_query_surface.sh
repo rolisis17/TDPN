@@ -13,6 +13,8 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
   timeout 30s go test ./x/vpnrewards/module -count=1 -run 'QueryServer'
   timeout 30s go test ./x/vpnslashing/module -count=1 -run 'QueryServer'
   timeout 30s go test ./x/vpnsponsor/module -count=1 -run 'QueryServer'
+  timeout 30s go test ./x/vpnvalidator/module -count=1 -run 'QueryServer'
+  timeout 30s go test ./x/vpngovernance/module -count=1 -run 'QueryServer'
   timeout 30s go test ./app -count=1 -run 'QueryServer'
 )
 

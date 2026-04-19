@@ -104,7 +104,7 @@ But overall gating still failed due to quorum/trust/federation conditions.
 You reported very important successes:
 - `wg-only-stack-selftest-record: status=pass`
 - `client-vpn-smoke: status=pass stage=complete`
-- Example subject used in one successful run: `inv-9ba88be291b578507b403d`
+- Example subject used in one successful run: `inv-REDACTED`
 
 That successful smoke run showed:
 - trust reset auto-retry succeeded (`retry_succeeded=true`)
@@ -340,6 +340,7 @@ done
 ```
 
 ### 5.6 Federation diagnostics
+Historical note: this transcript snippet uses `--admin-token` on the CLI; prefer token-file/stdin patterns in live operations to avoid process-list/history leakage.
 ```bash
 ADMIN_TOKEN="$(grep -m1 '^DIRECTORY_ADMIN_TOKEN=' deploy/.env.easy.server | cut -d= -f2-)"
 sudo ./scripts/easy_node.sh server-federation-status \
@@ -539,11 +540,11 @@ notes: "client-vpn up failed"
 - Client runner for `client-vpn-preflight`, `client-vpn-smoke`, manual validation gates, and signoff scripts.
 
 ## 17. Invite Keys Mentioned in Conversation (examples)
-- `inv-526a1c1e2bcc8dd8fdf802`
-- `inv-9ba88be291b578507b403d`
-- `inv-f9125e5f366911be9d3812`
-- `inv-fd06f9803d7ac060303d77`
-- `inv-e7524eb00d2303a616f81a`
+- `inv-REDACTED`
+- `inv-REDACTED`
+- `inv-REDACTED`
+- `inv-REDACTED`
+- `inv-REDACTED`
 
 ## 18. Why You Asked for Bigger/Faster Computer
 - Current computer felt slow for coding iteration.

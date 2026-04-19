@@ -132,6 +132,9 @@ for expected in \
   '--three-machine-docker-readiness-soak-pause-sec 3' \
   '--three-machine-docker-readiness-path-profile balanced' \
   '--three-machine-docker-readiness-keep-stacks 0' \
+  '--three-machine-docker-readiness-run-peer-failover 1' \
+  '--three-machine-docker-readiness-peer-failover-downtime-sec 8' \
+  '--three-machine-docker-readiness-peer-failover-timeout-sec 45' \
   "--run-profile-compare-campaign-signoff 1" \
   '--profile-compare-campaign-signoff-refresh-campaign 1' \
   "--summary-json $SINGLE_SUMMARY"; do

@@ -73,11 +73,13 @@ abs_path() {
 }
 
 print_cmd() {
+  local line=""
   local arg
   for arg in "$@"; do
-    printf '%q ' "$arg"
+    line+=$(printf '%q ' "$arg")
   done
-  printf '\n'
+  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
+  printf '%s\n' "$line"
 }
 
 bool_arg_or_die() {
@@ -110,6 +112,60 @@ host_is_loopback_local() {
       return 0
       ;;
   esac
+  return 1
+}
+
+url_host_from_endpoint() {
+  local raw="${1:-}"
+  local rest hostport host
+
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+
+  if [[ "$raw" == *"://"* ]]; then
+    rest="${raw#*://}"
+  else
+    rest="$raw"
+  fi
+  hostport="${rest%%/*}"
+  hostport="${hostport##*@}"
+
+  if [[ "$hostport" == \[*\]* ]]; then
+    host="${hostport#\[}"
+    host="${host%%]*}"
+    printf '%s\n' "$host"
+    return 0
+  fi
+
+  host="${hostport%%:*}"
+  printf '%s\n' "$host"
+}
+
+url_is_non_loopback_host() {
+  local host
+  host="$(url_host_from_endpoint "${1:-}")"
+  if [[ -z "$host" ]]; then
+    return 1
+  fi
+  if host_is_loopback_local "$host"; then
+    return 1
+  fi
+  return 0
+}
+
+url_csv_has_non_loopback_host() {
+  local csv="$1"
+  local item
+  IFS=',' read -r -a items <<<"$csv"
+  for item in "${items[@]}"; do
+    item="$(trim "$item")"
+    [[ -z "$item" ]] && continue
+    if url_is_non_loopback_host "$item"; then
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -519,6 +575,38 @@ explicit_endpoints=0
 if [[ -n "$directory_urls" || -n "$bootstrap_directory" || -n "$issuer_url" || -n "$entry_url" || -n "$exit_url" ]]; then
   explicit_endpoints=1
 fi
+
+explicit_remote_endpoints=0
+if [[ -n "$directory_urls" ]] && url_csv_has_non_loopback_host "$directory_urls"; then
+  explicit_remote_endpoints=1
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$bootstrap_directory" ]] && url_is_non_loopback_host "$bootstrap_directory"; then
+  explicit_remote_endpoints=1
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$issuer_url" ]] && url_is_non_loopback_host "$issuer_url"; then
+  explicit_remote_endpoints=1
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$entry_url" ]] && url_is_non_loopback_host "$entry_url"; then
+  explicit_remote_endpoints=1
+fi
+if [[ "$explicit_remote_endpoints" == "0" && -n "$exit_url" ]] && url_is_non_loopback_host "$exit_url"; then
+  explicit_remote_endpoints=1
+fi
+
+transport_auto_client_inner_source="0"
+transport_auto_disable_synthetic_fallback="0"
+transport_auto_data_plane_mode_opaque="0"
+if [[ "$explicit_remote_endpoints" == "1" ]]; then
+  if [[ -z "${CLIENT_INNER_SOURCE+x}" ]]; then
+    transport_auto_client_inner_source="1"
+  fi
+  if [[ -z "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" ]]; then
+    transport_auto_disable_synthetic_fallback="1"
+  fi
+  if [[ -z "${DATA_PLANE_MODE+x}" ]]; then
+    transport_auto_data_plane_mode_opaque="1"
+  fi
+fi
 if [[ "$start_local_stack" == "auto" ]]; then
   if [[ "$explicit_endpoints" == "1" ]]; then
     start_local_stack="0"
@@ -591,11 +679,15 @@ append_run_record() {
   local wg_session_count="${13}"
   local direct_exit_mode_events="${14}"
   local direct_exit_fallback_events="${15}"
-  local direct_exit_forced="${16}"
-  local output_log="${17}"
-  local client_log="${18}"
-  local command="${19}"
-  local skip_reason="${20}"
+  local transport_mismatch_failures="${16}"
+  local token_proof_invalid_failures="${17}"
+  local unknown_exit_failures="${18}"
+  local directory_trust_failures="${19}"
+  local direct_exit_forced="${20}"
+  local output_log="${21}"
+  local client_log="${22}"
+  local command="${23}"
+  local skip_reason="${24}"
 
   jq -n \
     --arg profile "$profile" \
@@ -613,6 +705,10 @@ append_run_record() {
     --argjson wg_session_count "$wg_session_count" \
     --argjson direct_exit_mode_events "$direct_exit_mode_events" \
     --argjson direct_exit_fallback_events "$direct_exit_fallback_events" \
+    --argjson transport_mismatch_failures "$transport_mismatch_failures" \
+    --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
+    --argjson unknown_exit_failures "$unknown_exit_failures" \
+    --argjson directory_trust_failures "$directory_trust_failures" \
     --arg direct_exit_forced "$direct_exit_forced" \
     --arg output_log "$output_log" \
     --arg client_log "$client_log" \
@@ -634,6 +730,10 @@ append_run_record() {
       wg_session_count: $wg_session_count,
       direct_exit_mode_events: $direct_exit_mode_events,
       direct_exit_fallback_events: $direct_exit_fallback_events,
+      transport_mismatch_failures: $transport_mismatch_failures,
+      token_proof_invalid_failures: $token_proof_invalid_failures,
+      unknown_exit_failures: $unknown_exit_failures,
+      directory_trust_failures: $directory_trust_failures,
       direct_exit_forced: ($direct_exit_forced == "true"),
       output_log: $output_log,
       client_log: $client_log,
@@ -654,7 +754,7 @@ for profile in "${profiles[@]}"; do
 
     if [[ -n "$skip_reason" ]]; then
       echo "[profile-compare-local] profile=$profile round=$round_idx status=skip reason=$skip_reason" | tee -a "$summary_log"
-      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason"
+      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason"
       continue
     fi
 
@@ -669,13 +769,25 @@ for profile in "${profiles[@]}"; do
       container_exit_url="$(rewrite_loopback_url_for_docker_local "$exit_url" "$docker_host_alias")"
     fi
 
-    run_cmd=(
-      env
+    run_cmd_env=(
       "EASY_NODE_CLIENT_TEST_MODE=$execution_mode"
       "EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS=$container_directory_urls"
       "EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL=$container_issuer_url"
       "EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL=$container_entry_url"
       "EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL=$container_exit_url"
+    )
+    if [[ "$transport_auto_client_inner_source" == "1" ]]; then
+      run_cmd_env+=("CLIENT_INNER_SOURCE=udp")
+    fi
+    if [[ "$transport_auto_disable_synthetic_fallback" == "1" ]]; then
+      run_cmd_env+=("CLIENT_DISABLE_SYNTHETIC_FALLBACK=1")
+    fi
+    if [[ "$transport_auto_data_plane_mode_opaque" == "1" ]]; then
+      run_cmd_env+=("DATA_PLANE_MODE=opaque")
+    fi
+    run_cmd=(
+      env
+      "${run_cmd_env[@]}"
       "$easy_node_script"
       client-test
     )
@@ -754,6 +866,10 @@ for profile in "${profiles[@]}"; do
     wg_session_count="$(count_matches 'client received wg-session config:' "$parse_log")"
     direct_exit_mode_events="$(count_matches 'client direct-exit mode engaged' "$parse_log")"
     direct_exit_fallback_events="$(count_matches 'client direct-exit fallback engaged' "$parse_log")"
+    transport_mismatch_failures="$(count_matches 'transport must be wireguard-udp in entry live mode' "$parse_log")"
+    token_proof_invalid_failures="$(count_matches 'token proof invalid' "$parse_log")"
+    unknown_exit_failures="$(count_matches 'path open denied: unknown-exit' "$parse_log")"
+    directory_trust_failures="$(count_matches 'directory key is not trusted' "$parse_log")"
 
     direct_exit_forced="false"
     startup_line="$(rg -m 1 'client role enabled:' "$parse_log" || true)"
@@ -767,7 +883,9 @@ for profile in "${profiles[@]}"; do
       "$profile" "$round_idx" "$run_status" "$run_rc" "$duration_sec" \
       "$selection_count" "$entry_operator_count" "$exit_operator_count" "$cross_pair_count" \
       "$same_operator_count" "$missing_operator_count" "$bootstrap_failures" "$wg_session_count" \
-      "$direct_exit_mode_events" "$direct_exit_fallback_events" "$direct_exit_forced" \
+      "$direct_exit_mode_events" "$direct_exit_fallback_events" \
+      "$transport_mismatch_failures" "$token_proof_invalid_failures" "$unknown_exit_failures" "$directory_trust_failures" \
+      "$direct_exit_forced" \
       "$run_output_log" "$client_log_path" "$run_cmd_str" ""
   done
 done
@@ -795,6 +913,10 @@ profile_summary_json="$(jq '
           avg_entry_operator_count: (if ($executed | length) == 0 then 0 else (($executed | map(.entry_operator_count) | add) / ($executed | length)) end),
           avg_exit_operator_count: (if ($executed | length) == 0 then 0 else (($executed | map(.exit_operator_count) | add) / ($executed | length)) end),
           avg_cross_pair_count: (if ($executed | length) == 0 then 0 else (($executed | map(.cross_pair_count) | add) / ($executed | length)) end),
+          avg_transport_mismatch_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.transport_mismatch_failures) | add) / ($executed | length)) end),
+          avg_token_proof_invalid_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.token_proof_invalid_failures) | add) / ($executed | length)) end),
+          avg_unknown_exit_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.unknown_exit_failures) | add) / ($executed | length)) end),
+          avg_directory_trust_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.directory_trust_failures) | add) / ($executed | length)) end),
           direct_exit_forced_runs: ($executed | map(select(.direct_exit_forced == true)) | length),
           direct_exit_mode_events: ($executed | map(.direct_exit_mode_events) | add // 0),
           direct_exit_fallback_events: ($executed | map(.direct_exit_fallback_events) | add // 0),
@@ -808,6 +930,10 @@ runs_executed="$(jq '[.[] | select(.status != "skip")] | length' <<<"$runs_json"
 runs_pass="$(jq '[.[] | select(.status == "pass")] | length' <<<"$runs_json")"
 runs_fail="$(jq '[.[] | select(.status == "fail")] | length' <<<"$runs_json")"
 runs_skipped="$(jq '[.[] | select(.status == "skip")] | length' <<<"$runs_json")"
+transport_mismatch_failures_total="$(jq '[.[] | (.transport_mismatch_failures // 0)] | add // 0' <<<"$runs_json")"
+token_proof_invalid_failures_total="$(jq '[.[] | (.token_proof_invalid_failures // 0)] | add // 0' <<<"$runs_json")"
+unknown_exit_failures_total="$(jq '[.[] | (.unknown_exit_failures // 0)] | add // 0' <<<"$runs_json")"
+directory_trust_failures_total="$(jq '[.[] | (.directory_trust_failures // 0)] | add // 0' <<<"$runs_json")"
 
 best_non_experimental_profile="$(jq -r '
   map(select(.profile != "speed-1hop" and .runs_executed > 0))
@@ -862,6 +988,15 @@ else
   notes="All executed profile runs failed"
 fi
 
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+anon_cred_present="0"
+if [[ -n "$anon_cred" ]]; then
+  anon_cred_present="1"
+fi
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$status" \
@@ -880,11 +1015,15 @@ jq -n \
   --arg issuer_url "$issuer_url" \
   --arg entry_url "$entry_url" \
   --arg exit_url "$exit_url" \
-  --arg subject "$subject" \
-  --arg anon_cred "$anon_cred" \
+  --arg subject "$subject_redacted" \
+  --arg anon_cred_present "$anon_cred_present" \
   --arg min_sources "$min_sources" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
+  --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
+  --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
+  --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
+  --arg explicit_remote_endpoints "$explicit_remote_endpoints" \
   --arg start_local_stack "$start_local_stack" \
   --argjson stack_started "$started_local_stack" \
   --arg stack_strict_beta "$stack_strict_beta" \
@@ -905,6 +1044,10 @@ jq -n \
   --argjson runs_pass "$runs_pass" \
   --argjson runs_fail "$runs_fail" \
   --argjson runs_skipped "$runs_skipped" \
+  --argjson transport_mismatch_failures_total "$transport_mismatch_failures_total" \
+  --argjson token_proof_invalid_failures_total "$token_proof_invalid_failures_total" \
+  --argjson unknown_exit_failures_total "$unknown_exit_failures_total" \
+  --argjson directory_trust_failures_total "$directory_trust_failures_total" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -924,10 +1067,16 @@ jq -n \
       entry_url: $entry_url,
       exit_url: $exit_url,
       subject: $subject,
-      anon_cred_present: ($anon_cred | length > 0),
+      anon_cred_present: ($anon_cred_present == "1"),
       min_sources: ($min_sources | tonumber),
       beta_profile: ($beta_profile == "1"),
       prod_profile: ($prod_profile == "1"),
+      explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
+      transport_auto_defaults: {
+        client_inner_source_udp: ($transport_auto_client_inner_source == "1"),
+        disable_synthetic_fallback: ($transport_auto_disable_synthetic_fallback == "1"),
+        data_plane_mode_opaque: ($transport_auto_data_plane_mode_opaque == "1")
+      },
       start_local_stack: $start_local_stack,
       local_stack_started: ($stack_started == 1),
       local_stack: {
@@ -945,7 +1094,11 @@ jq -n \
       runs_executed: $runs_executed,
       runs_pass: $runs_pass,
       runs_fail: $runs_fail,
-      runs_skipped: $runs_skipped
+      runs_skipped: $runs_skipped,
+      transport_mismatch_failures_total: $transport_mismatch_failures_total,
+      token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
+      unknown_exit_failures_total: $unknown_exit_failures_total,
+      directory_trust_failures_total: $directory_trust_failures_total
     },
     decision: {
       recommended_default_profile: $recommended_default_profile,

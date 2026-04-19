@@ -12,6 +12,8 @@ var (
 	ErrDistributionNotFound = errors.New("vpnrewards: distribution not found")
 )
 
+const maxQueryListResults = 1000
+
 // GetAccrualRequest requests a reward accrual by accrual ID.
 type GetAccrualRequest struct {
 	AccrualID string
@@ -86,7 +88,8 @@ func (s QueryServer) ListAccruals(_ ListAccrualsRequest) (ListAccrualsResponse, 
 		return ListAccrualsResponse{}, ErrNilKeeper
 	}
 
-	return ListAccrualsResponse{Accruals: s.keeper.ListAccruals()}, nil
+	records := s.keeper.ListAccruals()
+	return ListAccrualsResponse{Accruals: clampAccruals(records)}, nil
 }
 
 func (s QueryServer) ListDistributions(_ ListDistributionsRequest) (ListDistributionsResponse, error) {
@@ -94,5 +97,20 @@ func (s QueryServer) ListDistributions(_ ListDistributionsRequest) (ListDistribu
 		return ListDistributionsResponse{}, ErrNilKeeper
 	}
 
-	return ListDistributionsResponse{Distributions: s.keeper.ListDistributions()}, nil
+	records := s.keeper.ListDistributions()
+	return ListDistributionsResponse{Distributions: clampDistributions(records)}, nil
+}
+
+func clampAccruals(records []types.RewardAccrual) []types.RewardAccrual {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampDistributions(records []types.DistributionRecord) []types.DistributionRecord {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
 }

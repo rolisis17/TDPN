@@ -54,8 +54,13 @@ func (m sponsorMsgServer) CreateAuthorization(_ context.Context, req SponsorCrea
 	}, nil
 }
 
-func (m sponsorMsgServer) DelegateCredit(_ context.Context, req SponsorDelegateCreditRequest) (SponsorDelegateCreditResponse, error) {
-	resp, err := m.msgServer.DelegateCredit(sponsormodule.DelegateCreditRequest{Delegation: req.Record})
+func (m sponsorMsgServer) DelegateCredit(ctx context.Context, req SponsorDelegateCreditRequest) (SponsorDelegateCreditResponse, error) {
+	currentTimeUnix := sponsormodule.CurrentTimeUnixFromContext(ctx)
+
+	resp, err := m.msgServer.DelegateCredit(sponsormodule.DelegateCreditRequest{
+		Delegation:      req.Record,
+		CurrentTimeUnix: currentTimeUnix,
+	})
 	if err != nil {
 		if errors.Is(err, sponsormodule.ErrNilKeeper) {
 			return SponsorDelegateCreditResponse{}, errSponsorKeeperNotWired

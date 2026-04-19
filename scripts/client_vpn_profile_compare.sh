@@ -104,11 +104,23 @@ bool_arg_or_die() {
 }
 
 print_cmd() {
+  local line=""
   local arg
   for arg in "$@"; do
-    printf '%q ' "$arg"
+    line+=$(printf '%q ' "$arg")
   done
-  printf '\n'
+  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
+  printf '%s\n' "$line"
+}
+
+safe_append_to_array() {
+  local array_name="$1"
+  shift
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+  local -n target_array="$array_name"
+  target_array+=("$@")
 }
 
 append_opt() {
@@ -116,7 +128,7 @@ append_opt() {
   local flag="$2"
   local value="${3:-}"
   if [[ -n "$value" ]]; then
-    eval "$array_name+=(\"\$flag\" \"\$value\")"
+    safe_append_to_array "$array_name" "$flag" "$value" || return 1
   fi
 }
 
@@ -651,6 +663,15 @@ if [[ "$fail_on_any_fail" == "1" && "$runs_fail" -gt 0 ]]; then
   final_rc=1
 fi
 
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+anon_cred_present="0"
+if [[ -n "$anon_cred" ]]; then
+  anon_cred_present="1"
+fi
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$status" \
@@ -671,8 +692,8 @@ jq -n \
   --arg issuer_urls "$issuer_urls" \
   --arg entry_url "$entry_url" \
   --arg exit_url "$exit_url" \
-  --arg subject "$subject" \
-  --arg anon_cred "$anon_cred" \
+  --arg subject "$subject_redacted" \
+  --arg anon_cred_present "$anon_cred_present" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
   --argjson profiles "$profile_inputs_json" \
@@ -708,7 +729,7 @@ jq -n \
       entry_url: $entry_url,
       exit_url: $exit_url,
       subject: $subject,
-      anon_cred_present: ($anon_cred | length > 0),
+      anon_cred_present: ($anon_cred_present == "1"),
       beta_profile: ($beta_profile == "1"),
       prod_profile: ($prod_profile == "1")
     },

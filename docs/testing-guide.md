@@ -94,9 +94,153 @@ If it fails:
 ```
 
 - Purpose: run profile-matrix/RC-resilience wrapper chain checks (`three_machine_docker_profile_matrix`, `profile_compare_docker_matrix`, `three_machine_docker_profile_matrix_record`, `vpn_rc_matrix_path`, `vpn_rc_resilience_path`) with deterministic stage accounting.
+- Additional stages:
+  - `session_churn_guard` (`integration_session_churn_guard.sh`) is enabled by default.
+  - `three_hop_runtime_integration` (`integration_client_3hop_runtime.sh`) is optional (`--run-3hop-runtime-integration 1`).
 - When to run: after changes to phase-1 resilience wrappers, profile-matrix orchestration, or RC chain wiring; use `--dry-run 1` for contract-only verification.
 - Expected artifacts: report tree under `.easy-node-logs/ci_phase1_resilience_<stamp>/`, including `ci_phase1_resilience_summary.json` plus per-stage summary/report artifacts.
 - Exit meaning: `0` when all enabled stages pass; non-zero when any enabled stage fails (summary `status=fail` and per-stage `status/rc` fields identify failure).
+
+`ci_phase1_resilience` resume mode (retry interrupted long runs):
+
+- Command shape: `./scripts/ci_phase1_resilience.sh --resume 1 --reports-dir <same-dir>`.
+- Resume reuses prior passing summary artifacts for wrapper stages:
+  - `three_machine_docker_profile_matrix`
+  - `profile_compare_docker_matrix`
+  - `three_machine_docker_profile_matrix_record`
+  - `vpn_rc_matrix_path`
+  - `vpn_rc_resilience_path`
+- Resume does not auto-reuse runtime-only stages; `session_churn_guard` and optional `three_hop_runtime_integration` run normally when enabled.
+- Dry-run note: `--dry-run 1` keeps contract-only behavior; no stage commands are executed.
+- Best practice: point `--reports-dir` to the exact directory from the previous interrupted attempt.
+
+Retry example:
+
+```bash
+./scripts/ci_phase1_resilience.sh --resume 1 --reports-dir .easy-node-logs/ci_phase1_resilience_20260416_203000
+```
+
+`integration_ci_phase1_resilience` (Phase-1 gate contract check):
+
+```bash
+./scripts/integration_ci_phase1_resilience.sh
+```
+
+- Purpose: verify `ci_phase1_resilience.sh` contract behavior (stage ordering, dry-run forwarding, runtime-stage skip policy, toggle wiring, and first-failure `rc` propagation).
+- When to run: after editing `ci_phase1_resilience.sh` stage wiring, defaults, or toggle/env forwarding in higher-level CI wrappers.
+- Expected artifacts: temporary summary JSON and log captures under a harness-owned temp directory.
+- Exit meaning: `0` when all contract assertions pass; non-zero on any contract regression (`2` for missing required commands/executable under test).
+
+`vpn-rc-resilience-path` (Phase-1 resilience handoff run command):
+
+```bash
+./scripts/easy_node.sh vpn-rc-resilience-path
+```
+
+- Purpose: execute the Phase-1 resilience run chain and emit handoff booleans (`profile_matrix_stable`, `peer_loss_recovery_ok`, `session_churn_guard_ok`) in one summary.
+- When to run: after profile-matrix/resilience wrapper changes and before publishing roadmap progress handoff artifacts.
+- Expected artifacts: `.easy-node-logs/vpn_rc_resilience_path_<stamp>/vpn_rc_resilience_path_summary.json` (plus stage-level reports under the same run directory).
+- Exit meaning: `0` when all enabled resilience stages pass; non-zero when any stage fails (summary `status=fail` + `rc` fields).
+
+`integration_vpn_rc_resilience_path` (Phase-1 resilience handoff check):
+
+```bash
+./scripts/integration_vpn_rc_resilience_path.sh
+```
+
+- Purpose: validate `vpn-rc-resilience-path` summary contract fields, including explicit resilience handoff booleans and stable fail/pass status behavior.
+- When to run: after modifying `vpn_rc_resilience_path.sh` output schema/derivation logic.
+- Expected artifacts: harness temp summary/log files for pass/fail contract scenarios.
+- Exit meaning: `0` when contract checks pass; non-zero on any schema/status/rc mismatch.
+
+`integration_roadmap_progress_resilience_handoff` (handoff ingestion check):
+
+```bash
+./scripts/integration_roadmap_progress_resilience_handoff.sh
+```
+
+- Purpose: ensure roadmap progress reporting ingests and surfaces resilience handoff fields from `vpn_rc_resilience_path_summary.json`.
+- Also validates Phase-1 handoff ingestion (`--phase1-resilience-handoff-summary-json`) and the non-blockchain actionable gate list contract (`vpn_track.non_blockchain_actionable_no_sudo_or_github`) for checks that do not require sudo or GitHub.
+- When to run: after editing `roadmap_progress_report.sh` resilience-source detection or output mapping.
+- Expected artifacts: harness temp summaries validating ingestion and fallback behavior.
+- Exit meaning: `0` when ingestion contract checks pass; non-zero on mapping/regression failures.
+
+`integration_roadmap_progress_phase2_handoff` (Phase-2 handoff ingestion check):
+
+```bash
+./scripts/integration_roadmap_progress_phase2_handoff.sh
+```
+
+- Purpose: ensure roadmap progress reporting ingests and surfaces the Phase-2 Linux production-candidate handoff in the `vpn_track` block of the generated JSON/markdown report.
+- When to run: after editing Phase-2 handoff wiring or `roadmap_progress_report.sh` output mapping.
+- Expected artifacts: harness temp summaries validating the Phase-2 handoff contract and report placement.
+- Exit meaning: `0` when contract checks pass; non-zero on any schema/status/mapping regression.
+
+`integration_roadmap_progress_phase3_handoff` (Phase-3 handoff ingestion check):
+
+```bash
+./scripts/integration_roadmap_progress_phase3_handoff.sh
+```
+
+- Purpose: ensure roadmap progress reporting ingests and surfaces the Phase-3 Windows client-beta handoff in the `vpn_track` block of the generated JSON/markdown report.
+- When to run: after editing Phase-3 handoff wiring or `roadmap_progress_report.sh` output mapping.
+- Expected artifacts: harness temp summaries validating direct, nested, fallback, and missing-input ingestion paths.
+- Exit meaning: `0` when contract checks pass; non-zero on any schema/status/mapping regression.
+
+`integration_roadmap_progress_phase4_handoff` (Phase-4 handoff ingestion check):
+
+```bash
+./scripts/integration_roadmap_progress_phase4_handoff.sh
+```
+
+- Purpose: ensure roadmap progress reporting ingests and surfaces the Phase-4 Windows full-parity handoff in the `vpn_track` block of the generated JSON/markdown report.
+- When to run: after editing Phase-4 handoff wiring or `roadmap_progress_report.sh` output mapping.
+- Expected artifacts: harness temp summaries validating direct, nested, fallback, and missing-input ingestion paths.
+- Exit meaning: `0` when contract checks pass; non-zero on any schema/status/mapping regression.
+
+`integration_roadmap_progress_phase5_handoff` (Phase-5 handoff ingestion check):
+
+```bash
+./scripts/integration_roadmap_progress_phase5_handoff.sh
+```
+
+- Purpose: ensure roadmap progress reporting ingests and surfaces the Phase-5 settlement-layer handoff in the `vpn_track` block of the generated JSON/markdown report.
+- When to run: after editing Phase-5 handoff wiring or `roadmap_progress_report.sh` output mapping.
+- Expected artifacts: harness temp summaries validating direct, nested, fallback, and missing-input ingestion paths.
+- Exit meaning: `0` when contract checks pass; non-zero on any schema/status/mapping regression.
+
+`roadmap_non_blockchain_actionable_run` (no-sudo actionable gate runner):
+
+```bash
+./scripts/roadmap_non_blockchain_actionable_run.sh --recommended-only 1 --print-summary-json 1
+```
+
+- Purpose: resolve `vpn_track.non_blockchain_actionable_no_sudo_or_github` from `roadmap_progress_report`, then execute selected actions in one wrapper run.
+- Recommended use: `--recommended-only 1` for one fast next action, or run without it to execute all currently listed no-sudo/no-GitHub actions.
+- Clean launcher/wiring invocation path (same behavior through easy-node command routing):
+```bash
+./scripts/easy_node.sh roadmap-non-blockchain-actionable-run --recommended-only 1 --print-summary-json 1
+```
+- Optional limit: `--max-actions N` to cap how many actions run in one pass.
+- Optional parallel execution: `--parallel 1` to run selected no-sudo actions concurrently and reduce wall-clock time.
+- Optional per-action timeout: `--action-timeout-sec N` (or env `ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC`), where `0` keeps current unlimited behavior.
+- Timeout semantics: timed-out actions are marked `status=fail` with `timed_out=true`, `failure_kind=timed_out`, and `timeout_sec=N`; the runner continues remaining actions, and wrapper exit code still follows the first failing action (`124` for timeout).
+- Expected artifacts: one wrapper summary JSON and per-action logs under `.easy-node-logs/roadmap_non_blockchain_actionable_run_<stamp>/`.
+- Exit meaning: `0` when selected actions pass; non-zero with first failing action `rc`.
+
+Fast refresh: Phase-1 handoff summary (no heavy CI rerun):
+
+```bash
+latest_vpn_rc="$(find .easy-node-logs -type f -name vpn_rc_resilience_path_summary.json -print 2>/dev/null | sort | tail -n 1)"
+./scripts/easy_node.sh phase1-resilience-handoff-run \
+  --run-ci-phase1-resilience 0 \
+  --run-phase1-resilience-handoff-check 1 \
+  --handoff-vpn-rc-resilience-summary-json "$latest_vpn_rc" \
+  --print-summary-json 1
+```
+
+- Purpose: emit a fresh `phase1_resilience_handoff_run` summary from an existing `vpn_rc_resilience_path` artifact without re-running Docker/profile-matrix stages.
+- Note: if `latest_vpn_rc` is empty, run `./scripts/easy_node.sh vpn-rc-resilience-path` first.
 
 `integration_session_churn_guard` (session lifecycle churn guard integration):
 
@@ -108,6 +252,175 @@ If it fails:
 - When to run: after edits to client session reuse/refresh logic, direct-exit defaults, or guard env wiring.
 - Expected artifacts: `/tmp/integration_session_churn_guard_guarded.log` and `/tmp/integration_session_churn_guard_churn.log`; terminal summary line with guarded/churn selection and reuse counts.
 - Exit meaning: `0` when guard and override assertions both hold; non-zero on mismatch/failure (`2` for missing required commands).
+
+### Phase 2 targeted gates (Linux production candidate)
+
+Status:
+- `ci_phase2_linux_prod_candidate.sh` is the focused Phase-2 gate runner, with signoff and roadmap handoff integration checks included in the expanded gate set.
+- `integration_ci_phase2_linux_prod_candidate.sh` validates the Phase-2 gate contract.
+- `phase2_linux_prod_candidate_check.sh` validates the Phase-2 handoff/check artifact contract.
+- `phase2_linux_prod_candidate_run.sh` runs the Phase-2 gate + handoff check in one command.
+- `integration_phase2_linux_prod_candidate_check.sh` validates checker behavior/contract.
+- `integration_phase2_linux_prod_candidate_run.sh` validates wrapper behavior/contract.
+- `phase2_linux_prod_candidate_handoff_check.sh` validates the Phase-2 handoff/check artifact contract.
+- `phase2_linux_prod_candidate_handoff_run.sh` runs the Phase-2 handoff check in one command; use `--resume 1 --reports-dir <same-run-dir>` to reuse passing signoff/handoff summaries on retry.
+- `integration_phase2_linux_prod_candidate_handoff_check.sh` validates checker behavior/contract.
+- `integration_phase2_linux_prod_candidate_handoff_run.sh` validates wrapper behavior/contract.
+- `integration_phase2_linux_prod_candidate_signoff.sh` validates the Phase-2 signoff wrapper contract.
+- `integration_roadmap_progress_phase2_handoff.sh` validates roadmap progress ingestion of the Phase-2 handoff.
+
+Usage:
+
+```bash
+./scripts/ci_phase2_linux_prod_candidate.sh
+./scripts/integration_ci_phase2_linux_prod_candidate.sh
+./scripts/phase2_linux_prod_candidate_check.sh
+./scripts/phase2_linux_prod_candidate_run.sh
+./scripts/integration_phase2_linux_prod_candidate_check.sh
+./scripts/integration_phase2_linux_prod_candidate_run.sh
+./scripts/phase2_linux_prod_candidate_handoff_check.sh
+./scripts/phase2_linux_prod_candidate_handoff_run.sh
+./scripts/integration_phase2_linux_prod_candidate_handoff_check.sh
+./scripts/integration_phase2_linux_prod_candidate_handoff_run.sh
+./scripts/integration_phase2_linux_prod_candidate_signoff.sh
+./scripts/integration_roadmap_progress_phase2_handoff.sh
+```
+
+`phase2_linux_prod_candidate_handoff` (Phase-2 handoff check/run wrapper):
+
+```bash
+./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-check
+./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-run
+```
+
+- Purpose: run the Phase-2 Linux production-candidate handoff check or run wrapper and verify the matching contract in one place.
+- When to run: after changing Phase-2 handoff wiring, wrapper behavior, or operator-facing `easy_node.sh` command forwarding.
+- Expected artifacts: wrapper summary/log artifacts under the run directory.
+- Exit meaning: `0` when the wrapper and integration check pass; non-zero on any contract or run failure.
+
+`phase2_linux_prod_candidate_signoff` (Phase-2 signoff wrapper):
+
+```bash
+./scripts/easy_node.sh phase2-linux-prod-candidate-signoff
+./scripts/integration_phase2_linux_prod_candidate_signoff.sh
+```
+
+- Purpose: run the Phase-2 Linux production-candidate signoff wrapper and check its contract in one place.
+- When to run: after changing Phase-2 wrapper wiring or signoff handoff behavior.
+- Expected artifacts: wrapper summary/log artifacts under the run directory.
+- Exit meaning: `0` when the wrapper and integration check pass; non-zero on any contract or run failure.
+
+### Phase 3 targeted gates (Windows client beta)
+
+Status:
+- `ci_phase3_windows_client_beta.sh` is the focused Phase-3 gate runner for desktop/control API/config and launcher contract checks.
+- `integration_ci_phase3_windows_client_beta.sh` validates the Phase-3 gate contract.
+- `phase3_windows_client_beta_check.sh` validates the Phase-3 readiness/check artifact contract.
+- `phase3_windows_client_beta_run.sh` runs the Phase-3 gate + check in one command.
+- `integration_phase3_windows_client_beta_check.sh` validates checker behavior/contract.
+- `integration_phase3_windows_client_beta_run.sh` validates wrapper behavior/contract.
+- `phase3_windows_client_beta_handoff_check.sh` validates the Phase-3 handoff/check artifact contract.
+- `phase3_windows_client_beta_handoff_run.sh` runs the Phase-3 handoff check in one command; use `--resume 1 --reports-dir <same-run-dir>` to reuse passing run/handoff summaries on retry.
+- `integration_phase3_windows_client_beta_handoff_check.sh` validates handoff checker behavior/contract.
+- `integration_phase3_windows_client_beta_handoff_run.sh` validates handoff wrapper behavior/contract.
+- `integration_roadmap_progress_phase3_handoff.sh` validates roadmap progress ingestion of the Phase-3 handoff.
+
+Usage:
+
+```bash
+./scripts/ci_phase3_windows_client_beta.sh
+./scripts/integration_ci_phase3_windows_client_beta.sh
+./scripts/phase3_windows_client_beta_check.sh
+./scripts/phase3_windows_client_beta_run.sh
+./scripts/integration_phase3_windows_client_beta_check.sh
+./scripts/integration_phase3_windows_client_beta_run.sh
+./scripts/phase3_windows_client_beta_handoff_check.sh
+./scripts/phase3_windows_client_beta_handoff_run.sh
+./scripts/integration_phase3_windows_client_beta_handoff_check.sh
+./scripts/integration_phase3_windows_client_beta_handoff_run.sh
+./scripts/integration_roadmap_progress_phase3_handoff.sh
+./scripts/easy_node.sh ci-phase3-windows-client-beta
+./scripts/easy_node.sh phase3-windows-client-beta-check
+./scripts/easy_node.sh phase3-windows-client-beta-run
+./scripts/easy_node.sh phase3-windows-client-beta-handoff-check
+./scripts/easy_node.sh phase3-windows-client-beta-handoff-run
+```
+
+### Phase 4 targeted gates (Windows full parity)
+
+Status:
+- `ci_phase4_windows_full_parity.sh` is the focused Phase-4 gate runner for cross-platform Windows full-parity contract checks.
+- `integration_ci_phase4_windows_full_parity.sh` validates the Phase-4 gate contract.
+- `phase4_windows_full_parity_check.sh` validates the Phase-4 readiness/check artifact contract.
+- `phase4_windows_full_parity_run.sh` runs the Phase-4 gate + check in one command.
+- `integration_phase4_windows_full_parity_check.sh` validates checker behavior/contract.
+- `integration_phase4_windows_full_parity_run.sh` validates wrapper behavior/contract.
+- `phase4_windows_full_parity_handoff_check.sh` validates the Phase-4 handoff/check artifact contract.
+- `phase4_windows_full_parity_handoff_run.sh` runs the Phase-4 handoff check in one command; use `--resume 1 --reports-dir <same-run-dir>` to reuse passing run/handoff summaries on retry.
+- `integration_phase4_windows_full_parity_handoff_check.sh` validates handoff checker behavior/contract.
+- `integration_phase4_windows_full_parity_handoff_run.sh` validates handoff wrapper behavior/contract.
+- `integration_roadmap_progress_phase4_handoff.sh` validates roadmap progress ingestion of the Phase-4 handoff.
+
+Usage:
+
+```bash
+./scripts/ci_phase4_windows_full_parity.sh
+./scripts/integration_ci_phase4_windows_full_parity.sh
+./scripts/phase4_windows_full_parity_check.sh
+./scripts/phase4_windows_full_parity_run.sh
+./scripts/integration_phase4_windows_full_parity_check.sh
+./scripts/integration_phase4_windows_full_parity_run.sh
+./scripts/phase4_windows_full_parity_handoff_check.sh
+./scripts/phase4_windows_full_parity_handoff_run.sh
+./scripts/integration_phase4_windows_full_parity_handoff_check.sh
+./scripts/integration_phase4_windows_full_parity_handoff_run.sh
+./scripts/integration_roadmap_progress_phase4_handoff.sh
+./scripts/easy_node.sh ci-phase4-windows-full-parity
+./scripts/easy_node.sh phase4-windows-full-parity-check
+./scripts/easy_node.sh phase4-windows-full-parity-run
+./scripts/easy_node.sh phase4-windows-full-parity-handoff-check
+./scripts/easy_node.sh phase4-windows-full-parity-handoff-run
+```
+
+### Phase 5 targeted gates (Settlement layer)
+
+Status:
+- `ci_phase5_settlement_layer.sh` is the focused Phase-5 gate runner for settlement-layer readiness and contract checks.
+- `integration_ci_phase5_settlement_layer.sh` validates the Phase-5 gate contract.
+- canonical Phase-5 CI settlement blockchain stages include `settlement_adapter_roundtrip`, `settlement_adapter_signed_tx_roundtrip`, `settlement_shadow_env`, `settlement_shadow_status_surface`, `settlement_dual_asset_parity`, and `issuer_sponsor_api_live_smoke` (wired to `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`, `scripts/integration_cosmos_adapter_tdpnd_signed_tx_roundtrip.sh`, `scripts/integration_cosmos_settlement_shadow_env.sh`, `scripts/integration_cosmos_settlement_shadow_status_surface.sh`, `scripts/integration_cosmos_settlement_dual_asset_parity.sh`, and `scripts/integration_issuer_sponsor_api_live_smoke.sh`).
+- canonical Phase-5 CI settlement blockchain stages also include `issuer_admin_blockchain_handlers_coverage` wired to `scripts/integration_issuer_admin_blockchain_handlers_coverage_floor.sh`, validating issuer admin blockchain handler coverage floor for `upsert/promote/reputation/bond/recompute/get-subject/anon issue+revoke/audit/revoke-token`.
+- canonical Phase-6 Cosmos L1 contracts posture includes `cosmos_module_coverage_floor`, `cosmos_keeper_coverage_floor`, and `cosmos_app_coverage_floor` (wired to `scripts/integration_cosmos_module_coverage_floor.sh`, `scripts/integration_cosmos_keeper_coverage_floor.sh`, and `scripts/integration_cosmos_app_coverage_floor.sh`) before wrapper handoff/run stages.
+- `phase5_settlement_layer_check.sh` validates the Phase-5 readiness/check artifact contract.
+- `phase5_settlement_layer_run.sh` runs the Phase-5 gate + check in one command.
+- `integration_phase5_settlement_layer_check.sh` validates checker behavior/contract.
+- `integration_phase5_settlement_layer_run.sh` validates wrapper behavior/contract.
+- `phase5_settlement_layer_handoff_check.sh` validates the Phase-5 handoff/check artifact contract.
+- `phase5_settlement_layer_handoff_run.sh` runs the Phase-5 handoff check in one command.
+- `integration_phase5_settlement_layer_handoff_check.sh` validates handoff checker behavior/contract.
+- `integration_phase5_settlement_layer_handoff_run.sh` validates handoff wrapper behavior/contract.
+- `integration_roadmap_progress_phase5_handoff.sh` validates roadmap progress ingestion of the Phase-5 handoff.
+- `./scripts/easy_node.sh vpn-non-blockchain-fastlane --print-summary-json 1` is a non-blockchain acceleration wrapper (runtime + Phase-1..4 handoff + roadmap path) and explicitly excludes blockchain/Phase-5 settlement checks; Phase-1/2/3/4 handoff-run stages default to `--resume 1` unless explicitly overridden.
+
+Usage:
+
+```bash
+./scripts/ci_phase5_settlement_layer.sh
+./scripts/integration_ci_phase5_settlement_layer.sh
+./scripts/phase5_settlement_layer_check.sh
+./scripts/phase5_settlement_layer_run.sh
+./scripts/integration_phase5_settlement_layer_check.sh
+./scripts/integration_phase5_settlement_layer_run.sh
+./scripts/phase5_settlement_layer_handoff_check.sh
+./scripts/phase5_settlement_layer_handoff_run.sh
+./scripts/integration_phase5_settlement_layer_handoff_check.sh
+./scripts/integration_phase5_settlement_layer_handoff_run.sh
+./scripts/integration_roadmap_progress_phase5_handoff.sh
+./scripts/easy_node.sh ci-phase5-settlement-layer
+./scripts/easy_node.sh phase5-settlement-layer-check
+./scripts/easy_node.sh phase5-settlement-layer-run
+./scripts/easy_node.sh phase5-settlement-layer-handoff-check
+./scripts/easy_node.sh phase5-settlement-layer-handoff-run
+```
 
 ## 4) Manual end-to-end run (to understand flow)
 
@@ -140,11 +453,11 @@ This is the simplest full path test.
 
 ```bash
 ./scripts/integration_3machine_beta_validate.sh \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
   --min-operators 2 \
   --path-profile balanced
@@ -178,10 +491,17 @@ Three-machine docker profile matrix recorded rehearsal (phase-1 resilience recei
   --print-summary-json 1
 ```
 
+3-hop runtime integration (local deterministic, no docker):
+
+```bash
+./scripts/integration_client_3hop_runtime.sh
+```
+
 Notes:
 - This runs the machine-C control-plane validate/soak flow against two local
   dockerized operator stacks (`A` + `B`) for fast iteration.
 - It is not a replacement for final true multi-host production signoff.
+- In `three-machine-docker-profile-matrix`, `1hop` is auto-run with `--beta-profile 0 --prod-profile 0`; strict/beta/prod client-test paths intentionally reject `1hop`.
 - `single-machine-prod-readiness` and `vpn-rc-standard-path` now run this docker rehearsal with peer failover enabled by default.
 - Diagnostic override knobs: `single-machine-prod-readiness --three-machine-docker-readiness-run-peer-failover 0` or low-level `three-machine-docker-readiness --run-peer-failover 0`.
 - Docker profile matrix wrapper is now exposed in launcher advanced option 77 and maps to `profile-compare-campaign-signoff --campaign-execution-mode docker --campaign-start-local-stack 0`.
@@ -211,7 +531,8 @@ Path profile presets for client routing tests:
 - Session churn guard env: `CLIENT_SESSION_MIN_REFRESH_SEC` sets a minimum refresh interval to avoid rapid session reopen/close loops during unstable control-plane periods.
 - Direct-exit default behavior: with churn protection on, `1hop` uses that minimum refresh guard by default; diagnostics override with `CLIENT_SESSION_MIN_REFRESH_SEC=0` or `CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1` when churn reproduction is intentional.
 - Local control API profile operations stay on the same config-v1 contract (`/v1/set_profile` -> `config-v1-set-profile`); start daemon roles with `--config deploy/config/easy_mode_config_v1.conf` to keep runtime profile defaults aligned with launcher defaults.
-- New coverage this round: `integration_easy_node_config_v1.sh` now gates `config-v1-init/show/set-profile` behavior and required server federation default keys, and runs in both `ci_local.sh` and `beta_preflight.sh`.
+- Config-v1 also supports optional auto-update defaults for simple flows (`SIMPLE_AUTO_UPDATE`, `SIMPLE_AUTO_UPDATE_REMOTE`, `SIMPLE_AUTO_UPDATE_BRANCH`, `SIMPLE_AUTO_UPDATE_ALLOW_DIRTY`, `SIMPLE_AUTO_UPDATE_SHOW_STATUS`, `SIMPLE_AUTO_UPDATE_COMMANDS`), and `easy_node.sh` now applies those values before command dispatch unless explicit `EASY_NODE_AUTO_UPDATE*` env overrides are already set.
+- New coverage this round: `integration_easy_node_config_v1.sh` now gates `config-v1-init/show/set-profile` behavior plus required server federation and auto-update default keys, and `integration_easy_node_self_update.sh` now includes a config-v1-driven auto-update reexec contract check (both run in `ci_local.sh` and `beta_preflight.sh`).
 - Planned future track: optional micro-relay-based 3-hop mode is tracked in `docs/global-privacy-mesh-track.md` and is not part of the current production validation baseline yet.
 
 Single-machine profile comparison (decision support for default profile):
@@ -312,14 +633,33 @@ One-command campaign signoff (optional refresh + fail-closed check artifact):
   --print-summary-json 1
 ```
 
+No-sudo deterministic fallback (when docker rehearsal endpoints are known):
+
+```bash
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir .easy-node-logs \
+  --refresh-campaign 1 \
+  --fail-on-no-go 0 \
+  --campaign-execution-mode docker \
+  --campaign-start-local-stack 0 \
+  --campaign-directory-urls http://127.0.0.1:18081,http://127.0.0.1:28081 \
+  --campaign-issuer-url http://127.0.0.1:18082 \
+  --campaign-entry-url http://127.0.0.1:18083 \
+  --campaign-exit-url http://127.0.0.1:18084 \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --print-summary-json 1
+```
+
+`manual-validation-status`, `manual-validation-report`, and `roadmap-progress-report` now surface this as the profile-default gate primary command when derivable, and also print an explicit `sudo` fallback command.
+
 Real client VPN smoke test (machine C / tester host, Linux root):
 
 ```bash
 sudo ./scripts/easy_node.sh client-vpn-preflight \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081
 
 sudo ./scripts/easy_node.sh client-vpn-up \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --subject <INVITE_KEY> \
   --path-profile balanced
 
@@ -332,6 +672,25 @@ sudo ./scripts/easy_node.sh client-vpn-down
 # prod profile also enables issuer-quorum checks by default (>=2 distinct issuer IDs with keys).
 # for single-issuer lab tests only, append: --issuer-quorum-check 0
 ```
+
+No-sudo local automation (explicit defer mode, default strict behavior unchanged):
+
+```bash
+./scripts/easy_node.sh wg-only-stack-selftest-record \
+  --defer-no-root 1 \
+  --strict-beta 1 \
+  --print-summary-json 1
+
+./scripts/easy_node.sh client-vpn-smoke \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
+  --subject <INVITE_KEY> \
+  --runtime-fix 1 \
+  --defer-no-root 1 \
+  --print-summary-json 1
+```
+
+- When `--defer-no-root 1` is used on a non-root host, root-required failures are recorded as `skip` with explicit notes, so no-sudo automation can continue without pretending the check passed.
+- Default behavior remains strict/fail-closed when `--defer-no-root` is not enabled.
 
 Server federation readiness checks (machine A/B host):
 
@@ -382,7 +741,7 @@ Server federation readiness checks (machine A/B host):
 
 # optional: gate server startup directly
 ./scripts/easy_node.sh server-up \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --federation-wait 1 \
   --federation-require-configured-healthy 1 \
   --federation-max-cooling-retry-sec 120 \
@@ -420,18 +779,18 @@ Notes:
 
 ```bash
 ./scripts/integration_3machine_beta_soak.sh \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --rounds 12 \
   --pause-sec 5 \
   --path-profile balanced
 
 # one-bootstrap mode (auto-discovery)
 ./scripts/integration_machine_c_client_check.sh \
-  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --bootstrap-directory https://KNOWN_SERVER_IP:8081 \
   --discovery-wait-sec 20 \
   --path-profile balanced
 ```
@@ -708,15 +1067,15 @@ Machine-role quick checks (run on each host before full 3-machine run):
 ./scripts/easy_node.sh machine-a-test --public-host A_PUBLIC_IP_OR_DNS
 
 # machine B
-./scripts/easy_node.sh machine-b-test --peer-directory-a http://A_PUBLIC_IP_OR_DNS:8081 --public-host B_PUBLIC_IP_OR_DNS
+./scripts/easy_node.sh machine-b-test --peer-directory-a https://A_PUBLIC_IP_OR_DNS:8081 --public-host B_PUBLIC_IP_OR_DNS
 
 # machine C
 ./scripts/easy_node.sh machine-c-test \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084
 ```
 
 ## 5) How to test specific features

@@ -1,9 +1,46 @@
 package directory
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_INSECURE_SKIP_VERIFY", "1")
+
+	s := &Service{
+		prodStrict: true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict to reject MTLS_INSECURE_SKIP_VERIFY")
+	}
+	if err.Error() != "PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewDoesNotFallbackToDevAdminTokenByDefault(t *testing.T) {
+	t.Setenv("DIRECTORY_ADMIN_TOKEN", "")
+	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK", "0")
+
+	s := New()
+	if s.adminToken != "" {
+		t.Fatalf("expected empty DIRECTORY_ADMIN_TOKEN by default, got %q", s.adminToken)
+	}
+}
+
+func TestNewAllowsExplicitDevAdminTokenFallback(t *testing.T) {
+	t.Setenv("DIRECTORY_ADMIN_TOKEN", "")
+	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK", "1")
+
+	s := New()
+	if s.adminToken != "dev-admin-token" {
+		t.Fatalf("expected explicit dev fallback token, got %q", s.adminToken)
+	}
+}
 
 func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 	s := &Service{
@@ -12,7 +49,7 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -79,7 +116,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsDefaultAdminToken(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "dev-admin-token",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -111,7 +148,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsEmptyAdminToken(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -143,7 +180,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsShortAdminToken(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "short-token",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -175,7 +212,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakSettings(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -203,7 +240,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakQuorumVotes(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             1,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -235,7 +272,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakDiscoveryVotes(t *testing.T) 
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -267,7 +304,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingDiscoverySourceCap(t *test
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -299,7 +336,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingDiscoveryOperatorCap(t *te
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -331,7 +368,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakFinalSources(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -363,7 +400,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakIssuerURLSet(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      2,
 		issuerDisputeMinVotes:    2,
@@ -395,7 +432,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakIssuerVotes(t *testing.T) {
 		peerMinOperators:         2,
 		peerMinVotes:             2,
 		adminToken:               "directory-admin-012345",
-		issuerTrustURLs:          []string{"http://issuer-a.local", "http://issuer-b.local"},
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
 		issuerMinOperators:       2,
 		issuerTrustMinVotes:      1,
 		issuerDisputeMinVotes:    2,
@@ -417,5 +454,41 @@ func TestValidateRuntimeConfigBetaStrictRejectsWeakIssuerVotes(t *testing.T) {
 	}
 	if err.Error() != "BETA_STRICT_MODE requires DIRECTORY_ISSUER_TRUST_MIN_VOTES>=2" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsNonLoopbackIssuerTrustURLsWithoutAnchors(t *testing.T) {
+	s := &Service{
+		issuerTrustURLs:       []string{"https://issuer.example.com"},
+		issuerTrustedKeysFile: t.TempDir() + "/issuer-trust-anchors.txt",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected non-loopback issuer trust URLs without anchors to be rejected")
+	}
+	if !strings.Contains(err.Error(), "non-loopback issuer trust urls require configured issuer trust anchors") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigAllowsDangerousOverrideForIssuerTrustURLsWithoutAnchors(t *testing.T) {
+	t.Setenv(allowDangerousIssuerTrustWithoutAnchors, "1")
+
+	s := &Service{
+		issuerTrustURLs:       []string{"https://issuer.example.com"},
+		issuerTrustedKeysFile: t.TempDir() + "/issuer-trust-anchors.txt",
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected dangerous override to allow missing issuer trust anchors, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigAllowsLoopbackIssuerTrustURLsWithoutAnchors(t *testing.T) {
+	s := &Service{
+		issuerTrustURLs:       []string{"http://127.0.0.1:8082", "http://localhost:8083"},
+		issuerTrustedKeysFile: t.TempDir() + "/issuer-trust-anchors.txt",
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected loopback issuer trust URLs to allow missing anchors, got %v", err)
 	}
 }

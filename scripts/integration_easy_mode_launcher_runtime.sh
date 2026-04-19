@@ -21,7 +21,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TMP_ROOT/scripts" "$TMP_ROOT/data"
+mkdir -p "$TMP_ROOT/scripts" "$TMP_ROOT/data" "$TMP_ROOT/deploy/config"
+
+write_easy_mode_config() {
+  local real_vpn_default="${1:-0}"
+  local server_federation_wait="${2:-1}"
+  local server_federation_ready_timeout_sec="${3:-90}"
+  local server_federation_poll_sec="${4:-5}"
+  cat >"$TMP_ROOT/deploy/config/easy_mode_config_v1.conf" <<EOF_CFG
+EASY_MODE_CONFIG_VERSION=1
+SIMPLE_CLIENT_PROFILE_DEFAULT=2hop
+SIMPLE_CLIENT_REAL_VPN_DEFAULT=${real_vpn_default}
+SIMPLE_CLIENT_DISCOVERY_WAIT_SEC=20
+SIMPLE_CLIENT_PROD_PROFILE_DEFAULT=auto
+SIMPLE_CLIENT_RUN_PREFLIGHT=1
+SIMPLE_CLIENT_OPEN_TERMINAL=0
+SIMPLE_CLIENT_PREFLIGHT_USE_SUDO=0
+SIMPLE_CLIENT_SESSION_USE_SUDO=0
+SIMPLE_CLIENT_PROMPT_REAL_VPN_IN_SIMPLE=0
+SIMPLE_SERVER_PROD_PROFILE_DEFAULT=1
+SIMPLE_SERVER_RUN_PREFLIGHT=1
+SIMPLE_SERVER_FEDERATION_WAIT=${server_federation_wait}
+SIMPLE_SERVER_FEDERATION_READY_TIMEOUT_SEC=${server_federation_ready_timeout_sec}
+SIMPLE_SERVER_FEDERATION_POLL_SEC=${server_federation_poll_sec}
+SIMPLE_SERVER_SESSION_USE_SUDO=0
+EOF_CFG
+}
 
 cat >"$TMP_ROOT/scripts/easy_node.sh" <<'EOF_FAKE_EASY'
 #!/usr/bin/env bash
@@ -201,6 +226,8 @@ MACHINE_A_HOST=198.51.100.10
 MACHINE_B_HOST=203.0.113.20
 EOF_HOSTS
 
+write_easy_mode_config 0
+
 echo "[easy-mode-runtime] compile launcher"
 g++ -std=c++17 -O2 -o "$BIN" tools/easy_mode/easy_mode_ui.cpp
 
@@ -223,6 +250,17 @@ assert_line_has() {
   fi
 }
 
+assert_line_lacks() {
+  local line="$1"
+  local pattern="$2"
+  local message="$3"
+  if printf '%s\n' "$line" | rg -q -- "$pattern"; then
+    echo "$message"
+    printf 'line: %s\n' "$line"
+    exit 1
+  fi
+}
+
 echo "[easy-mode-runtime] main menu option 1 (simple client) runtime command forwarding"
 INPUT1="$TMP_DIR/input1.txt"
 {
@@ -230,15 +268,13 @@ INPUT1="$TMP_DIR/input1.txt"
   printf '\n'    # bootstrap URL (default from hosts)
   printf 'inv-runtime-smoke\n'
   printf '\n'    # path profile (default balanced)
-  printf 'n\n'   # real VPN mode? no -> client-test path
-  printf 'n\n'   # customize advanced client options? no
   printf '0\n'   # exit main menu
 } >"$INPUT1"
 run_ui "$INPUT1" "$TMP_DIR/run1.log"
 
-line1="$(rg '^client-test ' "$CAPTURE" | tail -n 1 || true)"
+line1="$(rg '^simple-client-test ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line1" ]]; then
-  echo "runtime wiring failed: option 1 did not invoke client-test in simple mode"
+  echo "runtime wiring failed: option 1 did not invoke simple-client-test in simple mode"
   cat "$TMP_DIR/run1.log"
   exit 1
 fi
@@ -254,11 +290,14 @@ assert_line_has "$line1" '--prod-profile 0' \
   "runtime wiring failed: option 1 missing --prod-profile 0 default"
 assert_line_has "$line1" '--path-profile 2hop' \
   "runtime wiring failed: option 1 missing --path-profile 2hop"
-if printf '%s\n' "$line1" | rg -q -- '--distinct-operators |--distinct-countries |--locality-soft-bias |--country-bias |--region-bias |--region-prefix-bias '; then
-  echo "runtime wiring failed: option 1 unexpectedly forwarded derived path-policy flags"
-  printf 'line: %s\n' "$line1"
-  exit 1
-fi
+assert_line_lacks "$line1" '--min-sources ' \
+  "runtime wiring failed: option 1 should not forward expert --min-sources via simple wrapper"
+assert_line_lacks "$line1" '--distinct-operators ' \
+  "runtime wiring failed: option 1 should not forward expert path-policy flags via simple wrapper"
+assert_line_lacks "$line1" '--operator-floor-check ' \
+  "runtime wiring failed: option 1 should not forward operator floor flags via simple wrapper"
+assert_line_lacks "$line1" '--issuer-quorum-check ' \
+  "runtime wiring failed: option 1 should not forward issuer quorum flags via simple wrapper"
 
 : >"$CAPTURE"
 
@@ -269,15 +308,13 @@ INPUT1H="$TMP_DIR/input1h.txt"
   printf '\n'    # bootstrap URL (default from hosts)
   printf 'inv-runtime-1hop\n'
   printf '1\n'   # path profile: 1-hop
-  printf 'n\n'   # real VPN mode? no -> client-test path
-  printf 'n\n'   # customize advanced client options? no
   printf '0\n'   # exit main menu
 } >"$INPUT1H"
 run_ui "$INPUT1H" "$TMP_DIR/run1h.log"
 
-line1h="$(rg '^client-test ' "$CAPTURE" | tail -n 1 || true)"
+line1h="$(rg '^simple-client-test ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line1h" ]]; then
-  echo "runtime wiring failed: option 1 1-hop dry-run did not invoke client-test"
+  echo "runtime wiring failed: option 1 1-hop dry-run did not invoke simple-client-test"
   cat "$TMP_DIR/run1h.log"
   exit 1
 fi
@@ -291,29 +328,20 @@ assert_line_has "$line1h" '--prod-profile 0' \
 : >"$CAPTURE"
 
 echo "[easy-mode-runtime] main menu option 1 (simple client real VPN) runtime command forwarding"
+write_easy_mode_config 1
 INPUT1R="$TMP_DIR/input1r.txt"
 {
   printf '1\n'   # main menu: simple client
   printf '\n'    # bootstrap URL (default from hosts)
   printf 'inv-runtime-vpn\n'
   printf '\n'    # path profile (default balanced)
-  printf 'y\n'   # real VPN mode? yes
-  printf 'y\n'   # customize advanced client options? yes
-  printf '\n'    # discovery wait default
-  printf '\n'    # prod profile default yes
-  printf '\n'    # VPN interface name default
-  printf '\n'    # VPN ready timeout sec default
-  printf '\n'    # run VPN preflight first? yes
-  printf 'n\n'   # open dedicated terminal? no
-  printf 'n\n'   # run preflight with sudo? no
-  printf 'n\n'   # run with sudo? no
   printf '0\n'   # exit main menu
 } >"$INPUT1R"
 run_ui "$INPUT1R" "$TMP_DIR/run1r.log"
 
-line1r_preflight="$(rg '^client-vpn-preflight ' "$CAPTURE" | tail -n 1 || true)"
+line1r_preflight="$(rg '^simple-client-vpn-preflight ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line1r_preflight" ]]; then
-  echo "runtime wiring failed: option 1 real VPN did not invoke client-vpn-preflight"
+  echo "runtime wiring failed: option 1 real VPN did not invoke simple-client-vpn-preflight"
   cat "$TMP_DIR/run1r.log"
   exit 1
 fi
@@ -321,18 +349,18 @@ assert_line_has "$line1r_preflight" '--bootstrap-directory http://198\.51\.100\.
   "runtime wiring failed: option 1 real VPN preflight missing default bootstrap directory"
 assert_line_has "$line1r_preflight" '--prod-profile 1' \
   "runtime wiring failed: option 1 real VPN preflight missing --prod-profile 1 default"
-assert_line_has "$line1r_preflight" '--operator-floor-check 1' \
-  "runtime wiring failed: option 1 real VPN preflight missing --operator-floor-check 1"
-assert_line_has "$line1r_preflight" '--operator-min-operators 2' \
-  "runtime wiring failed: option 1 real VPN preflight missing --operator-min-operators 2"
-assert_line_has "$line1r_preflight" '--issuer-quorum-check 1' \
-  "runtime wiring failed: option 1 real VPN preflight missing --issuer-quorum-check 1"
-assert_line_has "$line1r_preflight" '--issuer-min-operators 2' \
-  "runtime wiring failed: option 1 real VPN preflight missing --issuer-min-operators 2"
+assert_line_has "$line1r_preflight" '--path-profile 2hop' \
+  "runtime wiring failed: option 1 real VPN preflight missing --path-profile 2hop default"
+assert_line_has "$line1r_preflight" '--interface wgvpn0' \
+  "runtime wiring failed: option 1 real VPN preflight missing default --interface wgvpn0"
+assert_line_lacks "$line1r_preflight" '--operator-floor-check ' \
+  "runtime wiring failed: option 1 real VPN preflight should keep operator-floor wiring inside wrapper"
+assert_line_lacks "$line1r_preflight" '--issuer-quorum-check ' \
+  "runtime wiring failed: option 1 real VPN preflight should keep issuer-quorum wiring inside wrapper"
 
-line1r_session="$(rg '^client-vpn-session ' "$CAPTURE" | tail -n 1 || true)"
+line1r_session="$(rg '^simple-client-vpn-session ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line1r_session" ]]; then
-  echo "runtime wiring failed: option 1 real VPN did not invoke client-vpn-session"
+  echo "runtime wiring failed: option 1 real VPN did not invoke simple-client-vpn-session"
   cat "$TMP_DIR/run1r.log"
   exit 1
 fi
@@ -340,18 +368,20 @@ assert_line_has "$line1r_session" '--bootstrap-directory http://198\.51\.100\.10
   "runtime wiring failed: option 1 real VPN session missing default bootstrap directory"
 assert_line_has "$line1r_session" '--subject inv-runtime-vpn' \
   "runtime wiring failed: option 1 real VPN session missing invite subject"
-assert_line_has "$line1r_session" '--min-operators 2' \
-  "runtime wiring failed: option 1 real VPN session missing --min-operators 2"
-assert_line_has "$line1r_session" '--operator-floor-check 1' \
-  "runtime wiring failed: option 1 real VPN session missing --operator-floor-check 1"
-assert_line_has "$line1r_session" '--operator-min-operators 2' \
-  "runtime wiring failed: option 1 real VPN session missing --operator-min-operators 2"
+assert_line_has "$line1r_session" '--path-profile 2hop' \
+  "runtime wiring failed: option 1 real VPN session missing --path-profile 2hop default"
+assert_line_has "$line1r_session" '--beta-profile 1' \
+  "runtime wiring failed: option 1 real VPN session missing --beta-profile 1 default"
 assert_line_has "$line1r_session" '--prod-profile 1' \
   "runtime wiring failed: option 1 real VPN session missing --prod-profile 1 default"
-assert_line_has "$line1r_session" '--issuer-quorum-check 1' \
-  "runtime wiring failed: option 1 real VPN session missing --issuer-quorum-check 1"
-assert_line_has "$line1r_session" '--issuer-min-operators 2' \
-  "runtime wiring failed: option 1 real VPN session missing --issuer-min-operators 2"
+assert_line_has "$line1r_session" '--interface wgvpn0' \
+  "runtime wiring failed: option 1 real VPN session missing default --interface wgvpn0"
+assert_line_has "$line1r_session" '--ready-timeout-sec 35' \
+  "runtime wiring failed: option 1 real VPN session missing default --ready-timeout-sec 35"
+assert_line_lacks "$line1r_session" '--operator-floor-check ' \
+  "runtime wiring failed: option 1 real VPN session should keep operator-floor wiring inside wrapper"
+assert_line_lacks "$line1r_session" '--issuer-quorum-check ' \
+  "runtime wiring failed: option 1 real VPN session should keep issuer-quorum wiring inside wrapper"
 
 : >"$CAPTURE"
 
@@ -361,16 +391,13 @@ INPUT2="$TMP_DIR/input2.txt"
   printf '2\n'   # main menu: simple server
   printf '\n'    # public host (default hosts.a)
   printf '\n'    # authority mode? default no (provider)
-  printf 'n\n'   # customize advanced server options? no
-  printf '\n'    # authority directory URL default from peer host
-  printf '\n'    # authority issuer URL default from peer host
   printf '0\n'   # exit main menu
 } >"$INPUT2"
 run_ui "$INPUT2" "$TMP_DIR/run2.log"
 
-line2_preflight="$(rg '^server-preflight ' "$CAPTURE" | tail -n 1 || true)"
+line2_preflight="$(rg '^simple-server-preflight ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line2_preflight" ]]; then
-  echo "runtime wiring failed: option 2 did not invoke server-preflight"
+  echo "runtime wiring failed: option 2 did not invoke simple-server-preflight"
   cat "$TMP_DIR/run2.log"
   exit 1
 fi
@@ -378,20 +405,24 @@ assert_line_has "$line2_preflight" '--mode provider' \
   "runtime wiring failed: option 2 preflight missing --mode provider"
 assert_line_has "$line2_preflight" '--public-host 198\.51\.100\.10' \
   "runtime wiring failed: option 2 preflight missing default public host"
-assert_line_has "$line2_preflight" '--peer-directories http://203\.0\.113\.20:8081' \
-  "runtime wiring failed: option 2 preflight missing derived peer directories"
-assert_line_has "$line2_preflight" '--authority-directory http://203\.0\.113\.20:8081' \
-  "runtime wiring failed: option 2 preflight missing derived authority directory"
-assert_line_has "$line2_preflight" '--authority-issuer http://203\.0\.113\.20:8082' \
-  "runtime wiring failed: option 2 preflight missing derived authority issuer"
-assert_line_has "$line2_preflight" '--min-peer-operators 1' \
-  "runtime wiring failed: option 2 preflight missing default min-peer-operators"
+assert_line_has "$line2_preflight" '--peer-host 203\.0\.113\.20' \
+  "runtime wiring failed: option 2 preflight missing derived peer-host"
 assert_line_has "$line2_preflight" '--prod-profile 1' \
   "runtime wiring failed: option 2 preflight missing --prod-profile 1 default"
+assert_line_has "$line2_preflight" '--peer-identity-strict auto' \
+  "runtime wiring failed: option 2 preflight missing default --peer-identity-strict auto"
+assert_line_has "$line2_preflight" '--timeout-sec 8' \
+  "runtime wiring failed: option 2 preflight missing default --timeout-sec 8"
+assert_line_lacks "$line2_preflight" '--peer-directories ' \
+  "runtime wiring failed: option 2 preflight should keep derived peer-directories inside wrapper"
+assert_line_lacks "$line2_preflight" '--authority-directory ' \
+  "runtime wiring failed: option 2 preflight should keep derived authority-directory inside wrapper"
+assert_line_lacks "$line2_preflight" '--authority-issuer ' \
+  "runtime wiring failed: option 2 preflight should keep derived authority-issuer inside wrapper"
 
-line2_session="$(rg '^server-session ' "$CAPTURE" | tail -n 1 || true)"
+line2_session="$(rg '^simple-server-session ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line2_session" ]]; then
-  echo "runtime wiring failed: option 2 did not invoke server-session"
+  echo "runtime wiring failed: option 2 did not invoke simple-server-session"
   cat "$TMP_DIR/run2.log"
   exit 1
 fi
@@ -399,18 +430,54 @@ assert_line_has "$line2_session" '--mode provider' \
   "runtime wiring failed: option 2 server-session missing --mode provider"
 assert_line_has "$line2_session" '--public-host 198\.51\.100\.10' \
   "runtime wiring failed: option 2 server-session missing default public host"
-assert_line_has "$line2_session" '--peer-directories http://203\.0\.113\.20:8081' \
-  "runtime wiring failed: option 2 server-session missing derived peer directories"
-assert_line_has "$line2_session" '--authority-directory http://203\.0\.113\.20:8081' \
-  "runtime wiring failed: option 2 server-session missing derived authority directory"
-assert_line_has "$line2_session" '--authority-issuer http://203\.0\.113\.20:8082' \
-  "runtime wiring failed: option 2 server-session missing derived authority issuer"
-assert_line_has "$line2_session" '--beta-profile 1' \
-  "runtime wiring failed: option 2 server-session missing --beta-profile 1"
+assert_line_has "$line2_session" '--peer-host 203\.0\.113\.20' \
+  "runtime wiring failed: option 2 server-session missing derived peer-host"
 assert_line_has "$line2_session" '--prod-profile 1' \
   "runtime wiring failed: option 2 server-session missing --prod-profile 1 default"
+assert_line_has "$line2_session" '--peer-identity-strict auto' \
+  "runtime wiring failed: option 2 server-session missing default --peer-identity-strict auto"
+assert_line_has "$line2_session" '--federation-wait 1' \
+  "runtime wiring failed: option 2 server-session missing --federation-wait 1 default"
+assert_line_has "$line2_session" '--federation-ready-timeout-sec 90' \
+  "runtime wiring failed: option 2 server-session missing --federation-ready-timeout-sec 90 default"
+assert_line_has "$line2_session" '--federation-poll-sec 5' \
+  "runtime wiring failed: option 2 server-session missing --federation-poll-sec 5 default"
+assert_line_lacks "$line2_session" '--peer-directories ' \
+  "runtime wiring failed: option 2 server-session should keep derived peer-directories inside wrapper"
+assert_line_lacks "$line2_session" '--authority-directory ' \
+  "runtime wiring failed: option 2 server-session should keep derived authority-directory inside wrapper"
+assert_line_lacks "$line2_session" '--authority-issuer ' \
+  "runtime wiring failed: option 2 server-session should keep derived authority-issuer inside wrapper"
 
 : >"$CAPTURE"
+
+echo "[easy-mode-runtime] main menu option 2 (simple server/provider) federation wait disabled by config override"
+write_easy_mode_config 0 0 120 11
+INPUT2F="$TMP_DIR/input2f.txt"
+{
+  printf '2\n'   # main menu: simple server
+  printf '\n'    # public host (default hosts.a)
+  printf '\n'    # authority mode? default no (provider)
+  printf '0\n'   # exit main menu
+} >"$INPUT2F"
+run_ui "$INPUT2F" "$TMP_DIR/run2f.log"
+
+line2f_session="$(rg '^simple-server-session ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line2f_session" ]]; then
+  echo "runtime wiring failed: option 2 (federation wait disabled) did not invoke simple-server-session"
+  cat "$TMP_DIR/run2f.log"
+  exit 1
+fi
+assert_line_has "$line2f_session" '--federation-wait 0' \
+  "runtime wiring failed: option 2 (federation wait disabled) missing --federation-wait 0"
+assert_line_lacks "$line2f_session" '--federation-ready-timeout-sec ' \
+  "runtime wiring failed: option 2 (federation wait disabled) unexpectedly forwarded --federation-ready-timeout-sec"
+assert_line_lacks "$line2f_session" '--federation-poll-sec ' \
+  "runtime wiring failed: option 2 (federation wait disabled) unexpectedly forwarded --federation-poll-sec"
+
+: >"$CAPTURE"
+
+write_easy_mode_config 0 1 90 5
 
 echo "[easy-mode-runtime] main menu option 2 (simple server/authority without peer) runtime command forwarding"
 INPUT2A="$TMP_DIR/input2a.txt"
@@ -418,15 +485,19 @@ INPUT2A="$TMP_DIR/input2a.txt"
   printf '2\n'   # main menu: simple server
   printf '198.51.100.11\n' # explicit public host
   printf 'y\n'   # authority mode
-  printf 'n\n'   # customize advanced server options? no
-  printf '\n'    # peer server optional (leave empty)
   printf '0\n'   # exit main menu
 } >"$INPUT2A"
 run_ui "$INPUT2A" "$TMP_DIR/run2a.log"
 
-line2a_preflight="$(rg '^server-preflight ' "$CAPTURE" | tail -n 1 || true)"
+if rg -q 'Peer server IP/host \(optional\)|Authority peer server IP/host' "$TMP_DIR/run2a.log"; then
+  echo "runtime wiring failed: simple server authority flow should not show peer override prompts"
+  cat "$TMP_DIR/run2a.log"
+  exit 1
+fi
+
+line2a_preflight="$(rg '^simple-server-preflight ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line2a_preflight" ]]; then
-  echo "runtime wiring failed: authority option 2 did not invoke server-preflight"
+  echo "runtime wiring failed: authority option 2 did not invoke simple-server-preflight"
   cat "$TMP_DIR/run2a.log"
   exit 1
 fi
@@ -434,17 +505,20 @@ assert_line_has "$line2a_preflight" '--mode authority' \
   "runtime wiring failed: authority option 2 preflight missing --mode authority"
 assert_line_has "$line2a_preflight" '--public-host 198\.51\.100\.11' \
   "runtime wiring failed: authority option 2 preflight missing explicit public host"
-assert_line_has "$line2a_preflight" '--min-peer-operators 0' \
-  "runtime wiring failed: authority option 2 preflight missing explicit min-peer-operators 0"
-if printf '%s\n' "$line2a_preflight" | rg -q -- '--peer-directories '; then
-  echo "runtime wiring failed: authority option 2 preflight unexpectedly forwarded peer directories"
-  printf 'line: %s\n' "$line2a_preflight"
-  exit 1
-fi
+assert_line_has "$line2a_preflight" '--prod-profile 0' \
+  "runtime wiring failed: authority option 2 preflight missing non-PROD fallback --prod-profile 0"
+assert_line_has "$line2a_preflight" '--peer-identity-strict auto' \
+  "runtime wiring failed: authority option 2 preflight missing default --peer-identity-strict auto"
+assert_line_has "$line2a_preflight" '--timeout-sec 8' \
+  "runtime wiring failed: authority option 2 preflight missing default --timeout-sec 8"
+assert_line_lacks "$line2a_preflight" '--peer-host ' \
+  "runtime wiring failed: authority option 2 preflight unexpectedly forwarded --peer-host when peer is empty"
+assert_line_lacks "$line2a_preflight" '--peer-directories ' \
+  "runtime wiring failed: authority option 2 preflight should keep peer-directories derivation inside wrapper"
 
-line2a_session="$(rg '^server-session ' "$CAPTURE" | tail -n 1 || true)"
+line2a_session="$(rg '^simple-server-session ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$line2a_session" ]]; then
-  echo "runtime wiring failed: authority option 2 did not invoke server-session"
+  echo "runtime wiring failed: authority option 2 did not invoke simple-server-session"
   cat "$TMP_DIR/run2a.log"
   exit 1
 fi
@@ -452,6 +526,10 @@ assert_line_has "$line2a_session" '--mode authority' \
   "runtime wiring failed: authority option 2 server-session missing --mode authority"
 assert_line_has "$line2a_session" '--public-host 198\.51\.100\.11' \
   "runtime wiring failed: authority option 2 server-session missing explicit public host"
+assert_line_has "$line2a_session" '--prod-profile 0' \
+  "runtime wiring failed: authority option 2 server-session missing non-PROD fallback --prod-profile 0"
+assert_line_has "$line2a_session" '--peer-identity-strict auto' \
+  "runtime wiring failed: authority option 2 server-session missing default --peer-identity-strict auto"
 assert_line_has "$line2a_session" '--auto-invite 1' \
   "runtime wiring failed: authority option 2 server-session missing default --auto-invite 1"
 assert_line_has "$line2a_session" '--auto-invite-count 1' \
@@ -460,13 +538,18 @@ assert_line_has "$line2a_session" '--auto-invite-tier 1' \
   "runtime wiring failed: authority option 2 server-session missing default --auto-invite-tier 1"
 assert_line_has "$line2a_session" '--auto-invite-wait-sec 10' \
   "runtime wiring failed: authority option 2 server-session missing default --auto-invite-wait-sec 10"
-assert_line_has "$line2a_session" '--auto-invite-fail-open 0' \
-  "runtime wiring failed: authority option 2 server-session missing default --auto-invite-fail-open 0"
-if printf '%s\n' "$line2a_session" | rg -q -- '--peer-directories '; then
-  echo "runtime wiring failed: authority option 2 server-session unexpectedly forwarded peer directories"
-  printf 'line: %s\n' "$line2a_session"
-  exit 1
-fi
+assert_line_lacks "$line2a_session" '--auto-invite-fail-open ' \
+  "runtime wiring failed: authority option 2 server-session should keep auto-invite fail-open policy inside wrapper"
+assert_line_has "$line2a_session" '--federation-wait 1' \
+  "runtime wiring failed: authority option 2 server-session missing --federation-wait 1 default"
+assert_line_has "$line2a_session" '--federation-ready-timeout-sec 90' \
+  "runtime wiring failed: authority option 2 server-session missing --federation-ready-timeout-sec 90 default"
+assert_line_has "$line2a_session" '--federation-poll-sec 5' \
+  "runtime wiring failed: authority option 2 server-session missing --federation-poll-sec 5 default"
+assert_line_lacks "$line2a_session" '--peer-host ' \
+  "runtime wiring failed: authority option 2 server-session unexpectedly forwarded --peer-host when peer is empty"
+assert_line_lacks "$line2a_session" '--peer-directories ' \
+  "runtime wiring failed: authority option 2 server-session should keep peer-directories derivation inside wrapper"
 
 : >"$CAPTURE"
 
@@ -635,6 +718,45 @@ if printf '%s\n' "$line12" | rg -q -- '--distinct-operators |--distinct-countrie
   printf 'line: %s\n' "$line12"
   exit 1
 fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] advanced option 31 (client-vpn-preflight real mode) runtime command forwarding"
+INPUT31="$TMP_DIR/input31.txt"
+{
+  printf '3\n'   # main menu: advanced
+  printf '31\n'  # client-vpn-preflight
+  printf '\n'    # auto-discover default yes
+  printf '\n'    # bootstrap directory URL default
+  printf '\n'    # discovery wait default
+  printf 'n\n'   # prod profile off
+  printf '3\n'   # path profile private/3hop
+  printf '\n'    # operator floor check default no
+  printf '\n'    # issuer quorum check default no
+  printf '\n'    # issuer min operators default
+  printf '\n'    # extra issuer URLs optional
+  printf '\n'    # VPN interface default
+  printf '\n'    # timeout default
+  printf 'n\n'   # run preflight with sudo? no
+  printf '0\n'   # back from advanced menu
+  printf '0\n'   # exit main menu
+} >"$INPUT31"
+run_ui "$INPUT31" "$TMP_DIR/run31.log"
+
+line31="$(rg '^client-vpn-preflight ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line31" ]]; then
+  echo "runtime wiring failed: advanced option 31 did not invoke client-vpn-preflight"
+  cat "$TMP_DIR/run31.log"
+  exit 1
+fi
+assert_line_has "$line31" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 31 missing default bootstrap directory"
+assert_line_has "$line31" '--path-profile 3hop' \
+  "runtime wiring failed: option 31 missing --path-profile 3hop forwarding"
+assert_line_has "$line31" '--operator-floor-check 0' \
+  "runtime wiring failed: option 31 missing default --operator-floor-check 0 for non-prod profile"
+assert_line_has "$line31" '--issuer-quorum-check 0' \
+  "runtime wiring failed: option 31 missing default --issuer-quorum-check 0 for non-prod profile"
 
 : >"$CAPTURE"
 
@@ -2722,6 +2844,45 @@ assert_line_has "$line76" '--print-report 0' \
   "runtime wiring failed: option 76 missing --print-report 0"
 assert_line_has "$line76" '--print-summary-json 1' \
   "runtime wiring failed: option 76 missing --print-summary-json 1"
+assert_line_lacks "$line76" '(--run-profile-compare-campaign-signoff 1|--run-profile-compare-campaign-signoff 0)' \
+  "runtime wiring failed: option 76 should keep --run-profile-compare-campaign-signoff pinned to auto"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 76 runtime default contract"
+INPUT76D="$TMP_DIR/input76d.txt"
+{
+  printf '3\n'
+  printf '76\n'
+  printf '\n'    # force profile campaign refresh default: no
+  printf '\n'    # print report default: yes
+  printf '\n'    # print summary json default: no
+  printf 'n\n'   # no sudo in integration
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT76D"
+run_ui "$INPUT76D" "$TMP_DIR/run76d.log"
+
+line76d="$(rg '^vpn-rc-standard-path ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line76d" ]]; then
+  echo "runtime wiring failed: option 76 default contract did not invoke vpn-rc-standard-path"
+  cat "$TMP_DIR/run76d.log"
+  exit 1
+fi
+assert_line_has "$line76d" '--run-profile-compare-campaign-signoff auto' \
+  "runtime wiring failed: option 76 default contract missing --run-profile-compare-campaign-signoff auto"
+assert_line_has "$line76d" '--profile-compare-campaign-signoff-refresh-campaign 0' \
+  "runtime wiring failed: option 76 default contract missing --profile-compare-campaign-signoff-refresh-campaign 0"
+assert_line_has "$line76d" '--print-report 1' \
+  "runtime wiring failed: option 76 default contract missing --print-report 1"
+assert_line_has "$line76d" '--print-summary-json 0' \
+  "runtime wiring failed: option 76 default contract missing --print-summary-json 0"
+assert_line_lacks "$line76d" '--profile-compare-campaign-signoff-refresh-campaign 1' \
+  "runtime wiring failed: option 76 default contract unexpectedly forwarded --profile-compare-campaign-signoff-refresh-campaign 1"
+assert_line_lacks "$line76d" '--print-report 0' \
+  "runtime wiring failed: option 76 default contract unexpectedly forwarded --print-report 0"
+assert_line_lacks "$line76d" '--print-summary-json 1' \
+  "runtime wiring failed: option 76 default contract unexpectedly forwarded --print-summary-json 1"
 
 : >"$CAPTURE"
 
@@ -3022,5 +3183,1673 @@ assert_line_has "$line73" '--print-summary-json 0' \
   "runtime wiring failed: option 73 missing default --print-summary-json 0"
 assert_line_has "$line73" '--show-json 0' \
   "runtime wiring failed: option 73 missing default --show-json 0"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 77 runtime command forwarding"
+INPUT77="$TMP_DIR/input77.txt"
+{
+  printf '3\n'
+  printf '77\n'
+  printf '.easy-node-logs/profile_compare_campaign_docker_runtime\n' # reports dir
+  printf 'http://198.51.100.10:8081\n' # bootstrap directory
+  printf '22\n'   # discovery wait sec
+  printf '\n'     # refresh campaign default yes
+  printf '\n'     # fail-on-no-go default yes
+  printf '.easy-node-logs/profile_compare_campaign_docker_runtime/profile_compare_campaign_signoff_summary.json\n'
+  printf '\n'     # print summary json default no
+  printf '\n'     # show json default no
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT77"
+run_ui "$INPUT77" "$TMP_DIR/run77.log"
+
+if ! rg -q '^77\) Docker profile matrix signoff \(campaign refresh \+ fail-closed gate\)$' "$TMP_DIR/run77.log"; then
+  echo "runtime wiring failed: advanced menu missing option 77 label"
+  cat "$TMP_DIR/run77.log"
+  exit 1
+fi
+
+line77="$(rg '^profile-compare-campaign-signoff ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line77" ]]; then
+  echo "runtime wiring failed: option 77 did not invoke profile-compare-campaign-signoff"
+  cat "$TMP_DIR/run77.log"
+  exit 1
+fi
+assert_line_has "$line77" '--reports-dir \.easy-node-logs/profile_compare_campaign_docker_runtime' \
+  "runtime wiring failed: option 77 missing --reports-dir forwarding"
+assert_line_has "$line77" '--refresh-campaign 1' \
+  "runtime wiring failed: option 77 missing default --refresh-campaign 1"
+assert_line_has "$line77" '--fail-on-no-go 1' \
+  "runtime wiring failed: option 77 missing default --fail-on-no-go 1"
+assert_line_has "$line77" '--campaign-execution-mode docker' \
+  "runtime wiring failed: option 77 missing fixed --campaign-execution-mode docker"
+assert_line_has "$line77" '--campaign-bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 77 missing --campaign-bootstrap-directory forwarding"
+assert_line_has "$line77" '--campaign-discovery-wait-sec 22' \
+  "runtime wiring failed: option 77 missing --campaign-discovery-wait-sec forwarding"
+assert_line_has "$line77" '--subject INVITE_KEY' \
+  "runtime wiring failed: option 77 missing effective --subject fallback value (INVITE_KEY)"
+assert_line_has "$line77" '--campaign-start-local-stack 0' \
+  "runtime wiring failed: option 77 missing fixed --campaign-start-local-stack 0"
+assert_line_has "$line77" '--summary-json \.easy-node-logs/profile_compare_campaign_docker_runtime/profile_compare_campaign_signoff_summary\.json' \
+  "runtime wiring failed: option 77 missing --summary-json forwarding"
+assert_line_has "$line77" '--print-summary-json 0' \
+  "runtime wiring failed: option 77 missing default --print-summary-json 0"
+assert_line_has "$line77" '--show-json 0' \
+  "runtime wiring failed: option 77 missing default --show-json 0"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 77 runtime default contract"
+INPUT77D="$TMP_DIR/input77d.txt"
+{
+  printf '3\n'
+  printf '77\n'
+  printf '\n'     # reports dir default
+  printf '\n'     # bootstrap directory default from MACHINE_A_HOST
+  printf '\n'     # discovery wait sec default
+  printf '\n'     # refresh campaign default yes
+  printf '\n'     # fail-on-no-go default yes
+  printf '\n'     # summary json default from reports dir
+  printf '\n'     # print summary json default no
+  printf '\n'     # show json default no
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT77D"
+run_ui "$INPUT77D" "$TMP_DIR/run77d.log"
+
+line77d="$(rg '^profile-compare-campaign-signoff ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line77d" ]]; then
+  echo "runtime wiring failed: option 77 default contract did not invoke profile-compare-campaign-signoff"
+  cat "$TMP_DIR/run77d.log"
+  exit 1
+fi
+assert_line_has "$line77d" '--reports-dir \.easy-node-logs/profile_compare_campaign_docker' \
+  "runtime wiring failed: option 77 default contract missing default --reports-dir"
+assert_line_has "$line77d" '--campaign-bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 77 default contract missing default --campaign-bootstrap-directory from host config"
+assert_line_has "$line77d" '--campaign-discovery-wait-sec 20' \
+  "runtime wiring failed: option 77 default contract missing default --campaign-discovery-wait-sec 20"
+assert_line_has "$line77d" '--subject INVITE_KEY' \
+  "runtime wiring failed: option 77 default contract missing effective --subject fallback value (INVITE_KEY)"
+assert_line_has "$line77d" '--refresh-campaign 1' \
+  "runtime wiring failed: option 77 default contract missing default --refresh-campaign 1"
+assert_line_has "$line77d" '--fail-on-no-go 1' \
+  "runtime wiring failed: option 77 default contract missing default --fail-on-no-go 1"
+assert_line_has "$line77d" '--summary-json \.easy-node-logs/profile_compare_campaign_docker/profile_compare_campaign_signoff_summary\.json' \
+  "runtime wiring failed: option 77 default contract missing default --summary-json path"
+assert_line_has "$line77d" '--print-summary-json 0' \
+  "runtime wiring failed: option 77 default contract missing default --print-summary-json 0"
+assert_line_has "$line77d" '--show-json 0' \
+  "runtime wiring failed: option 77 default contract missing default --show-json 0"
+assert_line_has "$line77d" '--campaign-execution-mode docker' \
+  "runtime wiring failed: option 77 default contract missing fixed --campaign-execution-mode docker"
+assert_line_has "$line77d" '--campaign-start-local-stack 0' \
+  "runtime wiring failed: option 77 default contract missing fixed --campaign-start-local-stack 0"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 78 runtime command forwarding"
+INPUT78="$TMP_DIR/input78.txt"
+{
+  printf '3\n'
+  printf '78\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT78"
+run_ui "$INPUT78" "$TMP_DIR/run78.log"
+
+if ! rg -q '^78\) VPN RC matrix chain path \(campaign refresh/check handoff\)$' "$TMP_DIR/run78.log"; then
+  echo "runtime wiring failed: advanced menu missing option 78 label"
+  cat "$TMP_DIR/run78.log"
+  exit 1
+fi
+
+line78="$(rg '^vpn-rc-matrix-path($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line78" ]]; then
+  echo "runtime wiring failed: option 78 did not invoke vpn-rc-matrix-path"
+  cat "$TMP_DIR/run78.log"
+  exit 1
+fi
+assert_line_lacks "$line78" '--reports-dir ' \
+  "runtime wiring failed: option 78 should not override --reports-dir in launcher forwarding"
+assert_line_lacks "$line78" '--campaign-bootstrap-directory ' \
+  "runtime wiring failed: option 78 should not override --campaign-bootstrap-directory in launcher forwarding"
+assert_line_lacks "$line78" '--campaign-discovery-wait-sec ' \
+  "runtime wiring failed: option 78 should not override --campaign-discovery-wait-sec in launcher forwarding"
+assert_line_has "$line78" '--campaign-execution-mode docker' \
+  "runtime wiring failed: option 78 missing fixed --campaign-execution-mode docker"
+assert_line_has "$line78" '--signoff-refresh-campaign 0' \
+  "runtime wiring failed: option 78 missing fixed --signoff-refresh-campaign 0"
+assert_line_has "$line78" '--signoff-fail-on-no-go 1' \
+  "runtime wiring failed: option 78 missing fixed --signoff-fail-on-no-go 1"
+assert_line_has "$line78" '--roadmap-refresh-manual-validation 1' \
+  "runtime wiring failed: option 78 missing fixed --roadmap-refresh-manual-validation 1"
+assert_line_has "$line78" '--roadmap-refresh-single-machine-readiness 0' \
+  "runtime wiring failed: option 78 missing fixed --roadmap-refresh-single-machine-readiness 0"
+assert_line_has "$line78" '--print-report 1' \
+  "runtime wiring failed: option 78 missing fixed --print-report 1"
+assert_line_has "$line78" '--print-summary-json 1' \
+  "runtime wiring failed: option 78 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 78 runtime default contract"
+INPUT78D="$TMP_DIR/input78d.txt"
+{
+  printf '3\n'
+  printf '78\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT78D"
+run_ui "$INPUT78D" "$TMP_DIR/run78d.log"
+
+line78d="$(rg '^vpn-rc-matrix-path($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line78d" ]]; then
+  echo "runtime wiring failed: option 78 default contract did not invoke vpn-rc-matrix-path"
+  cat "$TMP_DIR/run78d.log"
+  exit 1
+fi
+assert_line_lacks "$line78d" '--reports-dir ' \
+  "runtime wiring failed: option 78 default contract unexpectedly forwarded --reports-dir"
+assert_line_lacks "$line78d" '--campaign-bootstrap-directory ' \
+  "runtime wiring failed: option 78 default contract unexpectedly forwarded --campaign-bootstrap-directory"
+assert_line_lacks "$line78d" '--campaign-discovery-wait-sec ' \
+  "runtime wiring failed: option 78 default contract unexpectedly forwarded --campaign-discovery-wait-sec"
+assert_line_has "$line78d" '--campaign-execution-mode docker' \
+  "runtime wiring failed: option 78 default contract missing fixed --campaign-execution-mode docker"
+assert_line_has "$line78d" '--signoff-refresh-campaign 0' \
+  "runtime wiring failed: option 78 default contract missing fixed --signoff-refresh-campaign 0"
+assert_line_has "$line78d" '--signoff-fail-on-no-go 1' \
+  "runtime wiring failed: option 78 default contract missing fixed --signoff-fail-on-no-go 1"
+assert_line_has "$line78d" '--roadmap-refresh-manual-validation 1' \
+  "runtime wiring failed: option 78 default contract missing fixed --roadmap-refresh-manual-validation 1"
+assert_line_has "$line78d" '--roadmap-refresh-single-machine-readiness 0' \
+  "runtime wiring failed: option 78 default contract missing fixed --roadmap-refresh-single-machine-readiness 0"
+assert_line_has "$line78d" '--print-report 1' \
+  "runtime wiring failed: option 78 default contract missing fixed --print-report 1"
+assert_line_has "$line78d" '--print-summary-json 1' \
+  "runtime wiring failed: option 78 default contract missing fixed --print-summary-json 1"
+
+ : >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 79 runtime command forwarding"
+INPUT79="$TMP_DIR/input79.txt"
+{
+  printf '3\n'
+  printf '79\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT79"
+run_ui "$INPUT79" "$TMP_DIR/run79.log"
+
+if ! rg -q '^79\) 3-machine Docker profile matrix \(resilience defaults\)$' "$TMP_DIR/run79.log"; then
+  echo "runtime wiring failed: advanced menu missing option 79 label"
+  cat "$TMP_DIR/run79.log"
+  exit 1
+fi
+
+line79="$(rg '^three-machine-docker-profile-matrix($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line79" ]]; then
+  echo "runtime wiring failed: option 79 did not invoke three-machine-docker-profile-matrix"
+  cat "$TMP_DIR/run79.log"
+  exit 1
+fi
+assert_line_has "$line79" '--run-peer-failover 1' \
+  "runtime wiring failed: option 79 missing fixed --run-peer-failover 1"
+assert_line_has "$line79" '--print-summary-json 1' \
+  "runtime wiring failed: option 79 missing fixed --print-summary-json 1"
+assert_line_has "$line79" '--docker-host-alias 198\.51\.100\.10' \
+  "runtime wiring failed: option 79 missing default --docker-host-alias from host config"
+assert_line_has "$line79" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 79 missing default --bootstrap-directory from host config"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 79 runtime default contract"
+INPUT79D="$TMP_DIR/input79d.txt"
+{
+  printf '3\n'
+  printf '79\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT79D"
+run_ui "$INPUT79D" "$TMP_DIR/run79d.log"
+
+line79d="$(rg '^three-machine-docker-profile-matrix($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line79d" ]]; then
+  echo "runtime wiring failed: option 79 default contract did not invoke three-machine-docker-profile-matrix"
+  cat "$TMP_DIR/run79d.log"
+  exit 1
+fi
+assert_line_has "$line79d" '--run-peer-failover 1' \
+  "runtime wiring failed: option 79 default contract missing fixed --run-peer-failover 1"
+assert_line_has "$line79d" '--print-summary-json 1' \
+  "runtime wiring failed: option 79 default contract missing fixed --print-summary-json 1"
+assert_line_has "$line79d" '--docker-host-alias 198\.51\.100\.10' \
+  "runtime wiring failed: option 79 default contract missing default --docker-host-alias from host config"
+assert_line_has "$line79d" '--bootstrap-directory http://198\.51\.100\.10:8081' \
+  "runtime wiring failed: option 79 default contract missing default --bootstrap-directory from host config"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 80 runtime command forwarding"
+INPUT80="$TMP_DIR/input80.txt"
+{
+  printf '3\n'
+  printf '80\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT80"
+run_ui "$INPUT80" "$TMP_DIR/run80.log"
+
+if ! rg -q '^80\) VPN RC resilience path \(resilience defaults \+ integration coverage\)$' "$TMP_DIR/run80.log"; then
+  echo "runtime wiring failed: advanced menu missing option 80 label"
+  cat "$TMP_DIR/run80.log"
+  exit 1
+fi
+
+line80="$(rg '^vpn-rc-resilience-path($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line80" ]]; then
+  echo "runtime wiring failed: option 80 did not invoke vpn-rc-resilience-path"
+  cat "$TMP_DIR/run80.log"
+  exit 1
+fi
+assert_line_lacks "$line80" '--reports-dir ' \
+  "runtime wiring failed: option 80 should not override --reports-dir in launcher forwarding"
+assert_line_lacks "$line80" '--campaign-bootstrap-directory ' \
+  "runtime wiring failed: option 80 should not override --campaign-bootstrap-directory in launcher forwarding"
+assert_line_lacks "$line80" '--campaign-discovery-wait-sec ' \
+  "runtime wiring failed: option 80 should not override --campaign-discovery-wait-sec in launcher forwarding"
+assert_line_has "$line80" '--print-summary-json 1' \
+  "runtime wiring failed: option 80 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 80 runtime default contract"
+INPUT80D="$TMP_DIR/input80d.txt"
+{
+  printf '3\n'
+  printf '80\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT80D"
+run_ui "$INPUT80D" "$TMP_DIR/run80d.log"
+
+line80d="$(rg '^vpn-rc-resilience-path($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line80d" ]]; then
+  echo "runtime wiring failed: option 80 default contract did not invoke vpn-rc-resilience-path"
+  cat "$TMP_DIR/run80d.log"
+  exit 1
+fi
+assert_line_lacks "$line80d" '--reports-dir ' \
+  "runtime wiring failed: option 80 default contract unexpectedly forwarded --reports-dir"
+assert_line_lacks "$line80d" '--campaign-bootstrap-directory ' \
+  "runtime wiring failed: option 80 default contract unexpectedly forwarded --campaign-bootstrap-directory"
+assert_line_lacks "$line80d" '--campaign-discovery-wait-sec ' \
+  "runtime wiring failed: option 80 default contract unexpectedly forwarded --campaign-discovery-wait-sec"
+assert_line_has "$line80d" '--print-summary-json 1' \
+  "runtime wiring failed: option 80 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 81 runtime command forwarding"
+INPUT81="$TMP_DIR/input81.txt"
+{
+  printf '3\n'
+  printf '81\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT81"
+run_ui "$INPUT81" "$TMP_DIR/run81.log"
+
+if ! rg -q '^81\) 3-machine Docker profile matrix record wrapper \(coverage defaults\)$' "$TMP_DIR/run81.log"; then
+  echo "runtime wiring failed: advanced menu missing option 81 label"
+  cat "$TMP_DIR/run81.log"
+  exit 1
+fi
+
+line81="$(rg '^three-machine-docker-profile-matrix-record($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line81" ]]; then
+  echo "runtime wiring failed: option 81 did not invoke three-machine-docker-profile-matrix-record"
+  cat "$TMP_DIR/run81.log"
+  exit 1
+fi
+assert_line_lacks "$line81" '--run-peer-failover ' \
+  "runtime wiring failed: option 81 should not forward --run-peer-failover"
+assert_line_lacks "$line81" '--docker-host-alias ' \
+  "runtime wiring failed: option 81 should not forward --docker-host-alias"
+assert_line_lacks "$line81" '--bootstrap-directory ' \
+  "runtime wiring failed: option 81 should not forward --bootstrap-directory"
+assert_line_has "$line81" '--print-summary-json 1' \
+  "runtime wiring failed: option 81 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 81 runtime default contract"
+INPUT81D="$TMP_DIR/input81d.txt"
+{
+  printf '3\n'
+  printf '81\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT81D"
+run_ui "$INPUT81D" "$TMP_DIR/run81d.log"
+
+line81d="$(rg '^three-machine-docker-profile-matrix-record($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line81d" ]]; then
+  echo "runtime wiring failed: option 81 default contract did not invoke three-machine-docker-profile-matrix-record"
+  cat "$TMP_DIR/run81d.log"
+  exit 1
+fi
+assert_line_lacks "$line81d" '--run-peer-failover ' \
+  "runtime wiring failed: option 81 default contract unexpectedly forwarded --run-peer-failover"
+assert_line_lacks "$line81d" '--docker-host-alias ' \
+  "runtime wiring failed: option 81 default contract unexpectedly forwarded --docker-host-alias"
+assert_line_lacks "$line81d" '--bootstrap-directory ' \
+  "runtime wiring failed: option 81 default contract unexpectedly forwarded --bootstrap-directory"
+assert_line_has "$line81d" '--print-summary-json 1' \
+  "runtime wiring failed: option 81 default contract missing fixed --print-summary-json 1"
+
+ : >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 82 runtime command forwarding"
+INPUT82="$TMP_DIR/input82.txt"
+{
+  printf '3\n'
+  printf '82\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT82"
+run_ui "$INPUT82" "$TMP_DIR/run82.log"
+
+if ! rg -q '^82\) Phase-0 CI gate \(surface simplification fast gate\)$' "$TMP_DIR/run82.log"; then
+  echo "runtime wiring failed: advanced menu missing option 82 label"
+  cat "$TMP_DIR/run82.log"
+  exit 1
+fi
+
+line82="$(rg '^ci-phase0($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line82" ]]; then
+  echo "runtime wiring failed: option 82 did not invoke ci-phase0"
+  cat "$TMP_DIR/run82.log"
+  exit 1
+fi
+assert_line_lacks "$line82" '--' \
+  "runtime wiring failed: option 82 should not forward additional flags by default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 82 runtime default contract"
+INPUT82D="$TMP_DIR/input82d.txt"
+{
+  printf '3\n'
+  printf '82\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT82D"
+run_ui "$INPUT82D" "$TMP_DIR/run82d.log"
+
+line82d="$(rg '^ci-phase0($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line82d" ]]; then
+  echo "runtime wiring failed: option 82 default contract did not invoke ci-phase0"
+  cat "$TMP_DIR/run82d.log"
+  exit 1
+fi
+assert_line_lacks "$line82d" '--' \
+  "runtime wiring failed: option 82 default contract unexpectedly forwarded flags"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 83 runtime command forwarding"
+INPUT83="$TMP_DIR/input83.txt"
+{
+  printf '3\n'
+  printf '83\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT83"
+run_ui "$INPUT83" "$TMP_DIR/run83.log"
+
+if ! rg -q '^83\) Phase-1 resilience CI gate$' "$TMP_DIR/run83.log"; then
+  echo "runtime wiring failed: advanced menu missing option 83 label"
+  cat "$TMP_DIR/run83.log"
+  exit 1
+fi
+
+line83="$(rg '^ci-phase1-resilience($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line83" ]]; then
+  echo "runtime wiring failed: option 83 did not invoke ci-phase1-resilience"
+  cat "$TMP_DIR/run83.log"
+  exit 1
+fi
+assert_line_lacks "$line83" '--' \
+  "runtime wiring failed: option 83 should not forward additional flags by default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 83 runtime default contract"
+INPUT83D="$TMP_DIR/input83d.txt"
+{
+  printf '3\n'
+  printf '83\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT83D"
+run_ui "$INPUT83D" "$TMP_DIR/run83d.log"
+
+line83d="$(rg '^ci-phase1-resilience($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line83d" ]]; then
+  echo "runtime wiring failed: option 83 default contract did not invoke ci-phase1-resilience"
+  cat "$TMP_DIR/run83d.log"
+  exit 1
+fi
+assert_line_lacks "$line83d" '--' \
+  "runtime wiring failed: option 83 default contract unexpectedly forwarded flags"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 84 runtime command forwarding"
+INPUT84="$TMP_DIR/input84.txt"
+{
+  printf '3\n'
+  printf '84\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT84"
+run_ui "$INPUT84" "$TMP_DIR/run84.log"
+
+if ! rg -q '^84\) Phase-1 resilience handoff check$' "$TMP_DIR/run84.log"; then
+  echo "runtime wiring failed: advanced menu missing option 84 label"
+  cat "$TMP_DIR/run84.log"
+  exit 1
+fi
+
+line84="$(rg '^phase1-resilience-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line84" ]]; then
+  echo "runtime wiring failed: option 84 did not invoke phase1-resilience-handoff-check"
+  cat "$TMP_DIR/run84.log"
+  exit 1
+fi
+assert_line_has "$line84" '--print-summary-json 1' \
+  "runtime wiring failed: option 84 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 84 runtime default contract"
+INPUT84D="$TMP_DIR/input84d.txt"
+{
+  printf '3\n'
+  printf '84\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT84D"
+run_ui "$INPUT84D" "$TMP_DIR/run84d.log"
+
+line84d="$(rg '^phase1-resilience-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line84d" ]]; then
+  echo "runtime wiring failed: option 84 default contract did not invoke phase1-resilience-handoff-check"
+  cat "$TMP_DIR/run84d.log"
+  exit 1
+fi
+assert_line_has "$line84d" '--print-summary-json 1' \
+  "runtime wiring failed: option 84 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 85 runtime command forwarding"
+INPUT85="$TMP_DIR/input85.txt"
+{
+  printf '3\n'
+  printf '85\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT85"
+run_ui "$INPUT85" "$TMP_DIR/run85.log"
+
+if ! rg -q '^85\) Phase-1 resilience handoff run \(refresh \+ check\)$' "$TMP_DIR/run85.log"; then
+  echo "runtime wiring failed: advanced menu missing option 85 label"
+  cat "$TMP_DIR/run85.log"
+  exit 1
+fi
+
+line85="$(rg '^phase1-resilience-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line85" ]]; then
+  echo "runtime wiring failed: option 85 did not invoke phase1-resilience-handoff-run"
+  cat "$TMP_DIR/run85.log"
+  exit 1
+fi
+assert_line_has "$line85" '--print-summary-json 1' \
+  "runtime wiring failed: option 85 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 85 runtime default contract"
+INPUT85D="$TMP_DIR/input85d.txt"
+{
+  printf '3\n'
+  printf '85\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT85D"
+run_ui "$INPUT85D" "$TMP_DIR/run85d.log"
+
+line85d="$(rg '^phase1-resilience-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line85d" ]]; then
+  echo "runtime wiring failed: option 85 default contract did not invoke phase1-resilience-handoff-run"
+  cat "$TMP_DIR/run85d.log"
+  exit 1
+fi
+assert_line_has "$line85d" '--print-summary-json 1' \
+  "runtime wiring failed: option 85 default contract missing fixed --print-summary-json 1"
+
+ : >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 86 runtime command forwarding"
+INPUT86="$TMP_DIR/input86.txt"
+{
+  printf '3\n'
+  printf '86\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT86"
+run_ui "$INPUT86" "$TMP_DIR/run86.log"
+
+if ! rg -q '^86\) Phase-2 Linux prod-candidate CI gate$' "$TMP_DIR/run86.log"; then
+  echo "runtime wiring failed: advanced menu missing option 86 label"
+  cat "$TMP_DIR/run86.log"
+  exit 1
+fi
+
+line86="$(rg '^ci-phase2-linux-prod-candidate($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line86" ]]; then
+  echo "runtime wiring failed: option 86 did not invoke ci-phase2-linux-prod-candidate"
+  cat "$TMP_DIR/run86.log"
+  exit 1
+fi
+assert_line_lacks "$line86" '--' \
+  "runtime wiring failed: option 86 should not forward additional flags by default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 86 runtime default contract"
+INPUT86D="$TMP_DIR/input86d.txt"
+{
+  printf '3\n'
+  printf '86\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT86D"
+run_ui "$INPUT86D" "$TMP_DIR/run86d.log"
+
+line86d="$(rg '^ci-phase2-linux-prod-candidate($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line86d" ]]; then
+  echo "runtime wiring failed: option 86 default contract did not invoke ci-phase2-linux-prod-candidate"
+  cat "$TMP_DIR/run86d.log"
+  exit 1
+fi
+assert_line_lacks "$line86d" '--' \
+  "runtime wiring failed: option 86 default contract unexpectedly forwarded flags"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 87 runtime command forwarding"
+INPUT87="$TMP_DIR/input87.txt"
+{
+  printf '3\n'
+  printf '87\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT87"
+run_ui "$INPUT87" "$TMP_DIR/run87.log"
+
+if ! rg -q '^87\) Phase-2 Linux prod-candidate check$' "$TMP_DIR/run87.log"; then
+  echo "runtime wiring failed: advanced menu missing option 87 label"
+  cat "$TMP_DIR/run87.log"
+  exit 1
+fi
+
+line87="$(rg '^phase2-linux-prod-candidate-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line87" ]]; then
+  echo "runtime wiring failed: option 87 did not invoke phase2-linux-prod-candidate-check"
+  cat "$TMP_DIR/run87.log"
+  exit 1
+fi
+assert_line_has "$line87" '--print-summary-json 1' \
+  "runtime wiring failed: option 87 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 87 runtime default contract"
+INPUT87D="$TMP_DIR/input87d.txt"
+{
+  printf '3\n'
+  printf '87\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT87D"
+run_ui "$INPUT87D" "$TMP_DIR/run87d.log"
+
+line87d="$(rg '^phase2-linux-prod-candidate-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line87d" ]]; then
+  echo "runtime wiring failed: option 87 default contract did not invoke phase2-linux-prod-candidate-check"
+  cat "$TMP_DIR/run87d.log"
+  exit 1
+fi
+assert_line_has "$line87d" '--print-summary-json 1' \
+  "runtime wiring failed: option 87 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 88 runtime command forwarding"
+INPUT88="$TMP_DIR/input88.txt"
+{
+  printf '3\n'
+  printf '88\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT88"
+run_ui "$INPUT88" "$TMP_DIR/run88.log"
+
+if ! rg -q '^88\) Phase-2 Linux prod-candidate run \(refresh \+ check\)$' "$TMP_DIR/run88.log"; then
+  echo "runtime wiring failed: advanced menu missing option 88 label"
+  cat "$TMP_DIR/run88.log"
+  exit 1
+fi
+
+line88="$(rg '^phase2-linux-prod-candidate-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line88" ]]; then
+  echo "runtime wiring failed: option 88 did not invoke phase2-linux-prod-candidate-run"
+  cat "$TMP_DIR/run88.log"
+  exit 1
+fi
+assert_line_has "$line88" '--print-summary-json 1' \
+  "runtime wiring failed: option 88 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 88 runtime default contract"
+INPUT88D="$TMP_DIR/input88d.txt"
+{
+  printf '3\n'
+  printf '88\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT88D"
+run_ui "$INPUT88D" "$TMP_DIR/run88d.log"
+
+line88d="$(rg '^phase2-linux-prod-candidate-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line88d" ]]; then
+  echo "runtime wiring failed: option 88 default contract did not invoke phase2-linux-prod-candidate-run"
+  cat "$TMP_DIR/run88d.log"
+  exit 1
+fi
+assert_line_has "$line88d" '--print-summary-json 1' \
+  "runtime wiring failed: option 88 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 89 runtime command forwarding"
+INPUT89="$TMP_DIR/input89.txt"
+{
+  printf '3\n'
+  printf '89\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT89"
+run_ui "$INPUT89" "$TMP_DIR/run89.log"
+
+if ! rg -q '^89\) Phase-2 Linux prod-candidate signoff \(run \+ roadmap report\)$' "$TMP_DIR/run89.log"; then
+  echo "runtime wiring failed: advanced menu missing option 89 label"
+  cat "$TMP_DIR/run89.log"
+  exit 1
+fi
+
+line89="$(rg '^phase2-linux-prod-candidate-signoff --print-summary-json 1$' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line89" ]]; then
+  echo "runtime wiring failed: option 89 did not invoke phase2-linux-prod-candidate-signoff with the default summary contract"
+  cat "$TMP_DIR/run89.log"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 89 runtime default contract"
+INPUT89D="$TMP_DIR/input89d.txt"
+{
+  printf '3\n'
+  printf '89\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT89D"
+run_ui "$INPUT89D" "$TMP_DIR/run89d.log"
+
+line89d="$(rg '^phase2-linux-prod-candidate-signoff --print-summary-json 1$' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line89d" ]]; then
+  echo "runtime wiring failed: option 89 default contract did not invoke phase2-linux-prod-candidate-signoff with the default summary contract"
+  cat "$TMP_DIR/run89d.log"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 90 runtime command forwarding"
+INPUT90="$TMP_DIR/input90.txt"
+{
+  printf '3\n'
+  printf '90\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT90"
+run_ui "$INPUT90" "$TMP_DIR/run90.log"
+
+if ! rg -q '^90\) Phase-2 Linux prod-candidate handoff check$' "$TMP_DIR/run90.log"; then
+  echo "runtime wiring failed: advanced menu missing option 90 label"
+  cat "$TMP_DIR/run90.log"
+  exit 1
+fi
+
+line90="$(rg '^phase2-linux-prod-candidate-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line90" ]]; then
+  echo "runtime wiring failed: option 90 did not invoke phase2-linux-prod-candidate-handoff-check"
+  cat "$TMP_DIR/run90.log"
+  exit 1
+fi
+assert_line_has "$line90" '--show-json 1' \
+  "runtime wiring failed: option 90 missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 90 runtime default contract"
+INPUT90D="$TMP_DIR/input90d.txt"
+{
+  printf '3\n'
+  printf '90\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT90D"
+run_ui "$INPUT90D" "$TMP_DIR/run90d.log"
+
+line90d="$(rg '^phase2-linux-prod-candidate-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line90d" ]]; then
+  echo "runtime wiring failed: option 90 default contract did not invoke phase2-linux-prod-candidate-handoff-check"
+  cat "$TMP_DIR/run90d.log"
+  exit 1
+fi
+assert_line_has "$line90d" '--show-json 1' \
+  "runtime wiring failed: option 90 default contract missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 91 runtime command forwarding"
+INPUT91="$TMP_DIR/input91.txt"
+{
+  printf '3\n'
+  printf '91\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT91"
+run_ui "$INPUT91" "$TMP_DIR/run91.log"
+
+if ! rg -q '^91\) Phase-2 Linux prod-candidate handoff run \(signoff \+ check\)$' "$TMP_DIR/run91.log"; then
+  echo "runtime wiring failed: advanced menu missing option 91 label"
+  cat "$TMP_DIR/run91.log"
+  exit 1
+fi
+
+line91="$(rg '^phase2-linux-prod-candidate-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line91" ]]; then
+  echo "runtime wiring failed: option 91 did not invoke phase2-linux-prod-candidate-handoff-run"
+  cat "$TMP_DIR/run91.log"
+  exit 1
+fi
+assert_line_has "$line91" '--print-summary-json 1' \
+  "runtime wiring failed: option 91 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 91 runtime default contract"
+INPUT91D="$TMP_DIR/input91d.txt"
+{
+  printf '3\n'
+  printf '91\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT91D"
+run_ui "$INPUT91D" "$TMP_DIR/run91d.log"
+
+line91d="$(rg '^phase2-linux-prod-candidate-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line91d" ]]; then
+  echo "runtime wiring failed: option 91 default contract did not invoke phase2-linux-prod-candidate-handoff-run"
+  cat "$TMP_DIR/run91d.log"
+  exit 1
+fi
+assert_line_has "$line91d" '--print-summary-json 1' \
+  "runtime wiring failed: option 91 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 92 runtime command forwarding"
+INPUT92="$TMP_DIR/input92.txt"
+{
+  printf '3\n'
+  printf '92\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT92"
+run_ui "$INPUT92" "$TMP_DIR/run92.log"
+
+if ! rg -q '^92\) Phase-3 Windows client beta CI gate$' "$TMP_DIR/run92.log"; then
+  echo "runtime wiring failed: advanced menu missing option 92 label"
+  cat "$TMP_DIR/run92.log"
+  exit 1
+fi
+
+line92="$(rg '^ci-phase3-windows-client-beta($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line92" ]]; then
+  echo "runtime wiring failed: option 92 did not invoke ci-phase3-windows-client-beta"
+  cat "$TMP_DIR/run92.log"
+  exit 1
+fi
+assert_line_lacks "$line92" '--' \
+  "runtime wiring failed: option 92 should not forward additional flags by default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 92 runtime default contract"
+INPUT92D="$TMP_DIR/input92d.txt"
+{
+  printf '3\n'
+  printf '92\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT92D"
+run_ui "$INPUT92D" "$TMP_DIR/run92d.log"
+
+line92d="$(rg '^ci-phase3-windows-client-beta($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line92d" ]]; then
+  echo "runtime wiring failed: option 92 default contract did not invoke ci-phase3-windows-client-beta"
+  cat "$TMP_DIR/run92d.log"
+  exit 1
+fi
+assert_line_lacks "$line92d" '--' \
+  "runtime wiring failed: option 92 default contract unexpectedly forwarded flags"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 93 runtime command forwarding"
+INPUT93="$TMP_DIR/input93.txt"
+{
+  printf '3\n'
+  printf '93\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT93"
+run_ui "$INPUT93" "$TMP_DIR/run93.log"
+
+if ! rg -q '^93\) Phase-3 Windows client beta check$' "$TMP_DIR/run93.log"; then
+  echo "runtime wiring failed: advanced menu missing option 93 label"
+  cat "$TMP_DIR/run93.log"
+  exit 1
+fi
+
+line93="$(rg '^phase3-windows-client-beta-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line93" ]]; then
+  echo "runtime wiring failed: option 93 did not invoke phase3-windows-client-beta-check"
+  cat "$TMP_DIR/run93.log"
+  exit 1
+fi
+assert_line_has "$line93" '--print-summary-json 1' \
+  "runtime wiring failed: option 93 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 93 runtime default contract"
+INPUT93D="$TMP_DIR/input93d.txt"
+{
+  printf '3\n'
+  printf '93\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT93D"
+run_ui "$INPUT93D" "$TMP_DIR/run93d.log"
+
+line93d="$(rg '^phase3-windows-client-beta-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line93d" ]]; then
+  echo "runtime wiring failed: option 93 default contract did not invoke phase3-windows-client-beta-check"
+  cat "$TMP_DIR/run93d.log"
+  exit 1
+fi
+assert_line_has "$line93d" '--print-summary-json 1' \
+  "runtime wiring failed: option 93 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 94 runtime command forwarding"
+INPUT94="$TMP_DIR/input94.txt"
+{
+  printf '3\n'
+  printf '94\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT94"
+run_ui "$INPUT94" "$TMP_DIR/run94.log"
+
+if ! rg -q '^94\) Phase-3 Windows client beta run \(refresh \+ check\)$' "$TMP_DIR/run94.log"; then
+  echo "runtime wiring failed: advanced menu missing option 94 label"
+  cat "$TMP_DIR/run94.log"
+  exit 1
+fi
+
+line94="$(rg '^phase3-windows-client-beta-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line94" ]]; then
+  echo "runtime wiring failed: option 94 did not invoke phase3-windows-client-beta-run"
+  cat "$TMP_DIR/run94.log"
+  exit 1
+fi
+assert_line_has "$line94" '--print-summary-json 1' \
+  "runtime wiring failed: option 94 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 94 runtime default contract"
+INPUT94D="$TMP_DIR/input94d.txt"
+{
+  printf '3\n'
+  printf '94\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT94D"
+run_ui "$INPUT94D" "$TMP_DIR/run94d.log"
+
+line94d="$(rg '^phase3-windows-client-beta-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line94d" ]]; then
+  echo "runtime wiring failed: option 94 default contract did not invoke phase3-windows-client-beta-run"
+  cat "$TMP_DIR/run94d.log"
+  exit 1
+fi
+assert_line_has "$line94d" '--print-summary-json 1' \
+  "runtime wiring failed: option 94 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 95 runtime command forwarding"
+INPUT95="$TMP_DIR/input95.txt"
+{
+  printf '3\n'
+  printf '95\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT95"
+run_ui "$INPUT95" "$TMP_DIR/run95.log"
+
+if ! rg -q '^95\) Phase-3 Windows client beta handoff check$' "$TMP_DIR/run95.log"; then
+  echo "runtime wiring failed: advanced menu missing option 95 label"
+  cat "$TMP_DIR/run95.log"
+  exit 1
+fi
+
+line95="$(rg '^phase3-windows-client-beta-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line95" ]]; then
+  echo "runtime wiring failed: option 95 did not invoke phase3-windows-client-beta-handoff-check"
+  cat "$TMP_DIR/run95.log"
+  exit 1
+fi
+assert_line_has "$line95" '--show-json 1' \
+  "runtime wiring failed: option 95 missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 95 runtime default contract"
+INPUT95D="$TMP_DIR/input95d.txt"
+{
+  printf '3\n'
+  printf '95\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT95D"
+run_ui "$INPUT95D" "$TMP_DIR/run95d.log"
+
+line95d="$(rg '^phase3-windows-client-beta-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line95d" ]]; then
+  echo "runtime wiring failed: option 95 default contract did not invoke phase3-windows-client-beta-handoff-check"
+  cat "$TMP_DIR/run95d.log"
+  exit 1
+fi
+assert_line_has "$line95d" '--show-json 1' \
+  "runtime wiring failed: option 95 default contract missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 96 runtime command forwarding"
+INPUT96="$TMP_DIR/input96.txt"
+{
+  printf '3\n'
+  printf '96\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT96"
+run_ui "$INPUT96" "$TMP_DIR/run96.log"
+
+if ! rg -q '^96\) Phase-3 Windows client beta handoff run \(run \+ check\)$' "$TMP_DIR/run96.log"; then
+  echo "runtime wiring failed: advanced menu missing option 96 label"
+  cat "$TMP_DIR/run96.log"
+  exit 1
+fi
+
+line96="$(rg '^phase3-windows-client-beta-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line96" ]]; then
+  echo "runtime wiring failed: option 96 did not invoke phase3-windows-client-beta-handoff-run"
+  cat "$TMP_DIR/run96.log"
+  exit 1
+fi
+assert_line_has "$line96" '--print-summary-json 1' \
+  "runtime wiring failed: option 96 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 96 runtime default contract"
+INPUT96D="$TMP_DIR/input96d.txt"
+{
+  printf '3\n'
+  printf '96\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT96D"
+run_ui "$INPUT96D" "$TMP_DIR/run96d.log"
+
+line96d="$(rg '^phase3-windows-client-beta-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line96d" ]]; then
+  echo "runtime wiring failed: option 96 default contract did not invoke phase3-windows-client-beta-handoff-run"
+  cat "$TMP_DIR/run96d.log"
+  exit 1
+fi
+assert_line_has "$line96d" '--print-summary-json 1' \
+  "runtime wiring failed: option 96 default contract missing fixed --print-summary-json 1"
+
+echo "[easy-mode-runtime] option 97 runtime command forwarding"
+INPUT97="$TMP_DIR/input97.txt"
+{
+  printf '3\n'
+  printf '97\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT97"
+run_ui "$INPUT97" "$TMP_DIR/run97.log"
+
+if ! rg -q '^97\) Phase-4 Windows full parity CI gate$' "$TMP_DIR/run97.log"; then
+  echo "runtime wiring failed: advanced menu missing option 97 label"
+  cat "$TMP_DIR/run97.log"
+  exit 1
+fi
+
+line97="$(rg '^ci-phase4-windows-full-parity($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line97" ]]; then
+  echo "runtime wiring failed: option 97 did not invoke ci-phase4-windows-full-parity"
+  cat "$TMP_DIR/run97.log"
+  exit 1
+fi
+assert_line_lacks "$line97" '--' \
+  "runtime wiring failed: option 97 should not forward additional flags by default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 97 runtime default contract"
+INPUT97D="$TMP_DIR/input97d.txt"
+{
+  printf '3\n'
+  printf '97\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT97D"
+run_ui "$INPUT97D" "$TMP_DIR/run97d.log"
+
+line97d="$(rg '^ci-phase4-windows-full-parity($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line97d" ]]; then
+  echo "runtime wiring failed: option 97 default contract did not invoke ci-phase4-windows-full-parity"
+  cat "$TMP_DIR/run97d.log"
+  exit 1
+fi
+assert_line_lacks "$line97d" '--' \
+  "runtime wiring failed: option 97 default contract unexpectedly forwarded flags"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 98 runtime command forwarding"
+INPUT98="$TMP_DIR/input98.txt"
+{
+  printf '3\n'
+  printf '98\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT98"
+run_ui "$INPUT98" "$TMP_DIR/run98.log"
+
+if ! rg -q '^98\) Phase-4 Windows full parity check$' "$TMP_DIR/run98.log"; then
+  echo "runtime wiring failed: advanced menu missing option 98 label"
+  cat "$TMP_DIR/run98.log"
+  exit 1
+fi
+
+line98="$(rg '^phase4-windows-full-parity-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line98" ]]; then
+  echo "runtime wiring failed: option 98 did not invoke phase4-windows-full-parity-check"
+  cat "$TMP_DIR/run98.log"
+  exit 1
+fi
+assert_line_has "$line98" '--print-summary-json 1' \
+  "runtime wiring failed: option 98 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 98 runtime default contract"
+INPUT98D="$TMP_DIR/input98d.txt"
+{
+  printf '3\n'
+  printf '98\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT98D"
+run_ui "$INPUT98D" "$TMP_DIR/run98d.log"
+
+line98d="$(rg '^phase4-windows-full-parity-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line98d" ]]; then
+  echo "runtime wiring failed: option 98 default contract did not invoke phase4-windows-full-parity-check"
+  cat "$TMP_DIR/run98d.log"
+  exit 1
+fi
+assert_line_has "$line98d" '--print-summary-json 1' \
+  "runtime wiring failed: option 98 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 99 runtime command forwarding"
+INPUT99="$TMP_DIR/input99.txt"
+{
+  printf '3\n'
+  printf '99\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT99"
+run_ui "$INPUT99" "$TMP_DIR/run99.log"
+
+if ! rg -q '^99\) Phase-4 Windows full parity run \(refresh \+ check\)$' "$TMP_DIR/run99.log"; then
+  echo "runtime wiring failed: advanced menu missing option 99 label"
+  cat "$TMP_DIR/run99.log"
+  exit 1
+fi
+
+line99="$(rg '^phase4-windows-full-parity-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line99" ]]; then
+  echo "runtime wiring failed: option 99 did not invoke phase4-windows-full-parity-run"
+  cat "$TMP_DIR/run99.log"
+  exit 1
+fi
+assert_line_has "$line99" '--print-summary-json 1' \
+  "runtime wiring failed: option 99 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 99 runtime default contract"
+INPUT99D="$TMP_DIR/input99d.txt"
+{
+  printf '3\n'
+  printf '99\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT99D"
+run_ui "$INPUT99D" "$TMP_DIR/run99d.log"
+
+line99d="$(rg '^phase4-windows-full-parity-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line99d" ]]; then
+  echo "runtime wiring failed: option 99 default contract did not invoke phase4-windows-full-parity-run"
+  cat "$TMP_DIR/run99d.log"
+  exit 1
+fi
+assert_line_has "$line99d" '--print-summary-json 1' \
+  "runtime wiring failed: option 99 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 100 runtime command forwarding"
+INPUT100="$TMP_DIR/input100.txt"
+{
+  printf '3\n'
+  printf '100\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT100"
+run_ui "$INPUT100" "$TMP_DIR/run100.log"
+
+if ! rg -q '^100\) Phase-4 Windows full parity handoff check$' "$TMP_DIR/run100.log"; then
+  echo "runtime wiring failed: advanced menu missing option 100 label"
+  cat "$TMP_DIR/run100.log"
+  exit 1
+fi
+
+line100="$(rg '^phase4-windows-full-parity-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line100" ]]; then
+  echo "runtime wiring failed: option 100 did not invoke phase4-windows-full-parity-handoff-check"
+  cat "$TMP_DIR/run100.log"
+  exit 1
+fi
+assert_line_has "$line100" '--show-json 1' \
+  "runtime wiring failed: option 100 missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 100 runtime default contract"
+INPUT100D="$TMP_DIR/input100d.txt"
+{
+  printf '3\n'
+  printf '100\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT100D"
+run_ui "$INPUT100D" "$TMP_DIR/run100d.log"
+
+line100d="$(rg '^phase4-windows-full-parity-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line100d" ]]; then
+  echo "runtime wiring failed: option 100 default contract did not invoke phase4-windows-full-parity-handoff-check"
+  cat "$TMP_DIR/run100d.log"
+  exit 1
+fi
+assert_line_has "$line100d" '--show-json 1' \
+  "runtime wiring failed: option 100 default contract missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 101 runtime command forwarding"
+INPUT101="$TMP_DIR/input101.txt"
+{
+  printf '3\n'
+  printf '101\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT101"
+run_ui "$INPUT101" "$TMP_DIR/run101.log"
+
+if ! rg -q '^101\) Phase-4 Windows full parity handoff run \(run \+ check\)$' "$TMP_DIR/run101.log"; then
+  echo "runtime wiring failed: advanced menu missing option 101 label"
+  cat "$TMP_DIR/run101.log"
+  exit 1
+fi
+
+line101="$(rg '^phase4-windows-full-parity-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line101" ]]; then
+  echo "runtime wiring failed: option 101 did not invoke phase4-windows-full-parity-handoff-run"
+  cat "$TMP_DIR/run101.log"
+  exit 1
+fi
+assert_line_has "$line101" '--print-summary-json 1' \
+  "runtime wiring failed: option 101 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 101 runtime default contract"
+INPUT101D="$TMP_DIR/input101d.txt"
+{
+  printf '3\n'
+  printf '101\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT101D"
+run_ui "$INPUT101D" "$TMP_DIR/run101d.log"
+
+line101d="$(rg '^phase4-windows-full-parity-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line101d" ]]; then
+  echo "runtime wiring failed: option 101 default contract did not invoke phase4-windows-full-parity-handoff-run"
+  cat "$TMP_DIR/run101d.log"
+  exit 1
+fi
+assert_line_has "$line101d" '--print-summary-json 1' \
+  "runtime wiring failed: option 101 default contract missing fixed --print-summary-json 1"
+
+echo "[easy-mode-runtime] option 102 runtime command forwarding"
+INPUT102="$TMP_DIR/input102.txt"
+{
+  printf '3\n'
+  printf '102\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT102"
+run_ui "$INPUT102" "$TMP_DIR/run102.log"
+
+if ! rg -q '^102\) Phase-5 settlement layer CI gate$' "$TMP_DIR/run102.log"; then
+  echo "runtime wiring failed: advanced menu missing option 102 label"
+  cat "$TMP_DIR/run102.log"
+  exit 1
+fi
+
+line102="$(rg '^ci-phase5-settlement-layer($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line102" ]]; then
+  echo "runtime wiring failed: option 102 did not invoke ci-phase5-settlement-layer"
+  cat "$TMP_DIR/run102.log"
+  exit 1
+fi
+assert_line_lacks "$line102" '--' \
+  "runtime wiring failed: option 102 should not forward additional flags by default"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 102 runtime default contract"
+INPUT102D="$TMP_DIR/input102d.txt"
+{
+  printf '3\n'
+  printf '102\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT102D"
+run_ui "$INPUT102D" "$TMP_DIR/run102d.log"
+
+line102d="$(rg '^ci-phase5-settlement-layer($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line102d" ]]; then
+  echo "runtime wiring failed: option 102 default contract did not invoke ci-phase5-settlement-layer"
+  cat "$TMP_DIR/run102d.log"
+  exit 1
+fi
+assert_line_lacks "$line102d" '--' \
+  "runtime wiring failed: option 102 default contract unexpectedly forwarded flags"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 103 runtime command forwarding"
+INPUT103="$TMP_DIR/input103.txt"
+{
+  printf '3\n'
+  printf '103\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT103"
+run_ui "$INPUT103" "$TMP_DIR/run103.log"
+
+if ! rg -q '^103\) Phase-5 settlement layer check$' "$TMP_DIR/run103.log"; then
+  echo "runtime wiring failed: advanced menu missing option 103 label"
+  cat "$TMP_DIR/run103.log"
+  exit 1
+fi
+
+line103="$(rg '^phase5-settlement-layer-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line103" ]]; then
+  echo "runtime wiring failed: option 103 did not invoke phase5-settlement-layer-check"
+  cat "$TMP_DIR/run103.log"
+  exit 1
+fi
+assert_line_has "$line103" '--print-summary-json 1' \
+  "runtime wiring failed: option 103 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 103 runtime default contract"
+INPUT103D="$TMP_DIR/input103d.txt"
+{
+  printf '3\n'
+  printf '103\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT103D"
+run_ui "$INPUT103D" "$TMP_DIR/run103d.log"
+
+line103d="$(rg '^phase5-settlement-layer-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line103d" ]]; then
+  echo "runtime wiring failed: option 103 default contract did not invoke phase5-settlement-layer-check"
+  cat "$TMP_DIR/run103d.log"
+  exit 1
+fi
+assert_line_has "$line103d" '--print-summary-json 1' \
+  "runtime wiring failed: option 103 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 104 runtime command forwarding"
+INPUT104="$TMP_DIR/input104.txt"
+{
+  printf '3\n'
+  printf '104\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT104"
+run_ui "$INPUT104" "$TMP_DIR/run104.log"
+
+if ! rg -q '^104\) Phase-5 settlement layer run \(refresh \+ check\)$' "$TMP_DIR/run104.log"; then
+  echo "runtime wiring failed: advanced menu missing option 104 label"
+  cat "$TMP_DIR/run104.log"
+  exit 1
+fi
+
+line104="$(rg '^phase5-settlement-layer-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line104" ]]; then
+  echo "runtime wiring failed: option 104 did not invoke phase5-settlement-layer-run"
+  cat "$TMP_DIR/run104.log"
+  exit 1
+fi
+assert_line_has "$line104" '--print-summary-json 1' \
+  "runtime wiring failed: option 104 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 104 runtime default contract"
+INPUT104D="$TMP_DIR/input104d.txt"
+{
+  printf '3\n'
+  printf '104\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT104D"
+run_ui "$INPUT104D" "$TMP_DIR/run104d.log"
+
+line104d="$(rg '^phase5-settlement-layer-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line104d" ]]; then
+  echo "runtime wiring failed: option 104 default contract did not invoke phase5-settlement-layer-run"
+  cat "$TMP_DIR/run104d.log"
+  exit 1
+fi
+assert_line_has "$line104d" '--print-summary-json 1' \
+  "runtime wiring failed: option 104 default contract missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 105 runtime command forwarding"
+INPUT105="$TMP_DIR/input105.txt"
+{
+  printf '3\n'
+  printf '105\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT105"
+run_ui "$INPUT105" "$TMP_DIR/run105.log"
+
+if ! rg -q '^105\) Phase-5 settlement layer handoff check$' "$TMP_DIR/run105.log"; then
+  echo "runtime wiring failed: advanced menu missing option 105 label"
+  cat "$TMP_DIR/run105.log"
+  exit 1
+fi
+
+line105="$(rg '^phase5-settlement-layer-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line105" ]]; then
+  echo "runtime wiring failed: option 105 did not invoke phase5-settlement-layer-handoff-check"
+  cat "$TMP_DIR/run105.log"
+  exit 1
+fi
+assert_line_has "$line105" '--show-json 1' \
+  "runtime wiring failed: option 105 missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 105 runtime default contract"
+INPUT105D="$TMP_DIR/input105d.txt"
+{
+  printf '3\n'
+  printf '105\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT105D"
+run_ui "$INPUT105D" "$TMP_DIR/run105d.log"
+
+line105d="$(rg '^phase5-settlement-layer-handoff-check($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line105d" ]]; then
+  echo "runtime wiring failed: option 105 default contract did not invoke phase5-settlement-layer-handoff-check"
+  cat "$TMP_DIR/run105d.log"
+  exit 1
+fi
+assert_line_has "$line105d" '--show-json 1' \
+  "runtime wiring failed: option 105 default contract missing fixed --show-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 106 runtime command forwarding"
+INPUT106="$TMP_DIR/input106.txt"
+{
+  printf '3\n'
+  printf '106\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT106"
+run_ui "$INPUT106" "$TMP_DIR/run106.log"
+
+if ! rg -q '^106\) Phase-5 settlement layer handoff run \(run \+ check\)$' "$TMP_DIR/run106.log"; then
+  echo "runtime wiring failed: advanced menu missing option 106 label"
+  cat "$TMP_DIR/run106.log"
+  exit 1
+fi
+
+line106="$(rg '^phase5-settlement-layer-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line106" ]]; then
+  echo "runtime wiring failed: option 106 did not invoke phase5-settlement-layer-handoff-run"
+  cat "$TMP_DIR/run106.log"
+  exit 1
+fi
+assert_line_has "$line106" '--print-summary-json 1' \
+  "runtime wiring failed: option 106 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 106 runtime default contract"
+INPUT106D="$TMP_DIR/input106d.txt"
+{
+  printf '3\n'
+  printf '106\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT106D"
+run_ui "$INPUT106D" "$TMP_DIR/run106d.log"
+
+line106d="$(rg '^phase5-settlement-layer-handoff-run($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line106d" ]]; then
+  echo "runtime wiring failed: option 106 default contract did not invoke phase5-settlement-layer-handoff-run"
+  cat "$TMP_DIR/run106d.log"
+  exit 1
+fi
+assert_line_has "$line106d" '--print-summary-json 1' \
+  "runtime wiring failed: option 106 default contract missing fixed --print-summary-json 1"
+
+echo "[easy-mode-runtime] option 107 runtime command forwarding"
+INPUT107="$TMP_DIR/input107.txt"
+{
+  printf '3\n'
+  printf '107\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT107"
+run_ui "$INPUT107" "$TMP_DIR/run107.log"
+
+if ! rg -q '^107\) VPN non-blockchain fastlane \(runtime\+phase1-4 handoff\+roadmap\)$' "$TMP_DIR/run107.log"; then
+  echo "runtime wiring failed: advanced menu missing option 107 label"
+  cat "$TMP_DIR/run107.log"
+  exit 1
+fi
+
+line107="$(rg '^vpn-non-blockchain-fastlane($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line107" ]]; then
+  echo "runtime wiring failed: option 107 did not invoke vpn-non-blockchain-fastlane"
+  cat "$TMP_DIR/run107.log"
+  exit 1
+fi
+assert_line_has "$line107" '--print-summary-json 1' \
+  "runtime wiring failed: option 107 missing fixed --print-summary-json 1"
+
+: >"$CAPTURE"
+
+echo "[easy-mode-runtime] option 107 runtime default contract"
+INPUT107D="$TMP_DIR/input107d.txt"
+{
+  printf '3\n'
+  printf '107\n'
+  printf '\n'     # run with sudo default no
+  printf '0\n'
+  printf '0\n'
+} >"$INPUT107D"
+run_ui "$INPUT107D" "$TMP_DIR/run107d.log"
+
+line107d="$(rg '^vpn-non-blockchain-fastlane($| )' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$line107d" ]]; then
+  echo "runtime wiring failed: option 107 default contract did not invoke vpn-non-blockchain-fastlane"
+  cat "$TMP_DIR/run107d.log"
+  exit 1
+fi
+assert_line_has "$line107d" '--print-summary-json 1' \
+  "runtime wiring failed: option 107 default contract missing fixed --print-summary-json 1"
 
 echo "easy-mode launcher runtime integration check ok"

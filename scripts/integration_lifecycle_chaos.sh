@@ -8,6 +8,10 @@ mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 LIFECYCLE_CHAOS_TAG="${LIFECYCLE_CHAOS_TAG:-base}"
+LIFECYCLE_CHAOS_TAG_SAFE="$(printf '%s' "$LIFECYCLE_CHAOS_TAG" | tr -cd 'A-Za-z0-9._-')"
+if [[ -z "$LIFECYCLE_CHAOS_TAG_SAFE" ]]; then
+  LIFECYCLE_CHAOS_TAG_SAFE="base"
+fi
 DIR_PORT="${DIR_PORT:-8381}"
 ISSUER_PORT="${ISSUER_PORT:-8382}"
 ENTRY_PORT="${ENTRY_PORT:-8383}"
@@ -24,12 +28,30 @@ DISPUTE_SLEEP_SEC="${DISPUTE_SLEEP_SEC:-0.12}"
 FRESH_LOOPS="${FRESH_LOOPS:-18}"
 FRESH_SLEEP_SEC="${FRESH_SLEEP_SEC:-0.15}"
 
-NODE_LOG="/tmp/lifecycle_chaos_node_${LIFECYCLE_CHAOS_TAG}.log"
-REVOKE_LOG="/tmp/lifecycle_chaos_revoke_${LIFECYCLE_CHAOS_TAG}.json"
-DISPUTE_LOG="/tmp/lifecycle_chaos_dispute_${LIFECYCLE_CHAOS_TAG}.log"
-RACE_LOG="/tmp/lifecycle_chaos_race_${LIFECYCLE_CHAOS_TAG}.log"
-FRESH_LOG="/tmp/lifecycle_chaos_fresh_${LIFECYCLE_CHAOS_TAG}.log"
-PAYLOAD_FILE="/tmp/lifecycle_chaos_payload_${LIFECYCLE_CHAOS_TAG}.json"
+make_temp_file() {
+  mktemp "$1"
+}
+
+make_private_temp_file() {
+  local old_umask
+  local file_path
+  old_umask="$(umask)"
+  umask 077
+  file_path="$(mktemp "$1")"
+  umask "$old_umask"
+  printf '%s\n' "$file_path"
+}
+
+NODE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_node_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
+REVOKE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_revoke_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.json")"
+DISPUTE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_dispute_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
+RACE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_race_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
+FRESH_LOG="$(make_temp_file "/tmp/lifecycle_chaos_fresh_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
+PAYLOAD_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_payload_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.json")"
+POP_PRIV_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_pop_priv_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.key")"
+POP_PRIV_ITER_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_pop_priv_iter_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.key")"
+TOKEN_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_token_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.jwt")"
+TOKEN_ITER_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_token_iter_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.jwt")"
 
 DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
 ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
@@ -49,6 +71,17 @@ node_pid=$!
 
 cleanup() {
   kill "$node_pid" >/dev/null 2>&1 || true
+  rm -f \
+    "$NODE_LOG" \
+    "$REVOKE_LOG" \
+    "$DISPUTE_LOG" \
+    "$RACE_LOG" \
+    "$FRESH_LOG" \
+    "$PAYLOAD_FILE" \
+    "$POP_PRIV_FILE" \
+    "$POP_PRIV_ITER_FILE" \
+    "$TOKEN_FILE" \
+    "$TOKEN_ITER_FILE"
 }
 trap cleanup EXIT
 
@@ -73,7 +106,7 @@ pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
   echo "failed to generate seed token PoP keypair"
-  echo "$pop_json"
+  echo "$pop_json" | sed -E 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
   exit 1
 fi
 
@@ -84,14 +117,17 @@ jti=$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')
 
 if [[ -z "$token" || -z "$jti" ]]; then
   echo "failed to parse token/jti for lifecycle chaos seed token"
-  echo "$token_json"
+  echo "$token_json" | sed -E 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
   cat "${NODE_LOG}"
   exit 1
 fi
 
+printf '%s' "$pop_priv" >"$POP_PRIV_FILE"
+printf '%s' "$token" >"$TOKEN_FILE"
+
 token_proof=$(go run ./cmd/tokenpop sign \
-  --private-key "$pop_priv" \
-  --token "$token" \
+  --private-key-file "$POP_PRIV_FILE" \
+  --token-file "$TOKEN_FILE" \
   --exit-id "exit-local-1" \
   --proof-nonce "seed-${jti}" \
   --client-inner-pub "$client_pub" \
@@ -159,9 +195,11 @@ dispute_pid=$!
     tk=$(echo "$tj" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
     if [[ -n "$tk" ]]; then
       fresh_nonce="fresh-$RANDOM-$(date +%s%N)"
+      printf '%s' "$pop_priv_iter" >"$POP_PRIV_ITER_FILE"
+      printf '%s' "$tk" >"$TOKEN_ITER_FILE"
       tp=$(go run ./cmd/tokenpop sign \
-        --private-key "$pop_priv_iter" \
-        --token "$tk" \
+        --private-key-file "$POP_PRIV_ITER_FILE" \
+        --token-file "$TOKEN_ITER_FILE" \
         --exit-id "exit-local-1" \
         --proof-nonce "$fresh_nonce" \
         --client-inner-pub "$client_pub" \

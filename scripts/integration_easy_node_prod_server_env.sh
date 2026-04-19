@@ -115,6 +115,12 @@ if [[ "${1:-}" == "genkey" ]]; then
   echo "test-wg-private-key"
   exit 0
 fi
+if [[ "${1:-}" == "pubkey" ]]; then
+  # server-up derives EXIT_WG_PUBKEY via `wg pubkey`
+  cat >/dev/null || true
+  echo "test-wg-public-key"
+  exit 0
+fi
 exit 0
 EOF_WG
 

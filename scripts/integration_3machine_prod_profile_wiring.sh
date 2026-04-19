@@ -177,37 +177,42 @@ EASY_NODE_SH="$FAKE_EASY_NODE" \
   --client-min-entry-operators 1 \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
-  --path-profile private \
+  --path-profile 3hop \
   --beta-profile 0 \
   --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_validate_path_profile.log 2>&1
 
+if ! rg -q -- '--path-profile 3hop' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
+  echo "validate path-profile wiring failed: expected --path-profile 3hop to reach easy_node client-test"
+  cat "$VALIDATE_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--distinct-operators 1' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --distinct-operators 1 from private profile"
+  echo "validate path-profile wiring failed: expected --distinct-operators 1 from 3hop profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--distinct-countries 1' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --distinct-countries 1 from private profile"
+  echo "validate path-profile wiring failed: expected --distinct-countries 1 from 3hop profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--locality-soft-bias 0' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --locality-soft-bias 0 from private profile"
+  echo "validate path-profile wiring failed: expected --locality-soft-bias 0 from 3hop profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--country-bias 1.60' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --country-bias 1.60 from private profile"
+  echo "validate path-profile wiring failed: expected --country-bias 1.60 from 3hop profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--region-bias 1.25' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --region-bias 1.25 from private profile"
+  echo "validate path-profile wiring failed: expected --region-bias 1.25 from 3hop profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--region-prefix-bias 1.10' "$VALIDATE_PATH_PROFILE_CAPTURE"; then
-  echo "validate path-profile wiring failed: expected --region-prefix-bias 1.10 from private profile"
+  echo "validate path-profile wiring failed: expected --region-prefix-bias 1.10 from 3hop profile"
   cat "$VALIDATE_PATH_PROFILE_CAPTURE"
   exit 1
 fi
@@ -343,37 +348,42 @@ THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
   --client-min-entry-operators 1 \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
-  --path-profile speed \
+  --path-profile 3hop \
   --beta-profile 0 \
   --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_soak_path_profile.log 2>&1
 
+if ! rg -q -- '--path-profile 3hop' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --path-profile 3hop to reach validate script"
+  cat "$SOAK_PATH_PROFILE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--distinct-operators 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --distinct-operators 1 from speed profile"
+  echo "soak path-profile wiring failed: expected --distinct-operators 1 from 3hop profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--distinct-countries 0' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --distinct-countries 0 from speed profile"
+if ! rg -q -- '--distinct-countries 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --distinct-countries 1 from 3hop profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--locality-soft-bias 1' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --locality-soft-bias 1 from speed profile"
+if ! rg -q -- '--locality-soft-bias 0' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --locality-soft-bias 0 from 3hop profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--country-bias 1.80' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --country-bias 1.80 from speed profile"
+if ! rg -q -- '--country-bias 1.60' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --country-bias 1.60 from 3hop profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--region-bias 1.35' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --region-bias 1.35 from speed profile"
+if ! rg -q -- '--region-bias 1.25' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --region-bias 1.25 from 3hop profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--region-prefix-bias 1.15' "$SOAK_PATH_PROFILE_CAPTURE"; then
-  echo "soak path-profile wiring failed: expected --region-prefix-bias 1.15 from speed profile"
+if ! rg -q -- '--region-prefix-bias 1.10' "$SOAK_PATH_PROFILE_CAPTURE"; then
+  echo "soak path-profile wiring failed: expected --region-prefix-bias 1.10 from 3hop profile"
   cat "$SOAK_PATH_PROFILE_CAPTURE"
   exit 1
 fi
@@ -743,6 +753,75 @@ fi
 if ! rg -q -- '--gate-summary-json /tmp/prod_gate_summary.json' "$GATE_CAPTURE"; then
   echo "easy_node prod gate wiring failed: --gate-summary-json missing"
   cat "$GATE_CAPTURE"
+  exit 1
+fi
+
+FAKE_VALIDATE_PROFILE_ENV="$TMP_DIR/fake_validate_profile_env.sh"
+VALIDATE_PROFILE_ENV_CAPTURE="$TMP_DIR/validate_profile_env_capture.log"
+cat >"$FAKE_VALIDATE_PROFILE_ENV" <<'EOF_FAKE_VALIDATE_PROFILE_ENV'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'env_path_profile=%s\n' "${EASY_NODE_PATH_PROFILE:-}" >>"${VALIDATE_PROFILE_ENV_CAPTURE_FILE:?}"
+printf 'args=%s\n' "$*" >>"${VALIDATE_PROFILE_ENV_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_VALIDATE_PROFILE_ENV
+chmod +x "$FAKE_VALIDATE_PROFILE_ENV"
+
+echo "[wiring] easy_node -> three-machine-validate path-profile env forwarding"
+PATH="$TMP_BIN:$PATH" \
+VALIDATE_PROFILE_ENV_CAPTURE_FILE="$VALIDATE_PROFILE_ENV_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_VALIDATE_PROFILE_ENV" \
+./scripts/easy_node.sh three-machine-validate --path-profile private >/tmp/integration_3machine_prod_profile_wiring_easy_validate_path_profile.log 2>&1
+
+if ! rg -q '^env_path_profile=private$' "$VALIDATE_PROFILE_ENV_CAPTURE"; then
+  echo "easy_node three-machine-validate wiring failed: expected EASY_NODE_PATH_PROFILE=private"
+  cat "$VALIDATE_PROFILE_ENV_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--path-profile private' "$VALIDATE_PROFILE_ENV_CAPTURE"; then
+  echo "easy_node three-machine-validate wiring failed: expected --path-profile private arg forwarded"
+  cat "$VALIDATE_PROFILE_ENV_CAPTURE"
+  exit 1
+fi
+
+: >"$VALIDATE_PROFILE_ENV_CAPTURE"
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_PATH_PROFILE=balanced \
+VALIDATE_PROFILE_ENV_CAPTURE_FILE="$VALIDATE_PROFILE_ENV_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_VALIDATE_PROFILE_ENV" \
+./scripts/easy_node.sh three-machine-validate --path-profile 3hop >/tmp/integration_3machine_prod_profile_wiring_easy_validate_path_profile_override.log 2>&1
+
+if ! rg -q '^env_path_profile=3hop$' "$VALIDATE_PROFILE_ENV_CAPTURE"; then
+  echo "easy_node three-machine-validate wiring failed: --path-profile arg should override inherited EASY_NODE_PATH_PROFILE"
+  cat "$VALIDATE_PROFILE_ENV_CAPTURE"
+  exit 1
+fi
+
+FAKE_SOAK_PROFILE_ENV="$TMP_DIR/fake_soak_profile_env.sh"
+SOAK_PROFILE_ENV_CAPTURE="$TMP_DIR/soak_profile_env_capture.log"
+cat >"$FAKE_SOAK_PROFILE_ENV" <<'EOF_FAKE_SOAK_PROFILE_ENV'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'env_path_profile=%s\n' "${EASY_NODE_PATH_PROFILE:-}" >>"${SOAK_PROFILE_ENV_CAPTURE_FILE:?}"
+printf 'args=%s\n' "$*" >>"${SOAK_PROFILE_ENV_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_SOAK_PROFILE_ENV
+chmod +x "$FAKE_SOAK_PROFILE_ENV"
+
+echo "[wiring] easy_node -> three-machine-soak path-profile env forwarding"
+PATH="$TMP_BIN:$PATH" \
+SOAK_PROFILE_ENV_CAPTURE_FILE="$SOAK_PROFILE_ENV_CAPTURE" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_SOAK_PROFILE_ENV" \
+./scripts/easy_node.sh three-machine-soak --path-profile speed >/tmp/integration_3machine_prod_profile_wiring_easy_soak_path_profile.log 2>&1
+
+if ! rg -q '^env_path_profile=speed$' "$SOAK_PROFILE_ENV_CAPTURE"; then
+  echo "easy_node three-machine-soak wiring failed: expected EASY_NODE_PATH_PROFILE=speed"
+  cat "$SOAK_PROFILE_ENV_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--path-profile speed' "$SOAK_PROFILE_ENV_CAPTURE"; then
+  echo "easy_node three-machine-soak wiring failed: expected --path-profile speed arg forwarded"
+  cat "$SOAK_PROFILE_ENV_CAPTURE"
   exit 1
 fi
 

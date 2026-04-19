@@ -28,6 +28,7 @@ Usage:
     [--pause-sec N] \
     [--fault-every N] \
     [--fault-command CMD] \
+    [--allow-unsafe-fault-command [0|1]] \
     [--continue-on-fail [0|1]] \
     [--min-sources N] \
     [--min-operators N] \
@@ -137,6 +138,7 @@ rounds="${THREE_MACHINE_SOAK_ROUNDS:-12}"
 pause_sec="${THREE_MACHINE_SOAK_PAUSE_SEC:-5}"
 fault_every="${THREE_MACHINE_SOAK_FAULT_EVERY:-0}"
 fault_command="${THREE_MACHINE_SOAK_FAULT_COMMAND:-}"
+allow_unsafe_fault_command="${THREE_MACHINE_SOAK_ALLOW_UNSAFE_FAULT_COMMAND:-0}"
 continue_on_fail="${THREE_MACHINE_SOAK_CONTINUE_ON_FAIL:-0}"
 min_sources="2"
 min_operators="2"
@@ -250,6 +252,15 @@ while [[ $# -gt 0 ]]; do
     --fault-command)
       fault_command="${2:-}"
       shift 2
+      ;;
+    --allow-unsafe-fault-command)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        allow_unsafe_fault_command="${2:-}"
+        shift 2
+      else
+        allow_unsafe_fault_command="1"
+        shift
+      fi
       ;;
     --continue-on-fail)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -491,6 +502,15 @@ if ((fault_every > 0)) && [[ -z "$fault_command" ]]; then
   echo "--fault-command is required when --fault-every is greater than 0"
   exit 2
 fi
+if [[ "$allow_unsafe_fault_command" != "0" && "$allow_unsafe_fault_command" != "1" ]]; then
+  echo "--allow-unsafe-fault-command must be 0 or 1"
+  exit 2
+fi
+if ((fault_every > 0)) && [[ "$allow_unsafe_fault_command" != "1" ]]; then
+  echo "--fault-command uses shell execution and is blocked by default"
+  echo "set --allow-unsafe-fault-command 1 (or THREE_MACHINE_SOAK_ALLOW_UNSAFE_FAULT_COMMAND=1) to opt in"
+  exit 2
+fi
 
 if [[ "$prod_profile" == "1" ]]; then
   beta_profile="1"
@@ -525,14 +545,15 @@ if [[ "$beta_profile" == "1" ]]; then
   if ((min_operators < 2)); then
     min_operators="2"
   fi
-  if ((client_min_selection_lines < 8)); then
+  # Apply strict beta client-diversity defaults only when thresholds are unset (0).
+  if ((client_min_selection_lines == 0)); then
     client_min_selection_lines="8"
   fi
   if [[ "$distinct_operators" == "1" ]]; then
-    if ((client_min_entry_operators < 2)); then
+    if ((client_min_entry_operators == 0)); then
       client_min_entry_operators="2"
     fi
-    if ((client_min_exit_operators < 2)); then
+    if ((client_min_exit_operators == 0)); then
       client_min_exit_operators="2"
     fi
   fi
@@ -622,6 +643,11 @@ for round in $(seq 1 "$rounds"); do
     --beta-profile "$beta_profile"
     --prod-profile "$prod_profile"
   )
+  if [[ -n "$path_profile" ]]; then
+    cmd+=(--path-profile "$path_profile")
+  elif [[ -n "$normalized_path_profile" ]]; then
+    cmd+=(--path-profile "$normalized_path_profile")
+  fi
   if [[ -n "$directory_a" ]]; then
     cmd+=(--directory-a "$directory_a")
   fi

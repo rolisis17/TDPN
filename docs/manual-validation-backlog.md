@@ -28,13 +28,27 @@ When `single-machine-prod-readiness` runs with `--run-profile-compare-campaign-s
 - `roadmap_stage=PRODUCTION_SIGNOFF_COMPLETE`: all tracked manual checks passed.
 `roadmap-progress-report` now adds a VPN RC-done phase signal plus the explicit list of pending real-host checks so the remaining external-only tail is visible at a glance.
 
+Manual readiness interpretation (operator quick guide):
+- `pre_real_host_readiness.status=pass` with `manual_validation_report.readiness_status=NOT_READY` is expected while external gates are still pending (`machine_c_vpn_smoke`, `three_machine_prod_signoff`).
+- `client-vpn-smoke` or `three-machine-prod-signoff` with `status=skip`, `defer_no_root=true`, `deferred_no_root=true`, and `stage=pre-real-host-readiness` means root-only defer was applied; treat as deferred, not complete.
+- same commands with `status=fail` and `deferred_no_root=false` mean a real blocker (not root-only); fail-closed behavior is working as intended.
+- `prod-pilot-runbook` / `prod-pilot-cohort-runbook` may continue after root-only deferred pre-readiness to collect pilot evidence, but final signoff still requires privileged reruns.
+- next command after any root-only deferred warning:
+  - `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1`
+
 They also surface an optional one-host docker rehearsal snapshot (`docker_rehearsal_status`, `docker_rehearsal_ready`, `docker_rehearsal_command`) so we can track that confidence pass without changing real-host signoff requirements.
 They now also surface an optional Linux root real-WG privileged matrix snapshot (`real_wg_privileged_status`, `real_wg_privileged_ready`, `real_wg_privileged_command`) so one-host dataplane confidence can be tracked alongside the docker rehearsal gate without changing machine-C / true 3-machine blockers.
 
 They also surface a non-blocking profile-default gate snapshot from `profile-compare-campaign-signoff` (status/decision/recommended profile + next command) so default-profile decision progress is visible in the same readiness handoff.
-When a profile-compare campaign refresh cannot run because local stack bootstrap needs root (`--start-local-stack=1 requires root`) and no docker rehearsal endpoints are available, that profile-default gate now reports `pending` with a sudo-ready rerun command instead of a hard `fail`, so single-machine readiness signaling stays focused on true blockers.
+That profile-default gate now reports `pending` when `decision=NO-GO` is driven by insufficient campaign evidence (for example low/incomplete campaign runs or local refresh blocked by root requirements), so one-host readiness stays focused on true blockers.
+`warn` is reserved for advisory `NO-GO` outcomes with sufficient campaign evidence.
 `single-machine-prod-readiness` now mirrors that same profile-default gate snapshot in its summary JSON (`summary.profile_default_gate`, `summary.profile_default_ready`) so the one-host sweep and manual-validation report stay consistent.
 It now also prints the same profile-default gate fields in stdout (`profile_default_gate_status`, `profile_default_gate_available`, `profile_default_gate_next_command`) so operators can see the rerun path immediately without opening JSON artifacts.
+When docker rehearsal artifacts are available, `profile_default_gate_next_command` now prefers a deterministic no-sudo refresh command (docker execution mode + explicit directory/issuer/entry/exit overrides), and also exposes `profile_default_gate_next_command_sudo` as explicit fallback.
+The same gate snapshot now includes artifact pointers for fast triage (`campaign_check_summary_json_resolved`, `docker_rehearsal_matrix_summary_json`, `docker_rehearsal_profile_summary_json`) plus source hints (`next_command_source`, `docker_rehearsal_hint_available`, `docker_rehearsal_hint_source`).
+Operator next steps:
+- if `profile_default_gate_status=pending`: rerun `./scripts/easy_node.sh profile-compare-campaign-signoff --refresh-campaign 1 --print-summary-json 1` (or use docker campaign mode / launcher option 77 when non-root).
+- if `profile_default_gate_status=warn`: keep the current default profile and continue machine-C + true 3-machine signoff; treat profile-default tuning as follow-up.
 `single-machine-prod-readiness` now also prints `next_action_check_id` and `next_action_command` directly in stdout so the next roadmap step is visible immediately in terminal output.
 It can now also include the one-host dockerized 3-machine rehearsal in that same sweep (`--run-three-machine-docker-readiness auto|0|1`) and surfaces the rehearsal status in summary JSON/stdout.
 It can now also include an optional Linux root real-WG matrix receipt refresh in that same sweep (`--run-real-wg-privileged-matrix auto|0|1`), and treats that matrix step as a non-blocking confidence gate in one-host readiness output.
@@ -157,7 +171,7 @@ Suggested flow:
 
 ```bash
 sudo ./scripts/easy_node.sh client-vpn-smoke \
-  --bootstrap-directory http://A_HOST:8081 \
+  --bootstrap-directory https://A_HOST:8081 \
   --subject INVITE_KEY \
   --path-profile balanced \
   --interface wgvpn0 \
@@ -202,3 +216,120 @@ The CLI prints the same reminder with:
 ./scripts/easy_node.sh manual-validation-backlog
 ./scripts/easy_node.sh manual-validation-status --show-json 1
 ```
+
+## Security Re-scan Notes (2026-04-18, independent verifier pass)
+
+Potential remaining hardening items from a read-only grep/ripgrep + manual line-by-line sweep (Go/shell/Rust/JS/docs), prioritized by impact:
+
+1. **P1 (open): client outbound dial policy allows `localhost` mixed-resolution bypass**
+   - References:
+     - `internal/app/client.go:4094`
+     - `internal/app/client.go:4127`
+     - `internal/app/client.go:4142`
+   - Why it matters:
+     - For host `localhost`, mixed DNS answers (loopback + non-loopback) can still route to non-loopback targets depending on resolver ordering.
+     - This reintroduces DNS-rebind/mixed-resolution risk on client outbound control calls.
+   - Suggested fix:
+     - Mirror the stricter service-side policy: treat `localhost` as safe only when **all** resolved addresses are loopback (unless explicit dangerous private-DNS override is enabled).
+   - Suggested tests:
+     - Add a focused test in `internal/app/outbound_dial_policy_test.go` that supplies mixed `localhost` answers and expects rejection.
+
+2. **P2 (open): replay guards are now persistent per instance, but still not shared across replicas**
+   - References:
+     - `services/exit/service.go:341`
+     - `services/exit/service.go:597`
+     - `services/exit/service.go:1900`
+     - `services/directory/service.go:377`
+     - `services/directory/service.go:549`
+     - `services/directory/service.go:3307`
+   - Why it matters:
+     - Restart durability is now present (file-backed stores), but active/active deployments without shared replay storage can still accept cross-instance replays.
+   - Suggested fix:
+     - Back replay keys with shared durable state (for example Redis/DB) keyed by `(token_id, nonce)` with TTL.
+     - Keep local file/cache as fast-path only.
+   - Suggested tests:
+     - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
+
+3. **P2 (open): integration scripts still leak raw PoP private-key JSON on some parse failures**
+   - References:
+     - `scripts/integration_lifecycle_chaos.sh:109`
+     - `scripts/integration_multi_issuer.sh:40`
+     - `scripts/integration_revocation.sh:23`
+   - Why it matters:
+     - On failure paths, raw `tokenpop gen` output can be printed to CI/operator logs, exposing `private_key` material.
+   - Suggested fix:
+     - Replace raw `echo "$pop_json"` paths with shared redaction helper (same pattern already used by hardened integration scripts).
+   - Suggested tests:
+     - Add grep-based guardrails in script contract tests to block unredacted `pop_json` emission and verify failure output is redacted.
+
+4. **P2 (open): compose still supports full-privilege `entry-exit` mode via env toggle**
+   - References:
+     - `deploy/docker-compose.yml:185`
+   - Why it matters:
+     - `ENTRY_EXIT_PRIVILEGED=true` bypasses the new least-privilege defaults (`cap_drop: ALL`, `cap_add: NET_ADMIN`, `no-new-privileges`).
+   - Suggested fix:
+     - Move privileged mode behind a dedicated emergency profile/override compose file and keep base stack permanently non-privileged.
+   - Suggested tests:
+     - CI policy check: fail when base compose enables privileged mode in default paths.
+
+5. **P3 (open): client-side trusted-key/subject loaders still use unbounded direct file reads**
+   - References:
+     - `internal/app/directory_trust.go:98`
+     - `internal/app/client.go:176`
+   - Why it matters:
+     - These paths still use direct `os.ReadFile` without size cap or strict `lstat/open/samefile` checks.
+     - Risk is local but can still cause memory pressure or unexpected file-read behavior in hardened deployments.
+   - Suggested fix:
+     - Reuse the bounded regular-file helper pattern already adopted in services/blockchain paths.
+   - Suggested tests:
+     - Oversized file and symlink/race rejection tests for `loadTrustedKeys` and `loadClientSubject`.
+
+6. **P1 (resolved in current branch): sensitive local IDE runtime artifacts removed from repo**
+   - References:
+     - `User/globalStorage/storage.json:5`
+     - `User/globalStorage/storage.json:14`
+     - `User/globalStorage/github.copilot-chat/copilotCli/copilot:3`
+     - `User/globalStorage/github.copilot-chat/debugCommand/copilot-debug:3`
+     - `User/globalStorage/state.vscdb` (binary SQLite)
+   - Status:
+     - `git ls-files User/globalStorage` now returns no tracked files.
+     - `.gitignore` includes guardrails to prevent reintroduction.
+   - Remaining follow-up:
+     - If this data was pushed/shared previously, rotate any potentially exposed credentials/tokens and assess remote history cleanup.
+
+7. **P3 (verified resolved): bounded service file reads enforce regular-file + anti-symlink/TOCTOU checks**
+   - References:
+     - `services/entry/service.go:1881`
+     - `services/directory/service.go:5887`
+     - `services/issuer/service.go:3577`
+   - Status:
+     - `readFileBounded` in `directory`, `entry`, and `issuer` now validates path/file type and same-file consistency while keeping bounded reads.
+
+8. **P1 (verified resolved): entry service map growth bounded (memory DoS hardening)**
+   - References:
+     - `services/entry/service.go:89`
+     - `services/entry/service.go:96`
+     - `services/entry/service.go:107`
+     - `services/entry/service.go:553`
+     - `services/entry/service.go:601`
+     - `services/entry/service.go:690`
+   - Status:
+     - Capacity bounds + pruning + fail-closed behavior are present and covered by focused tests.
+
+9. **P2 (verified resolved): default admin token fallback is no longer implicit**
+   - References:
+     - `services/directory/service.go:154`
+     - `services/directory/service.go:421`
+     - `services/issuer/service.go:132`
+     - `services/issuer/service.go:158`
+   - Status:
+     - `directory`/`issuer` no longer auto-populate `dev-admin-token` by default.
+     - Legacy fallback requires explicit dangerous opt-in env vars.
+
+10. **P3 (verified resolved): integration fan-out no longer uses `xargs ... sh -c` in flagged scripts**
+    - References:
+      - `scripts/integration_client_startup_burst.sh:130`
+      - `scripts/integration_load_chaos.sh:219`
+    - Status:
+      - Flagged scripts now use function/background-job fan-out.
+      - `rg 'xargs.*sh -c|xargs.*bash -c'` returns no matches.

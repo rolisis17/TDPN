@@ -14,7 +14,7 @@ default_log_dir() {
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/prod_gate_bundle.sh [--bundle-dir PATH] [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
+  ./scripts/prod_gate_bundle.sh [--bundle-dir PATH] [--control-require-issuer-quorum auto|0|1] [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
 
 Purpose:
   Run production 3-machine gate and always produce a shareable diagnostics bundle:
@@ -92,6 +92,7 @@ write_sha256_line() {
 }
 
 bundle_dir=""
+control_require_issuer_quorum="${PROD_GATE_BUNDLE_CONTROL_REQUIRE_ISSUER_QUORUM:-auto}"
 signoff_check="${PROD_GATE_BUNDLE_SIGNOFF_CHECK:-0}"
 signoff_require_full_sequence="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_FULL_SEQUENCE:-1}"
 signoff_require_wg_validate_ok="${PROD_GATE_BUNDLE_SIGNOFF_REQUIRE_WG_VALIDATE_OK:-1}"
@@ -111,6 +112,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle-dir)
       bundle_dir="${2:-}"
+      shift 2
+      ;;
+    --control-require-issuer-quorum)
+      control_require_issuer_quorum="${2:-}"
       shift 2
       ;;
     --signoff-check)
@@ -224,6 +229,10 @@ bool_arg_or_die "--signoff-require-wg-validate-udp-source" "$signoff_require_wg_
 bool_arg_or_die "--signoff-require-wg-validate-strict-distinct" "$signoff_require_wg_validate_strict_distinct"
 bool_arg_or_die "--signoff-require-wg-soak-diversity-pass" "$signoff_require_wg_soak_diversity_pass"
 bool_arg_or_die "--signoff-show-json" "$signoff_show_json"
+if [[ "$control_require_issuer_quorum" != "0" && "$control_require_issuer_quorum" != "1" && "$control_require_issuer_quorum" != "auto" ]]; then
+  echo "--control-require-issuer-quorum must be one of: auto, 0, 1"
+  exit 2
+fi
 if [[ ! "$signoff_max_wg_soak_failed_rounds" =~ ^[0-9]+$ ]]; then
   echo "--signoff-max-wg-soak-failed-rounds must be an integer >= 0"
   exit 2
@@ -273,6 +282,7 @@ gate_summary_json="$bundle_dir/prod_gate_summary.json"
 echo "[prod-gate-bundle] started at $started_at_utc"
 echo "[prod-gate-bundle] bundle_dir=$bundle_dir"
 echo "[prod-gate-bundle] gate_script=$GATE_SCRIPT"
+echo "[prod-gate-bundle] control_require_issuer_quorum=$control_require_issuer_quorum"
 if [[ "$signoff_check" == "1" ]]; then
   echo "[prod-gate-bundle] signoff enabled: script=$CHECK_SCRIPT full_sequence=$signoff_require_full_sequence wg_validate_ok=$signoff_require_wg_validate_ok wg_soak_ok=$signoff_require_wg_soak_ok wg_validate_udp_source=$signoff_require_wg_validate_udp_source wg_validate_strict_distinct=$signoff_require_wg_validate_strict_distinct wg_soak_diversity_pass=$signoff_require_wg_soak_diversity_pass min_selection_lines=$signoff_min_wg_soak_selection_lines min_entry_operators=$signoff_min_wg_soak_entry_operators min_exit_operators=$signoff_min_wg_soak_exit_operators min_cross_operator_pairs=$signoff_min_wg_soak_cross_operator_pairs max_wg_soak_failed_rounds=$signoff_max_wg_soak_failed_rounds show_json=$signoff_show_json"
 else
@@ -282,12 +292,25 @@ fi
 set +e
 "$GATE_SCRIPT" \
   "${gate_args[@]}" \
+  --control-require-issuer-quorum "$control_require_issuer_quorum" \
   --report-file "$report_file" \
   --wg-validate-summary-json "$wg_validate_summary_json" \
   --wg-soak-summary-json "$wg_soak_summary_json" \
   --gate-summary-json "$gate_summary_json"
 gate_rc=$?
 set -e
+
+if [[ "$gate_rc" -ne 0 && -s "$gate_summary_json" ]]; then
+  gate_failed_step="$(json_string_field "$gate_summary_json" "failed_step")"
+  gate_report_file="$(json_string_field "$gate_summary_json" "report_file")"
+  if [[ -n "$gate_report_file" && -f "$gate_report_file" ]] &&
+    [[ "$gate_failed_step" == "control_validate" || "$gate_failed_step" == "control_soak" ]] &&
+    grep -Eq 'issuer B did not become healthy|issuer quorum check failed' "$gate_report_file"; then
+    echo "[prod-gate-bundle] hint: issuer-B control-plane checks failed."
+    echo "[prod-gate-bundle] hint: if machine B runs provider mode (no local issuer on :8082), use --control-require-issuer-quorum auto (recommended) or 0."
+    echo "[prod-gate-bundle] hint: if machine B is an authority, keep strict mode (--control-require-issuer-quorum 1) and restore issuer B at /v1/pubkeys."
+  fi
+fi
 
 step_logs_dir=""
 if [[ -s "$gate_summary_json" ]]; then
@@ -346,6 +369,7 @@ started_at_utc=$started_at_utc
 finished_at_utc=$finished_at_utc
 gate_script=$GATE_SCRIPT
 gate_rc=$gate_rc
+control_require_issuer_quorum=$control_require_issuer_quorum
 signoff_enabled=$signoff_check
 signoff_script=$CHECK_SCRIPT
 signoff_rc=$signoff_rc

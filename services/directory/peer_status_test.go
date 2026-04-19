@@ -1,18 +1,37 @@
 package directory
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 )
+
+func captureDirectoryLogs(t *testing.T) (*bytes.Buffer, func()) {
+	t.Helper()
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	prevFlags := log.Flags()
+	prevPrefix := log.Prefix()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	return &buf, func() {
+		log.SetOutput(prevOutput)
+		log.SetFlags(prevFlags)
+		log.SetPrefix(prevPrefix)
+	}
+}
 
 func TestSnapshotSyncPeersSkipsCoolingDownDiscoveredPeer(t *testing.T) {
 	now := time.Now().UTC()
@@ -149,6 +168,111 @@ func TestRecordPeerSyncFailureTracksConfiguredPeerHealth(t *testing.T) {
 	s.recordPeerSyncFailure("http://unknown-peer.local", now, errors.New("ignored"))
 	if _, exists := s.discoveredPeerHealth["http://unknown-peer.local"]; exists {
 		t.Fatalf("expected unknown peer health to remain untracked")
+	}
+}
+
+func TestRecordPeerSyncFailureConfiguredPeerBackoffWhenDiscoveryEnabled(t *testing.T) {
+	now := time.Now().UTC()
+	configuredURL := "http://seed-configured.local"
+	s := &Service{
+		peerURLs:                []string{configuredURL},
+		peerDiscoveryEnabled:    true,
+		peerDiscoveryFailN:      2,
+		peerDiscoveryBackoff:    15 * time.Second,
+		peerDiscoveryBackoffMax: time.Minute,
+		discoveredPeerHealth:    make(map[string]discoveredPeerHealth),
+	}
+
+	s.recordPeerSyncFailure(configuredURL, now, errors.New("connect refused"))
+	health := s.discoveredPeerHealth[configuredURL]
+	if !health.cooldownUntil.IsZero() {
+		t.Fatalf("expected no cooldown before threshold")
+	}
+
+	s.recordPeerSyncFailure(configuredURL, now.Add(time.Second), errors.New("connect refused"))
+	health = s.discoveredPeerHealth[configuredURL]
+	if health.cooldownUntil.IsZero() {
+		t.Fatalf("expected configured peer cooldown when discovery-enabled threshold is reached")
+	}
+
+	peers := s.snapshotSyncPeers(now.Add(2 * time.Second))
+	if containsString(peers, configuredURL) {
+		t.Fatalf("expected configured peer excluded from active sync set while cooling down")
+	}
+
+	known := s.snapshotKnownPeers(now.Add(2 * time.Second))
+	if !containsString(known, configuredURL) {
+		t.Fatalf("expected configured peer to remain in known-peer list during cooldown")
+	}
+}
+
+func TestRecordPeerSyncFailureLogsCooldownEntryTransition(t *testing.T) {
+	now := time.Now().UTC()
+	discoveredURL := "http://peer-flaky.local"
+	s := &Service{
+		peerDiscoveryEnabled:    true,
+		peerDiscoveryFailN:      2,
+		peerDiscoveryBackoff:    30 * time.Second,
+		peerDiscoveryBackoffMax: 2 * time.Minute,
+		discoveredPeers: map[string]time.Time{
+			discoveredURL: now,
+		},
+		discoveredPeerVoters: map[string]map[string]time.Time{
+			discoveredURL: {
+				"op-seed": now,
+			},
+		},
+		discoveredPeerHealth: make(map[string]discoveredPeerHealth),
+	}
+	logBuf, restoreLogs := captureDirectoryLogs(t)
+	defer restoreLogs()
+
+	s.recordPeerSyncFailure(discoveredURL, now, errors.New("dial timeout"))
+	s.recordPeerSyncFailure(discoveredURL, now.Add(time.Second), errors.New("dial timeout"))
+	s.recordPeerSyncFailure(discoveredURL, now.Add(2*time.Second), errors.New("dial timeout"))
+
+	logs := logBuf.String()
+	if strings.Count(logs, "directory peer cooldown entered: peer="+discoveredURL) != 1 {
+		t.Fatalf("expected exactly one cooldown-entry log, got logs:\n%s", logs)
+	}
+	if !strings.Contains(logs, "retry_after_sec=30") {
+		t.Fatalf("expected cooldown log to include retry_after_sec, got logs:\n%s", logs)
+	}
+}
+
+func TestRecordPeerSyncSuccessLogsCooldownRecoveryTransition(t *testing.T) {
+	now := time.Now().UTC()
+	discoveredURL := "http://peer-recover.local"
+	s := &Service{
+		peerDiscoveryEnabled: true,
+		discoveredPeers: map[string]time.Time{
+			discoveredURL: now,
+		},
+		discoveredPeerVoters: map[string]map[string]time.Time{
+			discoveredURL: {
+				"op-seed": now,
+			},
+		},
+		discoveredPeerHealth: map[string]discoveredPeerHealth{
+			discoveredURL: {
+				consecutiveFailures: 3,
+				cooldownUntil:       now.Add(45 * time.Second),
+				lastError:           "connect timeout",
+			},
+		},
+	}
+	logBuf, restoreLogs := captureDirectoryLogs(t)
+	defer restoreLogs()
+
+	s.recordPeerSyncSuccess(discoveredURL, now.Add(5*time.Second))
+	s.recordPeerSyncSuccess(discoveredURL, now.Add(6*time.Second))
+
+	logs := logBuf.String()
+	if strings.Count(logs, "directory peer cooldown recovered: peer="+discoveredURL) != 1 {
+		t.Fatalf("expected exactly one cooldown-recovery log, got logs:\n%s", logs)
+	}
+	if !strings.Contains(logs, "previous_failures=3") {
+		t.Fatalf("expected recovery log to include previous failure count, got logs:\n%s", logs)
 	}
 }
 
@@ -335,5 +459,52 @@ func TestHandlePeerStatusReturnsConfiguredAndDiscoveredState(t *testing.T) {
 	}
 	if discovered.RetryAfterSec > 90 {
 		t.Fatalf("expected retry_after_sec bounded by cooldown window, got %d", discovered.RetryAfterSec)
+	}
+}
+
+func TestHandlePeerStatusMarksCoolingConfiguredPeerIneligible(t *testing.T) {
+	now := time.Now().UTC()
+	configuredURL := "http://seed.local"
+	s := &Service{
+		adminToken:           "secret",
+		peerURLs:             []string{configuredURL},
+		peerDiscoveryEnabled: true,
+		discoveredPeerHealth: map[string]discoveredPeerHealth{
+			configuredURL: {
+				lastFailure:         now.Add(-3 * time.Second),
+				consecutiveFailures: 3,
+				cooldownUntil:       now.Add(45 * time.Second),
+				lastError:           "dial timeout",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/peer-status", nil)
+	req.Header.Set("X-Admin-Token", "secret")
+	rr := httptest.NewRecorder()
+	s.handlePeerStatus(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var out proto.DirectoryPeerStatusResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode peer status response: %v", err)
+	}
+	if len(out.Peers) != 1 {
+		t.Fatalf("expected one peer in status response, got %d", len(out.Peers))
+	}
+	peer := out.Peers[0]
+	if !peer.Configured {
+		t.Fatalf("expected configured peer status")
+	}
+	if !peer.CoolingDown {
+		t.Fatalf("expected configured peer to be cooling down")
+	}
+	if peer.Eligible {
+		t.Fatalf("expected cooling configured peer to be marked ineligible")
+	}
+	if peer.RetryAfterSec <= 0 {
+		t.Fatalf("expected positive retry_after_sec during cooldown")
 	}
 }

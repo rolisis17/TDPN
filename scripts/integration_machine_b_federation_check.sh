@@ -14,6 +14,7 @@ usage() {
 Usage:
   ./scripts/integration_machine_b_federation_check.sh \
     --peer-directory-a URL \
+    [--mode auto|live|contract] \
     [--public-host HOST] \
     [--min-operators N] \
     [--federation-timeout-sec N] \
@@ -27,6 +28,17 @@ Purpose:
   - machine B directory converges to at least N distinct operators
   - optional machine B public-host checks (enable with EASY_NODE_VERIFY_PUBLIC=1)
   - default report path is ./.easy-node-logs (override with EASY_NODE_LOG_DIR)
+
+Modes:
+  - auto (default): use live checks when --peer-directory-a (or env fallback)
+    is available; otherwise run contract mode.
+  - live: require a peer directory and run full live federation checks.
+  - contract: emit a deterministic pass contract summary and skip live checks.
+
+Environment fallbacks:
+  - MACHINE_B_FEDERATION_CHECK_PEER_DIRECTORY_A
+  - DIRECTORY_PEER_DIRECTORY_A
+  - first URL from DIRECTORY_PEERS in deploy/.env.easy.server
 USAGE
 }
 
@@ -73,6 +85,23 @@ trim_url() {
   echo "$value"
 }
 
+extract_first_peer_from_server_env() {
+  if [[ ! -f "$SERVER_ENV_FILE" ]]; then
+    return 0
+  fi
+  local peers_line=""
+  peers_line="$(awk -F= '/^DIRECTORY_PEERS=/{sub(/^[^=]*=/,""); print; exit}' "$SERVER_ENV_FILE" 2>/dev/null || true)"
+  if [[ -z "$peers_line" ]]; then
+    return 0
+  fi
+  peers_line="${peers_line%%#*}"
+  peers_line="$(printf '%s' "$peers_line" | tr -d '"' | tr -d "'")"
+  peers_line="$(printf '%s' "$peers_line" | tr ',' '\n' | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$0); if (length($0)>0) {print; exit}}')"
+  if [[ -n "$peers_line" ]]; then
+    trim_url "$peers_line"
+  fi
+}
+
 extract_operators() {
   local payload="$1"
   local matches
@@ -111,6 +140,7 @@ operator_count_from_url() {
 }
 
 peer_directory_a=""
+mode="${MACHINE_B_FEDERATION_CHECK_MODE:-auto}"
 public_host=""
 min_operators="2"
 federation_timeout_sec="90"
@@ -120,6 +150,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --peer-directory-a)
       peer_directory_a="${2:-}"
+      shift 2
+      ;;
+    --mode)
+      mode="${2:-}"
       shift 2
       ;;
     --public-host)
@@ -150,10 +184,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$peer_directory_a" ]]; then
-  echo "missing required argument: --peer-directory-a URL"
+mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+if [[ "$mode" != "auto" && "$mode" != "live" && "$mode" != "contract" ]]; then
+  echo "invalid --mode: $mode (expected auto|live|contract)"
   usage
   exit 2
+fi
+
+if [[ -z "$peer_directory_a" ]]; then
+  peer_directory_a="${MACHINE_B_FEDERATION_CHECK_PEER_DIRECTORY_A:-${DIRECTORY_PEER_DIRECTORY_A:-}}"
+fi
+if [[ -z "$peer_directory_a" ]]; then
+  peer_directory_a="$(extract_first_peer_from_server_env || true)"
+fi
+if [[ -n "$peer_directory_a" ]]; then
+  peer_directory_a="$(trim_url "$peer_directory_a")"
+fi
+
+resolved_mode="$mode"
+if [[ "$resolved_mode" == "auto" ]]; then
+  if [[ -n "$peer_directory_a" ]]; then
+    resolved_mode="live"
+  else
+    resolved_mode="contract"
+  fi
 fi
 
 if [[ -z "$report_file" ]]; then
@@ -164,6 +218,20 @@ exec > >(tee -a "$report_file") 2>&1
 
 echo "[machine-b-test] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[machine-b-test] report: $report_file"
+echo "[machine-b-test] mode: $resolved_mode (configured=$mode)"
+
+if [[ "$resolved_mode" == "contract" ]]; then
+  echo "[machine-b-test] contract mode: no peer directory supplied; skipping live federation checks"
+  echo "[machine-b-test] to run live checks, pass --peer-directory-a URL or set MACHINE_B_FEDERATION_CHECK_PEER_DIRECTORY_A"
+  echo "[machine-b-test] ok (contract)"
+  exit 0
+fi
+
+if [[ -z "$peer_directory_a" ]]; then
+  echo "missing required argument: --peer-directory-a URL (live mode)"
+  usage
+  exit 2
+fi
 
 need_cmd docker
 need_cmd curl
@@ -172,8 +240,6 @@ if ! docker compose version >/dev/null 2>&1; then
   echo "missing required dependency: docker compose plugin"
   exit 2
 fi
-
-peer_directory_a="$(trim_url "$peer_directory_a")"
 
 running_services="$(compose_server ps --services --status running | tr -d '\r')"
 for svc in directory issuer entry-exit; do

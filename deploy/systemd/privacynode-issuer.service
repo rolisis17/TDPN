@@ -14,7 +14,16 @@ ExecStart=/usr/local/bin/node --issuer
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/privacynode
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target
-

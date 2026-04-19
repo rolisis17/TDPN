@@ -26,11 +26,22 @@ extract_directory_addr() {
 
 reset_profile_trust_pin() {
   local directory_addr="$1"
-  [[ -z "$directory_addr" ]] && return 0
-  local directory_url="http://${directory_addr}"
+  if [[ -n "$directory_addr" ]]; then
+    local directory_url="http://${directory_addr}"
+    ./scripts/easy_node.sh client-vpn-trust-reset \
+      --directory-urls "$directory_url" \
+      --trust-scope scoped \
+      --dry-run 0 >/dev/null 2>&1 || true
+  fi
+
+  # Keep matrix runs deterministic even if previous sessions used different
+  # trust scope modes (scoped/global) or stale pinned directory keys exist.
   ./scripts/easy_node.sh client-vpn-trust-reset \
-    --directory-urls "$directory_url" \
+    --all-scoped 1 \
     --trust-scope scoped \
+    --dry-run 0 >/dev/null 2>&1 || true
+  ./scripts/easy_node.sh client-vpn-trust-reset \
+    --trust-scope global \
     --dry-run 0 >/dev/null 2>&1 || true
 }
 
@@ -38,12 +49,18 @@ run_profile() {
   local name="$1"
   shift
   local out="/tmp/integration_real_wg_matrix_${name}.log"
+  local trust_file="/tmp/integration_real_wg_matrix_${name}_trusted_keys.txt"
   rm -f "$out"
+  rm -f "$trust_file"
   local directory_addr=""
   directory_addr="$(extract_directory_addr "$@" || true)"
   reset_profile_trust_pin "$directory_addr"
   echo "[real-wg-matrix] running profile=${name}"
-  if ! env "$@" ./scripts/integration_real_wg_privileged.sh >"$out" 2>&1; then
+  if ! env \
+    EASY_NODE_CLIENT_VPN_TRUST_SCOPE=scoped \
+    DIRECTORY_TRUSTED_KEYS_FILE="$trust_file" \
+    DIRECTORY_TRUST_TOFU=1 \
+    "$@" ./scripts/integration_real_wg_privileged.sh >"$out" 2>&1; then
     echo "[real-wg-matrix] profile=${name} failed"
     cat "$out"
     exit 1

@@ -100,6 +100,61 @@ json_bool() {
   fi
 }
 
+output_indicates_root_requirement() {
+  local text="$1"
+  if [[ -z "$text" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$text" | grep -Eqi 'requires root|run with sudo|must be root|root privileges required'; then
+    return 0
+  fi
+  return 1
+}
+
+pre_real_host_readiness_failure_requires_root() {
+  local readiness_output="$1"
+  local readiness_json="$2"
+  local readiness_notes=""
+  local readiness_stage=""
+  local blockers_only_wg_only="false"
+
+  if output_indicates_root_requirement "$readiness_output"; then
+    return 0
+  fi
+
+  if [[ -z "$readiness_json" ]]; then
+    return 1
+  fi
+
+  readiness_notes="$(
+    printf '%s\n' "$readiness_json" | jq -r '
+      [
+        (.notes // ""),
+        (.runtime_fix.notes // ""),
+        (.wg_only_stack_selftest.notes // "")
+      ] | map(select(type == "string")) | join("\n")
+    ' 2>/dev/null || true
+  )"
+  if output_indicates_root_requirement "$readiness_notes"; then
+    return 0
+  fi
+
+  readiness_stage="$(printf '%s\n' "$readiness_json" | jq -r '.stage // ""' 2>/dev/null || true)"
+  blockers_only_wg_only="$(
+    printf '%s\n' "$readiness_json" | jq -r '
+      (.machine_c_smoke_gate.blockers // []) as $b
+      | (($b | type) == "array")
+        and (($b | length) == 1)
+        and (($b[0] // "") == "wg_only_stack_selftest")
+    ' 2>/dev/null || printf 'false'
+  )"
+  if [[ "${EUID:-$(id -u)}" -ne 0 && "$readiness_stage" == "wg_only_stack_selftest" && "$blockers_only_wg_only" == "true" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -184,6 +239,7 @@ if [[ ! -x "$PRE_REAL_HOST_READINESS_SCRIPT" ]]; then
 fi
 
 pre_real_host_readiness="${PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS:-1}"
+pre_real_host_readiness_defer_no_root_mode="${PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS_DEFER_NO_ROOT:-auto}"
 pre_real_host_readiness_summary_json=""
 pre_real_host_readiness_summary_json_override="${PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}"
 rounds="${PROD_PILOT_COHORT_ROUNDS:-5}"
@@ -442,6 +498,10 @@ bool_or_die "--trend-require-wg-soak-diversity-pass" "$trend_require_wg_soak_div
 bool_or_die "--bundle-outputs" "$bundle_outputs"
 bool_or_die "--bundle-fail-close" "$bundle_fail_close"
 bool_or_die "--print-summary-json" "$print_summary_json"
+if [[ "$pre_real_host_readiness_defer_no_root_mode" != "auto" && "$pre_real_host_readiness_defer_no_root_mode" != "0" && "$pre_real_host_readiness_defer_no_root_mode" != "1" ]]; then
+  echo "PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS_DEFER_NO_ROOT must be auto, 0, or 1"
+  exit 2
+fi
 
 int_or_die "--rounds" "$rounds"
 int_or_die "--pause-sec" "$pause_sec"
@@ -547,8 +607,19 @@ pre_real_host_readiness_readiness_status=""
 pre_real_host_readiness_report_summary_json=""
 pre_real_host_readiness_report_md=""
 pre_real_host_readiness_blockers_json='[]'
+pre_real_host_readiness_defer_no_root="0"
+pre_real_host_readiness_deferred_no_root="0"
+pre_real_host_readiness_defer_reason=""
 pre_real_host_blocked=0
 pilot_pre_real_host_readiness_explicit=0
+
+if [[ "$pre_real_host_readiness_defer_no_root_mode" == "auto" ]]; then
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    pre_real_host_readiness_defer_no_root="1"
+  fi
+else
+  pre_real_host_readiness_defer_no_root="$pre_real_host_readiness_defer_no_root_mode"
+fi
 
 for arg in "${pilot_args[@]}"; do
   if [[ "$arg" == "--pre-real-host-readiness" ]]; then
@@ -558,17 +629,25 @@ for arg in "${pilot_args[@]}"; do
 done
 
 if [[ "$pre_real_host_readiness" == "1" ]]; then
+  readiness_output=""
+  readiness_json=""
   echo "[prod-pilot-cohort] running pre-real-host readiness gate"
   echo "[prod-pilot-cohort] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
   echo "[prod-pilot-cohort] pre_real_host_readiness_log=$pre_real_host_readiness_log"
+  echo "[prod-pilot-cohort] pre_real_host_readiness_defer_no_root=$pre_real_host_readiness_defer_no_root mode=$pre_real_host_readiness_defer_no_root_mode"
   set +e
   "$PRE_REAL_HOST_READINESS_SCRIPT" \
     --summary-json "$pre_real_host_readiness_summary_json" \
+    --defer-no-root "$pre_real_host_readiness_defer_no_root" \
     --print-summary-json 1 2>&1 | tee "$pre_real_host_readiness_log"
   pre_real_host_readiness_rc=${PIPESTATUS[0]}
   set -e
+  if [[ -f "$pre_real_host_readiness_log" ]]; then
+    readiness_output="$(cat "$pre_real_host_readiness_log" 2>/dev/null || true)"
+  fi
 
   if [[ -f "$pre_real_host_readiness_summary_json" ]] && jq -e . "$pre_real_host_readiness_summary_json" >/dev/null 2>&1; then
+    readiness_json="$(cat "$pre_real_host_readiness_summary_json")"
     pre_real_host_readiness_status="$(jq -r '.status // "fail"' "$pre_real_host_readiness_summary_json" 2>/dev/null || printf 'fail')"
     pre_real_host_readiness_machine_c_ready="$(jq -r '.machine_c_smoke_gate.ready // false' "$pre_real_host_readiness_summary_json" 2>/dev/null || printf 'false')"
     pre_real_host_readiness_next_command="$(jq -r '.machine_c_smoke_gate.next_command // ""' "$pre_real_host_readiness_summary_json" 2>/dev/null || true)"
@@ -579,8 +658,14 @@ if [[ "$pre_real_host_readiness" == "1" ]]; then
   fi
 
   if [[ "$pre_real_host_readiness_rc" -ne 0 || "$pre_real_host_readiness_machine_c_ready" != "true" ]]; then
-    pre_real_host_blocked=1
-    echo "[prod-pilot-cohort] pre-real-host readiness blocked cohort runbook: rc=$pre_real_host_readiness_rc"
+    if [[ "$pre_real_host_readiness_defer_no_root" == "1" ]] && pre_real_host_readiness_failure_requires_root "$readiness_output" "$readiness_json"; then
+      pre_real_host_readiness_deferred_no_root="1"
+      pre_real_host_readiness_defer_reason="pre-real-host readiness requires root privileges; continuing cohort runbook with deferred gate"
+      echo "[prod-pilot-cohort] $pre_real_host_readiness_defer_reason"
+    else
+      pre_real_host_blocked=1
+      echo "[prod-pilot-cohort] pre-real-host readiness blocked cohort runbook: rc=$pre_real_host_readiness_rc"
+    fi
   fi
 fi
 
@@ -931,6 +1016,10 @@ jq -nc \
   --arg pre_real_host_readiness_readiness_status "$pre_real_host_readiness_readiness_status" \
   --arg pre_real_host_readiness_report_summary_json "$pre_real_host_readiness_report_summary_json" \
   --arg pre_real_host_readiness_report_md "$pre_real_host_readiness_report_md" \
+  --arg pre_real_host_readiness_defer_no_root "$pre_real_host_readiness_defer_no_root" \
+  --arg pre_real_host_readiness_defer_no_root_mode "$pre_real_host_readiness_defer_no_root_mode" \
+  --arg pre_real_host_readiness_deferred_no_root "$pre_real_host_readiness_deferred_no_root" \
+  --arg pre_real_host_readiness_defer_reason "$pre_real_host_readiness_defer_reason" \
   --argjson pre_real_host_readiness_blockers "$pre_real_host_readiness_blockers_json" \
   --argjson round_results "$round_results_json" \
   --argjson run_reports "$run_reports_json" \
@@ -953,6 +1042,8 @@ jq -nc \
       continue_on_fail:$continue_on_fail,
       require_all_rounds_ok:$require_all_rounds_ok,
       pre_real_host_readiness:$pre_real_host_readiness,
+      pre_real_host_readiness_defer_no_root:($pre_real_host_readiness_defer_no_root == "1"),
+      pre_real_host_readiness_defer_mode:($pre_real_host_readiness_defer_no_root_mode // ""),
       trend_fail_on_any_no_go:$trend_fail_on_any_no_go,
       trend_require_wg_validate_udp_source:$trend_require_wg_validate_udp_source,
       trend_require_wg_validate_strict_distinct:$trend_require_wg_validate_strict_distinct,
@@ -996,6 +1087,10 @@ jq -nc \
       log_file:($pre_real_host_readiness_log // ""),
       report_summary_json:($pre_real_host_readiness_report_summary_json // ""),
       report_md:($pre_real_host_readiness_report_md // ""),
+      defer_no_root:($pre_real_host_readiness_defer_no_root == "1"),
+      defer_mode:($pre_real_host_readiness_defer_no_root_mode // ""),
+      deferred_no_root:($pre_real_host_readiness_deferred_no_root == "1"),
+      defer_reason:($pre_real_host_readiness_defer_reason // ""),
       blockers:$pre_real_host_readiness_blockers
     },
     alert:{

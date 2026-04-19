@@ -14,6 +14,9 @@ func SignRelaySelectionFeed(feed proto.RelaySelectionFeedResponse, priv ed25519.
 	if len(priv) == 0 {
 		return "", fmt.Errorf("missing selection feed private key")
 	}
+	if len(priv) != ed25519.PrivateKeySize {
+		return "", fmt.Errorf("invalid private key size")
+	}
 	unsigned := feed
 	unsigned.Signature = ""
 	payload, err := json.Marshal(unsigned)
@@ -28,12 +31,8 @@ func VerifyRelaySelectionFeed(feed proto.RelaySelectionFeedResponse, pub ed25519
 	if feed.Signature == "" {
 		return fmt.Errorf("selection feed missing signature")
 	}
-	nowUnix := now.Unix()
-	if feed.ExpiresAt > 0 && nowUnix >= feed.ExpiresAt {
-		return fmt.Errorf("selection feed expired")
-	}
-	if feed.GeneratedAt > 0 && feed.GeneratedAt > nowUnix+60 {
-		return fmt.Errorf("selection feed generated_at too far in future")
+	if err := verifySignedFeedFreshness("selection feed", feed.GeneratedAt, feed.ExpiresAt, now); err != nil {
+		return err
 	}
 
 	sigRaw, err := base64.RawURLEncoding.DecodeString(feed.Signature)

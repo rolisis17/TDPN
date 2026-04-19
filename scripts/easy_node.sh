@@ -9,6 +9,8 @@ PROVIDER_ENV_FILE="$DEPLOY_DIR/.env.easy.provider"
 SERVER_ENV_FILE="$AUTHORITY_ENV_FILE"
 CLIENT_ENV_FILE_DEFAULT="$DEPLOY_DIR/.env.easy.client"
 CLIENT_ENV_FILE="${EASY_NODE_CLIENT_ENV_FILE:-$CLIENT_ENV_FILE_DEFAULT}"
+EASY_MODE_CONFIG_V1_FILE_DEFAULT="$DEPLOY_DIR/config/easy_mode_config_v1.conf"
+EASY_MODE_CONFIG_V1_FILE="${EASY_NODE_CONFIG_V1_FILE:-$EASY_MODE_CONFIG_V1_FILE_DEFAULT}"
 
 default_log_dir() {
   echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
@@ -223,17 +225,92 @@ Usage:
   ./scripts/easy_node.sh server-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh server-down
   ./scripts/easy_node.sh stop-all [--with-wg-only [0|1]] [--force-iface-cleanup [0|1]]
-  ./scripts/easy_node.sh client-vpn-status
+  ./scripts/easy_node.sh client-vpn-status [--show-json [0|1]]
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
+  ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
+  ./scripts/easy_node.sh three-machine-docker-profile-matrix-record [three_machine_docker_profile_matrix_record args...]
   ./scripts/easy_node.sh manual-validation-backlog
+  ./scripts/easy_node.sh config-v1-show [--path PATH]
+  ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
+  ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--dry-run [0|1]]
+  ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
+  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
+  ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
+  ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-staged-file-groups [blockchain_staged_file_groups args...]
+  ./scripts/easy_node.sh blockchain-cosmos-only-guardrail [blockchain_cosmos_only_guardrail args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template [blockchain_mainnet_activation_metrics_missing_input_template args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template [blockchain_mainnet_activation_metrics_input_template args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack [blockchain_mainnet_activation_operator_pack args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run [blockchain_mainnet_activation_real_evidence_run args...]
+  ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
+  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
+  ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
+  ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
+  ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
+  ./scripts/easy_node.sh phase1-resilience-handoff-run [--refresh-from-ci-summary [0|1]] [phase1_resilience_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase2-linux-prod-candidate [ci_phase2_linux_prod_candidate args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-check [phase2_linux_prod_candidate_check args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-run [phase2_linux_prod_candidate_run args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-signoff [phase2_linux_prod_candidate_signoff args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-check [phase2_linux_prod_candidate_handoff_check args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-run [phase2_linux_prod_candidate_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase3-windows-client-beta [ci_phase3_windows_client_beta args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-check [phase3_windows_client_beta_check args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-run [phase3_windows_client_beta_run args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-handoff-check [phase3_windows_client_beta_handoff_check args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-handoff-run [phase3_windows_client_beta_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase4-windows-full-parity [ci_phase4_windows_full_parity args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-check [phase4_windows_full_parity_check args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-run [phase4_windows_full_parity_run args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-handoff-check [phase4_windows_full_parity_handoff_check args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-handoff-run [phase4_windows_full_parity_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase5-settlement-layer [ci_phase5_settlement_layer args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-check [phase5_settlement_layer_check args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-run [phase5_settlement_layer_run args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-handoff-check [phase5_settlement_layer_handoff_check args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-handoff-run [phase5_settlement_layer_handoff_run args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-summary-report [phase5_settlement_layer_summary_report args...]
+  ./scripts/easy_node.sh issuer-sponsor-api-live-smoke [issuer_sponsor_api_live_smoke args...]
+  ./scripts/easy_node.sh issuer-sponsor-vpn-session-live-smoke [issuer_sponsor_vpn_session_live_smoke args...]
+  ./scripts/easy_node.sh issuer-settlement-status-live-smoke [issuer_settlement_status_live_smoke args...]
+  ./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet [ci_phase6_cosmos_l1_build_testnet args...]
+  ./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts [ci_phase6_cosmos_l1_contracts args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-check [phase6_cosmos_l1_build_testnet_check args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-run [phase6_cosmos_l1_build_testnet_run args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-handoff-check [phase6_cosmos_l1_build_testnet_handoff_check args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-handoff-run [phase6_cosmos_l1_build_testnet_handoff_run args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-suite [phase6_cosmos_l1_build_testnet_suite args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-summary-report [phase6_cosmos_l1_summary_report args...]
+  ./scripts/easy_node.sh ci-phase7-mainnet-cutover [ci_phase7_mainnet_cutover args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-check [phase7_mainnet_cutover_check args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-run [phase7_mainnet_cutover_run args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check [phase7_mainnet_cutover_handoff_check args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run [phase7_mainnet_cutover_handoff_run args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-summary-report [phase7_mainnet_cutover_summary_report args...]
   ./scripts/easy_node.sh manual-validation-status
   ./scripts/easy_node.sh manual-validation-report
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH]
 
-Operator-safe commands are listed above. Full command and flag reference is available in expert help.
+Simple mode commands are listed above. Advanced flags are intentionally omitted here and grouped in expert help.
 Expert help:
   ./scripts/easy_node.sh --help --expert
   ./scripts/easy_node.sh help --expert
@@ -247,12 +324,14 @@ Usage:
   ./scripts/easy_node.sh check
   ./scripts/easy_node.sh self-update [--remote NAME] [--branch NAME] [--allow-dirty [0|1]] [--show-status [0|1]]
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh simple-server-preflight [--mode authority|provider] [--public-host HOST] [--peer-host HOST] [--prod-profile [0|1]] [--peer-identity-strict 0|1|auto] [--timeout-sec N]
   ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-federation-status [--directory-url URL] [--admin-token TOKEN] [--timeout-sec N] [--show-json [0|1]] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--fail-on-not-ready [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh server-federation-wait [--directory-url URL] [--admin-token TOKEN] [--ready-timeout-sec N] [--poll-sec N] [--timeout-sec N] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh server-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh server-session [server-up args...] [--cleanup-all [0|1]]
+  ./scripts/easy_node.sh simple-server-session [--mode authority|provider] [--public-host HOST] [--peer-host HOST] [--prod-profile [0|1]] [--peer-identity-strict 0|1|auto] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N]
   ./scripts/easy_node.sh server-down
   ./scripts/easy_node.sh rotate-server-secrets [--restart [0|1]] [--rotate-issuer-admin [0|1]] [--show-secrets [0|1]]
   ./scripts/easy_node.sh stop-all [--with-wg-only [0|1]] [--force-iface-cleanup [0|1]]
@@ -268,18 +347,29 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-selftest-record [wg-only-stack-selftest args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh simple-client-test [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID|--anon-cred TOKEN] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh profile-compare-local [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-trend [--compare-summary-json PATH]... [--compare-summary-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--min-profile-runs N] [--min-profile-pass-rate-pct N] [--balanced-latency-margin-pct N] [--fail-on-any-fail [0|1]] [--min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign [--campaign-runs N] [--campaign-pause-sec N] [--reports-dir DIR] [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-min-profile-runs N] [--trend-min-profile-pass-rate-pct N] [--trend-balanced-latency-margin-pct N] [--trend-fail-on-any-fail [0|1]] [--trend-min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-start-local-stack auto|0|1] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
-  ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--campaign-anon-cred TOKEN] [--subject ID (alias for --campaign-subject)|--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
+  ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--defer-no-root [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-profile-compare [--profiles CSV] [--rounds N] [--pause-sec N] [--min-pass-rate-pct N] [--fail-on-any-fail [0|1]] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--run-preflight [0|1]] [--status-check [0|1]] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--public-ip-url URL] [--country-url URL] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh client-vpn-status
+  ./scripts/easy_node.sh client-vpn-status [--show-json [0|1]]
+  ./scripts/easy_node.sh config-v1-show [--path PATH]
+  ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
+  ./scripts/easy_node.sh config-v1-set-profile --path-profile 1hop|2hop|3hop [--path PATH]
+  ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--script-path PATH] [--allow-update [0|1]] [--command-timeout-sec N] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--connect-path-profile-default 1hop|2hop|3hop] [--connect-interface-default IFACE] [--connect-run-preflight-default [0|1]] [--connect-prod-profile-default auto|0|1] [--dry-run [0|1]]
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-session [client-vpn-up args...] [--cleanup-all [0|1]]
+  ./scripts/easy_node.sh simple-client-vpn-session [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]] [--interface IFACE] [--ready-timeout-sec N]
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]] [--iface IFACE] [--keep-key [0|1]]
   ./scripts/easy_node.sh client-vpn-trust-reset [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--trust-scope scoped|global] [--all-scoped [0|1]] [--dry-run [0|1]] [--trust-file PATH]
   ./scripts/easy_node.sh three-machine-validate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--exit-country CC] [--exit-region REGION] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
@@ -288,14 +378,82 @@ Usage:
   ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--incident-snapshot-attach-artifact PATH]... [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
   ./scripts/easy_node.sh three-machine-prod-signoff [three-machine-prod-bundle args...] [--bundle-dir PATH] [--run-report-json PATH] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
-  ./scripts/easy_node.sh three-machine-docker-readiness [--run-validate [0|1]] [--run-soak [0|1]] [--soak-rounds N] [--soak-pause-sec N] [--keep-stacks [0|1]] [--reset-data [0|1]] [--stack-a-base-port N] [--stack-b-base-port N] [--docker-host-alias HOST] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
+  ./scripts/easy_node.sh three-machine-docker-profile-matrix-record [three_machine_docker_profile_matrix_record args...]
+  ./scripts/easy_node.sh three-machine-docker-readiness [--run-validate [0|1]] [--run-soak [0|1]] [--run-peer-failover [0|1]] [--peer-failover-downtime-sec N] [--peer-failover-timeout-sec N] [--soak-rounds N] [--soak-pause-sec N] [--keep-stacks [0|1]] [--reset-data [0|1]] [--stack-a-base-port N] [--stack-b-base-port N] [--docker-host-alias HOST] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--require-issuer-quorum [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-docker-readiness-record [three-machine-docker-readiness args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--rehearsal-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-backlog
-  ./scripts/easy_node.sh single-machine-prod-readiness [--run-ci-local 0|1] [--run-beta-preflight 0|1] [--run-deep-suite 0|1] [--run-runtime-fix-record 0|1] [--run-three-machine-docker-readiness auto|0|1] [--three-machine-docker-readiness-run-validate 0|1] [--three-machine-docker-readiness-run-soak 0|1] [--three-machine-docker-readiness-soak-rounds N] [--three-machine-docker-readiness-soak-pause-sec N] [--three-machine-docker-readiness-path-profile speed|balanced|private] [--three-machine-docker-readiness-keep-stacks 0|1] [--three-machine-docker-readiness-summary-json PATH] [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--profile-compare-campaign-signoff-fail-on-no-go 0|1] [--profile-compare-campaign-signoff-reports-dir PATH] [--profile-compare-campaign-signoff-summary-json PATH] [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] [--profile-compare-campaign-signoff-campaign-directory-urls URL[,URL...]] [--profile-compare-campaign-signoff-campaign-bootstrap-directory URL] [--profile-compare-campaign-signoff-campaign-discovery-wait-sec N] [--profile-compare-campaign-signoff-campaign-issuer-url URL] [--profile-compare-campaign-signoff-campaign-entry-url URL] [--profile-compare-campaign-signoff-campaign-exit-url URL] [--profile-compare-campaign-signoff-campaign-start-local-stack auto|0|1] [--run-pre-real-host-readiness auto|0|1] [--run-real-wg-privileged-matrix auto|0|1] [--beta-preflight-privileged auto|0|1] [--summary-json PATH] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh single-machine-prod-readiness [--run-ci-local 0|1] [--run-beta-preflight 0|1] [--run-deep-suite 0|1] [--run-runtime-fix-record 0|1] [--run-three-machine-docker-readiness auto|0|1] [--three-machine-docker-readiness-run-validate 0|1] [--three-machine-docker-readiness-run-soak 0|1] [--three-machine-docker-readiness-run-peer-failover 0|1] [--three-machine-docker-readiness-peer-failover-downtime-sec N] [--three-machine-docker-readiness-peer-failover-timeout-sec N] [--three-machine-docker-readiness-soak-rounds N] [--three-machine-docker-readiness-soak-pause-sec N] [--three-machine-docker-readiness-path-profile speed|balanced|private] [--three-machine-docker-readiness-keep-stacks 0|1] [--three-machine-docker-readiness-summary-json PATH] [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--profile-compare-campaign-signoff-fail-on-no-go 0|1] [--profile-compare-campaign-signoff-reports-dir PATH] [--profile-compare-campaign-signoff-summary-json PATH] [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] [--profile-compare-campaign-signoff-campaign-directory-urls URL[,URL...]] [--profile-compare-campaign-signoff-campaign-bootstrap-directory URL] [--profile-compare-campaign-signoff-campaign-discovery-wait-sec N] [--profile-compare-campaign-signoff-campaign-issuer-url URL] [--profile-compare-campaign-signoff-campaign-entry-url URL] [--profile-compare-campaign-signoff-campaign-exit-url URL] [--profile-compare-campaign-signoff-campaign-start-local-stack auto|0|1] [--run-pre-real-host-readiness auto|0|1] [--run-real-wg-privileged-matrix auto|0|1] [--beta-preflight-privileged auto|0|1] [--summary-json PATH] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--matrix-summary-json PATH] [--matrix-report-md PATH] [--signoff-summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--summary-json PATH] [--campaign-execution-mode docker|local] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--signoff-refresh-campaign [0|1]] [--signoff-fail-on-no-go [0|1]] [--roadmap-refresh-manual-validation [0|1]] [--roadmap-refresh-single-machine-readiness [0|1]] [--print-report [0|1]] [--print-summary-json [0|1]] [--dry-run [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--run-profile-compare-campaign-signoff auto|0|1] [--profile-compare-campaign-signoff-refresh-campaign 0|1] [--single-machine-summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
+  ./scripts/easy_node.sh vpn-non-blockchain-fastlane [--parallel [0|1]] [vpn_non_blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-fastlane [blockchain_fastlane args...]
+  ./scripts/easy_node.sh blockchain-gate-bundle [blockchain_gate_bundle args...]
+  ./scripts/easy_node.sh ci-blockchain-parallel-sweep [ci_blockchain_parallel_sweep args...]
+  ./scripts/easy_node.sh blockchain-staged-file-groups [blockchain_staged_file_groups args...]
+  ./scripts/easy_node.sh blockchain-cosmos-only-guardrail [blockchain_cosmos_only_guardrail args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-prefill [blockchain_mainnet_activation_metrics_prefill args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input [blockchain_mainnet_activation_metrics_input args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-checklist [blockchain_mainnet_activation_metrics_missing_checklist args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-missing-input-template [blockchain_mainnet_activation_metrics_missing_input_template args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template [blockchain_mainnet_activation_metrics_input_template args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-metrics [blockchain_mainnet_activation_metrics args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate [blockchain_mainnet_activation_gate args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle-seeded [blockchain_mainnet_activation_gate_cycle args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-operator-pack [blockchain_mainnet_activation_operator_pack args...]
+  ./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run [blockchain_mainnet_activation_real_evidence_run args...]
+  ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
+  ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
+  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
+  ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
+  ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
+  ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
+  ./scripts/easy_node.sh phase1-resilience-handoff-run [--refresh-from-ci-summary [0|1]] [phase1_resilience_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase2-linux-prod-candidate [ci_phase2_linux_prod_candidate args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-check [phase2_linux_prod_candidate_check args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-run [phase2_linux_prod_candidate_run args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-signoff [phase2_linux_prod_candidate_signoff args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-check [phase2_linux_prod_candidate_handoff_check args...]
+  ./scripts/easy_node.sh phase2-linux-prod-candidate-handoff-run [phase2_linux_prod_candidate_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase3-windows-client-beta [ci_phase3_windows_client_beta args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-check [phase3_windows_client_beta_check args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-run [phase3_windows_client_beta_run args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-handoff-check [phase3_windows_client_beta_handoff_check args...]
+  ./scripts/easy_node.sh phase3-windows-client-beta-handoff-run [phase3_windows_client_beta_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase4-windows-full-parity [ci_phase4_windows_full_parity args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-check [phase4_windows_full_parity_check args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-run [phase4_windows_full_parity_run args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-handoff-check [phase4_windows_full_parity_handoff_check args...]
+  ./scripts/easy_node.sh phase4-windows-full-parity-handoff-run [phase4_windows_full_parity_handoff_run args...]
+  ./scripts/easy_node.sh ci-phase5-settlement-layer [ci_phase5_settlement_layer args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-check [phase5_settlement_layer_check args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-run [phase5_settlement_layer_run args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-handoff-check [phase5_settlement_layer_handoff_check args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-handoff-run [phase5_settlement_layer_handoff_run args...]
+  ./scripts/easy_node.sh phase5-settlement-layer-summary-report [phase5_settlement_layer_summary_report args...]
+  ./scripts/easy_node.sh issuer-sponsor-api-live-smoke [issuer_sponsor_api_live_smoke args...]
+  ./scripts/easy_node.sh issuer-sponsor-vpn-session-live-smoke [issuer_sponsor_vpn_session_live_smoke args...]
+  ./scripts/easy_node.sh issuer-settlement-status-live-smoke [issuer_settlement_status_live_smoke args...]
+  ./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet [ci_phase6_cosmos_l1_build_testnet args...]
+  ./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts [ci_phase6_cosmos_l1_contracts args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-check [phase6_cosmos_l1_build_testnet_check args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-run [phase6_cosmos_l1_build_testnet_run args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-handoff-check [phase6_cosmos_l1_build_testnet_handoff_check args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-handoff-run [phase6_cosmos_l1_build_testnet_handoff_run args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-build-testnet-suite [phase6_cosmos_l1_build_testnet_suite args...]
+  ./scripts/easy_node.sh phase6-cosmos-l1-summary-report [phase6_cosmos_l1_summary_report args...]
+  ./scripts/easy_node.sh ci-phase7-mainnet-cutover [ci_phase7_mainnet_cutover args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-check [phase7_mainnet_cutover_check args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-run [phase7_mainnet_cutover_run args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check [phase7_mainnet_cutover_handoff_check args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run [phase7_mainnet_cutover_handoff_run args...]
+  ./scripts/easy_node.sh phase7-mainnet-cutover-summary-report [phase7_mainnet_cutover_summary_report args...]
   ./scripts/easy_node.sh manual-validation-status [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--profile-compare-signoff-summary-json PATH] [--overlay-check-id CHECK_ID] [--overlay-status pass|fail|warn|pending|skip] [--overlay-notes TEXT] [--overlay-command TEXT] [--overlay-artifact PATH]... [--show-json [0|1]]
   ./scripts/easy_node.sh manual-validation-report [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--profile-compare-signoff-summary-json PATH] [--overlay-check-id CHECK_ID] [--overlay-status pass|fail|warn|pending|skip] [--overlay-notes TEXT] [--overlay-command TEXT] [--overlay-artifact PATH]... [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]] [--fail-on-not-ready [0|1]]
-  ./scripts/easy_node.sh roadmap-progress-report [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--manual-validation-summary-json PATH] [--manual-validation-report-md PATH] [--profile-compare-signoff-summary-json PATH] [--single-machine-summary-json PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-progress-report [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--manual-validation-summary-json PATH] [--manual-validation-report-md PATH] [--profile-compare-signoff-summary-json PATH] [--single-machine-summary-json PATH] [--vpn-rc-resilience-summary-json PATH] [--phase2-linux-prod-candidate-summary-json PATH] [--phase3-windows-client-beta-summary-json PATH] [--phase4-windows-full-parity-summary-json PATH] [--phase5-settlement-layer-summary-json PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh manual-validation-record --check-id CHECK_ID --status pass|fail|warn|pending|skip [--notes TEXT] [--artifact PATH]... [--command TEXT] [--show-json [0|1]]
   ./scripts/easy_node.sh runtime-doctor [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--show-json [0|1]]
   ./scripts/easy_node.sh runtime-fix [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--prune-wg-only-dir [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--show-json [0|1]]
@@ -346,7 +504,7 @@ Usage:
 
 Notes:
   - self-update fast-forwards this repo from git remote/branch (safe default: skip dirty or non-fast-forward local state).
-  - set EASY_NODE_AUTO_UPDATE=1 to auto-run self-update before selected commands (defaults: server-up/server-session/client-test/client-vpn-up/client-vpn-session).
+  - set SIMPLE_AUTO_UPDATE=1 in config-v1 (or EASY_NODE_AUTO_UPDATE=1) to auto-run self-update before selected commands (defaults include server/session + client test/VPN commands and simple wrapper variants).
   - server-preflight validates peer/issuer reachability plus identity/quorum readiness before server-up.
   - server-up --mode authority runs directory + issuer + entry-exit.
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
@@ -359,13 +517,17 @@ Notes:
   - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
   - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), can optionally fail-close on configured-peer degradation/excessive cooldown/stale sync age, and can emit machine-readable summary JSON for automation.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
-  - profile-compare-local runs repeated client-test rounds across profiles (`speed`, `balanced`, `private`, `speed-1hop`), emits JSON/markdown comparison artifacts, and recommends a default while keeping `speed-1hop` experimental/non-default.
-  - profile-compare-trend aggregates multiple profile-compare-local summaries into one recommendation trend report, applies reliability/latency policy thresholds, and keeps `speed-1hop` non-default.
-  - client-vpn-profile-compare runs repeatable real client-vpn-smoke rounds across `1hop|2hop|3hop`, emits JSON/markdown comparison artifacts, and recommends default/latency/privacy profiles while keeping `1hop` experimental/non-default.
+  - profile-compare-local runs repeated client-test rounds across profiles (`speed`, `balanced`, `private`, `speed-1hop`), emits JSON/markdown comparison artifacts, and recommends a default while keeping `speed-1hop` experimental/non-default and out of simple mode.
+  - profile-compare-trend aggregates multiple profile-compare-local summaries into one recommendation trend report, applies reliability/latency policy thresholds, and keeps `speed-1hop` non-default and expert-only.
+  - client-vpn-profile-compare runs repeatable real client-vpn-smoke rounds across `1hop|2hop|3hop`, emits JSON/markdown comparison artifacts, and recommends default/latency/privacy profiles while keeping `1hop` experimental/non-default and outside the simple path.
   - profile-compare-campaign runs repeat local profile comparisons and auto-aggregates them into one campaign-level recommendation/report bundle.
+  - profile-compare-docker-matrix wraps profile-compare-campaign with docker-first defaults (`1hop,2hop,3hop`) while preserving pass-through overrides and printing summary/report artifact paths.
   - profile-compare-campaign-check applies fail-closed policy gates to campaign artifacts and emits one GO/NO-GO decision for default-profile readiness.
-  - profile-compare-campaign-signoff runs optional campaign refresh + campaign-check fail-closed in one command and emits one signoff summary JSON for handoff.
-  - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated.
+  - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff. In invite-key flows, prefer `--campaign-subject` (alias `--subject`) with a real key value; fallback order is `CAMPAIGN_SUBJECT` then `INVITE_KEY`.
+  - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. This wrapper is invite-key subject only and rejects anon-cred flags.
+  - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, then calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping.
+  - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
+  - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
   - real-wg-privileged-matrix-record wraps that matrix into one recorded manual-validation step and refreshes the shared readiness report automatically.
@@ -379,15 +541,84 @@ Notes:
   - client-vpn-up runs a real local VPN client (host WireGuard interface) for external testers; trust pinning defaults to scoped files per directory set (`EASY_NODE_CLIENT_VPN_TRUST_SCOPE=scoped`, legacy `global` mode available), and use client-vpn-down to stop/cleanup.
   - client-vpn-trust-reset removes pinned client directory trust files (scoped/global, state-aware fallback) to recover cleanly after expected directory key rotations in lab/staging environments.
   - server-session and client-vpn-session keep a live log terminal open and run cleanup automatically when that terminal exits.
-  - client-vpn-smoke runs preflight + up + status + optional egress checks + down as one real-host smoke flow, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, can optionally auto-reset pinned trust and retry once on directory-key mismatch (`--trust-reset-on-key-mismatch 1`), records machine-C validation automatically, and refreshes the shared manual-validation report by default.
+  - client-vpn-smoke runs preflight + up + status + optional egress checks + down as one real-host smoke flow, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, can optionally auto-reset pinned trust and retry once on directory-key mismatch (`--trust-reset-on-key-mismatch 1`), can defer as `skip` on root-required failures when explicitly enabled (`--defer-no-root 1`), records machine-C validation automatically, and refreshes the shared manual-validation report by default.
   - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
   - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), optionally attach extra evidence files into that incident bundle with --incident-snapshot-attach-artifact, and enable fail-close artifact signoff inline with --signoff-check=1.
   - three-machine-prod-signoff wraps three-machine-prod-bundle into one recorded manual-validation step for the final machine-C production signoff rerun, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, and refreshes the shared manual-validation report by default.
   - three-machine-reminder prints the true 3-machine production test checklist.
+  - three-machine-docker-profile-matrix wraps the three-machine docker profile matrix helper script with pass-through args.
+  - three-machine-docker-profile-matrix-record wraps the three-machine docker profile matrix record helper script with pass-through args.
   - three-machine-docker-readiness provisions two independent dockerized operator stacks on one host and runs machine-C style control-plane validate/soak checks (real multi-host WG signoff remains a separate final gate).
   - three-machine-docker-readiness-record wraps that docker rehearsal into one recorded manual-validation receipt and refreshes the shared readiness report automatically.
+  - vpn-rc-matrix-path runs profile-compare-docker-matrix + profile-compare-campaign-signoff fail-closed + roadmap-progress-report in one chain and writes a machine-readable RC summary JSON.
   - vpn-rc-standard-path runs the locked VPN RC one-host execution path in one command (single-machine production readiness sweep with docker rehearsal defaults, then roadmap-progress-report refresh) and prints a final handoff summary.
+  - vpn-rc-resilience-path wraps the VPN RC resilience helper path, forwards timeout controls (`--docker-profile-matrix-timeout-sec`, `--rc-matrix-path-timeout-sec`), and preserves pass-through args.
+  - vpn-non-blockchain-fastlane wraps the non-blockchain acceleration helper path, forwards `--parallel [0|1]`, and preserves pass-through args.
+  - blockchain-fastlane wraps the blockchain acceleration helper path and preserves pass-through args.
+  - blockchain-gate-bundle wraps the blockchain gate bundle helper path and preserves pass-through args.
+  - ci-blockchain-parallel-sweep wraps the blockchain parallel sweep helper path and preserves pass-through args.
+  - blockchain-staged-file-groups wraps the blockchain staged file groups helper path and preserves pass-through args.
+  - blockchain-cosmos-only-guardrail wraps the Cosmos-only blockchain drift guardrail helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-prefill wraps the blockchain metrics prefill helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-input wraps the blockchain metrics evidence normalizer helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-missing-checklist wraps the blockchain missing-metrics checklist helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-missing-input-template wraps the blockchain missing-input-template helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics-input-template wraps the blockchain metrics evidence template helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-metrics wraps the blockchain mainnet activation metrics producer helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-gate wraps the blockchain mainnet activation gate helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-gate-cycle wraps the blockchain mainnet activation gate cycle helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-gate-cycle-seeded wraps the blockchain mainnet activation gate cycle helper path, auto-adds `--seed-example-input 1` for quick local runs, and preserves pass-through args.
+  - blockchain-mainnet-activation-operator-pack wraps the blockchain mainnet activation operator pack helper path and preserves pass-through args.
+  - blockchain-mainnet-activation-real-evidence-run wraps the deterministic non-seeded activation evidence helper path and preserves pass-through args.
+  - blockchain-bootstrap-governance-graduation-gate wraps the blockchain bootstrap governance graduation gate helper path and preserves pass-through args.
+  - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, policy override via `--allow-policy-no-go [0|1]`, and `--parallel [0|1]`).
+  - roadmap-blockchain-actionable-run resolves and runs the current roadmap blockchain actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
+  - roadmap-next-actions-run wraps roadmap `next_actions` in one command with optional ID-prefix filtering, per-action timeout, parallel execution controls, optional soft-fail for unreachable profile-default endpoints, and explicit profile-default subject override via `--profile-default-gate-subject ID`.
+  - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
+  - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
+  - phase1-resilience-handoff-check wraps the Phase-1 resilience handoff check helper script with pass-through args.
+  - phase1-resilience-handoff-run wraps the Phase-1 resilience handoff run helper script with pass-through args, including fast refresh mode via `--refresh-from-ci-summary 1` to reuse an existing ci summary artifact and rerun only handoff-check.
+  - ci-phase2-linux-prod-candidate runs the Phase-2 Linux production-candidate gate with fail-fast behavior.
+  - phase2-linux-prod-candidate-check wraps the Phase-2 Linux production-candidate fail-closed check helper script with pass-through args.
+  - phase2-linux-prod-candidate-run wraps the Phase-2 Linux production-candidate run helper script with pass-through args.
+  - phase2-linux-prod-candidate-signoff wraps the Phase-2 Linux production-candidate signoff helper script with pass-through args.
+  - phase2-linux-prod-candidate-handoff-check wraps the Phase-2 Linux production-candidate handoff check helper script with pass-through args.
+  - phase2-linux-prod-candidate-handoff-run wraps the Phase-2 Linux production-candidate handoff run helper script with pass-through args.
+  - ci-phase3-windows-client-beta runs the Phase-3 Windows client-beta gate with fail-fast behavior.
+  - phase3-windows-client-beta-check wraps the Phase-3 Windows client-beta fail-closed check helper script with pass-through args.
+  - phase3-windows-client-beta-run wraps the Phase-3 Windows client-beta run helper script with pass-through args.
+  - phase3-windows-client-beta-handoff-check wraps the Phase-3 Windows client-beta handoff check helper script with pass-through args.
+  - phase3-windows-client-beta-handoff-run wraps the Phase-3 Windows client-beta handoff run helper script with pass-through args.
+  - ci-phase4-windows-full-parity runs the Phase-4 Windows full-parity gate with fail-fast behavior.
+  - phase4-windows-full-parity-check wraps the Phase-4 Windows full-parity fail-closed check helper script with pass-through args.
+  - phase4-windows-full-parity-run wraps the Phase-4 Windows full-parity run helper script with pass-through args.
+  - phase4-windows-full-parity-handoff-check wraps the Phase-4 Windows full-parity handoff check helper script with pass-through args.
+  - phase4-windows-full-parity-handoff-run wraps the Phase-4 Windows full-parity handoff run helper script with pass-through args.
+  - ci-phase5-settlement-layer runs the Phase-5 settlement-layer gate with fail-fast behavior.
+  - phase5-settlement-layer-check wraps the Phase-5 settlement-layer fail-closed check helper script with pass-through args.
+  - phase5-settlement-layer-run wraps the Phase-5 settlement-layer run helper script with pass-through args.
+  - phase5-settlement-layer-handoff-check wraps the Phase-5 settlement-layer handoff check helper script with pass-through args.
+  - phase5-settlement-layer-handoff-run wraps the Phase-5 settlement-layer handoff run helper script with pass-through args.
+  - phase5-settlement-layer-summary-report wraps the Phase-5 settlement summary-report helper script with pass-through args.
+  - issuer-sponsor-api-live-smoke wraps the phase5 issuer sponsor API live-smoke helper script with pass-through args.
+  - issuer-sponsor-vpn-session-live-smoke wraps the phase5 issuer sponsor VPN session live-smoke helper script with pass-through args.
+  - issuer-settlement-status-live-smoke wraps the phase5 issuer settlement-status live-smoke helper script with pass-through args.
+  - ci-phase6-cosmos-l1-build-testnet runs the Phase-6 Cosmos L1 build-testnet gate with fail-fast behavior.
+  - ci-phase6-cosmos-l1-contracts runs the Phase-6 Cosmos L1 contracts gate with fail-fast behavior.
+  - phase6-cosmos-l1-build-testnet-check wraps the Phase-6 Cosmos L1 build-testnet fail-closed check helper script with pass-through args.
+  - phase6-cosmos-l1-build-testnet-run wraps the Phase-6 Cosmos L1 build-testnet run helper script with pass-through args.
+  - phase6-cosmos-l1-build-testnet-handoff-check wraps the Phase-6 Cosmos L1 build-testnet handoff check helper script with pass-through args.
+  - phase6-cosmos-l1-build-testnet-handoff-run wraps the Phase-6 Cosmos L1 build-testnet handoff run helper script with pass-through args.
+  - phase6-cosmos-l1-build-testnet-suite wraps the Phase-6 Cosmos L1 build-testnet suite helper script with pass-through args.
+  - phase6-cosmos-l1-summary-report wraps the Phase-6 Cosmos L1 summary-report helper script with pass-through args.
+  - ci-phase7-mainnet-cutover runs the Phase-7 mainnet cutover gate with fail-fast behavior.
+  - phase7-mainnet-cutover-check wraps the Phase-7 mainnet cutover fail-closed check helper script with pass-through args.
+  - phase7-mainnet-cutover-run wraps the Phase-7 mainnet cutover run helper script with pass-through args.
+  - phase7-mainnet-cutover-handoff-check wraps the Phase-7 mainnet cutover handoff check helper script with pass-through args.
+  - phase7-mainnet-cutover-handoff-run wraps the Phase-7 mainnet cutover handoff run helper script with pass-through args.
+  - phase7-mainnet-cutover-summary-report wraps the Phase-7 mainnet cutover summary-report helper script with pass-through args.
   - manual-validation-backlog prints the deferred real-host validation list so we can resume manual testing cleanly later.
+  - local-api-session launches `go run ./cmd/node --local-api`, wires config-v1 simple client defaults into local control API connect defaults, supports optional service lifecycle command overrides, and supports deterministic dry-run output.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
   - manual-validation-report turns that readiness state into one shareable markdown + JSON handoff artifact, includes the same staged roadmap signal for single-machine operators, and can fail-close with --fail-on-not-ready=1.
@@ -533,6 +764,89 @@ check_dependencies() {
 
 EASY_NODE_SELF_UPDATE_APPLIED=0
 
+normalize_config_bool_01() {
+  local value="${1:-}"
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$value" in
+    1|true|yes|on|y)
+      printf '%s\n' "1"
+      ;;
+    0|false|no|off|n)
+      printf '%s\n' "0"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+apply_config_v1_auto_update_defaults() {
+  local cfg_path="${EASY_MODE_CONFIG_V1_FILE:-$EASY_MODE_CONFIG_V1_FILE_DEFAULT}"
+  local cfg_version=""
+  local raw_value=""
+  local normalized_bool=""
+
+  if [[ -z "$cfg_path" ]]; then
+    return 0
+  fi
+  if [[ "$cfg_path" != /* ]]; then
+    cfg_path="$ROOT_DIR/$cfg_path"
+  fi
+  if [[ ! -f "$cfg_path" ]]; then
+    return 0
+  fi
+
+  cfg_version="$(identity_value "$cfg_path" "EASY_MODE_CONFIG_VERSION")"
+  if [[ "$cfg_version" != "1" ]]; then
+    return 0
+  fi
+
+  if [[ -z "${EASY_NODE_AUTO_UPDATE+x}" ]]; then
+    raw_value="$(identity_value "$cfg_path" "SIMPLE_AUTO_UPDATE")"
+    normalized_bool="$(normalize_config_bool_01 "$raw_value" 2>/dev/null || true)"
+    if [[ -n "$normalized_bool" ]]; then
+      export EASY_NODE_AUTO_UPDATE="$normalized_bool"
+    fi
+  fi
+
+  if [[ -z "${EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY+x}" ]]; then
+    raw_value="$(identity_value "$cfg_path" "SIMPLE_AUTO_UPDATE_ALLOW_DIRTY")"
+    normalized_bool="$(normalize_config_bool_01 "$raw_value" 2>/dev/null || true)"
+    if [[ -n "$normalized_bool" ]]; then
+      export EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY="$normalized_bool"
+    fi
+  fi
+
+  if [[ -z "${EASY_NODE_AUTO_UPDATE_SHOW_STATUS+x}" ]]; then
+    raw_value="$(identity_value "$cfg_path" "SIMPLE_AUTO_UPDATE_SHOW_STATUS")"
+    normalized_bool="$(normalize_config_bool_01 "$raw_value" 2>/dev/null || true)"
+    if [[ -n "$normalized_bool" ]]; then
+      export EASY_NODE_AUTO_UPDATE_SHOW_STATUS="$normalized_bool"
+    fi
+  fi
+
+  if [[ -z "${EASY_NODE_AUTO_UPDATE_REMOTE+x}" ]]; then
+    raw_value="$(identity_value "$cfg_path" "SIMPLE_AUTO_UPDATE_REMOTE")"
+    if [[ -n "$raw_value" ]]; then
+      export EASY_NODE_AUTO_UPDATE_REMOTE="$raw_value"
+    fi
+  fi
+
+  if [[ -z "${EASY_NODE_AUTO_UPDATE_BRANCH+x}" ]]; then
+    raw_value="$(identity_value "$cfg_path" "SIMPLE_AUTO_UPDATE_BRANCH")"
+    if [[ -n "$raw_value" ]]; then
+      export EASY_NODE_AUTO_UPDATE_BRANCH="$raw_value"
+    fi
+  fi
+
+  if [[ -z "${EASY_NODE_AUTO_UPDATE_COMMANDS+x}" ]]; then
+    raw_value="$(identity_value "$cfg_path" "SIMPLE_AUTO_UPDATE_COMMANDS")"
+    if [[ -n "$raw_value" ]]; then
+      export EASY_NODE_AUTO_UPDATE_COMMANDS="$raw_value"
+    fi
+  fi
+}
+
 self_update_repo() {
   local remote="${EASY_NODE_AUTO_UPDATE_REMOTE:-origin}"
   local branch="${EASY_NODE_AUTO_UPDATE_BRANCH:-}"
@@ -569,6 +883,10 @@ self_update_repo() {
     echo "self-update requires --remote (or EASY_NODE_AUTO_UPDATE_REMOTE)"
     return 1
   fi
+  if ! is_safe_git_remote_name "$remote"; then
+    echo "self-update requires --remote to be a safe git remote name"
+    return 1
+  fi
   if [[ "$allow_dirty" != "0" && "$allow_dirty" != "1" ]]; then
     echo "self-update requires --allow-dirty (or EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY) to be 0 or 1"
     return 1
@@ -599,6 +917,10 @@ self_update_repo() {
   if [[ -z "$branch" ]]; then
     echo "self-update skipped: detached HEAD (set --branch or EASY_NODE_AUTO_UPDATE_BRANCH)"
     return 0
+  fi
+  if ! is_safe_git_branch_name "$branch"; then
+    echo "self-update requires --branch to be a safe git branch name"
+    return 1
   fi
 
   if [[ "$allow_dirty" != "1" ]]; then
@@ -653,7 +975,7 @@ self_update_repo() {
 auto_update_command_enabled() {
   local cmd
   cmd="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
-  local commands_csv="${EASY_NODE_AUTO_UPDATE_COMMANDS:-server-up,server-session,client-test,client-vpn-up,client-vpn-session}"
+  local commands_csv="${EASY_NODE_AUTO_UPDATE_COMMANDS:-server-up,server-session,client-test,client-vpn-up,client-vpn-session,simple-server-preflight,simple-server-session,simple-client-test,simple-client-vpn-preflight,simple-client-vpn-session}"
   local normalized_csv
   normalized_csv="$(printf '%s' "$commands_csv" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   case ",${normalized_csv}," in
@@ -889,12 +1211,16 @@ ensure_url_scheme() {
     echo "$raw"
     return
   fi
-  if [[ "$raw" == "$scheme://"* ]]; then
+  if [[ "$raw" == https://* ]]; then
     echo "$raw"
     return
   fi
-  if [[ "$raw" == http://* || "$raw" == https://* ]]; then
-    echo "${scheme}://${raw#*://}"
+  if [[ "$raw" == http://* ]]; then
+    if [[ "$scheme" == "https" ]]; then
+      echo "https://${raw#http://}"
+    else
+      echo "$raw"
+    fi
     return
   fi
   echo "${scheme}://${raw}"
@@ -904,6 +1230,99 @@ is_https_url() {
   local raw
   raw="$(trim "$1")"
   [[ "$raw" == https://* ]]
+}
+
+url_host_is_loopback() {
+  local raw host
+  raw="$(trim_url "$1")"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  host="$(host_from_url "$raw")"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  host="${host#[}"
+  host="${host%]}"
+  host_is_loopback "$host"
+}
+
+require_https_for_remote_url() {
+  local raw="$1"
+  local context="${2:-url}"
+  raw="$(trim_url "$raw")"
+  if [[ -z "$raw" ]]; then
+    echo "$context requires a URL"
+    return 1
+  fi
+  if is_https_url "$raw"; then
+    return 0
+  fi
+  if [[ "$raw" == http://* ]] && url_host_is_loopback "$raw"; then
+    return 0
+  fi
+  echo "$context refused insecure remote URL: $raw (use https:// or loopback http://)"
+  return 1
+}
+
+require_https_for_remote_csv_urls() {
+  local csv="$1"
+  local context="${2:-url-list}"
+  local item
+  while IFS= read -r item; do
+    item="$(trim "$item")"
+    [[ -z "$item" ]] && continue
+    if ! require_https_for_remote_url "$item" "$context"; then
+      return 1
+    fi
+  done < <(split_csv_lines "$csv")
+  return 0
+}
+
+is_safe_wg_interface_name() {
+  local name
+  name="$(trim "$1")"
+  if [[ -z "$name" || "${#name}" -gt 15 ]]; then
+    return 1
+  fi
+  [[ "$name" =~ ^wg[[:alnum:]_.-]{0,13}$ ]]
+}
+
+is_safe_git_remote_name() {
+  local name
+  name="$(trim "$1")"
+  if [[ -z "$name" || "${#name}" -gt 64 ]]; then
+    return 1
+  fi
+  if [[ "$name" == -* ]]; then
+    return 1
+  fi
+  if [[ "$name" == *$'\n'* || "$name" == *$'\r'* || "$name" == *$'\t'* || "$name" == *" "* ]]; then
+    return 1
+  fi
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$ ]]
+}
+
+is_safe_git_branch_name() {
+  local branch
+  branch="$(trim "$1")"
+  if [[ -z "$branch" || "${#branch}" -gt 255 ]]; then
+    return 1
+  fi
+  if [[ "$branch" == -* || "$branch" == /* || "$branch" == .* ]]; then
+    return 1
+  fi
+  if [[ "$branch" == */ || "$branch" == *. || "$branch" == *.lock ]]; then
+    return 1
+  fi
+  if [[ "$branch" == *".."* || "$branch" == *"//"* || "$branch" == *"@{"* ]]; then
+    return 1
+  fi
+  if [[ "$branch" == *[\~\^\:\?\*\[\\]* ]]; then
+    return 1
+  fi
+  if [[ "$branch" == *$'\n'* || "$branch" == *$'\r'* || "$branch" == *$'\t'* || "$branch" == *" "* ]]; then
+    return 1
+  fi
+  return 0
 }
 
 bootstrap_mtls() {
@@ -1078,7 +1497,52 @@ curl_tls_opts_for_url() {
   fi
 }
 
-build_admin_header_args() {
+curl_config_escape_value() {
+  local raw="$1"
+  raw="${raw//\\/\\\\}"
+  raw="${raw//\"/\\\"}"
+  printf '%s' "$raw"
+}
+
+append_curl_header_config() {
+  local config_file="$1"
+  local header_value="$2"
+  if [[ -z "$config_file" || -z "$header_value" ]]; then
+    echo "missing curl header config parameters" >&2
+    return 1
+  fi
+  if [[ "$header_value" == *$'\n'* || "$header_value" == *$'\r'* ]]; then
+    echo "refusing multiline curl header value" >&2
+    return 1
+  fi
+  local escaped_value
+  escaped_value="$(curl_config_escape_value "$header_value")"
+  printf 'header = "%s"\n' "$escaped_value" >>"$config_file"
+}
+
+build_admin_token_header_config() {
+  local admin_token="$1"
+  local out_var="$2"
+  if [[ -z "$admin_token" ]]; then
+    echo "missing admin token" >&2
+    return 1
+  fi
+  if [[ "$admin_token" == *$'\n'* || "$admin_token" == *$'\r'* ]]; then
+    echo "admin token must be a single line value" >&2
+    return 1
+  fi
+  local header_config
+  header_config="$(mktemp)"
+  chmod 600 "$header_config" 2>/dev/null || true
+  if ! append_curl_header_config "$header_config" "X-Admin-Token: ${admin_token}"; then
+    rm -f "$header_config"
+    return 1
+  fi
+  local -n _header_out="$out_var"
+  _header_out="$header_config"
+}
+
+build_admin_header_config() {
   local method="$1"
   local url="$2"
   local body_file="$3"
@@ -1087,7 +1551,7 @@ build_admin_header_args() {
   local admin_key_file="$6"
   local admin_key_id="$7"
   local out_var="$8"
-  local -a header_args=()
+  local header_config
 
   if [[ "$auth_mode" == "signed" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
@@ -1098,6 +1562,8 @@ build_admin_header_args() {
       echo "admin signing key file not found: $admin_key_file" >&2
       return 1
     fi
+    header_config="$(mktemp)"
+    chmod 600 "$header_config" 2>/dev/null || true
     local sign_json
     local -a sign_cmd=(
       go run ./cmd/adminsig sign
@@ -1121,22 +1587,25 @@ build_admin_header_args() {
     h_sig="$(printf '%s\n' "$sign_json" | jq -r '.headers["X-Admin-Signature"]')"
     if [[ -z "$h_key_id" || -z "$h_ts" || -z "$h_nonce" || -z "$h_sig" || "$h_key_id" == "null" || "$h_sig" == "null" ]]; then
       echo "failed to generate signed admin headers" >&2
+      rm -f "$header_config"
       return 1
     fi
-    header_args+=(-H "X-Admin-Key-Id: ${h_key_id}")
-    header_args+=(-H "X-Admin-Timestamp: ${h_ts}")
-    header_args+=(-H "X-Admin-Nonce: ${h_nonce}")
-    header_args+=(-H "X-Admin-Signature: ${h_sig}")
+    if ! append_curl_header_config "$header_config" "X-Admin-Key-Id: ${h_key_id}" ||
+      ! append_curl_header_config "$header_config" "X-Admin-Timestamp: ${h_ts}" ||
+      ! append_curl_header_config "$header_config" "X-Admin-Nonce: ${h_nonce}" ||
+      ! append_curl_header_config "$header_config" "X-Admin-Signature: ${h_sig}"; then
+      rm -f "$header_config"
+      return 1
+    fi
   else
-    if [[ -z "$admin_token" ]]; then
-      echo "missing admin token" >&2
+    if ! build_admin_token_header_config "$admin_token" header_config; then
+      rm -f "$header_config"
       return 1
     fi
-    header_args+=(-H "X-Admin-Token: ${admin_token}")
   fi
 
   local -n _header_out="$out_var"
-  _header_out=("${header_args[@]}")
+  _header_out="$header_config"
 }
 
 discover_directory_urls() {
@@ -1239,6 +1708,30 @@ normalize_url_csv_scheme() {
   while IFS= read -r item; do
     [[ -z "$item" ]] && continue
     normalized="$(ensure_url_scheme "$item" "$scheme")"
+    if [[ -n "$out" ]]; then
+      out+=","
+    fi
+    out+="$normalized"
+  done < <(split_csv_lines "$csv")
+  echo "$out"
+}
+
+normalize_url_csv_scheme_unique() {
+  local csv="$1"
+  local scheme="$2"
+  local out=""
+  local item normalized dedupe_key
+  declare -A seen=()
+  while IFS= read -r item; do
+    [[ -z "$item" ]] && continue
+    normalized="$(trim_url "$(ensure_url_scheme "$item" "$scheme")")"
+    [[ -z "$normalized" ]] && continue
+    # URL host/scheme are case-insensitive; keep first-seen value but dedupe by lowercase key.
+    dedupe_key="$(printf '%s' "$normalized" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "${seen[$dedupe_key]+x}" ]]; then
+      continue
+    fi
+    seen["$dedupe_key"]=1
     if [[ -n "$out" ]]; then
       out+=","
     fi
@@ -1401,6 +1894,16 @@ random_token() {
   fi
   # Last-resort fallback.
   date +%s%N | sha256sum | awk '{print substr($1,1,32)}'
+}
+
+is_placeholder_admin_token() {
+  local token="$1"
+  case "$token" in
+    ""|"dev-admin-token"|"replace-with-strong-admin-token"|"change-me")
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 random_id_suffix() {
@@ -1670,6 +2173,68 @@ peer_dirs_have_reachable_relays() {
   return 1
 }
 
+print_prod_https_mismatch_hint_for_endpoint() {
+  local endpoint_url="$1"
+  local endpoint_label="$2"
+  local timeout_sec="${3:-4}"
+  endpoint_url="$(trim_url "$endpoint_url")"
+  if ! is_https_url "$endpoint_url"; then
+    return 1
+  fi
+  local http_probe_url
+  http_probe_url="http://${endpoint_url#https://}"
+  if curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "$http_probe_url" >/dev/null 2>&1; then
+    echo "hint: ${endpoint_label} appears reachable over plain HTTP (${http_probe_url}) while HTTPS failed."
+    echo "hint: prod profile is fail-closed and requires TLS/mTLS-capable peer and authority endpoints."
+    echo "hint: either run all peered nodes with --prod-profile 1, or use --prod-profile 0 for non-TLS lab peering."
+    return 0
+  fi
+  return 1
+}
+
+print_prod_https_mismatch_hint_for_peer_relays() {
+  local peer_dirs="$1"
+  local timeout_sec="${2:-4}"
+  local peer endpoint_url
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    endpoint_url="$(trim_url "$peer")/v1/relays"
+    if print_prod_https_mismatch_hint_for_endpoint "$endpoint_url" "peer directory ${peer}" "$timeout_sec"; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
+print_prod_https_mismatch_hint_for_peer_issuers() {
+  local peer_dirs="$1"
+  local timeout_sec="${2:-4}"
+  local peer peer_host peer_issuer_url endpoint_url
+  while IFS= read -r peer; do
+    [[ -z "$peer" ]] && continue
+    peer_host="$(host_from_url "$peer")"
+    [[ -z "$peer_host" ]] && continue
+    peer_issuer_url="$(ensure_url_scheme "$(url_from_host_port "$peer_host" 8082)" "https")"
+    endpoint_url="$(trim_url "$peer_issuer_url")/v1/pubkeys"
+    if print_prod_https_mismatch_hint_for_endpoint "$endpoint_url" "peer issuer ${peer_issuer_url}" "$timeout_sec"; then
+      return 0
+    fi
+  done < <(split_csv_lines "$peer_dirs")
+  return 1
+}
+
+print_provider_prod_http_authority_hint() {
+  local authority_directory="$1"
+  local authority_issuer="$2"
+  if [[ "$authority_directory" == http://* || "$authority_issuer" == http://* ]]; then
+    echo "hint: provider preflight is running with --prod-profile 1, so authority URLs are normalized to https before probing."
+    echo "hint: configured authority looks non-prod/http (directory=${authority_directory}, issuer=${authority_issuer:-[derived]})."
+    echo "hint: use --prod-profile 0 for a non-prod authority, or move the authority to HTTPS/mTLS before rerunning."
+    return 0
+  fi
+  return 1
+}
+
 issuer_sync_optional_no_sources() {
   local issuer_success="$1"
   local issuer_quorum="$2"
@@ -1902,6 +2467,99 @@ client_vpn_operator_floor_summary() {
   echo "${#all_ops[@]}|${#entry_ops[@]}|${#exit_ops[@]}|$missing_operator|$fetch_fail|$parse_fail|$all_ops_csv|$entry_ops_csv|$exit_ops_csv"
 }
 
+csv_has_middle_signal() {
+  local csv="${1:-}"
+  local token
+  while IFS= read -r token; do
+    token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+    token="$(trim "$token")"
+    case "$token" in
+      middle|relay|micro-relay|micro_relay|transit|three-hop-middle)
+        return 0
+        ;;
+    esac
+  done < <(printf '%s\n' "$csv" | tr ',' '\n')
+  return 1
+}
+
+client_vpn_middle_relay_summary() {
+  local directory_urls="$1"
+  local timeout_sec="${2:-8}"
+  declare -A middle_ops=()
+  declare -A entry_ops=()
+  declare -A exit_ops=()
+  local middle_relays=0
+  local missing_middle_operator=0
+  local fetch_fail=0
+  local parse_fail=0
+  local directory_url payload parsed role op hop_roles capabilities
+  local -a tls_opts
+
+  while IFS= read -r directory_url; do
+    [[ -z "$directory_url" ]] && continue
+    mapfile -t tls_opts < <(curl_tls_opts_for_url "$directory_url")
+    payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${tls_opts[@]}" "${directory_url%/}/v1/relays" 2>/dev/null || true)"
+    if [[ -z "$payload" ]]; then
+      fetch_fail=$((fetch_fail + 1))
+      continue
+    fi
+
+    parsed=0
+    while IFS=$'\t' read -r role op hop_roles capabilities; do
+      parsed=1
+      role="$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')"
+      role="$(trim "$role")"
+      op="$(trim "$op")"
+      hop_roles="$(trim "$hop_roles")"
+      capabilities="$(trim "$capabilities")"
+      [[ -z "$role" ]] && continue
+      if [[ "$role" == "entry" && -n "$op" && "$op" != "null" ]]; then
+        entry_ops["$op"]=1
+      fi
+      if [[ "$role" == "exit" && -n "$op" && "$op" != "null" ]]; then
+        exit_ops["$op"]=1
+      fi
+
+      local middle_like=0
+      if [[ "$role" == "middle" ]]; then
+        middle_like=1
+      elif csv_has_middle_signal "$hop_roles"; then
+        middle_like=1
+      elif csv_has_middle_signal "$capabilities"; then
+        middle_like=1
+      fi
+      if [[ "$middle_like" == "1" ]]; then
+        middle_relays=$((middle_relays + 1))
+        if [[ -z "$op" || "$op" == "null" ]]; then
+          missing_middle_operator=$((missing_middle_operator + 1))
+        else
+          middle_ops["$op"]=1
+        fi
+      fi
+    done < <(printf '%s\n' "$payload" | jq -r '.relays[]? | [(.role // ""), ((.operator_id // .operator // .origin_operator // "") | tostring), ((.hop_roles // []) | map(tostring) | join(",")), ((.capabilities // []) | map(tostring) | join(","))] | @tsv' 2>/dev/null || true)
+
+    if [[ "$parsed" -eq 0 ]]; then
+      if ! printf '%s\n' "$payload" | jq -e '.relays' >/dev/null 2>&1; then
+        parse_fail=$((parse_fail + 1))
+      fi
+    fi
+  done < <(split_csv_lines "$directory_urls")
+
+  declare -A eligible_middle_ops=()
+  local op
+  for op in "${!middle_ops[@]}"; do
+    if [[ -n "${entry_ops[$op]+x}" || -n "${exit_ops[$op]+x}" ]]; then
+      continue
+    fi
+    eligible_middle_ops["$op"]=1
+  done
+
+  local middle_ops_csv eligible_middle_ops_csv
+  middle_ops_csv="$(sorted_csv "${!middle_ops[@]}")"
+  eligible_middle_ops_csv="$(sorted_csv "${!eligible_middle_ops[@]}")"
+  echo "${#middle_ops[@]}|${#eligible_middle_ops[@]}|$middle_relays|$missing_middle_operator|$fetch_fail|$parse_fail|$middle_ops_csv|$eligible_middle_ops_csv"
+}
+
 client_vpn_issuer_quorum_summary() {
   local issuer_urls="$1"
   local timeout_sec="${2:-8}"
@@ -2010,6 +2668,19 @@ compose_server() {
   compose_with_env "$AUTHORITY_ENV_FILE" "$@"
 }
 
+validate_env_scalar_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "invalid ${name}: multiline values are not allowed"
+    exit 2
+  fi
+  if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    echo "invalid ${name}: control characters are not allowed"
+    exit 2
+  fi
+}
+
 write_authority_env() {
   local public_host="$1"
   local operator_id="$2"
@@ -2037,6 +2708,26 @@ write_authority_env() {
   local peer_sources_count=0
   local peer_gossip_sec="5"
   local entry_directory_urls=""
+
+  validate_env_scalar_or_die "public_host" "$public_host"
+  validate_env_scalar_or_die "operator_id" "$operator_id"
+  validate_env_scalar_or_die "issuer_id" "$issuer_id"
+  validate_env_scalar_or_die "issuer_admin_token" "$issuer_admin_token"
+  validate_env_scalar_or_die "directory_admin_token" "$directory_admin_token"
+  validate_env_scalar_or_die "entry_puzzle_secret" "$entry_puzzle_secret"
+  validate_env_scalar_or_die "peer_dirs" "$peer_dirs"
+  validate_env_scalar_or_die "beta_profile" "$beta_profile"
+  validate_env_scalar_or_die "client_allowlist" "$client_allowlist"
+  validate_env_scalar_or_die "allow_anon_cred" "$allow_anon_cred"
+  validate_env_scalar_or_die "prod_profile" "$prod_profile"
+  validate_env_scalar_or_die "admin_signers_file_container" "$admin_signers_file_container"
+  validate_env_scalar_or_die "admin_sign_key_id" "$admin_sign_key_id"
+  validate_env_scalar_or_die "admin_sign_key_file_local" "$admin_sign_key_file_local"
+  validate_env_scalar_or_die "issuer_urls_csv" "$issuer_urls_csv"
+  validate_env_scalar_or_die "exit_wg_private_key_path" "$exit_wg_private_key_path"
+  validate_env_scalar_or_die "exit_wg_interface" "$exit_wg_interface"
+  validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
+
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
     # In strict prod profile token admin auth is disabled; avoid persisting an unused token.
@@ -2269,6 +2960,19 @@ write_provider_env() {
   local peer_sources_count=0
   local peer_gossip_sec="5"
   local entry_directory_urls=""
+
+  validate_env_scalar_or_die "public_host" "$public_host"
+  validate_env_scalar_or_die "operator_id" "$operator_id"
+  validate_env_scalar_or_die "directory_admin_token" "$directory_admin_token"
+  validate_env_scalar_or_die "entry_puzzle_secret" "$entry_puzzle_secret"
+  validate_env_scalar_or_die "peer_dirs" "$peer_dirs"
+  validate_env_scalar_or_die "beta_profile" "$beta_profile"
+  validate_env_scalar_or_die "authority_issuer" "$authority_issuer"
+  validate_env_scalar_or_die "prod_profile" "$prod_profile"
+  validate_env_scalar_or_die "issuer_urls_csv" "$issuer_urls_csv"
+  validate_env_scalar_or_die "exit_wg_private_key_path" "$exit_wg_private_key_path"
+  validate_env_scalar_or_die "exit_wg_interface" "$exit_wg_interface"
+  validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -2699,6 +3403,8 @@ server_preflight() {
   fi
 
   if [[ "$mode" == "provider" ]]; then
+    local authority_directory_input="$authority_directory"
+    local authority_issuer_input="$authority_issuer"
     if [[ -z "$authority_directory" && -n "$peer_dirs" ]]; then
       authority_directory="$(first_csv_item "$peer_dirs")"
     fi
@@ -2722,10 +3428,13 @@ server_preflight() {
     else
       peer_dirs="$(merge_url_csv "$peer_dirs" "$authority_directory")"
     fi
+    if [[ "$prod_profile" == "1" ]]; then
+      print_provider_prod_http_authority_hint "$authority_directory_input" "$authority_issuer_input" || true
+    fi
   fi
 
   if [[ -n "$peer_dirs" ]]; then
-    peer_dirs="$(normalize_url_csv_scheme "$peer_dirs" "$url_scheme")"
+    peer_dirs="$(normalize_url_csv_scheme_unique "$peer_dirs" "$url_scheme")"
     peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
   fi
 
@@ -2796,6 +3505,9 @@ server_preflight() {
       peer_payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${peer_tls_opts[@]}" "$(trim_url "$peer_url")/v1/relays" 2>/dev/null || true)"
       if [[ -z "$peer_payload" ]]; then
         echo "[peer] fail: ${peer_url}/v1/relays unreachable"
+        if [[ "$prod_profile" == "1" ]]; then
+          print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$peer_url")/v1/relays" "peer directory ${peer_url}" "$timeout_sec" || true
+        fi
         peer_fetch_fail=$((peer_fetch_fail + 1))
         continue
       fi
@@ -2847,6 +3559,9 @@ server_preflight() {
     authority_payload="$(curl -fsS --connect-timeout 2 --max-time "$timeout_sec" "${authority_tls_opts[@]}" "$(trim_url "$authority_issuer")/v1/pubkeys" 2>/dev/null || true)"
     if [[ -z "$authority_payload" ]]; then
       echo "[issuer] fail: authority issuer unreachable: ${authority_issuer}/v1/pubkeys"
+      if [[ "$prod_profile" == "1" ]]; then
+        print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$authority_issuer")/v1/pubkeys" "authority issuer ${authority_issuer}" "$timeout_sec" || true
+      fi
       failures=$((failures + 1))
     elif ! authority_issuer_id="$(printf '%s\n' "$authority_payload" | jq -r '(.issuer // "") | tostring' 2>/dev/null)"; then
       echo "[issuer] fail: authority issuer payload parse failed"
@@ -2870,6 +3585,7 @@ server_preflight() {
     echo "[issuer] peer issuer ids observed: ${peer_issuer_count}"
     if ((peer_issuer_count < 1)); then
       echo "[issuer] fail: prod profile requires at least one reachable peer issuer id (self + peer => quorum of 2 issuer URLs)"
+      print_prod_https_mismatch_hint_for_peer_issuers "$peer_dirs" "$timeout_sec" || true
       failures=$((failures + 1))
     fi
   fi
@@ -3350,7 +4066,7 @@ server_up() {
   fi
 
   if [[ -n "$peer_dirs" ]]; then
-    peer_dirs="$(normalize_url_csv_scheme "$peer_dirs" "$url_scheme")"
+    peer_dirs="$(normalize_url_csv_scheme_unique "$peer_dirs" "$url_scheme")"
   fi
 
   if [[ -n "$peer_dirs" ]]; then
@@ -3389,7 +4105,7 @@ server_up() {
     entry_puzzle_secret="$(random_token)"
   fi
   if [[ "$prod_profile" == "1" ]]; then
-    if [[ "$directory_admin_token" == "dev-admin-token" || "${#directory_admin_token}" -lt 16 ]]; then
+    if is_placeholder_admin_token "$directory_admin_token" || [[ "${#directory_admin_token}" -lt 16 ]]; then
       echo "server-up requires a strong DIRECTORY_ADMIN_TOKEN in prod profile (len>=16, non-default)"
       exit 2
     fi
@@ -3497,6 +4213,9 @@ server_up() {
       if [[ "$op_check_rc" == "2" ]]; then
         if [[ "$peer_identity_strict_effective" == "1" ]]; then
           echo "server-up refused: could not verify operator-id uniqueness against peer directories."
+          if [[ "$prod_profile" == "1" ]]; then
+            print_prod_https_mismatch_hint_for_peer_relays "$peer_dirs" 4 || true
+          fi
           echo "check peer directory reachability and mTLS trust/certs, then retry."
           echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
           exit 2
@@ -3533,6 +4252,9 @@ server_up() {
       if [[ "$issuer_check_rc" == "2" ]]; then
         if [[ "$issuer_identity_strict_effective" == "1" ]]; then
           echo "server-up refused: could not verify issuer-id uniqueness against peer directories."
+          if [[ "$prod_profile" == "1" ]]; then
+            print_prod_https_mismatch_hint_for_peer_issuers "$peer_dirs" 4 || true
+          fi
           echo "check peer issuer reachability and mTLS trust/certs, then retry."
           echo "temporary bypass (diagnostics only): --peer-identity-strict 0"
           exit 2
@@ -3577,11 +4299,28 @@ server_up() {
     exit_wg_private_key_local="$DEPLOY_DIR/data/entry-exit/exit_${relay_suffix_for_wg}_wg.key"
     exit_wg_private_key_container="/app/data/$(basename "$exit_wg_private_key_local")"
     mkdir -p "$(dirname "$exit_wg_private_key_local")"
-    if [[ -f "$exit_wg_private_key_local" ]]; then
+    if [[ -f "$exit_wg_private_key_local" && -r "$exit_wg_private_key_local" ]]; then
       exit_wg_key_prepared="1"
+    elif [[ -f "$exit_wg_private_key_local" ]]; then
+      secure_file_permissions "$exit_wg_private_key_local"
+      if [[ -r "$exit_wg_private_key_local" ]]; then
+        exit_wg_key_prepared="1"
+        echo "note: repaired exit wg private-key permissions before deriving EXIT_WG_PUBKEY ($exit_wg_private_key_local)"
+      elif [[ "$prod_profile" == "1" ]]; then
+        echo "server-up refused: exit wg private key is not readable and prod profile must fail closed ($exit_wg_private_key_local)"
+        echo "fix ownership or permissions (for example: chmod 600 '$exit_wg_private_key_local') or recreate the key as the current user, then rerun server-up."
+        exit 2
+      else
+        # Root-owned leftovers can exist after prior sudo-based runs. Do not fail
+        # startup here; allow runtime generation inside the container path.
+        echo "note: exit wg private-key exists but is not readable; deferring key initialization to runtime ($exit_wg_private_key_local)"
+      fi
     elif [[ -w "$(dirname "$exit_wg_private_key_local")" ]]; then
-      (umask 077 && wg genkey >"$exit_wg_private_key_local")
-      exit_wg_key_prepared="1"
+      if (umask 077 && wg genkey >"$exit_wg_private_key_local"); then
+        exit_wg_key_prepared="1"
+      else
+        echo "note: failed to write exit wg private-key before compose; deferring key initialization to runtime ($exit_wg_private_key_local)"
+      fi
     else
       # Some local test environments may have stale root-owned bind-mount dirs.
       # Defer key init to runtime instead of failing server-up preflight.
@@ -3589,17 +4328,42 @@ server_up() {
     fi
     if [[ "$exit_wg_key_prepared" == "1" ]]; then
       secure_file_permissions "$exit_wg_private_key_local"
-      if ! exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local")"; then
-        echo "server-up failed to derive EXIT_WG_PUBKEY from $exit_wg_private_key_local"
-        exit 1
+      if exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local" 2>/dev/null)"; then
+        exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
+        if [[ -z "$exit_wg_pubkey" ]]; then
+          if [[ "$prod_profile" == "1" ]]; then
+            echo "server-up refused: derived EXIT_WG_PUBKEY was empty in prod profile ($exit_wg_private_key_local)"
+            echo "fix the file permissions/contents or recreate the key as the current user, then rerun server-up."
+            exit 2
+          fi
+          echo "note: derived EXIT_WG_PUBKEY was empty; deferring pubkey derivation to runtime ($exit_wg_private_key_local)"
+          exit_wg_key_prepared="0"
+        fi
+      else
+        if [[ "$prod_profile" == "1" ]]; then
+          echo "server-up refused: could not derive EXIT_WG_PUBKEY from local key in prod profile ($exit_wg_private_key_local)"
+          echo "fix the file permissions/contents or recreate the key as the current user, then rerun server-up."
+          exit 2
+        fi
+        secure_file_permissions "$exit_wg_private_key_local"
+        if exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local" 2>/dev/null)"; then
+          exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
+          if [[ -n "$exit_wg_pubkey" ]]; then
+            echo "note: repaired exit wg private-key permissions before deriving EXIT_WG_PUBKEY ($exit_wg_private_key_local)"
+          else
+            echo "note: derived EXIT_WG_PUBKEY was empty; deferring pubkey derivation to runtime ($exit_wg_private_key_local)"
+            exit_wg_key_prepared="0"
+          fi
+        else
+          echo "note: could not derive EXIT_WG_PUBKEY from local key; deferring pubkey derivation to runtime ($exit_wg_private_key_local)"
+          exit_wg_key_prepared="0"
+        fi
       fi
-      exit_wg_pubkey="$(printf '%s' "$exit_wg_pubkey" | tr -d '\r\n')"
-      if [[ -z "$exit_wg_pubkey" ]]; then
-        echo "server-up failed to derive non-empty EXIT_WG_PUBKEY from $exit_wg_private_key_local"
-        exit 1
-      fi
-    else
+    fi
+    if [[ "$exit_wg_key_prepared" != "1" ]]; then
       exit_wg_pubkey="derive"
+    else
+      :
     fi
   fi
 
@@ -3714,6 +4478,9 @@ server_up() {
     wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8083/v1/health" "local entry" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8084/v1/health" "local exit" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${authority_issuer}/v1/pubkeys" "authority issuer" 20 "${issuer_opts[@]}" || {
+      if [[ "$prod_profile" == "1" ]]; then
+        print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$authority_issuer")/v1/pubkeys" "authority issuer ${authority_issuer}" 4 || true
+      fi
       echo "provider mode requires reachable authority issuer."
       exit 1
     }
@@ -3991,6 +4758,9 @@ server_federation_status() {
       directory_url="$(ensure_url_scheme "$directory_url" "$url_scheme")"
     fi
   fi
+  if ! require_https_for_remote_url "$directory_url" "server-federation-status"; then
+    exit 2
+  fi
 
   if [[ -z "$admin_token" ]]; then
     admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
@@ -3998,6 +4768,11 @@ server_federation_status() {
   admin_token="$(printf '%s' "$admin_token" | tr -d '\r')"
   if [[ -z "$admin_token" ]]; then
     echo "server-federation-status requires directory admin token (set in env file or pass --admin-token)"
+    exit 2
+  fi
+  local admin_header_config=""
+  if ! build_admin_token_header_config "$admin_token" admin_header_config; then
+    echo "server-federation-status refused: invalid directory admin token header value"
     exit 2
   fi
 
@@ -4015,17 +4790,17 @@ server_federation_status() {
     curl -sS -o "$peer_status_body" -w "%{http_code}" \
       --connect-timeout 3 --max-time "$timeout_sec" \
       "${tls_opts[@]}" \
-      -H "X-Admin-Token: ${admin_token}" \
+      --config "$admin_header_config" \
       "$peer_status_url" || true
   )"
   if [[ "$peer_status_code" != "200" ]]; then
     echo "server-federation-status failed: peer-status endpoint returned code=${peer_status_code:-none}"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
   if ! jq -e '.peers | arrays' <"$peer_status_body" >/dev/null 2>&1; then
     echo "server-federation-status failed: invalid peer-status payload from $peer_status_url"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
 
@@ -4034,17 +4809,17 @@ server_federation_status() {
     curl -sS -o "$sync_status_body" -w "%{http_code}" \
       --connect-timeout 3 --max-time "$timeout_sec" \
       "${tls_opts[@]}" \
-      -H "X-Admin-Token: ${admin_token}" \
+      --config "$admin_header_config" \
       "$sync_status_url" || true
   )"
   if [[ "$sync_status_code" != "200" ]]; then
     echo "server-federation-status failed: sync-status endpoint returned code=${sync_status_code:-none}"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
   if ! jq -e '.peer and .issuer' <"$sync_status_body" >/dev/null 2>&1; then
     echo "server-federation-status failed: invalid sync-status payload from $sync_status_url"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
 
@@ -4422,12 +5197,12 @@ server_federation_status() {
       echo "hints:"
       echo "  - run './scripts/easy_node.sh server-federation-wait --directory-url ${directory_url} --ready-timeout-sec 90 --poll-sec 5' to wait for convergence"
       echo "  - verify DIRECTORY_PEERS references healthy peers and tune policy thresholds only when justified"
-      rm -f "$peer_status_body" "$sync_status_body"
+      rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
       exit 1
     fi
   fi
 
-  rm -f "$peer_status_body" "$sync_status_body"
+  rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
 }
 
 server_federation_wait() {
@@ -4617,6 +5392,9 @@ server_federation_wait() {
       directory_url="$(ensure_url_scheme "$directory_url" "$url_scheme")"
     fi
   fi
+  if ! require_https_for_remote_url "$directory_url" "server-federation-wait"; then
+    exit 2
+  fi
 
   if [[ -z "$admin_token" ]]; then
     admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
@@ -4624,6 +5402,11 @@ server_federation_wait() {
   admin_token="$(printf '%s' "$admin_token" | tr -d '\r')"
   if [[ -z "$admin_token" ]]; then
     echo "server-federation-wait requires directory admin token (set in env file or pass --admin-token)"
+    exit 2
+  fi
+  local admin_header_config=""
+  if ! build_admin_token_header_config "$admin_token" admin_header_config; then
+    echo "server-federation-wait refused: invalid directory admin token header value"
     exit 2
   fi
 
@@ -4829,14 +5612,14 @@ server_federation_wait() {
       curl -sS -o "$sync_body" -w "%{http_code}" \
         --connect-timeout 3 --max-time "$timeout_sec" \
         "${tls_opts[@]}" \
-        -H "X-Admin-Token: ${admin_token}" \
+        --config "$admin_header_config" \
         "$sync_status_url" || true
     )"
     peer_status_code="$(
       curl -sS -o "$peer_status_body" -w "%{http_code}" \
         --connect-timeout 3 --max-time "$timeout_sec" \
         "${tls_opts[@]}" \
-        -H "X-Admin-Token: ${admin_token}" \
+        --config "$admin_header_config" \
         "$peer_status_url" || true
     )"
 
@@ -4846,6 +5629,7 @@ server_federation_wait() {
       last_failure_state="admin_token_unauthorized"
       last_failure_reasons_json='["admin_token_unauthorized"]'
       emit_federation_wait_summary "fail" "$last_failure_state" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
+      rm -f "$admin_header_config"
       return 1
     fi
 
@@ -5059,6 +5843,7 @@ server_federation_wait() {
         fi
         emit_federation_wait_summary "fail" "$last_failure_state" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
         rm -f "$sync_body" "$peer_status_body"
+        rm -f "$admin_header_config"
         return 1
       fi
 
@@ -5103,6 +5888,7 @@ server_federation_wait() {
         fi
         emit_federation_wait_summary "ready" "ready" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
         rm -f "$sync_body" "$peer_status_body"
+        rm -f "$admin_header_config"
         return 0
       fi
 
@@ -5169,6 +5955,7 @@ server_federation_wait() {
     fi
   fi
   emit_federation_wait_summary "timeout" "timeout" "$timeout_failure_reasons_json" "$last_sync_json" "$last_peer_json"
+  rm -f "$admin_header_config"
   return 1
 }
 
@@ -5416,12 +6203,12 @@ rotate_server_secrets() {
 }
 
 cleanup_client_demo_artifacts() {
-  local stale_runs=""
+  local -a stale_runs=()
 
-  stale_runs="$(docker ps -aq --filter "name=deploy-client-demo-run-" || true)"
-  if [[ -n "$stale_runs" ]]; then
+  mapfile -t stale_runs < <(docker ps -aq --filter "name=deploy-client-demo-run-" || true)
+  if (( ${#stale_runs[@]} > 0 )); then
     # Best-effort cleanup for interrupted client runs.
-    docker rm -f $stale_runs >/dev/null 2>&1 || true
+    docker rm -f "${stale_runs[@]}" >/dev/null 2>&1 || true
   fi
 
   # Remove dangling default network if it is no longer in use.
@@ -5519,16 +6306,16 @@ stop_all() {
   )
   cleanup_client_demo_artifacts
 
-  local compose_ids=""
-  compose_ids="$(docker ps -aq --filter "label=com.docker.compose.project=deploy" || true)"
-  if [[ -n "$compose_ids" ]]; then
-    docker rm -f $compose_ids >/dev/null 2>&1 || true
+  local -a compose_ids=()
+  mapfile -t compose_ids < <(docker ps -aq --filter "label=com.docker.compose.project=deploy" || true)
+  if (( ${#compose_ids[@]} > 0 )); then
+    docker rm -f "${compose_ids[@]}" >/dev/null 2>&1 || true
   fi
 
-  local compose_networks=""
-  compose_networks="$(docker network ls -q --filter "label=com.docker.compose.project=deploy" || true)"
-  if [[ -n "$compose_networks" ]]; then
-    docker network rm $compose_networks >/dev/null 2>&1 || true
+  local -a compose_networks=()
+  mapfile -t compose_networks < <(docker network ls -q --filter "label=com.docker.compose.project=deploy" || true)
+  if (( ${#compose_networks[@]} > 0 )); then
+    docker network rm "${compose_networks[@]}" >/dev/null 2>&1 || true
   fi
 
   echo "all local Privacynode docker resources are stopped"
@@ -6524,12 +7311,61 @@ wg_only_stack_selftest() {
 
 three_machine_validate() {
   ensure_deps_or_die
-  "$ROOT_DIR/scripts/integration_3machine_beta_validate.sh" "$@"
+  local default_script="$ROOT_DIR/scripts/integration_3machine_beta_validate.sh"
+  local script="${THREE_MACHINE_BETA_VALIDATE_SCRIPT:-$default_script}"
+  local ci_stub_mode="${THREE_MACHINE_VALIDATE_CI_STUB_MODE:-}"
+  local forwarded_path_profile="${EASY_NODE_PATH_PROFILE:-}"
+  local arg_path_profile=""
+  local prev=""
+  local arg
+  for arg in "$@"; do
+    if [[ "$prev" == "--path-profile" ]]; then
+      arg_path_profile="$arg"
+    fi
+    prev="$arg"
+  done
+  if [[ -n "$arg_path_profile" ]]; then
+    forwarded_path_profile="$arg_path_profile"
+  fi
+  if [[ -z "$ci_stub_mode" ]]; then
+    if [[ "$script" != "$default_script" ]]; then
+      ci_stub_mode="1"
+    else
+      ci_stub_mode="0"
+    fi
+  fi
+  if [[ "$ci_stub_mode" != "0" && "$ci_stub_mode" != "1" ]]; then
+    echo "three-machine-validate requires THREE_MACHINE_VALIDATE_CI_STUB_MODE to be 0 or 1 when set"
+    exit 2
+  fi
+  if [[ -n "$forwarded_path_profile" ]]; then
+    EASY_NODE_PATH_PROFILE="$forwarded_path_profile" THREE_MACHINE_VALIDATE_CI_STUB_MODE="$ci_stub_mode" "$script" "$@"
+    return
+  fi
+  THREE_MACHINE_VALIDATE_CI_STUB_MODE="$ci_stub_mode" "$script" "$@"
 }
 
 three_machine_soak() {
   ensure_deps_or_die
-  "$ROOT_DIR/scripts/integration_3machine_beta_soak.sh" "$@"
+  local script="${THREE_MACHINE_BETA_SOAK_SCRIPT:-$ROOT_DIR/scripts/integration_3machine_beta_soak.sh}"
+  local forwarded_path_profile="${EASY_NODE_PATH_PROFILE:-}"
+  local arg_path_profile=""
+  local prev=""
+  local arg
+  for arg in "$@"; do
+    if [[ "$prev" == "--path-profile" ]]; then
+      arg_path_profile="$arg"
+    fi
+    prev="$arg"
+  done
+  if [[ -n "$arg_path_profile" ]]; then
+    forwarded_path_profile="$arg_path_profile"
+  fi
+  if [[ -n "$forwarded_path_profile" ]]; then
+    EASY_NODE_PATH_PROFILE="$forwarded_path_profile" "$script" "$@"
+    return
+  fi
+  "$script" "$@"
 }
 
 three_machine_prod_gate() {
@@ -6541,6 +7377,18 @@ three_machine_prod_gate() {
 three_machine_docker_readiness() {
   ensure_deps_or_die
   local script="${THREE_MACHINE_DOCKER_READINESS_SCRIPT:-$ROOT_DIR/scripts/three_machine_docker_readiness.sh}"
+  "$script" "$@"
+}
+
+three_machine_docker_profile_matrix() {
+  ensure_deps_or_die
+  local script="${THREE_MACHINE_DOCKER_PROFILE_MATRIX_SCRIPT:-$ROOT_DIR/scripts/three_machine_docker_profile_matrix.sh}"
+  "$script" "$@"
+}
+
+three_machine_docker_profile_matrix_record() {
+  ensure_deps_or_die
+  local script="${THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_SCRIPT:-$ROOT_DIR/scripts/three_machine_docker_profile_matrix_record.sh}"
   "$script" "$@"
 }
 
@@ -6960,6 +7808,10 @@ EOF
   if [[ "$preflight_check" == "1" ]]; then
     preflight_status="ok"
     preflight_rc=0
+    local using_https_endpoints="0"
+    if [[ "$bootstrap_directory" == https://* || "$directory_a" == https://* || "$directory_b" == https://* || "$issuer_url" == https://* || "$entry_url" == https://* || "$exit_url" == https://* ]]; then
+      using_https_endpoints="1"
+    fi
     local preflight_require_root_effective="$preflight_require_root"
     if [[ "$skip_wg" == "1" ]]; then
       preflight_require_root_effective="0"
@@ -7019,6 +7871,15 @@ EOF
       if [[ "$preflight_rc" != "0" ]]; then
         preflight_status="fail"
         final_rc="$preflight_rc"
+        if [[ "$preflight_require_root_effective" == "1" && "${EUID:-$(id -u)}" != "0" ]]; then
+          echo "hint: rerun with sudo (strict preflight requires root for privileged checks)."
+        fi
+        if [[ ! -f "$mtls_ca_file" || ! -f "$mtls_client_cert_file" || ! -f "$mtls_client_key_file" ]]; then
+          echo "hint: strict preflight needs local mTLS files (ca/cert/key); generate or copy them, or pass --mtls-*-file explicitly."
+        fi
+        if [[ "$using_https_endpoints" == "1" ]]; then
+          echo "hint: verify this host can reach the remote HTTPS control-plane endpoints with the same mTLS trust bundle."
+        fi
       fi
     fi
   fi
@@ -7504,9 +8365,9 @@ Run order:
 
 Recommended commands:
   ./scripts/easy_node.sh machine-a-test --public-host A_HOST
-  ./scripts/easy_node.sh machine-b-test --peer-directory-a http://A_HOST:8081 --public-host B_HOST
-  ./scripts/easy_node.sh three-machine-validate --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --prod-profile 1 --path-profile balanced
-  ./scripts/easy_node.sh three-machine-soak --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --rounds 12 --pause-sec 5 --prod-profile 1 --path-profile balanced
+  ./scripts/easy_node.sh machine-b-test --peer-directory-a https://A_HOST:8081 --public-host B_HOST
+  ./scripts/easy_node.sh three-machine-validate --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --prod-profile 1 --path-profile balanced
+  ./scripts/easy_node.sh three-machine-soak --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --rounds 12 --pause-sec 5 --prod-profile 1 --path-profile balanced
   sudo ./scripts/easy_node.sh prod-wg-validate --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --strict-distinct 1
   sudo ./scripts/easy_node.sh prod-wg-soak --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --rounds 12 --pause-sec 10 --strict-distinct 1
   sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084
@@ -7603,6 +8464,452 @@ vpn_rc_standard_path() {
   "$rc_script" "$@"
 }
 
+vpn_rc_resilience_path() {
+  local rc_script="${VPN_RC_RESILIENCE_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_resilience_path.sh}"
+  "$rc_script" "$@"
+}
+
+vpn_rc_matrix_path() {
+  local rc_script="${VPN_RC_MATRIX_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_matrix_path.sh}"
+  "$rc_script" "$@"
+}
+
+vpn_non_blockchain_fastlane() {
+  local script="${VPN_NON_BLOCKCHAIN_FASTLANE_SCRIPT:-$ROOT_DIR/scripts/vpn_non_blockchain_fastlane.sh}"
+  "$script" "$@"
+}
+
+blockchain_fastlane() {
+  local fastlane_script="${BLOCKCHAIN_FASTLANE_SCRIPT:-$ROOT_DIR/scripts/blockchain_fastlane.sh}"
+  if [[ ! -x "$fastlane_script" ]]; then
+    echo "missing helper script: $fastlane_script"
+    exit 2
+  fi
+  "$fastlane_script" "$@"
+}
+
+blockchain_gate_bundle() {
+  local bundle_script="${BLOCKCHAIN_GATE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/blockchain_gate_bundle.sh}"
+  if [[ ! -x "$bundle_script" ]]; then
+    echo "missing helper script: $bundle_script"
+    exit 2
+  fi
+  "$bundle_script" "$@"
+}
+
+blockchain_staged_file_groups() {
+  local staged_file_groups_script="${BLOCKCHAIN_STAGED_FILE_GROUPS_SCRIPT:-$ROOT_DIR/scripts/blockchain_staged_file_groups.sh}"
+  if [[ ! -x "$staged_file_groups_script" ]]; then
+    echo "missing helper script: $staged_file_groups_script"
+    exit 2
+  fi
+  "$staged_file_groups_script" "$@"
+}
+
+blockchain_cosmos_only_guardrail() {
+  local guardrail_script="${BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT:-$ROOT_DIR/scripts/blockchain_cosmos_only_guardrail.sh}"
+  if [[ ! -x "$guardrail_script" ]]; then
+    echo "missing helper script: $guardrail_script"
+    exit 2
+  fi
+  "$guardrail_script" "$@"
+}
+
+ci_blockchain_parallel_sweep() {
+  local sweep_script="${CI_BLOCKCHAIN_PARALLEL_SWEEP_SCRIPT:-$ROOT_DIR/scripts/ci_blockchain_parallel_sweep.sh}"
+  if [[ ! -x "$sweep_script" ]]; then
+    echo "missing helper script: $sweep_script"
+    exit 2
+  fi
+  "$sweep_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_input() {
+  local metrics_input_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input.sh}"
+  if [[ ! -x "$metrics_input_script" ]]; then
+    echo "missing helper script: $metrics_input_script"
+    exit 2
+  fi
+  "$metrics_input_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_prefill() {
+  local metrics_prefill_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PREFILL_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_prefill.sh}"
+  if [[ ! -x "$metrics_prefill_script" ]]; then
+    echo "missing helper script: $metrics_prefill_script"
+    exit 2
+  fi
+  "$metrics_prefill_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_missing_checklist() {
+  local metrics_missing_checklist_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_MISSING_CHECKLIST_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_checklist.sh}"
+  if [[ ! -x "$metrics_missing_checklist_script" ]]; then
+    echo "missing helper script: $metrics_missing_checklist_script"
+    exit 2
+  fi
+  "$metrics_missing_checklist_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_missing_input_template() {
+  local metrics_missing_input_template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_MISSING_INPUT_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_missing_input_template.sh}"
+  if [[ ! -x "$metrics_missing_input_template_script" ]]; then
+    echo "missing helper script: $metrics_missing_input_template_script"
+    exit 2
+  fi
+  "$metrics_missing_input_template_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics_input_template() {
+  local metrics_input_template_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_TEMPLATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input_template.sh}"
+  if [[ ! -x "$metrics_input_template_script" ]]; then
+    echo "missing helper script: $metrics_input_template_script"
+    exit 2
+  fi
+  "$metrics_input_template_script" "$@"
+}
+
+blockchain_mainnet_activation_metrics() {
+  local metrics_script="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics.sh}"
+  if [[ ! -x "$metrics_script" ]]; then
+    echo "missing helper script: $metrics_script"
+    exit 2
+  fi
+  "$metrics_script" "$@"
+}
+
+blockchain_mainnet_activation_gate() {
+  local gate_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
+blockchain_mainnet_activation_gate_cycle() {
+  local gate_cycle_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate_cycle.sh}"
+  if [[ ! -x "$gate_cycle_script" ]]; then
+    echo "missing helper script: $gate_cycle_script"
+    exit 2
+  fi
+  "$gate_cycle_script" "$@"
+}
+
+blockchain_mainnet_activation_gate_cycle_seeded() {
+  local gate_cycle_script="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_gate_cycle.sh}"
+  if [[ ! -x "$gate_cycle_script" ]]; then
+    echo "missing helper script: $gate_cycle_script"
+    exit 2
+  fi
+  "$gate_cycle_script" --seed-example-input 1 "$@"
+}
+
+blockchain_mainnet_activation_operator_pack() {
+  local operator_pack_script="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_operator_pack.sh}"
+  if [[ ! -x "$operator_pack_script" ]]; then
+    echo "missing helper script: $operator_pack_script"
+    exit 2
+  fi
+  "$operator_pack_script" "$@"
+}
+
+blockchain_mainnet_activation_real_evidence_run() {
+  local real_evidence_script="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_real_evidence_run.sh}"
+  if [[ ! -x "$real_evidence_script" ]]; then
+    echo "missing helper script: $real_evidence_script"
+    exit 2
+  fi
+  "$real_evidence_script" "$@"
+}
+
+blockchain_bootstrap_governance_graduation_gate() {
+  local gate_script="${BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SCRIPT:-$ROOT_DIR/scripts/blockchain_bootstrap_graduation_gate.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
+roadmap_non_blockchain_actionable_run() {
+  local script="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_non_blockchain_actionable_run.sh}"
+  "$script" "$@"
+}
+
+roadmap_blockchain_actionable_run() {
+  local script="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_blockchain_actionable_run.sh}"
+  "$script" "$@"
+}
+
+roadmap_next_actions_run() {
+  local script="${ROADMAP_NEXT_ACTIONS_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_next_actions_run.sh}"
+  "$script" "$@"
+}
+
+ci_phase0() {
+  local gate_script="${CI_PHASE0_SCRIPT:-$ROOT_DIR/scripts/ci_phase0.sh}"
+  "$gate_script" "$@"
+}
+
+ci_phase1_resilience() {
+  local gate_script="${CI_PHASE1_RESILIENCE_SCRIPT:-$ROOT_DIR/scripts/ci_phase1_resilience.sh}"
+  "$gate_script" "$@"
+}
+
+phase1_resilience_handoff_check() {
+  local handoff_check_script="${PHASE1_RESILIENCE_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase1_resilience_handoff_check.sh}"
+  "$handoff_check_script" "$@"
+}
+
+phase1_resilience_handoff_run() {
+  local handoff_run_script="${PHASE1_RESILIENCE_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase1_resilience_handoff_run.sh}"
+  "$handoff_run_script" "$@"
+}
+
+ci_phase2_linux_prod_candidate() {
+  local gate_script="${CI_PHASE2_LINUX_PROD_CANDIDATE_SCRIPT:-$ROOT_DIR/scripts/ci_phase2_linux_prod_candidate.sh}"
+  "$gate_script" "$@"
+}
+
+phase2_linux_prod_candidate_check() {
+  local check_script="${PHASE2_LINUX_PROD_CANDIDATE_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase2_linux_prod_candidate_check.sh}"
+  "$check_script" "$@"
+}
+
+phase2_linux_prod_candidate_run() {
+  local run_script="${PHASE2_LINUX_PROD_CANDIDATE_RUN_SCRIPT:-$ROOT_DIR/scripts/phase2_linux_prod_candidate_run.sh}"
+  "$run_script" "$@"
+}
+
+phase2_linux_prod_candidate_signoff() {
+  local signoff_script="${PHASE2_LINUX_PROD_CANDIDATE_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/phase2_linux_prod_candidate_signoff.sh}"
+  "$signoff_script" "$@"
+}
+
+phase2_linux_prod_candidate_handoff_check() {
+  local handoff_check_script="${PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase2_linux_prod_candidate_handoff_check.sh}"
+  "$handoff_check_script" "$@"
+}
+
+phase2_linux_prod_candidate_handoff_run() {
+  local handoff_run_script="${PHASE2_LINUX_PROD_CANDIDATE_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase2_linux_prod_candidate_handoff_run.sh}"
+  "$handoff_run_script" "$@"
+}
+
+ci_phase3_windows_client_beta() {
+  local gate_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_SCRIPT:-$ROOT_DIR/scripts/ci_phase3_windows_client_beta.sh}"
+  "$gate_script" "$@"
+}
+
+phase3_windows_client_beta_check() {
+  local check_script="${PHASE3_WINDOWS_CLIENT_BETA_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase3_windows_client_beta_check.sh}"
+  "$check_script" "$@"
+}
+
+phase3_windows_client_beta_run() {
+  local run_script="${PHASE3_WINDOWS_CLIENT_BETA_RUN_SCRIPT:-$ROOT_DIR/scripts/phase3_windows_client_beta_run.sh}"
+  "$run_script" "$@"
+}
+
+phase3_windows_client_beta_handoff_check() {
+  local handoff_check_script="${PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase3_windows_client_beta_handoff_check.sh}"
+  "$handoff_check_script" "$@"
+}
+
+phase3_windows_client_beta_handoff_run() {
+  local handoff_run_script="${PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase3_windows_client_beta_handoff_run.sh}"
+  "$handoff_run_script" "$@"
+}
+
+ci_phase4_windows_full_parity() {
+  local gate_script="${CI_PHASE4_WINDOWS_FULL_PARITY_SCRIPT:-$ROOT_DIR/scripts/ci_phase4_windows_full_parity.sh}"
+  "$gate_script" "$@"
+}
+
+phase4_windows_full_parity_check() {
+  local check_script="${PHASE4_WINDOWS_FULL_PARITY_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase4_windows_full_parity_check.sh}"
+  "$check_script" "$@"
+}
+
+phase4_windows_full_parity_run() {
+  local run_script="${PHASE4_WINDOWS_FULL_PARITY_RUN_SCRIPT:-$ROOT_DIR/scripts/phase4_windows_full_parity_run.sh}"
+  "$run_script" "$@"
+}
+
+phase4_windows_full_parity_handoff_check() {
+  local handoff_check_script="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase4_windows_full_parity_handoff_check.sh}"
+  "$handoff_check_script" "$@"
+}
+
+phase4_windows_full_parity_handoff_run() {
+  local handoff_run_script="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase4_windows_full_parity_handoff_run.sh}"
+  "$handoff_run_script" "$@"
+}
+
+ci_phase5_settlement_layer() {
+  local gate_script="${CI_PHASE5_SETTLEMENT_LAYER_SCRIPT:-$ROOT_DIR/scripts/ci_phase5_settlement_layer.sh}"
+  "$gate_script" "$@"
+}
+
+phase5_settlement_layer_check() {
+  local check_script="${PHASE5_SETTLEMENT_LAYER_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_check.sh}"
+  "$check_script" "$@"
+}
+
+phase5_settlement_layer_run() {
+  local run_script="${PHASE5_SETTLEMENT_LAYER_RUN_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_run.sh}"
+  "$run_script" "$@"
+}
+
+phase5_settlement_layer_handoff_check() {
+  local handoff_check_script="${PHASE5_SETTLEMENT_LAYER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_handoff_check.sh}"
+  "$handoff_check_script" "$@"
+}
+
+phase5_settlement_layer_handoff_run() {
+  local handoff_run_script="${PHASE5_SETTLEMENT_LAYER_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_handoff_run.sh}"
+  "$handoff_run_script" "$@"
+}
+
+phase5_settlement_layer_summary_report() {
+  local summary_report_script="${PHASE5_SETTLEMENT_LAYER_SUMMARY_REPORT_SCRIPT:-$ROOT_DIR/scripts/phase5_settlement_layer_summary_report.sh}"
+  "$summary_report_script" "$@"
+}
+
+issuer_sponsor_api_live_smoke() {
+  local live_smoke_script="${ISSUER_SPONSOR_API_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_api_live_smoke.sh}"
+  "$live_smoke_script" "$@"
+}
+
+issuer_sponsor_vpn_session_live_smoke() {
+  local live_smoke_script="${ISSUER_SPONSOR_VPN_SESSION_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_sponsor_vpn_session_live_smoke.sh}"
+  "$live_smoke_script" "$@"
+}
+
+issuer_settlement_status_live_smoke() {
+  local live_smoke_script="${ISSUER_SETTLEMENT_STATUS_LIVE_SMOKE_SCRIPT:-$ROOT_DIR/scripts/integration_issuer_settlement_status_live_smoke.sh}"
+  "$live_smoke_script" "$@"
+}
+
+ci_phase6_cosmos_l1_build_testnet() {
+  local gate_script="${CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_build_testnet.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
+ci_phase6_cosmos_l1_contracts() {
+  local gate_script="${CI_PHASE6_COSMOS_L1_CONTRACTS_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_contracts.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
+phase6_cosmos_l1_build_testnet_check() {
+  local check_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_check.sh}"
+  if [[ ! -x "$check_script" ]]; then
+    echo "missing helper script: $check_script"
+    exit 2
+  fi
+  "$check_script" "$@"
+}
+
+phase6_cosmos_l1_build_testnet_run() {
+  local run_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_RUN_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_run.sh}"
+  if [[ ! -x "$run_script" ]]; then
+    echo "missing helper script: $run_script"
+    exit 2
+  fi
+  "$run_script" "$@"
+}
+
+phase6_cosmos_l1_build_testnet_handoff_check() {
+  local handoff_check_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_handoff_check.sh}"
+  if [[ ! -x "$handoff_check_script" ]]; then
+    echo "missing helper script: $handoff_check_script"
+    exit 2
+  fi
+  "$handoff_check_script" "$@"
+}
+
+phase6_cosmos_l1_build_testnet_handoff_run() {
+  local handoff_run_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_handoff_run.sh}"
+  if [[ ! -x "$handoff_run_script" ]]; then
+    echo "missing helper script: $handoff_run_script"
+    exit 2
+  fi
+  "$handoff_run_script" "$@"
+}
+
+phase6_cosmos_l1_build_testnet_suite() {
+  local suite_script="${PHASE6_COSMOS_L1_BUILD_TESTNET_SUITE_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_build_testnet_suite.sh}"
+  if [[ ! -x "$suite_script" ]]; then
+    echo "missing helper script: $suite_script"
+    exit 2
+  fi
+  "$suite_script" "$@"
+}
+
+phase6_cosmos_l1_summary_report() {
+  local summary_report_script="${PHASE6_COSMOS_L1_SUMMARY_REPORT_SCRIPT:-$ROOT_DIR/scripts/phase6_cosmos_l1_summary_report.sh}"
+  "$summary_report_script" "$@"
+}
+
+ci_phase7_mainnet_cutover() {
+  local gate_script="${CI_PHASE7_MAINNET_CUTOVER_SCRIPT:-$ROOT_DIR/scripts/ci_phase7_mainnet_cutover.sh}"
+  if [[ ! -x "$gate_script" ]]; then
+    echo "missing helper script: $gate_script"
+    exit 2
+  fi
+  "$gate_script" "$@"
+}
+
+phase7_mainnet_cutover_check() {
+  local check_script="${PHASE7_MAINNET_CUTOVER_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase7_mainnet_cutover_check.sh}"
+  if [[ ! -x "$check_script" ]]; then
+    echo "missing helper script: $check_script"
+    exit 2
+  fi
+  "$check_script" "$@"
+}
+
+phase7_mainnet_cutover_run() {
+  local run_script="${PHASE7_MAINNET_CUTOVER_RUN_SCRIPT:-$ROOT_DIR/scripts/phase7_mainnet_cutover_run.sh}"
+  if [[ ! -x "$run_script" ]]; then
+    echo "missing helper script: $run_script"
+    exit 2
+  fi
+  "$run_script" "$@"
+}
+
+phase7_mainnet_cutover_handoff_check() {
+  local handoff_check_script="${PHASE7_MAINNET_CUTOVER_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/phase7_mainnet_cutover_handoff_check.sh}"
+  if [[ ! -x "$handoff_check_script" ]]; then
+    echo "missing helper script: $handoff_check_script"
+    exit 2
+  fi
+  "$handoff_check_script" "$@"
+}
+
+phase7_mainnet_cutover_handoff_run() {
+  local handoff_run_script="${PHASE7_MAINNET_CUTOVER_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/phase7_mainnet_cutover_handoff_run.sh}"
+  if [[ ! -x "$handoff_run_script" ]]; then
+    echo "missing helper script: $handoff_run_script"
+    exit 2
+  fi
+  "$handoff_run_script" "$@"
+}
+
+phase7_mainnet_cutover_summary_report() {
+  local summary_report_script="${PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_SCRIPT:-$ROOT_DIR/scripts/phase7_mainnet_cutover_summary_report.sh}"
+  "$summary_report_script" "$@"
+}
+
 profile_compare_local() {
   local compare_script="${PROFILE_COMPARE_LOCAL_SCRIPT:-$ROOT_DIR/scripts/profile_compare_local.sh}"
   "$compare_script" "$@"
@@ -7623,6 +8930,11 @@ profile_compare_campaign() {
   "$campaign_script" "$@"
 }
 
+profile_compare_docker_matrix() {
+  local matrix_script="${PROFILE_COMPARE_DOCKER_MATRIX_SCRIPT:-$ROOT_DIR/scripts/profile_compare_docker_matrix.sh}"
+  "$matrix_script" "$@"
+}
+
 profile_compare_campaign_check() {
   local campaign_check_script="${PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_check.sh}"
   "$campaign_check_script" "$@"
@@ -7630,7 +8942,287 @@ profile_compare_campaign_check() {
 
 profile_compare_campaign_signoff() {
   local campaign_signoff_script="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_signoff.sh}"
-  "$campaign_signoff_script" "$@"
+  local -a forwarded=()
+  local subject_alias_value=""
+  local campaign_subject_value=""
+  local anon_alias_value=""
+  local campaign_anon_value=""
+  require_flag_value_or_die() {
+    local flag="$1"
+    local value="${2:-}"
+    if [[ -z "$value" || "$value" == --* ]]; then
+      echo "$flag requires a value"
+      exit 2
+    fi
+  }
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --campaign-subject)
+        require_flag_value_or_die "$1" "${2:-}"
+        forwarded+=("$1")
+        campaign_subject_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
+        ;;
+      --campaign-subject=*)
+        campaign_subject_value="${1#--campaign-subject=}"
+        forwarded+=("$1")
+        shift
+        ;;
+      --subject)
+        require_flag_value_or_die "$1" "${2:-}"
+        forwarded+=(--campaign-subject)
+        subject_alias_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
+        ;;
+      --subject=*)
+        subject_alias_value="${1#--subject=}"
+        forwarded+=(--campaign-subject "${1#--subject=}")
+        shift
+        ;;
+      --campaign-anon-cred)
+        require_flag_value_or_die "$1" "${2:-}"
+        forwarded+=("$1")
+        campaign_anon_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
+        ;;
+      --campaign-anon-cred=*)
+        campaign_anon_value="${1#--campaign-anon-cred=}"
+        forwarded+=("$1")
+        shift
+        ;;
+      --anon-cred)
+        require_flag_value_or_die "$1" "${2:-}"
+        forwarded+=(--campaign-anon-cred)
+        anon_alias_value="${2:-}"
+        forwarded+=("$2")
+        shift 2
+        ;;
+      --anon-cred=*)
+        anon_alias_value="${1#--anon-cred=}"
+        forwarded+=(--campaign-anon-cred "${1#--anon-cred=}")
+        shift
+        ;;
+      *)
+        forwarded+=("$1")
+        shift
+        ;;
+    esac
+  done
+  if [[ -n "$subject_alias_value" && -n "$campaign_subject_value" && "$subject_alias_value" != "$campaign_subject_value" ]]; then
+    echo "conflicting subject values: --subject and --campaign-subject must match when both are provided"
+    exit 2
+  fi
+  if [[ -n "$anon_alias_value" && -n "$campaign_anon_value" && "$anon_alias_value" != "$campaign_anon_value" ]]; then
+    echo "conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided"
+    exit 2
+  fi
+  "$campaign_signoff_script" "${forwarded[@]}"
+}
+
+profile_default_gate_run() {
+  local profile_default_gate_run_script="${PROFILE_DEFAULT_GATE_RUN_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_run.sh}"
+  "$profile_default_gate_run_script" "$@"
+}
+
+profile_default_gate_token_probe() {
+  local profile_default_gate_token_probe_script="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_token_probe.sh}"
+  "$profile_default_gate_token_probe_script" "$@"
+}
+
+profile_default_gate_live() {
+  local raw_host_a="${A_HOST:-}"
+  local raw_host_b="${B_HOST:-}"
+  local campaign_subject="${INVITE_KEY:-}"
+  local reports_dir=".easy-node-logs"
+  local campaign_timeout_sec="2400"
+  local heartbeat_interval_sec=""
+  local summary_json=".easy-node-logs/profile_compare_campaign_signoff_summary.json"
+  local print_summary_json="1"
+  local -a passthrough=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --host-a|--a-host|--directory-a)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --host-a HOST"
+          exit 2
+        fi
+        raw_host_a="$2"
+        shift 2
+        ;;
+      --host-a=*|--a-host=*|--directory-a=*)
+        raw_host_a="${1#*=}"
+        shift
+        ;;
+      --host-b|--b-host|--directory-b)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --host-b HOST"
+          exit 2
+        fi
+        raw_host_b="$2"
+        shift 2
+        ;;
+      --host-b=*|--b-host=*|--directory-b=*)
+        raw_host_b="${1#*=}"
+        shift
+        ;;
+      --campaign-subject|--subject|--key|--invite-key)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --campaign-subject INVITE_KEY"
+          exit 2
+        fi
+        campaign_subject="$2"
+        shift 2
+        ;;
+      --campaign-subject=*|--subject=*|--key=*|--invite-key=*)
+        campaign_subject="${1#*=}"
+        shift
+        ;;
+      --reports-dir)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --reports-dir DIR"
+          exit 2
+        fi
+        reports_dir="$2"
+        shift 2
+        ;;
+      --reports-dir=*)
+        reports_dir="${1#*=}"
+        shift
+        ;;
+      --campaign-timeout-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --campaign-timeout-sec N"
+          exit 2
+        fi
+        campaign_timeout_sec="$2"
+        shift 2
+        ;;
+      --campaign-timeout-sec=*)
+        campaign_timeout_sec="${1#*=}"
+        shift
+        ;;
+      --heartbeat-interval-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --heartbeat-interval-sec N"
+          exit 2
+        fi
+        heartbeat_interval_sec="$2"
+        shift 2
+        ;;
+      --heartbeat-interval-sec=*)
+        heartbeat_interval_sec="${1#*=}"
+        shift
+        ;;
+      --summary-json)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --summary-json PATH"
+          exit 2
+        fi
+        summary_json="$2"
+        shift 2
+        ;;
+      --summary-json=*)
+        summary_json="${1#*=}"
+        shift
+        ;;
+      --print-summary-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          print_summary_json="${2:-}"
+          shift 2
+        else
+          print_summary_json="1"
+          shift
+        fi
+        ;;
+      --print-summary-json=*)
+        case "${1#*=}" in
+          0|1)
+            print_summary_json="${1#*=}"
+            ;;
+          *)
+            print_summary_json="1"
+            ;;
+        esac
+        shift
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        passthrough+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  normalize_live_host() {
+    local raw="$1"
+    raw="${raw#http://}"
+    raw="${raw#https://}"
+    raw="${raw%%/*}"
+    raw="${raw%%:*}"
+    printf '%s\n' "$raw"
+  }
+
+  local host_a=""
+  local host_b=""
+  host_a="$(normalize_live_host "$raw_host_a")"
+  host_b="$(normalize_live_host "$raw_host_b")"
+
+  if [[ -z "$host_a" ]]; then
+    echo "profile-default-gate-live requires host A (set --host-a or A_HOST)"
+    exit 2
+  fi
+  if [[ -z "$host_b" ]]; then
+    echo "profile-default-gate-live requires host B (set --host-b or B_HOST)"
+    exit 2
+  fi
+  if [[ -z "$campaign_subject" ]]; then
+    echo "profile-default-gate-live requires invite subject (set --campaign-subject/--subject/--key/--invite-key or INVITE_KEY)"
+    exit 2
+  fi
+  if ! [[ "$campaign_timeout_sec" =~ ^[0-9]+$ ]] || (( campaign_timeout_sec <= 0 )); then
+    echo "profile-default-gate-live requires --campaign-timeout-sec > 0"
+    exit 2
+  fi
+
+  local directory_a="http://${host_a}:8081"
+  local directory_b="http://${host_b}:8081"
+  local issuer_a="http://${host_a}:8082"
+  local entry_a="http://${host_a}:8083"
+  local exit_a="http://${host_a}:8084"
+
+  echo "profile-default-gate-live:"
+  echo "  directory_a: $directory_a"
+  echo "  directory_b: $directory_b"
+  echo "  subject: [redacted]"
+  echo "  reports_dir: $reports_dir"
+  echo "  summary_json: $summary_json"
+
+  local -a run_args=(
+    --directory-a "$directory_a" \
+    --directory-b "$directory_b" \
+    --campaign-bootstrap-directory "$directory_a" \
+    --campaign-issuer-url "$issuer_a" \
+    --campaign-entry-url "$entry_a" \
+    --campaign-exit-url "$exit_a" \
+    --campaign-subject "$campaign_subject" \
+    --reports-dir "$reports_dir" \
+    --campaign-timeout-sec "$campaign_timeout_sec" \
+    --summary-json "$summary_json" \
+    --print-summary-json "$print_summary_json"
+  )
+  if [[ -n "$heartbeat_interval_sec" ]]; then
+    run_args+=(--heartbeat-interval-sec "$heartbeat_interval_sec")
+  fi
+  run_args+=("${passthrough[@]}")
+
+  profile_default_gate_run "${run_args[@]}"
 }
 
 manual_validation_report() {
@@ -7921,6 +9513,12 @@ prod_pilot_cohort_quick_check() {
   "$check_script" "$@"
 }
 
+# Backward-compatible shim for stale call-sites that still invoke
+# "cohort_quick_check" directly.
+cohort_quick_check() {
+  prod_pilot_cohort_quick_check "$@"
+}
+
 prod_pilot_cohort_quick_trend() {
   ensure_deps_or_die
   local trend_script="${PROD_PILOT_COHORT_QUICK_TREND_SCRIPT:-$ROOT_DIR/scripts/prod_pilot_cohort_quick_trend.sh}"
@@ -7977,6 +9575,12 @@ incident_snapshot() {
 incident_snapshot_summary() {
   local summary_script="${INCIDENT_SNAPSHOT_SUMMARY_SCRIPT:-$ROOT_DIR/scripts/incident_snapshot_summary.sh}"
   "$summary_script" "$@"
+}
+
+# Backward-compatible shim for stale typo call-sites that used
+# "apshot_summary" instead of "incident_snapshot_summary".
+apshot_summary() {
+  incident_snapshot_summary "$@"
 }
 
 server_env_value() {
@@ -8189,6 +9793,9 @@ invite_generate() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! require_https_for_remote_url "$issuer_url" "invite-generate"; then
+    exit 2
+  fi
   if ! [[ "$wait_sec" =~ ^[0-9]+$ ]]; then
     echo "invite-generate requires --wait-sec >= 0"
     exit 2
@@ -8230,6 +9837,11 @@ invite_generate() {
     echo "missing helper script: $upsert_script"
     exit 2
   fi
+  local admin_token_file=""
+  if [[ "$auth_mode" == "token" ]]; then
+    admin_token_file="$(mktemp)"
+    (umask 077 && printf '%s' "$admin_token" >"$admin_token_file")
+  fi
 
   local generated=0
   local attempts=0
@@ -8248,6 +9860,7 @@ invite_generate() {
         echo "last error:"
         echo "$last_error"
       fi
+      rm -f "$admin_token_file"
       exit 1
     fi
     key="${prefix}-$(random_token | tr -cd 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]' | head -c 22)"
@@ -8265,7 +9878,7 @@ invite_generate() {
     if [[ "$auth_mode" == "signed" ]]; then
       upsert_cmd+=(--admin-key-file "$admin_key_file" --admin-key-id "$admin_key_id")
     else
-      upsert_cmd+=(--admin-token "$admin_token")
+      upsert_cmd+=(--admin-token-file "$admin_token_file")
     fi
     set +e
     upsert_out="$("${upsert_cmd[@]}" 2>&1)"
@@ -8281,10 +9894,12 @@ invite_generate() {
         if [[ -n "$last_error" ]]; then
           echo "$last_error"
         fi
+        rm -f "$admin_token_file"
         exit 1
       fi
     fi
   done
+  rm -f "$admin_token_file"
   echo "invite keys generated: $generated (issuer=$issuer_url)"
   if [[ -n "$last_error" && "$generated" -lt "$count" ]]; then
     echo "last invite-generate error:"
@@ -8345,6 +9960,9 @@ invite_check() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! require_https_for_remote_url "$issuer_url" "invite-check"; then
+    exit 2
+  fi
   if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
       echo "invite-check requires --admin-key-file and --admin-key-id together"
@@ -8358,13 +9976,17 @@ invite_check() {
   enforce_invite_auth_mode_or_die "invite-check" "$auth_mode"
 
   local request_url="${issuer_url}/v1/admin/subject/get?subject=${key}"
-  local -a header_args=()
+  local header_config=""
   local -a tls_args=()
-  build_admin_header_args "GET" "$request_url" "" "$auth_mode" "$admin_token" "$admin_key_file" "$admin_key_id" header_args
+  if ! build_admin_header_config "GET" "$request_url" "" "$auth_mode" "$admin_token" "$admin_key_file" "$admin_key_id" header_config; then
+    echo "invite-check failed: could not build admin auth headers"
+    exit 2
+  fi
   mapfile -t tls_args < <(curl_tls_opts_for_url "$issuer_url")
 
   local payload
-  payload="$(curl -fsS --connect-timeout 4 --max-time 12 "${tls_args[@]}" "${header_args[@]}" "$request_url" 2>/dev/null || true)"
+  payload="$(curl -fsS --connect-timeout 4 --max-time 12 "${tls_args[@]}" --config "$header_config" "$request_url" 2>/dev/null || true)"
+  rm -f "$header_config"
   if [[ -z "$payload" ]]; then
     echo "invite key not found: $key"
     exit 1
@@ -8434,6 +10056,9 @@ invite_disable() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! require_https_for_remote_url "$issuer_url" "invite-disable"; then
+    exit 2
+  fi
   if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
       echo "invite-disable requires --admin-key-file and --admin-key-id together"
@@ -8451,6 +10076,11 @@ invite_disable() {
     echo "missing helper script: $upsert_script"
     exit 2
   fi
+  local admin_token_file=""
+  if [[ "$auth_mode" == "token" ]]; then
+    admin_token_file="$(mktemp)"
+    (umask 077 && printf '%s' "$admin_token" >"$admin_token_file")
+  fi
   local -a upsert_cmd=(
     "$upsert_script"
     --issuer-url "$issuer_url"
@@ -8461,9 +10091,16 @@ invite_disable() {
   if [[ "$auth_mode" == "signed" ]]; then
     upsert_cmd+=(--admin-key-file "$admin_key_file" --admin-key-id "$admin_key_id")
   else
-    upsert_cmd+=(--admin-token "$admin_token")
+    upsert_cmd+=(--admin-token-file "$admin_token_file")
   fi
+  set +e
   "${upsert_cmd[@]}" >/dev/null
+  local upsert_rc=$?
+  set -e
+  rm -f "$admin_token_file"
+  if [[ $upsert_rc -ne 0 ]]; then
+    exit "$upsert_rc"
+  fi
   echo "invite key disabled: $key (issuer=$issuer_url)"
 }
 
@@ -8471,6 +10108,11 @@ set_env_kv() {
   local env_file="$1"
   local key="$2"
   local value="$3"
+  if [[ ! "$key" =~ ^[A-Z0-9_]+$ ]]; then
+    echo "invalid env key: $key"
+    exit 2
+  fi
+  validate_env_scalar_or_die "$key" "$value"
   local escaped
   escaped="$(printf '%s' "$value" | sed -e 's/[&|]/\\&/g')"
   if rg -q "^${key}=" "$env_file"; then
@@ -8859,7 +10501,7 @@ prod_preflight() {
   local directory_admin_token entry_puzzle_secret
   directory_admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
   entry_puzzle_secret="$(identity_value "$env_file" "ENTRY_PUZZLE_SECRET")"
-  if [[ -n "$directory_admin_token" && "$directory_admin_token" != "dev-admin-token" && "${#directory_admin_token}" -ge 16 ]]; then
+  if ! is_placeholder_admin_token "$directory_admin_token" && [[ "${#directory_admin_token}" -ge 16 ]]; then
     check_ok "DIRECTORY_ADMIN_TOKEN configured and non-default"
   else
     check_fail "DIRECTORY_ADMIN_TOKEN must be set, non-default, and len>=16"
@@ -9324,6 +10966,12 @@ prod_preflight() {
     fi
 
     if [[ -n "$directory_public_url" ]]; then
+      local directory_admin_header_config=""
+      if ! require_https_for_remote_url "$directory_public_url" "prod-preflight live directory admin checks"; then
+        check_fail "live directory admin checks refused on insecure URL: ${directory_public_url}"
+      elif ! build_admin_token_header_config "$directory_admin_token" directory_admin_header_config; then
+        check_fail "live directory admin token invalid; skipping directory admin endpoint checks"
+      else
       local governance_url governance_body governance_code
       governance_url="${directory_public_url%/}/v1/admin/governance-status"
       governance_body="$(mktemp)"
@@ -9333,7 +10981,7 @@ prod_preflight() {
         curl -sS -o "$governance_body" -w "%{http_code}" \
           --connect-timeout 3 --max-time "$timeout_sec" \
           "${governance_tls_opts[@]}" \
-          -H "X-Admin-Token: ${directory_admin_token}" \
+          --config "$directory_admin_header_config" \
           "$governance_url" || true
       )"
       if [[ "$governance_code" != "200" ]]; then
@@ -9389,7 +11037,7 @@ prod_preflight() {
         curl -sS -o "$sync_body" -w "%{http_code}" \
           --connect-timeout 3 --max-time "$timeout_sec" \
           "${governance_tls_opts[@]}" \
-          -H "X-Admin-Token: ${directory_admin_token}" \
+          --config "$directory_admin_header_config" \
           "$sync_url" || true
       )"
       if [[ "$sync_code" != "200" ]]; then
@@ -9500,7 +11148,7 @@ prod_preflight() {
         curl -sS -o "$peer_status_body" -w "%{http_code}" \
           --connect-timeout 3 --max-time "$timeout_sec" \
           "${governance_tls_opts[@]}" \
-          -H "X-Admin-Token: ${directory_admin_token}" \
+          --config "$directory_admin_header_config" \
           "$peer_status_url" || true
       )"
       if [[ "$peer_status_code" != "200" ]]; then
@@ -9548,6 +11196,8 @@ prod_preflight() {
         fi
       fi
       rm -f "$peer_status_body"
+      fi
+      rm -f "$directory_admin_header_config"
     fi
 
     if [[ "$mode" == "authority" && -n "$live_issuer_url" ]]; then
@@ -9614,8 +11264,12 @@ client_test() {
   local min_entry_operators="${EASY_NODE_CLIENT_MIN_ENTRY_OPERATORS:-1}"
   local min_exit_operators="${EASY_NODE_CLIENT_MIN_EXIT_OPERATORS:-1}"
   local require_cross_operator_pair="${EASY_NODE_CLIENT_REQUIRE_CROSS_OPERATOR_PAIR:-0}"
+  local require_middle_relay="${CLIENT_REQUIRE_MIDDLE_RELAY:-}"
   local allow_direct_exit_fallback="${CLIENT_ALLOW_DIRECT_EXIT_FALLBACK:-}"
   local force_direct_exit="${CLIENT_FORCE_DIRECT_EXIT:-}"
+  local client_inner_source="${CLIENT_INNER_SOURCE:-}"
+  local client_disable_synthetic_fallback="${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-}"
+  local data_plane_mode="${DATA_PLANE_MODE:-}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local bootstrap_directory=""
@@ -9646,6 +11300,14 @@ client_test() {
         ;;
       --discovery-wait-sec)
         discovery_wait_sec="${2:-}"
+        shift 2
+        ;;
+      --path-profile)
+        path_profile="${2:-}"
+        shift 2
+        ;;
+      --path-profile)
+        path_profile="${2:-}"
         shift 2
         ;;
       --entry-url)
@@ -9795,6 +11457,18 @@ client_test() {
     echo "client-test requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, speed-1hop, balanced, private (legacy aliases: fast, privacy)"
     exit 2
   }
+  local canonical_path_profile="2hop"
+  case "$normalized_path_profile" in
+    speed-1hop)
+      canonical_path_profile="1hop"
+      ;;
+    privacy)
+      canonical_path_profile="3hop"
+      ;;
+    *)
+      canonical_path_profile="2hop"
+      ;;
+  esac
   local speed_onehop_profile=0
   if [[ "$normalized_path_profile" == "speed-1hop" ]]; then
     speed_onehop_profile=1
@@ -9854,6 +11528,22 @@ client_test() {
     echo "client-test requires --require-cross-operator-pair to be 0 or 1"
     exit 2
   fi
+  if [[ -n "$client_inner_source" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
+    echo "client-test requires CLIENT_INNER_SOURCE to be udp or synthetic when set"
+    exit 2
+  fi
+  if [[ -n "$client_disable_synthetic_fallback" && "$client_disable_synthetic_fallback" != "0" && "$client_disable_synthetic_fallback" != "1" ]]; then
+    echo "client-test requires CLIENT_DISABLE_SYNTHETIC_FALLBACK to be 0 or 1 when set"
+    exit 2
+  fi
+  if [[ -n "$data_plane_mode" && "$data_plane_mode" != "json" && "$data_plane_mode" != "opaque" ]]; then
+    echo "client-test requires DATA_PLANE_MODE to be json or opaque when set"
+    exit 2
+  fi
+  if [[ -n "$require_middle_relay" && "$require_middle_relay" != "0" && "$require_middle_relay" != "1" ]]; then
+    echo "client-test requires CLIENT_REQUIRE_MIDDLE_RELAY to be 0 or 1 when set"
+    exit 2
+  fi
   if ! [[ "$entry_rotation_sec" =~ ^[0-9]+$ ]]; then
     echo "client-test requires CLIENT_ENTRY_ROTATION_SEC to be numeric"
     exit 2
@@ -9888,6 +11578,8 @@ client_test() {
   if [[ -z "$allow_direct_exit_fallback" ]]; then
     if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
       allow_direct_exit_fallback="0"
+    elif [[ "$require_distinct_operators" == "1" ]]; then
+      allow_direct_exit_fallback="0"
     else
       allow_direct_exit_fallback="1"
     fi
@@ -9898,6 +11590,10 @@ client_test() {
   fi
   if [[ "$allow_direct_exit_fallback" == "1" && "$beta_profile" == "1" ]]; then
     echo "client-test does not allow CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1 with beta/prod profile"
+    exit 2
+  fi
+  if [[ "$allow_direct_exit_fallback" == "1" && "$require_distinct_operators" == "1" ]]; then
+    echo "client-test requires --distinct-operators 0 when CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
     exit 2
   fi
   if [[ -z "$force_direct_exit" ]]; then
@@ -9978,6 +11674,18 @@ client_test() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if ! require_https_for_remote_csv_urls "$directory_urls" "client-test --directory-urls"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$issuer_url" "client-test --issuer-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$entry_url" "client-test --entry-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$exit_url" "client-test --exit-url"; then
+    exit 2
+  fi
   if [[ -z "$container_directory_urls" ]]; then
     container_directory_urls="$directory_urls"
   else
@@ -10075,6 +11783,19 @@ EOF_CLIENT
     echo "note: full fail-closed strict runtime is validated via wg-only/strict integration flows"
   fi
 
+  local runtime_subject_file=""
+  cleanup_client_test_subject_file() {
+    if [[ -n "$runtime_subject_file" ]]; then
+      rm -f "$runtime_subject_file" >/dev/null 2>&1 || true
+      runtime_subject_file=""
+    fi
+  }
+  if [[ -n "$client_subject" ]]; then
+    runtime_subject_file="$(mktemp)"
+    (umask 077 && printf '%s' "$client_subject" >"$runtime_subject_file")
+    secure_file_permissions "$runtime_subject_file"
+  fi
+
   if [[ "$execution_mode" == "docker" ]]; then
     local -a run_cmd
     run_cmd=(
@@ -10090,6 +11811,7 @@ EOF_CLIENT
       -e "ISSUER_URL=$container_issuer_url"
       -e "ENTRY_URL=$container_entry_url"
       -e "EXIT_CONTROL_URL=$container_exit_url"
+      -e "CLIENT_PATH_PROFILE=$canonical_path_profile"
       -e "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
       -e "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
       -e "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
@@ -10102,11 +11824,17 @@ EOF_CLIENT
       -e "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       -e "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
     )
-    if [[ -n "$client_subject" ]]; then
-      run_cmd+=(-e "CLIENT_SUBJECT=$client_subject")
+    if [[ -n "$runtime_subject_file" ]]; then
+      run_cmd+=(
+        -v "${runtime_subject_file}:/tmp/tdpn_client_subject:ro"
+        -e "CLIENT_SUBJECT_FILE=/tmp/tdpn_client_subject"
+      )
     fi
     if [[ -n "$client_anon_cred" ]]; then
       run_cmd+=(-e "CLIENT_ANON_CRED=$client_anon_cred")
+    fi
+    if [[ -n "$require_middle_relay" ]]; then
+      run_cmd+=(-e "CLIENT_REQUIRE_MIDDLE_RELAY=$require_middle_relay")
     fi
     if [[ "$beta_profile" == "1" && "$container_directory_urls" == *,* ]]; then
       run_cmd+=(
@@ -10132,6 +11860,15 @@ EOF_CLIENT
     if [[ -n "$exit_region" ]]; then
       run_cmd+=(-e "CLIENT_EXIT_REGION=$exit_region")
     fi
+    if [[ -n "$client_inner_source" ]]; then
+      run_cmd+=(-e "CLIENT_INNER_SOURCE=$client_inner_source")
+    fi
+    if [[ -n "$client_disable_synthetic_fallback" ]]; then
+      run_cmd+=(-e "CLIENT_DISABLE_SYNTHETIC_FALLBACK=$client_disable_synthetic_fallback")
+    fi
+    if [[ -n "$data_plane_mode" ]]; then
+      run_cmd+=(-e "DATA_PLANE_MODE=$data_plane_mode")
+    fi
     run_cmd+=(client-demo)
 
     (
@@ -10148,6 +11885,7 @@ EOF_CLIENT
       "ISSUER_URL=$issuer_url"
       "ENTRY_URL=$entry_url"
       "EXIT_CONTROL_URL=$exit_url"
+      "CLIENT_PATH_PROFILE=$canonical_path_profile"
       "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
       "CLIENT_REQUIRE_DISTINCT_OPERATORS=$require_distinct_operators"
       "CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=$require_distinct_countries"
@@ -10160,11 +11898,14 @@ EOF_CLIENT
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
     )
-    if [[ -n "$client_subject" ]]; then
-      local_cmd+=("CLIENT_SUBJECT=$client_subject")
+    if [[ -n "$runtime_subject_file" ]]; then
+      local_cmd+=("CLIENT_SUBJECT_FILE=$runtime_subject_file")
     fi
     if [[ -n "$client_anon_cred" ]]; then
       local_cmd+=("CLIENT_ANON_CRED=$client_anon_cred")
+    fi
+    if [[ -n "$require_middle_relay" ]]; then
+      local_cmd+=("CLIENT_REQUIRE_MIDDLE_RELAY=$require_middle_relay")
     fi
     if [[ "$beta_profile" == "1" && "$directory_urls" == *,* ]]; then
       local_cmd+=(
@@ -10189,6 +11930,15 @@ EOF_CLIENT
     fi
     if [[ -n "$exit_region" ]]; then
       local_cmd+=("CLIENT_EXIT_REGION=$exit_region")
+    fi
+    if [[ -n "$client_inner_source" ]]; then
+      local_cmd+=("CLIENT_INNER_SOURCE=$client_inner_source")
+    fi
+    if [[ -n "$client_disable_synthetic_fallback" ]]; then
+      local_cmd+=("CLIENT_DISABLE_SYNTHETIC_FALLBACK=$client_disable_synthetic_fallback")
+    fi
+    if [[ -n "$data_plane_mode" ]]; then
+      local_cmd+=("DATA_PLANE_MODE=$data_plane_mode")
     fi
     local_cmd+=(go run ./cmd/node --client)
 
@@ -10257,24 +12007,28 @@ EOF_CLIENT
       echo "client test: failed selection volume validation (observed=$selection_count required=$min_selection_lines)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if ((entry_op_count < min_entry_operators)); then
       echo "client test: failed entry-operator diversity validation (observed=$entry_op_count required=$min_entry_operators)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if ((exit_op_count < min_exit_operators)); then
       echo "client test: failed exit-operator diversity validation (observed=$exit_op_count required=$min_exit_operators)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if [[ "$require_cross_operator_pair" == "1" ]] && ((cross_pair_count < 1)); then
       echo "client test: failed cross-operator-pair validation (observed=$cross_pair_count required>=1)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if [[ "$require_distinct_operators" == "1" ]]; then
@@ -10282,6 +12036,7 @@ EOF_CLIENT
         echo "client test: failed distinct-operator validation (same_ops=$same_ops missing_ops=$missing_ops)"
         echo "client test log: $out"
         rg 'client selected entry=' "$out" || true
+        cleanup_client_test_subject_file
         return 1
       fi
     fi
@@ -10289,12 +12044,14 @@ EOF_CLIENT
     echo "client test log: $out"
     echo "key log lines:"
     rg 'client selected entry=|client received wg-session config|bootstrap failed' "$out" || true
+    cleanup_client_test_subject_file
     return 0
   fi
 
   echo "client test: failed"
   echo "client test log: $out"
   cat "$out"
+  cleanup_client_test_subject_file
   return 1
 }
 
@@ -10306,6 +12063,7 @@ client_vpn_preflight() {
   local exit_url=""
   local bootstrap_directory=""
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local path_profile="${EASY_NODE_PATH_PROFILE:-}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
   local timeout_sec="${EASY_NODE_CLIENT_VPN_PREFLIGHT_TIMEOUT_SEC:-12}"
@@ -10314,6 +12072,9 @@ client_vpn_preflight() {
   local operator_min_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_OPERATORS:-2}"
   local operator_min_entry_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_ENTRY_OPERATORS:-}"
   local operator_min_exit_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_EXIT_OPERATORS:-}"
+  local middle_relay_check="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_CHECK:-}"
+  local middle_relay_min_operators="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_MIN_OPERATORS:-1}"
+  local middle_relay_require_distinct="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_REQUIRE_DISTINCT:-1}"
   local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
   local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
   local mtls_ca_file="$DEPLOY_DIR/tls/ca.crt"
@@ -10332,6 +12093,10 @@ client_vpn_preflight() {
         ;;
       --discovery-wait-sec)
         discovery_wait_sec="${2:-}"
+        shift 2
+        ;;
+      --path-profile)
+        path_profile="${2:-}"
         shift 2
         ;;
       --issuer-url)
@@ -10397,6 +12162,28 @@ client_vpn_preflight() {
         operator_min_exit_operators="${2:-}"
         shift 2
         ;;
+      --middle-relay-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          middle_relay_check="${2:-}"
+          shift 2
+        else
+          middle_relay_check="1"
+          shift
+        fi
+        ;;
+      --middle-relay-min-operators)
+        middle_relay_min_operators="${2:-}"
+        shift 2
+        ;;
+      --middle-relay-require-distinct)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          middle_relay_require_distinct="${2:-}"
+          shift 2
+        else
+          middle_relay_require_distinct="1"
+          shift
+        fi
+        ;;
       --issuer-quorum-check)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           issuer_quorum_check="${2:-}"
@@ -10454,6 +12241,30 @@ client_vpn_preflight() {
     echo "client-vpn-preflight requires --operator-floor-check 0 or 1"
     exit 2
   fi
+  local normalized_path_profile=""
+  normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+    echo "client-vpn-preflight requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private"
+    exit 2
+  }
+  if [[ -z "$middle_relay_check" ]]; then
+    if [[ "$normalized_path_profile" == "privacy" ]]; then
+      middle_relay_check="1"
+    else
+      middle_relay_check="0"
+    fi
+  fi
+  if [[ "$middle_relay_check" != "0" && "$middle_relay_check" != "1" ]]; then
+    echo "client-vpn-preflight requires --middle-relay-check 0 or 1"
+    exit 2
+  fi
+  if [[ "$middle_relay_require_distinct" != "0" && "$middle_relay_require_distinct" != "1" ]]; then
+    echo "client-vpn-preflight requires --middle-relay-require-distinct 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$middle_relay_min_operators" =~ ^[0-9]+$ ]] || ((middle_relay_min_operators < 1)); then
+    echo "client-vpn-preflight requires --middle-relay-min-operators >= 1"
+    exit 2
+  fi
   if [[ -z "$operator_min_entry_operators" ]]; then
     operator_min_entry_operators="$operator_min_operators"
   fi
@@ -10495,6 +12306,10 @@ client_vpn_preflight() {
     echo "client-vpn-preflight requires --interface"
     exit 2
   fi
+  if ! is_safe_wg_interface_name "$interface_name"; then
+    echo "client-vpn-preflight requires --interface to start with wg, use only [a-zA-Z0-9_.-], and be <= 15 chars"
+    exit 2
+  fi
 
   local client_url_scheme="http"
   if [[ "$prod_profile" == "1" ]]; then
@@ -10532,6 +12347,18 @@ client_vpn_preflight() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-preflight --directory-urls"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$issuer_url" "client-vpn-preflight --issuer-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$entry_url" "client-vpn-preflight --entry-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$exit_url" "client-vpn-preflight --exit-url"; then
+    exit 2
+  fi
   if [[ -z "$issuer_urls" ]]; then
     issuer_urls="$issuer_url"
   fi
@@ -10557,10 +12384,14 @@ client_vpn_preflight() {
   echo "  exit_url: $exit_url"
   echo "  interface: $interface_name"
   echo "  prod_profile: $prod_profile"
+  echo "  path_profile: ${normalized_path_profile:-balanced}"
   echo "  operator_floor_check: $operator_floor_check"
   echo "  operator_min_operators: $operator_min_operators"
   echo "  operator_min_entry_operators: $operator_min_entry_operators"
   echo "  operator_min_exit_operators: $operator_min_exit_operators"
+  echo "  middle_relay_check: $middle_relay_check"
+  echo "  middle_relay_min_operators: $middle_relay_min_operators"
+  echo "  middle_relay_require_distinct: $middle_relay_require_distinct"
   echo "  issuer_quorum_check: $issuer_quorum_check"
   echo "  issuer_urls: $issuer_urls"
 
@@ -10637,6 +12468,46 @@ client_vpn_preflight() {
     fi
   fi
 
+  if [[ "$middle_relay_check" == "1" ]]; then
+    local middle_ops eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail
+    local middle_ops_list eligible_middle_ops_list
+    local middle_floor_failed=0
+    IFS='|' read -r middle_ops eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" "$timeout_sec")
+    echo "  middle relay diversity: middle_ops=$middle_ops eligible_middle_ops=$eligible_middle_ops middle_relays=$middle_relays missing_middle_operator_fields=$missing_middle_ops fetch_failures=$middle_fetch_fail parse_failures=$middle_parse_fail"
+    if ((middle_fetch_fail > 0)); then
+      echo "  [fail] could not fetch relay set from all configured directories for middle-relay check"
+      fail=$((fail + 1))
+      middle_floor_failed=1
+    fi
+    if ((middle_parse_fail > 0)); then
+      echo "  [fail] failed to parse one or more directory relay payloads for middle-relay check"
+      fail=$((fail + 1))
+      middle_floor_failed=1
+    fi
+    if ((middle_relay_require_distinct > 0)); then
+      if ((missing_middle_ops > 0)); then
+        echo "  [fail] middle-relay descriptors missing operator metadata under distinct middle-relay policy"
+        fail=$((fail + 1))
+        middle_floor_failed=1
+      fi
+      if ((eligible_middle_ops < middle_relay_min_operators)); then
+        echo "  [fail] middle-relay operator floor not met (need >=$middle_relay_min_operators distinct middle operators not used by entry/exit, observed=$eligible_middle_ops)"
+        fail=$((fail + 1))
+        middle_floor_failed=1
+      fi
+    else
+      if ((middle_ops < middle_relay_min_operators)); then
+        echo "  [fail] middle-relay operator floor not met (need >=$middle_relay_min_operators distinct middle operators, observed=$middle_ops)"
+        fail=$((fail + 1))
+        middle_floor_failed=1
+      fi
+    fi
+    if ((middle_floor_failed > 0)); then
+      echo "  observed middle operators: all=${middle_ops_list:-none} eligible_distinct=${eligible_middle_ops_list:-none}"
+      echo "  hint: for staged labs, lower the middle floor with --middle-relay-min-operators 1 or disable with --middle-relay-check 0"
+    fi
+  fi
+
   if [[ "$issuer_quorum_check" == "1" ]]; then
     local issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail
     IFS='|' read -r issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail < <(client_vpn_issuer_quorum_summary "$issuer_urls" "$timeout_sec")
@@ -10704,6 +12575,533 @@ client_vpn_preflight() {
   return 0
 }
 
+write_easy_mode_config_v1_template() {
+  local out_path="$1"
+  cat >"$out_path" <<'EOF_CFG'
+# Privacynode easy launcher config (versioned contract).
+# This file is intended to be shared by launcher, daemon wrappers, and future desktop app control paths.
+EASY_MODE_CONFIG_VERSION=1
+
+# Client simple-flow defaults
+SIMPLE_CLIENT_PROFILE_DEFAULT=2hop
+SIMPLE_CLIENT_REAL_VPN_DEFAULT=1
+SIMPLE_CLIENT_DISCOVERY_WAIT_SEC=20
+SIMPLE_CLIENT_PROD_PROFILE_DEFAULT=auto
+SIMPLE_CLIENT_INTERFACE=wgvpn0
+SIMPLE_CLIENT_READY_TIMEOUT_SEC=35
+SIMPLE_CLIENT_RUN_PREFLIGHT=1
+SIMPLE_CLIENT_OPEN_TERMINAL=0
+SIMPLE_CLIENT_PREFLIGHT_USE_SUDO=1
+SIMPLE_CLIENT_SESSION_USE_SUDO=1
+SIMPLE_CLIENT_PROMPT_REAL_VPN_IN_SIMPLE=0
+
+# Server simple-flow defaults
+SIMPLE_SERVER_PROD_PROFILE_DEFAULT=1
+SIMPLE_SERVER_RUN_PREFLIGHT=1
+SIMPLE_SERVER_FEDERATION_WAIT=1
+SIMPLE_SERVER_FEDERATION_READY_TIMEOUT_SEC=90
+SIMPLE_SERVER_FEDERATION_POLL_SEC=5
+SIMPLE_SERVER_PEER_IDENTITY_STRICT=auto
+SIMPLE_SERVER_PREFLIGHT_TIMEOUT_SEC=8
+SIMPLE_SERVER_AUTO_INVITE=1
+SIMPLE_SERVER_AUTO_INVITE_COUNT=1
+SIMPLE_SERVER_AUTO_INVITE_TIER=1
+SIMPLE_SERVER_AUTO_INVITE_WAIT_SEC=10
+SIMPLE_SERVER_SESSION_USE_SUDO=0
+
+# Optional automatic git fast-forward update (opt-in by default)
+SIMPLE_AUTO_UPDATE=0
+SIMPLE_AUTO_UPDATE_REMOTE=origin
+SIMPLE_AUTO_UPDATE_BRANCH=
+SIMPLE_AUTO_UPDATE_ALLOW_DIRTY=0
+SIMPLE_AUTO_UPDATE_SHOW_STATUS=1
+SIMPLE_AUTO_UPDATE_COMMANDS=server-up,server-session,client-test,client-vpn-up,client-vpn-session,simple-server-preflight,simple-server-session,simple-client-test,simple-client-vpn-preflight,simple-client-vpn-session
+EOF_CFG
+}
+
+config_v1_init() {
+  local out_path="$EASY_MODE_CONFIG_V1_FILE"
+  local force="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path)
+        if [[ $# -lt 2 ]]; then
+          echo "config-v1-init requires --path PATH"
+          exit 2
+        fi
+        out_path="$2"
+        shift 2
+        ;;
+      --force)
+        if [[ $# -lt 2 ]]; then
+          echo "config-v1-init requires --force 0 or 1"
+          exit 2
+        fi
+        force="$2"
+        shift 2
+        ;;
+      *)
+        echo "unknown arg for config-v1-init: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$force" != "0" && "$force" != "1" ]]; then
+    echo "config-v1-init requires --force 0 or 1"
+    exit 2
+  fi
+  if [[ "$out_path" != /* ]]; then
+    out_path="$ROOT_DIR/$out_path"
+  fi
+  if [[ -f "$out_path" && "$force" != "1" ]]; then
+    echo "config-v1-init: config already exists at $out_path (use --force 1 to overwrite)"
+    return 0
+  fi
+  mkdir -p "$(dirname "$out_path")"
+  write_easy_mode_config_v1_template "$out_path"
+  echo "config-v1-init: wrote $out_path"
+}
+
+config_v1_show() {
+  local path="$EASY_MODE_CONFIG_V1_FILE"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path)
+        if [[ $# -lt 2 ]]; then
+          echo "config-v1-show requires --path PATH"
+          exit 2
+        fi
+        path="$2"
+        shift 2
+        ;;
+      *)
+        echo "unknown arg for config-v1-show: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ "$path" != /* ]]; then
+    path="$ROOT_DIR/$path"
+  fi
+  if [[ ! -f "$path" ]]; then
+    echo "config-v1-show: file not found: $path"
+    exit 1
+  fi
+  echo "config_v1_path: $path"
+  cat "$path"
+}
+
+upsert_key_value_file() {
+  local path="$1"
+  local key="$2"
+  local value="$3"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { updated = 0 }
+    {
+      if ($0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        print key "=" value
+        updated = 1
+      } else {
+        print $0
+      }
+    }
+    END {
+      if (!updated) {
+        print key "=" value
+      }
+    }
+  ' "$path" >"$tmp"
+  mv "$tmp" "$path"
+}
+
+normalize_profile_for_config_v1() {
+  local normalized
+  normalized="$(normalize_path_profile "$1")" || return 1
+  case "$normalized" in
+    speed-1hop)
+      printf '%s\n' "1hop"
+      ;;
+    fast|balanced|"")
+      printf '%s\n' "2hop"
+      ;;
+    private|privacy)
+      printf '%s\n' "3hop"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+config_v1_set_profile() {
+  local path="$EASY_MODE_CONFIG_V1_FILE"
+  local path_profile=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path)
+        if [[ $# -lt 2 ]]; then
+          echo "config-v1-set-profile requires --path PATH"
+          exit 2
+        fi
+        path="$2"
+        shift 2
+        ;;
+      --path-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "config-v1-set-profile requires --path-profile"
+          exit 2
+        fi
+        path_profile="$2"
+        shift 2
+        ;;
+      *)
+        echo "unknown arg for config-v1-set-profile: $1"
+        exit 2
+        ;;
+    esac
+  done
+  if [[ -z "$path_profile" ]]; then
+    echo "config-v1-set-profile requires --path-profile"
+    exit 2
+  fi
+  if [[ "$path" != /* ]]; then
+    path="$ROOT_DIR/$path"
+  fi
+  local normalized
+  normalized="$(normalize_profile_for_config_v1 "$path_profile")" || {
+    echo "config-v1-set-profile requires --path-profile 1hop|2hop|3hop (aliases: speed|balanced|private)"
+    exit 2
+  }
+  if [[ ! -f "$path" ]]; then
+    mkdir -p "$(dirname "$path")"
+    write_easy_mode_config_v1_template "$path"
+  fi
+  upsert_key_value_file "$path" "SIMPLE_CLIENT_PROFILE_DEFAULT" "$normalized"
+  if [[ "$normalized" == "1hop" ]]; then
+    upsert_key_value_file "$path" "SIMPLE_CLIENT_PROD_PROFILE_DEFAULT" "0"
+  else
+    upsert_key_value_file "$path" "SIMPLE_CLIENT_PROD_PROFILE_DEFAULT" "auto"
+  fi
+  echo "config-v1-set-profile: SIMPLE_CLIENT_PROFILE_DEFAULT=$normalized"
+  echo "config-v1-set-profile: updated $path"
+}
+
+local_api_session_apply_config_v1_defaults() {
+  local cfg_path="$1"
+  if [[ -z "$cfg_path" || ! -f "$cfg_path" ]]; then
+    return 0
+  fi
+
+  local path_profile_default interface_default run_preflight_default prod_profile_default normalized_profile
+
+  path_profile_default="$(identity_value "$cfg_path" "SIMPLE_CLIENT_PROFILE_DEFAULT")"
+  if [[ -z "${LOCAL_CONTROL_API_CONNECT_PATH_PROFILE:-}" && -n "$path_profile_default" ]]; then
+    normalized_profile="$(normalize_profile_for_config_v1 "$path_profile_default" 2>/dev/null || true)"
+    if [[ -n "$normalized_profile" ]]; then
+      export LOCAL_CONTROL_API_CONNECT_PATH_PROFILE="$normalized_profile"
+    fi
+  fi
+
+  interface_default="$(identity_value "$cfg_path" "SIMPLE_CLIENT_INTERFACE")"
+  if [[ -z "${LOCAL_CONTROL_API_CONNECT_INTERFACE:-}" && -n "$interface_default" ]]; then
+    export LOCAL_CONTROL_API_CONNECT_INTERFACE="$interface_default"
+  fi
+
+  run_preflight_default="$(identity_value "$cfg_path" "SIMPLE_CLIENT_RUN_PREFLIGHT")"
+  if [[ -z "${LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT:-}" && ( "$run_preflight_default" == "0" || "$run_preflight_default" == "1" ) ]]; then
+    export LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT="$run_preflight_default"
+  fi
+
+  prod_profile_default="$(identity_value "$cfg_path" "SIMPLE_CLIENT_PROD_PROFILE_DEFAULT")"
+  if [[ -z "${LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT:-}" ]]; then
+    case "$prod_profile_default" in
+      auto|0|1)
+        export LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT="$prod_profile_default"
+        ;;
+    esac
+  fi
+}
+
+local_api_session() {
+  local api_addr="${LOCAL_CONTROL_API_ADDR:-127.0.0.1:8095}"
+  local node_config=""
+  local config_v1_path="$EASY_MODE_CONFIG_V1_FILE"
+  local script_path="${LOCAL_CONTROL_API_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
+  local allow_update="${LOCAL_CONTROL_API_ALLOW_UPDATE:-0}"
+  local command_timeout_sec="${LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC:-120}"
+  local service_status_command="${LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND:-}"
+  local service_start_command="${LOCAL_CONTROL_API_SERVICE_START_COMMAND:-}"
+  local service_stop_command="${LOCAL_CONTROL_API_SERVICE_STOP_COMMAND:-}"
+  local service_restart_command="${LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND:-}"
+  local connect_path_profile_default=""
+  local connect_interface_default=""
+  local connect_run_preflight_default=""
+  local connect_prod_profile_default=""
+  local dry_run="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --api-addr)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --api-addr HOST:PORT"
+          exit 2
+        fi
+        api_addr="$2"
+        shift 2
+        ;;
+      --config)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --config PATH"
+          exit 2
+        fi
+        node_config="$2"
+        shift 2
+        ;;
+      --config-v1-path)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --config-v1-path PATH"
+          exit 2
+        fi
+        config_v1_path="$2"
+        shift 2
+        ;;
+      --script-path)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --script-path PATH"
+          exit 2
+        fi
+        script_path="$2"
+        shift 2
+        ;;
+      --allow-update)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          allow_update="${2:-}"
+          shift 2
+        else
+          allow_update="1"
+          shift
+        fi
+        ;;
+      --command-timeout-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --command-timeout-sec N"
+          exit 2
+        fi
+        command_timeout_sec="$2"
+        shift 2
+        ;;
+      --service-status-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-status-command CMD"
+          exit 2
+        fi
+        service_status_command="$2"
+        shift 2
+        ;;
+      --service-start-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-start-command CMD"
+          exit 2
+        fi
+        service_start_command="$2"
+        shift 2
+        ;;
+      --service-stop-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-stop-command CMD"
+          exit 2
+        fi
+        service_stop_command="$2"
+        shift 2
+        ;;
+      --service-restart-command)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --service-restart-command CMD"
+          exit 2
+        fi
+        service_restart_command="$2"
+        shift 2
+        ;;
+      --connect-path-profile-default)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --connect-path-profile-default 1hop|2hop|3hop"
+          exit 2
+        fi
+        connect_path_profile_default="$2"
+        shift 2
+        ;;
+      --connect-interface-default)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --connect-interface-default IFACE"
+          exit 2
+        fi
+        connect_interface_default="$2"
+        shift 2
+        ;;
+      --connect-run-preflight-default)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          connect_run_preflight_default="${2:-}"
+          shift 2
+        else
+          connect_run_preflight_default="1"
+          shift
+        fi
+        ;;
+      --connect-prod-profile-default)
+        if [[ $# -lt 2 ]]; then
+          echo "local-api-session requires --connect-prod-profile-default auto|0|1"
+          exit 2
+        fi
+        connect_prod_profile_default="$2"
+        shift 2
+        ;;
+      --dry-run)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          dry_run="${2:-}"
+          shift 2
+        else
+          dry_run="1"
+          shift
+        fi
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        echo "unknown arg for local-api-session: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$allow_update" != "0" && "$allow_update" != "1" ]]; then
+    echo "local-api-session requires --allow-update to be 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$command_timeout_sec" =~ ^[0-9]+$ ]] || ((command_timeout_sec < 5)); then
+    echo "local-api-session requires --command-timeout-sec >= 5"
+    exit 2
+  fi
+  if [[ "$dry_run" != "0" && "$dry_run" != "1" ]]; then
+    echo "local-api-session requires --dry-run to be 0 or 1"
+    exit 2
+  fi
+  if [[ -z "$api_addr" ]]; then
+    echo "local-api-session requires --api-addr HOST:PORT"
+    exit 2
+  fi
+
+  if [[ -n "$node_config" && "$node_config" != /* ]]; then
+    node_config="$ROOT_DIR/$node_config"
+  fi
+  if [[ -n "$config_v1_path" && "$config_v1_path" != /* ]]; then
+    config_v1_path="$ROOT_DIR/$config_v1_path"
+  fi
+  if [[ -n "$script_path" && "$script_path" != /* ]]; then
+    script_path="$ROOT_DIR/$script_path"
+  fi
+
+  if [[ -n "$connect_path_profile_default" ]]; then
+    connect_path_profile_default="$(normalize_profile_for_config_v1 "$connect_path_profile_default" 2>/dev/null || true)"
+    if [[ -z "$connect_path_profile_default" ]]; then
+      echo "local-api-session requires --connect-path-profile-default 1hop|2hop|3hop"
+      exit 2
+    fi
+  fi
+  if [[ -n "$connect_run_preflight_default" && "$connect_run_preflight_default" != "0" && "$connect_run_preflight_default" != "1" ]]; then
+    echo "local-api-session requires --connect-run-preflight-default to be 0 or 1"
+    exit 2
+  fi
+  if [[ -n "$connect_prod_profile_default" ]]; then
+    case "$connect_prod_profile_default" in
+      auto|0|1)
+        ;;
+      *)
+        echo "local-api-session requires --connect-prod-profile-default auto|0|1"
+        exit 2
+        ;;
+    esac
+  fi
+
+  export LOCAL_CONTROL_API_ADDR="$api_addr"
+  export LOCAL_CONTROL_API_SCRIPT="$script_path"
+  export LOCAL_CONTROL_API_ALLOW_UPDATE="$allow_update"
+  export LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC="$command_timeout_sec"
+  export LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND="$service_status_command"
+  export LOCAL_CONTROL_API_SERVICE_START_COMMAND="$service_start_command"
+  export LOCAL_CONTROL_API_SERVICE_STOP_COMMAND="$service_stop_command"
+  export LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND="$service_restart_command"
+  export EASY_NODE_CONFIG_V1_FILE="$config_v1_path"
+
+  local_api_session_apply_config_v1_defaults "$config_v1_path"
+  if [[ -n "$connect_path_profile_default" ]]; then
+    export LOCAL_CONTROL_API_CONNECT_PATH_PROFILE="$connect_path_profile_default"
+  fi
+  if [[ -n "$connect_interface_default" ]]; then
+    export LOCAL_CONTROL_API_CONNECT_INTERFACE="$connect_interface_default"
+  fi
+  if [[ -n "$connect_run_preflight_default" ]]; then
+    export LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT="$connect_run_preflight_default"
+  fi
+  if [[ -n "$connect_prod_profile_default" ]]; then
+    export LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT="$connect_prod_profile_default"
+  fi
+
+  local config_v1_status="missing"
+  if [[ -n "$config_v1_path" && -f "$config_v1_path" ]]; then
+    config_v1_status="present"
+  fi
+
+  local -a cmd
+  cmd=(go run ./cmd/node)
+  if [[ -n "$node_config" ]]; then
+    cmd+=(--config "$node_config")
+  fi
+  cmd+=(--local-api)
+
+  local cmd_preview=""
+  printf -v cmd_preview '%q ' "${cmd[@]}"
+  cmd_preview="${cmd_preview% }"
+
+  echo "local-api-session:"
+  echo "  api_addr: $LOCAL_CONTROL_API_ADDR"
+  echo "  script_path: $LOCAL_CONTROL_API_SCRIPT"
+  echo "  config_v1_path: ${config_v1_path:-none} (${config_v1_status})"
+  echo "  command_timeout_sec: $LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC"
+  echo "  allow_update: $LOCAL_CONTROL_API_ALLOW_UPDATE"
+  echo "  service_status_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  service_start_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_START_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  service_stop_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_STOP_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  service_restart_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  connect_path_profile_default: ${LOCAL_CONTROL_API_CONNECT_PATH_PROFILE:-2hop}"
+  echo "  connect_interface_default: ${LOCAL_CONTROL_API_CONNECT_INTERFACE:-wgvpn0}"
+  echo "  connect_run_preflight_default: ${LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT:-1}"
+  echo "  connect_prod_profile_default: ${LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT:-0}"
+  echo "  command: $cmd_preview"
+
+  if [[ "$dry_run" == "1" ]]; then
+    echo "local-api-session dry-run: command not executed"
+    return 0
+  fi
+
+  if ! command -v go >/dev/null 2>&1; then
+    echo "local-api-session requires go in PATH"
+    exit 2
+  fi
+  if [[ -n "$script_path" && ! -f "$script_path" ]]; then
+    echo "local-api-session script path not found: $script_path"
+    exit 1
+  fi
+
+  (
+    cd "$ROOT_DIR"
+    "${cmd[@]}"
+  )
+}
+
 client_vpn_state_file() {
   echo "$DEPLOY_DIR/data/client_vpn.state"
 }
@@ -10714,14 +13112,37 @@ client_vpn_smoke() {
 }
 
 client_vpn_status() {
+  local show_json="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --show-json)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          show_json="${2:-}"
+          shift 2
+        else
+          show_json="1"
+          shift
+        fi
+        ;;
+      *)
+        echo "unknown arg for client-vpn-status: $1"
+        exit 2
+        ;;
+    esac
+  done
+
   local state_file
   state_file="$(client_vpn_state_file)"
   if [[ ! -f "$state_file" ]]; then
+    if [[ "$show_json" == "1" ]]; then
+      echo '{"running":false,"reason":"no_state_file"}'
+      return 0
+    fi
     echo "client-vpn is not running (no state file)"
     return 0
   fi
 
-  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject path_profile prod_profile beta_profile
+  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url path_profile prod_profile beta_profile session_reuse allow_session_churn
   pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
   iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
   log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
@@ -10734,8 +13155,9 @@ client_vpn_status() {
   issuer_urls="$(identity_value "$state_file" "CLIENT_VPN_ISSUER_URLS")"
   entry_url="$(identity_value "$state_file" "CLIENT_VPN_ENTRY_URL")"
   exit_url="$(identity_value "$state_file" "CLIENT_VPN_EXIT_URL")"
-  subject="$(identity_value "$state_file" "CLIENT_VPN_SUBJECT")"
   path_profile="$(identity_value "$state_file" "CLIENT_VPN_PATH_PROFILE")"
+  session_reuse="$(identity_value "$state_file" "CLIENT_VPN_SESSION_REUSE")"
+  allow_session_churn="$(identity_value "$state_file" "CLIENT_VPN_ALLOW_SESSION_CHURN")"
   prod_profile="$(identity_value "$state_file" "CLIENT_VPN_PROD_PROFILE")"
   beta_profile="$(identity_value "$state_file" "CLIENT_VPN_BETA_PROFILE")"
 
@@ -10744,13 +13166,73 @@ client_vpn_status() {
     running="yes"
   fi
 
+  local interface_state="missing"
+  if [[ -n "$iface" ]] && ip link show dev "$iface" >/dev/null 2>&1; then
+    interface_state="present"
+  fi
+
+  if [[ "$show_json" == "1" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+      jq -n \
+        --arg running "$running" \
+        --arg pid "${pid:-}" \
+        --arg interface "${iface:-}" \
+        --arg interface_state "$interface_state" \
+        --arg proxy_addr "${proxy_addr:-}" \
+        --arg path_profile "${path_profile:-}" \
+        --arg session_reuse "${session_reuse:-}" \
+        --arg allow_session_churn "${allow_session_churn:-}" \
+        --arg beta_profile "${beta_profile:-}" \
+        --arg prod_profile "${prod_profile:-}" \
+        --arg directory_urls "${directory_urls:-}" \
+        --arg issuer_url "${issuer_url:-}" \
+        --arg issuer_urls "${issuer_urls:-}" \
+        --arg entry_url "${entry_url:-}" \
+        --arg exit_url "${exit_url:-}" \
+        --arg key_file "${key_file:-}" \
+        --arg trust_file "${trust_file:-}" \
+        --arg trust_scope "${trust_scope:-}" \
+        --arg log_file "${log_file:-}" \
+        '{
+          running: ($running == "yes"),
+          pid: $pid,
+          interface: $interface,
+          interface_state: $interface_state,
+          proxy_addr: $proxy_addr,
+          path_profile: $path_profile,
+          session_reuse: $session_reuse,
+          allow_session_churn: $allow_session_churn,
+          beta_profile: $beta_profile,
+          prod_profile: $prod_profile,
+          directory_urls: $directory_urls,
+          issuer_url: $issuer_url,
+          issuer_urls: $issuer_urls,
+          entry_url: $entry_url,
+          exit_url: $exit_url,
+          key_file: $key_file,
+          trust_file: $trust_file,
+          trust_scope: $trust_scope,
+          log_file: $log_file
+        }'
+    else
+      printf '{"running":%s,"pid":"%s","interface":"%s","interface_state":"%s","path_profile":"%s"}\n' \
+        "$([[ "$running" == "yes" ]] && printf 'true' || printf 'false')" \
+        "${pid:-}" \
+        "${iface:-}" \
+        "$interface_state" \
+        "${path_profile:-}"
+    fi
+    return 0
+  fi
+
   echo "client-vpn status:"
   echo "  running: $running"
   echo "  pid: ${pid:-unknown}"
   echo "  interface: ${iface:-unknown}"
   echo "  proxy_addr: ${proxy_addr:-unknown}"
-  echo "  subject: ${subject:-none}"
   echo "  path_profile: ${path_profile:-default}"
+  echo "  session_reuse: ${session_reuse:-unknown}"
+  echo "  allow_session_churn: ${allow_session_churn:-unknown}"
   echo "  beta_profile: ${beta_profile:-0}"
   echo "  prod_profile: ${prod_profile:-0}"
   echo "  directory_urls: ${directory_urls:-unknown}"
@@ -10764,7 +13246,7 @@ client_vpn_status() {
   echo "  log_file: ${log_file:-unknown}"
 
   if [[ -n "$iface" ]]; then
-    if ip link show dev "$iface" >/dev/null 2>&1; then
+    if [[ "$interface_state" == "present" ]]; then
       echo "  interface_state: present"
       ip -brief address show dev "$iface" 2>/dev/null || true
       wg show "$iface" 2>/dev/null || true
@@ -11194,6 +13676,769 @@ client_vpn_session() {
   client_vpn_logs --follow 1 --tail 120
 }
 
+simple_wrapper_normalize_host() {
+  local raw="$1"
+  raw="$(trim "$raw")"
+  if [[ -z "$raw" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$raw" == http://* || "$raw" == https://* ]]; then
+    printf '%s' "$(host_from_url "$raw")"
+    return
+  fi
+  printf '%s' "$(host_from_hostport "$raw")"
+}
+
+simple_client_test() {
+  local bootstrap_directory=""
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local client_subject=""
+  local client_anon_cred=""
+  local path_profile="${EASY_NODE_PATH_PROFILE:-2hop}"
+  local timeout_sec="45"
+  local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bootstrap-directory)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --bootstrap-directory URL"
+          exit 2
+        fi
+        bootstrap_directory="$2"
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --discovery-wait-sec N"
+          exit 2
+        fi
+        discovery_wait_sec="$2"
+        shift 2
+        ;;
+      --subject)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --subject ID"
+          exit 2
+        fi
+        client_subject="$2"
+        shift 2
+        ;;
+      --anon-cred)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --anon-cred TOKEN"
+          exit 2
+        fi
+        client_anon_cred="$2"
+        shift 2
+        ;;
+      --path-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --path-profile 1hop|2hop|3hop"
+          exit 2
+        fi
+        path_profile="$2"
+        shift 2
+        ;;
+      --timeout-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --timeout-sec N"
+          exit 2
+        fi
+        timeout_sec="$2"
+        shift 2
+        ;;
+      --beta-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --beta-profile 0 or 1"
+          exit 2
+        fi
+        beta_profile="$2"
+        shift 2
+        ;;
+      --prod-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-test requires --prod-profile 0 or 1"
+          exit 2
+        fi
+        prod_profile="$2"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        echo "unknown arg for simple-client-test: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$bootstrap_directory" ]]; then
+    echo "simple-client-test requires --bootstrap-directory URL"
+    exit 2
+  fi
+  if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
+    echo "simple-client-test requires exactly one of --subject or --anon-cred"
+    exit 2
+  fi
+  if [[ -z "$client_subject" && -z "$client_anon_cred" ]]; then
+    echo "simple-client-test requires --subject or --anon-cred"
+    exit 2
+  fi
+  if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+    echo "simple-client-test requires --beta-profile 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "simple-client-test requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ && "$timeout_sec" =~ ^[0-9]+$ ]]; then
+    echo "simple-client-test requires numeric --discovery-wait-sec and --timeout-sec"
+    exit 2
+  fi
+
+  local normalized_path_profile=""
+  normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+    echo "simple-client-test requires --path-profile 1hop|2hop|3hop (aliases: speed|balanced|private)"
+    exit 2
+  }
+  if [[ "$normalized_path_profile" == "speed-1hop" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
+    echo "simple-client-test: 1-hop profile is non-strict only; forcing --beta-profile 0 and --prod-profile 0"
+    beta_profile="0"
+    prod_profile="0"
+  fi
+
+  local -a args=(
+    --bootstrap-directory "$bootstrap_directory"
+    --discovery-wait-sec "$discovery_wait_sec"
+    --min-sources 1
+    --timeout-sec "$timeout_sec"
+    --path-profile "$path_profile"
+    --beta-profile "$beta_profile"
+    --prod-profile "$prod_profile"
+  )
+  if [[ -n "$client_subject" ]]; then
+    args+=(--subject "$client_subject")
+  else
+    args+=(--anon-cred "$client_anon_cred")
+  fi
+
+  client_test "${args[@]}"
+}
+
+simple_client_vpn_preflight() {
+  local bootstrap_directory=""
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local path_profile="${EASY_NODE_PATH_PROFILE:-2hop}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-1}"
+  local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bootstrap-directory)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-preflight requires --bootstrap-directory URL"
+          exit 2
+        fi
+        bootstrap_directory="$2"
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-preflight requires --discovery-wait-sec N"
+          exit 2
+        fi
+        discovery_wait_sec="$2"
+        shift 2
+        ;;
+      --path-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-preflight requires --path-profile 1hop|2hop|3hop"
+          exit 2
+        fi
+        path_profile="$2"
+        shift 2
+        ;;
+      --prod-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-preflight requires --prod-profile 0 or 1"
+          exit 2
+        fi
+        prod_profile="$2"
+        shift 2
+        ;;
+      --interface)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-preflight requires --interface IFACE"
+          exit 2
+        fi
+        interface_name="$2"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        echo "unknown arg for simple-client-vpn-preflight: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$bootstrap_directory" ]]; then
+    echo "simple-client-vpn-preflight requires --bootstrap-directory URL"
+    exit 2
+  fi
+  if [[ -z "$interface_name" ]]; then
+    echo "simple-client-vpn-preflight requires --interface IFACE"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "simple-client-vpn-preflight requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ ]]; then
+    echo "simple-client-vpn-preflight requires numeric --discovery-wait-sec"
+    exit 2
+  fi
+
+  local normalized_path_profile=""
+  normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+    echo "simple-client-vpn-preflight requires --path-profile 1hop|2hop|3hop (aliases: speed|balanced|private)"
+    exit 2
+  }
+
+  local operator_floor_check="1"
+  local operator_min_operators="2"
+  local issuer_quorum_check="1"
+  local issuer_min_operators="2"
+  if [[ "$normalized_path_profile" == "speed-1hop" ]]; then
+    operator_floor_check="0"
+    operator_min_operators="1"
+    issuer_quorum_check="0"
+    issuer_min_operators="1"
+  fi
+
+  client_vpn_preflight \
+    --bootstrap-directory "$bootstrap_directory" \
+    --discovery-wait-sec "$discovery_wait_sec" \
+    --path-profile "$path_profile" \
+    --prod-profile "$prod_profile" \
+    --interface "$interface_name" \
+    --operator-floor-check "$operator_floor_check" \
+    --operator-min-operators "$operator_min_operators" \
+    --issuer-quorum-check "$issuer_quorum_check" \
+    --issuer-min-operators "$issuer_min_operators"
+}
+
+simple_client_vpn_session() {
+  local bootstrap_directory=""
+  local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
+  local client_subject=""
+  local path_profile="${EASY_NODE_PATH_PROFILE:-2hop}"
+  local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-1}"
+  local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
+  local ready_timeout_sec="${EASY_NODE_CLIENT_VPN_READY_TIMEOUT_SEC:-35}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bootstrap-directory)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --bootstrap-directory URL"
+          exit 2
+        fi
+        bootstrap_directory="$2"
+        shift 2
+        ;;
+      --discovery-wait-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --discovery-wait-sec N"
+          exit 2
+        fi
+        discovery_wait_sec="$2"
+        shift 2
+        ;;
+      --subject)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --subject ID"
+          exit 2
+        fi
+        client_subject="$2"
+        shift 2
+        ;;
+      --path-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --path-profile 1hop|2hop|3hop"
+          exit 2
+        fi
+        path_profile="$2"
+        shift 2
+        ;;
+      --beta-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --beta-profile 0 or 1"
+          exit 2
+        fi
+        beta_profile="$2"
+        shift 2
+        ;;
+      --prod-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --prod-profile 0 or 1"
+          exit 2
+        fi
+        prod_profile="$2"
+        shift 2
+        ;;
+      --interface)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --interface IFACE"
+          exit 2
+        fi
+        interface_name="$2"
+        shift 2
+        ;;
+      --ready-timeout-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-client-vpn-session requires --ready-timeout-sec N"
+          exit 2
+        fi
+        ready_timeout_sec="$2"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        echo "unknown arg for simple-client-vpn-session: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$bootstrap_directory" ]]; then
+    echo "simple-client-vpn-session requires --bootstrap-directory URL"
+    exit 2
+  fi
+  if [[ -z "$client_subject" ]]; then
+    echo "simple-client-vpn-session requires --subject ID"
+    exit 2
+  fi
+  if [[ -z "$interface_name" ]]; then
+    echo "simple-client-vpn-session requires --interface IFACE"
+    exit 2
+  fi
+  if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
+    echo "simple-client-vpn-session requires --beta-profile 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "simple-client-vpn-session requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ && "$ready_timeout_sec" =~ ^[0-9]+$ ]]; then
+    echo "simple-client-vpn-session requires numeric --discovery-wait-sec and --ready-timeout-sec"
+    exit 2
+  fi
+
+  local normalized_path_profile=""
+  normalized_path_profile="$(normalize_path_profile "$path_profile")" || {
+    echo "simple-client-vpn-session requires --path-profile 1hop|2hop|3hop (aliases: speed|balanced|private)"
+    exit 2
+  }
+
+  local min_operators="2"
+  local operator_floor_check="1"
+  local operator_min_operators="2"
+  local issuer_quorum_check="1"
+  local issuer_min_operators="2"
+  local install_route="1"
+  if [[ "$normalized_path_profile" == "speed-1hop" ]]; then
+    min_operators="1"
+    operator_floor_check="0"
+    operator_min_operators="1"
+    issuer_quorum_check="0"
+    issuer_min_operators="1"
+    install_route="0"
+    echo "1-hop quick mode: forcing --install-route 0 for stable control-plane connectivity."
+    echo "Use expert option 34 if you want to override route behavior manually."
+  fi
+
+  client_vpn_session \
+    --bootstrap-directory "$bootstrap_directory" \
+    --discovery-wait-sec "$discovery_wait_sec" \
+    --subject "$client_subject" \
+    --min-sources 1 \
+    --min-operators "$min_operators" \
+    --operator-floor-check "$operator_floor_check" \
+    --operator-min-operators "$operator_min_operators" \
+    --path-profile "$path_profile" \
+    --beta-profile "$beta_profile" \
+    --prod-profile "$prod_profile" \
+    --issuer-quorum-check "$issuer_quorum_check" \
+    --issuer-min-operators "$issuer_min_operators" \
+    --interface "$interface_name" \
+    --ready-timeout-sec "$ready_timeout_sec" \
+    --install-route "$install_route" \
+    --cleanup-all 1
+}
+
+simple_server_preflight() {
+  local mode="authority"
+  local public_host=""
+  local peer_host=""
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-1}"
+  local peer_identity_strict="${EASY_NODE_PEER_IDENTITY_STRICT:-auto}"
+  local timeout_sec="${EASY_NODE_SERVER_PREFLIGHT_TIMEOUT_SEC:-8}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-preflight requires --mode authority|provider"
+          exit 2
+        fi
+        mode="$2"
+        shift 2
+        ;;
+      --public-host)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-preflight requires --public-host HOST"
+          exit 2
+        fi
+        public_host="$2"
+        shift 2
+        ;;
+      --peer-host)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-preflight requires --peer-host HOST"
+          exit 2
+        fi
+        peer_host="$2"
+        shift 2
+        ;;
+      --prod-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-preflight requires --prod-profile 0 or 1"
+          exit 2
+        fi
+        prod_profile="$2"
+        shift 2
+        ;;
+      --peer-identity-strict)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-preflight requires --peer-identity-strict 0|1|auto"
+          exit 2
+        fi
+        peer_identity_strict="$2"
+        shift 2
+        ;;
+      --timeout-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-preflight requires --timeout-sec N"
+          exit 2
+        fi
+        timeout_sec="$2"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        echo "unknown arg for simple-server-preflight: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$mode" != "authority" && "$mode" != "provider" ]]; then
+    echo "simple-server-preflight requires --mode authority|provider"
+    exit 2
+  fi
+  if [[ -z "$public_host" ]]; then
+    echo "simple-server-preflight requires --public-host HOST"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "simple-server-preflight requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if [[ "$peer_identity_strict" != "0" && "$peer_identity_strict" != "1" && "$peer_identity_strict" != "auto" ]]; then
+    echo "simple-server-preflight requires --peer-identity-strict 0|1|auto"
+    exit 2
+  fi
+  if ! [[ "$timeout_sec" =~ ^[0-9]+$ ]]; then
+    echo "simple-server-preflight requires numeric --timeout-sec"
+    exit 2
+  fi
+
+  public_host="$(simple_wrapper_normalize_host "$public_host")"
+  peer_host="$(simple_wrapper_normalize_host "$peer_host")"
+
+  local peer_directories=""
+  local authority_directory=""
+  local authority_issuer=""
+  if [[ "$mode" == "provider" ]]; then
+    if [[ -z "$peer_host" ]]; then
+      echo "simple-server-preflight requires --peer-host when --mode provider"
+      exit 2
+    fi
+    authority_directory="$(url_from_host_port "$peer_host" 8081)"
+    authority_issuer="$(url_from_host_port "$peer_host" 8082)"
+    peer_directories="$authority_directory"
+  elif [[ -n "$peer_host" ]]; then
+    peer_directories="$(url_from_host_port "$peer_host" 8081)"
+  fi
+
+  local min_peer_operators="0"
+  if [[ -n "$peer_directories" ]]; then
+    min_peer_operators="1"
+  fi
+
+  local -a args=(
+    --mode "$mode"
+    --public-host "$public_host"
+    --beta-profile 1
+    --prod-profile "$prod_profile"
+    --peer-identity-strict "$peer_identity_strict"
+    --min-peer-operators "$min_peer_operators"
+    --timeout-sec "$timeout_sec"
+  )
+  if [[ -n "$peer_directories" ]]; then
+    args+=(--peer-directories "$peer_directories")
+  fi
+  if [[ -n "$authority_directory" ]]; then
+    args+=(--authority-directory "$authority_directory")
+  fi
+  if [[ -n "$authority_issuer" ]]; then
+    args+=(--authority-issuer "$authority_issuer")
+  fi
+
+  server_preflight "${args[@]}"
+}
+
+simple_server_session() {
+  local mode="authority"
+  local public_host=""
+  local peer_host=""
+  local prod_profile="${EASY_NODE_PROD_PROFILE:-1}"
+  local peer_identity_strict="${EASY_NODE_PEER_IDENTITY_STRICT:-auto}"
+  local federation_wait="1"
+  local federation_ready_timeout_sec="90"
+  local federation_poll_sec="5"
+  local auto_invite="1"
+  local auto_invite_count="1"
+  local auto_invite_tier="1"
+  local auto_invite_wait_sec="10"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --mode authority|provider"
+          exit 2
+        fi
+        mode="$2"
+        shift 2
+        ;;
+      --public-host)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --public-host HOST"
+          exit 2
+        fi
+        public_host="$2"
+        shift 2
+        ;;
+      --peer-host)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --peer-host HOST"
+          exit 2
+        fi
+        peer_host="$2"
+        shift 2
+        ;;
+      --prod-profile)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --prod-profile 0 or 1"
+          exit 2
+        fi
+        prod_profile="$2"
+        shift 2
+        ;;
+      --peer-identity-strict)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --peer-identity-strict 0|1|auto"
+          exit 2
+        fi
+        peer_identity_strict="$2"
+        shift 2
+        ;;
+      --federation-wait)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --federation-wait 0 or 1"
+          exit 2
+        fi
+        federation_wait="$2"
+        shift 2
+        ;;
+      --federation-ready-timeout-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --federation-ready-timeout-sec N"
+          exit 2
+        fi
+        federation_ready_timeout_sec="$2"
+        shift 2
+        ;;
+      --federation-poll-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --federation-poll-sec N"
+          exit 2
+        fi
+        federation_poll_sec="$2"
+        shift 2
+        ;;
+      --auto-invite)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --auto-invite 0 or 1"
+          exit 2
+        fi
+        auto_invite="$2"
+        shift 2
+        ;;
+      --auto-invite-count)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --auto-invite-count N"
+          exit 2
+        fi
+        auto_invite_count="$2"
+        shift 2
+        ;;
+      --auto-invite-tier)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --auto-invite-tier 1|2|3"
+          exit 2
+        fi
+        auto_invite_tier="$2"
+        shift 2
+        ;;
+      --auto-invite-wait-sec)
+        if [[ $# -lt 2 ]]; then
+          echo "simple-server-session requires --auto-invite-wait-sec N"
+          exit 2
+        fi
+        auto_invite_wait_sec="$2"
+        shift 2
+        ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
+      *)
+        echo "unknown arg for simple-server-session: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$mode" != "authority" && "$mode" != "provider" ]]; then
+    echo "simple-server-session requires --mode authority|provider"
+    exit 2
+  fi
+  if [[ -z "$public_host" ]]; then
+    echo "simple-server-session requires --public-host HOST"
+    exit 2
+  fi
+  if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
+    echo "simple-server-session requires --prod-profile 0 or 1"
+    exit 2
+  fi
+  if [[ "$peer_identity_strict" != "0" && "$peer_identity_strict" != "1" && "$peer_identity_strict" != "auto" ]]; then
+    echo "simple-server-session requires --peer-identity-strict 0|1|auto"
+    exit 2
+  fi
+  if [[ "$federation_wait" != "0" && "$federation_wait" != "1" ]]; then
+    echo "simple-server-session requires --federation-wait 0 or 1"
+    exit 2
+  fi
+  if [[ "$auto_invite" != "0" && "$auto_invite" != "1" ]]; then
+    echo "simple-server-session requires --auto-invite 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$federation_ready_timeout_sec" =~ ^[0-9]+$ && "$federation_poll_sec" =~ ^[0-9]+$ ]]; then
+    echo "simple-server-session requires numeric federation timeout/poll values"
+    exit 2
+  fi
+
+  public_host="$(simple_wrapper_normalize_host "$public_host")"
+  peer_host="$(simple_wrapper_normalize_host "$peer_host")"
+
+  local -a args=(
+    --mode "$mode"
+    --public-host "$public_host"
+    --beta-profile 1
+    --prod-profile "$prod_profile"
+    --peer-identity-strict "$peer_identity_strict"
+    --cleanup-all 1
+  )
+  if [[ "$federation_wait" == "1" ]]; then
+    args+=(
+      --federation-wait 1
+      --federation-ready-timeout-sec "$federation_ready_timeout_sec"
+      --federation-poll-sec "$federation_poll_sec"
+    )
+  else
+    args+=(--federation-wait 0)
+  fi
+
+  if [[ "$mode" == "provider" ]]; then
+    if [[ -z "$peer_host" ]]; then
+      echo "simple-server-session requires --peer-host when --mode provider"
+      exit 2
+    fi
+    local authority_directory authority_issuer
+    authority_directory="$(url_from_host_port "$peer_host" 8081)"
+    authority_issuer="$(url_from_host_port "$peer_host" 8082)"
+    args+=(
+      --authority-directory "$authority_directory"
+      --authority-issuer "$authority_issuer"
+      --peer-directories "$authority_directory"
+    )
+  else
+    if ! [[ "$auto_invite_count" =~ ^[0-9]+$ ]] || [[ "$auto_invite_count" == "0" ]]; then
+      auto_invite_count="1"
+    fi
+    if [[ "$auto_invite_tier" != "1" && "$auto_invite_tier" != "2" && "$auto_invite_tier" != "3" ]]; then
+      auto_invite_tier="1"
+    fi
+    if ! [[ "$auto_invite_wait_sec" =~ ^[0-9]+$ ]]; then
+      auto_invite_wait_sec="10"
+    fi
+    args+=(
+      --client-allowlist 1
+      --allow-anon-cred 0
+      --auto-invite "$auto_invite"
+      --auto-invite-count "$auto_invite_count"
+      --auto-invite-tier "$auto_invite_tier"
+      --auto-invite-wait-sec "$auto_invite_wait_sec"
+      --auto-invite-fail-open 0
+    )
+    if [[ -n "$peer_host" ]]; then
+      args+=(--peer-directories "$(url_from_host_port "$peer_host" 8081)")
+    fi
+  fi
+
+  server_session "${args[@]}"
+}
+
 client_vpn_up() {
   local directory_urls=""
   local issuer_url=""
@@ -11203,6 +14448,7 @@ client_vpn_up() {
   local bootstrap_directory=""
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
   local client_subject="${CLIENT_SUBJECT:-}"
+  local client_subject_file=""
   local client_anon_cred="${CLIENT_ANON_CRED:-}"
   local min_sources="1"
   local min_operators="1"
@@ -11229,6 +14475,9 @@ client_vpn_up() {
   local allowed_ips="${CLIENT_WG_ALLOWED_IPS:-0.0.0.0/0}"
   local install_route="${CLIENT_WG_INSTALL_ROUTE:-1}"
   local startup_sync_timeout_sec="${CLIENT_STARTUP_SYNC_TIMEOUT_SEC:-12}"
+  local session_reuse="${CLIENT_SESSION_REUSE:-1}"
+  local allow_session_churn="${CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN:-0}"
+  local session_refresh_lead_sec="${CLIENT_SESSION_REFRESH_LEAD_SEC:-20}"
   local ready_timeout_sec="${EASY_NODE_CLIENT_VPN_READY_TIMEOUT_SEC:-35}"
   local force_restart="0"
   local foreground="0"
@@ -11245,6 +14494,7 @@ client_vpn_up() {
   local locality_country_bias_set=0
   local locality_region_bias_set=0
   local locality_region_prefix_bias_set=0
+  local speed_onehop_profile=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -11278,6 +14528,10 @@ client_vpn_up() {
         ;;
       --subject)
         client_subject="${2:-}"
+        shift 2
+        ;;
+      --subject-file)
+        client_subject_file="${2:-}"
         shift 2
         ;;
       --anon-cred)
@@ -11435,6 +14689,24 @@ client_vpn_up() {
         startup_sync_timeout_sec="${2:-}"
         shift 2
         ;;
+      --session-reuse)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          session_reuse="${2:-}"
+          shift 2
+        else
+          session_reuse="1"
+          shift
+        fi
+        ;;
+      --allow-session-churn)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          allow_session_churn="${2:-}"
+          shift 2
+        else
+          allow_session_churn="1"
+          shift
+        fi
+        ;;
       --ready-timeout-sec)
         ready_timeout_sec="${2:-}"
         shift 2
@@ -11489,6 +14761,18 @@ client_vpn_up() {
     echo "client-vpn-up requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private (legacy aliases: fast, privacy)"
     exit 2
   }
+  local canonical_path_profile="2hop"
+  case "$normalized_path_profile" in
+    speed-1hop)
+      canonical_path_profile="1hop"
+      ;;
+    privacy)
+      canonical_path_profile="3hop"
+      ;;
+    *)
+      canonical_path_profile="2hop"
+      ;;
+  esac
   if [[ "$normalized_path_profile" == "speed-1hop" ]]; then
     speed_onehop_profile=1
   fi
@@ -11605,6 +14889,18 @@ client_vpn_up() {
     echo "client-vpn-up requires --foreground 0 or 1"
     exit 2
   fi
+  if [[ "$session_reuse" != "0" && "$session_reuse" != "1" ]]; then
+    echo "client-vpn-up requires CLIENT_SESSION_REUSE to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$allow_session_churn" != "0" && "$allow_session_churn" != "1" ]]; then
+    echo "client-vpn-up requires --allow-session-churn 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$session_refresh_lead_sec" =~ ^[0-9]+$ ]] || ((session_refresh_lead_sec < 1)); then
+    echo "client-vpn-up requires CLIENT_SESSION_REFRESH_LEAD_SEC >= 1"
+    exit 2
+  fi
   if ! [[ "$min_sources" =~ ^[0-9]+$ && "$min_operators" =~ ^[0-9]+$ && "$discovery_wait_sec" =~ ^[0-9]+$ && "$startup_sync_timeout_sec" =~ ^[0-9]+$ && "$ready_timeout_sec" =~ ^[0-9]+$ ]]; then
     echo "client-vpn-up requires numeric --min-sources, --min-operators, --discovery-wait-sec, --startup-sync-timeout-sec and --ready-timeout-sec"
     exit 2
@@ -11613,9 +14909,32 @@ client_vpn_up() {
     echo "client-vpn-up requires --interface"
     exit 2
   fi
+  if ! is_safe_wg_interface_name "$interface_name"; then
+    echo "client-vpn-up requires --interface to start with wg, use only [a-zA-Z0-9_.-], and be <= 15 chars"
+    exit 2
+  fi
   if [[ -z "$proxy_addr" ]]; then
     echo "client-vpn-up requires --proxy-addr"
     exit 2
+  fi
+  if [[ -n "$client_subject_file" ]]; then
+    if [[ -n "$client_subject" ]]; then
+      echo "client-vpn-up requires exactly one of --subject or --subject-file"
+      exit 2
+    fi
+    if [[ ! -f "$client_subject_file" ]]; then
+      echo "client-vpn-up requires --subject-file to reference an existing file"
+      exit 2
+    fi
+    if [[ ! -r "$client_subject_file" ]]; then
+      echo "client-vpn-up requires --subject-file to be readable"
+      exit 2
+    fi
+    client_subject="$(tr -d '\r\n' <"$client_subject_file")"
+    if [[ -z "$client_subject" ]]; then
+      echo "client-vpn-up requires --subject-file to contain a non-empty subject"
+      exit 2
+    fi
   fi
   if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
     echo "client-vpn-up requires exactly one of --subject or --anon-cred"
@@ -11685,6 +15004,18 @@ client_vpn_up() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-up --directory-urls"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$issuer_url" "client-vpn-up --issuer-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$entry_url" "client-vpn-up --entry-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$exit_url" "client-vpn-up --exit-url"; then
+    exit 2
+  fi
   if [[ -z "$issuer_urls" ]]; then
     issuer_urls="$issuer_url"
   fi
@@ -11850,6 +15181,13 @@ client_vpn_up() {
   mkdir -p "$trusted_keys_dir" >/dev/null 2>&1 || true
   seed_client_vpn_trust_file_if_empty "$trusted_keys_file" "$directory_urls"
 
+  local runtime_subject_file=""
+  cleanup_runtime_subject_file() {
+    if [[ -n "$runtime_subject_file" ]]; then
+      rm -f "$runtime_subject_file" >/dev/null 2>&1 || true
+      runtime_subject_file=""
+    fi
+  }
   local -a env_vars
   env_vars=(
     "DATA_PLANE_MODE=opaque"
@@ -11862,6 +15200,7 @@ client_vpn_up() {
     "ISSUER_URL=$issuer_url"
     "ENTRY_URL=$entry_url"
     "EXIT_CONTROL_URL=$exit_url"
+    "CLIENT_PATH_PROFILE=$canonical_path_profile"
     "CLIENT_WG_BACKEND=command"
     "CLIENT_WG_INTERFACE=$interface_name"
     "CLIENT_WG_PRIVATE_KEY_PATH=$private_key_file"
@@ -11882,6 +15221,9 @@ client_vpn_up() {
     "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
     "CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC=4"
     "CLIENT_BOOTSTRAP_JITTER_PCT=10"
+    "CLIENT_SESSION_REUSE=$session_reuse"
+    "CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=$allow_session_churn"
+    "CLIENT_SESSION_REFRESH_LEAD_SEC=$session_refresh_lead_sec"
     "CLIENT_STARTUP_SYNC_TIMEOUT_SEC=$startup_sync_timeout_sec"
     "BETA_STRICT_MODE=$beta_profile"
     "PROD_STRICT_MODE=$prod_profile"
@@ -11890,12 +15232,19 @@ client_vpn_up() {
     env_vars+=(
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
       "CLIENT_FORCE_DIRECT_EXIT=1"
-      "CLIENT_SESSION_REUSE=1"
-      "CLIENT_STICKY_PAIR_SEC=300"
     )
+    if [[ "$allow_session_churn" != "1" ]]; then
+      env_vars+=(
+        "CLIENT_SESSION_REUSE=1"
+        "CLIENT_STICKY_PAIR_SEC=300"
+      )
+    fi
   fi
   if [[ -n "$client_subject" ]]; then
-    env_vars+=("CLIENT_SUBJECT=$client_subject")
+    runtime_subject_file="$(mktemp)"
+    (umask 077 && printf '%s' "$client_subject" >"$runtime_subject_file")
+    secure_file_permissions "$runtime_subject_file"
+    env_vars+=("CLIENT_SUBJECT_FILE=$runtime_subject_file")
   fi
   if [[ -n "$client_anon_cred" ]]; then
     env_vars+=("CLIENT_ANON_CRED=$client_anon_cred")
@@ -11922,9 +15271,15 @@ client_vpn_up() {
     echo "log: $log_file"
     (
       cd "$ROOT_DIR"
-      env "${env_vars[@]}" go run ./cmd/node --client
+      env_kv=""
+      for env_kv in "${env_vars[@]}"; do
+        export "$env_kv"
+      done
+      go run ./cmd/node --client
     ) 2>&1 | tee -a "$log_file"
-    return $?
+    local foreground_rc=$?
+    cleanup_runtime_subject_file
+    return "$foreground_rc"
   fi
 
   local pid=""
@@ -11932,7 +15287,11 @@ client_vpn_up() {
   pid_tmp="$(mktemp)"
   (
     cd "$ROOT_DIR"
-    nohup env "${env_vars[@]}" go run ./cmd/node --client >"$log_file" 2>&1 &
+    env_kv=""
+    for env_kv in "${env_vars[@]}"; do
+      export "$env_kv"
+    done
+    nohup go run ./cmd/node --client >"$log_file" 2>&1 &
     echo "$!" >"$pid_tmp"
   )
   pid="$(cat "$pid_tmp")"
@@ -11941,6 +15300,7 @@ client_vpn_up() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
     echo "client-vpn failed to start; log follows:"
     cat "$log_file"
+    cleanup_runtime_subject_file
     exit 1
   fi
 
@@ -11951,6 +15311,7 @@ client_vpn_up() {
       echo "client-vpn exited before tunnel became ready"
       cat "$log_file"
       print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"
+      cleanup_runtime_subject_file
       exit 1
     fi
     if rg -q "client received wg-session config" "$log_file"; then
@@ -11967,6 +15328,7 @@ client_vpn_up() {
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
 
@@ -11978,6 +15340,7 @@ client_vpn_up() {
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
   if ! is_valid_wg_public_key "$exit_wg_pub"; then
@@ -11986,6 +15349,7 @@ client_vpn_up() {
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
 
@@ -11993,8 +15357,11 @@ client_vpn_up() {
     echo "client-vpn missing interface after session config: $interface_name"
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
+
+  cleanup_runtime_subject_file
 
   cat >"$state_file" <<EOF_STATE
 CLIENT_VPN_PID=$pid
@@ -12010,8 +15377,9 @@ CLIENT_VPN_ISSUER_URLS=$issuer_urls
 CLIENT_VPN_ENTRY_URL=$entry_url
 CLIENT_VPN_EXIT_URL=$exit_url
 CLIENT_VPN_EXIT_WG_PUBKEY=$exit_wg_pub
-CLIENT_VPN_SUBJECT=$client_subject
 CLIENT_VPN_PATH_PROFILE=$normalized_path_profile
+CLIENT_VPN_SESSION_REUSE=$session_reuse
+CLIENT_VPN_ALLOW_SESSION_CHURN=$allow_session_churn
 CLIENT_VPN_BETA_PROFILE=$beta_profile
 CLIENT_VPN_PROD_PROFILE=$prod_profile
 EOF_STATE
@@ -12022,8 +15390,9 @@ EOF_STATE
   echo "  interface: $interface_name"
   echo "  allowed_ips: $allowed_ips"
   echo "  install_route: $install_route"
-  echo "  subject: ${client_subject:-none}"
   echo "  path_profile: ${normalized_path_profile:-default}"
+  echo "  session_reuse: $session_reuse"
+  echo "  allow_session_churn: $allow_session_churn"
   echo "  directory_urls: $directory_urls"
   echo "  trusted_keys_file: $trusted_keys_file"
   echo "  trust_scope: $trust_scope_mode"
@@ -12037,6 +15406,7 @@ EOF_STATE
 
 main() {
   local cmd="${1:-}"
+  apply_config_v1_auto_update_defaults
   maybe_auto_update_and_reexec "$@"
   case "$cmd" in
     check)
@@ -12046,9 +15416,29 @@ main() {
       shift
       self_update_repo "$@"
       ;;
+    config-v1-show)
+      shift
+      config_v1_show "$@"
+      ;;
+    config-v1-init)
+      shift
+      config_v1_init "$@"
+      ;;
+    config-v1-set-profile)
+      shift
+      config_v1_set_profile "$@"
+      ;;
+    local-api-session)
+      shift
+      local_api_session "$@"
+      ;;
     server-preflight)
       shift
       server_preflight "$@"
+      ;;
+    simple-server-preflight)
+      shift
+      simple_server_preflight "$@"
       ;;
     server-up)
       shift
@@ -12072,6 +15462,10 @@ main() {
     server-session)
       shift
       server_session "$@"
+      ;;
+    simple-server-session)
+      shift
+      simple_server_session "$@"
       ;;
     server-down)
       server_down
@@ -12125,6 +15519,10 @@ main() {
       shift
       client_test "$@"
       ;;
+    simple-client-test)
+      shift
+      simple_client_test "$@"
+      ;;
     profile-compare-local)
       shift
       profile_compare_local "$@"
@@ -12137,6 +15535,10 @@ main() {
       shift
       profile_compare_campaign "$@"
       ;;
+    profile-compare-docker-matrix)
+      shift
+      profile_compare_docker_matrix "$@"
+      ;;
     profile-compare-campaign-check)
       shift
       profile_compare_campaign_check "$@"
@@ -12145,9 +15547,25 @@ main() {
       shift
       profile_compare_campaign_signoff "$@"
       ;;
+    profile-default-gate-run)
+      shift
+      profile_default_gate_run "$@"
+      ;;
+    profile-default-gate-live)
+      shift
+      profile_default_gate_live "$@"
+      ;;
+    profile-default-gate-token-probe)
+      shift
+      profile_default_gate_token_probe "$@"
+      ;;
     client-vpn-preflight)
       shift
       client_vpn_preflight "$@"
+      ;;
+    simple-client-vpn-preflight)
+      shift
+      simple_client_vpn_preflight "$@"
       ;;
     client-vpn-up)
       shift
@@ -12172,6 +15590,10 @@ main() {
     client-vpn-session)
       shift
       client_vpn_session "$@"
+      ;;
+    simple-client-vpn-session)
+      shift
+      simple_client_vpn_session "$@"
       ;;
     client-vpn-down)
       shift
@@ -12205,6 +15627,14 @@ main() {
       shift
       three_machine_reminder "$@"
       ;;
+    three-machine-docker-profile-matrix)
+      shift
+      three_machine_docker_profile_matrix "$@"
+      ;;
+    three-machine-docker-profile-matrix-record)
+      shift
+      three_machine_docker_profile_matrix_record "$@"
+      ;;
     three-machine-docker-readiness)
       shift
       three_machine_docker_readiness "$@"
@@ -12221,9 +15651,273 @@ main() {
       shift
       single_machine_prod_readiness "$@"
       ;;
+    vpn-rc-matrix-path)
+      shift
+      vpn_rc_matrix_path "$@"
+      ;;
     vpn-rc-standard-path)
       shift
       vpn_rc_standard_path "$@"
+      ;;
+    vpn-rc-resilience-path)
+      shift
+      vpn_rc_resilience_path "$@"
+      ;;
+    vpn-non-blockchain-fastlane)
+      shift
+      vpn_non_blockchain_fastlane "$@"
+      ;;
+    blockchain-fastlane)
+      shift
+      blockchain_fastlane "$@"
+      ;;
+    blockchain-gate-bundle)
+      shift
+      blockchain_gate_bundle "$@"
+      ;;
+    blockchain-staged-file-groups)
+      shift
+      blockchain_staged_file_groups "$@"
+      ;;
+    blockchain-cosmos-only-guardrail)
+      shift
+      blockchain_cosmos_only_guardrail "$@"
+      ;;
+    ci-blockchain-parallel-sweep)
+      shift
+      ci_blockchain_parallel_sweep "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-prefill)
+      shift
+      blockchain_mainnet_activation_metrics_prefill "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-input)
+      shift
+      blockchain_mainnet_activation_metrics_input "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-missing-checklist)
+      shift
+      blockchain_mainnet_activation_metrics_missing_checklist "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-missing-input-template)
+      shift
+      blockchain_mainnet_activation_metrics_missing_input_template "$@"
+      ;;
+    blockchain-mainnet-activation-metrics-input-template)
+      shift
+      blockchain_mainnet_activation_metrics_input_template "$@"
+      ;;
+    blockchain-mainnet-activation-metrics)
+      shift
+      blockchain_mainnet_activation_metrics "$@"
+      ;;
+    blockchain-mainnet-activation-gate)
+      shift
+      blockchain_mainnet_activation_gate "$@"
+      ;;
+    blockchain-mainnet-activation-gate-cycle)
+      shift
+      blockchain_mainnet_activation_gate_cycle "$@"
+      ;;
+    blockchain-mainnet-activation-gate-cycle-seeded)
+      shift
+      blockchain_mainnet_activation_gate_cycle_seeded "$@"
+      ;;
+    blockchain-mainnet-activation-operator-pack)
+      shift
+      blockchain_mainnet_activation_operator_pack "$@"
+      ;;
+    blockchain-mainnet-activation-real-evidence-run)
+      shift
+      blockchain_mainnet_activation_real_evidence_run "$@"
+      ;;
+    blockchain-bootstrap-governance-graduation-gate)
+      shift
+      blockchain_bootstrap_governance_graduation_gate "$@"
+      ;;
+    roadmap-non-blockchain-actionable-run)
+      shift
+      roadmap_non_blockchain_actionable_run "$@"
+      ;;
+    roadmap-blockchain-actionable-run)
+      shift
+      roadmap_blockchain_actionable_run "$@"
+      ;;
+    roadmap-next-actions-run)
+      shift
+      roadmap_next_actions_run "$@"
+      ;;
+    ci-phase0)
+      shift
+      ci_phase0 "$@"
+      ;;
+    ci-phase1-resilience)
+      shift
+      ci_phase1_resilience "$@"
+      ;;
+    phase1-resilience-handoff-check)
+      shift
+      phase1_resilience_handoff_check "$@"
+      ;;
+    phase1-resilience-handoff-run)
+      shift
+      phase1_resilience_handoff_run "$@"
+      ;;
+    ci-phase2-linux-prod-candidate)
+      shift
+      ci_phase2_linux_prod_candidate "$@"
+      ;;
+    phase2-linux-prod-candidate-check)
+      shift
+      phase2_linux_prod_candidate_check "$@"
+      ;;
+    phase2-linux-prod-candidate-run)
+      shift
+      phase2_linux_prod_candidate_run "$@"
+      ;;
+    phase2-linux-prod-candidate-signoff)
+      shift
+      phase2_linux_prod_candidate_signoff "$@"
+      ;;
+    phase2-linux-prod-candidate-handoff-check)
+      shift
+      phase2_linux_prod_candidate_handoff_check "$@"
+      ;;
+    phase2-linux-prod-candidate-handoff-run)
+      shift
+      phase2_linux_prod_candidate_handoff_run "$@"
+      ;;
+    ci-phase3-windows-client-beta)
+      shift
+      ci_phase3_windows_client_beta "$@"
+      ;;
+    phase3-windows-client-beta-check)
+      shift
+      phase3_windows_client_beta_check "$@"
+      ;;
+    phase3-windows-client-beta-run)
+      shift
+      phase3_windows_client_beta_run "$@"
+      ;;
+    phase3-windows-client-beta-handoff-check)
+      shift
+      phase3_windows_client_beta_handoff_check "$@"
+      ;;
+    phase3-windows-client-beta-handoff-run)
+      shift
+      phase3_windows_client_beta_handoff_run "$@"
+      ;;
+    ci-phase4-windows-full-parity)
+      shift
+      ci_phase4_windows_full_parity "$@"
+      ;;
+    phase4-windows-full-parity-check)
+      shift
+      phase4_windows_full_parity_check "$@"
+      ;;
+    phase4-windows-full-parity-run)
+      shift
+      phase4_windows_full_parity_run "$@"
+      ;;
+    phase4-windows-full-parity-handoff-check)
+      shift
+      phase4_windows_full_parity_handoff_check "$@"
+      ;;
+    phase4-windows-full-parity-handoff-run)
+      shift
+      phase4_windows_full_parity_handoff_run "$@"
+      ;;
+    ci-phase5-settlement-layer)
+      shift
+      ci_phase5_settlement_layer "$@"
+      ;;
+    phase5-settlement-layer-check)
+      shift
+      phase5_settlement_layer_check "$@"
+      ;;
+    phase5-settlement-layer-run)
+      shift
+      phase5_settlement_layer_run "$@"
+      ;;
+    phase5-settlement-layer-handoff-check)
+      shift
+      phase5_settlement_layer_handoff_check "$@"
+      ;;
+    phase5-settlement-layer-handoff-run)
+      shift
+      phase5_settlement_layer_handoff_run "$@"
+      ;;
+    phase5-settlement-layer-summary-report)
+      shift
+      phase5_settlement_layer_summary_report "$@"
+      ;;
+    issuer-sponsor-api-live-smoke)
+      shift
+      issuer_sponsor_api_live_smoke "$@"
+      ;;
+    issuer-sponsor-vpn-session-live-smoke)
+      shift
+      issuer_sponsor_vpn_session_live_smoke "$@"
+      ;;
+    issuer-settlement-status-live-smoke)
+      shift
+      issuer_settlement_status_live_smoke "$@"
+      ;;
+    ci-phase6-cosmos-l1-build-testnet)
+      shift
+      ci_phase6_cosmos_l1_build_testnet "$@"
+      ;;
+    ci-phase6-cosmos-l1-contracts)
+      shift
+      ci_phase6_cosmos_l1_contracts "$@"
+      ;;
+    phase6-cosmos-l1-build-testnet-check)
+      shift
+      phase6_cosmos_l1_build_testnet_check "$@"
+      ;;
+    phase6-cosmos-l1-build-testnet-run)
+      shift
+      phase6_cosmos_l1_build_testnet_run "$@"
+      ;;
+    phase6-cosmos-l1-build-testnet-handoff-check)
+      shift
+      phase6_cosmos_l1_build_testnet_handoff_check "$@"
+      ;;
+    phase6-cosmos-l1-build-testnet-handoff-run)
+      shift
+      phase6_cosmos_l1_build_testnet_handoff_run "$@"
+      ;;
+    phase6-cosmos-l1-build-testnet-suite)
+      shift
+      phase6_cosmos_l1_build_testnet_suite "$@"
+      ;;
+    phase6-cosmos-l1-summary-report)
+      shift
+      phase6_cosmos_l1_summary_report "$@"
+      ;;
+    ci-phase7-mainnet-cutover)
+      shift
+      ci_phase7_mainnet_cutover "$@"
+      ;;
+    phase7-mainnet-cutover-check)
+      shift
+      phase7_mainnet_cutover_check "$@"
+      ;;
+    phase7-mainnet-cutover-run)
+      shift
+      phase7_mainnet_cutover_run "$@"
+      ;;
+    phase7-mainnet-cutover-handoff-check)
+      shift
+      phase7_mainnet_cutover_handoff_check "$@"
+      ;;
+    phase7-mainnet-cutover-handoff-run)
+      shift
+      phase7_mainnet_cutover_handoff_run "$@"
+      ;;
+    phase7-mainnet-cutover-summary-report)
+      shift
+      phase7_mainnet_cutover_summary_report "$@"
       ;;
     manual-validation-status)
       shift

@@ -187,6 +187,41 @@ if [[ "$(jq -r '.status' "$ROLLBACK_SUMMARY")" != "ok" ]]; then
   exit 1
 fi
 
+echo "[prod-key-rotation] rollback blocks unsafe manifest paths"
+UNSAFE_BACKUP="$TMP_DIR/unsafe_backup"
+UNSAFE_SUMMARY="$TMP_DIR/unsafe_summary.json"
+mkdir -p "$UNSAFE_BACKUP/snapshot"
+cat >"$UNSAFE_BACKUP/backup_manifest.json" <<'EOF_UNSAFE_MANIFEST'
+[
+  {"path":"../escape","exists":true}
+]
+EOF_UNSAFE_MANIFEST
+set +e
+CAPTURE_FILE="$CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+./scripts/prod_key_rotation_runbook.sh \
+  --rollback-from "$UNSAFE_BACKUP" \
+  --mode authority \
+  --restart-after-rollback 0 \
+  --summary-json "$UNSAFE_SUMMARY" >/tmp/integration_prod_key_rotation_runbook_unsafe.log 2>&1
+unsafe_rc=$?
+set -e
+if [[ "$unsafe_rc" -eq 0 ]]; then
+  echo "prod key-rotation rollback accepted unsafe manifest path unexpectedly"
+  cat /tmp/integration_prod_key_rotation_runbook_unsafe.log
+  exit 1
+fi
+if ! rg -q 'rollback refused: manifest path contains invalid segment' /tmp/integration_prod_key_rotation_runbook_unsafe.log; then
+  echo "prod key-rotation rollback did not report unsafe manifest path refusal"
+  cat /tmp/integration_prod_key_rotation_runbook_unsafe.log
+  exit 1
+fi
+if [[ "$(jq -r '.status' "$UNSAFE_SUMMARY")" != "fail" ]]; then
+  echo "prod key-rotation unsafe rollback summary should be fail"
+  cat "$UNSAFE_SUMMARY"
+  exit 1
+fi
+
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail

@@ -8,6 +8,10 @@ mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 LOAD_CHAOS_TAG="${LOAD_CHAOS_TAG:-base}"
+LOAD_CHAOS_TAG_SAFE="$(printf '%s' "$LOAD_CHAOS_TAG" | tr -cd 'A-Za-z0-9._-')"
+if [[ -z "$LOAD_CHAOS_TAG_SAFE" ]]; then
+  LOAD_CHAOS_TAG_SAFE="base"
+fi
 CORE_TIMEOUT_SEC="${CORE_TIMEOUT_SEC:-90}"
 CLIENT_TIMEOUT_SEC="${CLIENT_TIMEOUT_SEC:-10}"
 MAIN_DIR_PORT="${MAIN_DIR_PORT:-8781}"
@@ -31,14 +35,50 @@ MAIN_OPERATOR_ID="${MAIN_OPERATOR_ID:-op-main}"
 PEER_OPERATOR_ID="${PEER_OPERATOR_ID:-op-peer-${LOAD_COUNTRY_CODE,,}}"
 PEER_SYNC_SEC="${PEER_SYNC_SEC:-1}"
 
-CORE_LOG="/tmp/load_chaos_core_${LOAD_CHAOS_TAG}.log"
-PEER_LOG="/tmp/load_chaos_peer_${LOAD_CHAOS_TAG}.log"
-MAIN_LOG="/tmp/load_chaos_main_${LOAD_CHAOS_TAG}.log"
-RESPONSES_LOG="/tmp/load_chaos_responses_${LOAD_CHAOS_TAG}.log"
-PAYLOAD_FILE="/tmp/load_chaos_path_open_${LOAD_CHAOS_TAG}.json"
-CLIENT_DOWN_LOG="/tmp/load_chaos_client_down_${LOAD_CHAOS_TAG}.log"
-PEER_RESTART_LOG="/tmp/load_chaos_peer_restart_${LOAD_CHAOS_TAG}.log"
-CLIENT_RECOVER_LOG="/tmp/load_chaos_client_recover_${LOAD_CHAOS_TAG}.log"
+make_temp_file() {
+  mktemp "$1"
+}
+
+make_private_temp_file() {
+  local old_umask
+  local file_path
+  old_umask="$(umask)"
+  umask 077
+  file_path="$(mktemp "$1")"
+  umask "$old_umask"
+  printf '%s\n' "$file_path"
+}
+
+redact_token_json() {
+  local payload="$1"
+  if command -v jq >/dev/null 2>&1 && printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$payload" | jq -c '
+      if type == "object" then
+        (if has("token") then .token = "[redacted]" else . end)
+        | (if has("private_key") then .private_key = "[redacted]" else . end)
+        | (if has("credential") then .credential = "[redacted]" else . end)
+      else
+        .
+      end
+    '
+    return
+  fi
+  printf '%s\n' "$payload" | sed -E \
+    -e 's/"token":"[^"]*"/"token":"[redacted]"/g' \
+    -e 's/"private_key":"[^"]*"/"private_key":"[redacted]"/g' \
+    -e 's/"credential":"[^"]*"/"credential":"[redacted]"/g'
+}
+
+CORE_LOG="$(make_temp_file "/tmp/load_chaos_core_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+PEER_LOG="$(make_temp_file "/tmp/load_chaos_peer_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+MAIN_LOG="$(make_temp_file "/tmp/load_chaos_main_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+RESPONSES_LOG="$(make_temp_file "/tmp/load_chaos_responses_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+PAYLOAD_FILE="$(make_private_temp_file "/tmp/load_chaos_path_open_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.json")"
+CLIENT_DOWN_LOG="$(make_temp_file "/tmp/load_chaos_client_down_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+PEER_RESTART_LOG="$(make_temp_file "/tmp/load_chaos_peer_restart_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+CLIENT_RECOVER_LOG="$(make_temp_file "/tmp/load_chaos_client_recover_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+POP_PRIV_FILE=""
+TOKEN_FILE=""
 
 ENTRY_OPEN_RPS="$ENTRY_OPEN_RPS" \
 ENTRY_PUZZLE_DIFFICULTY="$ENTRY_PUZZLE_DIFFICULTY" \
@@ -92,6 +132,21 @@ main_pid=$!
 
 cleanup() {
   kill "$core_pid" "$peer_pid" "$main_pid" >/dev/null 2>&1 || true
+  if [[ -n "$POP_PRIV_FILE" ]]; then
+    rm -f "$POP_PRIV_FILE"
+  fi
+  if [[ -n "$TOKEN_FILE" ]]; then
+    rm -f "$TOKEN_FILE"
+  fi
+  rm -f \
+    "$CORE_LOG" \
+    "$PEER_LOG" \
+    "$MAIN_LOG" \
+    "$RESPONSES_LOG" \
+    "$PAYLOAD_FILE" \
+    "$CLIENT_DOWN_LOG" \
+    "$PEER_RESTART_LOG" \
+    "$CLIENT_RECOVER_LOG"
 }
 trap cleanup EXIT
 
@@ -116,7 +171,7 @@ pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
   echo "failed to generate token PoP keypair"
-  echo "$pop_json"
+  redact_token_json "$pop_json"
   exit 1
 fi
 
@@ -125,16 +180,22 @@ token_json=$(curl -sS -X POST "http://127.0.0.1:${CORE_ISSUER_PORT}/v1/token" -H
 token=$(echo "$token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 if [[ -z "$token" ]]; then
   echo "failed to issue token for load segment"
-  echo "$token_json"
+  redact_token_json "$token_json"
   cat "$CORE_LOG"
   exit 1
 fi
 
 client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 token_proof_nonce="$(date +%s%N)-load-chaos"
+POP_PRIV_FILE="$(make_private_temp_file "/tmp/load_chaos_tokenpop_private_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.key")"
+printf '%s' "$pop_priv" >"$POP_PRIV_FILE"
+chmod 600 "$POP_PRIV_FILE"
+TOKEN_FILE="$(make_private_temp_file "/tmp/load_chaos_token_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.jwt")"
+printf '%s' "$token" >"$TOKEN_FILE"
+chmod 600 "$TOKEN_FILE"
 token_proof=$(go run ./cmd/tokenpop sign \
-  --private-key "$pop_priv" \
-  --token "$token" \
+  --private-key-file "$POP_PRIV_FILE" \
+  --token-file "$TOKEN_FILE" \
   --exit-id "exit-local-1" \
   --proof-nonce "$token_proof_nonce" \
   --client-inner-pub "$client_pub" \
@@ -155,12 +216,23 @@ export RESPONSES_LOG
 export PAYLOAD_FILE
 export CORE_ENTRY_PORT
 
-seq "$LOAD_OPEN_REQUESTS" | xargs -P "$LOAD_OPEN_PARALLEL" -I{} sh -c '
+send_path_open_once() {
   curl -sS -X POST "http://127.0.0.1:${CORE_ENTRY_PORT}/v1/path/open" \
     -H "Content-Type: application/json" \
-    --data @"${PAYLOAD_FILE}" >>"${RESPONSES_LOG}"
+    --data @"${PAYLOAD_FILE}" >>"${RESPONSES_LOG}" || true
   printf "\n" >>"${RESPONSES_LOG}"
-'
+}
+
+active_jobs=0
+for _request_idx in $(seq "$LOAD_OPEN_REQUESTS"); do
+  send_path_open_once &
+  active_jobs=$((active_jobs + 1))
+  if (( active_jobs >= LOAD_OPEN_PARALLEL )); then
+    wait -n || true
+    active_jobs=$((active_jobs - 1))
+  fi
+done
+wait || true
 
 challenge_count=$(rg -c 'challenge-required' "$RESPONSES_LOG" || true)
 blocked_count=$(rg -c 'source-temporarily-blocked|entry-overloaded' "$RESPONSES_LOG" || true)

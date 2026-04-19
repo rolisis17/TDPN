@@ -20,7 +20,7 @@ This freezes a practical beta profile that is strict enough for operator separat
 ./scripts/easy_node.sh server-up \
   --public-host A_PUBLIC_IP_OR_DNS \
   --operator-id op-a \
-  --peer-directories http://B_PUBLIC_IP_OR_DNS:8081 \
+  --peer-directories https://B_PUBLIC_IP_OR_DNS:8081 \
   --client-allowlist 1 \
   --allow-anon-cred 0 \
   --beta-profile 1
@@ -32,7 +32,7 @@ This freezes a practical beta profile that is strict enough for operator separat
 ./scripts/easy_node.sh server-up \
   --public-host B_PUBLIC_IP_OR_DNS \
   --operator-id op-b \
-  --peer-directories http://A_PUBLIC_IP_OR_DNS:8081 \
+  --peer-directories https://A_PUBLIC_IP_OR_DNS:8081 \
   --client-allowlist 1 \
   --allow-anon-cred 0 \
   --beta-profile 1
@@ -44,15 +44,15 @@ Run on machine A and machine B issuers:
 
 ```bash
 ./scripts/beta_subject_upsert.sh \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --admin-token "<ISSUER_ADMIN_TOKEN_FROM_SERVER_UP>" \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --admin-token-file "<ISSUER_ADMIN_TOKEN_FILE>" \
   --subject client-alice \
   --kind client \
   --tier 1
 
 ./scripts/beta_subject_upsert.sh \
-  --issuer-url http://B_PUBLIC_IP_OR_DNS:8082 \
-  --admin-token "<ISSUER_ADMIN_TOKEN_FROM_SERVER_UP>" \
+  --issuer-url https://B_PUBLIC_IP_OR_DNS:8082 \
+  --admin-token-file "<ISSUER_ADMIN_TOKEN_FILE>" \
   --subject client-alice \
   --kind client \
   --tier 1
@@ -76,8 +76,8 @@ client-bob,client,1,0,0,0
 EOF
 
 ./scripts/beta_subject_batch_upsert.sh \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --admin-token "<ISSUER_ADMIN_TOKEN_FROM_SERVER_UP>" \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --admin-token-file "<ISSUER_ADMIN_TOKEN_FILE>" \
   --csv invited_clients.csv
 ```
 
@@ -93,7 +93,7 @@ Machine B:
 
 ```bash
 ./scripts/easy_node.sh machine-b-test \
-  --peer-directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --peer-directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
   --public-host B_PUBLIC_IP_OR_DNS
 ```
 
@@ -101,11 +101,11 @@ Machine B:
 
 ```bash
 ./scripts/easy_node.sh machine-c-test \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --subject client-alice \
   --min-sources 2 \
   --min-operators 2 \
@@ -121,11 +121,11 @@ Expected signal:
 
 ```bash
 ./scripts/easy_node.sh three-machine-soak \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --rounds 12 \
   --pause-sec 5 \
   --beta-profile 1 \
@@ -136,14 +136,14 @@ Optional fault injection:
 
 ```bash
 ./scripts/easy_node.sh three-machine-soak \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --rounds 10 \
   --fault-every 3 \
-  --fault-command "ssh user@B_PUBLIC_IP_OR_DNS 'cd /path/to/repo && ./scripts/easy_node.sh server-up --public-host B_PUBLIC_IP_OR_DNS --operator-id op-b --peer-directories http://A_PUBLIC_IP_OR_DNS:8081 --beta-profile 1'" \
+  --fault-command "ssh user@B_PUBLIC_IP_OR_DNS 'cd /path/to/repo && ./scripts/easy_node.sh server-up --public-host B_PUBLIC_IP_OR_DNS --operator-id op-b --peer-directories https://A_PUBLIC_IP_OR_DNS:8081 --beta-profile 1'" \
   --continue-on-fail 1 \
   --beta-profile 1 \
   --distinct-operators 1
@@ -155,11 +155,11 @@ This runs one strict validation pass, then soak rounds, then collects endpoint s
 
 ```bash
 ./scripts/beta_pilot_runbook.sh \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --subject client-alice \
   --rounds 10 \
   --pause-sec 5 \
@@ -170,7 +170,7 @@ Optional path diversity tuning on machine C:
 
 ```bash
 export CLIENT_ENTRY_ROTATION_SEC=15
-./scripts/beta_pilot_runbook.sh --bootstrap-directory http://KNOWN_SERVER_IP:8081 --subject client-alice --beta-profile 1
+./scripts/beta_pilot_runbook.sh --bootstrap-directory https://KNOWN_SERVER_IP:8081 --subject client-alice --beta-profile 1
 ```
 
 ## 7) One-bootstrap mode
@@ -179,12 +179,12 @@ If machine C only knows one server IP, use bootstrap discovery:
 
 ```bash
 ./scripts/easy_node.sh discover-hosts \
-  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --bootstrap-directory https://KNOWN_SERVER_IP:8081 \
   --wait-sec 20 \
   --write-config 1
 
 ./scripts/easy_node.sh machine-c-test \
-  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --bootstrap-directory https://KNOWN_SERVER_IP:8081 \
   --discovery-wait-sec 20 \
   --beta-profile 1 \
   --distinct-operators 1

@@ -33,7 +33,7 @@ func TestResolveExitRouteFromDirectory(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 
 	s := &Service{
@@ -50,7 +50,7 @@ func TestResolveExitRouteFromDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve route failed: %v", err)
 	}
-	if route.controlURL != "http://10.0.0.20:8084" {
+	if route.controlURL != "https://10.0.0.20:8084" {
 		t.Fatalf("unexpected control url: %s", route.controlURL)
 	}
 	if route.dataAddr != "10.0.0.20:51821" {
@@ -137,7 +137,7 @@ func TestResolveExitRouteQuorumFailure(t *testing.T) {
 	d2 := "http://d2.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, d1, []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 	// d2 intentionally missing to simulate failed source.
 
@@ -161,10 +161,10 @@ func TestResolveExitRouteOperatorQuorumFailure(t *testing.T) {
 	d2 := "http://d2.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixtureWithOperator(t, handlers, d1, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 	addDirectoryFixtureWithOperator(t, handlers, d2, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 
 	s := &Service{
@@ -188,10 +188,10 @@ func TestResolveExitRouteVoteThreshold(t *testing.T) {
 	d2 := "http://d2.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, d1, []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 	addDirectoryFixture(t, handlers, d2, []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.21:51821", ControlURL: "http://10.0.0.21:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.21:51821", ControlURL: "https://10.0.0.21:8084"},
 	})
 
 	s := &Service{
@@ -214,10 +214,10 @@ func TestResolveExitRouteVoteThresholdDedupByOperator(t *testing.T) {
 	d2 := "http://d2.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixtureWithOperator(t, handlers, d1, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 	addDirectoryFixtureWithOperator(t, handlers, d2, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 
 	s := &Service{
@@ -240,7 +240,7 @@ func TestResolveExitRouteStrictTrustRejectsUnknownKey(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "http://10.0.0.20:8084"},
+		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
 	})
 
 	trustFile := filepath.Join(t.TempDir(), "trusted_keys.txt")
@@ -270,6 +270,64 @@ func TestResolveExitRouteStrictTrustRejectsUnknownKey(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteStrictRejectsLoopbackControlURL(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", Endpoint: "127.0.0.1:51821", ControlURL: "http://127.0.0.1:8084"},
+	})
+
+	s := &Service{
+		exitControlURL:      "http://127.0.0.1:8084",
+		exitDataAddr:        "127.0.0.1:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		betaStrict:          true,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	if _, err := s.resolveExitRoute(context.Background(), "exit-a"); err == nil {
+		t.Fatalf("expected strict mode to reject loopback exit control_url")
+	}
+}
+
+func TestEnforceDirectoryTrustSetRejectsAdditionalUntrustedKeys(t *testing.T) {
+	keyA, _, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen A: %v", err)
+	}
+	keyB, _, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen B: %v", err)
+	}
+	keyAB64 := base64.RawURLEncoding.EncodeToString(keyA)
+	keyBB64 := base64.RawURLEncoding.EncodeToString(keyB)
+	trustFile := filepath.Join(t.TempDir(), "trusted_keys.txt")
+	if err := os.WriteFile(trustFile, []byte(keyAB64+"\n"), 0o644); err != nil {
+		t.Fatalf("write trust file: %v", err)
+	}
+	s := &Service{
+		directoryTrustStrict: true,
+		directoryTrustTOFU:   false,
+		directoryTrustFile:   trustFile,
+	}
+	if err := s.enforceDirectoryTrustSet([]string{keyAB64, keyBB64}); err == nil {
+		t.Fatalf("expected strict trust to reject additional untrusted key")
+	}
+	trusted, err := loadTrustedKeys(trustFile)
+	if err != nil {
+		t.Fatalf("load trusted keys: %v", err)
+	}
+	if _, ok := trusted[keyAB64]; !ok {
+		t.Fatalf("expected original trusted key to remain present")
+	}
+	if _, ok := trusted[keyBB64]; ok {
+		t.Fatalf("expected additional key to remain untrusted")
+	}
+}
+
 func addDirectoryFixture(t *testing.T, handlers map[string]func(*http.Request) (*http.Response, error), durl string, relays []proto.RelayDescriptor) {
 	addDirectoryFixtureWithOperator(t, handlers, durl, "", relays)
 }
@@ -294,6 +352,9 @@ func addDirectoryFixtureWithOperator(t *testing.T, handlers map[string]func(*htt
 
 func signDescriptor(t *testing.T, d proto.RelayDescriptor, priv ed25519.PrivateKey) proto.RelayDescriptor {
 	t.Helper()
+	if d.ValidUntil.IsZero() {
+		d.ValidUntil = time.Now().Add(time.Minute)
+	}
 	d.Signature = ""
 	payload, err := json.Marshal(d)
 	if err != nil {

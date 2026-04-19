@@ -2,7 +2,9 @@ package module
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/keeper"
@@ -306,6 +308,139 @@ func TestMsgServerDelegateCreditMissingAuthorizationPropagation(t *testing.T) {
 	}
 	if !errors.Is(err, ErrAuthorizationNotFound) {
 		t.Fatalf("expected ErrAuthorizationNotFound, got %v", err)
+	}
+}
+
+func TestMsgServerDelegateCreditLinkageMismatchPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	_, err := server.AuthorizeSponsor(AuthorizeSponsorRequest{
+		Authorization: types.SponsorAuthorization{
+			AuthorizationID: "auth-linkage",
+			SponsorID:       "sponsor-linkage",
+			AppID:           "app-linkage",
+			MaxCredits:      50,
+		},
+	})
+	if err != nil {
+		t.Fatalf("authorize failed: %v", err)
+	}
+
+	_, err = server.DelegateCredit(DelegateCreditRequest{
+		Delegation: types.DelegatedSessionCredit{
+			ReservationID:   "res-linkage",
+			AuthorizationID: "auth-linkage",
+			SponsorID:       "sponsor-other",
+			AppID:           "app-linkage",
+			SessionID:       "sess-linkage",
+			Credits:         10,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected linkage mismatch error")
+	}
+	if !errors.Is(err, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "linkage does not match") {
+		t.Fatalf("expected linkage mismatch details in error, got %v", err)
+	}
+}
+
+func TestMsgServerDelegateCreditExpiredAuthorizationPropagation(t *testing.T) {
+	t.Parallel()
+
+	nowUnix := time.Now().Unix()
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	_, err := server.AuthorizeSponsor(AuthorizeSponsorRequest{
+		Authorization: types.SponsorAuthorization{
+			AuthorizationID: "auth-expired",
+			SponsorID:       "sponsor-expired",
+			AppID:           "app-expired",
+			MaxCredits:      50,
+			ExpiresAtUnix:   nowUnix - 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("authorize failed: %v", err)
+	}
+
+	_, err = server.DelegateCredit(DelegateCreditRequest{
+		Delegation: types.DelegatedSessionCredit{
+			ReservationID:   "res-expired",
+			AuthorizationID: "auth-expired",
+			SponsorID:       "sponsor-expired",
+			AppID:           "app-expired",
+			SessionID:       "sess-expired",
+			Credits:         10,
+		},
+		CurrentTimeUnix: nowUnix,
+	})
+	if err == nil {
+		t.Fatal("expected expired authorization error")
+	}
+	if !errors.Is(err, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired details in error, got %v", err)
+	}
+}
+
+func TestMsgServerDelegateCreditMaxCreditsExceededPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	_, err := server.AuthorizeSponsor(AuthorizeSponsorRequest{
+		Authorization: types.SponsorAuthorization{
+			AuthorizationID: "auth-max",
+			SponsorID:       "sponsor-max",
+			AppID:           "app-max",
+			MaxCredits:      100,
+		},
+	})
+	if err != nil {
+		t.Fatalf("authorize failed: %v", err)
+	}
+
+	if _, err := server.DelegateCredit(DelegateCreditRequest{
+		Delegation: types.DelegatedSessionCredit{
+			ReservationID:   "res-max-1",
+			AuthorizationID: "auth-max",
+			SponsorID:       "sponsor-max",
+			AppID:           "app-max",
+			SessionID:       "sess-max-1",
+			Credits:         60,
+		},
+	}); err != nil {
+		t.Fatalf("first delegation failed: %v", err)
+	}
+
+	_, err = server.DelegateCredit(DelegateCreditRequest{
+		Delegation: types.DelegatedSessionCredit{
+			ReservationID:   "res-max-2",
+			AuthorizationID: "auth-max",
+			SponsorID:       "sponsor-max",
+			AppID:           "app-max",
+			SessionID:       "sess-max-2",
+			Credits:         41,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected max credits exceeded error")
+	}
+	if !errors.Is(err, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "max credits exceeded") {
+		t.Fatalf("expected max credits exceeded details in error, got %v", err)
 	}
 }
 

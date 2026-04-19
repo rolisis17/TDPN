@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+SCRIPT_UNDER_TEST="${DESKTOP_RELEASE_BUNDLE_SCRIPT_UNDER_TEST:-$ROOT_DIR/scripts/windows/desktop_release_bundle.ps1}"
+if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
+  echo "desktop release bundle guardrails failed: missing script: $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+
+if command -v powershell >/dev/null 2>&1; then
+  POWERSHELL_BIN="powershell"
+elif command -v pwsh >/dev/null 2>&1; then
+  POWERSHELL_BIN="pwsh"
+elif command -v powershell.exe >/dev/null 2>&1; then
+  POWERSHELL_BIN="powershell.exe"
+else
+  echo "desktop release bundle guardrails failed: missing powershell/pwsh/powershell.exe"
+  exit 2
+fi
+
+POWERSHELL_USES_WINDOWS_PATHS="0"
+if [[ "$POWERSHELL_BIN" == *.exe ]]; then
+  POWERSHELL_USES_WINDOWS_PATHS="1"
+fi
+
+to_powershell_path() {
+  local path="$1"
+  if [[ "$POWERSHELL_USES_WINDOWS_PATHS" == "1" ]] && command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$path"
+    return
+  fi
+  printf '%s' "$path"
+}
+
+TMP_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+SCRIPT_UNDER_TEST_PS="$(to_powershell_path "$SCRIPT_UNDER_TEST")"
+
+run_expect_pass() {
+  local name="$1"
+  shift
+  local log_path="$TMP_DIR/${name}.log"
+  if "$@" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "desktop release bundle guardrails failed: expected pass for $name"
+  cat "$log_path"
+  exit 1
+}
+
+run_expect_fail() {
+  local name="$1"
+  local expected_pattern="$2"
+  shift 2
+  local log_path="$TMP_DIR/${name}.log"
+  if "$@" >"$log_path" 2>&1; then
+    echo "desktop release bundle guardrails failed: expected failure for $name"
+    cat "$log_path"
+    exit 1
+  fi
+  if ! grep -F -- "$expected_pattern" "$log_path" >/dev/null 2>&1; then
+    echo "desktop release bundle guardrails failed: missing expected failure text for $name"
+    echo "expected pattern: $expected_pattern"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
+echo "[desktop-release-bundle-guardrails] https update feed passes"
+run_expect_pass \
+  "https_feed_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -UpdateFeedUrl "https://updates.example.invalid/tdpn/beta.json" \
+    -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] localhost http update feed passes"
+run_expect_pass \
+  "localhost_http_feed_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -UpdateFeedUrl "http://localhost:18080/tdpn/beta.json" \
+    -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] non-local http update feed fails"
+run_expect_fail \
+  "remote_http_feed_fail" \
+  "non-local update feeds must use https" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -UpdateFeedUrl "http://example.com/tdpn/beta.json" \
+    -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] unsupported update feed scheme fails"
+run_expect_fail \
+  "unsupported_scheme_fail" \
+  "allowed schemes: http, https" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -UpdateFeedUrl "ftp://updates.example.invalid/tdpn/beta.json" \
+    -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] signing password without cert path fails"
+run_expect_fail \
+  "password_without_cert_fail" \
+  "-SigningCertPassword requires -SigningCertPath." \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -SigningCertPassword "placeholder" \
+    -SkipBuild
+
+MISSING_CERT_PATH="$TMP_DIR/nonexistent-signing.pfx"
+MISSING_CERT_PATH_PS="$(to_powershell_path "$MISSING_CERT_PATH")"
+
+echo "[desktop-release-bundle-guardrails] missing signing cert path fails"
+run_expect_fail \
+  "missing_cert_path_fail" \
+  "signing certificate file was not found" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -SigningCertPath "$MISSING_CERT_PATH_PS" \
+    -SkipBuild
+
+DUMMY_CERT_PATH="$TMP_DIR/dummy-signing.pfx"
+printf '%s\n' "dummy" >"$DUMMY_CERT_PATH"
+DUMMY_CERT_PATH_PS="$(to_powershell_path "$DUMMY_CERT_PATH")"
+
+echo "[desktop-release-bundle-guardrails] existing signing cert placeholder path passes"
+run_expect_pass \
+  "existing_cert_path_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -SigningCertPath "$DUMMY_CERT_PATH_PS" \
+    -SigningCertPassword "placeholder" \
+    -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] scoped environment restore is preserved in-process"
+run_expect_pass \
+  "scoped_env_restore_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-channel'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }"
+
+echo "desktop release bundle guardrails integration check ok"

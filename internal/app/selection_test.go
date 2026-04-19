@@ -377,6 +377,60 @@ func TestRankRelayPairsDistinctCountriesRequiresMetadata(t *testing.T) {
 	}
 }
 
+func TestRankRelayPairsThreeHopPrefersPairsWithMiddleRelay(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		pathProfile:        "3hop",
+		preferMiddleRelay:  true,
+		requireDistinctOps: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
+		{RelayID: "entry-b", Role: "entry", OperatorID: "op-b"},
+		{RelayID: "exit-c", Role: "exit", OperatorID: "op-c"},
+		{RelayID: "middle-a", Role: "entry", OperatorID: "op-a", HopRoles: []string{"middle"}},
+		{RelayID: "middle-d", Role: "entry", OperatorID: "op-d", HopRoles: []string{"middle"}},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) == 0 {
+		t.Fatalf("expected 3hop pairs")
+	}
+	if !pairs[0].hasMiddle {
+		t.Fatalf("expected first ranked pair to include a middle relay")
+	}
+	if pairs[0].middle.RelayID == "" {
+		t.Fatalf("expected selected middle relay id")
+	}
+	if strings.TrimSpace(pairs[0].middle.OperatorID) == strings.TrimSpace(pairs[0].entry.OperatorID) {
+		t.Fatalf("expected middle operator to differ from entry operator for preferred pair")
+	}
+}
+
+func TestRankRelayPairsThreeHopRequireMiddleRelay(t *testing.T) {
+	c := &Client{
+		entryURL:                 "http://fallback-entry.local",
+		exitControlURL:           "http://fallback-exit.local",
+		healthCheckEnabled:       false,
+		pathProfile:              "3hop",
+		preferMiddleRelay:        true,
+		requireMiddleRelay:       true,
+		requireDistinctOps:       true,
+		requireDistinctCountries: false,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
+		{RelayID: "exit-b", Role: "exit", OperatorID: "op-b"},
+		// middle candidate exists but collides with entry operator under distinct-ops
+		{RelayID: "middle-a", Role: "entry", OperatorID: "op-a", HopRoles: []string{"middle"}},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 0 {
+		t.Fatalf("expected no pairs when strict middle relay requirement cannot be met, got %d", len(pairs))
+	}
+}
+
 func TestRankRelayPairsAppliesStickyPairPreference(t *testing.T) {
 	c := &Client{
 		entryURL:           "http://fallback-entry.local",

@@ -128,6 +128,12 @@ scripts\windows\wsl2_easy.cmd bootstrap
 scripts\windows\wsl2_easy.cmd run
 ```
 
+Desktop/local API security quick notes:
+- prefer literal loopback IPs (`127.0.0.1` / `::1`) for any `http://` local control/bootstrap URLs (avoid `localhost` hostname ambiguity)
+- when opting into remote desktop daemon URLs (`TDPN_LOCAL_API_ALLOW_REMOTE=1`), require `https://` and a non-empty `TDPN_LOCAL_API_AUTH_BEARER`
+- keep local API bearer tokens and invite keys out of CLI arguments and logs; use short-lived session env vars
+- see `docs/local-control-api.md` and `apps/desktop/README.md` for current desktop hardening gates and mutation/auth requirements
+
 Script-only easy mode:
 
 ```bash
@@ -492,7 +498,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `./scripts/easy_node.sh runtime-doctor --show-json 1` (quick runtime hygiene check before real-host reruns; if the reported blocker is remediable, the readiness wrappers now point at `sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1` as the immediate next action)
 - `sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1` (safe recorded cleanup pass before repeating real-host validation; wraps `runtime-fix`, keeps a durable summary/log artifact, records the runtime-hygiene result, and refreshes the shared manual-validation readiness report through the underlying fix flow)
 - `./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1` (one-command recorded dockerized 3-machine rehearsal for one-host control-plane confidence before real machine-C reruns)
-- `sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country` (one-command real machine-C smoke run with automatic receipt recording, public `balanced` profile defaults, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic incident snapshot capture on failed runs, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
+- `sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory https://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1` (one-command real machine-C smoke run with automatic receipt recording, public `balanced` profile defaults, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic incident snapshot capture on failed runs, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report; keep third-party IP/country lookup URLs opt-in)
 - `sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1` (one-command true 3-machine production signoff run with automatic receipt recording, optional pre-run hygiene repair, saved runtime doctor/fix artifacts, automatic attachment of those runtime artifacts into failed incident snapshots, automatic refresh of the shared manual-validation readiness report, refreshed readiness-report artifacts attached back into the failed incident bundle, and final receipt artifacts that include that refreshed readiness report)
 - `docs/product-roadmap.md` (beta -> v1 -> v2 delivery path)
 
@@ -538,13 +544,13 @@ Optional env vars:
 - `DIRECTORY_KEY_ROTATE_SEC` (default `0`; when `>0`, auto-rotate directory signing key on interval)
 - `DIRECTORY_KEY_HISTORY` (default `3`; number of previous directory pubkeys retained during rotation)
 - `DIRECTORY_TRUST_STRICT` (`1` enforces trusted directory key pinning)
-- `DIRECTORY_TRUST_TOFU` (`1` default, allow trust-on-first-use when strict and trust file empty)
+- `DIRECTORY_TRUST_TOFU` (`0` default, opt-in trust-on-first-use when strict and trust file empty)
 - `DIRECTORY_TRUSTED_KEYS_FILE` (default `data/trusted_directory_keys.txt`)
 - `ENTRY_DIRECTORY_MIN_SOURCES` (fallback `DIRECTORY_MIN_SOURCES`; minimum successful directory sources for entry exit-route resolution)
 - `ENTRY_DIRECTORY_MIN_OPERATORS` (fallback `DIRECTORY_MIN_OPERATORS`; minimum distinct directory operators for entry route resolution)
 - `ENTRY_DIRECTORY_MIN_RELAY_VOTES` (fallback `DIRECTORY_MIN_RELAY_VOTES`; minimum votes for selected exit route)
 - `ENTRY_DIRECTORY_TRUST_STRICT` (fallback `DIRECTORY_TRUST_STRICT`; strict trusted-key mode for entry route discovery)
-- `ENTRY_DIRECTORY_TRUST_TOFU` (fallback `DIRECTORY_TRUST_TOFU`; TOFU bootstrap for strict entry trust mode)
+- `ENTRY_DIRECTORY_TRUST_TOFU` (fallback `DIRECTORY_TRUST_TOFU`; opt-in TOFU bootstrap for strict entry trust mode)
 - `ENTRY_DIRECTORY_TRUSTED_KEYS_FILE` (fallback `DIRECTORY_TRUSTED_KEYS_FILE`; default `data/entry_trusted_directory_keys.txt`)
 - `ENTRY_LIVE_WG_MODE` (`1` enables entry-side live WireGuard plausibility checks for `wireguard-udp` opaque sessions)
 - `ENTRY_BETA_STRICT` (`1` enables strict beta checks only for entry role)
@@ -645,6 +651,7 @@ Optional env vars:
 - `WGIOINJECT_INTERVAL_MS` (default `200`)
 - `WGIOINJECT_WG_LIKE_PCT` (default `80`, percentage of WG-like packets)
 - `ISSUER_ADMIN_TOKEN` (no default in compose/easy-mode prod; when token-admin auth is enabled it must be non-default and length>=16 for public bind/strict modes)
+- `ISSUER_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK` (default `0`; when `1` and `ISSUER_ADMIN_TOKEN` is empty, legacy `dev-admin-token` fallback is re-enabled for trusted lab compatibility)
 - `ISSUER_ADMIN_SIGNED_ALLOW_TOKEN_FALLBACK` (default `0`; when `ISSUER_ADMIN_REQUIRE_SIGNED=1`, token-admin fallback is denied unless explicitly enabled)
 - `ISSUER_SUBJECTS_FILE` (default `data/issuer_subjects.json`)
 - `ISSUER_REVOCATIONS_FILE` (default `data/issuer_revocations.json`)
@@ -685,11 +692,13 @@ Optional env vars:
 - `DIRECTORY_APPEAL_MAX_TTL_SEC` (default `604800`; maximum accepted appeal horizon from peer/issuer trust signals before capping)
 - `DIRECTORY_PEER_MAX_HOPS` (default `2`; loop-resistance hop cap for imported peer descriptors)
 - `DIRECTORY_PEER_TRUST_STRICT` (`1` enforces trusted key pinning for directory peers)
-- `DIRECTORY_PEER_TRUST_TOFU` (`1` default; allow trust-on-first-use for unknown peer keys in strict mode)
+- `DIRECTORY_PEER_TRUST_TOFU` (`0` default; opt-in trust-on-first-use for unknown peer keys in strict mode)
 - `DIRECTORY_PEER_TRUSTED_KEYS_FILE` (default `data/directory_peer_trusted_keys.txt`)
 - `DIRECTORY_ISSUER_TRUST_URLS` (comma-separated issuer URLs for directory trust-attestation ingestion)
 - `DIRECTORY_PROVIDER_ISSUER_URLS` (comma-separated issuer URLs accepted for provider-role token verification on provider relay upserts; defaults to issuer trust URLs)
+- `DIRECTORY_PROVIDER_ISSUER_PUBKEY_CACHE_SEC` (default `30`; cache TTL for provider-token issuer pubkey fetches to reduce remote fetch amplification on repeated invalid upserts)
 - `DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC` (default `300`; max provider-advertised relay descriptor TTL)
+- `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE` (default `data/directory_provider_token_proof_replay.json`; durable replay store for provider relay upsert token-proof nonces)
 - `DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR` (default `0` disabled; when `>0`, cap active provider-advertised relays per operator across entry+exit roles)
 - `DIRECTORY_ISSUER_SYNC_SEC` (default `10`; issuer trust sync interval in seconds)
 - `DIRECTORY_ISSUER_MIN_OPERATORS` (fallback `DIRECTORY_MIN_OPERATORS`; minimum distinct issuer operators required for each issuer sync round)
@@ -700,6 +709,7 @@ Optional env vars:
 - `DIRECTORY_PROVIDER_MIN_EXIT_TIER` (default `1`; minimum `provider_role` token tier required to advertise `exit` relays via `/v1/provider/relay/upsert`)
 - `DIRECTORY_BETA_STRICT` (`1` enables strict beta checks only for directory role)
 - `DIRECTORY_ADMIN_TOKEN` (no default in compose/easy-mode prod; required to be non-default and length>=16 for public bind/strict modes)
+- `DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK` (default `0`; when `1` and `DIRECTORY_ADMIN_TOKEN` is empty, legacy `dev-admin-token` fallback is re-enabled for trusted lab compatibility)
 - `DIRECTORY_SELECTION_FEED_TTL_SEC` (default `30`; signed selection feed TTL)
 - `DIRECTORY_SELECTION_FEED_EPOCH_SEC` (default `10`; generated_at stabilization window for selection-feed cacheability)
 - `DIRECTORY_TRUST_FEED_TTL_SEC` (default `30`; signed trust-attestation feed TTL)
@@ -726,8 +736,11 @@ Optional env vars:
 - `EXIT_ACCOUNTING_FLUSH_SEC` (default `10`; accounting snapshot write interval)
 - `EXIT_REVOCATION_REFRESH_SEC` (default `15`)
 - `EXIT_STARTUP_SYNC_TIMEOUT_SEC` (default `0`, but defaults to `8` automatically when `WG_BACKEND=command`; when `>0`, exit waits for issuer keys + revocation feed readiness before serving; strict beta mode defaults to `30`)
+- `EXIT_MAX_ACTIVE_SESSIONS` (default `4096`; hard cap on concurrently tracked path-open sessions to limit authenticated session-flood memory pressure)
+- `EXIT_VERIFY_ISSUER_REFRESH_MIN_INTERVAL_MS` (default `2000`; minimum interval between verify-triggered issuer key refresh attempts to prevent per-request refresh amplification under invalid-token floods)
 - `EXIT_PEER_REBIND_SEC` (default `0`; when `>0`, allow exit session peer source rebind after inactivity window)
 - `EXIT_TOKEN_PROOF_REPLAY_GUARD` (`1` enables nonce replay guard for `token_proof_nonce` on path open)
+- `EXIT_TOKEN_PROOF_REPLAY_STORE_FILE` (default `data/exit_token_proof_replay.json`; durable replay store for path-open token-proof nonces)
 - `EXIT_BETA_STRICT` (`1` enables strict beta checks only for exit role)
 - `CLIENT_EXIT_MIN_GEO_CONFIDENCE` (default `0`; required minimum `geo_confidence` for country/region matching)
 - `CLIENT_EXIT_LOCALITY_FALLBACK_ORDER` (default `country,region,region-prefix,global`; configurable locality fallback policy)

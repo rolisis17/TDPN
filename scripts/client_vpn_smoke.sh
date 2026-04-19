@@ -50,6 +50,7 @@ Usage:
     [--mtls-client-cert-file PATH] \
     [--mtls-client-key-file PATH] \
     [--run-preflight [0|1]] \
+    [--defer-no-root [0|1]] \
     [--status-check [0|1]] \
     [--keep-up [0|1]] \
     [--record-result [0|1]] \
@@ -124,12 +125,22 @@ print_cmd() {
   printf '\n'
 }
 
+safe_append_to_array() {
+  local array_name="$1"
+  shift
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+  local -n target_array="$array_name"
+  target_array+=("$@")
+}
+
 append_opt() {
   local array_name="$1"
   local flag="$2"
   local value="${3:-}"
   if [[ -n "$value" ]]; then
-    eval "$array_name+=(\"\$flag\" \"\$value\")"
+    safe_append_to_array "$array_name" "$flag" "$value" || return 1
   fi
 }
 
@@ -183,6 +194,7 @@ mtls_client_cert_file=""
 mtls_client_key_file=""
 
 run_preflight="1"
+defer_no_root="${CLIENT_VPN_SMOKE_DEFER_NO_ROOT:-0}"
 status_check="1"
 keep_up="0"
 record_result="1"
@@ -253,6 +265,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_preflight="1"
+        shift
+      fi
+      ;;
+    --defer-no-root)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        defer_no_root="${2:-}"
+        shift 2
+      else
+        defer_no_root="1"
         shift
       fi
       ;;
@@ -386,6 +407,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--run-preflight" "$run_preflight"
+bool_arg_or_die "--defer-no-root" "$defer_no_root"
 bool_arg_or_die "--status-check" "$status_check"
 bool_arg_or_die "--keep-up" "$keep_up"
 bool_arg_or_die "--record-result" "$record_result"
@@ -476,6 +498,7 @@ pre_real_host_readiness_cmd=(
   "--exit-iface" "$runtime_exit_iface"
   "--vpn-iface" "$runtime_vpn_iface"
   "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
+  "--defer-no-root" "$defer_no_root"
   "--summary-json" "$pre_real_host_readiness_summary_json"
   "--manual-validation-report-summary-json" "$manual_validation_report_summary_json"
   "--manual-validation-report-md" "$manual_validation_report_md"
@@ -579,6 +602,10 @@ trust_reset_reason=""
 up_retry_attempted="0"
 up_retry_succeeded="0"
 trust_reset_failure_note=""
+up_failure_hint_id=""
+up_failure_hint=""
+up_failure_next_command=""
+up_failure_matched_pattern=""
 smoke_status="fail"
 notes=""
 record_notes=""
@@ -597,6 +624,7 @@ incident_snapshot_refresh_status="skipped"
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+smoke_deferred_no_root="0"
 
 extract_json_payload() {
   local prefix="$1"
@@ -625,7 +653,7 @@ append_existing_artifact() {
   local array_name="$1"
   local artifact_path="$2"
   if [[ -n "$artifact_path" && -e "$artifact_path" ]]; then
-    eval "$array_name+=(\"\$artifact_path\")"
+    safe_append_to_array "$array_name" "$artifact_path" || return 1
   fi
 }
 
@@ -658,6 +686,192 @@ run_and_capture() {
     rm -f "$tmp"
     return "$rc"
   fi
+}
+
+output_indicates_no_root_requirement() {
+  local text="$1"
+  if [[ -z "$text" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$text" | grep -Eqi 'requires root|run preflight with sudo|must be root|permission denied|operation not permitted'; then
+    return 0
+  fi
+  return 1
+}
+
+pre_real_host_readiness_failure_requires_root() {
+  local readiness_output="$1"
+  local readiness_json="$2"
+  local readiness_notes=""
+  local readiness_stage=""
+  local blockers_only_wg_only="false"
+
+  if output_indicates_no_root_requirement "$readiness_output"; then
+    return 0
+  fi
+
+  if [[ -z "$readiness_json" ]]; then
+    return 1
+  fi
+
+  readiness_notes="$(
+    printf '%s\n' "$readiness_json" | jq -r '
+      [
+        (.notes // ""),
+        (.runtime_fix.notes // ""),
+        (.wg_only_stack_selftest.notes // "")
+      ] | map(select(type == "string")) | join("\n")
+    ' 2>/dev/null || true
+  )"
+  if output_indicates_no_root_requirement "$readiness_notes"; then
+    return 0
+  fi
+
+  readiness_stage="$(printf '%s\n' "$readiness_json" | jq -r '.stage // ""' 2>/dev/null || true)"
+  blockers_only_wg_only="$(
+    printf '%s\n' "$readiness_json" | jq -r '
+      (.machine_c_smoke_gate.blockers // []) as $b
+      | (($b | type) == "array")
+        and (($b | length) == 1)
+        and (($b[0] // "") == "wg_only_stack_selftest")
+    ' 2>/dev/null || printf 'false'
+  )"
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 && "$readiness_stage" == "wg_only_stack_selftest" && "$blockers_only_wg_only" == "true" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+derive_up_failure_note() {
+  local failed_output="$1"
+  if [[ -z "$failed_output" ]]; then
+    printf '%s' "client-vpn up failed"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'no suitable entry/exit relays found'; then
+    printf '%s' "client-vpn up failed: no suitable entry/exit relays found (balanced/2hop requires at least two distinct operators); add another operator relay or use --path-profile 1hop for single-operator labs"
+    return 0
+  fi
+  if printf '%s\n' "$failed_output" | grep -Eqi 'did not receive wg-session config within'; then
+    printf '%s' "client-vpn up failed: timed out waiting for wg-session config (control plane did not establish a viable path in time)"
+    return 0
+  fi
+  if printf '%s\n' "$failed_output" | grep -Eqi 'directory key is not trusted'; then
+    printf '%s' "client-vpn up failed: directory key trust mismatch (run client-vpn-trust-reset or enable --trust-reset-on-key-mismatch 1)"
+    return 0
+  fi
+
+  printf '%s' "client-vpn up failed"
+}
+
+build_smoke_rerun_command() {
+  local -a rerun_cmd=("$0" "${original_args[@]}")
+  local extra_arg=""
+  for extra_arg in "$@"; do
+    rerun_cmd+=("$extra_arg")
+  done
+  print_cmd "${rerun_cmd[@]}"
+}
+
+build_trust_reset_command() {
+  local -a trust_reset_cmd=("$easy_node_script" "client-vpn-trust-reset")
+  append_opt trust_reset_cmd "--directory-urls" "$directory_urls"
+  append_opt trust_reset_cmd "--bootstrap-directory" "$bootstrap_directory"
+  append_opt trust_reset_cmd "--discovery-wait-sec" "$discovery_wait_sec"
+  append_opt trust_reset_cmd "--trust-scope" "$trust_reset_scope"
+  print_cmd "${trust_reset_cmd[@]}"
+}
+
+build_runtime_fix_command() {
+  local -a runtime_fix_next_cmd=(
+    "$easy_node_script" "runtime-fix"
+    "--base-port" "$runtime_base_port"
+    "--client-iface" "$runtime_client_iface"
+    "--exit-iface" "$runtime_exit_iface"
+    "--vpn-iface" "$runtime_vpn_iface"
+    "--prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
+    "--show-json" "1"
+  )
+  print_cmd "${runtime_fix_next_cmd[@]}"
+}
+
+derive_up_failure_diagnostics() {
+  local failed_output="$1"
+  local suggested_ready_timeout_sec="120"
+
+  up_failure_hint_id="generic_up_failure"
+  up_failure_hint="client-vpn up failed"
+  up_failure_next_command="$(build_smoke_rerun_command)"
+  up_failure_matched_pattern=""
+
+  if [[ -z "$failed_output" ]]; then
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'no suitable entry/exit relays found'; then
+    up_failure_hint_id="relay_selection_issue"
+    up_failure_hint="insufficient entry/exit relays for the selected path profile"
+    up_failure_next_command="$(build_smoke_rerun_command --path-profile 1hop)"
+    up_failure_matched_pattern="no suitable entry/exit relays found"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'did not receive wg-session config within|timed out waiting for wg-session config|control plane did not establish a viable path in time'; then
+    up_failure_hint_id="control_plane_timeout"
+    up_failure_hint="timed out waiting for wg-session config"
+    if [[ "$ready_timeout_sec" =~ ^[0-9]+$ ]] && [[ "$ready_timeout_sec" -gt 0 ]]; then
+      suggested_ready_timeout_sec="$((ready_timeout_sec + 60))"
+    fi
+    up_failure_next_command="$(build_smoke_rerun_command --ready-timeout-sec "$suggested_ready_timeout_sec")"
+    up_failure_matched_pattern="wg-session timeout"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'directory key is not trusted|trust mismatch'; then
+    up_failure_hint_id="trust_mismatch"
+    up_failure_hint="directory key trust mismatch"
+    up_failure_next_command="$(build_trust_reset_command)"
+    up_failure_matched_pattern="directory key trust mismatch"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'unauthori[sz]ed|forbidden|invite|token|credential|authentication failed|auth failed|subject.*rejected|subject.*invalid'; then
+    up_failure_hint_id="auth_or_invite_issue"
+    up_failure_hint="authentication or invite issue while starting client-vpn"
+    up_failure_next_command="$(build_smoke_rerun_command)"
+    up_failure_matched_pattern="auth/invite failure"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'wg-quick|wireguard|wg setup|no such device|permission denied|operation not permitted|invalid argument|device not found|interface .*not found'; then
+    up_failure_hint_id="wg_setup_failure"
+    up_failure_hint="WireGuard setup failure on the host"
+    up_failure_next_command="$(build_runtime_fix_command)"
+    up_failure_matched_pattern="wireguard setup failure"
+    return 0
+  fi
+
+  up_failure_hint_id="generic_up_failure"
+  up_failure_hint="client-vpn up failed"
+  up_failure_next_command="$(build_smoke_rerun_command)"
+}
+
+defer_no_root_on_failure() {
+  local failed_output="$1"
+  local defer_note="$2"
+  if [[ "$defer_no_root" != "1" ]]; then
+    return 1
+  fi
+  if ! output_indicates_no_root_requirement "$failed_output"; then
+    return 1
+  fi
+  smoke_deferred_no_root="1"
+  result_stage="$stage"
+  finish_and_record "skip" "$defer_note"
+  return 0
 }
 
 attempt_up_retry_with_trust_reset() {
@@ -845,6 +1059,10 @@ run_pre_real_host_readiness_gate() {
 
   if [[ "$readiness_rc" -ne 0 || "$pre_real_host_readiness_machine_c_ready" != "true" ]]; then
     runtime_gate_failure_note="pre-real-host readiness gate blocked machine-C smoke"
+    if [[ "$defer_no_root" == "1" ]] && pre_real_host_readiness_failure_requires_root "$readiness_output" "$readiness_json"; then
+      runtime_gate_failure_note="client-vpn smoke deferred: pre-real-host readiness requires root privileges (rerun with sudo)"
+      return 2
+    fi
     return 1
   fi
 
@@ -1158,6 +1376,10 @@ write_summary_json() {
     --arg trust_reset_scope "$trust_reset_scope" \
     --arg trust_reset_log "$trust_reset_log" \
     --arg up_retry_log "$up_retry_log" \
+    --arg up_failure_hint_id "$up_failure_hint_id" \
+    --arg up_failure_hint "$up_failure_hint" \
+    --arg up_failure_next_command "$up_failure_next_command" \
+    --arg up_failure_matched_pattern "$up_failure_matched_pattern" \
     --arg runtime_doctor_before_log "$runtime_doctor_before_log" \
     --arg runtime_doctor_before_json "$runtime_doctor_before_json" \
     --arg runtime_fix_log "$runtime_fix_log" \
@@ -1185,6 +1407,8 @@ write_summary_json() {
     --arg summary_log "$summary_log" \
     --arg summary_json "$summary_json" \
     --argjson keep_up "$keep_up" \
+    --arg defer_no_root "$defer_no_root" \
+    --arg smoke_deferred_no_root "$smoke_deferred_no_root" \
     --argjson pre_real_host_readiness_enabled "$pre_real_host_readiness_enabled" \
     --argjson runtime_doctor_enabled "$runtime_doctor_enabled" \
     --argjson runtime_fix_on_non_ok "$runtime_fix_on_non_ok" \
@@ -1203,6 +1427,8 @@ write_summary_json() {
       stage: $stage,
       notes: $notes,
       keep_up: ($keep_up == "1"),
+      defer_no_root: ($defer_no_root == "1"),
+      deferred_no_root: ($smoke_deferred_no_root == "1"),
       pre_real_host_readiness: {
         enabled: ($pre_real_host_readiness_enabled == 1),
         status: $pre_real_host_readiness_status,
@@ -1253,6 +1479,19 @@ write_summary_json() {
         status_output: $status_output,
         public_ip_result: $public_ip_result,
         country_result: $country_result
+      },
+      diagnostics: {
+        up_failure: {
+          available: ($status == "fail" and $stage == "up" and ($up_failure_hint_id | length) > 0),
+          hint_id: (if $status == "fail" and $stage == "up" then $up_failure_hint_id else "" end),
+          hint: (if $status == "fail" and $stage == "up" then $up_failure_hint else "" end),
+          next_suggested_command: (if $status == "fail" and $stage == "up" then $up_failure_next_command else "" end),
+          matched_pattern: (if $status == "fail" and $stage == "up" then $up_failure_matched_pattern else "" end),
+          trust_reset_attempted: ($trust_reset_attempted == 1),
+          trust_reset_status: $trust_reset_status,
+          up_retry_attempted: ($up_retry_attempted == 1),
+          up_retry_succeeded: ($up_retry_succeeded == 1)
+        }
       },
       incident_snapshot: {
         enabled_on_fail: ($incident_snapshot_on_fail == 1),
@@ -1344,7 +1583,11 @@ finish_and_record() {
     done
     "${record_cmd[@]}" >>"$summary_log" 2>&1 || true
   fi
-  echo "client-vpn-smoke: status=$smoke_status stage=$result_stage"
+  if [[ "$smoke_status" == "fail" && "$result_stage" == "up" ]]; then
+    echo "client-vpn-smoke: status=$smoke_status stage=$result_stage hint=${up_failure_hint_id:-generic_up_failure} next_command=${up_failure_next_command:-}"
+  else
+    echo "client-vpn-smoke: status=$smoke_status stage=$result_stage"
+  fi
   echo "summary_log: $summary_log"
   echo "summary_json: $summary_json"
   if [[ "$print_summary_json" == "1" ]]; then
@@ -1352,8 +1595,16 @@ finish_and_record() {
   fi
 }
 
-if ! run_pre_real_host_readiness_gate; then
+if run_pre_real_host_readiness_gate; then
+  :
+else
+  pre_real_host_readiness_rc=$?
   result_stage="$stage"
+  if [[ "$pre_real_host_readiness_rc" -eq 2 ]]; then
+    smoke_deferred_no_root="1"
+    finish_and_record "skip" "$runtime_gate_failure_note"
+    exit 0
+  fi
   finish_and_record "fail" "$runtime_gate_failure_note"
   exit 1
 fi
@@ -1368,6 +1619,9 @@ if [[ "$run_preflight" == "1" ]]; then
   stage="preflight"
   preflight_output=""
   if ! run_and_capture preflight_output "${preflight_cmd[@]}"; then
+    if defer_no_root_on_failure "$preflight_output" "client-vpn smoke deferred: preflight requires root privileges"; then
+      exit 0
+    fi
     result_stage="$stage"
     finish_and_record "fail" "client-vpn preflight failed"
     exit 1
@@ -1377,9 +1631,14 @@ fi
 stage="up"
 up_output=""
 if ! run_and_capture up_output "${up_cmd[@]}"; then
+  if defer_no_root_on_failure "$up_output" "client-vpn smoke deferred: client-vpn up requires root privileges"; then
+    exit 0
+  fi
+  local_up_failure_note="$(derive_up_failure_note "$up_output")"
+  derive_up_failure_diagnostics "$up_output"
   if ! attempt_up_retry_with_trust_reset "$up_output"; then
     result_stage="$stage"
-    finish_and_record "fail" "${trust_reset_failure_note:-client-vpn up failed}"
+    finish_and_record "fail" "${trust_reset_failure_note:-$local_up_failure_note}"
     exit 1
   fi
 fi

@@ -5,15 +5,18 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"privacynode/internal/fileperm"
 	"privacynode/pkg/adminauth"
 )
 
@@ -24,6 +27,8 @@ type signOutput struct {
 	Signature string            `json:"signature"`
 	Headers   map[string]string `json:"headers"`
 }
+
+const maxPrivateKeyFileBytes int64 = 8 * 1024
 
 func main() {
 	if len(os.Args) < 2 {
@@ -68,6 +73,7 @@ func runGen(args []string) error {
 	privateOut := fs.String("private-key-out", "", "path to write private key (base64url, 0600)")
 	publicOut := fs.String("public-key-out", "", "path to write public key (base64url)")
 	keyIDOut := fs.String("key-id-out", "", "path to write key id")
+	showPrivateKey := fs.Bool("show-private-key", false, "include private key in stdout output (dangerous)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -95,9 +101,11 @@ func runGen(args []string) error {
 		}
 	}
 	out := map[string]string{
-		"private_key": privB64,
-		"public_key":  pubB64,
-		"key_id":      keyID,
+		"public_key": pubB64,
+		"key_id":     keyID,
+	}
+	if *showPrivateKey {
+		out["private_key"] = privB64
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)
 }
@@ -155,7 +163,7 @@ func runSign(args []string) error {
 	}
 	body := []byte(*bodyInline)
 	if *bodyFile != "" {
-		b, readErr := os.ReadFile(*bodyFile)
+		b, readErr := readInputFileStrict(*bodyFile, "body", 2*1024*1024)
 		if readErr != nil {
 			return fmt.Errorf("read body file: %w", readErr)
 		}
@@ -167,7 +175,10 @@ func runSign(args []string) error {
 	}
 	n := strings.TrimSpace(*nonce)
 	if n == "" {
-		n = randomNonce(16)
+		n, err = randomNonce(16)
+		if err != nil {
+			return fmt.Errorf("generate nonce: %w", err)
+		}
 	}
 	kid := strings.TrimSpace(*keyID)
 	if kid == "" {
@@ -194,9 +205,9 @@ func runSign(args []string) error {
 }
 
 func readPrivateKeyFile(path string) (ed25519.PrivateKey, error) {
-	b, err := os.ReadFile(path)
+	b, err := readSecretFileStrict(path, "private key")
 	if err != nil {
-		return nil, fmt.Errorf("read private key file: %w", err)
+		return nil, err
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(string(b)))
 	if err != nil {
@@ -208,23 +219,148 @@ func readPrivateKeyFile(path string) (ed25519.PrivateKey, error) {
 	return ed25519.PrivateKey(raw), nil
 }
 
-func randomNonce(n int) string {
+func readSecretFileStrict(path string, label string) ([]byte, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("%s file is required", label)
+	}
+	linfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s file: %w", label, err)
+	}
+	if linfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s file %q must not be a symlink", label, path)
+	}
+	if !linfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s file %q must be a regular file", label, path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s file: %w", label, err)
+	}
+	defer f.Close()
+	finfo, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat open %s file: %w", label, err)
+	}
+	if !os.SameFile(linfo, finfo) {
+		return nil, fmt.Errorf("%s file %q changed during open", label, path)
+	}
+	if err := fileperm.ValidateOwnerOnly(path, finfo); err != nil {
+		return nil, fmt.Errorf("%s file: %w", label, err)
+	}
+	if finfo.Size() > maxPrivateKeyFileBytes {
+		return nil, fmt.Errorf("%s file %q exceeds max size %d bytes", label, path, maxPrivateKeyFileBytes)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxPrivateKeyFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s file: %w", label, err)
+	}
+	if int64(len(b)) > maxPrivateKeyFileBytes {
+		return nil, fmt.Errorf("%s file %q exceeds max size %d bytes", label, path, maxPrivateKeyFileBytes)
+	}
+	return b, nil
+}
+
+func readInputFileStrict(path string, label string, maxBytes int64) ([]byte, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("%s file is required", label)
+	}
+	linfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s file: %w", label, err)
+	}
+	if linfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s file %q must not be a symlink", label, path)
+	}
+	if !linfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s file %q must be a regular file", label, path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s file: %w", label, err)
+	}
+	defer f.Close()
+	finfo, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat open %s file: %w", label, err)
+	}
+	if !os.SameFile(linfo, finfo) {
+		return nil, fmt.Errorf("%s file %q changed during open", label, path)
+	}
+	if maxBytes > 0 && finfo.Size() > maxBytes {
+		return nil, fmt.Errorf("%s file %q exceeds max size %d bytes", label, path, maxBytes)
+	}
+	reader := io.Reader(f)
+	if maxBytes > 0 {
+		reader = io.LimitReader(f, maxBytes+1)
+	}
+	b, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("read %s file: %w", label, err)
+	}
+	if maxBytes > 0 && int64(len(b)) > maxBytes {
+		return nil, fmt.Errorf("%s file %q exceeds max size %d bytes", label, path, maxBytes)
+	}
+	return b, nil
+}
+
+func randomNonce(n int) (string, error) {
 	if n <= 0 {
 		n = 16
 	}
 	b := make([]byte, n)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func writeFileWithMode(path string, body []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("write path is required")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir for %s: %w", path, err)
 	}
-	if err := os.WriteFile(path, body, mode); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write symlink path %s", path)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("write path %s is a directory", path)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("lstat %s: %w", path, err)
+	}
+
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp for %s: %w", path, err)
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if _, err := tmpFile.Write(body); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("write temp for %s: %w", path, err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("sync temp for %s: %w", path, err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp for %s: %w", path, err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		return fmt.Errorf("chmod %s: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp for %s: %w", path, err)
 	}
 	return nil
 }

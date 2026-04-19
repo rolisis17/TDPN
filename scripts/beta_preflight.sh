@@ -33,6 +33,15 @@ run_step "runtime doctor" ./scripts/integration_runtime_doctor.sh
 run_step "manual validation status" ./scripts/integration_manual_validation_status.sh
 run_step "manual validation report" ./scripts/integration_manual_validation_report.sh
 run_step "roadmap progress report" ./scripts/integration_roadmap_progress_report.sh
+run_step "roadmap progress resilience handoff" ./scripts/integration_roadmap_progress_resilience_handoff.sh
+run_step "roadmap progress phase-2 handoff" ./scripts/integration_roadmap_progress_phase2_handoff.sh
+run_step "roadmap progress phase-3 handoff" ./scripts/integration_roadmap_progress_phase3_handoff.sh
+run_step "roadmap progress phase-4 handoff" ./scripts/integration_roadmap_progress_phase4_handoff.sh
+run_step "roadmap progress phase-5 handoff" ./scripts/integration_roadmap_progress_phase5_handoff.sh
+run_step "roadmap next actions run integration" ./scripts/integration_roadmap_next_actions_run.sh
+run_step "easy-node roadmap next actions run integration" ./scripts/integration_easy_node_roadmap_next_actions_run.sh
+run_step "roadmap non-blockchain actionable run integration" ./scripts/integration_roadmap_non_blockchain_actionable_run.sh
+run_step "easy-node roadmap non-blockchain actionable run integration" ./scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh
 run_step "pre-real-host readiness" ./scripts/integration_pre_real_host_readiness.sh
 run_step "runtime fix" ./scripts/integration_runtime_fix.sh
 run_step "runtime fix record" ./scripts/integration_runtime_fix_record.sh
@@ -43,6 +52,8 @@ run_step "client-vpn trust-scope wiring" ./scripts/integration_client_vpn_trust_
 run_step "client-vpn path-profile wiring" ./scripts/integration_client_vpn_path_profile_wiring.sh
 run_step "client-vpn trust-reset" ./scripts/integration_client_vpn_trust_reset.sh
 run_step "three-machine prod signoff" ./scripts/integration_three_machine_prod_signoff.sh
+run_step "three-machine docker profile matrix" ./scripts/integration_three_machine_docker_profile_matrix.sh
+run_step "three-machine docker profile matrix record" ./scripts/integration_three_machine_docker_profile_matrix_record.sh
 run_step "wg-only stack selftest record" ./scripts/integration_wg_only_stack_selftest_record.sh
 run_step "wg-only stack wiring" ./scripts/integration_wg_only_stack_wiring.sh
 run_step "rotate server secrets" ./scripts/integration_rotate_server_secrets.sh
@@ -53,10 +64,43 @@ run_step "path profile contract integration" ./scripts/integration_path_profile_
 run_step "profile compare local integration" ./scripts/integration_profile_compare_local.sh
 run_step "profile compare trend integration" ./scripts/integration_profile_compare_trend.sh
 run_step "profile compare campaign integration" ./scripts/integration_profile_compare_campaign.sh
+run_step "profile compare docker matrix integration" ./scripts/integration_profile_compare_docker_matrix.sh
 run_step "profile compare campaign check integration" ./scripts/integration_profile_compare_campaign_check.sh
 run_step "profile compare campaign signoff integration" ./scripts/integration_profile_compare_campaign_signoff.sh
-run_step "easy-mode launcher wiring" ./scripts/integration_easy_mode_launcher_wiring.sh
-run_step "easy-mode launcher runtime" ./scripts/integration_easy_mode_launcher_runtime.sh
+run_step "profile default gate run integration" ./scripts/integration_profile_default_gate_run.sh
+run_step "vpn-rc matrix path integration" ./scripts/integration_vpn_rc_matrix_path.sh
+run_step "vpn-rc resilience path integration" ./scripts/integration_vpn_rc_resilience_path.sh
+run_step "vpn non-blockchain fastlane integration" ./scripts/integration_vpn_non_blockchain_fastlane.sh
+beta_preflight_phase1_run_session_churn_guard="${BETA_PREFLIGHT_PHASE1_RUN_SESSION_CHURN_GUARD:-${CI_PHASE1_RESILIENCE_RUN_SESSION_CHURN_GUARD:-1}}"
+beta_preflight_phase1_run_3hop_runtime_integration="${BETA_PREFLIGHT_PHASE1_RUN_3HOP_RUNTIME_INTEGRATION:-${CI_PHASE1_RESILIENCE_RUN_3HOP_RUNTIME_INTEGRATION:-0}}"
+run_step "phase-1 resilience gate (dry-run contract)" ./scripts/ci_phase1_resilience.sh \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --run-session-churn-guard "$beta_preflight_phase1_run_session_churn_guard" \
+  --run-3hop-runtime-integration "$beta_preflight_phase1_run_3hop_runtime_integration"
+run_step "phase-1 resilience gate integration" ./scripts/integration_ci_phase1_resilience.sh
+run_step "phase-2 linux prod candidate gate integration" ./scripts/integration_ci_phase2_linux_prod_candidate.sh
+run_step "phase-2 linux prod candidate check integration" ./scripts/integration_phase2_linux_prod_candidate_check.sh
+run_step "phase-2 linux prod candidate handoff check integration" ./scripts/integration_phase2_linux_prod_candidate_handoff_check.sh
+run_step "phase-2 linux prod candidate run integration" ./scripts/integration_phase2_linux_prod_candidate_run.sh
+run_step "phase-2 linux prod candidate handoff run integration" ./scripts/integration_phase2_linux_prod_candidate_handoff_run.sh
+run_step "phase-2 linux prod candidate signoff integration" ./scripts/integration_phase2_linux_prod_candidate_signoff.sh
+run_step "phase-3 windows client beta gate integration" ./scripts/integration_ci_phase3_windows_client_beta.sh
+run_step "phase-3 windows client beta check integration" ./scripts/integration_phase3_windows_client_beta_check.sh
+run_step "phase-3 windows client beta run integration" ./scripts/integration_phase3_windows_client_beta_run.sh
+run_step "phase-3 windows client beta handoff check integration" ./scripts/integration_phase3_windows_client_beta_handoff_check.sh
+run_step "phase-3 windows client beta handoff run integration" ./scripts/integration_phase3_windows_client_beta_handoff_run.sh
+run_step "phase-4 windows full parity gate integration" ./scripts/integration_ci_phase4_windows_full_parity.sh
+run_step "phase-4 windows full parity check integration" ./scripts/integration_phase4_windows_full_parity_check.sh
+run_step "phase-4 windows full parity run integration" ./scripts/integration_phase4_windows_full_parity_run.sh
+run_step "phase-4 windows full parity handoff check integration" ./scripts/integration_phase4_windows_full_parity_handoff_check.sh
+run_step "phase-4 windows full parity handoff run integration" ./scripts/integration_phase4_windows_full_parity_handoff_run.sh
+run_step "easy-node windows gate-wrapper integration" ./scripts/integration_easy_node_windows_gate_wrappers.sh
+run_step "phase-5 settlement layer gate integration" ./scripts/integration_ci_phase5_settlement_layer.sh
+run_step "phase-5 settlement layer check integration" ./scripts/integration_phase5_settlement_layer_check.sh
+run_step "phase-5 settlement layer run integration" ./scripts/integration_phase5_settlement_layer_run.sh
+run_step "phase-5 settlement layer handoff check integration" ./scripts/integration_phase5_settlement_layer_handoff_check.sh
+run_step "phase-5 settlement layer handoff run integration" ./scripts/integration_phase5_settlement_layer_handoff_run.sh
 run_step "incident snapshot tooling" ./scripts/integration_incident_snapshot.sh
 run_step "incident snapshot attachment tooling" ./scripts/integration_incident_snapshot_attach_artifacts.sh
 run_step "incident snapshot summary tooling" ./scripts/integration_incident_snapshot_summary.sh
@@ -65,6 +109,9 @@ run_step "easy-node server-up auto invite" ./scripts/integration_easy_node_serve
 run_step "easy-node server federation status" ./scripts/integration_easy_node_server_federation_status.sh
 run_step "easy-node server federation wait" ./scripts/integration_easy_node_server_federation_wait.sh
 run_step "easy-node self-update" ./scripts/integration_easy_node_self_update.sh
+run_step "phase-0 gate" ./scripts/ci_phase0.sh
+run_step "local API config-v1 defaults" ./scripts/integration_local_api_config_defaults.sh
+run_step "desktop scaffold contract" ./scripts/integration_desktop_scaffold_contract.sh
 run_step "easy-node role guard" ./scripts/integration_easy_node_role_guard.sh
 run_step "easy-node invite auth policy" ./scripts/integration_easy_node_invite_auth_policy.sh
 run_step "easy-node peer identity guard" ./scripts/integration_easy_node_peer_identity_guard.sh
@@ -107,6 +154,8 @@ run_step "peer discovery operator cap" ./scripts/integration_peer_discovery_oper
 run_step "anonymous credential dispute" ./scripts/integration_anon_credential_dispute.sh
 run_step "client bootstrap recovery matrix" ./scripts/integration_client_bootstrap_recovery_matrix.sh
 run_step "client startup sync" ./scripts/integration_client_startup_sync.sh
+run_step "session churn guard" ./scripts/integration_session_churn_guard.sh
+run_step "client 3hop runtime" ./scripts/integration_client_3hop_runtime.sh
 run_step "beta fault matrix" ./scripts/integration_beta_fault_matrix.sh
 run_step "strict live-wg full path" ./scripts/integration_live_wg_full_path_strict.sh
 run_step "wg-only mode guardrails" ./scripts/integration_wg_only_mode.sh

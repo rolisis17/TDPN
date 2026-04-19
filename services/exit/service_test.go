@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,8 +21,1342 @@ import (
 	"privacynode/pkg/policy"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
+	"privacynode/pkg/settlement"
 	"privacynode/pkg/wg"
 )
+
+type settlementServiceStub struct {
+	reserveFundsFn           func(context.Context, settlement.FundReservation) (settlement.FundReservation, error)
+	recordUsageFn            func(context.Context, settlement.UsageRecord) error
+	settleSessionFn          func(context.Context, string) (settlement.SessionSettlement, error)
+	issueRewardFn            func(context.Context, settlement.RewardIssue) (settlement.RewardIssue, error)
+	reconcileFn              func(context.Context) (settlement.ReconcileReport, error)
+	reserveFundsCalls        int
+	recordUsageCalls         int
+	settleSessionCalls       int
+	issueRewardCalls         int
+	reconcileCalls           int
+	submitSlashEvidenceCalls int
+}
+
+func (s *settlementServiceStub) RecordUsage(ctx context.Context, usage settlement.UsageRecord) error {
+	s.recordUsageCalls++
+	if s.recordUsageFn != nil {
+		return s.recordUsageFn(ctx, usage)
+	}
+	return nil
+}
+
+func (s *settlementServiceStub) QuotePrice(_ context.Context, subjectID string, currency string) (settlement.PriceQuote, error) {
+	return settlement.PriceQuote{
+		SubjectID: subjectID,
+		Currency:  currency,
+	}, nil
+}
+
+func (s *settlementServiceStub) ReserveFunds(ctx context.Context, reservation settlement.FundReservation) (settlement.FundReservation, error) {
+	s.reserveFundsCalls++
+	if s.reserveFundsFn != nil {
+		return s.reserveFundsFn(ctx, reservation)
+	}
+	return reservation, nil
+}
+
+func (s *settlementServiceStub) ReserveSponsorCredits(_ context.Context, reservation settlement.SponsorCreditReservation) (settlement.SponsorCreditReservation, error) {
+	return reservation, nil
+}
+
+func (s *settlementServiceStub) GetSponsorReservation(_ context.Context, reservationID string) (settlement.SponsorCreditReservation, error) {
+	return settlement.SponsorCreditReservation{}, errors.New("not found: " + reservationID)
+}
+
+func (s *settlementServiceStub) AuthorizePayment(_ context.Context, proof settlement.PaymentProof) (settlement.PaymentAuthorization, error) {
+	return settlement.PaymentAuthorization{
+		ReservationID: proof.ReservationID,
+	}, nil
+}
+
+func (s *settlementServiceStub) SettleSession(ctx context.Context, sessionID string) (settlement.SessionSettlement, error) {
+	s.settleSessionCalls++
+	if s.settleSessionFn != nil {
+		return s.settleSessionFn(ctx, sessionID)
+	}
+	return settlement.SessionSettlement{
+		SessionID:     sessionID,
+		ChargedMicros: 1,
+		Currency:      "USD",
+	}, nil
+}
+
+func (s *settlementServiceStub) IssueReward(ctx context.Context, reward settlement.RewardIssue) (settlement.RewardIssue, error) {
+	s.issueRewardCalls++
+	if s.issueRewardFn != nil {
+		return s.issueRewardFn(ctx, reward)
+	}
+	return reward, nil
+}
+
+func (s *settlementServiceStub) SubmitSlashEvidence(_ context.Context, evidence settlement.SlashEvidence) (settlement.SlashEvidence, error) {
+	s.submitSlashEvidenceCalls++
+	return evidence, nil
+}
+
+func (s *settlementServiceStub) Reconcile(ctx context.Context) (settlement.ReconcileReport, error) {
+	s.reconcileCalls++
+	if s.reconcileFn != nil {
+		return s.reconcileFn(ctx)
+	}
+	return settlement.ReconcileReport{}, nil
+}
+
+type failingSettlementChainAdapter struct {
+	submitSessionSettlementCalls int
+	submitRewardIssueCalls       int
+}
+
+func (a *failingSettlementChainAdapter) SubmitSessionSettlement(_ context.Context, _ settlement.SessionSettlement) (string, error) {
+	a.submitSessionSettlementCalls++
+	return "", errors.New("chain unavailable")
+}
+
+func (a *failingSettlementChainAdapter) SubmitRewardIssue(_ context.Context, _ settlement.RewardIssue) (string, error) {
+	a.submitRewardIssueCalls++
+	return "", errors.New("chain unavailable")
+}
+
+func (a *failingSettlementChainAdapter) SubmitSponsorReservation(_ context.Context, _ settlement.SponsorCreditReservation) (string, error) {
+	return "", errors.New("chain unavailable")
+}
+
+func (a *failingSettlementChainAdapter) SubmitSlashEvidence(_ context.Context, _ settlement.SlashEvidence) (string, error) {
+	return "", errors.New("chain unavailable")
+}
+
+func (a *failingSettlementChainAdapter) Health(_ context.Context) error {
+	return errors.New("chain unavailable")
+}
+
+func TestHandlePathCloseFinalizeWarningDoesNotFailSessionClose(t *testing.T) {
+	stub := &settlementServiceStub{
+		settleSessionFn: func(_ context.Context, sessionID string) (settlement.SessionSettlement, error) {
+			return settlement.SessionSettlement{}, errors.New("adapter unavailable for " + sessionID)
+		},
+	}
+	now := time.Now()
+	s := &Service{
+		settlement: stub,
+		sessions: map[string]sessionInfo{
+			"sid-close-finalize-warning": {
+				claims:       crypto.CapabilityClaims{Subject: "client-1", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-finalize-warning",
+				ingressBytes: 512,
+				egressBytes:  1024,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-finalize-warning","session_key_id":"sk-close-finalize-warning"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathCloseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode close response: %v", err)
+	}
+	if !resp.Closed {
+		t.Fatalf("expected session close success despite settlement finalize warning: %+v", resp)
+	}
+	if _, exists := s.sessions["sid-close-finalize-warning"]; exists {
+		t.Fatalf("expected closed session removed from session map")
+	}
+	if stub.recordUsageCalls != 1 {
+		t.Fatalf("expected one usage record attempt, got %d", stub.recordUsageCalls)
+	}
+	if stub.settleSessionCalls != 1 {
+		t.Fatalf("expected one settle attempt, got %d", stub.settleSessionCalls)
+	}
+	if stub.issueRewardCalls != 0 {
+		t.Fatalf("expected no reward issue attempt after settle warning, got %d", stub.issueRewardCalls)
+	}
+}
+
+func TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose(t *testing.T) {
+	stub := &settlementServiceStub{
+		reserveFundsFn: func(_ context.Context, reservation settlement.FundReservation) (settlement.FundReservation, error) {
+			return reservation, errors.New("reserve deferred")
+		},
+		recordUsageFn: func(_ context.Context, _ settlement.UsageRecord) error {
+			return errors.New("usage deferred")
+		},
+	}
+	now := time.Now()
+	s := &Service{
+		settlement:     stub,
+		sessionReserve: 200000,
+		sessions: map[string]sessionInfo{
+			"sid-close-reserve-warning": {
+				claims:       crypto.CapabilityClaims{Subject: "client-2", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-reserve-warning",
+				ingressBytes: 2048,
+				egressBytes:  1024,
+			},
+		},
+	}
+
+	s.reserveSettlementForSession(context.Background(), "sid-close-reserve-warning", "client-2")
+	if stub.reserveFundsCalls != 1 {
+		t.Fatalf("expected reserve attempted once, got %d", stub.reserveFundsCalls)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-reserve-warning","session_key_id":"sk-close-reserve-warning"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathCloseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode close response: %v", err)
+	}
+	if !resp.Closed {
+		t.Fatalf("expected close success despite reserve/finalize warnings: %+v", resp)
+	}
+	if _, exists := s.sessions["sid-close-reserve-warning"]; exists {
+		t.Fatalf("expected closed session removed from session map")
+	}
+	if stub.recordUsageCalls != 1 {
+		t.Fatalf("expected one usage record attempt on close, got %d", stub.recordUsageCalls)
+	}
+	if stub.settleSessionCalls != 0 {
+		t.Fatalf("expected no settle attempt when usage recording fails, got %d", stub.settleSessionCalls)
+	}
+}
+
+func TestHandlePathCloseRejectsSessionKeyMismatch(t *testing.T) {
+	now := time.Now()
+	s := &Service{
+		sessions: map[string]sessionInfo{
+			"sid-close-key-mismatch": {
+				claims:       crypto.CapabilityClaims{Subject: "client-4", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-key-correct",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-key-mismatch","session_key_id":"sk-close-key-wrong"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathCloseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode close response: %v", err)
+	}
+	if resp.Closed {
+		t.Fatalf("expected close rejection for mismatched session key id: %+v", resp)
+	}
+	if resp.Reason != "session-key-id-mismatch" {
+		t.Fatalf("reason=%q want=session-key-id-mismatch", resp.Reason)
+	}
+	if _, exists := s.sessions["sid-close-key-mismatch"]; !exists {
+		t.Fatalf("expected session to remain when session key id mismatches")
+	}
+}
+
+func TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose(t *testing.T) {
+	adapter := &failingSettlementChainAdapter{}
+	memSettlement := settlement.NewMemoryService(
+		settlement.WithPricePerMiBMicros(100000),
+		settlement.WithChainAdapter(adapter),
+	)
+	now := time.Now()
+	s := &Service{
+		addr:           "127.0.0.1:51820",
+		settlement:     memSettlement,
+		sessionReserve: 500000,
+		sessions: map[string]sessionInfo{
+			"sid-close-deferred-chain": {
+				claims:       crypto.CapabilityClaims{Subject: "client-3", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-deferred-chain",
+				ingressBytes: 400000,
+				egressBytes:  200000,
+			},
+		},
+	}
+
+	s.reserveSettlementForSession(context.Background(), "sid-close-deferred-chain", "client-3")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-deferred-chain","session_key_id":"sk-close-deferred-chain"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathCloseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode close response: %v", err)
+	}
+	if !resp.Closed {
+		t.Fatalf("expected close success when chain adapter defers writes: %+v", resp)
+	}
+	if _, exists := s.sessions["sid-close-deferred-chain"]; exists {
+		t.Fatalf("expected closed session removed from session map")
+	}
+	if adapter.submitSessionSettlementCalls < 1 {
+		t.Fatalf("expected chain settlement submit attempted")
+	}
+
+	report, err := memSettlement.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("reconcile report: %v", err)
+	}
+	if report.PendingAdapterOperations < 1 {
+		t.Fatalf("expected pending adapter operations after chain failure, got %d", report.PendingAdapterOperations)
+	}
+	if report.FailedOperations < 1 {
+		t.Fatalf("expected failed settlement operations after replayed chain failure, got %d", report.FailedOperations)
+	}
+}
+
+func TestHandlePathOpenRejectsMalformedJSONBodies(t *testing.T) {
+	oversizedSessionID := strings.Repeat("a", int(pathControlJSONBodyMaxBytes)+1024)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"session_id":"sid-open","token":"tok-open","unexpected":true}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"session_id":"sid-open","token":"tok-open"}{"trailing":true}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"session_id":"` + oversizedSessionID + `","token":"tok-open"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{}
+			req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(tc.body))
+			rr := httptest.NewRecorder()
+
+			s.handlePathOpen(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected HTTP 400 for malformed path open body, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestSessionCapacityReachedLockedRejectsOnlyNewSessionsAtCapacity(t *testing.T) {
+	s := &Service{
+		maxActiveSessions: 1,
+		sessions: map[string]sessionInfo{
+			"sid-existing": {},
+		},
+	}
+	if !s.sessionCapacityReachedLocked("sid-new") {
+		t.Fatalf("expected capacity reached for new session id")
+	}
+	if s.sessionCapacityReachedLocked("sid-existing") {
+		t.Fatalf("expected existing session id to bypass capacity rejection")
+	}
+}
+
+func TestEffectiveMaxActiveSessionsDefaults(t *testing.T) {
+	s := &Service{}
+	if got := s.effectiveMaxActiveSessions(); got != defaultMaxActiveSessions {
+		t.Fatalf("effectiveMaxActiveSessions()=%d want=%d", got, defaultMaxActiveSessions)
+	}
+}
+
+func TestHandlePathCloseRejectsMalformedJSONBodies(t *testing.T) {
+	oversizedSessionID := strings.Repeat("a", int(pathControlJSONBodyMaxBytes)+1024)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"session_id":"sid-close","unexpected":true}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"session_id":"sid-close"}{"trailing":true}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"session_id":"` + oversizedSessionID + `"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{}
+			req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(tc.body))
+			rr := httptest.NewRecorder()
+
+			s.handlePathClose(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected HTTP 400 for malformed path close body, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestReconcileSettlementCallsService(t *testing.T) {
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			return settlement.ReconcileReport{PendingAdapterOperations: 1}, nil
+		},
+	}
+	s := &Service{settlement: stub}
+	s.reconcileSettlement(context.Background())
+
+	if stub.reconcileCalls != 1 {
+		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
+func TestReconcileSettlementToleratesError(t *testing.T) {
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			return settlement.ReconcileReport{}, errors.New("temporary reconcile outage")
+		},
+	}
+	s := &Service{settlement: stub}
+	s.reconcileSettlement(context.Background())
+
+	if stub.reconcileCalls != 1 {
+		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
+func TestHandleSettlementStatusReturnsReport(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			return settlement.ReconcileReport{
+				GeneratedAt:               now,
+				PendingAdapterOperations:  4,
+				ShadowAdapterConfigured:   true,
+				ShadowAttemptedOperations: 9,
+				ShadowSubmittedOperations: 8,
+				ShadowFailedOperations:    1,
+				PendingOperations:         7,
+				SubmittedOperations:       3,
+				ConfirmedOperations:       2,
+				FailedOperations:          1,
+			}, nil
+		},
+	}
+	s := &Service{settlement: stub}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	rr := httptest.NewRecorder()
+	s.handleSettlementStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp settlementStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode settlement status response: %v", err)
+	}
+	if !resp.Enabled {
+		t.Fatalf("expected settlement status endpoint enabled")
+	}
+	if resp.Stale {
+		t.Fatalf("expected fresh reconcile report")
+	}
+	if resp.CheckedAt.IsZero() {
+		t.Fatalf("expected checked_at timestamp")
+	}
+	if !resp.ReportGeneratedAt.Equal(now) {
+		t.Fatalf("expected report_generated_at %s, got %s", now, resp.ReportGeneratedAt)
+	}
+	if !resp.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter configured in status response")
+	}
+	if resp.ShadowAttemptedOperations != 9 || resp.ShadowSubmittedOperations != 8 || resp.ShadowFailedOperations != 1 {
+		t.Fatalf("unexpected shadow counters: attempted=%d submitted=%d failed=%d",
+			resp.ShadowAttemptedOperations, resp.ShadowSubmittedOperations, resp.ShadowFailedOperations)
+	}
+	if resp.PendingAdapterOperations != 4 || resp.PendingOperations != 7 || resp.SubmittedOperations != 3 || resp.ConfirmedOperations != 2 || resp.FailedOperations != 1 {
+		t.Fatalf("unexpected reconcile counters: %+v", resp)
+	}
+	if resp.LastError != "" {
+		t.Fatalf("expected no error on success, got %q", resp.LastError)
+	}
+	if stub.reconcileCalls != 1 {
+		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
+func TestHandleSettlementStatusSurfacesLifecycleCountersWithConfirmedProgress(t *testing.T) {
+	now := time.Unix(1700000200, 0).UTC()
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			return settlement.ReconcileReport{
+				GeneratedAt:         now,
+				PendingOperations:   0,
+				SubmittedOperations: 4,
+				ConfirmedOperations: 6,
+				FailedOperations:    0,
+			}, nil
+		},
+	}
+	s := &Service{settlement: stub}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	rr := httptest.NewRecorder()
+	s.handleSettlementStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp settlementStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode settlement status response: %v", err)
+	}
+	if !resp.Enabled || resp.Stale {
+		t.Fatalf("expected enabled fresh settlement status, got enabled=%t stale=%t", resp.Enabled, resp.Stale)
+	}
+	if !resp.ReportGeneratedAt.Equal(now) {
+		t.Fatalf("expected report_generated_at %s, got %s", now, resp.ReportGeneratedAt)
+	}
+	if resp.PendingOperations != 0 || resp.SubmittedOperations != 4 || resp.ConfirmedOperations != 6 || resp.FailedOperations != 0 {
+		t.Fatalf("unexpected lifecycle counters: %+v", resp)
+	}
+	if stub.reconcileCalls != 1 {
+		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
+func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			return settlement.ReconcileReport{}, errors.New("temporary reconcile outage")
+		},
+	}
+	s := &Service{settlement: stub}
+	s.settlementStatus.lastReport = settlement.ReconcileReport{
+		GeneratedAt:               time.Unix(1700000100, 0).UTC(),
+		PendingAdapterOperations:  5,
+		ShadowAdapterConfigured:   true,
+		ShadowAttemptedOperations: 4,
+		ShadowSubmittedOperations: 3,
+		ShadowFailedOperations:    1,
+		PendingOperations:         6,
+		SubmittedOperations:       2,
+		ConfirmedOperations:       1,
+		FailedOperations:          3,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	rr := httptest.NewRecorder()
+	s.handleSettlementStatus(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200 on reconcile error, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp settlementStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode settlement status response: %v", err)
+	}
+	if !resp.Enabled {
+		t.Fatalf("expected settlement status endpoint enabled")
+	}
+	if !resp.Stale {
+		t.Fatalf("expected stale response on reconcile error")
+	}
+	if !strings.Contains(resp.LastError, "temporary reconcile outage") {
+		t.Fatalf("expected reconcile error in response, got %q", resp.LastError)
+	}
+	if !resp.ShadowAdapterConfigured {
+		t.Fatalf("expected cached shadow adapter configured flag in fail-soft response")
+	}
+	if resp.ShadowAttemptedOperations != 4 || resp.ShadowSubmittedOperations != 3 || resp.ShadowFailedOperations != 1 {
+		t.Fatalf("expected cached shadow counters in fail-soft response, got attempted=%d submitted=%d failed=%d",
+			resp.ShadowAttemptedOperations, resp.ShadowSubmittedOperations, resp.ShadowFailedOperations)
+	}
+	if resp.PendingAdapterOperations != 5 || resp.PendingOperations != 6 || resp.SubmittedOperations != 2 || resp.ConfirmedOperations != 1 || resp.FailedOperations != 3 {
+		t.Fatalf("expected cached counters in fail-soft response, got %+v", resp)
+	}
+	if stub.reconcileCalls != 1 {
+		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
+func TestHandleSettlementStatusStaleClearsAfterRecovery(t *testing.T) {
+	recoveredAt := time.Unix(1700000300, 0).UTC()
+	call := 0
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			call++
+			if call == 1 {
+				return settlement.ReconcileReport{}, errors.New("temporary reconcile outage")
+			}
+			return settlement.ReconcileReport{
+				GeneratedAt:               recoveredAt,
+				PendingAdapterOperations:  1,
+				ShadowAdapterConfigured:   true,
+				ShadowAttemptedOperations: 5,
+				ShadowSubmittedOperations: 4,
+				ShadowFailedOperations:    1,
+				PendingOperations:         0,
+				SubmittedOperations:       4,
+				ConfirmedOperations:       3,
+				FailedOperations:          0,
+			}, nil
+		},
+	}
+	s := &Service{settlement: stub}
+	s.settlementStatus.lastReport = settlement.ReconcileReport{
+		GeneratedAt:              time.Unix(1700000200, 0).UTC(),
+		PendingAdapterOperations: 9,
+		PendingOperations:        9,
+		FailedOperations:         2,
+	}
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	firstRR := httptest.NewRecorder()
+	s.handleSettlementStatus(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200 for degraded response, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	var degraded settlementStatusResponse
+	if err := json.Unmarshal(firstRR.Body.Bytes(), &degraded); err != nil {
+		t.Fatalf("decode degraded settlement status response: %v", err)
+	}
+	if !degraded.Stale {
+		t.Fatalf("expected stale response while reconcile is failing")
+	}
+	if !strings.Contains(degraded.LastError, "temporary reconcile outage") {
+		t.Fatalf("expected reconcile error in degraded response, got %q", degraded.LastError)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	secondRR := httptest.NewRecorder()
+	s.handleSettlementStatus(secondRR, secondReq)
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200 for recovered response, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	var recovered settlementStatusResponse
+	if err := json.Unmarshal(secondRR.Body.Bytes(), &recovered); err != nil {
+		t.Fatalf("decode recovered settlement status response: %v", err)
+	}
+	if recovered.Stale {
+		t.Fatalf("expected stale=false after recovery")
+	}
+	if recovered.LastError != "" {
+		t.Fatalf("expected last_error cleared after recovery, got %q", recovered.LastError)
+	}
+	if !recovered.ReportGeneratedAt.Equal(recoveredAt) {
+		t.Fatalf("expected recovered report_generated_at %s, got %s", recoveredAt, recovered.ReportGeneratedAt)
+	}
+	if recovered.PendingAdapterOperations != 1 || recovered.PendingOperations != 0 || recovered.SubmittedOperations != 4 || recovered.ConfirmedOperations != 3 || recovered.FailedOperations != 0 {
+		t.Fatalf("unexpected recovered counters: %+v", recovered)
+	}
+	if stub.reconcileCalls != 2 {
+		t.Fatalf("expected two reconcile calls across degrade->recover, got %d", stub.reconcileCalls)
+	}
+}
+
+type settlementAdapterRequest struct {
+	path string
+	auth string
+	body []byte
+}
+
+func collectSettlementAdapterRequests(t *testing.T, ch <-chan settlementAdapterRequest, count int) []settlementAdapterRequest {
+	t.Helper()
+	out := make([]settlementAdapterRequest, 0, count)
+	timeout := time.After(2 * time.Second)
+	for len(out) < count {
+		select {
+		case req := <-ch:
+			out = append(out, req)
+		case <-timeout:
+			t.Fatalf("timed out waiting for %d adapter requests; got %d", count, len(out))
+		}
+	}
+	return out
+}
+
+func hasSettlementAdapterRequest(requests []settlementAdapterRequest, path string, auth string) bool {
+	for _, req := range requests {
+		if req.path == path && req.auth == auth {
+			return true
+		}
+	}
+	return false
+}
+
+func runSettlementForAdapterEnvTest(t *testing.T, svc settlement.Service, sessionID string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-env-test",
+		AmountMicros: 200000,
+	}); err != nil {
+		t.Fatalf("reserve funds: %v", err)
+	}
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-env-test",
+		BytesIngress: 4096,
+		BytesEgress:  2048,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+	if _, err := svc.SettleSession(ctx, sessionID); err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+}
+
+func TestSettlementServiceFromEnvCurrencyNativeDualQuoteBehavior(t *testing.T) {
+	t.Setenv("SETTLEMENT_PRICE_PER_MIB_MICROS", "2000000")
+	t.Setenv("SETTLEMENT_CURRENCY", "USDC")
+	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "TDPN")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_NUMERATOR", "3")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR", "2")
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+
+	baseQuote, err := svc.QuotePrice(ctx, "subject-currency-base", "")
+	if err != nil {
+		t.Fatalf("quote base currency: %v", err)
+	}
+	if baseQuote.Currency != "USDC" {
+		t.Fatalf("expected base quote currency USDC, got %s", baseQuote.Currency)
+	}
+	if baseQuote.PricePerMiBMicros != 2000000 {
+		t.Fatalf("expected base quote 2000000 micros, got %d", baseQuote.PricePerMiBMicros)
+	}
+
+	nativeQuote, err := svc.QuotePrice(ctx, "subject-currency-native", "TDPN")
+	if err != nil {
+		t.Fatalf("quote native currency: %v", err)
+	}
+	if nativeQuote.Currency != "TDPN" {
+		t.Fatalf("expected native quote currency TDPN, got %s", nativeQuote.Currency)
+	}
+	if nativeQuote.PricePerMiBMicros != 3000000 {
+		t.Fatalf("expected native quote 3000000 micros with 3/2 conversion, got %d", nativeQuote.PricePerMiBMicros)
+	}
+}
+
+func TestSettlementServiceFromEnvDualNativeCurrencySettlementCoherence(t *testing.T) {
+	t.Setenv("SETTLEMENT_PRICE_PER_MIB_MICROS", "2000000")
+	t.Setenv("SETTLEMENT_CURRENCY", "USDC")
+	t.Setenv("SETTLEMENT_NATIVE_CURRENCY", "TDPN")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_NUMERATOR", "3")
+	t.Setenv("SETTLEMENT_NATIVE_RATE_DENOMINATOR", "2")
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+	sessionID := "sess-dual-native-coherent"
+
+	nativeQuote, err := svc.QuotePrice(ctx, "subject-dual-native", "TDPN")
+	if err != nil {
+		t.Fatalf("quote native currency: %v", err)
+	}
+
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-dual-native",
+		AmountMicros: 3500000,
+		Currency:     "TDPN",
+	}); err != nil {
+		t.Fatalf("reserve funds in native currency: %v", err)
+	}
+
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-dual-native",
+		BytesIngress: 1048576,
+		BytesEgress:  0,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+
+	settled, err := svc.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	if settled.Currency != "TDPN" {
+		t.Fatalf("expected settlement in TDPN, got %s", settled.Currency)
+	}
+	if settled.ChargedMicros != nativeQuote.PricePerMiBMicros {
+		t.Fatalf("expected charged micros %d to match native quote, got %d", nativeQuote.PricePerMiBMicros, settled.ChargedMicros)
+	}
+	if settled.ChargedMicros != 3000000 {
+		t.Fatalf("expected deterministic converted charge 3000000, got %d", settled.ChargedMicros)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosDefaultHTTPSubmitMode(t *testing.T) {
+	seenCh := make(chan settlementAdapterRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		seenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", srv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-http-1")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+
+	svc := newSettlementServiceFromEnv()
+	runSettlementForAdapterEnvTest(t, svc, "sess-http-default")
+
+	select {
+	case got := <-seenCh:
+		if got.path != "/x/vpnbilling/settlements" {
+			t.Fatalf("expected default HTTP submit path, got %q", got.path)
+		}
+		if got.auth != "Bearer api-http-1" {
+			t.Fatalf("expected bearer auth preserved, got %q", got.auth)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for HTTP-mode settlement submit")
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosSignedTxModeUsesConfiguredFields(t *testing.T) {
+	seenCh := make(chan settlementAdapterRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		seenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", srv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-signed-1")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "/custom/tx/broadcast")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "tdpn-env-1")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "signer-env-1")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	secretFile := filepath.Join(t.TempDir(), "exit_signed_tx_secret.txt")
+	if err := os.WriteFile(secretFile, []byte(" signed-secret \n"), 0o600); err != nil {
+		t.Fatalf("write signed-tx secret file: %v", err)
+	}
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", secretFile)
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "exit-kms-key-1")
+
+	svc := newSettlementServiceFromEnv()
+	runSettlementForAdapterEnvTest(t, svc, "sess-signed-env")
+
+	select {
+	case got := <-seenCh:
+		if got.path != "/custom/tx/broadcast" {
+			t.Fatalf("expected signed-tx broadcast path override, got %q", got.path)
+		}
+		if got.auth != "Bearer api-signed-1" {
+			t.Fatalf("expected bearer auth preserved in signed-tx mode, got %q", got.auth)
+		}
+		var req struct {
+			Tx struct {
+				ChainID     string `json:"chain_id"`
+				KeyID       string `json:"key_id"`
+				Signer      string `json:"signer"`
+				MessageType string `json:"message_type"`
+				Signature   string `json:"signature"`
+			} `json:"tx"`
+		}
+		if err := json.Unmarshal(got.body, &req); err != nil {
+			t.Fatalf("decode signed-tx broadcast request: %v", err)
+		}
+		if req.Tx.ChainID != "tdpn-env-1" {
+			t.Fatalf("expected signed-tx chain id from env, got %q", req.Tx.ChainID)
+		}
+		if req.Tx.KeyID != "exit-kms-key-1" {
+			t.Fatalf("expected signed-tx key id from env, got %q", req.Tx.KeyID)
+		}
+		if req.Tx.Signer != "signer-env-1" {
+			t.Fatalf("expected signed-tx signer from env, got %q", req.Tx.Signer)
+		}
+		if req.Tx.MessageType != "/x/vpnbilling/settlements" {
+			t.Fatalf("expected settlement message type in signed-tx request, got %q", req.Tx.MessageType)
+		}
+		if req.Tx.Signature == "" {
+			t.Fatalf("expected non-empty signed-tx signature")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for signed-tx settlement submit")
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosSignedTxMissingRequiredFieldsFallsBack(t *testing.T) {
+	seenCh := make(chan settlementAdapterRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		seenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", srv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "/custom/tx/broadcast")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "tdpn-env-1")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "signed-secret")
+
+	svc := newSettlementServiceFromEnv()
+	runSettlementForAdapterEnvTest(t, svc, "sess-signed-fallback")
+
+	select {
+	case got := <-seenCh:
+		t.Fatalf("expected memory-only fallback when signed-tx required fields are missing, got request path=%s", got.path)
+	case <-time.After(800 * time.Millisecond):
+	}
+
+	report, err := svc.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("reconcile fallback service: %v", err)
+	}
+	if report.PendingAdapterOperations != 0 || report.FailedOperations != 0 {
+		t.Fatalf("expected no adapter operations after fallback, got pending=%d failed=%d", report.PendingAdapterOperations, report.FailedOperations)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *testing.T) {
+	primarySeenCh := make(chan settlementAdapterRequest, 4)
+	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		primarySeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primarySrv.Close()
+
+	shadowSeenCh := make(chan settlementAdapterRequest, 4)
+	shadowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		shadowSeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowSrv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-1")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "")
+
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_API_KEY", "api-shadow-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_KEY_ID", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+	sessionID := "sess-shadow-mirror"
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-mirror",
+		AmountMicros: 200000,
+	}); err != nil {
+		t.Fatalf("reserve funds: %v", err)
+	}
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-mirror",
+		BytesIngress: 4096,
+		BytesEgress:  2048,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+	sessionSettlement, err := svc.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	if !sessionSettlement.AdapterSubmitted || sessionSettlement.AdapterDeferred {
+		t.Fatalf("expected primary adapter submission to remain canonical, got submitted=%t deferred=%t",
+			sessionSettlement.AdapterSubmitted, sessionSettlement.AdapterDeferred)
+	}
+	if !sessionSettlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker on settlement")
+	}
+	if sessionSettlement.ShadowAdapterStatus != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected shadow settlement status submitted, got %s", sessionSettlement.ShadowAdapterStatus)
+	}
+
+	reward, err := svc.IssueReward(ctx, settlement.RewardIssue{
+		RewardID:          "rew-shadow-mirror-1",
+		ProviderSubjectID: "provider-shadow-mirror-1",
+		SessionID:         sessionID,
+		RewardMicros:      100,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("issue reward: %v", err)
+	}
+	if !reward.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker on reward")
+	}
+
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 2)
+	shadowRequests := collectSettlementAdapterRequests(t, shadowSeenCh, 2)
+
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnbilling/settlements", "Bearer api-primary-1") {
+		t.Fatalf("expected primary settlement submission with primary auth, got %+v", primaryRequests)
+	}
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnrewards/issues", "Bearer api-primary-1") {
+		t.Fatalf("expected primary reward submission with primary auth, got %+v", primaryRequests)
+	}
+	if !hasSettlementAdapterRequest(shadowRequests, "/x/vpnbilling/settlements", "Bearer api-shadow-1") {
+		t.Fatalf("expected shadow settlement submission with shadow auth, got %+v", shadowRequests)
+	}
+	if !hasSettlementAdapterRequest(shadowRequests, "/x/vpnrewards/issues", "Bearer api-shadow-1") {
+		t.Fatalf("expected shadow reward submission with shadow auth, got %+v", shadowRequests)
+	}
+
+	report, err := svc.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !report.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter configured in reconcile report")
+	}
+	if report.ShadowAttemptedOperations < 2 || report.ShadowSubmittedOperations < 2 || report.ShadowFailedOperations != 0 {
+		t.Fatalf("unexpected shadow report counts attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosShadowAdapterSignedTxModeUsesConfiguredFields(t *testing.T) {
+	primarySeenCh := make(chan settlementAdapterRequest, 2)
+	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		primarySeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primarySrv.Close()
+
+	shadowSeenCh := make(chan settlementAdapterRequest, 2)
+	shadowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		shadowSeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowSrv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-http")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "")
+
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_API_KEY", "api-shadow-signed")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH", "/shadow/custom/tx")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_CHAIN_ID", "tdpn-shadow-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "shadow-signer-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+	secretFile := filepath.Join(t.TempDir(), "exit_shadow_signed_tx_secret.txt")
+	if err := os.WriteFile(secretFile, []byte(" shadow-secret \n"), 0o600); err != nil {
+		t.Fatalf("write shadow signed-tx secret file: %v", err)
+	}
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", secretFile)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_KEY_ID", "shadow-kms-key-1")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+	sessionID := "sess-shadow-signedtx"
+	if _, err := svc.ReserveFunds(ctx, settlement.FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-signedtx",
+		AmountMicros: 200000,
+	}); err != nil {
+		t.Fatalf("reserve funds: %v", err)
+	}
+	if err := svc.RecordUsage(ctx, settlement.UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    "subject-shadow-signedtx",
+		BytesIngress: 4096,
+		BytesEgress:  2048,
+		RecordedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+	sessionSettlement, err := svc.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	if !sessionSettlement.AdapterSubmitted || sessionSettlement.AdapterDeferred {
+		t.Fatalf("expected primary adapter to remain canonical, got submitted=%t deferred=%t",
+			sessionSettlement.AdapterSubmitted, sessionSettlement.AdapterDeferred)
+	}
+	if !sessionSettlement.ShadowAdapterSubmitted {
+		t.Fatalf("expected shadow adapter submission marker on settlement")
+	}
+	if sessionSettlement.ShadowAdapterStatus != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected shadow settlement status submitted, got %s", sessionSettlement.ShadowAdapterStatus)
+	}
+
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 1)
+	shadowRequests := collectSettlementAdapterRequests(t, shadowSeenCh, 1)
+
+	primaryReq := primaryRequests[0]
+	if primaryReq.path != "/x/vpnbilling/settlements" {
+		t.Fatalf("expected canonical primary HTTP path, got %q", primaryReq.path)
+	}
+	if primaryReq.auth != "Bearer api-primary-http" {
+		t.Fatalf("expected primary bearer auth, got %q", primaryReq.auth)
+	}
+	var primaryBody map[string]any
+	if err := json.Unmarshal(primaryReq.body, &primaryBody); err != nil {
+		t.Fatalf("decode primary settlement payload: %v", err)
+	}
+	if _, ok := primaryBody["tx"]; ok {
+		t.Fatalf("expected primary payload to stay canonical HTTP shape, got signed-tx envelope")
+	}
+	if gotSessionID, _ := primaryBody["SessionID"].(string); gotSessionID != sessionID {
+		t.Fatalf("expected primary payload SessionID %q, got %q", sessionID, gotSessionID)
+	}
+
+	shadowReq := shadowRequests[0]
+	if shadowReq.path != "/shadow/custom/tx" {
+		t.Fatalf("expected shadow signed-tx broadcast path override, got %q", shadowReq.path)
+	}
+	if shadowReq.auth != "Bearer api-shadow-signed" {
+		t.Fatalf("expected shadow bearer auth in signed-tx mode, got %q", shadowReq.auth)
+	}
+	var signedReq struct {
+		Mode string `json:"mode"`
+		Tx   struct {
+			ChainID        string          `json:"chain_id"`
+			KeyID          string          `json:"key_id"`
+			Signer         string          `json:"signer"`
+			MessageType    string          `json:"message_type"`
+			Message        json.RawMessage `json:"message"`
+			IdempotencyKey string          `json:"idempotency_key"`
+			Signature      string          `json:"signature"`
+		} `json:"tx"`
+	}
+	if err := json.Unmarshal(shadowReq.body, &signedReq); err != nil {
+		t.Fatalf("decode shadow signed-tx broadcast request: %v", err)
+	}
+	if signedReq.Mode != "BROADCAST_MODE_SYNC" {
+		t.Fatalf("expected signed-tx broadcast mode BROADCAST_MODE_SYNC, got %q", signedReq.Mode)
+	}
+	if signedReq.Tx.ChainID != "tdpn-shadow-1" {
+		t.Fatalf("expected shadow chain id from env, got %q", signedReq.Tx.ChainID)
+	}
+	if signedReq.Tx.KeyID != "shadow-kms-key-1" {
+		t.Fatalf("expected shadow key id from env, got %q", signedReq.Tx.KeyID)
+	}
+	if signedReq.Tx.Signer != "shadow-signer-1" {
+		t.Fatalf("expected shadow signer from env, got %q", signedReq.Tx.Signer)
+	}
+	if signedReq.Tx.MessageType != "/x/vpnbilling/settlements" {
+		t.Fatalf("expected settlement message type in shadow signed-tx request, got %q", signedReq.Tx.MessageType)
+	}
+	if signedReq.Tx.IdempotencyKey == "" {
+		t.Fatalf("expected non-empty shadow idempotency key")
+	}
+	if signedReq.Tx.Signature == "" {
+		t.Fatalf("expected non-empty shadow signed-tx signature")
+	}
+	var signedMessage map[string]any
+	if err := json.Unmarshal(signedReq.Tx.Message, &signedMessage); err != nil {
+		t.Fatalf("decode shadow signed-tx message payload: %v", err)
+	}
+	if gotSessionID, _ := signedMessage["SessionID"].(string); gotSessionID != sessionID {
+		t.Fatalf("expected shadow signed-tx message SessionID %q, got %q", sessionID, gotSessionID)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosShadowAdapterInitFailureDoesNotBlockPrimary(t *testing.T) {
+	primarySeenCh := make(chan settlementAdapterRequest, 2)
+	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		primarySeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primarySrv.Close()
+
+	shadowSeenCh := make(chan settlementAdapterRequest, 1)
+	shadowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		shadowSeenCh <- settlementAdapterRequest{
+			path: r.URL.Path,
+			auth: r.Header.Get("Authorization"),
+			body: body,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowSrv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-only")
+	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
+	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "")
+
+	// Force shadow adapter init failure (signed-tx mode requires signer).
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "shadow-secret")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", "")
+
+	svc := newSettlementServiceFromEnv()
+	runSettlementForAdapterEnvTest(t, svc, "sess-shadow-init-fallback")
+
+	select {
+	case got := <-primarySeenCh:
+		if got.path != "/x/vpnbilling/settlements" {
+			t.Fatalf("expected primary settlement path, got %q", got.path)
+		}
+		if got.auth != "Bearer api-primary-only" {
+			t.Fatalf("expected primary auth header, got %q", got.auth)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for primary settlement submit")
+	}
+
+	select {
+	case got := <-shadowSeenCh:
+		t.Fatalf("expected no shadow requests when shadow adapter init fails, got path=%s", got.path)
+	case <-time.After(800 * time.Millisecond):
+	}
+
+	report, err := svc.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if report.ShadowAdapterConfigured {
+		t.Fatalf("expected shadow adapter to remain disabled after init failure")
+	}
+	if report.ShadowAttemptedOperations != 0 || report.ShadowSubmittedOperations != 0 || report.ShadowFailedOperations != 0 {
+		t.Fatalf("expected no shadow operation accounting, got attempted=%d submitted=%d failed=%d",
+			report.ShadowAttemptedOperations, report.ShadowSubmittedOperations, report.ShadowFailedOperations)
+	}
+}
 
 func TestAuthorizePacketReplayDenied(t *testing.T) {
 	s := &Service{enforcer: policy.NewEnforcer(), sessions: map[string]sessionInfo{}}
@@ -72,6 +1408,7 @@ func TestValidatePathOpenClaims(t *testing.T) {
 		Tier:       2,
 		ExpiryUnix: now + 60,
 		TokenID:    "jti-1",
+		ExitScope:  []string{"exit-a"},
 	}
 	if err := validatePathOpenClaims(good, now); err != nil {
 		t.Fatalf("expected valid claims, got err=%v", err)
@@ -110,6 +1447,18 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			claims: crypto.CapabilityClaims{
 				Audience:   "exit",
 				TokenType:  crypto.TokenTypeClientAccess,
+				Subject:    "client-a",
+				Tier:       1,
+				ExpiryUnix: now + 60,
+				TokenID:    "jti-1",
+			},
+		},
+		{
+			name: "missing exit scope",
+			claims: crypto.CapabilityClaims{
+				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
 				Subject:    "client-a",
 				Tier:       1,
 				ExpiryUnix: now + 60,
@@ -183,6 +1532,7 @@ func TestVerifyPathOpenTokenProof(t *testing.T) {
 	}
 	req := proto.PathOpenRequest{
 		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
 		Token:           "tok-1",
 		TokenProofNonce: "nonce-1",
 		ClientInnerPub:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -193,6 +1543,7 @@ func TestVerifyPathOpenTokenProof(t *testing.T) {
 	req.TokenProof, err = crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
 		Token:           req.Token,
 		ExitID:          req.ExitID,
+		MiddleRelayID:   req.MiddleRelayID,
 		TokenProofNonce: req.TokenProofNonce,
 		ClientInnerPub:  req.ClientInnerPub,
 		Transport:       req.Transport,
@@ -206,7 +1557,7 @@ func TestVerifyPathOpenTokenProof(t *testing.T) {
 		t.Fatalf("expected token proof verification success, got %v", err)
 	}
 
-	req.ExitID = "exit-other"
+	req.MiddleRelayID = "middle-other"
 	if err := verifyPathOpenTokenProof(req, claims); err == nil {
 		t.Fatalf("expected token proof verification failure for mutated request")
 	}
@@ -238,6 +1589,151 @@ func TestCheckAndRememberProofNonceReplay(t *testing.T) {
 	req2 := proto.PathOpenRequest{TokenProofNonce: "nonce-2"}
 	if err := s.checkAndRememberProofNonce(claims, req2, now); err != nil {
 		t.Fatalf("second nonce should pass: %v", err)
+	}
+}
+
+func TestCheckAndRememberProofNoncePerTokenCap(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		tokenProofReplayGuard: true,
+		proofNonceSeen:        make(map[string]map[string]int64),
+	}
+	claims := crypto.CapabilityClaims{TokenID: "jti-cap-1", ExpiryUnix: now + 3600}
+
+	total := tokenProofReplayMaxNoncesPerToken
+	for i := 0; i < total; i++ {
+		req := proto.PathOpenRequest{TokenProofNonce: fmt.Sprintf("nonce-%d", i)}
+		if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+			t.Fatalf("nonce %d should pass: %v", i, err)
+		}
+	}
+	if err := s.checkAndRememberProofNonce(claims, proto.PathOpenRequest{TokenProofNonce: "nonce-overflow"}, now); err == nil {
+		t.Fatalf("expected per-token replay cache saturation")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := s.proofNonceSeen[claims.TokenID]
+	if got := len(seen); got != tokenProofReplayMaxNoncesPerToken {
+		t.Fatalf("expected %d nonces retained, got %d", tokenProofReplayMaxNoncesPerToken, got)
+	}
+	if _, ok := seen[fmt.Sprintf("nonce-%d", total-1)]; !ok {
+		t.Fatalf("expected newest nonce retained")
+	}
+	if _, ok := seen["nonce-overflow"]; ok {
+		t.Fatalf("did not expect overflow nonce retained")
+	}
+}
+
+func TestCheckAndRememberProofNonceTokenIDCap(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		tokenProofReplayGuard: true,
+		proofNonceSeen:        make(map[string]map[string]int64),
+	}
+
+	total := tokenProofReplayMaxTokenIDs
+	for i := 0; i < total; i++ {
+		tokenID := fmt.Sprintf("jti-bucket-%05d", i)
+		claims := crypto.CapabilityClaims{TokenID: tokenID, ExpiryUnix: now + int64(3600+i)}
+		req := proto.PathOpenRequest{TokenProofNonce: "nonce-1"}
+		if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+			t.Fatalf("token %s should pass: %v", tokenID, err)
+		}
+	}
+	overflowTokenID := fmt.Sprintf("jti-bucket-%05d", total)
+	if err := s.checkAndRememberProofNonce(
+		crypto.CapabilityClaims{TokenID: overflowTokenID, ExpiryUnix: now + 7200},
+		proto.PathOpenRequest{TokenProofNonce: "nonce-1"},
+		now,
+	); err == nil {
+		t.Fatalf("expected token replay bucket saturation")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if got := len(s.proofNonceSeen); got != tokenProofReplayMaxTokenIDs {
+		t.Fatalf("expected %d token buckets retained, got %d", tokenProofReplayMaxTokenIDs, got)
+	}
+	newestTokenID := fmt.Sprintf("jti-bucket-%05d", total-1)
+	if _, ok := s.proofNonceSeen[newestTokenID]; !ok {
+		t.Fatalf("expected newest token bucket %q retained", newestTokenID)
+	}
+	if _, ok := s.proofNonceSeen[overflowTokenID]; ok {
+		t.Fatalf("did not expect overflow token bucket retained")
+	}
+}
+
+func TestCheckAndRememberProofNoncePersistsAcrossReload(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store.json")
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-1",
+		ExpiryUnix: now + 3600,
+	}
+	req := proto.PathOpenRequest{TokenProofNonce: "nonce-1"}
+
+	s := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+		proofNonceSeen:            make(map[string]map[string]int64),
+	}
+	if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+		t.Fatalf("first nonce should pass: %v", err)
+	}
+
+	loaded := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+	}
+	if err := loaded.loadTokenProofReplayStore(now + 1); err != nil {
+		t.Fatalf("load replay store: %v", err)
+	}
+	if err := loaded.checkAndRememberProofNonce(claims, req, now+1); err == nil || !strings.Contains(err.Error(), "replay") {
+		t.Fatalf("expected replay rejection after reload, got %v", err)
+	}
+}
+
+func TestLoadTokenProofReplayStorePrunesExpiredEntries(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store.json")
+	expiredClaims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-2",
+		ExpiryUnix: now - 10,
+	}
+	freshClaims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-2",
+		ExpiryUnix: now + 3600,
+	}
+
+	seed := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+		proofNonceSeen:            make(map[string]map[string]int64),
+	}
+	if err := seed.checkAndRememberProofNonce(expiredClaims, proto.PathOpenRequest{TokenProofNonce: "nonce-old"}, now-20); err != nil {
+		t.Fatalf("seed old nonce: %v", err)
+	}
+	if err := seed.checkAndRememberProofNonce(freshClaims, proto.PathOpenRequest{TokenProofNonce: "nonce-new"}, now); err != nil {
+		t.Fatalf("seed new nonce: %v", err)
+	}
+
+	loaded := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+	}
+	if err := loaded.loadTokenProofReplayStore(now); err != nil {
+		t.Fatalf("load replay store: %v", err)
+	}
+	bucket := loaded.proofNonceSeen[freshClaims.TokenID]
+	if got := len(bucket); got != 1 {
+		t.Fatalf("expected one non-expired nonce after load, got %d", got)
+	}
+	if _, ok := bucket["nonce-new"]; !ok {
+		t.Fatalf("expected non-expired nonce retained")
+	}
+	if _, ok := bucket["nonce-old"]; ok {
+		t.Fatalf("did not expect expired nonce retained")
 	}
 }
 
@@ -291,6 +1787,31 @@ func TestApplyRevocationFeedRejectsBadSignature(t *testing.T) {
 	}
 	if err := s.applyRevocationFeed(feed, now); err == nil {
 		t.Fatalf("expected bad signature to be rejected")
+	}
+}
+
+func TestApplyRevocationFeedRejectsUnsignedFeed(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	feed := proto.RevocationListResponse{
+		Issuer:      "issuer-local",
+		GeneratedAt: now,
+		ExpiresAt:   now + 30,
+		Revocations: []proto.Revocation{{JTI: "jti-unsigned", Until: now + 120}},
+	}
+	s := &Service{
+		issuerPub:  pub,
+		revokedJTI: map[string]int64{},
+	}
+	err = s.applyRevocationFeed(feed, now)
+	if err == nil {
+		t.Fatalf("expected unsigned feed rejection")
+	}
+	if !strings.Contains(err.Error(), "signature") {
+		t.Fatalf("expected signature-related error, got %v", err)
 	}
 }
 
@@ -373,6 +1894,43 @@ func TestVerifyTokenRejectsIssuerMismatchWhenMapped(t *testing.T) {
 	}
 }
 
+func TestVerifyTokenThrottlesRefreshOnRepeatedInvalidTokens(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	fetchCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pubkeys" {
+			http.NotFound(w, r)
+			return
+		}
+		fetchCount++
+		_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(pub)},
+		})
+	}))
+	defer server.Close()
+
+	s := &Service{
+		issuerURLs:               []string{server.URL},
+		httpClient:               server.Client(),
+		issuerPubs:               map[string]ed25519.PublicKey{issuerKeyID(pub): pub},
+		issuerKeyIssuer:          map[string]string{},
+		verifyRefreshMinInterval: time.Hour,
+	}
+	if _, _, err := s.verifyToken("invalid-token-1"); err == nil {
+		t.Fatalf("expected invalid token verification failure")
+	}
+	if _, _, err := s.verifyToken("invalid-token-2"); err == nil {
+		t.Fatalf("expected repeated invalid token verification failure")
+	}
+	if fetchCount != 0 {
+		t.Fatalf("expected malformed tokens to skip issuer refresh fetches, got %d", fetchCount)
+	}
+}
+
 func TestRevocationScopedByIssuerKey(t *testing.T) {
 	pubA, privA, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -421,13 +1979,21 @@ func TestRevocationScopedByIssuerKey(t *testing.T) {
 
 func mustSignFeed(t *testing.T, feed proto.RevocationListResponse, priv ed25519.PrivateKey) string {
 	t.Helper()
+	signature, err := signFeed(feed, priv)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return signature
+}
+
+func signFeed(feed proto.RevocationListResponse, priv ed25519.PrivateKey) (string, error) {
 	unsigned := feed
 	unsigned.Signature = ""
 	payload, err := json.Marshal(unsigned)
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload)), nil
 }
 
 func TestNewCommandBackendDisablesOpaqueEchoByDefault(t *testing.T) {
@@ -749,6 +2315,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequire
 		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
 		issuerMinSources:      2,
 		issuerMinOperators:    2,
+		issuerMinKeyVotes:     2,
 		issuerRequireID:       false,
 	}
 	err := s.validateRuntimeConfig()
@@ -756,6 +2323,41 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequire
 		t.Fatalf("expected strict mode validation failure")
 	}
 	if !strings.Contains(err.Error(), "EXIT_ISSUER_REQUIRE_ID=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_INSECURE_SKIP_VERIFY", "1")
+
+	s := &Service{
+		prodStrict:            true,
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+		issuerURLs:            []string{"https://issuer-a.example", "https://issuer-b.example"},
+		issuerMinSources:      2,
+		issuerMinOperators:    2,
+		issuerMinKeyVotes:     2,
+		issuerRequireID:       true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "MTLS_INSECURE_SKIP_VERIFY") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -769,6 +2371,19 @@ func TestValidateRuntimeConfigRejectsNegativeCleanupInterval(t *testing.T) {
 		t.Fatalf("expected cleanup interval validation error")
 	}
 	if !strings.Contains(err.Error(), "EXIT_SESSION_CLEANUP_SEC") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsNegativeSettlementReconcileInterval(t *testing.T) {
+	s := &Service{
+		settlementReconcileSec: -1,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected settlement reconcile interval validation error")
+	}
+	if !strings.Contains(err.Error(), "EXIT_SETTLEMENT_RECONCILE_SEC") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -797,12 +2412,44 @@ func TestNewDefaultWGPubKeyIsValid(t *testing.T) {
 	}
 }
 
+func TestNewSettlementReconcileIntervalDefaultsEnabled(t *testing.T) {
+	t.Setenv("EXIT_SETTLEMENT_RECONCILE_SEC", "")
+	s := New()
+	if s.settlementReconcileSec <= 0 {
+		t.Fatalf("expected settlement reconcile enabled by default, got %d", s.settlementReconcileSec)
+	}
+}
+
+func TestNewSettlementReconcileIntervalOverride(t *testing.T) {
+	t.Setenv("EXIT_SETTLEMENT_RECONCILE_SEC", "7")
+	s := New()
+	if s.settlementReconcileSec != 7 {
+		t.Fatalf("expected settlement reconcile interval override 7, got %d", s.settlementReconcileSec)
+	}
+}
+
+func TestNewSettlementReconcileIntervalCanDisable(t *testing.T) {
+	t.Setenv("EXIT_SETTLEMENT_RECONCILE_SEC", "0")
+	s := New()
+	if s.settlementReconcileSec != 0 {
+		t.Fatalf("expected settlement reconcile disabled by override, got %d", s.settlementReconcileSec)
+	}
+}
+
 func TestNewCommandBackendKeepsUnsetWGPubKeyForDerivation(t *testing.T) {
 	t.Setenv("EXIT_WG_PUBKEY", "")
 	t.Setenv("WG_BACKEND", "command")
 	s := New()
 	if strings.TrimSpace(s.wgPubKey) != "" {
 		t.Fatalf("expected empty EXIT_WG_PUBKEY in command mode for runtime derivation, got %q", s.wgPubKey)
+	}
+}
+
+func TestDecodeBoundedJSONResponseRejectsOversizedBody(t *testing.T) {
+	body := strings.NewReader(`{"value":"` + strings.Repeat("a", int(remoteResponseMaxBodyBytes)+1024) + `"}`)
+	var out map[string]string
+	if err := decodeBoundedJSONResponse(body, &out, remoteResponseMaxBodyBytes); err == nil {
+		t.Fatalf("expected oversized response rejection")
 	}
 }
 
@@ -898,7 +2545,7 @@ func TestEnsureStartupIssuerSyncTimeout(t *testing.T) {
 }
 
 func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
-	pub, _, err := crypto.GenerateEd25519Keypair()
+	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
@@ -911,12 +2558,19 @@ func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
 				Issuer:  "issuer-local",
 			})
 		case "/v1/revocations":
-			_ = json.NewEncoder(w).Encode(proto.RevocationListResponse{
+			feed := proto.RevocationListResponse{
 				Issuer:      "issuer-local",
 				GeneratedAt: time.Now().Unix(),
 				ExpiresAt:   time.Now().Add(time.Minute).Unix(),
 				Revocations: []proto.Revocation{},
-			})
+			}
+			signature, err := signFeed(feed, priv)
+			if err != nil {
+				http.Error(w, "sign revocation feed", http.StatusInternalServerError)
+				return
+			}
+			feed.Signature = signature
+			_ = json.NewEncoder(w).Encode(feed)
 		default:
 			http.NotFound(w, r)
 		}
@@ -944,7 +2598,7 @@ func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
 
 func newIssuerPubKeyServer(t *testing.T, issuerID string) *httptest.Server {
 	t.Helper()
-	pub, _, err := crypto.GenerateEd25519Keypair()
+	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
@@ -957,12 +2611,19 @@ func newIssuerPubKeyServer(t *testing.T, issuerID string) *httptest.Server {
 				Issuer:  issuerID,
 			})
 		case "/v1/revocations":
-			_ = json.NewEncoder(w).Encode(proto.RevocationListResponse{
+			feed := proto.RevocationListResponse{
 				Issuer:      issuerID,
 				GeneratedAt: time.Now().Unix(),
 				ExpiresAt:   time.Now().Add(time.Minute).Unix(),
 				Revocations: []proto.Revocation{},
-			})
+			}
+			signature, err := signFeed(feed, priv)
+			if err != nil {
+				http.Error(w, "sign revocation feed", http.StatusInternalServerError)
+				return
+			}
+			feed.Signature = signature
+			_ = json.NewEncoder(w).Encode(feed)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1035,6 +2696,93 @@ func TestRefreshIssuerKeysWithSourceAndOperatorQuorum(t *testing.T) {
 	}
 	if len(s.issuerPubs) == 0 {
 		t.Fatalf("expected issuer keys populated")
+	}
+}
+
+func TestRefreshIssuerKeysRejectsDisjointKeysetByDefault(t *testing.T) {
+	existingPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("existing keygen: %v", err)
+	}
+	newPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("new keygen: %v", err)
+	}
+	newPubB64 := base64.RawURLEncoding.EncodeToString(newPub)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pubkeys" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+			PubKeys: []string{newPubB64},
+			Issuer:  "issuer-rotation",
+		})
+	}))
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 1,
+		httpClient:         srv.Client(),
+		issuerPubs: map[string]ed25519.PublicKey{
+			issuerKeyID(existingPub): existingPub,
+		},
+		issuerKeyIssuer: map[string]string{},
+		minTokenEpoch:   map[string]int64{},
+	}
+	err = s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected disjoint keyset to be rejected")
+	}
+	if !strings.Contains(err.Error(), "continuity check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshIssuerKeysAllowsDisjointKeysetWithDangerousOverride(t *testing.T) {
+	t.Setenv("EXIT_ALLOW_DANGEROUS_ISSUER_KEYSET_REPLACEMENT", "1")
+
+	existingPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("existing keygen: %v", err)
+	}
+	newPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("new keygen: %v", err)
+	}
+	newPubB64 := base64.RawURLEncoding.EncodeToString(newPub)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pubkeys" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+			PubKeys: []string{newPubB64},
+			Issuer:  "issuer-rotation",
+		})
+	}))
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 1,
+		httpClient:         srv.Client(),
+		issuerPubs: map[string]ed25519.PublicKey{
+			issuerKeyID(existingPub): existingPub,
+		},
+		issuerKeyIssuer: map[string]string{},
+		minTokenEpoch:   map[string]int64{},
+	}
+	if err := s.refreshIssuerKeys(context.Background()); err != nil {
+		t.Fatalf("expected dangerous override to allow disjoint rotation, got %v", err)
+	}
+	if _, ok := s.issuerPubs[issuerKeyID(newPub)]; !ok {
+		t.Fatalf("expected refreshed keyset to include new key")
 	}
 }
 
@@ -1182,6 +2930,33 @@ func TestApplyRevocationFeedSetsMinTokenEpoch(t *testing.T) {
 	}
 	if got := s.revocationVersion["issuer-epoch"]; got != 2 {
 		t.Fatalf("expected revocation version 2, got %d", got)
+	}
+}
+
+func TestApplyRevocationFeedRejectsSignerIssuerMismatch(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	feed := proto.RevocationListResponse{
+		Issuer:      "issuer-spoofed",
+		GeneratedAt: now,
+		ExpiresAt:   now + 30,
+		Revocations: []proto.Revocation{{JTI: "jti-spoof", Until: now + 120}},
+	}
+	feed.Signature = mustSignFeed(t, feed, priv)
+	keyID := issuerKeyID(pub)
+
+	s := &Service{
+		issuerPubs:        map[string]ed25519.PublicKey{keyID: pub},
+		issuerKeyIssuer:   map[string]string{keyID: "issuer-real"},
+		revokedJTI:        map[string]int64{},
+		minTokenEpoch:     map[string]int64{},
+		revocationVersion: map[string]int64{},
+	}
+	if err := s.applyRevocationFeed(feed, now); err == nil {
+		t.Fatalf("expected signer/issuer mismatch rejection")
 	}
 }
 
@@ -1530,6 +3305,32 @@ func TestRecordSourceMismatchDropUpdatesMetrics(t *testing.T) {
 	}
 }
 
+func TestAuthorizeNonceCapacityEvictsIncrementally(t *testing.T) {
+	now := time.Now()
+	seen := make(map[uint64]struct{}, 8192)
+	for i := uint64(1); i <= 8192; i++ {
+		seen[i] = struct{}{}
+	}
+	s := &Service{
+		sessions: map[string]sessionInfo{
+			"sid-capacity": {
+				claims:     crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces: seen,
+			},
+		},
+	}
+	if _, err := s.authorizeNonce("sid-capacity", 9001, now); err != nil {
+		t.Fatalf("authorizeNonce failed: %v", err)
+	}
+	got := s.sessions["sid-capacity"]
+	if len(got.seenNonces) <= 1 {
+		t.Fatalf("expected incremental eviction preserving nonce history, got %d entries", len(got.seenNonces))
+	}
+	if _, ok := got.seenNonces[9001]; !ok {
+		t.Fatalf("expected newly authorized nonce to be tracked")
+	}
+}
+
 func TestApplyRevocationFeedRejectsVersionRollback(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -1619,5 +3420,91 @@ func TestBuildEgressSetupCommandsContainsHardeningRules(t *testing.T) {
 	}
 	if !strings.Contains(joined, "conntrack --ctstate ESTABLISHED,RELATED") {
 		t.Fatalf("expected established conntrack forward rule")
+	}
+}
+
+func TestSanitizeEgressCommandInputsRejectsMaliciousValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		chain string
+		cidr  string
+		iface string
+	}{
+		{
+			name:  "chain injection",
+			chain: "PRIVNODE_EGRESS; touch /tmp/pwned",
+			cidr:  "10.90.0.0/24",
+			iface: "eth0",
+		},
+		{
+			name:  "iface injection",
+			chain: "PRIVNODE_EGRESS",
+			cidr:  "10.90.0.0/24",
+			iface: "eth0; id",
+		},
+		{
+			name:  "cidr injection",
+			chain: "PRIVNODE_EGRESS",
+			cidr:  "10.90.0.0/24; iptables -F",
+			iface: "eth0",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := sanitizeEgressCommandInputs(tc.chain, tc.cidr, tc.iface)
+			if err == nil {
+				t.Fatalf("expected input rejection for %q", tc.name)
+			}
+		})
+	}
+}
+
+func TestSanitizeEgressCommandInputsAcceptsValidValues(t *testing.T) {
+	chain, cidr, iface, err := sanitizeEgressCommandInputs(" CHAIN_X-1 ", "10.90.0.0/24", "eth0.100@uplink")
+	if err != nil {
+		t.Fatalf("expected valid egress command inputs: %v", err)
+	}
+	if chain != "CHAIN_X-1" {
+		t.Fatalf("expected trimmed chain value, got %q", chain)
+	}
+	if cidr != "10.90.0.0/24" {
+		t.Fatalf("expected cidr preserved, got %q", cidr)
+	}
+	if iface != "eth0.100@uplink" {
+		t.Fatalf("expected iface preserved, got %q", iface)
+	}
+}
+
+func TestConfigureEgressRejectsInvalidCommandInputs(t *testing.T) {
+	s := &Service{
+		egressBackend: "command",
+		egressChain:   "PRIVNODE_EGRESS",
+		egressCIDR:    "10.90.0.0/24",
+		egressIface:   "eth0; rm -rf /",
+	}
+	err := s.configureEgress(context.Background())
+	if err == nil {
+		t.Fatalf("expected configureEgress rejection for invalid egress interface")
+	}
+	if s.egressConfigured {
+		t.Fatalf("expected egressConfigured to remain false on validation failure")
+	}
+}
+
+func TestTeardownEgressRejectsInvalidCommandInputs(t *testing.T) {
+	s := &Service{
+		egressBackend:    "command",
+		egressConfigured: true,
+		egressChain:      "PRIVNODE_EGRESS; whoami",
+		egressCIDR:       "10.90.0.0/24",
+		egressIface:      "eth0",
+	}
+	err := s.teardownEgress(context.Background())
+	if err == nil {
+		t.Fatalf("expected teardownEgress rejection for invalid egress chain")
+	}
+	if !s.egressConfigured {
+		t.Fatalf("expected egressConfigured unchanged when teardown validation fails")
 	}
 }

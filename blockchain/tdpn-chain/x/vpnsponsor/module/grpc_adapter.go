@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	sponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -38,9 +39,15 @@ func (a *GRPCMsgServerAdapter) CreateAuthorization(_ context.Context, req *spons
 	}, nil
 }
 
-func (a *GRPCMsgServerAdapter) DelegateSessionCredit(_ context.Context, req *sponsorpb.MsgDelegateSessionCreditRequest) (*sponsorpb.MsgDelegateSessionCreditResponse, error) {
+func (a *GRPCMsgServerAdapter) DelegateSessionCredit(ctx context.Context, req *sponsorpb.MsgDelegateSessionCreditRequest) (*sponsorpb.MsgDelegateSessionCreditResponse, error) {
+	currentTimeUnix := CurrentTimeUnixFromContext(ctx)
+	if currentTimeUnix <= 0 {
+		return nil, fmt.Errorf("%w: current_time_unix is required in context", ErrInvalidDelegation)
+	}
+
 	resp, err := a.server.DelegateCredit(DelegateCreditRequest{
-		Delegation: fromProtoDelegation(req.GetDelegation()),
+		Delegation:      fromProtoDelegation(req.GetDelegation()),
+		CurrentTimeUnix: currentTimeUnix,
 	})
 	if err != nil {
 		return nil, err
@@ -164,7 +171,6 @@ func fromProtoDelegation(pb *sponsorpb.DelegatedSessionCredit) sponsortypes.Dele
 		EndUserID:       pb.GetEndUserId(),
 		SessionID:       pb.GetSessionId(),
 		Credits:         pb.GetCredits(),
-		Status:          statusFromProto(pb.GetStatus()),
 	}
 }
 

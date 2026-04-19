@@ -66,6 +66,12 @@ EOF_FIX
     exit 0
     ;;
   client-vpn-preflight)
+    if [[ "${FAKE_VPN_SMOKE_PREFLIGHT_ROOT_REQUIRED:-0}" == "1" ]]; then
+      echo "client-vpn preflight:"
+      echo "  [fail] run preflight with sudo for real VPN validation"
+      echo "client-vpn preflight: FAIL (issues=1)"
+      exit 1
+    fi
     echo "client-vpn preflight: OK"
     exit 0
     ;;
@@ -83,6 +89,10 @@ EOF_FIX
         echo "client bootstrap failed: directory quorum not met: success=0 required=1: directory key is not trusted"
         exit 1
       fi
+    fi
+    if [[ -n "${FAKE_VPN_SMOKE_UP_FAILURE_MESSAGE:-}" ]]; then
+      printf '%s\n' "${FAKE_VPN_SMOKE_UP_FAILURE_MESSAGE}"
+      exit "${FAKE_VPN_SMOKE_UP_FAILURE_EXIT_CODE:-1}"
     fi
     if [[ "${FAKE_VPN_SMOKE_FAIL_UP:-0}" == "1" ]]; then
       echo "client-vpn up failed"
@@ -152,6 +162,48 @@ EOF_PRE_READY_MD
       exit 1
     fi
     mkdir -p "$(dirname "$summary_json")"
+    if [[ "${FAKE_PRE_REAL_HOST_FAIL_ROOT_REQUIRED:-0}" == "1" ]]; then
+      cat >"$summary_json" <<EOF_PRE_REAL_ROOT_FAIL
+{"status":"fail","stage":"wg_only_stack_selftest","notes":"WG-only stack selftest requires root privileges (run with sudo)","machine_c_smoke_gate":{"ready":false,"blockers":["wg_only_stack_selftest"],"next_command":"sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"},"manual_validation_report":{"summary_json":"$readiness_summary_json","report_md":"$readiness_report_md","readiness_status":"NOT_READY"}}
+EOF_PRE_REAL_ROOT_FAIL
+      echo "[pre-real-host-readiness] status=FAIL stage=wg_only_stack_selftest"
+      echo "[pre-real-host-readiness] machine_c_smoke_ready=false"
+      echo "[pre-real-host-readiness] blockers=wg_only_stack_selftest"
+      echo "[pre-real-host-readiness] manual_validation_readiness_status=NOT_READY"
+      echo "[pre-real-host-readiness] next_machine_c_command=sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"
+      echo "[pre-real-host-readiness] summary_json=$summary_json"
+      echo "[pre-real-host-readiness] summary_log=${summary_json%.json}.log"
+      if [[ -n "$readiness_summary_json" ]]; then
+        echo "[pre-real-host-readiness] readiness_report_json=$readiness_summary_json"
+      fi
+      if [[ -n "$readiness_report_md" ]]; then
+        echo "[pre-real-host-readiness] readiness_report_md=$readiness_report_md"
+      fi
+      echo "[pre-real-host-readiness] summary_json_payload:"
+      cat "$summary_json"
+      exit 1
+    fi
+    if [[ "${FAKE_PRE_REAL_HOST_FAIL_NON_ROOT:-0}" == "1" ]]; then
+      cat >"$summary_json" <<EOF_PRE_REAL_NON_ROOT_FAIL
+{"status":"fail","stage":"runtime_fix","notes":"runtime-fix-record did not clear runtime hygiene","machine_c_smoke_gate":{"ready":false,"blockers":["runtime_hygiene"],"next_command":"sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"},"manual_validation_report":{"summary_json":"$readiness_summary_json","report_md":"$readiness_report_md","readiness_status":"NOT_READY"}}
+EOF_PRE_REAL_NON_ROOT_FAIL
+      echo "[pre-real-host-readiness] status=FAIL stage=runtime-fix"
+      echo "[pre-real-host-readiness] machine_c_smoke_ready=false"
+      echo "[pre-real-host-readiness] blockers=runtime_hygiene"
+      echo "[pre-real-host-readiness] manual_validation_readiness_status=NOT_READY"
+      echo "[pre-real-host-readiness] next_machine_c_command=sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"
+      echo "[pre-real-host-readiness] summary_json=$summary_json"
+      echo "[pre-real-host-readiness] summary_log=${summary_json%.json}.log"
+      if [[ -n "$readiness_summary_json" ]]; then
+        echo "[pre-real-host-readiness] readiness_report_json=$readiness_summary_json"
+      fi
+      if [[ -n "$readiness_report_md" ]]; then
+        echo "[pre-real-host-readiness] readiness_report_md=$readiness_report_md"
+      fi
+      echo "[pre-real-host-readiness] summary_json_payload:"
+      cat "$summary_json"
+      exit 1
+    fi
     cat >"$summary_json" <<EOF_PRE_REAL
 {"status":"pass","machine_c_smoke_gate":{"ready":true,"blockers":[],"next_command":"sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"},"manual_validation_report":{"summary_json":"$readiness_summary_json","report_md":"$readiness_report_md","readiness_status":"NOT_READY"}}
 EOF_PRE_REAL
@@ -290,6 +342,64 @@ esac
 EOF_CURL
 chmod +x "$TMP_BIN/curl"
 
+assert_up_failure_diagnostics_case() {
+  local case_id="$1"
+  local failure_message="$2"
+  local expected_hint_id="$3"
+  local expected_next_command_substring="$4"
+  local log_path="$TMP_DIR/integration_client_vpn_smoke_${case_id}.log"
+  local summary_path="$TMP_DIR/integration_client_vpn_smoke_${case_id}_summary.json"
+
+  : >"$CAPTURE"
+  printf '1\n' >"$runtime_doctor_count"
+  if FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+    FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+    FAKE_VPN_SMOKE_UP_FAILURE_MESSAGE="$failure_message" \
+    CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+    ./scripts/client_vpn_smoke.sh \
+      --bootstrap-directory http://198.51.100.10:8081 \
+      --subject "inv-${case_id}" \
+      --interface "wgvpn-${case_id}" \
+      --print-summary-json 1 >"$log_path" 2>&1; then
+    echo "expected client-vpn-smoke up failure case '$case_id' to return non-zero"
+    cat "$log_path"
+    exit 1
+  fi
+
+  if ! rg -q 'client-vpn-smoke: status=fail stage=up' "$log_path"; then
+    echo "expected fail status for up failure case '$case_id'"
+    cat "$log_path"
+    exit 1
+  fi
+  if ! rg -q "hint=${expected_hint_id}" "$log_path"; then
+    echo "expected hinted stage-up log line missing for case '$case_id'"
+    cat "$log_path"
+    exit 1
+  fi
+
+  summary_path="$(sed -n 's/^summary_json: //p' "$log_path" | tail -n 1)"
+  if [[ -z "$summary_path" || ! -f "$summary_path" ]]; then
+    echo "expected up failure summary json file missing for case '$case_id'"
+    cat "$log_path"
+    exit 1
+  fi
+  if ! jq -e \
+    --arg hint_id "$expected_hint_id" \
+    --arg command_substring "$expected_next_command_substring" '
+      .status == "fail"
+      and .stage == "up"
+      and .diagnostics.up_failure.available == true
+      and .diagnostics.up_failure.hint_id == $hint_id
+      and (.diagnostics.up_failure.hint | length) > 0
+      and (.diagnostics.up_failure.next_suggested_command | contains($command_substring))
+      and (.diagnostics.up_failure.matched_pattern | length) > 0
+    ' "$summary_path" >/dev/null 2>&1; then
+    echo "up failure summary json missing expected diagnostics for case '$case_id'"
+    cat "$summary_path"
+    exit 1
+  fi
+}
+
 echo "[client-vpn-smoke] success path"
 runtime_doctor_count="$TMP_DIR/runtime_doctor_count.txt"
 printf '1\n' >"$runtime_doctor_count"
@@ -410,6 +520,140 @@ if ! rg -q 'runtime_doctor_before' "$CAPTURE"; then
   exit 1
 fi
 
+echo "[client-vpn-smoke] defer-no-root preflight path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_VPN_SMOKE_PREFLIGHT_ROOT_REQUIRED=1 \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject inv-defer \
+  --interface wgvpn15 \
+  --defer-no-root 1 \
+  --print-summary-json 1 >/tmp/integration_client_vpn_smoke_defer_no_root.log 2>&1
+
+if ! rg -q 'client-vpn-smoke: status=skip stage=preflight' /tmp/integration_client_vpn_smoke_defer_no_root.log; then
+  echo "expected skip status for defer-no-root preflight path"
+  cat /tmp/integration_client_vpn_smoke_defer_no_root.log
+  exit 1
+fi
+if rg -q '^client-vpn-up ' "$CAPTURE"; then
+  echo "did not expect up call in defer-no-root preflight path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id machine_c_vpn_smoke --status skip ' "$CAPTURE"; then
+  echo "expected manual-validation-record skip call missing in defer-no-root path"
+  cat "$CAPTURE"
+  exit 1
+fi
+defer_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_defer_no_root.log | tail -n 1)"
+if [[ -z "$defer_summary_json" || ! -f "$defer_summary_json" ]]; then
+  echo "expected defer-no-root summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_defer_no_root.log
+  exit 1
+fi
+if ! jq -e '.status == "skip" and .stage == "preflight" and .defer_no_root == true and .deferred_no_root == true and .manual_validation_report.status == "ok"' "$defer_summary_json" >/dev/null 2>&1; then
+  echo "defer-no-root summary json missing expected defer metadata"
+  cat "$defer_summary_json"
+  exit 1
+fi
+
+echo "[client-vpn-smoke] defer-no-root pre-real-host readiness root-required path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_PRE_REAL_HOST_FAIL_ROOT_REQUIRED=1 \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject inv-pre-ready-root \
+  --interface wgvpn15 \
+  --defer-no-root 1 \
+  --pre-real-host-readiness 1 \
+  --print-summary-json 1 >/tmp/integration_client_vpn_smoke_defer_pre_readiness_root.log 2>&1
+
+if ! rg -q 'client-vpn-smoke: status=skip stage=pre-real-host-readiness' /tmp/integration_client_vpn_smoke_defer_pre_readiness_root.log; then
+  echo "expected skip status for defer-no-root pre-real-host readiness root-required path"
+  cat /tmp/integration_client_vpn_smoke_defer_pre_readiness_root.log
+  exit 1
+fi
+if rg -q '^runtime-doctor ' "$CAPTURE"; then
+  echo "did not expect runtime-doctor call after pre-real-host readiness deferred path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if rg -q '^client-vpn-preflight ' "$CAPTURE" || rg -q '^client-vpn-up ' "$CAPTURE"; then
+  echo "did not expect preflight/up calls after pre-real-host readiness deferred path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id machine_c_vpn_smoke --status skip ' "$CAPTURE"; then
+  echo "expected manual-validation-record skip call missing in defer pre-real-host readiness path"
+  cat "$CAPTURE"
+  exit 1
+fi
+defer_pre_ready_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_defer_pre_readiness_root.log | tail -n 1)"
+if [[ -z "$defer_pre_ready_summary_json" || ! -f "$defer_pre_ready_summary_json" ]]; then
+  echo "expected defer pre-real-host readiness summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_defer_pre_readiness_root.log
+  exit 1
+fi
+if ! jq -e '.status == "skip" and .stage == "pre-real-host-readiness" and .defer_no_root == true and .deferred_no_root == true and .pre_real_host_readiness.status == "fail" and (.notes | test("requires root"; "i"))' "$defer_pre_ready_summary_json" >/dev/null 2>&1; then
+  echo "defer pre-real-host readiness summary json missing expected root-defer metadata"
+  cat "$defer_pre_ready_summary_json"
+  exit 1
+fi
+
+echo "[client-vpn-smoke] defer-no-root pre-real-host readiness non-root-independent failure path"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_PRE_REAL_HOST_FAIL_NON_ROOT=1 \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject inv-pre-ready-non-root \
+  --interface wgvpn15 \
+  --defer-no-root 1 \
+  --pre-real-host-readiness 1 \
+  --print-summary-json 1 >/tmp/integration_client_vpn_smoke_defer_pre_readiness_non_root.log 2>&1 && {
+    echo "expected non-root-independent pre-real-host readiness failure to return non-zero"
+    cat /tmp/integration_client_vpn_smoke_defer_pre_readiness_non_root.log
+    exit 1
+  }
+
+if ! rg -q 'client-vpn-smoke: status=fail stage=pre-real-host-readiness' /tmp/integration_client_vpn_smoke_defer_pre_readiness_non_root.log; then
+  echo "expected fail status for non-root-independent pre-real-host readiness failure path"
+  cat /tmp/integration_client_vpn_smoke_defer_pre_readiness_non_root.log
+  exit 1
+fi
+if rg -q '^runtime-doctor ' "$CAPTURE"; then
+  echo "did not expect runtime-doctor call after pre-real-host readiness failure path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id machine_c_vpn_smoke --status fail ' "$CAPTURE"; then
+  echo "expected manual-validation-record fail call missing in non-root-independent pre-real-host readiness failure path"
+  cat "$CAPTURE"
+  exit 1
+fi
+non_root_pre_ready_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_defer_pre_readiness_non_root.log | tail -n 1)"
+if [[ -z "$non_root_pre_ready_summary_json" || ! -f "$non_root_pre_ready_summary_json" ]]; then
+  echo "expected non-root pre-real-host readiness failure summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_defer_pre_readiness_non_root.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .stage == "pre-real-host-readiness" and .defer_no_root == true and .deferred_no_root == false and .pre_real_host_readiness.status == "fail"' "$non_root_pre_ready_summary_json" >/dev/null 2>&1; then
+  echo "non-root-independent pre-real-host readiness failure summary json missing expected fail metadata"
+  cat "$non_root_pre_ready_summary_json"
+  exit 1
+fi
+
 echo "[client-vpn-smoke] up failure path"
 : >"$CAPTURE"
 printf '1\n' >"$runtime_doctor_count"
@@ -452,7 +696,7 @@ if [[ -z "$fail_summary_json" || ! -f "$fail_summary_json" ]]; then
   cat /tmp/integration_client_vpn_smoke_fail.log
   exit 1
 fi
-if ! jq -e '.status == "fail" and .stage == "up" and .incident_snapshot.status == "ok"' "$fail_summary_json" >/dev/null 2>&1; then
+if ! jq -e '.status == "fail" and .stage == "up" and .incident_snapshot.status == "ok" and .diagnostics.up_failure.available == true and .diagnostics.up_failure.hint_id == "generic_up_failure" and (.diagnostics.up_failure.next_suggested_command | length) > 0' "$fail_summary_json" >/dev/null 2>&1; then
   echo "fail summary json missing expected incident snapshot status"
   cat "$fail_summary_json"
   exit 1
@@ -504,6 +748,30 @@ if ! rg -q 'incident_snapshot' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+
+echo "[client-vpn-smoke] up failure diagnostics: control-plane timeout"
+assert_up_failure_diagnostics_case "control_plane_timeout" \
+  "client-vpn up failed: did not receive wg-session config within 30s" \
+  "control_plane_timeout" \
+  "--ready-timeout-sec"
+
+echo "[client-vpn-smoke] up failure diagnostics: trust mismatch"
+assert_up_failure_diagnostics_case "trust_mismatch" \
+  "client bootstrap failed: directory quorum not met: success=0 required=1: directory key is not trusted" \
+  "trust_mismatch" \
+  "client-vpn-trust-reset"
+
+echo "[client-vpn-smoke] up failure diagnostics: auth/invite issue"
+assert_up_failure_diagnostics_case "auth_invite_issue" \
+  "client-vpn up failed: invite token unauthorized (401)" \
+  "auth_or_invite_issue" \
+  "client_vpn_smoke.sh"
+
+echo "[client-vpn-smoke] up failure diagnostics: wireguard setup"
+assert_up_failure_diagnostics_case "wg_setup_failure" \
+  "wg-quick: failed to set interface wgvpn10: invalid argument" \
+  "wg_setup_failure" \
+  "runtime-fix"
 
 echo "[client-vpn-smoke] trust-reset retry path"
 : >"$CAPTURE"
@@ -698,6 +966,7 @@ CLIENT_VPN_SMOKE_SCRIPT="$FAKE_SMOKE" \
   --bootstrap-directory http://198.51.100.10:8081 \
   --subject inv-wrapper \
   --interface wgvpn11 \
+  --defer-no-root 1 \
   --pre-real-host-readiness 1 \
   --trust-reset-on-key-mismatch 1 \
   --trust-reset-scope global \
@@ -717,6 +986,11 @@ if ! rg -q -- '--subject inv-wrapper' "$TMP_DIR/smoke_wrapper_calls.log"; then
 fi
 if ! rg -q -- '--interface wgvpn11' "$TMP_DIR/smoke_wrapper_calls.log"; then
   echo "easy_node client-vpn-smoke forwarding missing interface"
+  cat "$TMP_DIR/smoke_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--defer-no-root 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
+  echo "easy_node client-vpn-smoke forwarding missing defer-no-root"
   cat "$TMP_DIR/smoke_wrapper_calls.log"
   exit 1
 fi

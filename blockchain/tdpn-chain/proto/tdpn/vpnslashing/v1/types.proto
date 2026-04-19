@@ -20,6 +20,7 @@ message SlashEvidence {
   string kind = 4;
   string proof_hash = 5;
   int64 submitted_at_unix = 6;
+  string violation_type = 7;
 }
 
 // PenaltyDecision captures slash/jail intent generated from verified evidence.

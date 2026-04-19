@@ -9,7 +9,7 @@ usage() {
 Usage:
   ./scripts/beta_subject_batch_upsert.sh \
     --issuer-url URL \
-    --admin-token TOKEN \
+    [--admin-token TOKEN | --admin-token-file FILE] \
     --csv FILE \
     [--default-kind client|relay-exit] \
     [--default-tier 1|2|3] \
@@ -39,10 +39,19 @@ lower() {
 
 issuer_url="${ISSUER_URL:-http://127.0.0.1:8082}"
 admin_token="${ISSUER_ADMIN_TOKEN:-}"
+admin_token_file="${ISSUER_ADMIN_TOKEN_FILE:-}"
 csv_file=""
 default_kind="client"
 default_tier="1"
 continue_on_error="0"
+ephemeral_admin_token_file=""
+
+cleanup() {
+  if [[ -n "$ephemeral_admin_token_file" && -f "$ephemeral_admin_token_file" ]]; then
+    rm -f "$ephemeral_admin_token_file"
+  fi
+}
+trap cleanup EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,6 +61,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --admin-token)
       admin_token="${2:-}"
+      shift 2
+      ;;
+    --admin-token-file)
+      admin_token_file="${2:-}"
       shift 2
       ;;
     --csv)
@@ -87,8 +100,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$admin_token" || -z "$csv_file" ]]; then
-  echo "--admin-token and --csv are required"
+if [[ -z "$csv_file" ]]; then
+  echo "--csv is required"
+  usage
+  exit 2
+fi
+if [[ -n "$admin_token" && -n "$admin_token_file" ]]; then
+  echo "use either --admin-token OR --admin-token-file"
+  usage
+  exit 2
+fi
+if [[ -n "$admin_token_file" ]]; then
+  if [[ ! -f "$admin_token_file" ]]; then
+    echo "admin token file not found: $admin_token_file"
+    exit 2
+  fi
+fi
+if [[ -z "$admin_token" && -z "$admin_token_file" ]]; then
+  echo "admin auth is required: provide --admin-token or --admin-token-file"
   usage
   exit 2
 fi
@@ -114,6 +143,14 @@ if [[ ! -x "$SINGLE_UPSERT" ]]; then
 fi
 
 issuer_url="${issuer_url%/}"
+
+if [[ -n "$admin_token" && -z "$admin_token_file" ]]; then
+  ephemeral_admin_token_file="$(mktemp)"
+  chmod 600 "$ephemeral_admin_token_file"
+  printf '%s' "$admin_token" >"$ephemeral_admin_token_file"
+  admin_token_file="$ephemeral_admin_token_file"
+  admin_token=""
+fi
 
 total=0
 ok=0
@@ -148,15 +185,18 @@ while IFS=, read -r c_subject c_kind c_tier c_reputation c_bond c_stake _rest; d
 
   total=$((total + 1))
   echo "[batch-upsert] row=$line_no subject=$subject kind=$kind tier=$tier"
-  if "$SINGLE_UPSERT" \
-    --issuer-url "$issuer_url" \
-    --admin-token "$admin_token" \
-    --subject "$subject" \
-    --kind "$kind" \
-    --tier "$tier" \
-    --reputation "$reputation" \
-    --bond "$bond" \
-    --stake "$stake"; then
+  upsert_cmd=(
+    "$SINGLE_UPSERT"
+    --issuer-url "$issuer_url"
+    --subject "$subject"
+    --kind "$kind"
+    --tier "$tier"
+    --reputation "$reputation"
+    --bond "$bond"
+    --stake "$stake"
+  )
+  upsert_cmd+=(--admin-token-file "$admin_token_file")
+  if "${upsert_cmd[@]}"; then
     ok=$((ok + 1))
   else
     failed=$((failed + 1))

@@ -1,9 +1,11 @@
 package module
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
@@ -32,7 +34,8 @@ type AuthorizeSponsorResponse struct {
 
 // DelegateCreditRequest captures an intent to delegate sponsor credits to a session.
 type DelegateCreditRequest struct {
-	Delegation types.DelegatedSessionCredit
+	Delegation      types.DelegatedSessionCredit
+	CurrentTimeUnix int64
 }
 
 // DelegateCreditResponse returns persisted delegation plus replay hints.
@@ -47,8 +50,32 @@ type MsgServer struct {
 	keeper *keeper.Keeper
 }
 
+type currentTimeUnixContextKey struct{}
+
 func NewMsgServer(k *keeper.Keeper) MsgServer {
 	return MsgServer{keeper: k}
+}
+
+// WithCurrentTimeUnix stores an explicit unix timestamp in context for deterministic expiry checks.
+func WithCurrentTimeUnix(ctx context.Context, currentTimeUnix int64) context.Context {
+	return context.WithValue(ctx, currentTimeUnixContextKey{}, currentTimeUnix)
+}
+
+// CurrentTimeUnixFromContext extracts an explicit unix timestamp from context.
+// It accepts either int64 unix seconds or time.Time values.
+func CurrentTimeUnixFromContext(ctx context.Context) int64 {
+	if ctx == nil {
+		return 0
+	}
+	raw := ctx.Value(currentTimeUnixContextKey{})
+	switch value := raw.(type) {
+	case int64:
+		return value
+	case time.Time:
+		return value.Unix()
+	default:
+		return 0
+	}
 }
 
 func (s MsgServer) AuthorizeSponsor(req AuthorizeSponsorRequest) (AuthorizeSponsorResponse, error) {
@@ -95,7 +122,7 @@ func (s MsgServer) DelegateCredit(req DelegateCreditRequest) (DelegateCreditResp
 		}
 	}
 
-	record, err := s.keeper.DelegateSessionCredit(req.Delegation)
+	record, err := s.keeper.DelegateSessionCreditAtUnix(req.Delegation, req.CurrentTimeUnix)
 	resp := DelegateCreditResponse{
 		Delegation: record,
 		Existed:    existed,

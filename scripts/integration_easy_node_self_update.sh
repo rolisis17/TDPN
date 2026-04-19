@@ -185,6 +185,56 @@ if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
   exit 1
 fi
 
+echo "[self-update] config-v1 auto-update defaults trigger one-time reexec"
+CFG_AUTO_UPDATE="$TMP_DIR/easy_mode_config_v1.conf"
+cat >"$CFG_AUTO_UPDATE" <<'EOF_CFG'
+EASY_MODE_CONFIG_VERSION=1
+SIMPLE_AUTO_UPDATE=1
+SIMPLE_AUTO_UPDATE_REMOTE=origin
+SIMPLE_AUTO_UPDATE_ALLOW_DIRTY=0
+SIMPLE_AUTO_UPDATE_SHOW_STATUS=1
+SIMPLE_AUTO_UPDATE_COMMANDS=noop
+EOF_CFG
+write_state \
+  "7777777777777777777777777777777777777777" \
+  "8888888888888888888888888888888888888888" \
+  "main" \
+  "0"
+: >"$CAPTURE_FILE"
+CFG_AUTO_LOG="$TMP_DIR/config_auto.log"
+set +e
+PATH="$FAKE_BIN:$PATH" \
+EASY_NODE_SELF_UPDATE_STATE_FILE="$STATE_FILE" \
+EASY_NODE_SELF_UPDATE_CAPTURE_FILE="$CAPTURE_FILE" \
+EASY_NODE_CONFIG_V1_FILE="$CFG_AUTO_UPDATE" \
+bash ./scripts/easy_node.sh noop >"$CFG_AUTO_LOG" 2>&1
+cfg_auto_rc=$?
+set -e
+
+if [[ $cfg_auto_rc -ne 2 ]]; then
+  echo "expected config-v1 noop command to exit 2 after auto-update reexec path (got rc=$cfg_auto_rc)"
+  cat "$CFG_AUTO_LOG"
+  exit 1
+fi
+if ! rg -q 'auto-update: reloading command with updated code' "$CFG_AUTO_LOG"; then
+  echo "expected config-v1 auto-update reexec message"
+  cat "$CFG_AUTO_LOG"
+  exit 1
+fi
+if [[ "$(rg -c '^fetch ' "$CAPTURE_FILE" || true)" != "1" ]]; then
+  echo "expected exactly one fetch call during config-v1 auto-update reexec path"
+  cat "$CAPTURE_FILE"
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$STATE_FILE"
+if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
+  echo "expected config-v1 auto-update reexec path to fast-forward local sha to remote sha"
+  cat "$STATE_FILE"
+  exit 1
+fi
+
 echo "[self-update] dirty working tree is skipped by default"
 write_state \
   "5555555555555555555555555555555555555555" \

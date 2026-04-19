@@ -7,15 +7,18 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
-DIR_KEY_FILE=/tmp/dir_auto_rotation_ed25519.key
-DIR_PREV_FILE=/tmp/dir_auto_rotation_previous_pubkeys.txt
+old_umask="$(umask)"
+umask 077
+DIR_KEY_FILE="$(mktemp /tmp/dir_auto_rotation_ed25519.XXXXXX.key)"
+DIR_PREV_FILE="$(mktemp /tmp/dir_auto_rotation_previous_pubkeys.XXXXXX.txt)"
+NODE_LOG="$(mktemp /tmp/dir_auto_rotation_node.XXXXXX.log)"
+umask "$old_umask"
 DIR_PORT=8130
 ISSUER_PORT=8131
 ENTRY_CTRL_PORT=8132
 EXIT_CTRL_PORT=8133
 ENTRY_DATA_PORT=51960
 EXIT_DATA_PORT=51961
-rm -f "$DIR_KEY_FILE" "$DIR_PREV_FILE"
 
 DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
 ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
@@ -32,9 +35,13 @@ DIRECTORY_PREVIOUS_PUBKEYS_FILE="$DIR_PREV_FILE" \
 DIRECTORY_KEY_ROTATE_SEC=2 \
 DIRECTORY_KEY_HISTORY=2 \
 DIRECTORY_ADMIN_TOKEN=dev-admin-token \
-timeout 55s go run ./cmd/node --directory --issuer --entry --exit >/tmp/dir_auto_rotation_node.log 2>&1 &
+timeout 55s go run ./cmd/node --directory --issuer --entry --exit >"$NODE_LOG" 2>&1 &
 node_pid=$!
-trap 'kill $node_pid >/dev/null 2>&1 || true' EXIT
+cleanup() {
+  kill "$node_pid" >/dev/null 2>&1 || true
+  rm -f "$DIR_KEY_FILE" "$DIR_PREV_FILE" "$NODE_LOG"
+}
+trap cleanup EXIT
 
 sleep 3
 
@@ -50,7 +57,7 @@ done
 if [[ "$rotated" -ne 1 ]]; then
   echo "expected automatic directory key rotation to append previous pubkeys"
   cat "$DIR_PREV_FILE" || true
-  cat /tmp/dir_auto_rotation_node.log
+  cat "$NODE_LOG"
   exit 1
 fi
 

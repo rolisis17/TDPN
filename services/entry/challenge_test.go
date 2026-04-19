@@ -110,3 +110,52 @@ func TestAcquireOpenSlotLimit(t *testing.T) {
 		t.Fatalf("expected slot to be available after release")
 	}
 }
+
+func TestLimitOpenRejectsWhenRateBucketCapacityReached(t *testing.T) {
+	s := &Service{
+		openRPS:         100,
+		maxBuckets:      1,
+		buckets:         map[string]rateBucket{},
+		openBanDuration: 30 * time.Second,
+	}
+	if _, limited := s.limitOpen("1.2.3.4"); limited {
+		t.Fatalf("first source should not be limited")
+	}
+	if _, limited := s.limitOpen("5.6.7.8"); !limited {
+		t.Fatalf("second source should be limited when bucket capacity is reached")
+	}
+	if got := len(s.buckets); got != 1 {
+		t.Fatalf("expected exactly one tracked bucket, got %d", got)
+	}
+}
+
+func TestNoteAbuseFailsClosedWhenAbuseCapacityReached(t *testing.T) {
+	s := &Service{
+		openBanThreshold: 1,
+		openBanDuration:  30 * time.Second,
+		maxAbuseEntries:  1,
+		abuse:            map[string]abuseState{},
+	}
+	now := time.Unix(100, 0)
+	if !s.noteAbuse("1.2.3.4", now) {
+		t.Fatalf("first source should be banned at threshold=1")
+	}
+	if !s.noteAbuse("5.6.7.8", now.Add(time.Second)) {
+		t.Fatalf("new source should fail closed when abuse map is at capacity")
+	}
+	if got := len(s.abuse); got != 1 {
+		t.Fatalf("expected abuse map to stay bounded, got %d entries", got)
+	}
+}
+
+func TestAllowNewSessionRejectsAtCapacity(t *testing.T) {
+	s := &Service{
+		maxSessions: 1,
+		sessions: map[string]sessionState{
+			"sess-1": {expiresUnix: time.Now().Add(time.Minute).Unix()},
+		},
+	}
+	if s.allowNewSession(time.Now().Unix()) {
+		t.Fatalf("expected session allocation to fail when at capacity")
+	}
+}

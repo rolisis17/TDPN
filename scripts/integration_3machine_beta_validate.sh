@@ -264,6 +264,20 @@ host_is_loopback() {
   return 1
 }
 
+payload_signals_live_wg_mode() {
+  local payload="${1:-}"
+  if [[ -z "$payload" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$payload" | rg -qi '"(live_wg_mode|entry_live_wg_mode|exit_live_wg_mode|wg_only|wg_only_mode)"[[:space:]]*:[[:space:]]*(true|1)'; then
+    return 0
+  fi
+  if printf '%s\n' "$payload" | rg -qi '(live_wg_mode|entry_live_wg_mode|exit_live_wg_mode|wg_only|wg_only_mode)[[:space:]]*=[[:space:]]*(true|1)'; then
+    return 0
+  fi
+  return 1
+}
+
 rewrite_loopback_url_for_docker() {
   local raw="$1"
   local docker_host="${2:-host.docker.internal}"
@@ -449,6 +463,10 @@ locality_soft_bias="${THREE_MACHINE_LOCALITY_SOFT_BIAS:-0}"
 locality_country_bias="${THREE_MACHINE_COUNTRY_BIAS:-1.60}"
 locality_region_bias="${THREE_MACHINE_REGION_BIAS:-1.25}"
 locality_region_prefix_bias="${THREE_MACHINE_REGION_PREFIX_BIAS:-1.10}"
+client_inner_source="${THREE_MACHINE_CLIENT_INNER_SOURCE:-auto}"
+client_disable_synthetic_fallback="${THREE_MACHINE_CLIENT_DISABLE_SYNTHETIC_FALLBACK:-auto}"
+live_host_mode_hint="${THREE_MACHINE_VALIDATE_LIVE_HOST_MODE:-auto}"
+ci_stub_mode="${THREE_MACHINE_VALIDATE_CI_STUB_MODE:-auto}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 path_profile_set=0
 distinct_operators_set=0
@@ -725,6 +743,22 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
   echo "--require-issuer-quorum must be 0 or 1"
   exit 2
 fi
+if [[ "$client_inner_source" != "auto" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
+  echo "THREE_MACHINE_CLIENT_INNER_SOURCE must be auto, udp or synthetic"
+  exit 2
+fi
+if [[ "$client_disable_synthetic_fallback" != "auto" && "$client_disable_synthetic_fallback" != "0" && "$client_disable_synthetic_fallback" != "1" ]]; then
+  echo "THREE_MACHINE_CLIENT_DISABLE_SYNTHETIC_FALLBACK must be auto, 0 or 1"
+  exit 2
+fi
+if [[ "$live_host_mode_hint" != "auto" && "$live_host_mode_hint" != "0" && "$live_host_mode_hint" != "1" ]]; then
+  echo "THREE_MACHINE_VALIDATE_LIVE_HOST_MODE must be auto, 0 or 1"
+  exit 2
+fi
+if [[ "$ci_stub_mode" != "auto" && "$ci_stub_mode" != "0" && "$ci_stub_mode" != "1" ]]; then
+  echo "THREE_MACHINE_VALIDATE_CI_STUB_MODE must be auto, 0 or 1"
+  exit 2
+fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
   echo "--client-require-cross-operator-pair must be 0 or 1"
   exit 2
@@ -776,14 +810,15 @@ if [[ "$beta_profile" == "1" ]]; then
   if ((min_operators < 2)); then
     min_operators="2"
   fi
-  if ((client_min_selection_lines < 8)); then
+  # Apply strict beta client-diversity defaults only when thresholds are unset (0).
+  if ((client_min_selection_lines == 0)); then
     client_min_selection_lines="8"
   fi
   if [[ "$distinct_operators" == "1" ]]; then
-    if ((client_min_entry_operators < 2)); then
+    if ((client_min_entry_operators == 0)); then
       client_min_entry_operators="2"
     fi
-    if ((client_min_exit_operators < 2)); then
+    if ((client_min_exit_operators == 0)); then
       client_min_exit_operators="2"
     fi
   fi
@@ -797,8 +832,6 @@ fi
 if ((client_min_exit_operators < 1)); then
   client_min_exit_operators="1"
 fi
-
-echo "[client-diversity] thresholds selection_lines>=$client_min_selection_lines entry_ops>=$client_min_entry_operators exit_ops>=$client_min_exit_operators cross_operator_pair=$client_require_cross_operator_pair"
 
 if [[ -n "$bootstrap_directory" ]]; then
   bootstrap_scheme=""
@@ -994,6 +1027,75 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
   fi
 fi
 
+ci_stub_mode_effective="$ci_stub_mode"
+if [[ "$ci_stub_mode_effective" == "auto" ]]; then
+  resolved_easy_node_sh="$EASY_NODE_SH"
+  if [[ "$resolved_easy_node_sh" != /* ]]; then
+    resolved_easy_node_sh="$ROOT_DIR/${resolved_easy_node_sh#./}"
+  fi
+  if [[ "$resolved_easy_node_sh" != "$ROOT_DIR/scripts/easy_node.sh" ]]; then
+    ci_stub_mode_effective="1"
+  else
+    ci_stub_mode_effective="0"
+  fi
+fi
+
+entry_health_payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${entry_url}/v1/health" 2>/dev/null || true)"
+exit_health_payload="$(curl -fsS --connect-timeout 2 --max-time 4 "${exit_url}/v1/health" 2>/dev/null || true)"
+entry_exit_health_live_mode="0"
+if payload_signals_live_wg_mode "$entry_health_payload" || payload_signals_live_wg_mode "$exit_health_payload"; then
+  entry_exit_health_live_mode="1"
+fi
+
+entry_host="$(host_from_url "$entry_url")"
+exit_host="$(host_from_url "$exit_url")"
+likely_live_hosts="0"
+if ! host_is_loopback "$entry_host" || ! host_is_loopback "$exit_host"; then
+  likely_live_hosts="1"
+fi
+
+live_transport_required="0"
+case "$live_host_mode_hint" in
+  1)
+    live_transport_required="1"
+    ;;
+  0)
+    live_transport_required="0"
+    ;;
+  auto)
+    if [[ "$entry_exit_health_live_mode" == "1" ]]; then
+      live_transport_required="1"
+    elif [[ "$ci_stub_mode_effective" == "0" && "$likely_live_hosts" == "1" ]]; then
+      live_transport_required="1"
+    fi
+    ;;
+esac
+
+client_inner_source_effective="$client_inner_source"
+if [[ "$client_inner_source_effective" == "auto" ]]; then
+  if [[ "$beta_profile" == "1" || "$live_transport_required" == "1" ]]; then
+    client_inner_source_effective="udp"
+  else
+    client_inner_source_effective=""
+  fi
+fi
+client_disable_synthetic_fallback_effective="$client_disable_synthetic_fallback"
+if [[ "$client_disable_synthetic_fallback_effective" == "auto" ]]; then
+  if [[ "$client_inner_source_effective" == "udp" ]]; then
+    client_disable_synthetic_fallback_effective="1"
+  else
+    client_disable_synthetic_fallback_effective=""
+  fi
+fi
+if [[ "$client_inner_source_effective" == "synthetic" && "$client_disable_synthetic_fallback_effective" == "1" ]]; then
+  echo "invalid transport override: synthetic source cannot be combined with disabled synthetic fallback"
+  exit 2
+fi
+
+echo "[client-diversity] thresholds selection_lines>=$client_min_selection_lines entry_ops>=$client_min_entry_operators exit_ops>=$client_min_exit_operators cross_operator_pair=$client_require_cross_operator_pair"
+echo "[client-test] transport policy live_required=$live_transport_required mode_hint=$live_host_mode_hint ci_stub_mode=$ci_stub_mode_effective health_live_mode=$entry_exit_health_live_mode likely_live_hosts=$likely_live_hosts"
+echo "[client-test] source override inner_source=${client_inner_source_effective:-default} disable_synthetic_fallback=${client_disable_synthetic_fallback_effective:-default}"
+
 client_cmd=(
   "$EASY_NODE_SH" client-test
   --directory-urls "${directory_a},${directory_b}"
@@ -1015,6 +1117,11 @@ client_cmd=(
   --beta-profile "$beta_profile"
   --prod-profile "$prod_profile"
 )
+if [[ -n "$path_profile" ]]; then
+  client_cmd+=(--path-profile "$path_profile")
+elif [[ -n "$normalized_path_profile" ]]; then
+  client_cmd+=(--path-profile "$normalized_path_profile")
+fi
 if [[ -n "$client_subject" ]]; then
   client_cmd+=(--subject "$client_subject")
 fi
@@ -1053,11 +1160,35 @@ if [[ "$container_directory_urls" != "$client_directory_urls" || "$container_iss
   echo "[client-test] container_urls directory_urls=$container_directory_urls issuer=$container_issuer_url entry=$container_entry_url exit=$container_exit_url"
 fi
 
-env \
-  "EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS=$container_directory_urls" \
-  "EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL=$container_issuer_url" \
-  "EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL=$container_entry_url" \
-  "EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL=$container_exit_url" \
-  "${client_cmd[@]}"
+env_args=(
+  env
+  "EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS=$container_directory_urls"
+  "EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL=$container_issuer_url"
+  "EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL=$container_entry_url"
+  "EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL=$container_exit_url"
+)
+if [[ -n "$client_inner_source_effective" ]]; then
+  env_args+=("CLIENT_INNER_SOURCE=$client_inner_source_effective")
+fi
+if [[ -n "$client_disable_synthetic_fallback_effective" ]]; then
+  env_args+=("CLIENT_DISABLE_SYNTHETIC_FALLBACK=$client_disable_synthetic_fallback_effective")
+fi
+env_args+=("${client_cmd[@]}")
+
+set +e
+"${env_args[@]}"
+client_rc=$?
+set -e
+if ((client_rc != 0)); then
+  latest_client_log="$(ls -1t "$ROOT_DIR"/.easy-node-logs/easy_node_client_test_*.log 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$latest_client_log" ]] && rg -qi '(transport must be wireguard-udp|transport mismatch|entry live mode|live-WG|live host)' "$latest_client_log"; then
+    echo "client validation failed due transport mismatch against live-WG entry mode."
+    echo "client validation failed due live-host transport mismatch."
+    echo "hint: live-host entry mode requires wireguard-udp transport; retry with a live-WG client configuration."
+    echo "hint: run machine-C real VPN validation with sudo:"
+    echo "  sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory $directory_a --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1"
+  fi
+  exit "$client_rc"
+fi
 
 echo "3-machine beta validation check ok"

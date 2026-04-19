@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -20,6 +21,9 @@ func TestOpenPathWithChallengeRetries(t *testing.T) {
 			calls++
 			var in proto.PathOpenRequest
 			_ = json.NewDecoder(req.Body).Decode(&in)
+			if in.MiddleRelayID != "middle-a" {
+				return jsonResponse(proto.PathOpenResponse{Accepted: false, Reason: "missing middle relay id"})(req)
+			}
 			if calls == 1 {
 				return jsonResponse(proto.PathOpenResponse{
 					Accepted:   false,
@@ -43,11 +47,12 @@ func TestOpenPathWithChallengeRetries(t *testing.T) {
 		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 	resp, err := c.openPathWithChallenge(context.Background(), entryURL, proto.PathOpenRequest{
-		ExitID:       "exit-a",
-		Token:        "tok",
-		Transport:    "policy-json",
-		SessionID:    "unused",
-		RequestedMTU: 1280,
+		ExitID:        "exit-a",
+		MiddleRelayID: "middle-a",
+		Token:         "tok",
+		Transport:     "policy-json",
+		SessionID:     "unused",
+		RequestedMTU:  1280,
 	})
 	if err != nil {
 		t.Fatalf("openPathWithChallenge failed: %v", err)
@@ -78,6 +83,83 @@ func TestOpenPathWithChallengeDenied(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "path open denied") {
 		t.Fatalf("expected denied error, got %v", err)
+	}
+}
+
+func TestOpenPathRejectsTrailingJSON(t *testing.T) {
+	entryURL := "http://entry.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		entryURL + "/v1/path/open": func(_ *http.Request) (*http.Response, error) {
+			body := `{"accepted":true,"session_id":"s1","entry_data_addr":"127.0.0.1:51820","transport":"policy-json"}{"extra":1}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		},
+	}
+	c := &Client{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	_, err := c.openPath(context.Background(), entryURL, proto.PathOpenRequest{
+		ExitID:    "exit-a",
+		Token:     "tok",
+		Transport: "policy-json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "trailing") {
+		t.Fatalf("expected trailing-json decode error, got %v", err)
+	}
+}
+
+func TestOpenPathRejectsOversizedResponse(t *testing.T) {
+	entryURL := "http://entry.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		entryURL + "/v1/path/open": func(_ *http.Request) (*http.Response, error) {
+			oversizedChallenge := strings.Repeat("a", int(clientPathControlResponseMaxBytes))
+			body := fmt.Sprintf(`{"accepted":false,"reason":"challenge-required","challenge":"%s","difficulty":1}`, oversizedChallenge)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		},
+	}
+	c := &Client{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	_, err := c.openPath(context.Background(), entryURL, proto.PathOpenRequest{
+		ExitID:    "exit-a",
+		Token:     "tok",
+		Transport: "policy-json",
+	})
+	if err == nil || (!strings.Contains(err.Error(), "exceeds") && !strings.Contains(err.Error(), "EOF")) {
+		t.Fatalf("expected oversized decode error, got %v", err)
+	}
+}
+
+func TestOpenPathWithChallengeRejectsDifficultyOverCap(t *testing.T) {
+	entryURL := "http://entry.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		entryURL + "/v1/path/open": jsonResponse(proto.PathOpenResponse{
+			Accepted:   false,
+			Reason:     "challenge-required",
+			Challenge:  "abc",
+			Difficulty: clientMaxPuzzleDifficulty + 1,
+		}),
+	}
+	c := &Client{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	_, err := c.openPathWithChallenge(context.Background(), entryURL, proto.PathOpenRequest{
+		ExitID:        "exit-a",
+		MiddleRelayID: "middle-a",
+		Token:         "tok",
+		Transport:     "policy-json",
+		SessionID:     "unused",
+		RequestedMTU:  1280,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds max") {
+		t.Fatalf("expected difficulty cap error, got %v", err)
 	}
 }
 

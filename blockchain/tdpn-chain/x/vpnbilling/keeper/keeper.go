@@ -9,7 +9,7 @@ import (
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
 
-// Keeper is an in-memory stub until Cosmos SDK state stores are wired.
+// Keeper defaults to in-memory storage and accepts pluggable stores (file-backed/KV adapters).
 type Keeper struct {
 	mu    sync.RWMutex
 	store KeeperStore
@@ -30,18 +30,22 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertReservation(record types.CreditReservation) {
+	_ = k.UpsertReservationWithError(record)
+}
+
+func (k *Keeper) UpsertReservationWithError(record types.CreditReservation) error {
+	normalized := normalizeReservation(record)
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertReservation(record)
+	return k.upsertReservationLocked(normalized)
 }
 
 // CreateReservation inserts a reservation with idempotency semantics keyed by ReservationID.
 func (k *Keeper) CreateReservation(record types.CreditReservation) (types.CreditReservation, error) {
-	if err := record.ValidateBasic(); err != nil {
+	normalized := normalizeReservation(record)
+	if err := normalized.ValidateBasic(); err != nil {
 		return types.CreditReservation{}, err
 	}
-
-	normalized := normalizeReservation(record)
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -53,18 +57,38 @@ func (k *Keeper) CreateReservation(record types.CreditReservation) (types.Credit
 			return types.CreditReservation{}, conflictError("reservation", normalized.ReservationID)
 		}
 		// Normalize legacy records persisted via compatibility upserts.
-		k.store.UpsertReservation(normalizedExisting)
+		if err := k.upsertReservationLocked(normalizedExisting); err != nil {
+			return types.CreditReservation{}, err
+		}
 		return normalizedExisting, nil
 	}
+	if existingByBusinessKey, found := k.reservationByBusinessKeyLocked(normalized.SessionID, normalized.SponsorID, normalized.AssetDenom); found {
+		if existingByBusinessKey.ReservationID == normalized.ReservationID {
+			if err := k.upsertReservationLocked(existingByBusinessKey); err != nil {
+				return types.CreditReservation{}, err
+			}
+			return existingByBusinessKey, nil
+		}
+		return types.CreditReservation{}, reservationBusinessKeyConflictError(normalized, existingByBusinessKey.ReservationID)
+	}
 
-	k.store.UpsertReservation(normalized)
+	if err := k.upsertReservationLocked(normalized); err != nil {
+		return types.CreditReservation{}, err
+	}
 	return normalized, nil
 }
 
 func (k *Keeper) GetReservation(reservationID string) (types.CreditReservation, bool) {
+	normalizedReservationID := normalizeReservation(types.CreditReservation{ReservationID: reservationID}).ReservationID
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetReservation(reservationID)
+
+	record, ok := k.store.GetReservation(normalizedReservationID)
+	if !ok {
+		return types.CreditReservation{}, false
+	}
+	return normalizeReservation(record), true
 }
 
 func (k *Keeper) ListReservations() []types.CreditReservation {
@@ -72,6 +96,9 @@ func (k *Keeper) ListReservations() []types.CreditReservation {
 	defer k.mu.RUnlock()
 
 	records := k.store.ListReservations()
+	for i := range records {
+		records[i] = normalizeReservation(records[i])
+	}
 	slices.SortFunc(records, func(a, b types.CreditReservation) int {
 		return compareByID(a.ReservationID, b.ReservationID)
 	})
@@ -79,21 +106,44 @@ func (k *Keeper) ListReservations() []types.CreditReservation {
 }
 
 func (k *Keeper) UpsertSettlement(record types.SettlementRecord) {
+	_ = k.UpsertSettlementWithError(record)
+}
+
+func (k *Keeper) UpsertSettlementWithError(record types.SettlementRecord) error {
+	normalized := normalizeSettlement(record)
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertSettlement(record)
+	return k.upsertSettlementLocked(normalized)
 }
 
 // FinalizeSettlement inserts a settlement with idempotency semantics keyed by SettlementID.
 func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.SettlementRecord, error) {
-	if err := record.ValidateBasic(); err != nil {
+	normalized := normalizeSettlement(record)
+	if err := normalized.ValidateBasic(); err != nil {
 		return types.SettlementRecord{}, err
 	}
 
-	normalized := normalizeSettlement(record)
+	if normalized.ReservationID == "" {
+		return types.SettlementRecord{}, reservationIDRequiredError()
+	}
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
+
+	reservation, ok := k.store.GetReservation(normalized.ReservationID)
+	if !ok {
+		return types.SettlementRecord{}, reservationNotFoundError(normalized.ReservationID)
+	}
+	normalizedReservation := normalizeReservation(reservation)
+	if normalized.SessionID != normalizedReservation.SessionID {
+		return types.SettlementRecord{}, sessionMismatchError(normalized.SessionID, normalizedReservation.SessionID)
+	}
+	if normalized.AssetDenom != normalizedReservation.AssetDenom {
+		return types.SettlementRecord{}, assetDenomMismatchError(normalized.AssetDenom, normalizedReservation.AssetDenom)
+	}
+	if normalized.BilledAmount > normalizedReservation.Amount {
+		return types.SettlementRecord{}, overchargeError(normalized.BilledAmount, normalizedReservation.Amount)
+	}
 
 	existing, ok := k.store.GetSettlement(normalized.SettlementID)
 	if ok {
@@ -101,21 +151,55 @@ func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.Settle
 		if !settlementRecordsEqual(normalizedExisting, normalized) {
 			return types.SettlementRecord{}, conflictError("settlement", normalized.SettlementID)
 		}
-		// Normalize legacy records persisted via compatibility upserts.
-		k.store.UpsertSettlement(normalizedExisting)
-		k.advanceReservationForSettlementLocked(normalizedExisting.ReservationID)
+
+		updatedReservation := reservationAfterSettlement(normalizedReservation)
+		if err := k.persistFinalizedSettlementLocked(normalizedExisting, normalizedReservation, updatedReservation); err != nil {
+			return types.SettlementRecord{}, err
+		}
 		return normalizedExisting, nil
 	}
+	for _, existingSettlement := range k.store.ListSettlements() {
+		normalizedExistingSettlement := normalizeSettlement(existingSettlement)
+		if normalizedExistingSettlement.ReservationID == normalized.ReservationID &&
+			normalizedExistingSettlement.SettlementID != normalized.SettlementID {
+			return types.SettlementRecord{}, reservationAlreadySettledError(normalized.ReservationID, normalizedExistingSettlement.SettlementID)
+		}
+		if normalizedExistingSettlement.SettlementID == normalized.SettlementID {
+			continue
+		}
+		existingReservationForSettlement, found := k.store.GetReservation(normalizedExistingSettlement.ReservationID)
+		if !found {
+			continue
+		}
+		normalizedExistingReservation := normalizeReservation(existingReservationForSettlement)
+		if reservationBusinessKeyEqual(normalizedExistingReservation, normalizedReservation) &&
+			normalizedExistingReservation.ReservationID != normalizedReservation.ReservationID {
+			return types.SettlementRecord{}, reservationBusinessKeyAlreadySettledError(
+				normalizedReservation,
+				normalizedExistingReservation.ReservationID,
+				normalizedExistingSettlement.SettlementID,
+			)
+		}
+	}
 
-	k.store.UpsertSettlement(normalized)
-	k.advanceReservationForSettlementLocked(normalized.ReservationID)
+	updatedReservation := reservationAfterSettlement(normalizedReservation)
+	if err := k.persistFinalizedSettlementLocked(normalized, normalizedReservation, updatedReservation); err != nil {
+		return types.SettlementRecord{}, err
+	}
 	return normalized, nil
 }
 
 func (k *Keeper) GetSettlement(settlementID string) (types.SettlementRecord, bool) {
+	normalizedSettlementID := normalizeSettlement(types.SettlementRecord{SettlementID: settlementID}).SettlementID
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetSettlement(settlementID)
+
+	record, ok := k.store.GetSettlement(normalizedSettlementID)
+	if !ok {
+		return types.SettlementRecord{}, false
+	}
+	return normalizeSettlement(record), true
 }
 
 func (k *Keeper) ListSettlements() []types.SettlementRecord {
@@ -123,29 +207,86 @@ func (k *Keeper) ListSettlements() []types.SettlementRecord {
 	defer k.mu.RUnlock()
 
 	records := k.store.ListSettlements()
+	for i := range records {
+		records[i] = normalizeSettlement(records[i])
+	}
 	slices.SortFunc(records, func(a, b types.SettlementRecord) int {
 		return compareByID(a.SettlementID, b.SettlementID)
 	})
 	return records
 }
 
-func (k *Keeper) advanceReservationForSettlementLocked(reservationID string) {
-	if reservationID == "" {
-		return
-	}
-	reservation, ok := k.store.GetReservation(reservationID)
-	if !ok {
-		return
-	}
-
-	normalized := normalizeReservation(reservation)
+func reservationAfterSettlement(record types.CreditReservation) types.CreditReservation {
+	normalized := normalizeReservation(record)
 	if normalized.Status == chaintypes.ReconciliationPending || normalized.Status == chaintypes.ReconciliationSubmitted {
 		normalized.Status = chaintypes.ReconciliationConfirmed
 	}
-	k.store.UpsertReservation(normalized)
+	return normalized
+}
+
+func (k *Keeper) upsertReservationLocked(record types.CreditReservation) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertReservationWithError(record); err != nil {
+			return fmt.Errorf("persist reservation %q: %w", record.ReservationID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertReservation(record)
+	return nil
+}
+
+func (k *Keeper) upsertSettlementLocked(record types.SettlementRecord) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertSettlementWithError(record); err != nil {
+			return fmt.Errorf("persist settlement %q: %w", record.SettlementID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertSettlement(record)
+	return nil
+}
+
+func (k *Keeper) persistFinalizedSettlementLocked(
+	settlement types.SettlementRecord,
+	previousReservation types.CreditReservation,
+	updatedReservation types.CreditReservation,
+) error {
+	if atomicStore, ok := k.store.(KeeperStoreWithAtomicFinalize); ok {
+		if err := atomicStore.UpsertSettlementAndAdvanceReservationWithError(settlement, updatedReservation); err != nil {
+			return fmt.Errorf("persist settlement %q: %w", settlement.SettlementID, err)
+		}
+		return nil
+	}
+
+	reservationChanged := !reservationRecordsEqual(previousReservation, updatedReservation)
+	if reservationChanged {
+		if err := k.upsertReservationLocked(updatedReservation); err != nil {
+			return err
+		}
+	}
+
+	if err := k.upsertSettlementLocked(settlement); err != nil {
+		if reservationChanged {
+			if rollbackErr := k.upsertReservationLocked(previousReservation); rollbackErr != nil {
+				return fmt.Errorf(
+					"persist settlement %q failed: %v (rollback reservation %q failed: %w)",
+					settlement.SettlementID,
+					err,
+					previousReservation.ReservationID,
+					rollbackErr,
+				)
+			}
+		}
+		return err
+	}
+
+	return nil
 }
 
 func normalizeReservation(record types.CreditReservation) types.CreditReservation {
+	record = record.Canonicalize()
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationPending
 	}
@@ -153,6 +294,7 @@ func normalizeReservation(record types.CreditReservation) types.CreditReservatio
 }
 
 func normalizeSettlement(record types.SettlementRecord) types.SettlementRecord {
+	record = record.Canonicalize()
 	if record.OperationState == "" {
 		record.OperationState = chaintypes.ReconciliationSubmitted
 	}
@@ -169,6 +311,12 @@ func reservationRecordsEqual(a, b types.CreditReservation) bool {
 		a.CreatedAtUnix == b.CreatedAtUnix
 }
 
+func reservationBusinessKeyEqual(a, b types.CreditReservation) bool {
+	return a.SessionID == b.SessionID &&
+		a.SponsorID == b.SponsorID &&
+		a.AssetDenom == b.AssetDenom
+}
+
 func settlementRecordsEqual(a, b types.SettlementRecord) bool {
 	return a.SettlementID == b.SettlementID &&
 		a.ReservationID == b.ReservationID &&
@@ -182,6 +330,68 @@ func settlementRecordsEqual(a, b types.SettlementRecord) bool {
 
 func conflictError(kind string, id string) error {
 	return fmt.Errorf("%s %q already exists with conflicting fields", kind, id)
+}
+
+func reservationIDRequiredError() error {
+	return fmt.Errorf("reservation id is required")
+}
+
+func reservationNotFoundError(reservationID string) error {
+	return fmt.Errorf("reservation %q not found", reservationID)
+}
+
+func sessionMismatchError(settlementSessionID, reservationSessionID string) error {
+	return fmt.Errorf("settlement session %q does not match reservation session %q", settlementSessionID, reservationSessionID)
+}
+
+func assetDenomMismatchError(settlementAssetDenom, reservationAssetDenom string) error {
+	return fmt.Errorf("settlement asset denom %q does not match reservation asset denom %q", settlementAssetDenom, reservationAssetDenom)
+}
+
+func overchargeError(billedAmount, reservedAmount int64) error {
+	return fmt.Errorf("billed amount %d exceeds reserved amount %d", billedAmount, reservedAmount)
+}
+
+func reservationAlreadySettledError(reservationID, settlementID string) error {
+	return fmt.Errorf("reservation %q already settled by settlement %q", reservationID, settlementID)
+}
+
+func reservationBusinessKeyConflictError(record types.CreditReservation, existingReservationID string) error {
+	return fmt.Errorf(
+		"reservation business key %q already exists with conflicting fields (existing reservation %q)",
+		reservationBusinessKeyID(record.SessionID, record.SponsorID, record.AssetDenom),
+		existingReservationID,
+	)
+}
+
+func reservationBusinessKeyAlreadySettledError(
+	record types.CreditReservation,
+	existingReservationID string,
+	settlementID string,
+) error {
+	return fmt.Errorf(
+		"reservation business key %q already settled by settlement %q (reservation %q)",
+		reservationBusinessKeyID(record.SessionID, record.SponsorID, record.AssetDenom),
+		settlementID,
+		existingReservationID,
+	)
+}
+
+func reservationBusinessKeyID(sessionID, sponsorID, assetDenom string) string {
+	return fmt.Sprintf("session=%q sponsor=%q asset=%q", sessionID, sponsorID, assetDenom)
+}
+
+func (k *Keeper) reservationByBusinessKeyLocked(sessionID, sponsorID, assetDenom string) (types.CreditReservation, bool) {
+	for _, existingReservation := range k.store.ListReservations() {
+		normalizedExisting := normalizeReservation(existingReservation)
+		if normalizedExisting.SessionID != sessionID ||
+			normalizedExisting.SponsorID != sponsorID ||
+			normalizedExisting.AssetDenom != assetDenom {
+			continue
+		}
+		return normalizedExisting, true
+	}
+	return types.CreditReservation{}, false
 }
 
 func compareByID(a, b string) int {

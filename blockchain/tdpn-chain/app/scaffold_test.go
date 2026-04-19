@@ -2,6 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
@@ -14,15 +18,17 @@ func TestNewChainScaffold_ModuleNamesIncludeExpectedModules(t *testing.T) {
 	}
 
 	moduleNames := scaffold.ModuleNames()
-	if len(moduleNames) != 4 {
-		t.Fatalf("expected 4 module names, got %d", len(moduleNames))
+	if len(moduleNames) != 6 {
+		t.Fatalf("expected 6 module names, got %d", len(moduleNames))
 	}
 
 	expected := map[string]struct{}{
-		"vpnbilling":  {},
-		"vpnrewards":  {},
-		"vpnslashing": {},
-		"vpnsponsor":  {},
+		"vpnbilling":    {},
+		"vpnrewards":    {},
+		"vpnslashing":   {},
+		"vpnsponsor":    {},
+		"vpnvalidator":  {},
+		"vpngovernance": {},
 	}
 	seen := make(map[string]struct{}, len(moduleNames))
 	for _, name := range moduleNames {
@@ -80,6 +86,11 @@ func TestNewChainScaffoldWithStateDirPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewChainScaffoldWithStateDir reopen: %v", err)
 	}
+	for _, fileName := range []string{"vpnvalidator.json", "vpngovernance.json"} {
+		if _, err := os.Stat(filepath.Join(stateDir, fileName)); err != nil {
+			t.Fatalf("expected %s scaffold state file to exist: %v", fileName, err)
+		}
+	}
 	reservationResp, err := scaffoldB.BillingQueryServer().GetReservation(context.Background(), BillingGetReservationRequest{
 		ReservationID: reservationID,
 	})
@@ -107,5 +118,57 @@ func TestChainScaffoldConfigureStateDirRequiresPath(t *testing.T) {
 	scaffold := NewChainScaffold()
 	if err := scaffold.ConfigureStateDir("   "); err == nil {
 		t.Fatal("expected ConfigureStateDir to reject empty state dir")
+	}
+}
+
+func TestChainScaffoldConfigureStateDirRejectsSymlinkStateFile(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "outside-target.json")
+	if err := os.WriteFile(targetPath, []byte("seed\n"), 0o600); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+
+	linkPath := filepath.Join(stateDir, "vpnvalidator.json")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+
+	scaffold := NewChainScaffold()
+	err := scaffold.ConfigureStateDir(stateDir)
+	if err == nil {
+		t.Fatal("expected ConfigureStateDir to reject symlinked scaffold state file")
+	}
+	if !strings.Contains(err.Error(), "resolves to a symlink") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+}
+
+func TestChainScaffoldConfigureStateDirDoesNotWriteThroughDanglingSymlink(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "outside", "never-created.json")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("create target directory: %v", err)
+	}
+
+	linkPath := filepath.Join(stateDir, "vpnvalidator.json")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+
+	scaffold := NewChainScaffold()
+	err := scaffold.ConfigureStateDir(stateDir)
+	if err == nil {
+		t.Fatal("expected ConfigureStateDir to reject dangling symlinked scaffold state file")
+	}
+	if !strings.Contains(err.Error(), "resolves to a symlink") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+
+	if _, statErr := os.Stat(targetPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected dangling symlink target to remain absent, got stat err=%v", statErr)
 	}
 }

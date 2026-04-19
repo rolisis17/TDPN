@@ -231,6 +231,11 @@ if ! rg -q -- "-e CLIENT_EXIT_REGION_PREFIX_BIAS=1.10" "$PATH_PROFILE_CAPTURE"; 
   cat "$PATH_PROFILE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- "-e CLIENT_PATH_PROFILE=3hop" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected private-profile canonical path-profile env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
 
 PATH_PROFILE_SPEED_CAPTURE="$TMP_DIR/path_profile_speed_capture.log"
 run_client_test_capture "$PATH_PROFILE_SPEED_CAPTURE" "0" "0" --path-profile speed
@@ -254,6 +259,11 @@ if ! rg -q -- "-e CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY=0" "$PATH_PROFILE_S
   cat "$PATH_PROFILE_SPEED_CAPTURE"
   exit 1
 fi
+if ! rg -q -- "-e CLIENT_PATH_PROFILE=2hop" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile canonical path-profile env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
 
 PATH_PROFILE_SPEED_1HOP_CAPTURE="$TMP_DIR/path_profile_speed_1hop_capture.log"
 run_client_test_capture "$PATH_PROFILE_SPEED_1HOP_CAPTURE" "0" "0" --path-profile speed-1hop
@@ -270,6 +280,19 @@ fi
 if ! rg -q -- "-e CLIENT_FORCE_DIRECT_EXIT=1" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
   echo "missing expected speed-1hop force-direct env"
   cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_PATH_PROFILE=1hop" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop canonical path-profile env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+
+MIDDLE_RELAY_CAPTURE="$TMP_DIR/middle_relay_capture.log"
+CLIENT_REQUIRE_MIDDLE_RELAY=0 run_client_test_capture "$MIDDLE_RELAY_CAPTURE" "0" "0" --path-profile private
+if ! rg -q -- "-e CLIENT_REQUIRE_MIDDLE_RELAY=0" "$MIDDLE_RELAY_CAPTURE"; then
+  echo "missing expected CLIENT_REQUIRE_MIDDLE_RELAY passthrough env when set"
+  cat "$MIDDLE_RELAY_CAPTURE"
   exit 1
 fi
 

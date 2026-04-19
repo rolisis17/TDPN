@@ -14,13 +14,28 @@ for cmd in go curl rg sed timeout base64; do
   fi
 done
 
-LOG_FILE="/tmp/integration_anon_credential_dispute.log"
-PAYLOAD_TMP="/tmp/integration_anon_credential_dispute_payload.json"
-rm -f "$LOG_FILE"
+redact_sensitive_json() {
+  local payload="$1"
+  printf '%s\n' "$payload" | sed -E \
+    -e 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g' \
+    -e 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g' \
+    -e 's/("credential"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+}
+
+old_umask="$(umask)"
+umask 077
+LOG_FILE="$(mktemp /tmp/integration_anon_credential_dispute.XXXXXX.log)"
+PAYLOAD_TMP="$(mktemp /tmp/integration_anon_credential_dispute_payload.XXXXXX.json)"
+umask "$old_umask"
+chmod 600 "$PAYLOAD_TMP"
 
 timeout 25s go run ./cmd/node --directory --issuer --entry --exit >"$LOG_FILE" 2>&1 &
 node_pid=$!
-trap 'kill "$node_pid" >/dev/null 2>&1 || true; rm -f "$PAYLOAD_TMP"' EXIT
+cleanup() {
+  kill "$node_pid" >/dev/null 2>&1 || true
+  rm -f "$PAYLOAD_TMP" "$LOG_FILE"
+}
+trap cleanup EXIT
 
 sleep 2
 
@@ -32,7 +47,7 @@ issue_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/admin/anon-credential/iss
 anon_cred=$(echo "$issue_json" | sed -n 's/.*"credential":"\([^"]*\)".*/\1/p')
 if [[ -z "$anon_cred" ]]; then
   echo "failed to issue anonymous credential"
-  echo "$issue_json"
+  redact_sensitive_json "$issue_json"
   cat "$LOG_FILE"
   exit 1
 fi
@@ -41,7 +56,7 @@ pop_json=$(go run ./cmd/tokenpop gen)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" ]]; then
   echo "failed to generate token PoP keypair"
-  echo "$pop_json"
+  redact_sensitive_json "$pop_json"
   exit 1
 fi
 
@@ -81,14 +96,14 @@ token_json=$(issue_client_token 3)
 token=$(echo "$token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 if [[ -z "$token" ]]; then
   echo "failed to issue baseline token with anonymous credential"
-  echo "$token_json"
+  redact_sensitive_json "$token_json"
   cat "$LOG_FILE"
   exit 1
 fi
 baseline_tier="$(decode_token_tier "$token")"
 if [[ "$baseline_tier" != "3" ]]; then
   echo "expected baseline anonymous credential token tier 3, got $baseline_tier"
-  echo "$token_json"
+  redact_sensitive_json "$token_json"
   cat "$LOG_FILE"
   exit 1
 fi
@@ -124,14 +139,14 @@ token_json_capped=$(issue_client_token 3)
 token_capped=$(echo "$token_json_capped" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 if [[ -z "$token_capped" ]]; then
   echo "failed to issue token after anonymous credential dispute cap"
-  echo "$token_json_capped"
+  redact_sensitive_json "$token_json_capped"
   cat "$LOG_FILE"
   exit 1
 fi
 capped_tier="$(decode_token_tier "$token_capped")"
 if [[ "$capped_tier" != "1" ]]; then
   echo "expected disputed anonymous credential token tier 1, got $capped_tier"
-  echo "$token_json_capped"
+  redact_sensitive_json "$token_json_capped"
   cat "$LOG_FILE"
   exit 1
 fi
@@ -160,14 +175,14 @@ token_json_restored=$(issue_client_token 3)
 token_restored=$(echo "$token_json_restored" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 if [[ -z "$token_restored" ]]; then
   echo "failed to issue token after anonymous credential dispute clear"
-  echo "$token_json_restored"
+  redact_sensitive_json "$token_json_restored"
   cat "$LOG_FILE"
   exit 1
 fi
 restored_tier="$(decode_token_tier "$token_restored")"
 if [[ "$restored_tier" != "3" ]]; then
   echo "expected restored anonymous credential token tier 3, got $restored_tier"
-  echo "$token_json_restored"
+  redact_sensitive_json "$token_json_restored"
   cat "$LOG_FILE"
   exit 1
 fi

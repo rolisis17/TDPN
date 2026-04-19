@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package tdpn.vpngovernance.v1;
+
+option go_package = "github.com/tdpn/tdpn-chain/x/vpngovernance/types";
+
+enum ReconciliationStatus {
+  RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  RECONCILIATION_STATUS_PENDING = 1;
+  RECONCILIATION_STATUS_SUBMITTED = 2;
+  RECONCILIATION_STATUS_CONFIRMED = 3;
+  RECONCILIATION_STATUS_FAILED = 4;
+}
+
+// GovernancePolicy defines policy-level governance controls.
+message GovernancePolicy {
+  string policy_id = 1;
+  string title = 2;
+  string description = 3;
+  uint64 version = 4;
+  int64 activated_at_unix = 5;
+  ReconciliationStatus status = 6;
+}
+
+// GovernanceDecision defines proposal outcomes linked to a policy.
+message GovernanceDecision {
+  string decision_id = 1;
+  string policy_id = 2;
+  string proposal_id = 3;
+  string outcome = 4;
+  string decider = 5;
+  string reason = 6;
+  int64 decided_at_unix = 7;
+  ReconciliationStatus status = 8;
+}
+
+// GovernanceAuditAction defines append-only governance bootstrap/admin actions.
+message GovernanceAuditAction {
+  string action_id = 1;
+  string action = 2;
+  string actor = 3;
+  string reason = 4;
+  string evidence_pointer = 5;
+  int64 timestamp_unix = 6;
+}

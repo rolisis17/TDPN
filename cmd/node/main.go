@@ -17,6 +17,7 @@ func main() {
 	exit := flag.Bool("exit", false, "enable exit role")
 	directory := flag.Bool("directory", false, "enable directory role")
 	issuer := flag.Bool("issuer", false, "enable token issuer role")
+	localAPI := flag.Bool("local-api", false, "enable local control API role")
 	wgio := flag.Bool("wgio", false, "enable wg I/O udp bridge role")
 	wgiotap := flag.Bool("wgiotap", false, "enable wg I/O tap listener role")
 	wgioinject := flag.Bool("wgioinject", false, "enable wg I/O packet injector role")
@@ -33,6 +34,7 @@ func main() {
 			Exit:       *exit,
 			Directory:  *directory,
 			Issuer:     *issuer,
+			LocalAPI:   *localAPI,
 			WGIO:       *wgio,
 			WGIOTap:    *wgiotap,
 			WGIOInject: *wgioinject,
@@ -40,7 +42,7 @@ func main() {
 	}
 
 	if !nodeCfg.Roles.Any() {
-		log.Fatal("no role selected; pass one or more of --client --entry --exit --directory --issuer --wgio --wgiotap --wgioinject")
+		log.Fatal("no role selected; pass one or more of --client --entry --exit --directory --issuer --local-api --wgio --wgiotap --wgioinject")
 	}
 
 	if err := app.Run(ctx, nodeCfg); err != nil {

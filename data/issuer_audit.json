@@ -1,24 +1,5 @@
 [
   {
-    "id": 7190,
-    "timestamp": 1774325300,
-    "action": "subject-dispute-clear",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle-clear",
-    "tier_before": 1,
-    "tier_after": 3
-  },
-  {
-    "id": 7191,
-    "timestamp": 1774325300,
-    "action": "subject-dispute-apply",
-    "subject": "exit-local-1",
-    "reason": "chaos-cycle",
-    "value": 1774325480,
-    "tier_before": 3,
-    "tier_after": 1
-  },
-  {
     "id": 7192,
     "timestamp": 1774325300,
     "action": "subject-dispute-clear",
@@ -47253,5 +47234,21 @@
     "reason": "chaos-cycle-clear",
     "tier_before": 1,
     "tier_after": 3
+  },
+  {
+    "id": 12190,
+    "timestamp": 1776154345,
+    "action": "token-revoke",
+    "subject": "1776154345339983931",
+    "reason": "admin-revocation",
+    "value": 1776154465
+  },
+  {
+    "id": 12191,
+    "timestamp": 1776247415,
+    "action": "token-revoke",
+    "subject": "1776247414685107897",
+    "reason": "admin-revocation",
+    "value": 1776247535
   }
 ]

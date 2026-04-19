@@ -83,9 +83,8 @@ tar -czf /tmp/tdpn-manual-validation-state.tgz \
 Run on each machine in its own repo path and with its active server env (`.env.easy.server` when running authority mode):
 ```bash
 ADMIN_TOKEN="$(grep -m1 '^DIRECTORY_ADMIN_TOKEN=' deploy/.env.easy.server | cut -d= -f2-)"
-sudo ./scripts/easy_node.sh server-federation-status \
+DIRECTORY_ADMIN_TOKEN="$ADMIN_TOKEN" sudo ./scripts/easy_node.sh server-federation-status \
   --directory-url https://127.0.0.1:8081 \
-  --admin-token "$ADMIN_TOKEN" \
   --min-peer-source-operators 2 \
   --min-issuer-source-operators 2 \
   --fail-on-not-ready 1 \
@@ -171,4 +170,3 @@ When requesting help, always include:
 - Smoke: `status`, `stage`, `notes`, `summary_json` path
 - Signoff: `status`, `stage`, `notes`, `summary_json` path
 - A/B federation output from `server-federation-status --show-json 1`
-

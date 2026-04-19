@@ -20,6 +20,9 @@ This document captures the active Cosmos-first bootstrap model running in parall
 - Status: active implementation with phased rollout (`devnet -> testnet -> production gate`).
 - In scope: validator onboarding policy, hybrid governance bootstrap, eligibility scoring, epoch selection, and graduation criteria.
 - Out of scope for now: final tokenomics constants, full permissionless onboarding, and subjective abuse automation.
+- Current module posture:
+  - `x/vpngovernance` persists append-only admin audit actions (`action_id`, `action`, `actor`, `reason`, `evidence_pointer`, `timestamp_unix`) with replay-safe idempotency.
+  - `x/vpnvalidator` provides deterministic epoch selection helpers for hard gates, warmup/cooldown checks, stable-seat/rotating-seat fill, and concentration caps.
 
 ## Phase 0: Hybrid Governance Bootstrap (Small Network)
 
@@ -121,6 +124,28 @@ Move from bootstrap governance to broader semi-automation only after:
 - Incident response and audit trail are routinely exercised.
 - Chain-layer outages no longer threaten VPN user experience.
 
+## Bootstrap Governance Graduation Gate (Script-Aligned)
+
+To keep operator expectations aligned with automation, the current bootstrap graduation gate helper (`scripts/blockchain_bootstrap_graduation_gate.sh`) enforces the following objective thresholds:
+
+| Category | Metric | Go Threshold |
+|---|---|---|
+| Readiness window | Measurement coverage | `measurement_window_weeks >= 12` |
+| Validator supply | Candidate depth | `validator_candidate_depth >= 30` |
+| Validator decentralization | Operator concentration | `validator_independent_operators >= 12` and `validator_max_operator_seat_share_pct <= 20` |
+| Validator decentralization | Infra concentration | `validator_max_asn_provider_seat_share_pct <= 25` |
+| Validator decentralization | Geography diversity | `validator_region_count >= 4` and `validator_country_count >= 8` |
+| Governance quality | Manual action quality | `manual_sanctions_reversed_pct_90d < 5` |
+| Governance quality | Abuse response speed | `abuse_report_to_decision_p95_hours <= 24` |
+| VPN reliability | Connect/session success SLO | `vpn_connect_session_success_slo_pct >= 99.5` |
+| VPN reliability | Recovery SLO | `vpn_recovery_mttr_p95_minutes <= 30` |
+
+Notes:
+
+- This bootstrap graduation gate intentionally focuses on validator/governance and VPN-reliability readiness.
+- Demand/economics thresholds (`paying_users_3mo_min`, `paid_sessions_per_day_30d_avg`, `subsidy_runway_months`, `contribution_margin_3mo`) remain part of the broader mainnet activation gate.
+- If any bootstrap gate fails, decision remains `NO-GO` for graduation (`fail-close` mode can enforce non-zero exit).
+
 ## Mainnet Activation Go/No-Go Metrics Gate
 
 Default decision remains **NO-GO** for production activation until every required gate below is met for the full measurement window.
@@ -152,6 +177,33 @@ Decision policy:
 - All gates met => GO for production activation.
 - If GO is achieved, run a separate security and readiness review before broad validator expansion.
 
+Automation:
+
+- `scripts/blockchain_mainnet_activation_metrics.sh` produces deterministic activation metrics JSON from explicit inputs plus optional source artifacts; `scripts/integration_blockchain_mainnet_activation_metrics.sh` covers complete/partial coverage and source artifact precedence.
+- `scripts/blockchain_fastlane.sh` is the blockchain helper path for phase5 + phase6 + phase7 + activation helpers, and `scripts/integration_blockchain_fastlane.sh` covers ordering, dry-run/toggle behavior, and failure propagation.
+- Bootstrap governance graduation gate helper is `scripts/blockchain_bootstrap_graduation_gate.sh`, with contract coverage in `scripts/integration_blockchain_bootstrap_graduation_gate.sh`; `scripts/blockchain_fastlane.sh` can include it via `--run-blockchain-bootstrap-governance-graduation-gate` + `--blockchain-bootstrap-governance-graduation-gate-summary-json` / `BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON`; easy-node exposes `./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate` with wrapper coverage in `scripts/integration_easy_node_blockchain_gate_wrappers.sh`.
+- Phase7 check/run/handoff-check/handoff-run signal snapshots include `mainnet_activation_gate_go` and `bootstrap_governance_graduation_gate_go`; both requirements remain optional by default and are only required when operators explicitly enable `--require-mainnet-activation-gate-go` and/or `--require-bootstrap-governance-graduation-gate-go` in phase7 cutover gates.
+- `scripts/blockchain_mainnet_activation_gate.sh` evaluates the metrics gate from a bootstrap metrics JSON file and emits one summary JSON with the final GO/NO-GO decision.
+- `scripts/integration_blockchain_mainnet_activation_gate.sh` covers the GO path, NO-GO path, missing/invalid input handling, and fail-close behavior.
+- Activation helper contracts are `scripts/blockchain_mainnet_activation_metrics_input_template.sh` + `scripts/integration_blockchain_mainnet_activation_metrics_input_template.sh` and `scripts/blockchain_mainnet_activation_gate_cycle.sh` + `scripts/integration_blockchain_mainnet_activation_gate_cycle.sh`; easy-node exposes `./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template` and `./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle`.
+- Operator workflow should use the activation metrics template helper and activation gate cycle helper together so template generation, normalization, metrics evaluation, and final gate decision run as one repeatable loop; missing or invalid evidence stays fail-soft (`NO-GO` with explicit reasons), and VPN dataplane behavior remains independent from chain/gate liveness.
+- Canonical metrics fields consumed by the helper:
+  - `measurement_window_weeks`
+  - `vpn_connect_session_success_slo_pct`
+  - `vpn_recovery_mttr_p95_minutes`
+  - `paying_users_3mo_min`
+  - `paid_sessions_per_day_30d_avg`
+  - `validator_candidate_depth`
+  - `validator_independent_operators`
+  - `validator_max_operator_seat_share_pct`
+  - `validator_max_asn_provider_seat_share_pct`
+  - `validator_region_count`
+  - `validator_country_count`
+  - `manual_sanctions_reversed_pct_90d`
+  - `abuse_report_to_decision_p95_hours`
+  - `subsidy_runway_months`
+  - `contribution_margin_3mo`
+
 Evidence artifacts to use for this gate:
 
 - `prod-pilot-cohort` summaries/trend/alert artifacts.
@@ -172,3 +224,4 @@ Implementation sequence after GO:
 - Source roadmap: `docs/product-roadmap.md` (Parallel Track: Cosmos L1 Settlement and Governance Foundation).
 - Canonical execution plan: `docs/full-execution-plan-2026-2027.md`.
 - Related implementation guide: `docs/mvp-implementation-plan.md`.
+- `scripts/roadmap_progress_report.sh` optionally ingests validator-policy graduation summaries via `--blockchain-bootstrap-governance-graduation-gate-summary-json`, with integration coverage in `scripts/integration_roadmap_progress_report.sh`; ingestion is fail-soft when the summary is missing or invalid, falling back to the Phase-7 propagated `bootstrap_governance_graduation_gate_go` signal when no dedicated bootstrap summary is provided, and the ingested summaries carry freshness metadata such as `summary_generated_at` for staleness checks.

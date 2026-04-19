@@ -7,16 +7,21 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
-TRUST_FILE=/tmp/dir_rotation_trusted_keys.txt
-DIR_KEY_FILE=/tmp/dir_rotation_ed25519.key
-DIR_PREV_FILE=/tmp/dir_rotation_previous_pubkeys.txt
+old_umask="$(umask)"
+umask 077
+TRUST_FILE="$(mktemp /tmp/dir_rotation_trusted_keys.XXXXXX.txt)"
+DIR_KEY_FILE="$(mktemp /tmp/dir_rotation_ed25519.XXXXXX.key)"
+DIR_PREV_FILE="$(mktemp /tmp/dir_rotation_previous_pubkeys.XXXXXX.txt)"
+NODE_LOG="$(mktemp /tmp/dir_rotation_node.XXXXXX.log)"
+CLIENT_LOG="$(mktemp /tmp/dir_rotation_client.XXXXXX.log)"
+ROTATE_RESP_FILE="$(mktemp /tmp/dir_rotation_rotate.XXXXXX.json)"
+umask "$old_umask"
 DIR_PORT=8120
 ISSUER_PORT=8121
 ENTRY_CTRL_PORT=8122
 EXIT_CTRL_PORT=8123
 ENTRY_DATA_PORT=51950
 EXIT_DATA_PORT=51951
-rm -f "$TRUST_FILE" "$DIR_KEY_FILE" "$DIR_PREV_FILE"
 
 DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
 ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
@@ -31,9 +36,19 @@ EXIT_DATA_ADDR="127.0.0.1:${EXIT_DATA_PORT}" \
 DIRECTORY_PRIVATE_KEY_FILE="$DIR_KEY_FILE" \
 DIRECTORY_PREVIOUS_PUBKEYS_FILE="$DIR_PREV_FILE" \
 DIRECTORY_ADMIN_TOKEN=dev-admin-token \
-timeout 30s go run ./cmd/node --directory --issuer --entry --exit >/tmp/dir_rotation_node.log 2>&1 &
+timeout 30s go run ./cmd/node --directory --issuer --entry --exit >"$NODE_LOG" 2>&1 &
 node_pid=$!
-trap 'kill $node_pid >/dev/null 2>&1 || true' EXIT
+cleanup() {
+  kill "$node_pid" >/dev/null 2>&1 || true
+  rm -f \
+    "$TRUST_FILE" \
+    "$DIR_KEY_FILE" \
+    "$DIR_PREV_FILE" \
+    "$NODE_LOG" \
+    "$CLIENT_LOG" \
+    "$ROTATE_RESP_FILE"
+}
+trap cleanup EXIT
 
 sleep 3
 
@@ -45,29 +60,29 @@ run_strict_client() {
   DIRECTORY_TRUST_STRICT=1 \
   DIRECTORY_TRUST_TOFU=1 \
   DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
-  timeout 10s go run ./cmd/node --client >/tmp/dir_rotation_client.log 2>&1 || true
+  timeout 10s go run ./cmd/node --client >"$CLIENT_LOG" 2>&1 || true
 }
 
 run_strict_client
-if ! rg -q 'client selected entry=' /tmp/dir_rotation_client.log; then
+if ! rg -q 'client selected entry=' "$CLIENT_LOG"; then
   echo "expected initial strict-trust bootstrap success"
-  cat /tmp/dir_rotation_client.log
-  cat /tmp/dir_rotation_node.log
+  cat "$CLIENT_LOG"
+  cat "$NODE_LOG"
   exit 1
 fi
 
 before_count=$(wc -l < "$TRUST_FILE" | tr -d ' ')
 
 curl -sS -X POST "http://127.0.0.1:${DIR_PORT}/v1/admin/rotate-key" \
-  -H 'X-Admin-Token: dev-admin-token' >/tmp/dir_rotation_rotate.json
+  -H 'X-Admin-Token: dev-admin-token' >"$ROTATE_RESP_FILE"
 
 sleep 2
 
 run_strict_client
-if ! rg -q 'client selected entry=' /tmp/dir_rotation_client.log; then
+if ! rg -q 'client selected entry=' "$CLIENT_LOG"; then
   echo "expected strict-trust bootstrap success after directory key rotation"
-  cat /tmp/dir_rotation_client.log
-  cat /tmp/dir_rotation_node.log
+  cat "$CLIENT_LOG"
+  cat "$NODE_LOG"
   exit 1
 fi
 

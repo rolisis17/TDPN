@@ -1,19 +1,32 @@
-# Settlement Bridge Mapping (Scaffold)
+# Settlement Bridge Mapping
 
-This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
+This mapping reflects phase-1 stateful module wiring while keeping chain responsibilities isolated from VPN dataplane runtime.
 
 ## App-side to chain-side mapping
 - `pkg/settlement` reservation intents -> `x/vpnbilling` `CreditReservation`.
 - `pkg/settlement` usage finalization -> `x/vpnbilling` `SettlementRecord`.
 - reward accrual after settlement -> `x/vpnrewards` `RewardAccrual` and `DistributionRecord`.
 - objective slash evidence ingestion -> `x/vpnslashing` `SlashEvidence` and `PenaltyDecision`.
+  - v1 scope is objective, machine-verifiable evidence only.
+  - `evidence_ref`/proof reference must be canonical: `sha256:<value>` or `obj://<path>`.
+  - fallback derivation from violation type is removed; callers must submit explicit canonical proof references.
 - sponsor API credit delegation -> `x/vpnsponsor` `SponsorAuthorization` and `DelegatedSessionCredit`.
+  - sponsor reservation bridge payload supports optional identity split fields:
+    - `AppID` (dApp/application identity),
+    - `EndUserID` (end-user/session subject identity).
+  - legacy compatibility remains: when `AppID` or `EndUserID` are omitted, mapping falls back to `SubjectID`.
 - optional `tdpnd` settlement HTTP bridge routing:
   - write paths (`POST`):
     - `POST /x/vpnbilling/settlements` -> `x/vpnbilling`
     - `POST /x/vpnrewards/issues` -> `x/vpnrewards`
     - `POST /x/vpnsponsor/reservations` -> `x/vpnsponsor`
     - `POST /x/vpnslashing/evidence` -> `x/vpnslashing`
+    - `POST /x/vpnvalidator/eligibilities` -> `x/vpnvalidator`
+    - `POST /x/vpnvalidator/status-records` -> `x/vpnvalidator`
+    - `POST /x/vpngovernance/policies` -> `x/vpngovernance`
+    - `POST /x/vpngovernance/decisions` -> `x/vpngovernance`
+    - `POST /x/vpngovernance/audit-actions` -> `x/vpngovernance`
+      - validation expectation: reject evidence without canonical `sha256:<value>` or `obj://<path>` proof reference.
   - query paths (`GET`, list + by-id):
     - `GET /x/vpnbilling/reservations[/{reservation_id}]`
     - `GET /x/vpnbilling/settlements[/{settlement_id}]`
@@ -23,10 +36,17 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
     - `GET /x/vpnsponsor/delegations[/{reservation_id}]`
     - `GET /x/vpnslashing/evidence[/{evidence_id}]`
     - `GET /x/vpnslashing/penalties[/{penalty_id}]`
-  - bridge auth policy: bearer token (when configured) applies to `POST` writes only; `GET` query routes and `GET /health` remain open.
+    - `GET /x/vpnvalidator/eligibilities[/{validator_id}]`
+    - `GET /x/vpnvalidator/status-records[/{status_id}]`
+    - `GET /x/vpngovernance/policies[/{policy_id}]`
+    - `GET /x/vpngovernance/decisions[/{decision_id}]`
+    - `GET /x/vpngovernance/audit-actions[/{action_id}]`
+  - bridge auth policy: bearer token (when configured) applies to all `POST` writes (including validator/governance write routes); `GET` query routes and `GET /health` remain open.
 
 ## Reconciliation contract
-- Records use `pending|submitted|confirmed|failed` status placeholders via `types/ReconciliationStatus`.
+- Records use canonical lifecycle statuses via `types/ReconciliationStatus`: `pending -> submitted -> confirmed`, with explicit `failed` retained for replay/reconciliation.
+- Reconcile can promote settlement/reward/sponsor/slash records from `submitted` to `confirmed` when adapter query surfaces observe corresponding by-id bridge records.
+- This query-by-id confirmation capability is exposed via optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - Phase-1 app wiring is stateful across all module msg surfaces:
   - `vpnbilling`: reservation create + settlement finalize.
   - `vpnrewards`: accrual create + distribution record.
@@ -40,9 +60,12 @@ This scaffold keeps chain responsibilities isolated from VPN dataplane runtime.
   - distribution requires existing accrual,
   - penalty requires existing evidence,
   - delegated credit requires existing authorization.
-- Keepers remain in-memory placeholders and intentionally do not block session dataplane behavior.
+- Keepers use in-memory defaults for lightweight/local runs, with file-backed `--state-dir` runtime persistence and a KV-adapter seam for Cosmos SDK integration.
 - Cosmos SDK/ABCI wiring can replace keeper storage without changing module responsibility boundaries.
 - Proto schemas for Msg/Query surfaces are staged under `proto/tdpn/*/v1`.
 - Runtime state persistence option:
   - `tdpnd --state-dir <path>` enables file-backed module stores rooted at one runtime state directory.
   - integration gate: `scripts/integration_cosmos_tdpnd_state_dir_persistence.sh`.
+- Phase5 CI includes `settlement_adapter_roundtrip` as a first-class stage running `scripts/integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`.
+- Phase5 CI includes sponsor API live-smoke stage `issuer_sponsor_api_live_smoke` running `scripts/integration_issuer_sponsor_api_live_smoke.sh` for `/v1/sponsor/quote|reserve|token|status` no-wallet-signing happy-path coverage.
+- Phase5 run/handoff/summary wrappers consume sponsor live-smoke from CI/check/handoff summaries and expose normalized sponsor signal fields for downstream gates/reports (including `signals.issuer_sponsor_api_live_smoke_ok`, `handoff.issuer_sponsor_api_live_smoke_ok`, and consolidated `signals.issuer_sponsor_api_live_smoke` in the phase5 aggregate report).

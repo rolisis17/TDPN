@@ -14,7 +14,12 @@ done
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-STATE_DIR="$TMP_DIR/state"
+TEST_LOG_DIR="$TMP_DIR/easy-node-logs"
+STATE_DIR="$TMP_DIR/manual-validation-state"
+mkdir -p "$TEST_LOG_DIR" "$STATE_DIR"
+export EASY_NODE_LOG_DIR="$TEST_LOG_DIR"
+export EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR"
+
 PROFILE_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary.json"
 FAKE_DOCTOR="$TMP_DIR/fake_runtime_doctor.sh"
 FAKE_STATUS="$TMP_DIR/fake_manual_validation_status.sh"
@@ -27,6 +32,7 @@ INCIDENT_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_smoke_fail.lo
 INCIDENT_LOG="$TMP_DIR/integration_manual_validation_status_incident.log"
 PROFILE_BLOCKED_LOG="$TMP_DIR/integration_manual_validation_status_profile_blocked.log"
 PROFILE_STALE_LOG="$TMP_DIR/integration_manual_validation_status_profile_stale.log"
+PROFILE_NO_GO_INSUFFICIENT_LOG="$TMP_DIR/integration_manual_validation_status_profile_no_go_insufficient.log"
 PROFILE_NO_GO_LOG="$TMP_DIR/integration_manual_validation_status_profile_no_go.log"
 PROFILE_INVALID_SUMMARY_LOG="$TMP_DIR/integration_manual_validation_status_profile_invalid_summary.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
@@ -92,6 +98,83 @@ cat <<'OUT'
 OUT
 EOF
 chmod +x "$FAKE_DOCTOR_TIMEOUT"
+
+echo "[manual-validation] sudo-user safety fallback"
+SUDO_USER_INJECTION_MARKER="$TMP_DIR/manual_validation_sudo_user_eval_marker"
+SAFE_HOME_DIR="$TMP_DIR/manual_validation_safe_home"
+SUDO_SAFETY_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_sudo_user_safety.log"
+SUDO_SAFETY_RECORD_LOG="$TMP_DIR/integration_manual_validation_record_sudo_user_safety.log"
+mkdir -p "$SAFE_HOME_DIR"
+rm -f "$SUDO_USER_INJECTION_MARKER"
+MALICIOUS_SUDO_USER="invalid\$(touch ${SUDO_USER_INJECTION_MARKER})"
+EXPECTED_FALLBACK_STATE_DIR="$SAFE_HOME_DIR/.local/state/privacynode/manual_validation"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="" \
+XDG_STATE_HOME="" \
+HOME="$SAFE_HOME_DIR" \
+SUDO_USER="$MALICIOUS_SUDO_USER" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 0 >"$SUDO_SAFETY_STATUS_LOG"
+
+if [[ -e "$SUDO_USER_INJECTION_MARKER" ]]; then
+  echo "manual-validation-status evaluated unsafe SUDO_USER payload"
+  cat "$SUDO_SAFETY_STATUS_LOG"
+  exit 1
+fi
+if ! grep -F -- "[manual-validation-status] state_dir=$EXPECTED_FALLBACK_STATE_DIR" "$SUDO_SAFETY_STATUS_LOG" >/dev/null; then
+  echo "manual-validation-status did not fall back to HOME-based state directory for invalid SUDO_USER"
+  cat "$SUDO_SAFETY_STATUS_LOG"
+  exit 1
+fi
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="" \
+XDG_STATE_HOME="" \
+HOME="$SAFE_HOME_DIR" \
+SUDO_USER="$MALICIOUS_SUDO_USER" \
+./scripts/manual_validation_record.sh \
+  --check-id sudo_user_validation_guard \
+  --status pass \
+  --notes "invalid sudo user must not execute" \
+  --show-json 0 >"$SUDO_SAFETY_RECORD_LOG"
+
+if [[ -e "$SUDO_USER_INJECTION_MARKER" ]]; then
+  echo "manual-validation-record evaluated unsafe SUDO_USER payload"
+  cat "$SUDO_SAFETY_RECORD_LOG"
+  exit 1
+fi
+if ! grep -F -- "[manual-validation-record] check_id=sudo_user_validation_guard status=pass state_dir=$EXPECTED_FALLBACK_STATE_DIR" "$SUDO_SAFETY_RECORD_LOG" >/dev/null; then
+  echo "manual-validation-record did not use HOME-based state directory fallback for invalid SUDO_USER"
+  cat "$SUDO_SAFETY_RECORD_LOG"
+  exit 1
+fi
+
+VALID_SUDO_USER="$(id -un 2>/dev/null || true)"
+VALID_SUDO_HOME=""
+if [[ -n "$VALID_SUDO_USER" && "$VALID_SUDO_USER" != "root" ]]; then
+  if command -v getent >/dev/null 2>&1; then
+    VALID_SUDO_HOME="$(getent passwd "$VALID_SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+  fi
+  if [[ -z "$VALID_SUDO_HOME" && -r /etc/passwd ]]; then
+    VALID_SUDO_HOME="$(awk -F: -v user="$VALID_SUDO_USER" '$1 == user { print $6; exit }' /etc/passwd 2>/dev/null || true)"
+  fi
+fi
+if [[ -n "$VALID_SUDO_HOME" && "$VALID_SUDO_HOME" == /* ]]; then
+  VALID_SUDO_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_valid_sudo_user.log"
+  EXPECTED_VALID_SUDO_STATE_DIR="$VALID_SUDO_HOME/.local/state/privacynode/manual_validation"
+  EASY_NODE_MANUAL_VALIDATION_STATE_DIR="" \
+  XDG_STATE_HOME="" \
+  HOME="$SAFE_HOME_DIR" \
+  SUDO_USER="$VALID_SUDO_USER" \
+  MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+  RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+  ./scripts/manual_validation_status.sh --show-json 0 >"$VALID_SUDO_STATUS_LOG"
+  if ! grep -F -- "[manual-validation-status] state_dir=$EXPECTED_VALID_SUDO_STATE_DIR" "$VALID_SUDO_STATUS_LOG" >/dev/null; then
+    echo "manual-validation-status did not preserve valid SUDO_USER home resolution"
+    cat "$VALID_SUDO_STATUS_LOG"
+    exit 1
+  fi
+fi
 
 echo "[manual-validation] baseline status"
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
@@ -226,6 +309,7 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   and .summary.profile_default_gate.available == false
   and .summary.profile_default_gate.valid_json == false
   and .summary.profile_default_gate.summary_json == "'"$PROFILE_SIGNOFF_SUMMARY_JSON"'"
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and .summary.docker_rehearsal_gate.status == "pending"
   and .summary.docker_rehearsal_gate.ready == false
   and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
@@ -884,6 +968,11 @@ if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=sudo 
   cat $PROFILE_BLOCKED_LOG
   exit 1
 fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=.*--campaign-timeout-sec 2400' $PROFILE_BLOCKED_LOG; then
+  echo "profile-blocked status missing profile-default gate campaign-timeout flag"
+  cat $PROFILE_BLOCKED_LOG
+  exit 1
+fi
 profile_blocked_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_BLOCKED_LOG)"
 if [[ -z "$profile_blocked_json" ]]; then
   echo "profile-blocked status missing JSON payload"
@@ -897,7 +986,11 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
   and .summary.profile_default_gate.failure_stage == "campaign"
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
 ' >/dev/null; then
   echo "profile-blocked status JSON missing expected profile_default_gate fields"
   printf '%s\n' "$profile_blocked_json"
@@ -946,7 +1039,11 @@ if ! printf '%s\n' "$profile_stale_json" | jq -e '
   and .summary.profile_default_gate.stale_non_refreshed == true
   and .summary.profile_default_gate.refresh_campaign == false
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
 ' >/dev/null; then
   echo "profile-stale status JSON missing expected stale profile_default_gate fields"
   printf '%s\n' "$profile_stale_json"
@@ -954,6 +1051,252 @@ if ! printf '%s\n' "$profile_stale_json" | jq -e '
 fi
 
 echo "[manual-validation] profile-default no-go advisory mapping"
+PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_check_insufficient.json"
+cat >"$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON" <<'EOF_PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY'
+{
+  "version": 1,
+  "status": "fail",
+  "decision": "NO-GO",
+  "inputs": {
+    "policy": {
+      "require_min_runs_total": 3,
+      "require_min_runs_with_summary": 3
+    }
+  },
+  "observed": {
+    "campaign_status": "pass",
+    "trend_status": "warn",
+    "runs_total": 2,
+    "runs_with_summary": 2
+  }
+}
+EOF_PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced",
+    "diagnostics": {
+      "root_required": true
+    },
+    "next_operator_action": "Use a fresh invite key from active issuer and rerun signoff"
+  },
+  "artifacts": {
+    "campaign_check_summary_json": "$(basename "$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON")"
+  }
+}
+EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_NO_GO_INSUFFICIENT_LOG
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $PROFILE_NO_GO_INSUFFICIENT_LOG; then
+  echo "profile-no-go-insufficient status missing profile_default_gate_status=pending line"
+  cat $PROFILE_NO_GO_INSUFFICIENT_LOG
+  exit 1
+fi
+profile_no_go_insufficient_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_NO_GO_INSUFFICIENT_LOG)"
+if [[ -z "$profile_no_go_insufficient_json" ]]; then
+  echo "profile-no-go-insufficient status missing JSON payload"
+  cat $PROFILE_NO_GO_INSUFFICIENT_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.decision == "NO-GO"
+  and .summary.profile_default_gate.available == true
+  and .summary.profile_default_gate.valid_json == true
+  and .summary.profile_default_gate.failure_stage == "campaign_check"
+  and .summary.profile_default_gate.non_root_refresh_blocked == false
+  and .summary.profile_default_gate.stale_non_refreshed == false
+  and .summary.profile_default_gate.refresh_campaign == true
+  and .summary.profile_default_gate.insufficient_evidence == true
+  and (.summary.profile_default_gate.notes | contains("insufficient/unstable"))
+  and (.summary.profile_default_gate.notes | contains("operator action: Use a fresh invite key from active issuer and rerun signoff"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
+  and .summary.profile_default_gate.decision_next_operator_action == "Use a fresh invite key from active issuer and rerun signoff"
+  and .summary.profile_default_gate.diagnostics_root_required == true
+  and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required"
+  and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required"
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+' >/dev/null; then
+  echo "profile-no-go-insufficient status JSON missing expected pending mapping fields"
+  printf '%s\n' "$profile_no_go_insufficient_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default no-go insufficient guidance prefers docker no-sudo command when rehearsal artifacts exist"
+PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON="$TMP_DIR/three_machine_docker_profile_matrix_record_hint_matrix.json"
+PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON="$TMP_DIR/three_machine_docker_readiness_hint_2hop.json"
+cat >"$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" <<'EOF_PROFILE_DOCKER_HINT_PROFILE'
+{
+  "version": 1,
+  "status": "pass",
+  "endpoints": {
+    "directory_a": "http://127.0.0.1:18081",
+    "directory_b": "http://127.0.0.1:28081",
+    "issuer_a": "http://127.0.0.1:18082",
+    "entry": "http://127.0.0.1:18083",
+    "exit": "http://127.0.0.1:18084"
+  }
+}
+EOF_PROFILE_DOCKER_HINT_PROFILE
+cat >"$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" <<EOF_PROFILE_DOCKER_HINT_MATRIX
+{
+  "version": 1,
+  "status": "pass",
+  "profiles": [
+    {
+      "profile": "2hop",
+      "status": "pass",
+      "artifacts": {
+        "summary_json": "$(basename "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON")"
+      }
+    }
+  ]
+}
+EOF_PROFILE_DOCKER_HINT_MATRIX
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id three_machine_docker_readiness \
+  --status pass \
+  --notes "docker rehearsal endpoints available" \
+  --artifact "$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" \
+  --artifact "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" \
+  --command "./scripts/three_machine_docker_profile_matrix_record.sh --print-summary-json 1" \
+  --show-json 0 >/dev/null
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_NO_GO_INSUFFICIENT_LOG
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command_sudo=sudo \./scripts/easy_node\.sh profile-default-gate-run' $PROFILE_NO_GO_INSUFFICIENT_LOG; then
+  echo "profile-no-go-insufficient status missing profile_default_gate_next_command_sudo line"
+  cat $PROFILE_NO_GO_INSUFFICIENT_LOG
+  exit 1
+fi
+profile_no_go_insufficient_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_NO_GO_INSUFFICIENT_LOG)"
+if [[ -z "$profile_no_go_insufficient_json" ]]; then
+  echo "profile-no-go-insufficient status missing JSON payload after docker hint setup"
+  cat $PROFILE_NO_GO_INSUFFICIENT_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" --arg profile "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.insufficient_evidence == true
+  and .summary.profile_default_gate.diagnostics_root_required == true
+  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker") | not)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack") | not)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls") | not)
+  and (.summary.profile_default_gate.next_command | contains("--refresh-campaign") | not)
+  and (.summary.profile_default_gate.next_command | contains("--fail-on-no-go") | not)
+  and (.summary.profile_default_gate.next_command | contains("18081"))
+  and (.summary.profile_default_gate.next_command | contains("28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command | contains("--campaign-issuer-url http://127.0.0.1:18082"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-entry-url http://127.0.0.1:18083"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-exit-url http://127.0.0.1:18084"))
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-execution-mode docker") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-start-local-stack") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-directory-urls") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--refresh-campaign") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--fail-on-no-go") | not)
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
+  and (.summary.profile_default_gate.next_command_source | test("docker"))
+  and .summary.profile_default_gate.next_command_sudo_only_reason == null
+  and .summary.profile_default_gate.docker_rehearsal_hint_available == true
+  and .summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json == $matrix
+  and .summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json == $profile
+  and .summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved == "'"$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON"'"
+' >/dev/null; then
+  echo "profile-no-go-insufficient status JSON missing docker-hint guidance fields"
+  printf '%s\n' "$profile_no_go_insufficient_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default no-go insufficient guidance prefers sudo when docker hint implies local stack"
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT_DOCKER_STACK
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true,
+    "campaign_refresh_overrides_effective": {
+      "execution_mode": "docker",
+      "start_local_stack": "1"
+    }
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced",
+    "diagnostics": {
+      "root_required": true
+    },
+    "next_operator_action": "Use a fresh invite key from active issuer and rerun signoff"
+  },
+  "artifacts": {
+    "campaign_check_summary_json": "$(basename "$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON")"
+  }
+}
+EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT_DOCKER_STACK
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_NO_GO_INSUFFICIENT_LOG
+
+profile_no_go_insufficient_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' $PROFILE_NO_GO_INSUFFICIENT_LOG)"
+if [[ -z "$profile_no_go_insufficient_json" ]]; then
+  echo "profile-no-go-insufficient docker-stack status missing JSON payload"
+  cat $PROFILE_NO_GO_INSUFFICIENT_LOG
+  exit 1
+fi
+if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
+  .summary.profile_default_gate.status == "pending"
+  and .summary.profile_default_gate.insufficient_evidence == true
+  and .summary.profile_default_gate.diagnostics_root_required == true
+  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required_docker_start_local_stack_1"
+  and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required_docker_start_local_stack_1"
+  and (.summary.profile_default_gate.notes | contains("docker hint requires --campaign-start-local-stack 1"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
+  and .summary.profile_default_gate.docker_rehearsal_hint_available == true
+' >/dev/null; then
+  echo "profile-no-go-insufficient docker-stack status JSON missing sudo-selection guidance fields"
+  printf '%s\n' "$profile_no_go_insufficient_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default no-go advisory mapping (sufficient-evidence/no-artifact)"
 cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<'EOF_PROFILE_SIGNOFF_NO_GO'
 {
   "version": 1,
@@ -995,6 +1338,7 @@ if ! printf '%s\n' "$profile_no_go_json" | jq -e '
   and .summary.profile_default_gate.non_root_refresh_blocked == false
   and .summary.profile_default_gate.stale_non_refreshed == false
   and .summary.profile_default_gate.refresh_campaign == true
+  and .summary.profile_default_gate.insufficient_evidence == false
   and .summary.profile_default_gate.final_rc == 1
   and (.summary.profile_default_gate.notes | contains("decision is NO-GO"))
 ' >/dev/null; then
@@ -1027,7 +1371,19 @@ if ! printf '%s\n' "$profile_invalid_summary_json" | jq -e '
   and .summary.profile_default_gate.available == true
   and .summary.profile_default_gate.valid_json == false
   and (.summary.profile_default_gate.notes | contains("summary JSON is invalid"))
-  and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
+  and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
+  and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
+  and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 2400"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
+  and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
 ' >/dev/null; then
   echo "profile-invalid-summary status JSON missing expected profile_default_gate fields"

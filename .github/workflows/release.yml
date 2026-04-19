@@ -6,27 +6,29 @@ on:
       - "v*"
 
 permissions:
-  attestations: write
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: "1.22"
 
       - name: Verify release tag metadata
-        run: ./scripts/release_verify_tag.sh --version "${GITHUB_REF_NAME}" --require-head-match 1 --require-signature "${RELEASE_REQUIRE_SIGNED_TAG:-0}"
+        run: ./scripts/release_verify_tag.sh --version "${GITHUB_REF_NAME}" --require-head-match 1 --require-signature "${RELEASE_REQUIRE_SIGNED_TAG:-1}" --require-contained-in-ref "${RELEASE_REQUIRE_CONTAINED_IN_REF:-origin/main}"
         env:
           RELEASE_REQUIRE_SIGNED_TAG: ${{ vars.RELEASE_REQUIRE_SIGNED_TAG }}
+          RELEASE_REQUIRE_CONTAINED_IN_REF: ${{ vars.RELEASE_REQUIRE_CONTAINED_IN_REF }}
 
       - name: Prepare release artifacts
         run: ./scripts/release_prepare.sh --version "${GITHUB_REF_NAME}" --out-dir dist --require-tag-match 1
@@ -37,14 +39,27 @@ jobs:
           RELEASE_REQUIRE_TAG_NOTES: ${{ vars.RELEASE_REQUIRE_TAG_NOTES }}
 
       - name: Upload workflow artifact bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-${{ github.ref_name }}
           path: dist/${{ github.ref_name }}
           if-no-files-found: error
 
+  publish-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download workflow artifact bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist/${{ github.ref_name }}
+
       - name: Publish GitHub release artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           files: |
             dist/${{ github.ref_name }}/sha256sums.txt
@@ -53,12 +68,26 @@ jobs:
             dist/${{ github.ref_name }}/source_${{ github.ref_name }}.tar
             dist/${{ github.ref_name }}/bin/*
 
+  attest-release:
+    needs: publish-release
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download workflow artifact bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist/${{ github.ref_name }}
+
       - name: Attest release checksums
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: dist/${{ github.ref_name }}/sha256sums.txt
 
       - name: Attest release SBOM
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: dist/${{ github.ref_name }}/sbom_go_modules_${{ github.ref_name }}.json
