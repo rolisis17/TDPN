@@ -331,6 +331,7 @@ function Show-ToolReport {
 function Add-UniqueValue {
   param(
     [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
     [System.Collections.ArrayList]$List,
     [Parameter(Mandatory = $true)]
     [string]$Value
@@ -397,6 +398,50 @@ function Get-DependencyInstallHint {
     "Git.Git" { return "winget install --id Git.Git --exact" }
     "Microsoft.AppInstaller" { return "install App Installer from Microsoft Store" }
     default { return "winget install --id $PackageId --exact" }
+  }
+}
+
+function Get-WingetInstallCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  return ("winget install --id {0} --exact --accept-source-agreements --accept-package-agreements --silent" -f $PackageId)
+}
+
+function Get-RecommendedCommands {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$MissingPackageIds = @()
+  )
+
+  $commands = New-Object System.Collections.ArrayList
+  Add-UniqueValue -List $commands -Value "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+
+  foreach ($packageId in $MissingPackageIds) {
+    Add-UniqueValue -List $commands -Value (Get-WingetInstallCommand -PackageId $packageId)
+  }
+
+  Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
+  Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
+
+  return @($commands.ToArray())
+}
+
+function Show-RecommendedCommands {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$Commands = @()
+  )
+
+  if ($Commands.Count -eq 0) {
+    return
+  }
+
+  Write-Step "recommended commands (copy/paste):"
+  foreach ($command in $Commands) {
+    Write-Host ("  - {0}" -f $command)
   }
 }
 
@@ -515,6 +560,7 @@ $summary = [ordered]@{
   install_completed_package_ids = @()
   install_failed_package_ids = @()
   install_skipped_reason = ""
+  recommended_commands = @()
   generated_at_utc = ""
 }
 
@@ -612,7 +658,11 @@ try {
     }
   }
 
+  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($summary.missing_package_ids))
+  $summary.recommended_commands = @($recommendedCommands)
+
   Write-Step "status=$($summary.status)"
+  Show-RecommendedCommands -Commands $recommendedCommands
   Write-Step "next step: run scripts/windows/desktop_native_bootstrap.ps1 -Mode run-full (or scripts/windows/desktop_one_click.ps1)"
 } catch {
   $summary.status = "error"
