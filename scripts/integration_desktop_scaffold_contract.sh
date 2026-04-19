@@ -72,6 +72,35 @@ if ! grep -qF 'desktop_doctor.ps1' "$DOCTOR_CMD_SCRIPT"; then
 fi
 echo "[desktop-scaffold] doctor scaffold script markers are present"
 
+PACKAGED_RUN_SCAFFOLD_FILES=(
+  "scripts/windows/desktop_packaged_run.ps1"
+  "scripts/windows/desktop_packaged_run.cmd"
+)
+for path in "${PACKAGED_RUN_SCAFFOLD_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing packaged-run scaffold script: $path"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] packaged-run scaffold scripts exist"
+
+PACKAGED_RUN_POWERSHELL_SCRIPT="scripts/windows/desktop_packaged_run.ps1"
+PACKAGED_RUN_CMD_SCRIPT="scripts/windows/desktop_packaged_run.cmd"
+
+if ! grep -qF 'desktop_native_bootstrap' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected bootstrap launcher reference in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'packaged' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected packaged mode marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_packaged_run.ps1' "$PACKAGED_RUN_CMD_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected PowerShell launcher reference in $PACKAGED_RUN_CMD_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] packaged-run scaffold script markers are present"
+
 WINDOWS_NATIVE_BOOTSTRAP_FILES=(
   "scripts/windows/desktop_native_bootstrap.ps1"
   "scripts/windows/desktop_native_bootstrap.cmd"

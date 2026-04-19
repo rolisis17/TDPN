@@ -208,6 +208,34 @@ scripts\windows\desktop_one_click.cmd
 
 This wrapper is meant for the common "bootstrap then launch" path on Windows and keeps the same scaffold-only, non-production posture as the rest of the desktop track.
 
+Installer-style packaged launcher flow (`desktop_packaged_run`):
+
+This remains scaffold-only, non-production installer-style validation guidance.
+
+PowerShell (`.ps1`) form:
+
+```powershell
+./scripts/windows/desktop_packaged_run.ps1 -DryRun
+./scripts/windows/desktop_packaged_run.ps1
+```
+
+From `cmd.exe` (`.cmd`) form:
+
+```cmd
+scripts\windows\desktop_packaged_run.cmd -DryRun
+scripts\windows\desktop_packaged_run.cmd
+```
+
+What this path does:
+- prefers packaged desktop launch for installer-style smoke checks
+- still uses local API startup/health checks for desktop launch
+- still runs `desktop_doctor` preflight-style environment checks before launch
+
+Recommended sequence for installer testing:
+1. Build the bundle (`desktop_release_bundle`).
+2. Run `desktop_packaged_run` in `-DryRun` first.
+3. Run `desktop_packaged_run` for a real launch.
+
 Launch strategy behavior for `desktop_native_bootstrap`:
 - `dev` keeps the backward-compatible development flow. Use this when you want the same local development path the bootstrap has always used.
 - `auto` prefers a packaged desktop when one is available, then falls back to the dev launch path. Use this when you want one command to work across fresh machines and machines that already have packaged artifacts.
