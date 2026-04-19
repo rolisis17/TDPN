@@ -36,6 +36,10 @@ go run ./cmd/node --local-api
 Defaults expected by this app:
 - local API base URL: `http://127.0.0.1:8095`
 - local API timeout: `20s`
+- optional daemon production-hardening mode for connect:
+  - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
+  - when enabled, `/v1/connect` rejects manual `bootstrap_directory`/`invite_key` overrides and requires a registered `session_token`
+  - default remains legacy-compatible unless explicitly enabled
 
 Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatibility):
 - `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`)

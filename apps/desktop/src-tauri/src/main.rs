@@ -27,6 +27,7 @@ struct ControlConfig {
     auth_bearer_configured: bool,
     allow_update_mutations: bool,
     allow_service_mutations: bool,
+    connect_require_session: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     update_channel: Option<String>,
     update_feed_configured: bool,
@@ -45,6 +46,7 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
         auth_bearer_configured: cfg.auth_bearer.is_some(),
         allow_update_mutations: cfg.allow_update_mutations,
         allow_service_mutations: cfg.allow_service_mutations,
+        connect_require_session: cfg.connect_require_session,
         update_channel: optional_env_any(&["GPM_DESKTOP_UPDATE_CHANNEL", "TDPN_DESKTOP_UPDATE_CHANNEL"]),
         update_feed_configured: optional_env_any(&[
             "GPM_DESKTOP_UPDATE_FEED_CONFIGURED",

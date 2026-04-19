@@ -1026,6 +1026,77 @@ func TestHandleConnectFailuresAndValidation(t *testing.T) {
 	})
 }
 
+func TestHandleConnectSessionRequiredMode(t *testing.T) {
+	t.Run("manual overrides are rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir.example:8081",
+			"invite_key":"inv-manual-disabled"
+		}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "manual bootstrap_directory/invite_key overrides are disabled") {
+			t.Fatalf("error=%q want manual-overrides-disabled message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("manual override rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("session token is required when mode is enabled", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "connect requires a registered session_token") {
+			t.Fatalf("error=%q want session-required message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("session-required rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("registered session token resolves connect secrets", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-connect-session-token",
+			WalletAddress:      "cosmos1connectsession",
+			WalletProvider:     "keplr",
+			Role:               "client",
+			CreatedAt:          time.Now().UTC(),
+			ExpiresAt:          time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory: "https://dir.example:8081",
+			InviteKey:          "wallet:cosmos1connectsession",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-session-token",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir.example:8081")
+		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
+	})
+}
+
 func TestHandleSetProfileNormalizationAndValidation(t *testing.T) {
 	svc, logPath := newFakeService(t, false)
 

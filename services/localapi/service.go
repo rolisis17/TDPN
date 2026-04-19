@@ -57,30 +57,31 @@ var lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) 
 }
 
 type Service struct {
-	addr                string
-	scriptPath          string
-	commandRunner       string
-	commandTimeout      time.Duration
-	maxConcurrentCmds   int
-	commandSlots        chan struct{}
-	allowUpdate         bool
-	allowUnauthLoopback bool
-	allowInsecureHTTP   bool
-	authToken           string
-	serviceStatus       string
-	serviceStart        string
-	serviceStop         string
-	serviceRestart      string
-	gpmMainDomain       string
-	gpmManifestURL      string
-	gpmManifestCache    string
-	gpmManifestMaxAge   time.Duration
-	gpmManifestHMACKey  string
-	gpmRoleDefault      string
-	gpmApprovalToken    string
-	gpmStateStorePath   string
-	gpmAuditLogPath     string
-	gpmState            *gpmRuntimeState
+	addr                     string
+	scriptPath               string
+	commandRunner            string
+	commandTimeout           time.Duration
+	maxConcurrentCmds        int
+	commandSlots             chan struct{}
+	allowUpdate              bool
+	allowUnauthLoopback      bool
+	allowInsecureHTTP        bool
+	authToken                string
+	serviceStatus            string
+	serviceStart             string
+	serviceStop              string
+	serviceRestart           string
+	gpmConnectRequireSession bool
+	gpmMainDomain            string
+	gpmManifestURL           string
+	gpmManifestCache         string
+	gpmManifestMaxAge        time.Duration
+	gpmManifestHMACKey       string
+	gpmRoleDefault           string
+	gpmApprovalToken         string
+	gpmStateStorePath        string
+	gpmAuditLogPath          string
+	gpmState                 *gpmRuntimeState
 }
 
 type boundedOutputBuffer struct {
@@ -221,6 +222,11 @@ func New() *Service {
 		"TDPN_OPERATOR_APPROVAL_TOKEN",
 		"",
 	)
+	gpmConnectRequireSession := parseBoolWithDefault(preferredEnvValue(
+		"GPM_CONNECT_REQUIRE_SESSION",
+		"TDPN_CONNECT_REQUIRE_SESSION",
+		"",
+	), false)
 	gpmStateStorePath := preferredEnvValue(
 		"GPM_STATE_STORE_PATH",
 		"TDPN_STATE_STORE_PATH",
@@ -233,30 +239,31 @@ func New() *Service {
 	)
 
 	svc := &Service{
-		addr:                addr,
-		scriptPath:          scriptPath,
-		commandRunner:       commandRunner,
-		commandTimeout:      commandTimeout,
-		maxConcurrentCmds:   maxConcurrentCmds,
-		commandSlots:        make(chan struct{}, maxConcurrentCmds),
-		allowUpdate:         allowUpdate,
-		allowUnauthLoopback: allowUnauthLoopback,
-		allowInsecureHTTP:   allowInsecureHTTP,
-		authToken:           authToken,
-		serviceStatus:       serviceStatus,
-		serviceStart:        serviceStart,
-		serviceStop:         serviceStop,
-		serviceRestart:      serviceRestart,
-		gpmMainDomain:       strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
-		gpmManifestURL:      strings.TrimSpace(gpmManifestURL),
-		gpmManifestCache:    strings.TrimSpace(gpmManifestCache),
-		gpmManifestMaxAge:   time.Duration(gpmManifestMaxAgeSec) * time.Second,
-		gpmManifestHMACKey:  gpmManifestHMACKey,
-		gpmRoleDefault:      gpmRoleDefault,
-		gpmApprovalToken:    gpmApprovalToken,
-		gpmStateStorePath:   strings.TrimSpace(gpmStateStorePath),
-		gpmAuditLogPath:     strings.TrimSpace(gpmAuditLogPath),
-		gpmState:            newGPMRuntimeState(),
+		addr:                     addr,
+		scriptPath:               scriptPath,
+		commandRunner:            commandRunner,
+		commandTimeout:           commandTimeout,
+		maxConcurrentCmds:        maxConcurrentCmds,
+		commandSlots:             make(chan struct{}, maxConcurrentCmds),
+		allowUpdate:              allowUpdate,
+		allowUnauthLoopback:      allowUnauthLoopback,
+		allowInsecureHTTP:        allowInsecureHTTP,
+		authToken:                authToken,
+		serviceStatus:            serviceStatus,
+		serviceStart:             serviceStart,
+		serviceStop:              serviceStop,
+		serviceRestart:           serviceRestart,
+		gpmConnectRequireSession: gpmConnectRequireSession,
+		gpmMainDomain:            strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
+		gpmManifestURL:           strings.TrimSpace(gpmManifestURL),
+		gpmManifestCache:         strings.TrimSpace(gpmManifestCache),
+		gpmManifestMaxAge:        time.Duration(gpmManifestMaxAgeSec) * time.Second,
+		gpmManifestHMACKey:       gpmManifestHMACKey,
+		gpmRoleDefault:           gpmRoleDefault,
+		gpmApprovalToken:         gpmApprovalToken,
+		gpmStateStorePath:        strings.TrimSpace(gpmStateStorePath),
+		gpmAuditLogPath:          strings.TrimSpace(gpmAuditLogPath),
+		gpmState:                 newGPMRuntimeState(),
 	}
 	svc.loadGPMStateBestEffort()
 	return svc
@@ -381,6 +388,22 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	in.BootstrapDirectory = strings.TrimSpace(in.BootstrapDirectory)
 	in.InviteKey = strings.TrimSpace(in.InviteKey)
 	in.SessionToken = strings.TrimSpace(in.SessionToken)
+	if s.gpmConnectRequireSession {
+		if in.BootstrapDirectory != "" || in.InviteKey != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "manual bootstrap_directory/invite_key overrides are disabled; connect requires a registered session_token",
+			})
+			return
+		}
+		if in.SessionToken == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "connect requires a registered session_token when session-required mode is enabled",
+			})
+			return
+		}
+	}
 	if in.PolicyProfile != "" && strings.TrimSpace(in.PathProfile) == "" {
 		in.PathProfile = strings.TrimSpace(in.PolicyProfile)
 	}

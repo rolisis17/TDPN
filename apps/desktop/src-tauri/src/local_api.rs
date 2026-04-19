@@ -16,6 +16,7 @@ pub struct LocalApiConfig {
     pub auth_bearer: Option<String>,
     pub allow_update_mutations: bool,
     pub allow_service_mutations: bool,
+    pub connect_require_session: bool,
 }
 
 impl LocalApiConfig {
@@ -41,6 +42,11 @@ impl LocalApiConfig {
         let allow_service_mutations = parse_optional_bool_env_any(&[
             "GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS",
             "TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS",
+        ])?
+        .unwrap_or(false);
+        let connect_require_session = parse_optional_bool_env_any(&[
+            "GPM_LOCAL_API_CONNECT_REQUIRE_SESSION",
+            "TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION",
         ])?
         .unwrap_or(false);
 
@@ -116,6 +122,7 @@ impl LocalApiConfig {
             auth_bearer,
             allow_update_mutations,
             allow_service_mutations,
+            connect_require_session,
         })
     }
 
@@ -608,6 +615,8 @@ mod tests {
                 ("TDPN_LOCAL_API_AUTH_BEARER", None),
                 ("TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS", None),
                 ("TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS", None),
+                ("TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION", None),
+                ("GPM_LOCAL_API_CONNECT_REQUIRE_SESSION", None),
             ],
             || {
                 let cfg = LocalApiConfig::from_env().expect("from_env");
@@ -617,6 +626,7 @@ mod tests {
                 assert_eq!(cfg.auth_bearer, None);
                 assert!(!cfg.allow_update_mutations);
                 assert!(!cfg.allow_service_mutations);
+                assert!(!cfg.connect_require_session);
             },
         );
     }
@@ -710,6 +720,7 @@ mod tests {
             auth_bearer: Some("token".to_string()),
             allow_update_mutations: false,
             allow_service_mutations: false,
+            connect_require_session: false,
         };
         assert_eq!(cfg.redacted_base_url(), "https://example.com:8443");
     }
@@ -948,6 +959,40 @@ mod tests {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
                 assert!(
                     err.contains("invalid TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS value"),
+                    "{err}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_parses_connect_require_session_flags() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("http://127.0.0.1:8095")),
+                ("TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION", Some("0")),
+                ("GPM_LOCAL_API_CONNECT_REQUIRE_SESSION", Some("1")),
+            ],
+            || {
+                let cfg = LocalApiConfig::from_env().expect("from_env");
+                assert!(cfg.connect_require_session);
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_connect_require_session_flag_value() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("http://127.0.0.1:8095")),
+                ("TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION", Some("maybe")),
+            ],
+            || {
+                let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
+                assert!(
+                    err.contains("invalid TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION value"),
                     "{err}"
                 );
             },

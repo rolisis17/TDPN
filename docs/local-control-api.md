@@ -28,6 +28,10 @@ Defaults:
   - `LOCAL_CONTROL_API_SERVICE_START_COMMAND`
   - `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`
   - `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`
+- optional `/v1/connect` hardening mode (production-focused):
+  - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
+  - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
+  - default remains legacy-compatible unless this flag is explicitly enabled
 
 Runner behavior:
 - Linux/macOS default: execute `LOCAL_CONTROL_API_SCRIPT` directly.
@@ -113,6 +117,8 @@ Notes:
 - use `https://` for non-loopback bootstrap hosts.
 - loopback-only developer bootstrap may use `http://127.0.0.1:...` or `http://[::1]:...` when explicitly intended.
 - `http://localhost:...` is intentionally rejected by desktop validation; use literal loopback IPs to avoid hostname/DNS ambiguity.
+- production hardening mode (`GPM_CONNECT_REQUIRE_SESSION=1`, legacy `TDPN_CONNECT_REQUIRE_SESSION=1`) requires `session_token` and rejects manual `bootstrap_directory`/`invite_key` request overrides.
+- when hardening mode is not enabled (default), legacy `bootstrap_directory` + `invite_key` behavior remains available.
 
 Behavior:
 - runs optional `client-vpn-preflight`

@@ -34,10 +34,14 @@ const panelServerEl = byId("panel_server");
 const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
+const compatAdvancedHintEl = document.querySelector("details.advanced > p");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
+const COMPAT_ADVANCED_DEFAULT_HINT = "Optional legacy fields for support-only compatibility flows.";
+const COMPAT_ADVANCED_LOCKED_HINT =
+  "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
 const STORAGE_KEYS = Object.freeze({
   sessionToken: "gpm.desktop.session_token",
   role: "gpm.desktop.role",
@@ -52,6 +56,7 @@ const state = {
   role: "client",
   operatorApplicationStatus: undefined,
   serviceMutationsAllowed: false,
+  connectRequireSession: false,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL
@@ -364,6 +369,10 @@ function formatConfigMeta(cfg) {
     "allow_service_mutations",
     "allowServiceMutations"
   ]);
+  const connectRequireSession = readConfigBoolean(cfg, [
+    "connect_require_session",
+    "connectRequireSession"
+  ]);
 
   const hints = [`contract: ${contract}`];
   if (authConfigured !== undefined) {
@@ -384,12 +393,16 @@ function formatConfigMeta(cfg) {
   if (serviceMutationsEnabled !== undefined) {
     hints.push(serviceMutationsEnabled ? "service actions enabled" : "service actions locked");
   }
+  if (connectRequireSession !== undefined) {
+    hints.push(connectRequireSession ? "session-required connect mode" : "compat connect mode allowed");
+  }
 
   return {
     apiLine: timeout ? `${product} API: ${baseUrl} (timeout: ${timeout}s)` : `${product} API: ${baseUrl}`,
     hintLine: hints.join(" | "),
     updateMutationsEnabled: updateMutationsEnabled === true,
-    serviceMutationsEnabled: serviceMutationsEnabled === true
+    serviceMutationsEnabled: serviceMutationsEnabled === true,
+    connectRequireSession: connectRequireSession === true
   };
 }
 
@@ -530,10 +543,32 @@ function serviceLifecycleRequest() {
 }
 
 function setCompatOverrideEnabled(enabled) {
-  const allow = !!enabled;
+  const allow = !!enabled && !state.connectRequireSession;
   compatEnableEl.checked = allow;
-  bootstrapDirectoryEl.disabled = !allow;
-  inviteKeyEl.disabled = !allow;
+  compatEnableEl.disabled = state.connectRequireSession;
+  bootstrapDirectoryEl.disabled = state.connectRequireSession || !allow;
+  inviteKeyEl.disabled = state.connectRequireSession || !allow;
+}
+
+function updateCompatOverrideHint() {
+  if (!compatAdvancedHintEl) {
+    return;
+  }
+  compatAdvancedHintEl.textContent = state.connectRequireSession
+    ? COMPAT_ADVANCED_LOCKED_HINT
+    : COMPAT_ADVANCED_DEFAULT_HINT;
+}
+
+function applyConnectModePolicy(enabled) {
+  state.connectRequireSession = !!enabled;
+  if (state.connectRequireSession) {
+    bootstrapDirectoryEl.value = "";
+    inviteKeyEl.value = "";
+    setCompatOverrideEnabled(false);
+  } else {
+    setCompatOverrideEnabled(compatEnableEl.checked);
+  }
+  updateCompatOverrideHint();
 }
 
 function activateTab(name) {
@@ -578,7 +613,7 @@ function connectPayload() {
     install_route: byId("install_route").checked
   };
 
-  if (compatEnableEl.checked) {
+  if (!state.connectRequireSession && compatEnableEl.checked) {
     const bootstrap = bootstrapDirectoryEl.value.trim();
     const invite = inviteKeyEl.value.trim();
     if (bootstrap) {
@@ -749,7 +784,7 @@ byId("register_client_btn").addEventListener("click", async () => {
     session_token: state.sessionToken,
     path_profile: pathProfileEl.value
   };
-  if (compatEnableEl.checked) {
+  if (!state.connectRequireSession && compatEnableEl.checked) {
     const bootstrap = bootstrapDirectoryEl.value.trim();
     const invite = inviteKeyEl.value.trim();
     if (bootstrap) {
@@ -793,7 +828,10 @@ byId("approve_operator_btn").addEventListener("click", async () => {
 byId("connect_btn").addEventListener("click", async () => {
   const request = connectPayload();
   if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
-    print("validation", "sign in + register client, or provide compatibility bootstrap_directory + invite");
+    const hint = state.connectRequireSession
+      ? "session_token is required in session-required connect mode; sign in first"
+      : "sign in + register client, or provide compatibility bootstrap_directory + invite";
+    print("validation", hint);
     return;
   }
   inviteKeyEl.value = "";
@@ -871,7 +909,7 @@ async function init() {
   setRole("client", { persist: false });
   restorePersistedSessionErgonomics();
   activateTab("client");
-  setCompatOverrideEnabled(false);
+  applyConnectModePolicy(false);
   applyConnectionSnapshot({
     state: CONNECTION_DEFAULT_STATE,
     detail: CONNECTION_DEFAULT_DETAIL
@@ -883,12 +921,14 @@ async function init() {
     apiHintsEl.textContent = meta.hintLine;
     updateBtnEl.disabled = !meta.updateMutationsEnabled;
     state.serviceMutationsAllowed = meta.serviceMutationsEnabled;
+    applyConnectModePolicy(meta.connectRequireSession);
     syncServerRoleLockState();
   } catch (err) {
     apiBaseEl.textContent = "API: unavailable";
     apiHintsEl.textContent = "";
     updateBtnEl.disabled = true;
     state.serviceMutationsAllowed = false;
+    applyConnectModePolicy(false);
     syncServerRoleLockState();
     print("init (error)", err);
   }
