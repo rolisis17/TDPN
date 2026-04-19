@@ -39,6 +39,7 @@ const desktopStepSessionEl = document.getElementById("desktop_step_session");
 const desktopStepClientEl = document.getElementById("desktop_step_client");
 const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
 const MAX_OUTPUT_CHARS = 64 * 1024;
+const OPERATOR_PENDING_LIST_LIMIT = 25;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
@@ -1017,6 +1018,18 @@ byId("apply_operator_btn").addEventListener("click", async () => {
 byId("operator_status_btn").addEventListener("click", async () => {
   await refreshOperatorApplicationStatus({ quiet: false });
   await refreshServerReadinessStatus({ quiet: true });
+});
+
+byId("operator_list_pending_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("list pending operators")) {
+    return;
+  }
+  const request = {
+    session_token: state.sessionToken,
+    status: "pending",
+    limit: OPERATOR_PENDING_LIST_LIMIT
+  };
+  await call("gpm_operator_list_pending", "control_gpm_operator_list", { request });
 });
 
 byId("approve_operator_btn").addEventListener("click", async () => {

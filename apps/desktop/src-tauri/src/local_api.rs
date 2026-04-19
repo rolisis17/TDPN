@@ -559,6 +559,15 @@ pub struct GPMOperatorStatusRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct GPMOperatorListRequest {
+    pub session_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorApproveRequest {
     pub wallet_address: String,
     pub approved: bool,

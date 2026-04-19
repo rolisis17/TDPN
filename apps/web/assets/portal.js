@@ -20,6 +20,7 @@ const onboardingStepClientEl = document.getElementById("onboarding_step_client")
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
+const OPERATOR_PENDING_LIST_LIMIT = 25;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const PERSISTED_FIELD_IDS = [
   "api_base",
@@ -127,6 +128,106 @@ function normalizeOperatorApplicationStatus(value) {
 
 function parseOperatorApplicationStatus(payload) {
   return normalizeOperatorApplicationStatus(payload?.application?.status);
+}
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function nonEmptyString(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function numberOrUndefined(value) {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return undefined;
+}
+
+function extractOperatorListEntries(payload) {
+  const containers = [payload, payload?.data, payload?.result, payload?.queue, payload?.list];
+  for (const container of containers) {
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+    for (const key of ["operators", "items", "results", "entries", "applications", "queue"]) {
+      if (Array.isArray(container[key])) {
+        return container[key];
+      }
+    }
+  }
+  return [];
+}
+
+function formatOperatorListItemLabel(entry, index) {
+  if (typeof entry === "string") {
+    return entry.trim() || `item-${index + 1}`;
+  }
+  if (!entry || typeof entry !== "object") {
+    return `item-${index + 1}`;
+  }
+  return (
+    nonEmptyString(entry.chain_operator_id) ||
+    nonEmptyString(entry.operator_id) ||
+    nonEmptyString(entry.wallet_address) ||
+    nonEmptyString(entry.server_label) ||
+    nonEmptyString(entry.id) ||
+    `item-${index + 1}`
+  );
+}
+
+function summarizeOperatorList(payload, fallbackStatus = "pending", fallbackLimit = OPERATOR_PENDING_LIST_LIMIT) {
+  const entries = extractOperatorListEntries(payload);
+  const status =
+    nonEmptyString(
+      firstDefined(
+        payload?.status,
+        payload?.filter?.status,
+        payload?.request?.status,
+        payload?.meta?.status
+      )
+    ) || fallbackStatus;
+  const limit =
+    numberOrUndefined(
+      firstDefined(payload?.limit, payload?.request?.limit, payload?.meta?.limit, payload?.pagination?.limit)
+    ) ?? fallbackLimit;
+  const total =
+    numberOrUndefined(
+      firstDefined(
+        payload?.total,
+        payload?.count,
+        payload?.total_count,
+        payload?.pending_total,
+        payload?.meta?.total,
+        payload?.pagination?.total
+      )
+    ) ?? entries.length;
+  const sample = entries.slice(0, 3).map(formatOperatorListItemLabel);
+  const detailParts = [`status=${status}`, `returned=${entries.length}`, `limit=${limit}`, `total=${total}`];
+  if (sample.length > 0) {
+    detailParts.push(`sample=${sample.join(", ")}`);
+  }
+  return {
+    detail: `Operator queue: ${detailParts.join(" | ")}`,
+    output: {
+      status,
+      returned: entries.length,
+      limit,
+      total,
+      sample
+    }
+  };
 }
 
 function parseBooleanLike(value) {
@@ -620,16 +721,22 @@ async function refreshServerReadinessStatus(options = {}) {
   }
 }
 
-async function run(label, fn) {
+async function run(label, fn, options = {}) {
+  const outputMapper = typeof options.outputMapper === "function" ? options.outputMapper : null;
+  const successDetail = typeof options.successDetail === "function" ? options.successDetail : null;
   setBusy(true);
   setStatus("warn", `${label} in progress`, "Please wait while the portal completes the request.");
   try {
     const result = await fn();
-    print(label, result);
-    setStatus("good", `${label} completed`, "The request finished successfully.");
+    const outputPayload = outputMapper ? outputMapper(result) : result;
+    print(label, outputPayload);
+    const detail = successDetail ? successDetail(result) : "The request finished successfully.";
+    setStatus("good", `${label} completed`, detail);
+    return result;
   } catch (err) {
     print(`${label} (error)`, String(err && err.message ? err.message : err));
     setStatus("bad", `${label} failed`, String(err && err.message ? err.message : err));
+    return undefined;
   } finally {
     setBusy(false);
   }
@@ -762,6 +869,27 @@ byId("operator_status_btn").addEventListener("click", () =>
     await refreshServerReadinessStatus({ quiet: true });
     return result;
   })
+);
+
+byId("operator_list_pending_btn").addEventListener("click", () =>
+  run(
+    "operator_list_pending",
+    async () => {
+      const sessionToken = byId("session_token").value.trim();
+      if (!sessionToken) {
+        throw new Error("session_token is required to list pending operators. Sign in first.");
+      }
+      return post("/v1/gpm/onboarding/operator/list", {
+        session_token: sessionToken,
+        status: "pending",
+        limit: OPERATOR_PENDING_LIST_LIMIT
+      });
+    },
+    {
+      outputMapper: (result) => summarizeOperatorList(result).output,
+      successDetail: (result) => summarizeOperatorList(result).detail
+    }
+  )
 );
 
 byId("approve_operator_btn").addEventListener("click", () =>
