@@ -230,11 +230,6 @@ if [[ ! -f "$DESKTOP_DIR/package.json" ]]; then
   exit 1
 fi
 
-require_tool node "install Node.js LTS"
-require_tool npm "install Node.js LTS so npm is on PATH"
-require_tool rustc "install Rust with rustup"
-require_tool cargo "install Rust with rustup"
-
 validate_update_feed_url "$update_feed_url"
 validate_signing_placeholders "$signing_identity" "$signing_cert_path" "$signing_cert_password"
 
@@ -284,10 +279,10 @@ if [[ "$skip_build" == "1" ]]; then
   exit 0
 fi
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "npm was not found in PATH. Install Node.js/npm first." >&2
-  exit 1
-fi
+require_tool node "install Node.js LTS"
+require_tool npm "install Node.js LTS so npm is on PATH"
+require_tool rustc "install Rust with rustup"
+require_tool cargo "install Rust with rustup"
 
 pushd "$DESKTOP_DIR" >/dev/null
 npm_args=("run" "tauri" "--" "build")

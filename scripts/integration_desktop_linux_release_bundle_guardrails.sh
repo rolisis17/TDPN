@@ -20,6 +20,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
+CONSTRAINED_PATH_DIR="$TMP_DIR/constrained-path-bin"
+mkdir -p "$CONSTRAINED_PATH_DIR"
+
+link_test_tool() {
+  local tool_name="$1"
+  local tool_path
+  tool_path="$(command -v "$tool_name" || true)"
+  if [[ -z "$tool_path" ]]; then
+    echo "desktop linux release bundle guardrails failed: missing required test tool: $tool_name"
+    exit 1
+  fi
+  ln -sf "$tool_path" "$CONSTRAINED_PATH_DIR/$tool_name"
+}
+
+for tool_name in bash grep dirname tr; do
+  link_test_tool "$tool_name"
+done
+
 run_expect_pass() {
   local name="$1"
   shift
@@ -116,6 +134,13 @@ run_expect_pass \
     --skip-build
 
 SCRIPT_UNDER_TEST_Q="$(printf '%q' "$SCRIPT_UNDER_TEST")"
+TMP_DIR_Q="$(printf '%q' "$TMP_DIR")"
+CONSTRAINED_PATH_DIR_Q="$(printf '%q' "$CONSTRAINED_PATH_DIR")"
+
+echo "[desktop-linux-release-bundle-guardrails] skip-build passes with constrained PATH and still validates scaffold inputs"
+run_expect_pass \
+  "skip_build_constrained_path_pass" \
+  bash -lc "set -euo pipefail; constrained_path=$CONSTRAINED_PATH_DIR_Q; fail_log=$TMP_DIR_Q/skip_build_constrained_validation_fail.log; pass_log=$TMP_DIR_Q/skip_build_constrained_validation_pass.log; PATH=\"\$constrained_path\"; if command -v node >/dev/null 2>&1 || command -v npm >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1; then echo 'expected constrained PATH to omit node/npm/rustc/cargo' >&2; exit 1; fi; if $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'ftp://updates.example.invalid/tdpn/beta.json' --skip-build >\"\$fail_log\" 2>&1; then echo 'expected invalid update feed URL to fail under --skip-build' >&2; exit 1; fi; grep -F -- 'allowed schemes: http, https' \"\$fail_log\" >/dev/null; $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'https://updates.example.invalid/tdpn/beta.json' --skip-build >\"\$pass_log\" 2>&1; grep -F -- '[desktop-release-bundle] mode=scaffold-non-production' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] build skipped by --skip-build' \"\$pass_log\" >/dev/null"
 
 echo "[desktop-linux-release-bundle-guardrails] scoped environment restore is preserved in-process"
 run_expect_pass \
