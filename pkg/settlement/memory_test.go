@@ -1662,6 +1662,48 @@ func TestMemoryServiceAuthorizePaymentRequiresReservationID(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceAuthorizePaymentRequiresSponsorAndSubject(t *testing.T) {
+	s := NewMemoryService()
+	tests := []struct {
+		name    string
+		proof   PaymentProof
+		wantErr string
+	}{
+		{
+			name: "missing sponsor_id",
+			proof: PaymentProof{
+				ReservationID: "sres-binding-missing-sponsor",
+				SponsorID:     "   ",
+				SubjectID:     "client-1",
+				SessionID:     "sess-1",
+			},
+			wantErr: "authorize payment requires sponsor_id",
+		},
+		{
+			name: "missing subject_id",
+			proof: PaymentProof{
+				ReservationID: "sres-binding-missing-subject",
+				SponsorID:     "sponsor-1",
+				SubjectID:     " ",
+				SessionID:     "sess-1",
+			},
+			wantErr: "authorize payment requires subject_id",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.AuthorizePayment(context.Background(), tc.proof)
+			if err == nil {
+				t.Fatalf("expected missing binding field to fail")
+			}
+			if err.Error() != tc.wantErr {
+				t.Fatalf("unexpected error for missing binding field: got %v want %s", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestMemoryServiceAuthorizePaymentReservationNotFound(t *testing.T) {
 	s := NewMemoryService()
 	_, err := s.AuthorizePayment(context.Background(), PaymentProof{
@@ -1727,6 +1769,16 @@ func TestMemoryServiceAuthorizePaymentRejectsProofFieldMismatches(t *testing.T) 
 			},
 			wantErr: "reservation session mismatch",
 		},
+		{
+			name: "missing session when reservation requires it",
+			proof: PaymentProof{
+				ReservationID: "sres-mismatch-1",
+				SponsorID:     "sponsor-good-1",
+				SubjectID:     "client-good-1",
+				SessionID:     "   ",
+			},
+			wantErr: "authorize payment requires session_id",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1739,6 +1791,33 @@ func TestMemoryServiceAuthorizePaymentRejectsProofFieldMismatches(t *testing.T) 
 				t.Fatalf("unexpected authorize mismatch error: got %v want %s", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRejectsUnexpectedSessionBinding(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-empty-session-1",
+		SponsorID:     "sponsor-empty-session-1",
+		SubjectID:     "client-empty-session-1",
+		AmountMicros:  300,
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: "sres-empty-session-1",
+		SponsorID:     "sponsor-empty-session-1",
+		SubjectID:     "client-empty-session-1",
+		SessionID:     "sess-should-not-be-set",
+	})
+	if err == nil {
+		t.Fatalf("expected session mismatch when reservation has no session")
+	}
+	if err.Error() != "reservation session mismatch" {
+		t.Fatalf("unexpected error for unexpected session binding: %v", err)
 	}
 }
 
@@ -1808,7 +1887,7 @@ func TestMemoryServiceAuthorizePaymentRejectsConsumedReservationWithoutPriorAuth
 	}
 }
 
-func TestMemoryServiceAuthorizePaymentDuplicateProofReplayPreservesIdempotency(t *testing.T) {
+func TestMemoryServiceAuthorizePaymentDuplicateProofReplayRejectsMismatchedProof(t *testing.T) {
 	s := NewMemoryService()
 	ctx := context.Background()
 	_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
@@ -1822,7 +1901,7 @@ func TestMemoryServiceAuthorizePaymentDuplicateProofReplayPreservesIdempotency(t
 		t.Fatalf("ReserveSponsorCredits: %v", err)
 	}
 
-	authA, err := s.AuthorizePayment(ctx, PaymentProof{
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
 		ReservationID: "sres-replay-1",
 		SponsorID:     "sponsor-replay-1",
 		SubjectID:     "client-replay-1",
@@ -1832,20 +1911,17 @@ func TestMemoryServiceAuthorizePaymentDuplicateProofReplayPreservesIdempotency(t
 		t.Fatalf("AuthorizePayment first: %v", err)
 	}
 
-	authB, err := s.AuthorizePayment(ctx, PaymentProof{
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
 		ReservationID: "sres-replay-1",
 		SponsorID:     "sponsor-other",
 		SubjectID:     "client-other",
 		SessionID:     "sess-other",
 	})
-	if err != nil {
-		t.Fatalf("AuthorizePayment duplicate replay: %v", err)
+	if err == nil {
+		t.Fatalf("expected mismatched duplicate proof replay to fail")
 	}
-	if !authB.IdempotentReplay {
-		t.Fatalf("expected idempotent replay marker on duplicate proof")
-	}
-	if authA.ReservationID != authB.ReservationID || authA.SponsorID != authB.SponsorID || authA.SubjectID != authB.SubjectID || authA.SessionID != authB.SessionID {
-		t.Fatalf("expected replay authorization to return original authorization identity")
+	if err.Error() != "reservation sponsor mismatch" {
+		t.Fatalf("unexpected error for mismatched duplicate replay: %v", err)
 	}
 }
 

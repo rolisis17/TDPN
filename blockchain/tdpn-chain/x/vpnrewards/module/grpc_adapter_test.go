@@ -33,8 +33,8 @@ func TestGRPCMsgAdapterRecordFlow(t *testing.T) {
 	if accrualResp.GetAccrual().GetAccrualId() != "acc-grpc-1" {
 		t.Fatalf("unexpected accrual id: %q", accrualResp.GetAccrual().GetAccrualId())
 	}
-	if accrualResp.GetAccrual().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
-		t.Fatalf("expected submitted accrual state, got %v", accrualResp.GetAccrual().GetOperationState())
+	if accrualResp.GetAccrual().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING {
+		t.Fatalf("expected default pending accrual state, got %v", accrualResp.GetAccrual().GetOperationState())
 	}
 
 	distributionResp, err := adapter.RecordDistribution(context.Background(), &pb.MsgRecordDistributionRequest{

@@ -18,6 +18,7 @@ Usage:
     [--pause-sec N] \
     [--fault-every N] \
     [--fault-command CMD] \
+    [--allow-unsafe-fault-command [0|1]] \
     [--continue-on-fail [0|1]] \
     [--max-consecutive-failures N] \
     [--max-round-duration-sec N] \
@@ -191,6 +192,7 @@ rounds="${THREE_MACHINE_PROD_WG_SOAK_ROUNDS:-10}"
 pause_sec="${THREE_MACHINE_PROD_WG_SOAK_PAUSE_SEC:-8}"
 fault_every="${THREE_MACHINE_PROD_WG_SOAK_FAULT_EVERY:-0}"
 fault_command="${THREE_MACHINE_PROD_WG_SOAK_FAULT_COMMAND:-}"
+allow_unsafe_fault_command="${THREE_MACHINE_PROD_WG_SOAK_ALLOW_UNSAFE_FAULT_COMMAND:-0}"
 continue_on_fail="${THREE_MACHINE_PROD_WG_SOAK_CONTINUE_ON_FAIL:-0}"
 max_consecutive_failures="${THREE_MACHINE_PROD_WG_SOAK_MAX_CONSECUTIVE_FAILURES:-2}"
 max_round_duration_sec="${THREE_MACHINE_PROD_WG_SOAK_MAX_ROUND_DURATION_SEC:-0}"
@@ -224,6 +226,15 @@ while [[ $# -gt 0 ]]; do
     --fault-command)
       fault_command="${2:-}"
       shift 2
+      ;;
+    --allow-unsafe-fault-command)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        allow_unsafe_fault_command="${2:-}"
+        shift 2
+      else
+        allow_unsafe_fault_command="1"
+        shift
+      fi
       ;;
     --continue-on-fail)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -338,6 +349,15 @@ if [[ "$strict_ingress_rehearsal" != "0" && "$strict_ingress_rehearsal" != "1" ]
 fi
 if ((fault_every > 0)) && [[ -z "$(trim "$fault_command")" ]]; then
   echo "--fault-command is required when --fault-every > 0"
+  exit 2
+fi
+if [[ "$allow_unsafe_fault_command" != "0" && "$allow_unsafe_fault_command" != "1" ]]; then
+  echo "--allow-unsafe-fault-command must be 0 or 1"
+  exit 2
+fi
+if ((fault_every > 0)) && [[ "$allow_unsafe_fault_command" != "1" ]]; then
+  echo "--fault-command uses shell execution and is blocked by default"
+  echo "set --allow-unsafe-fault-command 1 (or THREE_MACHINE_PROD_WG_SOAK_ALLOW_UNSAFE_FAULT_COMMAND=1) to opt in"
   exit 2
 fi
 

@@ -95,11 +95,63 @@ Optional scaffold signing placeholders:
 - `-SigningCertPath`
 - `-SigningCertPassword`
 
+Scaffold guardrails now enforced by script:
+- `-UpdateFeedUrl` must be an absolute `http/https` URL.
+- non-local update feeds (anything except `localhost`/loopback) must use `https`.
+- `-SigningCertPassword` requires `-SigningCertPath`.
+- when `-SigningCertPath` is provided, the certificate file must exist.
+
 Pass extra Tauri build arguments after `--`:
 
 ```powershell
 ./scripts/windows/desktop_release_bundle.ps1 -Channel canary -- --bundles nsis
 ```
+
+Validate desktop scaffold + release guardrails from WSL:
+
+```bash
+bash ./scripts/integration_desktop_scaffold_contract.sh
+bash ./scripts/integration_desktop_release_bundle_guardrails.sh
+```
+
+Desktop local API hardening reminder:
+- `TDPN_LOCAL_API_ALLOW_REMOTE=1` with a non-loopback `TDPN_LOCAL_API_BASE_URL` now requires:
+  - `TDPN_LOCAL_API_AUTH_BEARER` to be set, and
+  - `https` in `TDPN_LOCAL_API_BASE_URL`.
+- Enabling desktop mutation controls (`TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` or `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) also requires `TDPN_LOCAL_API_AUTH_BEARER`, including loopback-only sessions.
+- `TDPN_LOCAL_API_AUTH_BEARER` must use token68 characters only (`A-Za-z0-9-._~+/=`), no whitespace/control chars.
+- Daemon local API (`--local-api`) rejects non-loopback HTTP binds unless `LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=1` is explicitly set (lab/dev only).
+
+Windows-native local API launcher (no WSL shim):
+
+```powershell
+./scripts/windows/local_api_session.ps1
+```
+
+Notes:
+- This prefers Git for Windows `bash.exe` and rejects `WindowsApps\bash.exe` (WSL shim).
+- Use `-CommandRunner` to pin a specific runner path.
+
+Windows-native desktop bootstrap (recommended for client machines):
+
+```powershell
+./scripts/windows/desktop_native_bootstrap.ps1 -Mode bootstrap -InstallMissing
+./scripts/windows/desktop_native_bootstrap.ps1 -Mode run-full
+```
+
+From `cmd.exe`:
+
+```cmd
+scripts\windows\desktop_native_bootstrap.cmd -Mode bootstrap -InstallMissing
+scripts\windows\desktop_native_bootstrap.cmd -Mode run-full
+```
+
+Desktop bootstrap notes:
+- uses process-scope execution policy bypass (no permanent policy change)
+- refreshes PATH for current session
+- can install missing Go/Node/Rust/Git Bash dependencies with `winget`
+- uses `npm.cmd` to avoid `npm.ps1` execution policy failures
+- modes: `check`, `bootstrap`, `run-api`, `run-desktop`, `run-full`
 
 ## 5) 3-machine beta test
 
@@ -109,14 +161,16 @@ From WSL on machine C, you can run the automated validator:
 
 ```bash
 ./scripts/easy_node.sh three-machine-validate \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
   --min-operators 2
 ```
+
+If you are still testing with plain HTTP, keep the validator and targets on a private network only; these examples are not safe to paste onto an exposed host as-is.
 
 Important for WSL/docker client runs:
 - do not use `127.0.0.1` / `localhost` for remote machines in `client-test`

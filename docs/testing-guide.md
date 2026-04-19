@@ -453,11 +453,11 @@ This is the simplest full path test.
 
 ```bash
 ./scripts/integration_3machine_beta_validate.sh \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
   --min-operators 2 \
   --path-profile balanced
@@ -656,10 +656,10 @@ Real client VPN smoke test (machine C / tester host, Linux root):
 
 ```bash
 sudo ./scripts/easy_node.sh client-vpn-preflight \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081
 
 sudo ./scripts/easy_node.sh client-vpn-up \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --subject <INVITE_KEY> \
   --path-profile balanced
 
@@ -682,7 +682,7 @@ No-sudo local automation (explicit defer mode, default strict behavior unchanged
   --print-summary-json 1
 
 ./scripts/easy_node.sh client-vpn-smoke \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --subject <INVITE_KEY> \
   --runtime-fix 1 \
   --defer-no-root 1 \
@@ -741,7 +741,7 @@ Server federation readiness checks (machine A/B host):
 
 # optional: gate server startup directly
 ./scripts/easy_node.sh server-up \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --federation-wait 1 \
   --federation-require-configured-healthy 1 \
   --federation-max-cooling-retry-sec 120 \
@@ -779,18 +779,18 @@ Notes:
 
 ```bash
 ./scripts/integration_3machine_beta_soak.sh \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --rounds 12 \
   --pause-sec 5 \
   --path-profile balanced
 
 # one-bootstrap mode (auto-discovery)
 ./scripts/integration_machine_c_client_check.sh \
-  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --bootstrap-directory https://KNOWN_SERVER_IP:8081 \
   --discovery-wait-sec 20 \
   --path-profile balanced
 ```
@@ -1067,15 +1067,15 @@ Machine-role quick checks (run on each host before full 3-machine run):
 ./scripts/easy_node.sh machine-a-test --public-host A_PUBLIC_IP_OR_DNS
 
 # machine B
-./scripts/easy_node.sh machine-b-test --peer-directory-a http://A_PUBLIC_IP_OR_DNS:8081 --public-host B_PUBLIC_IP_OR_DNS
+./scripts/easy_node.sh machine-b-test --peer-directory-a https://A_PUBLIC_IP_OR_DNS:8081 --public-host B_PUBLIC_IP_OR_DNS
 
 # machine C
 ./scripts/easy_node.sh machine-c-test \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084
 ```
 
 ## 5) How to test specific features

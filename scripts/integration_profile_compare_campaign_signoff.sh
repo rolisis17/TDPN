@@ -274,6 +274,25 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_over
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] missing --subject value fails clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_missing_subject_value" \
+  --refresh-campaign 1 \
+  --subject >/tmp/integration_profile_compare_campaign_signoff_missing_subject_value.log 2>&1
+missing_subject_value_rc=$?
+set -e
+if [[ "$missing_subject_value_rc" -ne 2 ]]; then
+  echo "expected rc=2 when --subject is provided without a value"
+  cat /tmp/integration_profile_compare_campaign_signoff_missing_subject_value.log
+  exit 1
+fi
+if ! rg -q '^--subject requires a value$' /tmp/integration_profile_compare_campaign_signoff_missing_subject_value.log; then
+  echo "expected missing --subject value error message not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_missing_subject_value.log
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] --key alias forwarding works"
 : >"$SIGNOFF_CAPTURE"
 KEY_ALIAS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_key_alias_summary.json"
@@ -1669,6 +1688,27 @@ fi
 if ! rg -q 'conflicting subject values: --subject and --campaign-subject must match when both are provided' /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_subject.log; then
   echo "expected easy_node subject conflict message missing"
   cat /tmp/integration_profile_compare_campaign_signoff_easy_node_conflict_subject.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] easy_node missing --subject value fails clearly"
+set +e
+FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_FORWARD" \
+./scripts/easy_node.sh profile-compare-campaign-signoff \
+  --reports-dir /tmp/reports-missing-subject-value \
+  --refresh-campaign 1 \
+  --subject >/tmp/integration_profile_compare_campaign_signoff_easy_node_missing_subject_value.log 2>&1
+easy_node_missing_subject_value_rc=$?
+set -e
+if [[ "$easy_node_missing_subject_value_rc" -ne 2 ]]; then
+  echo "expected rc=2 when easy_node --subject is provided without a value"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_missing_subject_value.log
+  exit 1
+fi
+if ! rg -q '^--subject requires a value$' /tmp/integration_profile_compare_campaign_signoff_easy_node_missing_subject_value.log; then
+  echo "expected easy_node missing --subject value error message not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_missing_subject_value.log
   exit 1
 fi
 

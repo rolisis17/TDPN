@@ -19,6 +19,7 @@ func TestMsgServerSubmitSlashEvidenceHappyPath(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-1",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-1"),
 		},
 	}
@@ -48,6 +49,7 @@ func TestMsgServerSubmitSlashEvidenceIdempotentReplay(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-2",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-2"),
 		},
 	}
@@ -77,6 +79,7 @@ func TestMsgServerSubmitSlashEvidenceConflictPropagation(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-3",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-3"),
 		},
 	}
@@ -111,6 +114,7 @@ func TestMsgServerSubmitSlashEvidenceInvalidPropagation(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-invalid"),
 		},
 	})
@@ -132,6 +136,7 @@ func TestMsgServerSubmitSlashEvidenceInvalidProofFormatPropagation(t *testing.T)
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-invalid-proof",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  "legacy-proof",
 		},
 	})
@@ -171,6 +176,7 @@ func TestMsgServerSubmitSlashEvidenceInvalidProofFormatsPropagation(t *testing.T
 				Evidence: types.SlashEvidence{
 					EvidenceID: tc.evidence,
 					Kind:       types.EvidenceKindObjective,
+					ViolationType: "double-sign",
 					ProofHash:  tc.proofHash,
 				},
 			})
@@ -200,6 +206,7 @@ func TestMsgServerSubmitSlashEvidenceReplayThenConflictOnProofHashChange(t *test
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-replay-conflict",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  "obj://bucket/replay-conflict",
 		},
 	}
@@ -246,6 +253,7 @@ func TestMsgServerApplyPenaltyHappyPath(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-4",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-4"),
 		},
 	}); err != nil {
@@ -283,6 +291,7 @@ func TestMsgServerApplyPenaltyIdempotentReplay(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-5",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-5"),
 		},
 	}); err != nil {
@@ -322,6 +331,7 @@ func TestMsgServerApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) 
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-5b",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-5b"),
 		},
 	}); err != nil {
@@ -374,6 +384,7 @@ func TestMsgServerApplyPenaltyConflictPropagation(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-6",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-6"),
 		},
 	}); err != nil {
@@ -460,6 +471,7 @@ func TestMsgServerNilKeeper(t *testing.T) {
 		Evidence: types.SlashEvidence{
 			EvidenceID: "evidence-msg-nil",
 			Kind:       types.EvidenceKindObjective,
+			ViolationType: "double-sign",
 			ProofHash:  testSHAProof("proof-msg-nil"),
 		},
 	})

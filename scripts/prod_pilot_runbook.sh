@@ -164,6 +164,8 @@ run_report_print="${PROD_PILOT_RUN_REPORT_PRINT:-1}"
 run_report_json_override="${PROD_PILOT_RUN_REPORT_JSON:-}"
 pre_real_host_readiness_default="${PROD_PILOT_PRE_REAL_HOST_READINESS:-1}"
 pre_real_host_readiness_summary_json_override="${PROD_PILOT_PRE_REAL_HOST_READINESS_SUMMARY_JSON:-}"
+pre_real_host_readiness_defer_no_root_mode="${PROD_PILOT_PRE_REAL_HOST_READINESS_DEFER_NO_ROOT:-auto}"
+pre_real_host_readiness_effective_uid="${PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE:-$EUID}"
 signoff_check="${PROD_PILOT_SIGNOFF_CHECK:-1}"
 signoff_require_full_sequence="${PROD_PILOT_SIGNOFF_REQUIRE_FULL_SEQUENCE:-1}"
 signoff_require_wg_validate_ok="${PROD_PILOT_SIGNOFF_REQUIRE_WG_VALIDATE_OK:-1}"
@@ -289,6 +291,15 @@ int_or_die "PROD_PILOT_SLO_DASHBOARD_CRITICAL_NO_GO_COUNT" "$dashboard_critical_
 int_or_die "PROD_PILOT_SLO_DASHBOARD_WARN_EVAL_ERRORS" "$dashboard_warn_eval_errors"
 int_or_die "PROD_PILOT_SLO_DASHBOARD_CRITICAL_EVAL_ERRORS" "$dashboard_critical_eval_errors"
 
+if [[ "$pre_real_host_readiness_defer_no_root_mode" != "auto" && "$pre_real_host_readiness_defer_no_root_mode" != "0" && "$pre_real_host_readiness_defer_no_root_mode" != "1" ]]; then
+  echo "PROD_PILOT_PRE_REAL_HOST_READINESS_DEFER_NO_ROOT must be one of: auto, 0, 1"
+  exit 2
+fi
+if [[ ! "$pre_real_host_readiness_effective_uid" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE must be an integer >= 0"
+  exit 2
+fi
+
 if [[ "$wg_slo_profile" != "off" && "$wg_slo_profile" != "recommended" && "$wg_slo_profile" != "strict" ]]; then
   echo "PROD_PILOT_WG_SLO_PROFILE must be one of: off, recommended, strict"
   exit 2
@@ -322,6 +333,15 @@ else
 fi
 
 pre_real_host_readiness_log_path="$(dirname "$(abs_path "$pre_real_host_readiness_summary_json_path")")/prod_pilot_pre_real_host_readiness_${timestamp}.log"
+
+pre_real_host_readiness_defer_no_root="0"
+if [[ "$pre_real_host_readiness_defer_no_root_mode" == "auto" ]]; then
+  if [[ "$pre_real_host_readiness_effective_uid" -ne 0 ]]; then
+    pre_real_host_readiness_defer_no_root="1"
+  fi
+else
+  pre_real_host_readiness_defer_no_root="$pre_real_host_readiness_defer_no_root_mode"
+fi
 
 cmd=(
   "$EASY_NODE_SH" "three-machine-prod-bundle"
@@ -390,6 +410,7 @@ if [[ "$pre_real_host_readiness" == "1" ]]; then
   mkdir -p "$(dirname "$pre_real_host_readiness_log_path")" "$(dirname "$(abs_path "$pre_real_host_readiness_summary_json_path")")"
   pre_real_host_readiness_cmd=(
     "$EASY_NODE_SH" "pre-real-host-readiness"
+    "--defer-no-root" "$pre_real_host_readiness_defer_no_root"
     "--summary-json" "$pre_real_host_readiness_summary_json_path"
     "--print-summary-json" "1"
   )
@@ -397,13 +418,39 @@ if [[ "$pre_real_host_readiness" == "1" ]]; then
   echo "[prod-pilot-runbook] running pre-real-host readiness gate"
   echo "[prod-pilot-runbook] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json_path"
   echo "[prod-pilot-runbook] pre_real_host_readiness_log=$pre_real_host_readiness_log_path"
+  echo "[prod-pilot-runbook] pre_real_host_readiness_defer_no_root=$pre_real_host_readiness_defer_no_root mode=$pre_real_host_readiness_defer_no_root_mode effective_uid=$pre_real_host_readiness_effective_uid"
   set +e
   "${pre_real_host_readiness_cmd[@]}" 2>&1 | tee "$pre_real_host_readiness_log_path"
   pre_real_host_readiness_rc=${PIPESTATUS[0]}
   set -e
   if [[ "$pre_real_host_readiness_rc" -ne 0 ]]; then
-    echo "[prod-pilot-runbook] pre-real-host readiness blocked pilot runbook: rc=$pre_real_host_readiness_rc"
-    exit "$pre_real_host_readiness_rc"
+    pre_real_host_readiness_root_only_deferred="0"
+    if [[ -f "$pre_real_host_readiness_summary_json_path" ]] && jq -e . "$pre_real_host_readiness_summary_json_path" >/dev/null 2>&1; then
+      pre_real_host_readiness_root_only_deferred="$(
+        jq -r '
+          (.machine_c_smoke_gate.blockers // []) as $blockers
+          | (.wg_only_stack_selftest.status // "") as $wg_status
+          | (.stage // "") as $stage
+          | (((.wg_only_stack_selftest.notes // "") + "\n" + (.notes // "")) | test("requires root"; "i")) as $root_hint
+          | (
+              (($blockers | type) == "array")
+              and (($blockers | length) == 1)
+              and (($blockers[0] // "") == "wg_only_stack_selftest")
+              and ($wg_status == "skip")
+              and ($stage == "wg_only_stack_selftest")
+              and $root_hint
+            )
+          | if . then "1" else "0" end
+        ' "$pre_real_host_readiness_summary_json_path" 2>/dev/null || printf '0'
+      )"
+    fi
+    if [[ "$pre_real_host_readiness_root_only_deferred" == "1" ]]; then
+      echo "[prod-pilot-runbook] warning: pre-real-host readiness reported root-only deferred condition; continuing to bundle flow."
+      echo "[prod-pilot-runbook] warning: rerun pre-real-host readiness with sudo before final production signoff."
+    else
+      echo "[prod-pilot-runbook] pre-real-host readiness blocked pilot runbook: rc=$pre_real_host_readiness_rc"
+      exit "$pre_real_host_readiness_rc"
+    fi
   fi
 fi
 

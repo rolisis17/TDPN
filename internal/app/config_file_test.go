@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,124 @@ func TestApplyConfigFileGenericEnv(t *testing.T) {
 	}
 	if got := os.Getenv("FOO"); got != "bar" {
 		t.Fatalf("FOO=%q want bar", got)
+	}
+}
+
+func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "generic.env")
+	content := strings.Join([]string{
+		"FOO=bar",
+		"LOCAL_CONTROL_API_AUTH_TOKEN=secret-token",
+		"LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK=1",
+		"LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=1",
+		"LOCAL_CONTROL_API_SCRIPT=/tmp/evil.sh",
+		"LOCAL_CONTROL_API_RUNNER=/tmp/evil-runner",
+		"LOCAL_CONTROL_API_ADDR=0.0.0.0:9999",
+		"LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND=echo status",
+		"LOCAL_CONTROL_API_SERVICE_START_COMMAND=echo start",
+		"LOCAL_CONTROL_API_SERVICE_STOP_COMMAND=echo stop",
+		"LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND=echo restart",
+		"MTLS_ALLOW_PROXY_FROM_ENV=1",
+		"COSMOS_ADAPTER_ALLOW_PROXY_FROM_ENV=1",
+		"COSMOS_ADAPTER_ALLOW_DANGEROUS_PRIVATE_ENDPOINT=1",
+		"CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1",
+		"ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1",
+		"EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1",
+		"DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1",
+		"WG_ALLOW_UNTRUSTED_BINARY_PATH=1",
+		"CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1",
+		"CLIENT_REQUIRE_HTTPS_CONTROL_URL=0",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("FOO", "")
+	t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
+	t.Setenv("LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK", "")
+	t.Setenv("LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP", "")
+	t.Setenv("LOCAL_CONTROL_API_SCRIPT", "")
+	t.Setenv("LOCAL_CONTROL_API_RUNNER", "")
+	t.Setenv("LOCAL_CONTROL_API_ADDR", "")
+	t.Setenv("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND", "")
+	t.Setenv("LOCAL_CONTROL_API_SERVICE_START_COMMAND", "")
+	t.Setenv("LOCAL_CONTROL_API_SERVICE_STOP_COMMAND", "")
+	t.Setenv("LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND", "")
+	t.Setenv("MTLS_ALLOW_PROXY_FROM_ENV", "")
+	t.Setenv("COSMOS_ADAPTER_ALLOW_PROXY_FROM_ENV", "")
+	t.Setenv("COSMOS_ADAPTER_ALLOW_DANGEROUS_PRIVATE_ENDPOINT", "")
+	t.Setenv("CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS", "")
+	t.Setenv("ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS", "")
+	t.Setenv("EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS", "")
+	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS", "")
+	t.Setenv("WG_ALLOW_UNTRUSTED_BINARY_PATH", "")
+	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	t.Setenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL", "")
+	if err := applyConfigFile(path); err != nil {
+		t.Fatalf("applyConfigFile: %v", err)
+	}
+	if got := os.Getenv("FOO"); got != "bar" {
+		t.Fatalf("FOO=%q want bar", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_AUTH_TOKEN"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_AUTH_TOKEN=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_SCRIPT"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_SCRIPT=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_RUNNER"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_RUNNER=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_ADDR"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_ADDR=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_SERVICE_START_COMMAND"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_SERVICE_START_COMMAND=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_SERVICE_STOP_COMMAND"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_SERVICE_STOP_COMMAND=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND=%q want empty", got)
+	}
+	if got := os.Getenv("MTLS_ALLOW_PROXY_FROM_ENV"); got != "" {
+		t.Fatalf("MTLS_ALLOW_PROXY_FROM_ENV=%q want empty", got)
+	}
+	if got := os.Getenv("COSMOS_ADAPTER_ALLOW_PROXY_FROM_ENV"); got != "" {
+		t.Fatalf("COSMOS_ADAPTER_ALLOW_PROXY_FROM_ENV=%q want empty", got)
+	}
+	if got := os.Getenv("COSMOS_ADAPTER_ALLOW_DANGEROUS_PRIVATE_ENDPOINT"); got != "" {
+		t.Fatalf("COSMOS_ADAPTER_ALLOW_DANGEROUS_PRIVATE_ENDPOINT=%q want empty", got)
+	}
+	if got := os.Getenv("CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"); got != "" {
+		t.Fatalf("CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=%q want empty", got)
+	}
+	if got := os.Getenv("ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"); got != "" {
+		t.Fatalf("ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=%q want empty", got)
+	}
+	if got := os.Getenv("EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"); got != "" {
+		t.Fatalf("EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=%q want empty", got)
+	}
+	if got := os.Getenv("DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"); got != "" {
+		t.Fatalf("DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=%q want empty", got)
+	}
+	if got := os.Getenv("WG_ALLOW_UNTRUSTED_BINARY_PATH"); got != "" {
+		t.Fatalf("WG_ALLOW_UNTRUSTED_BINARY_PATH=%q want empty", got)
+	}
+	if got := os.Getenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP"); got != "" {
+		t.Fatalf("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=%q want empty", got)
+	}
+	if got := os.Getenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL"); got != "" {
+		t.Fatalf("CLIENT_REQUIRE_HTTPS_CONTROL_URL=%q want empty", got)
 	}
 }
 

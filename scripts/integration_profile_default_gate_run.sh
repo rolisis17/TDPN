@@ -193,6 +193,8 @@ if ! [[ "$success_counter" =~ ^[0-9]+$ ]] || (( success_counter < 3 )); then
   exit 1
 fi
 assert_file_contains "$SUCCESS_LOG" "wait-retry label=directory_a" "missing directory_a retry status line"
+assert_file_contains "$SUCCESS_LOG" "wait-attempt label=directory_a phase=probe-start" "missing directory_a probe-start progress marker"
+assert_file_contains "$SUCCESS_LOG" "wait-next label=directory_a" "missing directory_a next-attempt progress marker"
 assert_file_contains "$SUCCESS_LOG" "status=ok rc=0 summary_json=$SUCCESS_SUMMARY" "missing success summary status line"
 
 success_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
@@ -209,14 +211,16 @@ assert_contains "$success_line_sp" "--refresh-campaign 1" "missing default refre
 assert_contains "$success_line_sp" "--campaign-execution-mode docker" "missing docker execution mode default"
 assert_contains "$success_line_sp" "--campaign-start-local-stack 0" "missing start-local-stack default"
 assert_contains "$success_line_sp" "--fail-on-no-go 0" "missing optional fail-on-no-go default"
-assert_contains "$success_line_sp" "--campaign-timeout-sec 1200" "missing default campaign timeout forwarding"
+assert_contains "$success_line_sp" "--campaign-timeout-sec 2400" "missing default campaign timeout forwarding"
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
-assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=1200" "missing campaign-timeout start marker"
-assert_file_contains "$SUCCESS_LOG" "campaign-visibility expected_duration_sec=1200" "missing campaign visibility duration marker"
+assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=2400" "missing campaign-timeout start marker"
+assert_file_contains "$SUCCESS_LOG" "campaign-visibility expected_duration_sec=2400" "missing campaign visibility duration marker"
+assert_file_contains "$SUCCESS_LOG" "signoff-startup-hint campaign_timeout_sec=2400" "missing signoff startup hint marker"
 assert_file_contains "$SUCCESS_LOG" "progress_reports_dir=$ROOT_DIR/.easy-node-logs" "missing campaign visibility reports-dir marker"
 assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "missing campaign visibility summary-json marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
+assert_file_contains "$SUCCESS_LOG" "signoff-progress elapsed_sec=0 state=campaign_start_pending" "missing immediate signoff progress marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
 
 echo "[profile-default-gate-run] CLI heartbeat override supersedes env default"
@@ -466,6 +470,55 @@ if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   exit 1
 fi
 
+echo "[profile-default-gate-run] placeholder host fails fast before endpoint wait"
+: >"$SIGNOFF_CAPTURE"
+PLACEHOLDER_HOST_LOG="$TMP_DIR/profile_default_gate_run_placeholder_host.log"
+PLACEHOLDER_HOST_COUNTER="$TMP_DIR/curl_counter_placeholder_host.txt"
+rm -f "$PLACEHOLDER_HOST_COUNTER"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$PLACEHOLDER_HOST_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-placeholder-host" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "A_HOST" \
+  --host-b "dir-b.test" >"$PLACEHOLDER_HOST_LOG" 2>&1
+placeholder_host_rc=$?
+set -e
+if [[ "$placeholder_host_rc" -ne 2 ]]; then
+  echo "expected placeholder-host path rc=2, got rc=$placeholder_host_rc"
+  cat "$PLACEHOLDER_HOST_LOG"
+  exit 1
+fi
+assert_file_contains "$PLACEHOLDER_HOST_LOG" "failure_kind=unreachable_directory_endpoint label=directory_a reason=placeholder_directory_endpoint_input" "missing placeholder-host failure marker"
+assert_file_contains "$PLACEHOLDER_HOST_LOG" "directory_a endpoint appears to be placeholder text" "missing placeholder-host rejection text"
+assert_file_contains "$PLACEHOLDER_HOST_LOG" "profile-default-gate-live --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>" "missing placeholder-host operator command hint"
+if grep -F -- "wait-start label=directory_a" "$PLACEHOLDER_HOST_LOG" >/dev/null 2>&1; then
+  echo "placeholder-host path should fail before endpoint wait-start logging"
+  cat "$PLACEHOLDER_HOST_LOG"
+  exit 1
+fi
+if [[ -f "$PLACEHOLDER_HOST_COUNTER" ]]; then
+  placeholder_host_attempts="$(cat "$PLACEHOLDER_HOST_COUNTER" 2>/dev/null || echo "0")"
+  if ! [[ "$placeholder_host_attempts" =~ ^[0-9]+$ ]]; then
+    echo "placeholder-host curl counter must be numeric, got: $placeholder_host_attempts"
+    cat "$PLACEHOLDER_HOST_LOG"
+    exit 1
+  fi
+  if (( placeholder_host_attempts > 0 )); then
+    echo "placeholder-host path should fail before endpoint curl probes (attempts=$placeholder_host_attempts)"
+    cat "$PLACEHOLDER_HOST_LOG"
+    exit 1
+  fi
+fi
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "placeholder-host path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-default-gate-run] campaign-directory-urls rejects 3-value input"
 : >"$SIGNOFF_CAPTURE"
 THREE_URLS_LOG="$TMP_DIR/profile_default_gate_run_three_urls.log"
@@ -519,6 +572,8 @@ if [[ "$unreachable_rc" -eq 0 ]]; then
 fi
 assert_file_contains "$UNREACHABLE_LOG" "unreachable directory endpoint (directory_a)" "missing clear unreachable-endpoint error text"
 assert_file_contains "$UNREACHABLE_LOG" "failure_kind=unreachable_directory_endpoint label=directory_a" "missing stable unreachable-endpoint failure marker"
+assert_file_contains "$UNREACHABLE_LOG" "hint: verify endpoint path and host reachability" "missing unreachable-endpoint host/path hint"
+assert_file_contains "$UNREACHABLE_LOG" "hint: if startup is slow, increase --endpoint-wait-timeout-sec" "missing unreachable-endpoint timeout tuning hint"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   echo "unreachable-endpoint path should not invoke signoff"
   cat "$SIGNOFF_CAPTURE"

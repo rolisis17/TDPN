@@ -84,6 +84,90 @@ func TestProtoMsgServerAdapterFinalizeUsage(t *testing.T) {
 	}
 }
 
+func TestProtoMsgServerAdapterReserveCreditsIgnoresClientSuppliedStatus(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoMsgServerAdapter(&k)
+
+	resp, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
+		Reservation: &pb.CreditReservation{
+			ReservationId: "res-adapter-status-1",
+			SessionId:     "sess-status-1",
+			Amount:        100,
+			Status:        pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.GetReservation().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING {
+		t.Fatalf("expected server-owned pending status, got %v", resp.GetReservation().GetStatus())
+	}
+}
+
+func TestProtoMsgServerAdapterFinalizeUsageIgnoresClientSuppliedStatus(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoMsgServerAdapter(&k)
+
+	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
+		Reservation: &pb.CreditReservation{
+			ReservationId: "res-adapter-status-2",
+			SessionId:     "sess-status-2",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	resp, err := adapter.FinalizeUsage(context.Background(), &pb.MsgFinalizeUsageRequest{
+		Settlement: &pb.SettlementRecord{
+			SettlementId:   "set-adapter-status-2",
+			ReservationId:  "res-adapter-status-2",
+			SessionId:      "sess-status-2",
+			BilledAmount:   60,
+			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.GetSettlement().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
+		t.Fatalf("expected server-owned submitted operation state, got %v", resp.GetSettlement().GetOperationState())
+	}
+}
+
+func TestProtoMsgServerAdapterFinalizeUsageRejectsZeroBilledAmount(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewProtoMsgServerAdapter(&k)
+
+	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
+		Reservation: &pb.CreditReservation{
+			ReservationId: "res-adapter-zero-amount",
+			SessionId:     "sess-zero-amount",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	_, err := adapter.FinalizeUsage(context.Background(), &pb.MsgFinalizeUsageRequest{
+		Settlement: &pb.SettlementRecord{
+			SettlementId:  "set-adapter-zero-amount",
+			ReservationId: "res-adapter-zero-amount",
+			SessionId:     "sess-zero-amount",
+			BilledAmount:  0,
+		},
+	})
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement for zero billed amount, got %v", err)
+	}
+}
+
 func TestProtoGrpcAdaptersCanonicalizeReserveOnWriteAndMixedCaseQuery(t *testing.T) {
 	t.Parallel()
 

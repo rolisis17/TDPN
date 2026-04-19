@@ -15,6 +15,7 @@ Usage:
     [--endpoint-wait-timeout-sec N] \
     [--endpoint-wait-interval-sec N] \
     [--endpoint-connect-timeout-sec N] \
+    [--allow-insecure-probe [0|1]] \
     [--heartbeat-interval-sec N] \
     [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY] \
     [profile-compare-campaign-signoff args...]
@@ -27,6 +28,8 @@ Notes:
   - --host-a/--host-b are aliases for --directory-a/--directory-b.
   - --directory-a/--directory-b accept hostnames, host:port, or full http(s) URLs.
   - Host-style inputs are normalized to http://HOST:PORT (default port 8081).
+  - TLS verification is on by default for endpoint probes; pass
+    --allow-insecure-probe 1 only for local self-signed setups.
   - This helper requires invite-key subject mode; passthrough anon-cred flags
     (--campaign-anon-cred/--anon-cred) are rejected.
   - --key/--invite-key are aliases for --subject.
@@ -35,12 +38,14 @@ Notes:
   - Env-file fallback default: $ROOT_DIR/deploy/.env.easy.client
     (override via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE).
   - Invite subject placeholders (for example literal INVITE_KEY) fail fast.
+  - Host placeholders (for example literal A_HOST/B_HOST) fail fast with
+    a copy/paste-ready profile-default-gate-live example command.
   - This wrapper defaults signoff refresh mode to roadmap docker defaults:
     --refresh-campaign 1
     --campaign-execution-mode docker
     --campaign-start-local-stack 0
     --fail-on-no-go 0
-    --campaign-timeout-sec 1200
+    --campaign-timeout-sec 2400
 USAGE
 }
 
@@ -89,6 +94,164 @@ invite_subject_looks_placeholder_01() {
       ;;
   esac
   return 1
+}
+
+matches_placeholder_token_01() {
+  local value token normalized
+  value="$(trim "${1:-}")"
+  token="$(trim "${2:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
+
+  case "$normalized" in
+    "$token"|\$\{"$token"\}|\$"$token"|"<$token>"|"{{$token}}"|YOUR_"$token"|REPLACE_WITH_"$token")
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+directory_host_looks_placeholder_01() {
+  local value host
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+
+  host="$value"
+  host="${host#http://}"
+  host="${host#https://}"
+  host="${host%%/*}"
+  if [[ "$host" =~ ^\[[^]]+\]:[0-9]+$ ]]; then
+    host="${host%%]:*}]"
+  elif [[ "$host" =~ :[0-9]+$ ]]; then
+    host="${host%:*}"
+  fi
+
+  for token in A_HOST B_HOST HOST_A HOST_B DIRECTORY_A_HOST DIRECTORY_B_HOST DIR_A_HOST DIR_B_HOST; do
+    if matches_placeholder_token_01 "$host" "$token"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+normalize_host_for_compare_01() {
+  local host
+  host="$(trim "${1:-}")"
+  host="${host#[}"
+  host="${host%]}"
+  printf '%s' "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+}
+
+ip_literal_is_loopback_01() {
+  local normalized
+  normalized="$(normalize_host_for_compare_01 "${1:-}")"
+  case "$normalized" in
+    "::1"|::ffff:127.*)
+      return 0
+      ;;
+  esac
+  if [[ "$normalized" == 127.* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+host_resolves_to_loopback_only_01() {
+  local normalized host_ips ip resolved_any
+  normalized="$(normalize_host_for_compare_01 "${1:-}")"
+  case "$normalized" in
+    ""|localhost|ip6-localhost|::1|127.*)
+      return 0
+      ;;
+    ::|0.0.0.0)
+      return 0
+      ;;
+  esac
+  if ip_literal_is_loopback_01 "$normalized"; then
+    return 0
+  fi
+  if ! command -v getent >/dev/null 2>&1; then
+    return 1
+  fi
+  host_ips="$(getent ahosts "$normalized" 2>/dev/null | awk '{print $1}' | sort -u || true)"
+  if [[ -z "$host_ips" ]]; then
+    return 1
+  fi
+  resolved_any=0
+  while IFS= read -r ip; do
+    ip="$(trim "$ip")"
+    if [[ -z "$ip" ]]; then
+      continue
+    fi
+    resolved_any=1
+    if ! ip_literal_is_loopback_01 "$ip"; then
+      return 1
+    fi
+  done <<<"$host_ips"
+  if [[ "$resolved_any" -ne 1 ]]; then
+    return 1
+  fi
+  return 0
+}
+
+is_local_host_for_probe_01() {
+  host_resolves_to_loopback_only_01 "${1:-}"
+}
+
+extract_host_from_hostport_01() {
+  local host_port
+  host_port="$(trim "${1:-}")"
+  if [[ "$host_port" == \[* ]]; then
+    if [[ "$host_port" =~ ^\[([^]]+)\] ]]; then
+      printf '%s' "${BASH_REMATCH[1]}"
+      return
+    fi
+  fi
+  printf '%s' "${host_port%%:*}"
+}
+
+extract_url_host_01() {
+  local url="$1"
+  local remainder host_port
+  if [[ ! "$url" =~ ^https?:// ]]; then
+    printf '%s' ""
+    return
+  fi
+  remainder="${url#*://}"
+  remainder="${remainder%%/*}"
+  host_port="${remainder##*@}"
+  printf '%s' "$(extract_host_from_hostport_01 "$host_port")"
+}
+
+extract_url_scheme_01() {
+  local url="$1"
+  if [[ "$url" =~ ^([A-Za-z][A-Za-z0-9+.-]*):// ]]; then
+    printf '%s' "$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    return
+  fi
+  printf '%s' ""
+}
+
+endpoint_scheme_for_host_01() {
+  local host="$1"
+  if is_local_host_for_probe_01 "$host"; then
+    printf '%s' "http"
+  else
+    printf '%s' "https"
+  fi
+}
+
+fail_placeholder_directory_input_01() {
+  local label="$1"
+  local raw_input="$2"
+
+  echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=unreachable_directory_endpoint label=$label reason=placeholder_directory_endpoint_input raw_input=$raw_input"
+  echo "profile-default-gate-run failed: $label endpoint appears to be placeholder text ($raw_input)"
+  echo "replace placeholders with real hosts/URLs for --directory-a/--directory-b (or --host-a/--host-b)"
+  echo "example: ./scripts/easy_node.sh profile-default-gate-live --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>"
+  exit 2
 }
 
 read_env_key_from_file() {
@@ -231,7 +394,10 @@ normalize_directory_url() {
     host_port="${host_port}:$default_port"
   fi
 
-  printf 'http://%s' "$host_port"
+  local host scheme
+  host="$(extract_host_from_hostport_01 "$host_port")"
+  scheme="$(endpoint_scheme_for_host_01 "$host")"
+  printf '%s://%s' "$scheme" "$host_port"
 }
 
 split_csv_trim() {
@@ -262,24 +428,47 @@ wait_for_directory_endpoint() {
   local label="$1"
   local directory_url="$2"
   local probe_url start_epoch deadline_epoch now_epoch attempt rc remaining_sec
+  local elapsed_sec attempt_start_epoch probe_host probe_scheme
   local err_file err_text
 
   probe_url="$(probe_url_for_directory "$directory_url")"
+  probe_host="$(extract_url_host_01 "$probe_url")"
+  probe_scheme="$(extract_url_scheme_01 "$probe_url")"
+  if [[ "$probe_scheme" == "http" ]] && ! is_local_host_for_probe_01 "$probe_host"; then
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url error=remote_http_disallowed"
+    echo "profile-default-gate-run failed: remote HTTP probe endpoint requires HTTPS ($label) url=$probe_url"
+    return 2
+  fi
+  if [[ "$allow_insecure_probe" == "1" ]] && ! is_local_host_for_probe_01 "$probe_host"; then
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url error=insecure_probe_remote_disallowed"
+    echo "profile-default-gate-run failed: --allow-insecure-probe=1 is only allowed for local endpoints ($label) url=$probe_url"
+    return 2
+  fi
   start_epoch="$(date +%s)"
   deadline_epoch=$((start_epoch + endpoint_wait_timeout_sec))
   attempt=0
 
-  echo "[profile-default-gate-run] $(timestamp_utc) wait-start label=$label url=$probe_url timeout_sec=$endpoint_wait_timeout_sec interval_sec=$endpoint_wait_interval_sec"
+  echo "[profile-default-gate-run] $(timestamp_utc) wait-start label=$label url=$probe_url timeout_sec=$endpoint_wait_timeout_sec interval_sec=$endpoint_wait_interval_sec connect_timeout_sec=$endpoint_connect_timeout_sec"
 
   while true; do
     attempt=$((attempt + 1))
+    attempt_start_epoch="$(date +%s)"
+    elapsed_sec=$((attempt_start_epoch - start_epoch))
+    if (( endpoint_wait_timeout_sec == 0 )); then
+      remaining_sec="unbounded"
+    else
+      remaining_sec=$((deadline_epoch - attempt_start_epoch))
+      if (( remaining_sec < 0 )); then
+        remaining_sec=0
+      fi
+    fi
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-attempt label=$label phase=probe-start url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec"
     err_file="$(mktemp)"
-    if curl --silent --show-error --fail --insecure \
-      --noproxy '*' \
-      --connect-timeout "$endpoint_connect_timeout_sec" \
-      --max-time "$endpoint_connect_timeout_sec" \
-      --output /dev/null \
-      "$probe_url" > /dev/null 2>"$err_file"; then
+    local -a curl_opts=(--silent --show-error --fail --noproxy '*' --connect-timeout "$endpoint_connect_timeout_sec" --max-time "$endpoint_connect_timeout_sec" --output /dev/null)
+    if [[ "$allow_insecure_probe" == "1" ]]; then
+      curl_opts+=(--insecure)
+    fi
+    if curl "${curl_opts[@]}" "$probe_url" > /dev/null 2>"$err_file"; then
       rm -f "$err_file"
       echo "[profile-default-gate-run] $(timestamp_utc) wait-pass label=$label url=$probe_url attempt=$attempt"
       return 0
@@ -295,16 +484,22 @@ wait_for_directory_endpoint() {
     fi
 
     now_epoch="$(date +%s)"
+    elapsed_sec=$((now_epoch - start_epoch))
     if (( endpoint_wait_timeout_sec == 0 || now_epoch >= deadline_epoch )); then
-      echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url attempt=$attempt error=$err_text"
+      echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec error=$err_text"
       echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=unreachable_directory_endpoint label=$label url=$probe_url"
       echo "profile-default-gate-run failed: unreachable directory endpoint ($label) url=$probe_url timeout_sec=$endpoint_wait_timeout_sec"
       echo "last_error: $err_text"
+      echo "hint: verify endpoint path and host reachability for $probe_url"
+      echo "hint: confirm service is listening on expected host:port and serving /v1/pubkeys"
+      echo "hint: if startup is slow, increase --endpoint-wait-timeout-sec (current=$endpoint_wait_timeout_sec)"
+      echo "hint: if network handshakes are slow, increase --endpoint-connect-timeout-sec (current=$endpoint_connect_timeout_sec)"
       return 1
     fi
 
     remaining_sec=$((deadline_epoch - now_epoch))
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-retry label=$label url=$probe_url attempt=$attempt remaining_sec=$remaining_sec error=$err_text"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-retry label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec error=$err_text"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-next label=$label url=$probe_url next_attempt=$((attempt + 1)) sleep_sec=$endpoint_wait_interval_sec"
     sleep "$endpoint_wait_interval_sec"
   done
 }
@@ -317,8 +512,9 @@ directory_b_port="${PROFILE_DEFAULT_GATE_DIRECTORY_B_PORT:-8081}"
 endpoint_wait_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_TIMEOUT_SEC:-45}"
 endpoint_wait_interval_sec="${PROFILE_DEFAULT_GATE_WAIT_INTERVAL_SEC:-2}"
 endpoint_connect_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_CONNECT_TIMEOUT_SEC:-3}"
+allow_insecure_probe="${PROFILE_DEFAULT_GATE_RUN_ALLOW_INSECURE_PROBE:-0}"
 env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
-campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-1200}"
+campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-2400}"
 heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-60}"
 heartbeat_interval_sec_cli=""
 
@@ -365,6 +561,15 @@ while [[ $# -gt 0 ]]; do
       require_value_or_die "$1" "$#"
       endpoint_connect_timeout_sec="${2:-}"
       shift 2
+      ;;
+    --allow-insecure-probe)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_probe="${2:-}"
+        shift 2
+      else
+        allow_insecure_probe="1"
+        shift
+      fi
       ;;
     --heartbeat-interval-sec)
       require_value_or_die "$1" "$#"
@@ -443,6 +648,7 @@ int_arg_or_die "--directory-b-port" "$directory_b_port"
 int_arg_or_die "--endpoint-wait-timeout-sec" "$endpoint_wait_timeout_sec"
 int_arg_or_die "--endpoint-wait-interval-sec" "$endpoint_wait_interval_sec"
 int_arg_or_die "--endpoint-connect-timeout-sec" "$endpoint_connect_timeout_sec"
+bool_arg_or_die "--allow-insecure-probe" "$allow_insecure_probe"
 int_arg_or_die "PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC" "$campaign_timeout_default_sec"
 
 if (( directory_a_port < 1 || directory_a_port > 65535 )); then
@@ -593,6 +799,12 @@ if [[ -z "$directory_a_input" || -z "$directory_b_input" ]]; then
   echo "provide --directory-a and --directory-b (or --host-a/--host-b), or pass --campaign-directory-urls A,B"
   exit 2
 fi
+if directory_host_looks_placeholder_01 "$directory_a_input"; then
+  fail_placeholder_directory_input_01 "directory_a" "$directory_a_input"
+fi
+if directory_host_looks_placeholder_01 "$directory_b_input"; then
+  fail_placeholder_directory_input_01 "directory_b" "$directory_b_input"
+fi
 
 directory_a_url="$(normalize_directory_url "--directory-a/--host-a" "$directory_a_input" "$directory_a_port")"
 directory_b_url="$(normalize_directory_url "--directory-b/--host-b" "$directory_b_input" "$directory_b_port")"
@@ -699,16 +911,20 @@ else
 fi
 
 echo "[profile-default-gate-run] $(timestamp_utc) campaign-visibility expected_duration_sec=$campaign_timeout_effective progress_reports_dir=$reports_dir_effective progress_summary_json=$summary_json_effective"
+echo "[profile-default-gate-run] $(timestamp_utc) signoff-startup-hint campaign_timeout_sec=$campaign_timeout_effective summary_json=$summary_json_effective heartbeat_interval_sec=$heartbeat_interval_sec"
 echo "[profile-default-gate-run] $(timestamp_utc) signoff-heartbeat interval_sec=$heartbeat_interval_sec"
 echo "[profile-default-gate-run] $(timestamp_utc) invoking profile-compare-campaign-signoff"
 signoff_start_epoch="$(date +%s)"
+echo "[profile-default-gate-run] $(timestamp_utc) signoff-progress elapsed_sec=0 state=campaign_start_pending progress_reports_dir=$reports_dir_effective progress_summary_json=$summary_json_effective"
 heartbeat_pid=""
 (
+  heartbeat_seq=0
   while true; do
     sleep "$heartbeat_interval_sec"
+    heartbeat_seq=$((heartbeat_seq + 1))
     now_epoch="$(date +%s)"
     elapsed_sec=$((now_epoch - signoff_start_epoch))
-    echo "[profile-default-gate-run] $(timestamp_utc) signoff-progress elapsed_sec=$elapsed_sec progress_reports_dir=$reports_dir_effective progress_summary_json=$summary_json_effective"
+    echo "[profile-default-gate-run] $(timestamp_utc) signoff-progress heartbeat_seq=$heartbeat_seq elapsed_sec=$elapsed_sec state=campaign_running progress_reports_dir=$reports_dir_effective progress_summary_json=$summary_json_effective"
   done
 ) &
 heartbeat_pid="$!"
@@ -728,6 +944,8 @@ if [[ "$signoff_rc" -eq 0 ]]; then
   echo "[profile-default-gate-run] $(timestamp_utc) status=ok rc=0 summary_json=$summary_json_effective"
 else
   echo "[profile-default-gate-run] $(timestamp_utc) status=fail rc=$signoff_rc summary_json=$summary_json_effective"
+  echo "hint: inspect signoff summary/logs at $summary_json_effective"
+  echo "hint: if campaign start timed out, increase --campaign-timeout-sec (current=$campaign_timeout_effective)"
 fi
 
 exit "$signoff_rc"

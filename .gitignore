@@ -31,3 +31,6 @@ data/directory_peer_trusted_keys.txt
 *.p12
 *.pfx
 *.pk8
+
+# Local editor/runtime state (never commit)
+User/globalStorage/

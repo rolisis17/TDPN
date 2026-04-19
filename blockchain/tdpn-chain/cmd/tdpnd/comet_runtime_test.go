@@ -738,7 +738,8 @@ func TestRunTDPNDMixedCometGRPCAuthEnforcementAndHealth(t *testing.T) {
 	defer conn.Close()
 
 	healthClient := healthpb.NewHealthClient(conn)
-	healthResp, err := healthClient.Check(context.Background(), &healthpb.HealthCheckRequest{})
+	healthCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+authToken)
+	healthResp, err := healthClient.Check(healthCtx, &healthpb.HealthCheckRequest{})
 	if err != nil {
 		t.Fatalf("grpc health check failed: %v", err)
 	}

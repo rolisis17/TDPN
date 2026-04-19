@@ -42,6 +42,7 @@ Usage:
     [--campaign-start-local-stack auto|0|1] \
     [--campaign-timeout-sec N] \
     [--campaign-endpoint-preflight-timeout-sec N] \
+    [--allow-insecure-probe [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
     [--print-summary-json [0|1]]
@@ -70,6 +71,8 @@ Notes:
   - --campaign-timeout-sec defaults to 0 (disabled / preserve existing behavior).
   - --campaign-endpoint-preflight-timeout-sec defaults to 4s per remote endpoint;
     set to 0 to disable preflight and preserve legacy refresh behavior.
+  - TLS verification is on by default for endpoint preflight probes; pass
+    --allow-insecure-probe 1 only for local self-signed setups.
   - When refresh inputs point at remote/bootstrap endpoints, the signoff step
     prefers a docker-style refresh to avoid local root-only bootstrap failures.
   - Remote endpoint preflight fail-closes campaign stage before refresh command
@@ -193,7 +196,7 @@ quote_cmd() {
 
 redact_sensitive_cmd_line() {
   local line="$1"
-  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g')"
+  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
   printf '%s' "$line"
 }
 
@@ -248,15 +251,13 @@ extract_url_host() {
   printf '%s' "$host"
 }
 
-is_local_host() {
-  local host="$1"
+ip_literal_is_loopback() {
   local normalized
-  normalized="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  normalized="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
   normalized="${normalized#[}"
   normalized="${normalized%]}"
-
   case "$normalized" in
-    ""|localhost|ip6-localhost|::1|::|0.0.0.0)
+    "::1"|::ffff:127.*)
       return 0
       ;;
   esac
@@ -264,6 +265,47 @@ is_local_host() {
     return 0
   fi
   return 1
+}
+
+host_resolves_to_loopback_only() {
+  local normalized host_ips ip resolved_any
+  normalized="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  normalized="${normalized#[}"
+  normalized="${normalized%]}"
+  case "$normalized" in
+    ""|localhost|ip6-localhost|::1|127.*|::|0.0.0.0)
+      return 0
+      ;;
+  esac
+  if ip_literal_is_loopback "$normalized"; then
+    return 0
+  fi
+  if ! command -v getent >/dev/null 2>&1; then
+    return 1
+  fi
+  host_ips="$(getent ahosts "$normalized" 2>/dev/null | awk '{print $1}' | sort -u || true)"
+  if [[ -z "$host_ips" ]]; then
+    return 1
+  fi
+  resolved_any=0
+  while IFS= read -r ip; do
+    ip="$(printf '%s' "$ip" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "$ip" ]]; then
+      continue
+    fi
+    resolved_any=1
+    if ! ip_literal_is_loopback "$ip"; then
+      return 1
+    fi
+  done <<<"$host_ips"
+  if [[ "$resolved_any" -ne 1 ]]; then
+    return 1
+  fi
+  return 0
+}
+
+is_local_host() {
+  host_resolves_to_loopback_only "${1:-}"
 }
 
 run_campaign_endpoint_preflight() {
@@ -340,6 +382,21 @@ run_campaign_endpoint_preflight() {
     return 0
   fi
 
+  if [[ "$allow_insecure_probe" == "1" ]]; then
+    for endpoint in "${remote_records[@]}"; do
+      IFS=$'\t' read -r label endpoint_url host <<<"$endpoint"
+      failed_records+=("${label}"$'\t'"${endpoint_url}"$'\t'"${host}"$'\t'"--allow-insecure-probe=1 is only permitted for local loopback endpoints")
+    done
+    campaign_preflight_status="fail"
+    campaign_preflight_failed_count="${#failed_records[@]}"
+    campaign_preflight_failure_reason="--allow-insecure-probe=1 is not allowed for remote endpoints"
+    campaign_preflight_failed_endpoints_json="$(json_endpoint_failures_from_lines "${failed_records[@]}")"
+    printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight failed reason=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$campaign_preflight_failure_reason" >>"$log_path"
+    return 2
+  fi
+
   campaign_preflight_attempted="1"
 
   if ! command -v curl >/dev/null 2>&1; then
@@ -361,12 +418,11 @@ run_campaign_endpoint_preflight() {
       "$endpoint_url" \
       "$campaign_endpoint_preflight_timeout_sec" >>"$log_path"
     err_file="$(mktemp "$log_dir/profile_compare_campaign_signoff_${run_stamp}_preflight_err.XXXXXX")"
-    if curl --silent --show-error --insecure \
-      --noproxy '*' \
-      --connect-timeout "$campaign_endpoint_preflight_timeout_sec" \
-      --max-time "$campaign_endpoint_preflight_timeout_sec" \
-      --output /dev/null \
-      "$endpoint_url" > /dev/null 2>"$err_file"; then
+    local -a curl_opts=(--silent --show-error --fail --noproxy '*' --connect-timeout "$campaign_endpoint_preflight_timeout_sec" --max-time "$campaign_endpoint_preflight_timeout_sec" --output /dev/null)
+    if [[ "$allow_insecure_probe" == "1" ]]; then
+      curl_opts+=(--insecure)
+    fi
+    if curl "${curl_opts[@]}" "$endpoint_url" > /dev/null 2>"$err_file"; then
       printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight pass label=%s url=%s\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         "$label" \
@@ -495,6 +551,7 @@ print_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}"
 campaign_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_TIMEOUT_SEC:-0}"
 campaign_heartbeat_interval_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC:-15}"
 campaign_endpoint_preflight_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ENDPOINT_PREFLIGHT_TIMEOUT_SEC:-4}"
+allow_insecure_probe="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_INSECURE_PROBE:-0}"
 
 require_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_STATUS_PASS:-}"
 require_trend_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TREND_STATUS_PASS:-}"
@@ -535,6 +592,16 @@ set_subject_alias_or_die() {
   fi
   if [[ "$subject_alias" != "$alias_value" ]]; then
     echo "conflicting subject values: $subject_alias_flag and $alias_flag must match when both are provided"
+    exit 2
+  fi
+}
+
+require_flag_value_or_die() {
+  local flag="$1"
+  local value="${2:-}"
+
+  if [[ -z "$value" || "$value" == --* ]]; then
+    echo "$flag requires a value"
     exit 2
   fi
 }
@@ -681,6 +748,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --campaign-subject)
+      require_flag_value_or_die "$1" "${2:-}"
       campaign_subject="${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
@@ -691,6 +759,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --campaign-anon-cred)
+      require_flag_value_or_die "$1" "${2:-}"
       campaign_anon_cred="${2:-}"
       shift 2
       ;;
@@ -699,6 +768,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --subject)
+      require_flag_value_or_die "$1" "${2:-}"
       set_subject_alias_or_die "--subject" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
@@ -709,6 +779,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --key)
+      require_flag_value_or_die "$1" "${2:-}"
       set_subject_alias_or_die "--key" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
@@ -719,6 +790,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --invite-key)
+      require_flag_value_or_die "$1" "${2:-}"
       set_subject_alias_or_die "--invite-key" "${2:-}"
       campaign_subject_cli_provided="1"
       shift 2
@@ -729,6 +801,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --anon-cred)
+      require_flag_value_or_die "$1" "${2:-}"
       anon_cred_alias="${2:-}"
       shift 2
       ;;
@@ -747,6 +820,15 @@ while [[ $# -gt 0 ]]; do
     --campaign-endpoint-preflight-timeout-sec)
       campaign_endpoint_preflight_timeout_sec="${2:-}"
       shift 2
+      ;;
+    --allow-insecure-probe)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_probe="${2:-}"
+        shift 2
+      else
+        allow_insecure_probe="1"
+        shift
+      fi
       ;;
     --summary-json)
       summary_json="${2:-}"
@@ -819,6 +901,7 @@ if [[ -n "$campaign_endpoint_preflight_timeout_sec" && ! "$campaign_endpoint_pre
   echo "--campaign-endpoint-preflight-timeout-sec must be a non-negative integer"
   exit 2
 fi
+bool_arg_or_die "--allow-insecure-probe" "$allow_insecure_probe"
 if [[ -n "$campaign_heartbeat_interval_sec" && ! "$campaign_heartbeat_interval_sec" =~ ^[0-9]+$ ]]; then
   echo "PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC must be a positive integer"
   exit 2
@@ -1472,6 +1555,22 @@ fi
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
+campaign_subject_configured="0"
+if [[ -n "$campaign_subject" ]]; then
+  campaign_subject_configured="1"
+fi
+campaign_anon_cred_configured="0"
+if [[ -n "$campaign_anon_cred" ]]; then
+  campaign_anon_cred_configured="1"
+fi
+campaign_subject_effective_configured="0"
+if [[ -n "$campaign_subject_effective" ]]; then
+  campaign_subject_effective_configured="1"
+fi
+campaign_anon_cred_effective_configured="0"
+if [[ -n "$campaign_anon_cred_effective" ]]; then
+  campaign_anon_cred_effective_configured="1"
+fi
 
 jq -n \
   --arg generated_at_utc "$generated_at_utc" \
@@ -1532,11 +1631,11 @@ jq -n \
   --arg campaign_entry_url_effective "$campaign_entry_url_effective" \
   --arg campaign_exit_url "$campaign_exit_url" \
   --arg campaign_exit_url_effective "$campaign_exit_url_effective" \
-  --arg campaign_subject "$campaign_subject" \
+  --arg campaign_subject_configured "$campaign_subject_configured" \
   --arg campaign_subject_source "$campaign_subject_source" \
-  --arg campaign_subject_effective "$campaign_subject_effective" \
-  --arg campaign_anon_cred "$campaign_anon_cred" \
-  --arg campaign_anon_cred_effective "$campaign_anon_cred_effective" \
+  --arg campaign_subject_effective_configured "$campaign_subject_effective_configured" \
+  --arg campaign_anon_cred_configured "$campaign_anon_cred_configured" \
+  --arg campaign_anon_cred_effective_configured "$campaign_anon_cred_effective_configured" \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
   --arg campaign_timeout_sec "$campaign_timeout_sec" \
@@ -1613,8 +1712,8 @@ jq -n \
         entry_url: (if $campaign_entry_url == "" then null else $campaign_entry_url end),
         exit_url: (if $campaign_exit_url == "" then null else $campaign_exit_url end),
         subject_source: (if $campaign_subject_source == "" then null else $campaign_subject_source end),
-        subject_configured: ($campaign_subject != ""),
-        anon_cred_configured: ($campaign_anon_cred != ""),
+        subject_configured: ($campaign_subject_configured == "1"),
+        anon_cred_configured: ($campaign_anon_cred_configured == "1"),
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end)
       },
       campaign_refresh_overrides_effective: {
@@ -1625,8 +1724,8 @@ jq -n \
         issuer_url: (if $campaign_issuer_url_effective == "" then null else $campaign_issuer_url_effective end),
         entry_url: (if $campaign_entry_url_effective == "" then null else $campaign_entry_url_effective end),
         exit_url: (if $campaign_exit_url_effective == "" then null else $campaign_exit_url_effective end),
-        subject_configured: ($campaign_subject_effective != ""),
-        anon_cred_configured: ($campaign_anon_cred_effective != ""),
+        subject_configured: ($campaign_subject_effective_configured == "1"),
+        anon_cred_configured: ($campaign_anon_cred_effective_configured == "1"),
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end)
       },
       campaign_refresh_runtime: {

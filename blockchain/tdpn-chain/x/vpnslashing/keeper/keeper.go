@@ -30,10 +30,15 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertEvidence(record types.SlashEvidence) {
+	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
+	_ = k.UpsertEvidenceWithError(record)
+}
+
+func (k *Keeper) UpsertEvidenceWithError(record types.SlashEvidence) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
-	k.store.UpsertEvidence(record)
+	return k.upsertEvidenceLocked(record)
 }
 
 // SubmitEvidence inserts evidence with idempotency semantics keyed by EvidenceID.
@@ -53,11 +58,19 @@ func (k *Keeper) SubmitEvidence(record types.SlashEvidence) (types.SlashEvidence
 		if !slashEvidenceRecordsEqual(normalizedExisting, normalized) {
 			return types.SlashEvidence{}, conflictError("evidence", normalized.EvidenceID)
 		}
-		k.store.UpsertEvidence(normalizedExisting)
+		if err := k.upsertEvidenceLocked(normalizedExisting); err != nil {
+			return types.SlashEvidence{}, err
+		}
 		return normalizedExisting, nil
 	}
 
-	k.store.UpsertEvidence(normalized)
+	if duplicateEvidence, ok := k.findEquivalentEvidenceLocked(normalized); ok {
+		return types.SlashEvidence{}, evidenceReplayConflictError(normalized.EvidenceID, duplicateEvidence.EvidenceID)
+	}
+
+	if err := k.upsertEvidenceLocked(normalized); err != nil {
+		return types.SlashEvidence{}, err
+	}
 	return normalized, nil
 }
 
@@ -79,9 +92,13 @@ func (k *Keeper) ListEvidence() []types.SlashEvidence {
 }
 
 func (k *Keeper) UpsertPenalty(record types.PenaltyDecision) {
+	_ = k.UpsertPenaltyWithError(record)
+}
+
+func (k *Keeper) UpsertPenaltyWithError(record types.PenaltyDecision) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertPenalty(record)
+	return k.upsertPenaltyLocked(record)
 }
 
 // ApplyPenalty inserts a penalty with idempotency semantics keyed by PenaltyID.
@@ -105,8 +122,12 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		if !penaltyRecordsEqual(normalizedExisting, normalized) {
 			return types.PenaltyDecision{}, conflictError("penalty", normalized.PenaltyID)
 		}
-		k.store.UpsertPenalty(normalizedExisting)
-		k.advanceEvidenceForPenaltyLocked(normalizedExisting.EvidenceID)
+		if err := k.upsertPenaltyLocked(normalizedExisting); err != nil {
+			return types.PenaltyDecision{}, err
+		}
+		if err := k.advanceEvidenceForPenaltyLocked(normalizedExisting.EvidenceID); err != nil {
+			return types.PenaltyDecision{}, err
+		}
 		return normalizedExisting, nil
 	}
 
@@ -114,8 +135,12 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		return types.PenaltyDecision{}, penaltyEvidenceConflictError(normalized.EvidenceID, conflictingPenalty.PenaltyID)
 	}
 
-	k.store.UpsertPenalty(normalized)
-	k.advanceEvidenceForPenaltyLocked(normalized.EvidenceID)
+	if err := k.upsertPenaltyLocked(normalized); err != nil {
+		return types.PenaltyDecision{}, err
+	}
+	if err := k.advanceEvidenceForPenaltyLocked(normalized.EvidenceID); err != nil {
+		return types.PenaltyDecision{}, err
+	}
 	return normalized, nil
 }
 
@@ -136,17 +161,20 @@ func (k *Keeper) ListPenalties() []types.PenaltyDecision {
 	return penalties
 }
 
-func (k *Keeper) advanceEvidenceForPenaltyLocked(evidenceID string) {
+func (k *Keeper) advanceEvidenceForPenaltyLocked(evidenceID string) error {
 	evidence, ok := k.store.GetEvidence(evidenceID)
 	if !ok {
-		return
+		return nil
 	}
 
 	normalized := normalizeEvidence(evidence)
 	if normalized.Status == chaintypes.ReconciliationPending || normalized.Status == chaintypes.ReconciliationSubmitted {
 		normalized.Status = chaintypes.ReconciliationConfirmed
 	}
-	k.store.UpsertEvidence(normalized)
+	if err := k.upsertEvidenceLocked(normalized); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyDecision, bool) {
@@ -157,6 +185,19 @@ func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyD
 		}
 	}
 	return types.PenaltyDecision{}, false
+}
+
+func (k *Keeper) findEquivalentEvidenceLocked(candidate types.SlashEvidence) (types.SlashEvidence, bool) {
+	for _, evidence := range k.store.ListEvidence() {
+		normalized := normalizeEvidence(evidence)
+		if normalized.EvidenceID == candidate.EvidenceID {
+			continue
+		}
+		if evidenceIncidentEqual(normalized, candidate) {
+			return normalized, true
+		}
+	}
+	return types.SlashEvidence{}, false
 }
 
 func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
@@ -174,6 +215,30 @@ func normalizePenalty(record types.PenaltyDecision) types.PenaltyDecision {
 	return record
 }
 
+func (k *Keeper) upsertEvidenceLocked(record types.SlashEvidence) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertEvidenceWithError(record); err != nil {
+			return fmt.Errorf("persist evidence %q: %w", record.EvidenceID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertEvidence(record)
+	return nil
+}
+
+func (k *Keeper) upsertPenaltyLocked(record types.PenaltyDecision) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertPenaltyWithError(record); err != nil {
+			return fmt.Errorf("persist penalty %q: %w", record.PenaltyID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertPenalty(record)
+	return nil
+}
+
 func slashEvidenceRecordsEqual(a, b types.SlashEvidence) bool {
 	return a.EvidenceID == b.EvidenceID &&
 		a.SessionID == b.SessionID &&
@@ -183,6 +248,14 @@ func slashEvidenceRecordsEqual(a, b types.SlashEvidence) bool {
 		a.ProofHash == b.ProofHash &&
 		a.SubmittedAtUnix == b.SubmittedAtUnix &&
 		a.Status == b.Status
+}
+
+func evidenceIncidentEqual(a, b types.SlashEvidence) bool {
+	return a.Kind == b.Kind &&
+		a.ViolationType == b.ViolationType &&
+		a.ProviderID == b.ProviderID &&
+		a.SessionID == b.SessionID &&
+		a.ProofHash == b.ProofHash
 }
 
 func penaltyRecordsEqual(a, b types.PenaltyDecision) bool {
@@ -204,4 +277,8 @@ func missingEvidenceError(evidenceID string) error {
 
 func penaltyEvidenceConflictError(evidenceID string, existingPenaltyID string) error {
 	return fmt.Errorf("evidence %q already has penalty %q", evidenceID, existingPenaltyID)
+}
+
+func evidenceReplayConflictError(evidenceID string, existingEvidenceID string) error {
+	return fmt.Errorf("evidence %q duplicates already-recorded evidence %q", evidenceID, existingEvidenceID)
 }

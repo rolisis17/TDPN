@@ -10,8 +10,11 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/tdpn/tdpn-chain/internal/fsguard"
 	"github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 )
+
+const fileStoreMaxSnapshotBytes int64 = 16 << 20
 
 // KeeperStore is the persistence seam for vpngovernance keeper state.
 type KeeperStore interface {
@@ -24,6 +27,14 @@ type KeeperStore interface {
 	PutAuditAction(record types.GovernanceAuditAction)
 	GetAuditAction(actionID string) (types.GovernanceAuditAction, bool)
 	ListAuditActions() []types.GovernanceAuditAction
+}
+
+// KeeperStoreWithWriteErrors allows callers to observe persistence failures.
+// Implementations should leave in-memory state unchanged when returning an error.
+type KeeperStoreWithWriteErrors interface {
+	UpsertPolicyWithError(record types.GovernancePolicy) error
+	UpsertDecisionWithError(record types.GovernanceDecision) error
+	PutAuditActionWithError(record types.GovernanceAuditAction) error
 }
 
 // InMemoryStore is the default keeper store implementation.
@@ -43,6 +54,11 @@ func NewInMemoryStore() *InMemoryStore {
 
 func (s *InMemoryStore) UpsertPolicy(record types.GovernancePolicy) {
 	s.policies[record.PolicyID] = record
+}
+
+func (s *InMemoryStore) UpsertPolicyWithError(record types.GovernancePolicy) error {
+	s.UpsertPolicy(record)
+	return nil
 }
 
 func (s *InMemoryStore) GetPolicy(policyID string) (types.GovernancePolicy, bool) {
@@ -68,6 +84,11 @@ func (s *InMemoryStore) UpsertDecision(record types.GovernanceDecision) {
 	s.decisions[record.DecisionID] = record
 }
 
+func (s *InMemoryStore) UpsertDecisionWithError(record types.GovernanceDecision) error {
+	s.UpsertDecision(record)
+	return nil
+}
+
 func (s *InMemoryStore) GetDecision(decisionID string) (types.GovernanceDecision, bool) {
 	record, ok := s.decisions[decisionID]
 	return record, ok
@@ -89,6 +110,11 @@ func (s *InMemoryStore) ListDecisions() []types.GovernanceDecision {
 
 func (s *InMemoryStore) PutAuditAction(record types.GovernanceAuditAction) {
 	s.auditActions[record.ActionID] = record
+}
+
+func (s *InMemoryStore) PutAuditActionWithError(record types.GovernanceAuditAction) error {
+	s.PutAuditAction(record)
+	return nil
 }
 
 func (s *InMemoryStore) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
@@ -146,7 +172,7 @@ func NewFileStore(path string) (*FileStore, error) {
 }
 
 func (s *FileStore) load() error {
-	payload, err := os.ReadFile(s.path)
+	payload, err := fsguard.ReadRegularFileBounded(s.path, fileStoreMaxSnapshotBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -164,24 +190,49 @@ func (s *FileStore) load() error {
 	}
 
 	if snapshot.Policies != nil {
-		s.policies = snapshot.Policies
+		policies, err := buildPolicySnapshotMap(snapshot.Policies)
+		if err != nil {
+			return fmt.Errorf("validate policy snapshot: %w", err)
+		}
+		s.policies = policies
 	}
 	if snapshot.Decisions != nil {
-		s.decisions = snapshot.Decisions
+		decisions, err := buildDecisionSnapshotMap(snapshot.Decisions)
+		if err != nil {
+			return fmt.Errorf("validate decision snapshot: %w", err)
+		}
+		s.decisions = decisions
 	}
 	if snapshot.AuditActions != nil {
-		s.audit = snapshot.AuditActions
+		auditActions, err := buildAuditActionSnapshotMap(snapshot.AuditActions)
+		if err != nil {
+			return fmt.Errorf("validate audit action snapshot: %w", err)
+		}
+		s.audit = auditActions
 	}
 
 	return nil
 }
 
 func (s *FileStore) UpsertPolicy(record types.GovernancePolicy) {
+	_ = s.UpsertPolicyWithError(record)
+}
+
+func (s *FileStore) UpsertPolicyWithError(record types.GovernancePolicy) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.policies[record.PolicyID]
 	s.policies[record.PolicyID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.policies[record.PolicyID] = previous
+		} else {
+			delete(s.policies, record.PolicyID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) GetPolicy(policyID string) (types.GovernancePolicy, bool) {
@@ -209,11 +260,24 @@ func (s *FileStore) ListPolicies() []types.GovernancePolicy {
 }
 
 func (s *FileStore) UpsertDecision(record types.GovernanceDecision) {
+	_ = s.UpsertDecisionWithError(record)
+}
+
+func (s *FileStore) UpsertDecisionWithError(record types.GovernanceDecision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.decisions[record.DecisionID]
 	s.decisions[record.DecisionID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.decisions[record.DecisionID] = previous
+		} else {
+			delete(s.decisions, record.DecisionID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) GetDecision(decisionID string) (types.GovernanceDecision, bool) {
@@ -241,11 +305,24 @@ func (s *FileStore) ListDecisions() []types.GovernanceDecision {
 }
 
 func (s *FileStore) PutAuditAction(record types.GovernanceAuditAction) {
+	_ = s.PutAuditActionWithError(record)
+}
+
+func (s *FileStore) PutAuditActionWithError(record types.GovernanceAuditAction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.audit[record.ActionID]
 	s.audit[record.ActionID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.audit[record.ActionID] = previous
+		} else {
+			delete(s.audit, record.ActionID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
@@ -324,7 +401,64 @@ func writeFileAtomic(path string, payload []byte) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
+	if err := syncDirectory(dir); err != nil {
+		return err
+	}
 
 	keepTmp = false
 	return nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func buildPolicySnapshotMap(input map[string]types.GovernancePolicy) (map[string]types.GovernancePolicy, error) {
+	loaded := make(map[string]types.GovernancePolicy, len(input))
+	for key, record := range input {
+		normalized := normalizePolicy(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid policy %q: %w", key, err)
+		}
+		if existing, ok := loaded[normalized.PolicyID]; ok && !policyRecordsEqual(existing, normalized) {
+			return nil, fmt.Errorf("conflicting policy entries for id %q", normalized.PolicyID)
+		}
+		loaded[normalized.PolicyID] = normalized
+	}
+	return loaded, nil
+}
+
+func buildDecisionSnapshotMap(input map[string]types.GovernanceDecision) (map[string]types.GovernanceDecision, error) {
+	loaded := make(map[string]types.GovernanceDecision, len(input))
+	for key, record := range input {
+		normalized := normalizeDecision(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid decision %q: %w", key, err)
+		}
+		if existing, ok := loaded[normalized.DecisionID]; ok && !decisionRecordsEqual(existing, normalized) {
+			return nil, fmt.Errorf("conflicting decision entries for id %q", normalized.DecisionID)
+		}
+		loaded[normalized.DecisionID] = normalized
+	}
+	return loaded, nil
+}
+
+func buildAuditActionSnapshotMap(input map[string]types.GovernanceAuditAction) (map[string]types.GovernanceAuditAction, error) {
+	loaded := make(map[string]types.GovernanceAuditAction, len(input))
+	for key, record := range input {
+		normalized := normalizeAuditAction(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid audit action %q: %w", key, err)
+		}
+		if existing, ok := loaded[normalized.ActionID]; ok && !auditActionRecordsEqual(existing, normalized) {
+			return nil, fmt.Errorf("conflicting audit action entries for id %q", normalized.ActionID)
+		}
+		loaded[normalized.ActionID] = normalized
+	}
+	return loaded, nil
 }

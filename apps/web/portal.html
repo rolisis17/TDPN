@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPM Portal</title>
+    <link rel="stylesheet" href="./assets/gpm.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap">
+        <div class="brand">GPM Portal <small>Wallet-first onboarding</small></div>
+        <nav class="nav">
+          <a class="btn secondary" href="./index.html">Home</a>
+          <a class="btn primary" href="./portal.html">Portal</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap portal-shell">
+      <section class="card">
+        <h2>API Connection</h2>
+        <div class="fields">
+          <label>
+            API base URL
+            <input id="api_base" value="http://127.0.0.1:8095" />
+          </label>
+          <label>
+            Session token
+            <input id="session_token" placeholder="session token after sign in" />
+          </label>
+          <label>
+            Current role
+            <input id="role" value="client" readonly />
+          </label>
+        </div>
+        <div id="status_line" class="status">Ready</div>
+      </section>
+
+      <section class="card">
+        <h2>Wallet Sign In</h2>
+        <div class="fields">
+          <label>
+            Wallet provider
+            <select id="wallet_provider">
+              <option value="keplr">Keplr</option>
+              <option value="leap">Leap</option>
+            </select>
+          </label>
+          <label>
+            Wallet address
+            <input id="wallet_address" placeholder="cosmos1..." />
+          </label>
+          <label>
+            Challenge ID
+            <input id="challenge_id" placeholder="gpm-chal-..." />
+          </label>
+          <label>
+            Signature
+            <input id="signature" placeholder="wallet signature" />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn secondary" id="challenge_btn">Request Challenge</button>
+          <button class="btn primary" id="signin_btn">Verify + Create Session</button>
+          <button class="btn secondary" id="session_btn">Refresh Session</button>
+          <button class="btn secondary" id="manifest_btn">Fetch Manifest</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Client Registration</h2>
+        <div class="fields">
+          <label>
+            Path profile
+            <select id="path_profile">
+              <option value="2hop">2hop (balanced)</option>
+              <option value="1hop">1hop (speed)</option>
+              <option value="3hop">3hop (private)</option>
+            </select>
+          </label>
+          <label>
+            Bootstrap directory (optional)
+            <input id="bootstrap_directory" placeholder="from manifest or leave blank" />
+          </label>
+          <label>
+            Invite/subject (optional)
+            <input id="invite_key" placeholder="optional compatibility invite" />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="register_client_btn">Register Client</button>
+        </div>
+      </section>
+
+      <section class="card" id="operator">
+        <h2>Operator Workflow</h2>
+        <div class="fields">
+          <label>
+            Chain operator ID
+            <input id="chain_operator_id" placeholder="operator-001" />
+          </label>
+          <label>
+            Server label
+            <input id="server_label" value="portal-operator" />
+          </label>
+          <label>
+            Admin token (if required)
+            <input id="admin_token" placeholder="approval token (optional)" />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn secondary" id="apply_operator_btn">Apply Operator Role</button>
+          <button class="btn secondary" id="operator_status_btn">Check Operator Status</button>
+          <button class="btn secondary" id="approve_operator_btn">Approve Operator</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Output</h2>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        Portal scaffold for GPM productization milestone. Production wallet-extension signing is tracked next.
+      </div>
+    </footer>
+
+    <script type="module" src="./assets/portal.js"></script>
+  </body>
+</html>

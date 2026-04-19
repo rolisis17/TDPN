@@ -13,6 +13,22 @@ type KeeperStore interface {
 	ListSettlements() []types.SettlementRecord
 }
 
+// KeeperStoreWithWriteErrors allows callers to observe persistence failures.
+// Implementations should leave in-memory state unchanged when returning an error.
+type KeeperStoreWithWriteErrors interface {
+	UpsertReservationWithError(record types.CreditReservation) error
+	UpsertSettlementWithError(record types.SettlementRecord) error
+}
+
+// KeeperStoreWithAtomicFinalize supports writing settlement+reservation updates
+// as one durable operation.
+type KeeperStoreWithAtomicFinalize interface {
+	UpsertSettlementAndAdvanceReservationWithError(
+		settlement types.SettlementRecord,
+		reservation types.CreditReservation,
+	) error
+}
+
 // InMemoryStore is the default keeper store implementation.
 type InMemoryStore struct {
 	reservations map[string]types.CreditReservation
@@ -30,6 +46,11 @@ func (s *InMemoryStore) UpsertReservation(record types.CreditReservation) {
 	s.reservations[record.ReservationID] = record
 }
 
+func (s *InMemoryStore) UpsertReservationWithError(record types.CreditReservation) error {
+	s.UpsertReservation(record)
+	return nil
+}
+
 func (s *InMemoryStore) GetReservation(reservationID string) (types.CreditReservation, bool) {
 	record, ok := s.reservations[reservationID]
 	return record, ok
@@ -45,6 +66,20 @@ func (s *InMemoryStore) ListReservations() []types.CreditReservation {
 
 func (s *InMemoryStore) UpsertSettlement(record types.SettlementRecord) {
 	s.settlements[record.SettlementID] = record
+}
+
+func (s *InMemoryStore) UpsertSettlementWithError(record types.SettlementRecord) error {
+	s.UpsertSettlement(record)
+	return nil
+}
+
+func (s *InMemoryStore) UpsertSettlementAndAdvanceReservationWithError(
+	settlement types.SettlementRecord,
+	reservation types.CreditReservation,
+) error {
+	s.UpsertReservation(reservation)
+	s.UpsertSettlement(settlement)
+	return nil
 }
 
 func (s *InMemoryStore) GetSettlement(settlementID string) (types.SettlementRecord, bool) {

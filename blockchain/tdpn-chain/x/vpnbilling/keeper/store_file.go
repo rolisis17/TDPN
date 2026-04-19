@@ -9,8 +9,11 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/tdpn/tdpn-chain/internal/fsguard"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
+
+const fileStoreMaxSnapshotBytes int64 = 16 << 20
 
 // FileStore persists vpnbilling keeper state to disk as JSON snapshots.
 type FileStore struct {
@@ -58,11 +61,25 @@ func NewFileStore(path string) (*FileStore, error) {
 }
 
 func (s *FileStore) UpsertReservation(record types.CreditReservation) {
+	_ = s.UpsertReservationWithError(record)
+}
+
+func (s *FileStore) UpsertReservationWithError(record types.CreditReservation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.state.Reservations[record.ReservationID]
 	s.state.Reservations[record.ReservationID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.state.Reservations[record.ReservationID] = previous
+		} else {
+			delete(s.state.Reservations, record.ReservationID)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (s *FileStore) GetReservation(reservationID string) (types.CreditReservation, bool) {
@@ -85,11 +102,54 @@ func (s *FileStore) ListReservations() []types.CreditReservation {
 }
 
 func (s *FileStore) UpsertSettlement(record types.SettlementRecord) {
+	_ = s.UpsertSettlementWithError(record)
+}
+
+func (s *FileStore) UpsertSettlementWithError(record types.SettlementRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.state.Settlements[record.SettlementID]
 	s.state.Settlements[record.SettlementID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.state.Settlements[record.SettlementID] = previous
+		} else {
+			delete(s.state.Settlements, record.SettlementID)
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (s *FileStore) UpsertSettlementAndAdvanceReservationWithError(
+	settlement types.SettlementRecord,
+	reservation types.CreditReservation,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previousSettlement, hadSettlement := s.state.Settlements[settlement.SettlementID]
+	previousReservation, hadReservation := s.state.Reservations[reservation.ReservationID]
+
+	s.state.Settlements[settlement.SettlementID] = settlement
+	s.state.Reservations[reservation.ReservationID] = reservation
+	if err := s.persistLocked(); err != nil {
+		if hadSettlement {
+			s.state.Settlements[settlement.SettlementID] = previousSettlement
+		} else {
+			delete(s.state.Settlements, settlement.SettlementID)
+		}
+		if hadReservation {
+			s.state.Reservations[reservation.ReservationID] = previousReservation
+		} else {
+			delete(s.state.Reservations, reservation.ReservationID)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (s *FileStore) GetSettlement(settlementID string) (types.SettlementRecord, bool) {
@@ -112,7 +172,7 @@ func (s *FileStore) ListSettlements() []types.SettlementRecord {
 }
 
 func (s *FileStore) loadFromDisk() error {
-	payload, err := os.ReadFile(s.path)
+	payload, err := fsguard.ReadRegularFileBounded(s.path, fileStoreMaxSnapshotBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -129,12 +189,16 @@ func (s *FileStore) loadFromDisk() error {
 		return fmt.Errorf("decode file store state: %w", err)
 	}
 
-	for _, reservation := range snapshot.Reservations {
-		s.state.Reservations[reservation.ReservationID] = reservation
+	reservations, err := buildReservationSnapshotMap(snapshot.Reservations)
+	if err != nil {
+		return fmt.Errorf("validate file store reservations: %w", err)
 	}
-	for _, settlement := range snapshot.Settlements {
-		s.state.Settlements[settlement.SettlementID] = settlement
+	settlements, err := buildSettlementSnapshotMap(snapshot.Settlements)
+	if err != nil {
+		return fmt.Errorf("validate file store settlements: %w", err)
 	}
+	s.state.Reservations = reservations
+	s.state.Settlements = settlements
 
 	return nil
 }
@@ -190,6 +254,48 @@ func (s *FileStore) persistLocked() error {
 	if err := os.Rename(tmpPath, s.path); err != nil {
 		return fmt.Errorf("replace file store state: %w", err)
 	}
+	if err := syncDirectory(parentDir); err != nil {
+		return fmt.Errorf("sync parent directory for file store state: %w", err)
+	}
 
 	return nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func buildReservationSnapshotMap(records []types.CreditReservation) (map[string]types.CreditReservation, error) {
+	loaded := make(map[string]types.CreditReservation, len(records))
+	for index, record := range records {
+		canonical := record.Canonicalize()
+		if err := canonical.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid reservation at index %d: %w", index, err)
+		}
+		if existing, ok := loaded[canonical.ReservationID]; ok && !reservationRecordsEqual(existing, canonical) {
+			return nil, fmt.Errorf("conflicting reservation entries for id %q", canonical.ReservationID)
+		}
+		loaded[canonical.ReservationID] = canonical
+	}
+	return loaded, nil
+}
+
+func buildSettlementSnapshotMap(records []types.SettlementRecord) (map[string]types.SettlementRecord, error) {
+	loaded := make(map[string]types.SettlementRecord, len(records))
+	for index, record := range records {
+		canonical := record.Canonicalize()
+		if err := canonical.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid settlement at index %d: %w", index, err)
+		}
+		if existing, ok := loaded[canonical.SettlementID]; ok && !settlementRecordsEqual(existing, canonical) {
+			return nil, fmt.Errorf("conflicting settlement entries for id %q", canonical.SettlementID)
+		}
+		loaded[canonical.SettlementID] = canonical
+	}
+	return loaded, nil
 }

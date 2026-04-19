@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	urlpkg "net/url"
 	"strings"
 	"time"
 
@@ -39,9 +41,12 @@ type settlementBridgeScaffold interface {
 }
 
 type settlementBridgeHandler struct {
-	scaffold  settlementBridgeScaffold
-	authToken string
+	scaffold   settlementBridgeScaffold
+	authToken  string
+	listenAddr string
 }
+
+type loopbackHostCheckFunc func(string) bool
 
 type bridgeEnvelope struct {
 	OK     bool   `json:"ok"`
@@ -155,6 +160,7 @@ type settlementGovernanceAuditActionPayload struct {
 }
 
 const settlementBridgeMaxJSONBodyBytes int64 = 1 << 20 // 1 MiB
+const settlementBridgeMaxEpochSelectionPreviewCandidates = 2048
 
 func runSettlementHTTPMode(
 	ctx context.Context,
@@ -169,14 +175,16 @@ func runSettlementHTTPMode(
 	defer listener.Close()
 
 	handler := &settlementBridgeHandler{
-		scaffold:  scaffold,
-		authToken: cfg.authToken,
+		scaffold:   scaffold,
+		authToken:  cfg.authToken,
+		listenAddr: listener.Addr().String(),
 	}
 	server := &http.Server{
-		Handler:      handler.routes(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		Handler:           handler.routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 
 	serveErrCh := make(chan error, 1)
@@ -237,7 +245,13 @@ func (h *settlementBridgeHandler) routes() http.Handler {
 	mux.HandleFunc("/x/vpngovernance/decisions/", h.handleGovernanceDecisions)
 	mux.HandleFunc("/x/vpngovernance/audit-actions", h.handleGovernanceAuditActions)
 	mux.HandleFunc("/x/vpngovernance/audit-actions/", h.handleGovernanceAuditActions)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		healthBypassAllowed := r.URL.Path == "/health" && (h.authToken == "" || isLoopbackRemoteAddr(r.RemoteAddr))
+		if !healthBypassAllowed && !h.authorizeRequest(w, r) {
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (h *settlementBridgeHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -303,45 +317,66 @@ func (h *settlementBridgeHandler) handleBillingSettlement(w http.ResponseWriter,
 		return
 	}
 
+	settlementID := strings.TrimSpace(payload.SettlementID)
+	sessionID := strings.TrimSpace(payload.SessionID)
+	subjectID := strings.TrimSpace(payload.SubjectID)
+	currency := strings.TrimSpace(payload.Currency)
 	reservationID := strings.TrimSpace(payload.ReservationID)
-	if reservationID == "" {
-		reservationID = strings.TrimSpace(payload.SettlementID)
-	}
-	if reservationID == "" {
-		reservationID = strings.TrimSpace(payload.SessionID)
-	}
-	createdUnix := unixOrZero(payload.SettledAt)
-	reservationAmount := payload.ChargedMicros
-	if reservationAmount <= 0 {
-		reservationAmount = 1
+	if settlementID == "" || reservationID == "" || sessionID == "" || subjectID == "" || currency == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{
+			OK:    false,
+			Error: "SettlementID, ReservationID, SessionID, SubjectID, and Currency are required",
+		})
+		return
 	}
 
-	_, err := h.scaffold.BillingMsgServer().CreateReservation(r.Context(), app.BillingCreateReservationRequest{
-		Record: billingtypes.CreditReservation{
-			ReservationID: reservationID,
-			SponsorID:     payload.SubjectID,
-			SessionID:     payload.SessionID,
-			AssetDenom:    payload.Currency,
-			Amount:        reservationAmount,
-			CreatedAtUnix: createdUnix,
-			Status:        mapReconciliationStatus(payload.Status, chaintypes.ReconciliationPending),
-		},
+	createdUnix := unixOrZero(payload.SettledAt)
+	if payload.ChargedMicros <= 0 {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "ChargedMicros must be > 0"})
+		return
+	}
+	reservationAmount := payload.ChargedMicros
+	existingSettlement, err := h.scaffold.BillingQueryServer().GetSettlement(r.Context(), app.BillingGetSettlementRequest{
+		SettlementID: settlementID,
 	})
 	if err != nil {
 		writeBridgeError(w, err)
 		return
 	}
+	if existingSettlement.Found {
+		writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: "settlement already exists"})
+		return
+	}
+	existingReservation, err := h.scaffold.BillingQueryServer().GetReservation(r.Context(), app.BillingGetReservationRequest{
+		ReservationID: reservationID,
+	})
+	if err != nil {
+		writeBridgeError(w, err)
+		return
+	}
+	if !existingReservation.Found {
+		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: "reservation not found"})
+		return
+	}
+	record := existingReservation.Reservation
+	if strings.TrimSpace(record.SessionID) != sessionID ||
+		strings.TrimSpace(record.SponsorID) != subjectID ||
+		strings.TrimSpace(record.AssetDenom) != currency ||
+		record.Amount != reservationAmount {
+		writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: "reservation fields do not match settlement"})
+		return
+	}
 
 	resp, err := h.scaffold.BillingMsgServer().FinalizeSettlement(r.Context(), app.BillingFinalizeSettlementRequest{
 		Record: billingtypes.SettlementRecord{
-			SettlementID:   payload.SettlementID,
+			SettlementID:   settlementID,
 			ReservationID:  reservationID,
-			SessionID:      payload.SessionID,
-			BilledAmount:   payload.ChargedMicros,
+			SessionID:      sessionID,
+			BilledAmount:   reservationAmount,
 			UsageBytes:     0,
-			AssetDenom:     payload.Currency,
+			AssetDenom:     currency,
 			SettledAtUnix:  createdUnix,
-			OperationState: mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			OperationState: chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -424,7 +459,7 @@ func (h *settlementBridgeHandler) handleRewardIssue(w http.ResponseWriter, r *ht
 			AssetDenom:     payload.Currency,
 			Amount:         payload.RewardMicros,
 			AccruedAtUnix:  issuedUnix,
-			OperationState: mapReconciliationStatus(payload.Status, chaintypes.ReconciliationPending),
+			OperationState: chaintypes.ReconciliationPending,
 		},
 	})
 	if err != nil {
@@ -438,7 +473,7 @@ func (h *settlementBridgeHandler) handleRewardIssue(w http.ResponseWriter, r *ht
 			AccrualID:      accrualID,
 			PayoutRef:      payload.RewardID,
 			DistributedAt:  issuedUnix,
-			Status:         mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			Status:         chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -550,16 +585,20 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 		return
 	}
 
-	authorizationID := "auth:" + strings.TrimSpace(payload.ReservationID)
-	maxCredits := payload.AmountMicros
-	if maxCredits <= 0 {
-		maxCredits = 1
-	}
 	createdUnix := unixOrZero(payload.CreatedAt)
 	expiresUnix := unixOrZero(payload.ExpiresAt)
 	subjectID := strings.TrimSpace(payload.SubjectID)
+	reservationID := strings.TrimSpace(payload.ReservationID)
+	sponsorID := strings.TrimSpace(payload.SponsorID)
 	appID := strings.TrimSpace(payload.AppID)
 	endUserID := strings.TrimSpace(payload.EndUserID)
+	if reservationID == "" || sponsorID == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{
+			OK:    false,
+			Error: "ReservationID and SponsorID are required",
+		})
+		return
+	}
 	if appID == "" {
 		appID = subjectID
 	}
@@ -572,15 +611,43 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 	if endUserID == "" {
 		endUserID = appID
 	}
+	if appID == "" || endUserID == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{
+			OK:    false,
+			Error: "SubjectID or AppID/EndUserID is required",
+		})
+		return
+	}
+	sessionID := strings.TrimSpace(payload.SessionID)
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{
+			OK:    false,
+			Error: "SessionID is required",
+		})
+		return
+	}
+
+	authorizationID := "auth:" + reservationID
+	if payload.AmountMicros <= 0 {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "AmountMicros must be > 0"})
+		return
+	}
+	credits := payload.AmountMicros
+	nowUnix := time.Now().Unix()
+	if expiresUnix <= nowUnix {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "ExpiresAt must be in the future"})
+		return
+	}
+	maxCredits := credits
 
 	_, err := h.scaffold.SponsorMsgServer().CreateAuthorization(r.Context(), app.SponsorCreateAuthorizationRequest{
 		Record: sponsortypes.SponsorAuthorization{
 			AuthorizationID: authorizationID,
-			SponsorID:       payload.SponsorID,
+			SponsorID:       sponsorID,
 			AppID:           appID,
 			MaxCredits:      maxCredits,
 			ExpiresAtUnix:   expiresUnix,
-			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationPending),
+			Status:          chaintypes.ReconciliationPending,
 		},
 	})
 	if err != nil {
@@ -588,17 +655,17 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 		return
 	}
 
-	delegateCtx := sponsormodule.WithCurrentTimeUnix(r.Context(), time.Now().Unix())
+	delegateCtx := sponsormodule.WithCurrentTimeUnix(r.Context(), nowUnix)
 	resp, err := h.scaffold.SponsorMsgServer().DelegateCredit(delegateCtx, app.SponsorDelegateCreditRequest{
 		Record: sponsortypes.DelegatedSessionCredit{
-			ReservationID:   payload.ReservationID,
+			ReservationID:   reservationID,
 			AuthorizationID: authorizationID,
-			SponsorID:       payload.SponsorID,
+			SponsorID:       sponsorID,
 			AppID:           appID,
 			EndUserID:       endUserID,
-			SessionID:       payload.SessionID,
-			Credits:         payload.AmountMicros,
-			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationPending),
+			SessionID:       sessionID,
+			Credits:         credits,
+			Status:          chaintypes.ReconciliationPending,
 		},
 	})
 	if err != nil {
@@ -786,7 +853,7 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 			Kind:            slashingtypes.EvidenceKindObjective,
 			ProofHash:       proofHash,
 			SubmittedAtUnix: unixOrZero(payload.ObservedAt),
-			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			Status:          chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -900,7 +967,7 @@ func (h *settlementBridgeHandler) handleValidatorEligibilities(w http.ResponseWr
 			Eligible:        payload.Eligible,
 			PolicyReason:    payload.PolicyReason,
 			UpdatedAtUnix:   unixOrZero(payload.UpdatedAt),
-			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			Status:          chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -979,7 +1046,7 @@ func (h *settlementBridgeHandler) handleValidatorStatusRecords(w http.ResponseWr
 			EvidenceHeight:   payload.EvidenceHeight,
 			EvidenceRef:      payload.EvidenceRef,
 			RecordedAtUnix:   unixOrZero(payload.RecordedAt),
-			Status:           mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			Status:           chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -1006,6 +1073,17 @@ func (h *settlementBridgeHandler) handleValidatorEpochSelectionPreview(w http.Re
 	var payload settlementValidatorEpochSelectionPreviewPayload
 	if err := decodeJSON(r, &payload); err != nil {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
+		return
+	}
+	if len(payload.Candidates) > settlementBridgeMaxEpochSelectionPreviewCandidates {
+		writeJSON(
+			w,
+			http.StatusBadRequest,
+			bridgeEnvelope{
+				OK:    false,
+				Error: fmt.Sprintf("candidate set too large: max=%d got=%d", settlementBridgeMaxEpochSelectionPreviewCandidates, len(payload.Candidates)),
+			},
+		)
 		return
 	}
 
@@ -1088,7 +1166,7 @@ func (h *settlementBridgeHandler) handleGovernancePolicies(w http.ResponseWriter
 			Description:     payload.Description,
 			Version:         payload.Version,
 			ActivatedAtUnix: unixOrZero(payload.ActivatedAt),
-			Status:          mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			Status:          chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -1163,7 +1241,7 @@ func (h *settlementBridgeHandler) handleGovernanceDecisions(w http.ResponseWrite
 			Decider:       payload.Decider,
 			Reason:        payload.Reason,
 			DecidedAtUnix: unixOrZero(payload.DecidedAt),
-			Status:        mapReconciliationStatus(payload.Status, chaintypes.ReconciliationSubmitted),
+			Status:        chaintypes.ReconciliationSubmitted,
 		},
 	})
 	if err != nil {
@@ -1256,7 +1334,19 @@ func (h *settlementBridgeHandler) authorizePOST(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusMethodNotAllowed, bridgeEnvelope{OK: false, Error: "method not allowed"})
 		return false
 	}
+	return h.authorizeRequest(w, r)
+}
+
+func (h *settlementBridgeHandler) authorizeRequest(w http.ResponseWriter, r *http.Request) bool {
 	if h.authToken == "" {
+		if !isLoopbackRemoteAddr(r.RemoteAddr) {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{OK: false, Error: "unauthenticated mode only allows loopback clients"})
+			return false
+		}
+		if !isAllowedUnauthenticatedOrigin(r.Header.Get("Origin"), h.listenAddr) {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{OK: false, Error: "cross-origin requests are not allowed in unauthenticated mode"})
+			return false
+		}
 		return true
 	}
 	if !hasValidBearerTokenHeader(r.Header.Get("Authorization"), h.authToken) {
@@ -1264,6 +1354,91 @@ func (h *settlementBridgeHandler) authorizePOST(w http.ResponseWriter, r *http.R
 		return false
 	}
 	return true
+}
+
+func isAllowedUnauthenticatedOrigin(rawOrigin, listenAddr string) bool {
+	return isAllowedUnauthenticatedOriginWithLoopbackCheck(rawOrigin, listenAddr, isLoopbackHost)
+}
+
+func isAllowedUnauthenticatedOriginWithLoopbackCheck(rawOrigin, listenAddr string, isLoopbackHostCheck loopbackHostCheckFunc) bool {
+	if isLoopbackHostCheck == nil {
+		return false
+	}
+	rawOrigin = strings.TrimSpace(rawOrigin)
+	if rawOrigin == "" {
+		return false
+	}
+	originURL, err := urlpkg.Parse(rawOrigin)
+	if err != nil || originURL.Host == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") {
+		return false
+	}
+	originHost := strings.TrimSpace(originURL.Hostname())
+	if originHost == "" {
+		return false
+	}
+	if !isLoopbackHostCheck(originHost) {
+		return false
+	}
+
+	listenPort := listenAddressPortWithLoopbackCheck(listenAddr, isLoopbackHostCheck)
+	if listenPort == "" {
+		return false
+	}
+	originPort := originURL.Port()
+	if originPort == "" {
+		if originURL.Scheme == "https" {
+			originPort = "443"
+		} else {
+			originPort = "80"
+		}
+	}
+	return subtle.ConstantTimeCompare([]byte(originPort), []byte(listenPort)) == 1
+}
+
+func isLoopbackOrLocalhost(host string) bool {
+	return isLoopbackHost(host)
+}
+
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	return isLoopbackRemoteAddrWithLoopbackCheck(remoteAddr, isLoopbackHost)
+}
+
+func isLoopbackRemoteAddrWithLoopbackCheck(remoteAddr string, isLoopbackHostCheck loopbackHostCheckFunc) bool {
+	if isLoopbackHostCheck == nil {
+		return false
+	}
+	addr := strings.TrimSpace(remoteAddr)
+	if addr == "" {
+		return false
+	}
+	host := addr
+	if parsedHost, _, err := net.SplitHostPort(addr); err == nil {
+		host = parsedHost
+	}
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
+	}
+	return isLoopbackHostCheck(host)
+}
+
+func listenAddressPort(addr string) string {
+	return listenAddressPortWithLoopbackCheck(addr, isLoopbackHost)
+}
+
+func listenAddressPortWithLoopbackCheck(addr string, isLoopbackHostCheck loopbackHostCheckFunc) string {
+	if isLoopbackHostCheck == nil {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return ""
+	}
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host != "" && !isLoopbackHostCheck(host) {
+		return ""
+	}
+	return strings.TrimSpace(port)
 }
 
 func (h *settlementBridgeHandler) validatorEpochSelectionPreviewQueryServer() (validatormodule.QueryServer, error) {
@@ -1334,9 +1509,10 @@ func normalizeEpochSelectionResult(result validatortypes.EpochSelectionResult) v
 
 func validateBridgeSlashEvidenceRef(proofHash string) error {
 	return (slashingtypes.SlashEvidence{
-		EvidenceID: "bridge-validation",
-		Kind:       slashingtypes.EvidenceKindObjective,
-		ProofHash:  proofHash,
+		EvidenceID:    "bridge-validation",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     proofHash,
 	}).ValidateBasic()
 }
 

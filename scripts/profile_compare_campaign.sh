@@ -84,11 +84,13 @@ abs_path() {
 }
 
 print_cmd() {
+  local line=""
   local arg
   for arg in "$@"; do
-    printf '%q ' "$arg"
+    line+=$(printf '%q ' "$arg")
   done
-  printf '\n'
+  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
+  printf '%s\n' "$line"
 }
 
 campaign_elapsed_sec() {
@@ -237,12 +239,26 @@ extract_diagnostic_count() {
   local key="$2"
   local raw_value
   raw_value="$(jq -r --arg key "$key" '
+    def key_variants: [$key, ($key + "_total")];
+    def profile_key_variants: [("avg_" + $key), ("avg_" + $key + "_total")];
+    def pick($obj):
+      [key_variants[] as $k | ($obj[$k] // empty)] | .[0] // empty;
+    def pick_profile($obj):
+      [profile_key_variants[] as $k | ($obj[$k] // empty)] | .[0] // empty;
+    def sum_runs:
+      [(.runs // [])[]? | pick(.)] | add // empty;
+    def sum_profile_avgs:
+      [(.profiles // [])[]? | pick_profile(.)] | add // empty;
     [
-      (.diagnostics[$key] // empty),
-      (.summary.diagnostics[$key] // empty),
-      (.summary[$key] // empty),
-      (.[$key] // empty)
-    ] | map(select(. != null)) | .[0] // 0
+      pick(.diagnostics // {}),
+      pick(.summary.diagnostics // {}),
+      pick(.aggregated_diagnostics // {}),
+      pick(.summary.aggregated_diagnostics // {}),
+      pick(.summary // {}),
+      sum_runs,
+      pick(.),
+      sum_profile_avgs
+    ] | map(select(. != null and . != "")) | .[0] // 0
   ' "$summary_json_path" 2>/dev/null || printf '%s' "0")"
   to_non_negative_int "$raw_value"
 }
@@ -251,10 +267,20 @@ has_diagnostic_key() {
   local summary_json_path="$1"
   local key="$2"
   jq -e --arg key "$key" '
-    ((.diagnostics // {}) | has($key))
-    or ((.summary.diagnostics // {}) | has($key))
-    or ((.summary // {}) | has($key))
-    or (has($key))
+    def key_variants: [$key, ($key + "_total")];
+    def profile_key_variants: [("avg_" + $key), ("avg_" + $key + "_total")];
+    def has_any($obj):
+      any(key_variants[]; $obj | has(.));
+    def has_any_profile($obj):
+      any(profile_key_variants[]; $obj | has(.));
+    has_any(.diagnostics // {})
+    or has_any(.summary.diagnostics // {})
+    or has_any(.aggregated_diagnostics // {})
+    or has_any(.summary.aggregated_diagnostics // {})
+    or has_any(.summary // {})
+    or (((.runs // []) | map(select(type == "object" and any(key_variants[]; has(.)))) | length) > 0)
+    or (((.profiles // []) | map(select(type == "object" and has_any_profile(.))) | length) > 0)
+    or has_any(.)
   ' "$summary_json_path" >/dev/null 2>&1
 }
 
@@ -1051,7 +1077,7 @@ fi
 operator_hint="No dominant diagnostic failure signal detected across selected runs."
 case "$likely_primary_failure" in
   token_proof_invalid|unknown_exit)
-    operator_hint="Check invite/issuer alignment and retry with a fresh invite key."
+    operator_hint="Check invite/issuer alignment, run profile-default-gate-token-probe against A/B endpoints, and retry with a fresh invite key."
     ;;
   transport_mismatch)
     operator_hint="Check live-WG transport requirements: DATA_PLANE_MODE and CLIENT_INNER_SOURCE must match the target environment."
@@ -1066,6 +1092,15 @@ case "$likely_primary_failure" in
     operator_hint="Check endpoint reachability and DNS/network routes for directory/issuer/entry/exit URLs before retrying."
     ;;
 esac
+
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+anon_cred_present="0"
+if [[ -n "$anon_cred" ]]; then
+  anon_cred_present="1"
+fi
 
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -1095,8 +1130,8 @@ jq -n \
   --arg issuer_url "$issuer_url" \
   --arg entry_url "$entry_url" \
   --arg exit_url "$exit_url" \
-  --arg subject "$subject" \
-  --arg anon_cred "$anon_cred" \
+  --arg subject "$subject_redacted" \
+  --arg anon_cred_present "$anon_cred_present" \
   --arg start_local_stack "$start_local_stack" \
   --arg client_iface "$client_iface" \
   --arg exit_iface "$exit_iface" \
@@ -1178,7 +1213,7 @@ jq -n \
         entry_url: $entry_url,
         exit_url: $exit_url,
         subject: $subject,
-        anon_cred_present: ($anon_cred | length > 0),
+        anon_cred_present: ($anon_cred_present == "1"),
         min_sources: $min_sources,
         beta_profile: ($beta_profile == 1),
         prod_profile: ($prod_profile == 1),

@@ -12,6 +12,11 @@ var (
 	ErrStatusNotFound = errors.New("vpnvalidator: validator status record not found")
 )
 
+const (
+	maxQueryListResults             = 1000
+	maxPreviewEpochCandidateRecords = 2048
+)
+
 // GetValidatorEligibilityRequest requests eligibility by validator id.
 type GetValidatorEligibilityRequest struct {
 	ValidatorID string
@@ -97,8 +102,9 @@ func (s QueryServer) ListValidatorEligibilities(_ ListValidatorEligibilitiesRequ
 		return ListValidatorEligibilitiesResponse{}, ErrNilKeeper
 	}
 
+	records := s.keeper.ListEligibilities()
 	return ListValidatorEligibilitiesResponse{
-		Eligibilities: s.keeper.ListEligibilities(),
+		Eligibilities: clampEligibilities(records),
 	}, nil
 }
 
@@ -107,14 +113,22 @@ func (s QueryServer) ListValidatorStatusRecords(_ ListValidatorStatusRecordsRequ
 		return ListValidatorStatusRecordsResponse{}, ErrNilKeeper
 	}
 
+	records := s.keeper.ListStatusRecords()
 	return ListValidatorStatusRecordsResponse{
-		Records: s.keeper.ListStatusRecords(),
+		Records: clampStatusRecords(records),
 	}, nil
 }
 
 func (s QueryServer) PreviewEpochSelection(req PreviewEpochSelectionRequest) (PreviewEpochSelectionResponse, error) {
 	if s.keeper == nil {
 		return PreviewEpochSelectionResponse{}, ErrNilKeeper
+	}
+	if len(req.Candidates) > maxPreviewEpochCandidateRecords {
+		return PreviewEpochSelectionResponse{}, fmt.Errorf(
+			"candidate set too large: max=%d got=%d",
+			maxPreviewEpochCandidateRecords,
+			len(req.Candidates),
+		)
 	}
 
 	result, err := s.keeper.SelectEpochValidators(req.Policy, req.Candidates)
@@ -125,4 +139,18 @@ func (s QueryServer) PreviewEpochSelection(req PreviewEpochSelectionRequest) (Pr
 	return PreviewEpochSelectionResponse{
 		Result: result,
 	}, nil
+}
+
+func clampEligibilities(records []types.ValidatorEligibility) []types.ValidatorEligibility {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampStatusRecords(records []types.ValidatorStatusRecord) []types.ValidatorStatusRecord {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
 }

@@ -968,7 +968,7 @@ if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=sudo 
   cat $PROFILE_BLOCKED_LOG
   exit 1
 fi
-if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=.*--campaign-timeout-sec 1200' $PROFILE_BLOCKED_LOG; then
+if ! rg -q '\[manual-validation-status\] profile_default_gate_next_command=.*--campaign-timeout-sec 2400' $PROFILE_BLOCKED_LOG; then
   echo "profile-blocked status missing profile-default gate campaign-timeout flag"
   cat $PROFILE_BLOCKED_LOG
   exit 1
@@ -986,7 +986,7 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
   and .summary.profile_default_gate.failure_stage == "campaign"
   and .summary.profile_default_gate.non_root_refresh_blocked == true
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
@@ -1039,7 +1039,7 @@ if ! printf '%s\n' "$profile_stale_json" | jq -e '
   and .summary.profile_default_gate.stale_non_refreshed == true
   and .summary.profile_default_gate.refresh_campaign == false
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))
@@ -1128,7 +1128,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required"
   and .summary.profile_default_gate.next_command_sudo_only_reason == "diagnostics_root_required"
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-compare-campaign-signoff"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
 ' >/dev/null; then
   echo "profile-no-go-insufficient status JSON missing expected pending mapping fields"
   printf '%s\n' "$profile_no_go_insufficient_json"
@@ -1206,7 +1206,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command | contains("--fail-on-no-go") | not)
   and (.summary.profile_default_gate.next_command | contains("18081"))
   and (.summary.profile_default_gate.next_command | contains("28081"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--campaign-issuer-url http://127.0.0.1:18082"))
@@ -1220,7 +1220,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-directory-urls") | not)
   and (.summary.profile_default_gate.next_command_sudo | contains("--refresh-campaign") | not)
   and (.summary.profile_default_gate.next_command_sudo | contains("--fail-on-no-go") | not)
-  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
@@ -1282,7 +1282,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   and (.summary.profile_default_gate.next_command | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
   and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
   and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and .summary.profile_default_gate.next_command_source == "sudo_required_diagnostics_root_required_docker_start_local_stack_1"
@@ -1375,13 +1375,13 @@ if ! printf '%s\n' "$profile_invalid_summary_json" | jq -e '
   and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
   and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
   and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
-  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
-  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 1200"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-timeout-sec 2400"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))
   and ((.summary.profile_default_gate.next_command_sudo | split("--campaign-subject") | length) == 2)
   and (.summary.profile_default_gate.next_command | contains("--summary-json '"$PROFILE_SIGNOFF_SUMMARY_JSON"'"))

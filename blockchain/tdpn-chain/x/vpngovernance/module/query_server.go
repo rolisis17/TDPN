@@ -12,6 +12,8 @@ var (
 	ErrAuditActionNotFound = errors.New("vpngovernance: audit action not found")
 )
 
+const maxQueryListResults = 1000
+
 // GetPolicyRequest requests governance policy by policy ID.
 type GetPolicyRequest struct {
 	PolicyID string
@@ -116,7 +118,8 @@ func (s QueryServer) ListPolicies(_ ListPoliciesRequest) (ListPoliciesResponse, 
 		return ListPoliciesResponse{}, ErrNilKeeper
 	}
 
-	return ListPoliciesResponse{Policies: s.keeper.ListPolicies()}, nil
+	records := s.keeper.ListPolicies()
+	return ListPoliciesResponse{Policies: clampPolicies(records)}, nil
 }
 
 func (s QueryServer) ListDecisions(_ ListDecisionsRequest) (ListDecisionsResponse, error) {
@@ -124,7 +127,8 @@ func (s QueryServer) ListDecisions(_ ListDecisionsRequest) (ListDecisionsRespons
 		return ListDecisionsResponse{}, ErrNilKeeper
 	}
 
-	return ListDecisionsResponse{Decisions: s.keeper.ListDecisions()}, nil
+	records := s.keeper.ListDecisions()
+	return ListDecisionsResponse{Decisions: clampDecisions(records)}, nil
 }
 
 func (s QueryServer) ListAuditActions(_ ListAuditActionsRequest) (ListAuditActionsResponse, error) {
@@ -132,5 +136,27 @@ func (s QueryServer) ListAuditActions(_ ListAuditActionsRequest) (ListAuditActio
 		return ListAuditActionsResponse{}, ErrNilKeeper
 	}
 
-	return ListAuditActionsResponse{Actions: s.keeper.ListAuditActions()}, nil
+	records := s.keeper.ListAuditActions()
+	return ListAuditActionsResponse{Actions: clampAuditActions(records)}, nil
+}
+
+func clampPolicies(records []types.GovernancePolicy) []types.GovernancePolicy {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampDecisions(records []types.GovernanceDecision) []types.GovernanceDecision {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampAuditActions(records []types.GovernanceAuditAction) []types.GovernanceAuditAction {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
 }

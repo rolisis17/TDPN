@@ -37,7 +37,7 @@ pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
   echo "failed to generate token PoP keypair"
-  echo "$pop_json"
+  echo "$pop_json" | sed -E 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
   exit 1
 fi
 
@@ -48,16 +48,24 @@ jti=$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')
 
 if [[ -z "$token" || -z "$jti" ]]; then
   echo "failed to parse issuer-b token/jti"
-  echo "$token_json"
+  echo "$token_json" | sed -E 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
   cat /tmp/multi_issuer_b.log
   exit 1
 fi
 
+pop_priv_file="$(mktemp)"
+token_file="$(mktemp)"
+chmod 600 "$pop_priv_file"
+chmod 600 "$token_file"
+printf '%s' "$pop_priv" >"$pop_priv_file"
+printf '%s' "$token" >"$token_file"
+trap 'kill "$dir_pid" "$issuer_a_pid" "$issuer_b_pid" "$relay_pid" >/dev/null 2>&1 || true; rm -f "$pop_priv_file" "$token_file"' EXIT
+
 client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 token_proof_nonce="$(date +%s%N)-multi-issuer"
 token_proof=$(go run ./cmd/tokenpop sign \
-  --private-key "$pop_priv" \
-  --token "$token" \
+  --private-key-file "$pop_priv_file" \
+  --token-file "$token_file" \
   --exit-id "exit-local-1" \
   --proof-nonce "$token_proof_nonce" \
   --client-inner-pub "$client_pub" \

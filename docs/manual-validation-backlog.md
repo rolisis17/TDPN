@@ -171,7 +171,7 @@ Suggested flow:
 
 ```bash
 sudo ./scripts/easy_node.sh client-vpn-smoke \
-  --bootstrap-directory http://A_HOST:8081 \
+  --bootstrap-directory https://A_HOST:8081 \
   --subject INVITE_KEY \
   --path-profile balanced \
   --interface wgvpn0 \
@@ -216,3 +216,120 @@ The CLI prints the same reminder with:
 ./scripts/easy_node.sh manual-validation-backlog
 ./scripts/easy_node.sh manual-validation-status --show-json 1
 ```
+
+## Security Re-scan Notes (2026-04-18, independent verifier pass)
+
+Potential remaining hardening items from a read-only grep/ripgrep + manual line-by-line sweep (Go/shell/Rust/JS/docs), prioritized by impact:
+
+1. **P1 (open): client outbound dial policy allows `localhost` mixed-resolution bypass**
+   - References:
+     - `internal/app/client.go:4094`
+     - `internal/app/client.go:4127`
+     - `internal/app/client.go:4142`
+   - Why it matters:
+     - For host `localhost`, mixed DNS answers (loopback + non-loopback) can still route to non-loopback targets depending on resolver ordering.
+     - This reintroduces DNS-rebind/mixed-resolution risk on client outbound control calls.
+   - Suggested fix:
+     - Mirror the stricter service-side policy: treat `localhost` as safe only when **all** resolved addresses are loopback (unless explicit dangerous private-DNS override is enabled).
+   - Suggested tests:
+     - Add a focused test in `internal/app/outbound_dial_policy_test.go` that supplies mixed `localhost` answers and expects rejection.
+
+2. **P2 (open): replay guards are now persistent per instance, but still not shared across replicas**
+   - References:
+     - `services/exit/service.go:341`
+     - `services/exit/service.go:597`
+     - `services/exit/service.go:1900`
+     - `services/directory/service.go:377`
+     - `services/directory/service.go:549`
+     - `services/directory/service.go:3307`
+   - Why it matters:
+     - Restart durability is now present (file-backed stores), but active/active deployments without shared replay storage can still accept cross-instance replays.
+   - Suggested fix:
+     - Back replay keys with shared durable state (for example Redis/DB) keyed by `(token_id, nonce)` with TTL.
+     - Keep local file/cache as fast-path only.
+   - Suggested tests:
+     - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
+
+3. **P2 (open): integration scripts still leak raw PoP private-key JSON on some parse failures**
+   - References:
+     - `scripts/integration_lifecycle_chaos.sh:109`
+     - `scripts/integration_multi_issuer.sh:40`
+     - `scripts/integration_revocation.sh:23`
+   - Why it matters:
+     - On failure paths, raw `tokenpop gen` output can be printed to CI/operator logs, exposing `private_key` material.
+   - Suggested fix:
+     - Replace raw `echo "$pop_json"` paths with shared redaction helper (same pattern already used by hardened integration scripts).
+   - Suggested tests:
+     - Add grep-based guardrails in script contract tests to block unredacted `pop_json` emission and verify failure output is redacted.
+
+4. **P2 (open): compose still supports full-privilege `entry-exit` mode via env toggle**
+   - References:
+     - `deploy/docker-compose.yml:185`
+   - Why it matters:
+     - `ENTRY_EXIT_PRIVILEGED=true` bypasses the new least-privilege defaults (`cap_drop: ALL`, `cap_add: NET_ADMIN`, `no-new-privileges`).
+   - Suggested fix:
+     - Move privileged mode behind a dedicated emergency profile/override compose file and keep base stack permanently non-privileged.
+   - Suggested tests:
+     - CI policy check: fail when base compose enables privileged mode in default paths.
+
+5. **P3 (open): client-side trusted-key/subject loaders still use unbounded direct file reads**
+   - References:
+     - `internal/app/directory_trust.go:98`
+     - `internal/app/client.go:176`
+   - Why it matters:
+     - These paths still use direct `os.ReadFile` without size cap or strict `lstat/open/samefile` checks.
+     - Risk is local but can still cause memory pressure or unexpected file-read behavior in hardened deployments.
+   - Suggested fix:
+     - Reuse the bounded regular-file helper pattern already adopted in services/blockchain paths.
+   - Suggested tests:
+     - Oversized file and symlink/race rejection tests for `loadTrustedKeys` and `loadClientSubject`.
+
+6. **P1 (resolved in current branch): sensitive local IDE runtime artifacts removed from repo**
+   - References:
+     - `User/globalStorage/storage.json:5`
+     - `User/globalStorage/storage.json:14`
+     - `User/globalStorage/github.copilot-chat/copilotCli/copilot:3`
+     - `User/globalStorage/github.copilot-chat/debugCommand/copilot-debug:3`
+     - `User/globalStorage/state.vscdb` (binary SQLite)
+   - Status:
+     - `git ls-files User/globalStorage` now returns no tracked files.
+     - `.gitignore` includes guardrails to prevent reintroduction.
+   - Remaining follow-up:
+     - If this data was pushed/shared previously, rotate any potentially exposed credentials/tokens and assess remote history cleanup.
+
+7. **P3 (verified resolved): bounded service file reads enforce regular-file + anti-symlink/TOCTOU checks**
+   - References:
+     - `services/entry/service.go:1881`
+     - `services/directory/service.go:5887`
+     - `services/issuer/service.go:3577`
+   - Status:
+     - `readFileBounded` in `directory`, `entry`, and `issuer` now validates path/file type and same-file consistency while keeping bounded reads.
+
+8. **P1 (verified resolved): entry service map growth bounded (memory DoS hardening)**
+   - References:
+     - `services/entry/service.go:89`
+     - `services/entry/service.go:96`
+     - `services/entry/service.go:107`
+     - `services/entry/service.go:553`
+     - `services/entry/service.go:601`
+     - `services/entry/service.go:690`
+   - Status:
+     - Capacity bounds + pruning + fail-closed behavior are present and covered by focused tests.
+
+9. **P2 (verified resolved): default admin token fallback is no longer implicit**
+   - References:
+     - `services/directory/service.go:154`
+     - `services/directory/service.go:421`
+     - `services/issuer/service.go:132`
+     - `services/issuer/service.go:158`
+   - Status:
+     - `directory`/`issuer` no longer auto-populate `dev-admin-token` by default.
+     - Legacy fallback requires explicit dangerous opt-in env vars.
+
+10. **P3 (verified resolved): integration fan-out no longer uses `xargs ... sh -c` in flagged scripts**
+    - References:
+      - `scripts/integration_client_startup_burst.sh:130`
+      - `scripts/integration_load_chaos.sh:219`
+    - Status:
+      - Flagged scripts now use function/background-job fan-out.
+      - `rg 'xargs.*sh -c|xargs.*bash -c'` returns no matches.

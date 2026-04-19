@@ -13,6 +13,13 @@ type KeeperStore interface {
 	ListPenalties() []types.PenaltyDecision
 }
 
+// KeeperStoreWithWriteErrors allows callers to observe persistence failures.
+// Implementations should leave in-memory state unchanged when returning an error.
+type KeeperStoreWithWriteErrors interface {
+	UpsertEvidenceWithError(record types.SlashEvidence) error
+	UpsertPenaltyWithError(record types.PenaltyDecision) error
+}
+
 // InMemoryStore is the default keeper store implementation.
 type InMemoryStore struct {
 	evidence  map[string]types.SlashEvidence
@@ -30,6 +37,11 @@ func (s *InMemoryStore) UpsertEvidence(record types.SlashEvidence) {
 	s.evidence[record.EvidenceID] = record
 }
 
+func (s *InMemoryStore) UpsertEvidenceWithError(record types.SlashEvidence) error {
+	s.UpsertEvidence(record)
+	return nil
+}
+
 func (s *InMemoryStore) GetEvidence(evidenceID string) (types.SlashEvidence, bool) {
 	record, ok := s.evidence[evidenceID]
 	return record, ok
@@ -45,6 +57,11 @@ func (s *InMemoryStore) ListEvidence() []types.SlashEvidence {
 
 func (s *InMemoryStore) UpsertPenalty(record types.PenaltyDecision) {
 	s.penalties[record.PenaltyID] = record
+}
+
+func (s *InMemoryStore) UpsertPenaltyWithError(record types.PenaltyDecision) error {
+	s.UpsertPenalty(record)
+	return nil
 }
 
 func (s *InMemoryStore) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {

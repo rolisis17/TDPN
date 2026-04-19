@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -109,6 +110,21 @@ func TestSponsorAuthorizationValidateBasic(t *testing.T) {
 			record:  SponsorAuthorization{AuthorizationID: base.AuthorizationID, SponsorID: base.SponsorID, AppID: base.AppID, MaxCredits: 0},
 			wantErr: "max credits must be positive",
 		},
+		{
+			name:    "negative expires at unix",
+			record:  SponsorAuthorization{AuthorizationID: base.AuthorizationID, SponsorID: base.SponsorID, AppID: base.AppID, MaxCredits: base.MaxCredits, ExpiresAtUnix: -1},
+			wantErr: "expires_at_unix cannot be negative",
+		},
+		{
+			name: "authorization id too long",
+			record: SponsorAuthorization{
+				AuthorizationID: strings.Repeat("a", 129),
+				SponsorID:       base.SponsorID,
+				AppID:           base.AppID,
+				MaxCredits:      base.MaxCredits,
+			},
+			wantErr: "authorization id exceeds 128 characters",
+		},
 	}
 
 	for _, tc := range tests {
@@ -192,6 +208,29 @@ func TestDelegatedSessionCreditValidateBasic(t *testing.T) {
 			name:    "non-positive credits",
 			record:  DelegatedSessionCredit{ReservationID: base.ReservationID, AuthorizationID: base.AuthorizationID, SponsorID: base.SponsorID, SessionID: base.SessionID, Credits: 0},
 			wantErr: "credits must be positive",
+		},
+		{
+			name: "reservation id too long",
+			record: DelegatedSessionCredit{
+				ReservationID:   strings.Repeat("r", 129),
+				AuthorizationID: base.AuthorizationID,
+				SponsorID:       base.SponsorID,
+				SessionID:       base.SessionID,
+				Credits:         base.Credits,
+			},
+			wantErr: "reservation id exceeds 128 characters",
+		},
+		{
+			name: "end user id too long",
+			record: DelegatedSessionCredit{
+				ReservationID:   base.ReservationID,
+				AuthorizationID: base.AuthorizationID,
+				SponsorID:       base.SponsorID,
+				EndUserID:       strings.Repeat("u", 129),
+				SessionID:       base.SessionID,
+				Credits:         base.Credits,
+			},
+			wantErr: "end user id exceeds 128 characters",
 		},
 	}
 

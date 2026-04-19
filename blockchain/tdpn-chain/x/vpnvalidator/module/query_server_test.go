@@ -3,6 +3,7 @@ package module
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -248,6 +249,31 @@ func TestQueryServerPreviewEpochSelectionValidationErrorPropagation(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "at least one stable or rotating seat is required") {
 		t.Fatalf("expected seat validation error, got %v", err)
+	}
+}
+
+func TestQueryServerPreviewEpochSelectionRejectsOversizedCandidateSet(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewQueryServer(&k)
+
+	policy := baselinePreviewPolicy()
+	candidates := make([]types.EpochValidatorCandidate, 0, maxPreviewEpochCandidateRecords+1)
+	for i := 0; i < maxPreviewEpochCandidateRecords+1; i++ {
+		suffix := strconv.Itoa(i)
+		candidates = append(candidates, previewCandidate("val-"+suffix, "op-"+suffix, "asn-"+suffix, "us", 100))
+	}
+
+	_, err := server.PreviewEpochSelection(PreviewEpochSelectionRequest{
+		Policy:     policy,
+		Candidates: candidates,
+	})
+	if err == nil {
+		t.Fatal("expected oversized candidate set to be rejected")
+	}
+	if !strings.Contains(err.Error(), "candidate set too large") {
+		t.Fatalf("expected oversized candidate set error, got %v", err)
 	}
 }
 

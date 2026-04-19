@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in jq mktemp; do
+for cmd in jq mktemp rg; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -20,6 +20,7 @@ Usage:
     [--exit-iface IFACE] \
     [--vpn-iface IFACE] \
     [--runtime-fix-prune-wg-only-dir [0|1]] \
+    [--defer-no-root [0|1]] \
     [--strict-beta [0|1]] \
     [--timeout-sec N] \
     [--min-selection-lines N] \
@@ -132,6 +133,17 @@ validate_wg_only_summary_payload() {
   return 0
 }
 
+wg_only_summary_signals_root_required() {
+  local notes_value="${1:-}"
+  if [[ -z "$notes_value" ]]; then
+    return 1
+  fi
+  if printf '%s\n' "$notes_value" | rg -qi 'requires root|root privileges'; then
+    return 0
+  fi
+  return 1
+}
+
 validate_manual_validation_summary_payload() {
   local payload="$1"
   local schema_id=""
@@ -210,12 +222,22 @@ run_and_capture() {
   fi
 }
 
+safe_append_to_array() {
+  local array_name="$1"
+  shift
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+  local -n target_array="$array_name"
+  target_array+=("$@")
+}
+
 append_existing_artifact() {
   local array_name="$1"
   local path="$2"
   [[ -z "$path" ]] && return 0
   if [[ -e "$path" ]]; then
-    eval "$array_name+=(\"\$path\")"
+    safe_append_to_array "$array_name" "$path" || return 1
   fi
 }
 
@@ -236,6 +258,7 @@ client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
 runtime_fix_prune_wg_only_dir="1"
+defer_no_root="${PRE_REAL_HOST_READINESS_DEFER_NO_ROOT:-0}"
 strict_beta="1"
 timeout_sec=""
 min_selection_lines=""
@@ -280,6 +303,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         strict_beta="1"
+        shift
+      fi
+      ;;
+    --defer-no-root)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        defer_no_root="${2:-}"
+        shift 2
+      else
+        defer_no_root="1"
         shift
       fi
       ;;
@@ -352,6 +384,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
+bool_arg_or_die "--defer-no-root" "$defer_no_root"
 bool_arg_or_die "--strict-beta" "$strict_beta"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 if ! [[ "$base_port" =~ ^[0-9]+$ ]]; then
@@ -414,6 +447,11 @@ wg_only_rc=""
 wg_only_status="skipped"
 wg_only_recorded_at=""
 wg_only_notes=""
+wg_only_root_required="0"
+wg_only_blocker_class="real_failure"
+wg_only_deferred_root_required_blocker="0"
+wg_only_root_required_failure="0"
+wg_only_gate_note=""
 
 runtime_fix_output=""
 runtime_fix_cmd=(
@@ -435,6 +473,7 @@ wg_only_cmd=(
   --base-port "$base_port"
   --client-iface "$client_iface"
   --exit-iface "$exit_iface"
+  --defer-no-root "$defer_no_root"
   --strict-beta "$strict_beta"
   --record-result 1
   --manual-validation-report 0
@@ -512,6 +551,33 @@ else
   wg_only_status="skipped"
 fi
 
+if wg_only_summary_signals_root_required "$wg_only_notes"; then
+  wg_only_root_required="1"
+fi
+if [[ "$wg_only_status" == "pass" ]]; then
+  wg_only_blocker_class="none"
+elif [[ "$wg_only_root_required" == "1" && "$wg_only_status" == "skip" && "$defer_no_root" == "1" ]]; then
+  wg_only_blocker_class="root_required_deferred_blocker"
+  wg_only_deferred_root_required_blocker="1"
+elif [[ "$wg_only_root_required" == "1" ]]; then
+  wg_only_blocker_class="root_required_real_failure"
+  wg_only_root_required_failure="1"
+else
+  wg_only_blocker_class="real_failure"
+fi
+
+case "$wg_only_blocker_class" in
+  root_required_deferred_blocker)
+    wg_only_gate_note="WG-only stack selftest was deferred because root is required; rerun with sudo: $(default_machine_c_command "$vpn_iface")"
+    ;;
+  root_required_real_failure)
+    wg_only_gate_note="WG-only stack selftest requires root privileges; rerun with sudo: $(default_machine_c_command "$vpn_iface")"
+    ;;
+  *)
+    wg_only_gate_note="$wg_only_notes"
+    ;;
+esac
+
 report_output=""
 report_json_payload=""
 stage="manual-validation-report"
@@ -572,7 +638,13 @@ elif [[ "$runtime_fix_rc" -ne 0 || "$runtime_fix_after_status" != "OK" ]]; then
 else
   status="fail"
   result_stage="wg_only_stack_selftest"
-  notes="WG-only host validation did not pass; machine-C smoke should stay blocked"
+  if [[ "$wg_only_blocker_class" == "root_required_deferred_blocker" ]]; then
+    notes="WG-only host validation is deferred because root is required; rerun with sudo to continue: $(default_machine_c_command "$vpn_iface")"
+  elif [[ "$wg_only_blocker_class" == "root_required_real_failure" ]]; then
+    notes="WG-only host validation requires root privileges; rerun with sudo to continue: $(default_machine_c_command "$vpn_iface")"
+  else
+    notes="WG-only host validation did not pass; machine-C smoke should stay blocked"
+  fi
 fi
 
 blockers_json="$(json_array_from_values "${blockers[@]:-}")"
@@ -600,11 +672,16 @@ summary_payload="$(
     --arg wg_only_status "$wg_only_status" \
     --arg wg_only_recorded_at "$wg_only_recorded_at" \
     --arg wg_only_notes "$wg_only_notes" \
+    --arg wg_only_blocker_class "$wg_only_blocker_class" \
+    --arg wg_only_gate_note "$wg_only_gate_note" \
     --arg manual_validation_report_status "$manual_validation_report_status" \
     --arg manual_validation_report_readiness_status "$manual_validation_report_readiness_status" \
     --arg manual_validation_report_next_action_check_id "$manual_validation_report_next_action_check_id" \
     --arg manual_validation_report_next_action_command "$manual_validation_report_next_action_command" \
     --argjson machine_c_smoke_ready "$machine_c_smoke_ready" \
+    --argjson wg_only_root_required "$wg_only_root_required" \
+    --argjson wg_only_deferred_root_required_blocker "$wg_only_deferred_root_required_blocker" \
+    --argjson wg_only_root_required_failure "$wg_only_root_required_failure" \
     --argjson blockers "$blockers_json" \
     --argjson print_summary_json "$print_summary_json" \
     --argjson base_port "$base_port" \
@@ -612,6 +689,7 @@ summary_payload="$(
     --arg exit_iface "$exit_iface" \
     --arg vpn_iface "$vpn_iface" \
     --argjson runtime_fix_prune_wg_only_dir "$runtime_fix_prune_wg_only_dir" \
+    --argjson defer_no_root "$defer_no_root" \
     --argjson strict_beta "$strict_beta" \
     --arg timeout_sec "$timeout_sec" \
     --arg min_selection_lines "$min_selection_lines" \
@@ -633,6 +711,7 @@ summary_payload="$(
          exit_iface: $exit_iface,
          vpn_iface: $vpn_iface,
          runtime_fix_prune_wg_only_dir: boolstr($runtime_fix_prune_wg_only_dir),
+         defer_no_root: boolstr($defer_no_root),
          strict_beta: boolstr($strict_beta),
          timeout_sec: (if ($timeout_sec | length) > 0 then ($timeout_sec | tonumber) else null end),
          min_selection_lines: (if ($min_selection_lines | length) > 0 then ($min_selection_lines | tonumber) else null end),
@@ -645,6 +724,7 @@ summary_payload="$(
            "--exit-iface " + $exit_iface,
            "--vpn-iface " + $vpn_iface,
            "--runtime-fix-prune-wg-only-dir " + (if boolstr($runtime_fix_prune_wg_only_dir) then "1" else "0" end),
+           "--defer-no-root " + (if boolstr($defer_no_root) then "1" else "0" end),
            "--strict-beta " + (if boolstr($strict_beta) then "1" else "0" end)
          ] | join(" ")))
        },
@@ -663,7 +743,13 @@ summary_payload="$(
          log: $wg_only_log,
          summary_json: $wg_only_summary_json,
          recorded_at_utc: $wg_only_recorded_at,
-         notes: $wg_only_notes
+         notes: $wg_only_notes,
+         root_required: boolstr($wg_only_root_required),
+         blocker_class: $wg_only_blocker_class,
+         deferred_root_required_blocker: boolstr($wg_only_deferred_root_required_blocker),
+         root_required_failure: boolstr($wg_only_root_required_failure),
+         next_sudo_command: $machine_c_smoke_command,
+         next_step_note: $wg_only_gate_note
        },
        manual_validation_report: {
          status: $manual_validation_report_status,
@@ -677,7 +763,9 @@ summary_payload="$(
        machine_c_smoke_gate: {
          ready: boolstr($machine_c_smoke_ready),
          blockers: $blockers,
-         next_command: $machine_c_smoke_command
+         next_command: $machine_c_smoke_command,
+         blocker_class: $wg_only_blocker_class,
+         next_sudo_command: $machine_c_smoke_command
        }
      }'
 )"
@@ -686,6 +774,14 @@ printf '%s\n' "$summary_payload" >"$summary_json"
 echo "[pre-real-host-readiness] status=$(printf '%s' "$status" | tr '[:lower:]' '[:upper:]') stage=$result_stage"
 echo "[pre-real-host-readiness] machine_c_smoke_ready=$(if [[ "$machine_c_smoke_ready" == "1" ]]; then printf 'true'; else printf 'false'; fi)"
 echo "[pre-real-host-readiness] blockers=$(printf '%s\n' "$blockers_json" | jq -r 'if length == 0 then "none" else join(",") end')"
+echo "[pre-real-host-readiness] wg_only_stack_selftest_status=$wg_only_status"
+echo "[pre-real-host-readiness] wg_only_stack_selftest_blocker_class=$wg_only_blocker_class"
+echo "[pre-real-host-readiness] wg_only_stack_selftest_root_required=$wg_only_root_required"
+echo "[pre-real-host-readiness] wg_only_stack_selftest_deferred_root_required_blocker=$wg_only_deferred_root_required_blocker"
+echo "[pre-real-host-readiness] wg_only_stack_selftest_root_required_failure=$wg_only_root_required_failure"
+if [[ -n "$wg_only_gate_note" ]]; then
+  echo "[pre-real-host-readiness] wg_only_stack_selftest_note=$wg_only_gate_note"
+fi
 echo "[pre-real-host-readiness] manual_validation_readiness_status=${manual_validation_report_readiness_status:-unknown}"
 echo "[pre-real-host-readiness] next_machine_c_command=$machine_c_smoke_command"
 echo "[pre-real-host-readiness] summary_json=$summary_json"

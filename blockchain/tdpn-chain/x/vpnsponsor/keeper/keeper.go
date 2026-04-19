@@ -31,11 +31,15 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertAuthorization(record types.SponsorAuthorization) {
+	_ = k.UpsertAuthorizationWithError(record)
+}
+
+func (k *Keeper) UpsertAuthorizationWithError(record types.SponsorAuthorization) error {
 	record = normalizeAuthorization(record)
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertAuthorization(record)
+	return k.upsertAuthorizationLocked(record)
 }
 
 // CreateAuthorization inserts an authorization with idempotency semantics keyed by AuthorizationID.
@@ -56,11 +60,21 @@ func (k *Keeper) CreateAuthorization(record types.SponsorAuthorization) (types.S
 			return types.SponsorAuthorization{}, conflictError("authorization", normalized.AuthorizationID)
 		}
 		// Normalize legacy records persisted via compatibility upserts.
-		k.store.UpsertAuthorization(normalizedExisting)
+		if err := k.upsertAuthorizationLocked(normalizedExisting); err != nil {
+			return types.SponsorAuthorization{}, err
+		}
 		return normalizedExisting, nil
 	}
+	if compatibilityRecord, found := k.authorizationByCanonicalIDLocked(normalized.AuthorizationID); found {
+		if !authorizationRecordsEqual(compatibilityRecord, normalized) {
+			return types.SponsorAuthorization{}, conflictError("authorization", normalized.AuthorizationID)
+		}
+		return compatibilityRecord, nil
+	}
 
-	k.store.UpsertAuthorization(normalized)
+	if err := k.upsertAuthorizationLocked(normalized); err != nil {
+		return types.SponsorAuthorization{}, err
+	}
 	return normalized, nil
 }
 
@@ -99,11 +113,15 @@ func (k *Keeper) ListAuthorizations() []types.SponsorAuthorization {
 }
 
 func (k *Keeper) UpsertDelegation(record types.DelegatedSessionCredit) {
+	_ = k.UpsertDelegationWithError(record)
+}
+
+func (k *Keeper) UpsertDelegationWithError(record types.DelegatedSessionCredit) error {
 	record = normalizeDelegation(record)
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertDelegation(record)
+	return k.upsertDelegationLocked(record)
 }
 
 // DelegateSessionCredit inserts delegated credits with idempotency semantics keyed by ReservationID.
@@ -125,12 +143,20 @@ func (k *Keeper) DelegateSessionCreditAtUnix(record types.DelegatedSessionCredit
 
 	authorization, ok := k.store.GetAuthorization(normalized.AuthorizationID)
 	if !ok {
+		if compatibilityAuthorization, found := k.authorizationByCanonicalIDLocked(normalized.AuthorizationID); found {
+			authorization = compatibilityAuthorization
+			ok = true
+		}
+	}
+	if !ok {
 		return types.DelegatedSessionCredit{}, authorizationNotFoundError(normalized.AuthorizationID)
 	}
 	normalizedAuthorization := normalizeAuthorization(authorization)
 	if !authorizationRecordsEqual(authorization, normalizedAuthorization) {
 		// Normalize legacy records persisted via compatibility upserts.
-		k.store.UpsertAuthorization(normalizedAuthorization)
+		if err := k.upsertAuthorizationLocked(normalizedAuthorization); err != nil {
+			return types.DelegatedSessionCredit{}, err
+		}
 	}
 	authorization = normalizedAuthorization
 	if authorization.SponsorID != normalized.SponsorID || authorization.AppID != normalized.AppID {
@@ -152,8 +178,16 @@ func (k *Keeper) DelegateSessionCreditAtUnix(record types.DelegatedSessionCredit
 			return types.DelegatedSessionCredit{}, conflictError("delegation", normalized.ReservationID)
 		}
 		// Normalize legacy records persisted via compatibility upserts.
-		k.store.UpsertDelegation(normalizedExisting)
+		if err := k.upsertDelegationLocked(normalizedExisting); err != nil {
+			return types.DelegatedSessionCredit{}, err
+		}
 		return normalizedExisting, nil
+	}
+	if compatibilityDelegation, found := k.delegationByCanonicalIDLocked(normalized.ReservationID); found {
+		if !delegationRecordsEqual(compatibilityDelegation, normalized) {
+			return types.DelegatedSessionCredit{}, conflictError("delegation", normalized.ReservationID)
+		}
+		return compatibilityDelegation, nil
 	}
 	delegatedCredits, overflowed := delegatedCreditsByAuthorization(k.store.ListDelegations(), normalized.AuthorizationID)
 	if overflowed {
@@ -164,8 +198,34 @@ func (k *Keeper) DelegateSessionCreditAtUnix(record types.DelegatedSessionCredit
 		return types.DelegatedSessionCredit{}, authorizationCreditsExceededError(normalized.AuthorizationID, authorization.MaxCredits)
 	}
 
-	k.store.UpsertDelegation(normalized)
+	if err := k.upsertDelegationLocked(normalized); err != nil {
+		return types.DelegatedSessionCredit{}, err
+	}
 	return normalized, nil
+}
+
+func (k *Keeper) upsertAuthorizationLocked(record types.SponsorAuthorization) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertAuthorizationWithError(record); err != nil {
+			return fmt.Errorf("persist authorization %q: %w", record.AuthorizationID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertAuthorization(record)
+	return nil
+}
+
+func (k *Keeper) upsertDelegationLocked(record types.DelegatedSessionCredit) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertDelegationWithError(record); err != nil {
+			return fmt.Errorf("persist delegation %q: %w", record.ReservationID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertDelegation(record)
+	return nil
 }
 
 func (k *Keeper) GetDelegation(reservationID string) (types.DelegatedSessionCredit, bool) {
@@ -301,4 +361,32 @@ func canonicalReservationID(value string) string {
 	return normalizeDelegation(types.DelegatedSessionCredit{
 		ReservationID: value,
 	}).ReservationID
+}
+
+func (k *Keeper) authorizationByCanonicalIDLocked(authID string) (types.SponsorAuthorization, bool) {
+	canonicalAuthID := canonicalAuthorizationID(authID)
+	if canonicalAuthID == "" {
+		return types.SponsorAuthorization{}, false
+	}
+	for _, record := range k.store.ListAuthorizations() {
+		normalized := normalizeAuthorization(record)
+		if normalized.AuthorizationID == canonicalAuthID {
+			return normalized, true
+		}
+	}
+	return types.SponsorAuthorization{}, false
+}
+
+func (k *Keeper) delegationByCanonicalIDLocked(reservationID string) (types.DelegatedSessionCredit, bool) {
+	canonicalResID := canonicalReservationID(reservationID)
+	if canonicalResID == "" {
+		return types.DelegatedSessionCredit{}, false
+	}
+	for _, record := range k.store.ListDelegations() {
+		normalized := normalizeDelegation(record)
+		if normalized.ReservationID == canonicalResID {
+			return normalized, true
+		}
+	}
+	return types.DelegatedSessionCredit{}, false
 }

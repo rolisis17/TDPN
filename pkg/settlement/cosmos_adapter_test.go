@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,23 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type stubCosmosOutboundResolver struct {
+	ips map[string][]net.IPAddr
+	err error
+}
+
+func (s stubCosmosOutboundResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.ips[strings.ToLower(host)], nil
+}
+
+func writeSignedTxSuccessResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, `{"tx_response":{"code":0}}`)
 }
 
 func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
@@ -116,6 +135,310 @@ func TestCosmosAdapterHealthPaths(t *testing.T) {
 	})
 }
 
+func TestNewCosmosAdapterRejectsNonLoopbackHTTPWithoutOverride(t *testing.T) {
+	_, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    "http://example.com",
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatalf("expected non-loopback http endpoint to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must use https for non-loopback hosts") {
+		t.Fatalf("expected https enforcement error, got %v", err)
+	}
+}
+
+func TestNewCosmosAdapterAllowsNonLoopbackHTTPWithOverride(t *testing.T) {
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:          "http://example.com",
+		AllowInsecureHTTP: true,
+		QueueSize:         8,
+		MaxRetries:        1,
+		BaseBackoff:       5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("expected allow-insecure-http override to permit endpoint, got %v", err)
+	}
+	adapter.Close()
+}
+
+func TestNewCosmosAdapterRejectsLocalhostHTTPWithMixedResolution(t *testing.T) {
+	originalLookup := cosmosLookupIPAddrs
+	t.Cleanup(func() {
+		cosmosLookupIPAddrs = originalLookup
+	})
+	cosmosLookupIPAddrs = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("127.0.0.1")},
+			{IP: net.ParseIP("198.51.100.7")},
+		}, nil
+	}
+
+	_, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    "http://localhost:1317",
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatalf("expected mixed-resolution localhost endpoint to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must use https for non-loopback hosts") {
+		t.Fatalf("expected https enforcement error, got %v", err)
+	}
+}
+
+func TestNewCosmosAdapterAllowsLocalhostHTTPWhenAllResolvedIPsAreLoopback(t *testing.T) {
+	originalLookup := cosmosLookupIPAddrs
+	t.Cleanup(func() {
+		cosmosLookupIPAddrs = originalLookup
+	})
+	cosmosLookupIPAddrs = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("127.0.0.1")},
+			{IP: net.ParseIP("::1")},
+		}, nil
+	}
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    "http://localhost:1317",
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("expected all-loopback localhost endpoint to be accepted, got %v", err)
+	}
+	adapter.Close()
+}
+
+func TestResolveCosmosSafeDialAddressBlocksPrivateDNSByDefault(t *testing.T) {
+	resolver := stubCosmosOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("10.0.0.6")}},
+		},
+	}
+	_, err := resolveCosmosSafeDialAddress(context.Background(), resolver, "example.com:443", false)
+	if err == nil {
+		t.Fatalf("expected private DNS resolution to be blocked")
+	}
+	if !strings.Contains(err.Error(), "blocked address classes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveCosmosSafeDialAddressBlocksNonLocalhostLoopbackResolutionByDefault(t *testing.T) {
+	resolver := stubCosmosOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("127.0.0.1")}},
+		},
+	}
+	_, err := resolveCosmosSafeDialAddress(context.Background(), resolver, "example.com:443", false)
+	if err == nil {
+		t.Fatalf("expected non-localhost loopback DNS resolution to be blocked")
+	}
+	if !strings.Contains(err.Error(), "blocked address classes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveCosmosSafeDialAddressAllowsPrivateDNSWithDangerousOverride(t *testing.T) {
+	resolver := stubCosmosOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("10.0.0.6")}},
+		},
+	}
+	got, err := resolveCosmosSafeDialAddress(context.Background(), resolver, "example.com:443", true)
+	if err != nil {
+		t.Fatalf("expected dangerous private-endpoint override to allow private DNS, got %v", err)
+	}
+	if got != "10.0.0.6:443" {
+		t.Fatalf("unexpected dial address: %s", got)
+	}
+}
+
+func TestResolveCosmosSafeDialAddressAllowsLiteralLoopback(t *testing.T) {
+	got, err := resolveCosmosSafeDialAddress(context.Background(), nil, "127.0.0.1:1317", false)
+	if err != nil {
+		t.Fatalf("expected literal loopback to be allowed, got %v", err)
+	}
+	if got != "127.0.0.1:1317" {
+		t.Fatalf("unexpected dial address: %s", got)
+	}
+}
+
+func TestResolveCosmosSafeDialAddressRejectsZoneHost(t *testing.T) {
+	_, err := resolveCosmosSafeDialAddress(context.Background(), nil, "[fe80::1%eth0]:443", false)
+	if err == nil {
+		t.Fatalf("expected zone identifier host to be rejected")
+	}
+	if !strings.Contains(err.Error(), "zone identifier") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCosmosEndpointPolicyRoundTripperBlocksPrivateDestinationBeforeRoundTrip(t *testing.T) {
+	resolver := stubCosmosOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("10.0.0.6")}},
+		},
+	}
+	called := false
+	rt := &cosmosEndpointPolicyRoundTripper{
+		inner: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("ok")),
+			}, nil
+		}),
+		resolver:                      resolver,
+		allowDangerousPrivateEndpoint: false,
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://example.com/health", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	_, err = rt.RoundTrip(req)
+	if err == nil {
+		t.Fatalf("expected private destination to be blocked")
+	}
+	if !strings.Contains(err.Error(), "blocked address classes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatalf("expected inner round tripper to remain uncalled on blocked destination")
+	}
+}
+
+func TestCosmosEndpointPolicyRoundTripperAllowsDangerousOverride(t *testing.T) {
+	resolver := stubCosmosOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("10.0.0.6")}},
+		},
+	}
+	called := false
+	rt := &cosmosEndpointPolicyRoundTripper{
+		inner: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("ok")),
+			}, nil
+		}),
+		resolver:                      resolver,
+		allowDangerousPrivateEndpoint: true,
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://example.com/health", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("expected dangerous override to allow request, got %v", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if !called {
+		t.Fatalf("expected inner round tripper to be called")
+	}
+}
+
+func TestCosmosAdapterHealthRejectsRedirectResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.Header().Set("Location", "/health-ok")
+			w.WriteHeader(http.StatusFound)
+		case "/health-ok":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    srv.URL,
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	err = adapter.Health(context.Background())
+	if err == nil {
+		t.Fatalf("expected health redirect response to fail when redirects are disabled")
+	}
+	if !strings.Contains(err.Error(), "status 302") {
+		t.Fatalf("expected status 302 error, got %v", err)
+	}
+}
+
+func TestNewCosmosAdapterDisablesProxyFromEnvironmentByDefault(t *testing.T) {
+	t.Setenv(cosmosAllowProxyFromEnvConfigName, "")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:18080")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:18080")
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    "http://127.0.0.1:9999",
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	policyRT, ok := adapter.client.Transport.(*cosmosEndpointPolicyRoundTripper)
+	if !ok || policyRT == nil {
+		t.Fatalf("expected cosmos endpoint policy round tripper, got %T", adapter.client.Transport)
+	}
+	transport, ok := policyRT.inner.(*http.Transport)
+	if !ok || transport == nil {
+		t.Fatalf("expected wrapped *http.Transport, got %T", policyRT.inner)
+	}
+	if transport.Proxy != nil {
+		t.Fatalf("expected proxy function to be nil by default")
+	}
+}
+
+func TestNewCosmosAdapterAllowsProxyFromEnvironmentWithExplicitOverride(t *testing.T) {
+	t.Setenv(cosmosAllowProxyFromEnvConfigName, "1")
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:    "http://127.0.0.1:9999",
+		QueueSize:   8,
+		MaxRetries:  1,
+		BaseBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	policyRT, ok := adapter.client.Transport.(*cosmosEndpointPolicyRoundTripper)
+	if !ok || policyRT == nil {
+		t.Fatalf("expected cosmos endpoint policy round tripper, got %T", adapter.client.Transport)
+	}
+	transport, ok := policyRT.inner.(*http.Transport)
+	if !ok || transport == nil {
+		t.Fatalf("expected wrapped *http.Transport, got %T", policyRT.inner)
+	}
+	if transport.Proxy == nil {
+		t.Fatalf("expected proxy function to be configured when override is enabled")
+	}
+}
+
 func TestCosmosAdapterUsesBearerAuthAcrossModes(t *testing.T) {
 	const (
 		token              = "adapter-auth-token"
@@ -149,7 +472,11 @@ func TestCosmosAdapterUsesBearerAuthAcrossModes(t *testing.T) {
 				case submitAuthCh <- authHeader:
 				default:
 				}
-				w.WriteHeader(http.StatusOK)
+				if expectedSubmitPath == "/cosmos/tx/v1beta1/txs" {
+					writeSignedTxSuccessResponse(w)
+				} else {
+					w.WriteHeader(http.StatusOK)
+				}
 			case r.Method == http.MethodGet && r.URL.Path == rewardQueryPath:
 				select {
 				case queryAuthCh <- authHeader:
@@ -1025,7 +1352,7 @@ func TestCosmosAdapterSignedTxModeSubmitsBroadcast(t *testing.T) {
 			key:  r.Header.Get("Idempotency-Key"),
 			body: body,
 		}
-		w.WriteHeader(http.StatusOK)
+		writeSignedTxSuccessResponse(w)
 	}))
 	defer srv.Close()
 
@@ -1097,6 +1424,58 @@ func TestCosmosAdapterSignedTxModeSubmitsBroadcast(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for signed-tx submit")
+	}
+}
+
+func TestCosmosAdapterSignedTxModeTreatsNonZeroTxCodeAsNonRetryableFailure(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"tx_response":{"code":12,"raw_log":"insufficient fee"}}`)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:       srv.URL,
+		QueueSize:      8,
+		MaxRetries:     3,
+		BaseBackoff:    5 * time.Millisecond,
+		SubmitMode:     CosmosSubmitModeSignedTx,
+		SignedTxSigner: "signer-nonzero-code",
+		SignedTxSecret: "test-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewCosmosAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if _, err := adapter.SubmitRewardIssue(context.Background(), RewardIssue{
+		RewardID:          "rew-signed-code-1",
+		ProviderSubjectID: "provider-1",
+		SessionID:         "sess-1",
+		RewardMicros:      100,
+		Currency:          "USD",
+	}); err != nil {
+		t.Fatalf("SubmitRewardIssue: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return adapter.deferredOperationCount() == 1
+	}, "signed-tx deferred non-retryable entry")
+
+	entry, ok := adapter.deferredOperationByID("reward:rew-signed-code-1")
+	if !ok {
+		t.Fatalf("expected deferred entry for reward:rew-signed-code-1")
+	}
+	if entry.replayable {
+		t.Fatalf("expected non-zero tx code to be non-replayable")
+	}
+	if !strings.Contains(entry.lastError, "tx failed code 12") {
+		t.Fatalf("expected tx code failure in last error, got %q", entry.lastError)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected exactly one attempt for non-retryable tx code failure, got %d", got)
 	}
 }
 
@@ -1459,7 +1838,7 @@ func TestCosmosAdapterSignedTxModeRetries429And503(t *testing.T) {
 					w.WriteHeader(tc.statusCode)
 					return
 				}
-				w.WriteHeader(http.StatusOK)
+				writeSignedTxSuccessResponse(w)
 				select {
 				case doneCh <- struct{}{}:
 				default:
@@ -1515,7 +1894,7 @@ func TestCosmosAdapterSignedTxModeReadsSecretFromFileAndIncludesKeyID(t *testing
 			path: r.URL.Path,
 			body: body,
 		}
-		w.WriteHeader(http.StatusOK)
+		writeSignedTxSuccessResponse(w)
 	}))
 	defer srv.Close()
 
@@ -1596,6 +1975,98 @@ func TestCosmosAdapterSignedTxModeRejectsUnreadableSecretFile(t *testing.T) {
 	}
 }
 
+func TestCosmosAdapterSignedTxModeRejectsSymlinkSecretFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior and policy differ on Windows")
+	}
+
+	tempDir := t.TempDir()
+	targetFile := filepath.Join(tempDir, "signed_tx_secret_target.txt")
+	if err := os.WriteFile(targetFile, []byte("symlink-secret"), 0o600); err != nil {
+		t.Fatalf("write secret target file: %v", err)
+	}
+	linkedFile := filepath.Join(tempDir, "signed_tx_secret_link.txt")
+	if err := os.Symlink(targetFile, linkedFile); err != nil {
+		t.Skipf("symlink creation not available: %v", err)
+	}
+
+	_, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:           "http://127.0.0.1:9999",
+		SubmitMode:         CosmosSubmitModeSignedTx,
+		SignedTxSigner:     "signer-symlink-secret-file",
+		SignedTxSecretFile: linkedFile,
+	})
+	if err == nil {
+		t.Fatalf("expected symlink secret file validation error")
+	}
+	if !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+}
+
+func TestCosmosAdapterSignedTxModeRejectsInsecureSecretFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits are not authoritative on Windows")
+	}
+
+	secretFile := filepath.Join(t.TempDir(), "insecure_signed_tx_secret.txt")
+	if err := os.WriteFile(secretFile, []byte("insecure-secret"), 0o644); err != nil {
+		t.Fatalf("write insecure secret file: %v", err)
+	}
+
+	_, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:           "http://127.0.0.1:9999",
+		SubmitMode:         CosmosSubmitModeSignedTx,
+		SignedTxSigner:     "signer-insecure-secret-file",
+		SignedTxSecretFile: secretFile,
+	})
+	if err == nil {
+		t.Fatalf("expected insecure secret file permission validation error")
+	}
+	if !strings.Contains(err.Error(), "must not grant group/other permissions") {
+		t.Fatalf("expected group/other permission error, got %v", err)
+	}
+}
+
+func TestCosmosAdapterSignedTxModeRejectsOversizedSecretFile(t *testing.T) {
+	secretFile := filepath.Join(t.TempDir(), "large_signed_tx_secret.txt")
+	largeSecret := strings.Repeat("a", int(cosmosSignedTxSecretFileMaxBytes)+1)
+	if err := os.WriteFile(secretFile, []byte(largeSecret), 0o600); err != nil {
+		t.Fatalf("write oversized secret file: %v", err)
+	}
+
+	_, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:           "http://127.0.0.1:9999",
+		SubmitMode:         CosmosSubmitModeSignedTx,
+		SignedTxSigner:     "signer-oversized-secret-file",
+		SignedTxSecretFile: secretFile,
+	})
+	if err == nil {
+		t.Fatalf("expected oversized secret file validation error")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Fatalf("expected max size validation error, got %v", err)
+	}
+}
+
+func TestCosmosAdapterSignedTxModeAcceptsOwnerOnlySecretFilePermissions(t *testing.T) {
+	secretFile := filepath.Join(t.TempDir(), "secure_signed_tx_secret.txt")
+	if err := os.WriteFile(secretFile, []byte("secure-secret"), 0o600); err != nil {
+		t.Fatalf("write secure secret file: %v", err)
+	}
+
+	adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+		Endpoint:           "http://127.0.0.1:9999",
+		SubmitMode:         CosmosSubmitModeSignedTx,
+		SignedTxSigner:     "signer-secure-secret-file",
+		SignedTxSecretFile: secretFile,
+	})
+	if err != nil {
+		t.Fatalf("expected owner-only secret file to be accepted, got %v", err)
+	}
+	adapter.Close()
+}
+
 func TestCosmosAdapterFailureAfterEnqueueTransitionsToDeferredReplayable(t *testing.T) {
 	var failWrites atomic.Bool
 	failWrites.Store(true)
@@ -1657,6 +2128,29 @@ func TestCosmosAdapterFailureAfterEnqueueTransitionsToDeferredReplayable(t *test
 
 	if got := atomic.LoadInt32(&attempts); got < 2 {
 		t.Fatalf("expected at least two submit attempts, got %d", got)
+	}
+}
+
+func TestCosmosAdapterDeferredBacklogCapEvictsOldest(t *testing.T) {
+	adapter := &CosmosAdapter{
+		deferredOp: map[string]cosmosDeferredOperation{
+			"op-1": {deferredAt: time.Unix(1, 0).UTC()},
+			"op-2": {deferredAt: time.Unix(2, 0).UTC()},
+			"op-3": {deferredAt: time.Unix(3, 0).UTC()},
+		},
+		deferredOpMax: 3,
+	}
+
+	adapter.markDeferredOperation(cosmosQueuedOperation{idempotencyKey: "op-4"}, 1, errors.New("retry"), true)
+
+	if got := adapter.deferredOperationCount(); got != 3 {
+		t.Fatalf("expected deferred backlog to stay capped at 3, got %d", got)
+	}
+	if _, ok := adapter.deferredOperationByID("op-1"); ok {
+		t.Fatalf("expected oldest deferred operation op-1 to be evicted")
+	}
+	if _, ok := adapter.deferredOperationByID("op-4"); !ok {
+		t.Fatalf("expected newest deferred operation op-4 to be retained")
 	}
 }
 

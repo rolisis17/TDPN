@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	reflectionv1alpha "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
@@ -116,6 +117,11 @@ type fakeAddr struct{}
 
 func (fakeAddr) Network() string { return "tcp" }
 func (fakeAddr) String() string  { return "fake:0" }
+
+type namedAddr string
+
+func (a namedAddr) Network() string { return "tcp" }
+func (a namedAddr) String() string  { return string(a) }
 
 type fakeListener struct {
 	mu         sync.Mutex
@@ -683,7 +689,13 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	defer conn.Close()
 
 	healthClient := healthpb.NewHealthClient(conn)
-	healthResp, err := healthClient.Check(context.Background(), &healthpb.HealthCheckRequest{})
+	_, err = healthClient.Check(context.Background(), &healthpb.HealthCheckRequest{})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated health check without token in auth mode, got %v", err)
+	}
+
+	healthCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+authToken)
+	healthResp, err := healthClient.Check(healthCtx, &healthpb.HealthCheckRequest{})
 	if err != nil {
 		t.Fatalf("health check failed: %v", err)
 	}
@@ -851,6 +863,119 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 		_, callErr := governanceQuery.ListGovernanceAuditActions(callCtx, &vpngovernancepb.QueryListGovernanceAuditActionsRequest{})
 		return callErr
 	})
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close grpc conn: %v", err)
+	}
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected graceful shutdown success, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for grpc runtime shutdown")
+	}
+}
+
+func TestRunTDPNDRejectsGRPCAuthTokenAndTokenFileTogether(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := dir + "/grpc-token.txt"
+	if err := os.WriteFile(tokenFile, []byte("file-token"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	err := runTDPND(
+		context.Background(),
+		[]string{
+			"--grpc-listen", "127.0.0.1:0",
+			"--grpc-auth-token", "cli-token",
+			"--grpc-auth-token-file", tokenFile,
+		},
+		nil,
+		func() chainScaffold { return app.NewChainScaffold() },
+		runtimeDeps{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "only one of --grpc-auth-token and --grpc-auth-token-file may be set") {
+		t.Fatalf("expected grpc auth token/file exclusivity error, got %v", err)
+	}
+}
+
+func TestRunTDPNDGRPCModeAuthEnforcementWithTokenFile(t *testing.T) {
+	const authToken = "tdpn-file-auth-token"
+
+	dir := t.TempDir()
+	tokenFile := dir + "/grpc-token.txt"
+	if err := os.WriteFile(tokenFile, []byte(authToken+"\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	bufListener := bufconn.Listen(1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--grpc-listen", "bufnet", "--grpc-auth-token-file", tokenFile},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return bufListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(
+		dialCtx,
+		"bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return bufListener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatalf("dial grpc bufconn: %v", err)
+	}
+	defer conn.Close()
+
+	billingMsg := vpnbillingpb.NewMsgClient(conn)
+
+	_, err = billingMsg.ReserveCredits(context.Background(), &vpnbillingpb.MsgReserveCreditsRequest{
+		Reservation: &vpnbillingpb.CreditReservation{
+			ReservationId: "res-file-auth-1",
+			SessionId:     "sess-file-auth-1",
+			Amount:        10,
+		},
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated without token, got %v", err)
+	}
+
+	okTokenCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+authToken)
+	okResp, err := billingMsg.ReserveCredits(okTokenCtx, &vpnbillingpb.MsgReserveCreditsRequest{
+		Reservation: &vpnbillingpb.CreditReservation{
+			ReservationId: "res-file-auth-2",
+			SessionId:     "sess-file-auth-2",
+			Amount:        10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected authorized reserve success, got %v", err)
+	}
+	if okResp.GetReservation().GetReservationId() != "res-file-auth-2" {
+		t.Fatalf("unexpected authorized reservation id %q", okResp.GetReservation().GetReservationId())
+	}
 
 	if err := conn.Close(); err != nil {
 		t.Fatalf("close grpc conn: %v", err)
@@ -1709,8 +1834,8 @@ func TestRunTDPNDSettlementHTTPEpochSelectionPreviewAuthAndMethodBehavior(t *tes
 	requestBody := `{"Policy":{"Epoch":99,"StableSeatCount":1,"RotatingSeatCount":0,"MinStake":1,"MinStakeAgeEpochs":1,"MinHealthScore":1,"MinResourceHeadroom":1,"WarmupEpochs":0,"CooldownEpochs":0,"MaxSeatsPerOperator":0,"MaxSeatsPerASN":0,"MaxSeatsPerRegion":0},"Candidates":[{"ValidatorID":"validator-preview-1","OperatorID":"operator-preview-1","ASN":"64512","Region":"au-west","Stake":100,"StakeAgeEpochs":10,"HealthScore":100,"ResourceHeadroom":100,"HasActiveSanction":false,"HasUnresolvedCriticalIssues":false,"ConsecutiveEligibleEpochs":10,"LastRemovedEpoch":-1,"Score":100,"StableSeatPreferred":true}]}`
 
 	getStatus, getPayload := doJSONRequest(t, http.MethodGet, previewPath, "", nil)
-	if getStatus != http.StatusMethodNotAllowed {
-		t.Fatalf("expected GET preview endpoint to return 405, got %d payload=%v", getStatus, getPayload)
+	if getStatus != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated GET preview endpoint to return 401, got %d payload=%v", getStatus, getPayload)
 	}
 
 	postStatus, postPayload := doJSONRequest(t, http.MethodPost, previewPath, requestBody, nil)
@@ -2211,6 +2336,191 @@ func assertBillingRewardsSponsorCanonicalizationRoundTrip(
 	}
 	if !containsSponsorDelegationReservationID(sponsorListDelegationsResp.GetDelegations(), delegationReservationCanonicalID) {
 		t.Fatalf("expected canonical sponsor delegation %q in list, got %v", delegationReservationCanonicalID, sponsorListDelegationsResp.GetDelegations())
+	}
+}
+
+func TestIsLoopbackListenAddrWithLookupRequiresAllResolvedIPsLoopback(t *testing.T) {
+	t.Parallel()
+
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		switch host {
+		case "loopback.local":
+			return []net.IPAddr{
+				{IP: net.ParseIP("127.0.0.1")},
+				{IP: net.ParseIP("::1")},
+			}, nil
+		case "mixed.local":
+			return []net.IPAddr{
+				{IP: net.ParseIP("127.0.0.1")},
+				{IP: net.ParseIP("203.0.113.10")},
+			}, nil
+		case "public.local":
+			return []net.IPAddr{{IP: net.ParseIP("198.51.100.20")}}, nil
+		case "empty.local":
+			return []net.IPAddr{}, nil
+		default:
+			return nil, errors.New("lookup failed")
+		}
+	}
+
+	testCases := []struct {
+		name       string
+		listenAddr string
+		want       bool
+	}{
+		{name: "literal-ipv4-loopback", listenAddr: "127.0.0.1:7000", want: true},
+		{name: "literal-ipv6-loopback", listenAddr: "[::1]:7000", want: true},
+		{name: "ipv6-zone-loopback", listenAddr: "[::1%lo0]:7000", want: true},
+		{name: "hostname-all-loopback", listenAddr: "loopback.local:7000", want: true},
+		{name: "hostname-mixed-loopback-and-public", listenAddr: "mixed.local:7000", want: false},
+		{name: "hostname-public", listenAddr: "public.local:7000", want: false},
+		{name: "hostname-empty-resolution", listenAddr: "empty.local:7000", want: false},
+		{name: "hostname-lookup-error", listenAddr: "missing.local:7000", want: false},
+		{name: "wildcard-host", listenAddr: "*:7000", want: false},
+		{name: "numeric-port-only", listenAddr: "7000", want: false},
+		{name: "public-ip-without-port", listenAddr: "198.51.100.20", want: false},
+		{name: "bufnet-short-circuit", listenAddr: "bufnet", want: true},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := isLoopbackListenAddrWithLookup(tc.listenAddr, lookup)
+			if got != tc.want {
+				t.Fatalf("isLoopbackListenAddrWithLookup(%q)=%v want=%v", tc.listenAddr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsLoopbackPeerWithLookupRequiresAllResolvedIPsLoopback(t *testing.T) {
+	t.Parallel()
+
+	lookup := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		switch host {
+		case "loopback.local":
+			return []net.IPAddr{
+				{IP: net.ParseIP("127.0.0.1")},
+				{IP: net.ParseIP("::1")},
+			}, nil
+		case "mixed.local":
+			return []net.IPAddr{
+				{IP: net.ParseIP("127.0.0.1")},
+				{IP: net.ParseIP("203.0.113.11")},
+			}, nil
+		default:
+			return nil, errors.New("lookup failed")
+		}
+	}
+
+	makePeerCtx := func(addr net.Addr) context.Context {
+		return peer.NewContext(context.Background(), &peer.Peer{Addr: addr})
+	}
+
+	testCases := []struct {
+		name string
+		ctx  context.Context
+		want bool
+	}{
+		{name: "missing-peer", ctx: context.Background(), want: false},
+		{name: "literal-loopback", ctx: makePeerCtx(namedAddr("127.0.0.1:40100")), want: true},
+		{name: "hostname-all-loopback", ctx: makePeerCtx(namedAddr("loopback.local:40101")), want: true},
+		{name: "hostname-mixed-loopback-and-public", ctx: makePeerCtx(namedAddr("mixed.local:40102")), want: false},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := isLoopbackPeerWithLookup(tc.ctx, lookup)
+			if got != tc.want {
+				t.Fatalf("isLoopbackPeerWithLookup(%s)=%v want=%v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMethodRequiresAuthDefaultDenyWithHealthAllowlist(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		fullMethod string
+		want       bool
+	}{
+		{name: "health-check-open", fullMethod: grpcHealthCheckMethod, want: false},
+		{name: "health-watch-auth-required", fullMethod: grpcHealthWatchMethod, want: true},
+		{name: "tdpn-method-auth-required", fullMethod: "/tdpn.vpnbilling.v1.Msg/ReserveCredits", want: true},
+		{name: "non-tdpn-method-auth-required", fullMethod: "/custom.service.v1.Query/Ping", want: true},
+		{name: "empty-method-auth-required", fullMethod: "", want: true},
+		{name: "trimmed-health-check-open", fullMethod: "  " + grpcHealthCheckMethod + "  ", want: false},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := methodRequiresAuth(tc.fullMethod); got != tc.want {
+				t.Fatalf("methodRequiresAuth(%q)=%v want=%v", tc.fullMethod, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAuthUnaryInterceptorDefaultDenyNonHealthMethods(t *testing.T) {
+	t.Parallel()
+
+	const authToken = "runtime-interceptor-token"
+	interceptor := authUnaryInterceptor(authToken)
+	handler := func(context.Context, any) (any, error) { return "ok", nil }
+
+	healthResp, err := interceptor(
+		context.Background(),
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: grpcHealthCheckMethod},
+		handler,
+	)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected health check without token to be unauthenticated, got %v", err)
+	}
+
+	healthTokenCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+authToken))
+	healthResp, err = interceptor(
+		healthTokenCtx,
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: grpcHealthCheckMethod},
+		handler,
+	)
+	if err != nil {
+		t.Fatalf("expected health check with token to pass auth, got %v", err)
+	}
+	if healthResp != "ok" {
+		t.Fatalf("expected health check handler response 'ok', got %#v", healthResp)
+	}
+
+	_, err = interceptor(
+		context.Background(),
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: "/custom.service.v1.Query/Ping"},
+		handler,
+	)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected non-allowlisted method without token to be unauthenticated, got %v", err)
+	}
+
+	okTokenCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+authToken))
+	authResp, err := interceptor(
+		okTokenCtx,
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: "/custom.service.v1.Query/Ping"},
+		handler,
+	)
+	if err != nil {
+		t.Fatalf("expected non-allowlisted method with token to pass auth, got %v", err)
+	}
+	if authResp != "ok" {
+		t.Fatalf("expected authorized handler response 'ok', got %#v", authResp)
 	}
 }
 

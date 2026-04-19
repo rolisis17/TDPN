@@ -15,10 +15,12 @@ AUTH_ENV="$ROOT_DIR/deploy/.env.easy.server"
 PROVIDER_ENV="$ROOT_DIR/deploy/.env.easy.provider"
 MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 IDENTITY_FILE="$ROOT_DIR/deploy/data/easy_node_identity.conf"
+EXIT_KEY_FILE="$ROOT_DIR/deploy/data/entry-exit/exit_opperm_wg.key"
 HOSTS_FILE="$ROOT_DIR/data/easy_mode_hosts.conf"
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
+WG_PUBKEY_FAIL_STATE="$TMP_DIR/wg_pubkey_fail_state"
 
 backup_file() {
   local src="$1"
@@ -43,6 +45,7 @@ cleanup() {
   restore_file "$PROVIDER_ENV" "provider_env"
   restore_file "$MODE_FILE" "mode_file"
   restore_file "$IDENTITY_FILE" "identity_file"
+  restore_file "$EXIT_KEY_FILE" "exit_key_file"
   restore_file "$HOSTS_FILE" "hosts_file"
   rm -rf "$TMP_DIR"
 }
@@ -52,7 +55,10 @@ backup_file "$AUTH_ENV" "auth_env"
 backup_file "$PROVIDER_ENV" "provider_env"
 backup_file "$MODE_FILE" "mode_file"
 backup_file "$IDENTITY_FILE" "identity_file"
+backup_file "$EXIT_KEY_FILE" "exit_key_file"
 backup_file "$HOSTS_FILE" "hosts_file"
+
+mkdir -p "$(dirname "$EXIT_KEY_FILE")"
 
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
@@ -141,6 +147,10 @@ if [[ "${1:-}" == "genkey" ]]; then
 fi
 if [[ "${1:-}" == "pubkey" ]]; then
   # server-up derives EXIT_WG_PUBKEY via `wg pubkey`
+  if [[ "${FAKE_WG_PUBKEY_FAIL_ONCE:-0}" == "1" && ! -f "${FAKE_WG_PUBKEY_FAIL_STATE_FILE:-}" ]]; then
+    : >"${FAKE_WG_PUBKEY_FAIL_STATE_FILE:-$WG_PUBKEY_FAIL_STATE}"
+    exit 13
+  fi
   cat >/dev/null || true
   echo "test-wg-public-key"
   exit 0
@@ -295,6 +305,65 @@ fi
 if ! rg -q 'auto invite: invite generation failed \(rc=[0-9]+\); failing because --auto-invite-fail-open=0' "$AUTH_FAIL_CLOSE_LOG"; then
   echo "expected auto-invite fail-close message"
   cat "$AUTH_FAIL_CLOSE_LOG"
+  exit 1
+fi
+
+echo "[server-up-auto-invite] non-prod exit key permission self-heal"
+printf '%s\n' 'test-private-key' >"$EXIT_KEY_FILE"
+chmod 600 "$EXIT_KEY_FILE"
+PERM_OK_LOG="$TMP_DIR/authority_exit_key_perm_heal.log"
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_WG_PUBKEY_FAIL_ONCE=1 \
+FAKE_WG_PUBKEY_FAIL_STATE_FILE="$WG_PUBKEY_FAIL_STATE" \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --operator-id opperm \
+  --beta-profile 1 \
+  --prod-profile 0 >"$PERM_OK_LOG" 2>&1
+
+if ! rg -q 'repaired exit wg private-key permissions before deriving EXIT_WG_PUBKEY' "$PERM_OK_LOG"; then
+  echo "expected non-prod exit key self-heal note"
+  cat "$PERM_OK_LOG"
+  exit 1
+fi
+if ! rg -q 'server stack started' "$PERM_OK_LOG"; then
+  echo "expected non-prod server-up to complete after exit key permission repair"
+  cat "$PERM_OK_LOG"
+  exit 1
+fi
+
+echo "[server-up-auto-invite] prod exit key permission failure is fail-closed"
+chmod 600 "$EXIT_KEY_FILE"
+rm -f "$WG_PUBKEY_FAIL_STATE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_WG_PUBKEY_FAIL_ONCE=1 \
+FAKE_WG_PUBKEY_FAIL_STATE_FILE="$WG_PUBKEY_FAIL_STATE" \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --operator-id opperm \
+  --peer-directories https://198.51.100.20:8081 \
+  --beta-profile 1 \
+  --prod-profile 1 >"$TMP_DIR/authority_exit_key_perm_fail.log" 2>&1
+perm_fail_rc=$?
+set -e
+if [[ "$perm_fail_rc" -eq 0 ]]; then
+  echo "expected prod server-up to fail closed on unreadable exit key"
+  cat "$TMP_DIR/authority_exit_key_perm_fail.log"
+  exit 1
+fi
+if ! rg -q 'server-up refused: could not derive EXIT_WG_PUBKEY from local key in prod profile' "$TMP_DIR/authority_exit_key_perm_fail.log"; then
+  echo "expected prod exit key fail-closed message"
+  cat "$TMP_DIR/authority_exit_key_perm_fail.log"
+  exit 1
+fi
+if ! rg -q 'fix the file permissions/contents or recreate the key as the current user' "$TMP_DIR/authority_exit_key_perm_fail.log"; then
+  echo "expected actionable remediation for unreadable prod exit key"
+  cat "$TMP_DIR/authority_exit_key_perm_fail.log"
   exit 1
 fi
 

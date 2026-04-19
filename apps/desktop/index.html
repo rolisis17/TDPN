@@ -3,103 +3,174 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TDPN Desktop (Scaffold)</title>
+    <title>Global Private Mesh Desktop</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <main class="app">
       <header class="hero">
-        <h1>TDPN Desktop</h1>
-        <p>Windows-native track scaffold (Tauri + local daemon API)</p>
+        <h1>Global Private Mesh</h1>
+        <p>GPM Desktop: wallet login, trusted bootstrap, and role-aware control.</p>
       </header>
 
       <section class="card">
-        <h2>Connection</h2>
-        <div class="grid">
+        <h2>Account</h2>
+        <div class="grid grid-4">
           <label>
-            Bootstrap directory
-            <input id="bootstrap_directory" value="http://127.0.0.1:8081" />
-          </label>
-          <label>
-            Invite key
-            <input id="invite_key" placeholder="inv-..." />
-          </label>
-          <label>
-            Path profile
-            <select id="path_profile">
-              <option value="2hop">2hop (default)</option>
-              <option value="1hop">1hop</option>
-              <option value="3hop">3hop</option>
+            Wallet provider
+            <select id="wallet_provider">
+              <option value="keplr">Keplr</option>
+              <option value="leap">Leap</option>
             </select>
           </label>
           <label>
-            Interface
-            <input id="interface" value="wgvpn0" />
+            Wallet address
+            <input id="wallet_address" placeholder="cosmos1..." />
           </label>
           <label>
-            Discovery wait (sec)
-            <input id="discovery_wait_sec" type="number" min="1" value="20" />
+            Challenge ID
+            <input id="challenge_id" placeholder="gpm-chal-..." />
           </label>
           <label>
-            Ready timeout (sec)
-            <input id="ready_timeout_sec" type="number" min="1" value="35" />
-          </label>
-          <label class="check">
-            <input id="run_preflight" type="checkbox" checked />
-            Run preflight
-          </label>
-          <label class="check">
-            <input id="prod_profile" type="checkbox" />
-            PROD profile
-          </label>
-          <label class="check">
-            <input id="install_route" type="checkbox" checked />
-            Install default route
+            Signature
+            <input id="wallet_signature" placeholder="wallet signature" />
           </label>
         </div>
         <div class="actions">
-          <button id="connect_btn">Connect</button>
-          <button id="disconnect_btn" class="secondary">Disconnect</button>
+          <button id="challenge_btn">Request Challenge</button>
+          <button id="signin_btn">Sign In</button>
+          <button id="session_btn" class="secondary">Session</button>
+          <button id="manifest_btn" class="secondary">Manifest</button>
+        </div>
+        <div class="grid grid-3">
+          <label>
+            Session token
+            <input id="session_token" placeholder="session token" />
+          </label>
+          <label>
+            Role
+            <input id="current_role" value="client" readonly />
+          </label>
+          <label>
+            Chain operator ID
+            <input id="chain_operator_id" placeholder="operator-id" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="register_client_btn">Register Client</button>
+          <button id="apply_operator_btn" class="secondary">Apply Operator Role</button>
+          <button id="operator_status_btn" class="secondary">Operator Status</button>
+          <button id="approve_operator_btn" class="secondary">Approve Operator</button>
         </div>
       </section>
 
       <section class="card">
-        <h2>Control</h2>
-        <div class="row">
-          <label>
-            Active profile
-            <select id="set_profile">
-              <option value="2hop">2hop</option>
-              <option value="1hop">1hop</option>
-              <option value="3hop">3hop</option>
-            </select>
-          </label>
+        <div class="tabs" role="tablist" aria-label="Workspaces">
+          <button id="tab_client" class="tab active" type="button">Client</button>
+          <button id="tab_server" class="tab" type="button">Server</button>
         </div>
-        <div class="actions">
-          <button id="set_profile_btn">Set Profile</button>
-          <button id="status_btn" class="secondary">Status</button>
-          <button id="diagnostics_btn" class="secondary">Diagnostics</button>
-          <button id="health_btn" class="secondary">Health</button>
-          <button id="update_btn" class="secondary">Update</button>
+
+        <div id="panel_client" class="tab-panel active">
+          <h2>Client Workspace</h2>
+          <div class="grid">
+            <label>
+              Path profile
+              <select id="path_profile">
+                <option value="2hop">2hop (balanced)</option>
+                <option value="1hop">1hop (speed)</option>
+                <option value="3hop">3hop (private)</option>
+              </select>
+            </label>
+            <label>
+              Interface
+              <input id="interface" value="wgvpn0" />
+            </label>
+            <label>
+              Discovery wait (sec)
+              <input id="discovery_wait_sec" type="number" min="1" value="20" />
+            </label>
+            <label>
+              Ready timeout (sec)
+              <input id="ready_timeout_sec" type="number" min="1" value="35" />
+            </label>
+            <label class="check">
+              <input id="run_preflight" type="checkbox" checked />
+              Run preflight
+            </label>
+            <label class="check">
+              <input id="prod_profile" type="checkbox" />
+              PROD profile
+            </label>
+            <label class="check">
+              <input id="install_route" type="checkbox" checked />
+              Install default route
+            </label>
+          </div>
+          <details class="advanced">
+            <summary>Advanced (TDPN compatibility)</summary>
+            <p>Optional legacy fields for support-only compatibility flows.</p>
+            <label class="check">
+              <input id="compat_enable" type="checkbox" />
+              Enable manual bootstrap/invite override
+            </label>
+            <div class="grid">
+              <label>
+                Bootstrap directory
+                <input id="bootstrap_directory" placeholder="https://directory.example:8081" disabled />
+              </label>
+              <label>
+                Invite/subject
+                <input id="invite_key" placeholder="inv-..." type="password" autocomplete="off" spellcheck="false" disabled />
+              </label>
+            </div>
+          </details>
+          <div class="actions">
+            <button id="connect_btn">Connect</button>
+            <button id="disconnect_btn" class="secondary">Disconnect</button>
+            <button id="status_btn" class="secondary">Status</button>
+            <button id="diagnostics_btn" class="secondary">Diagnostics</button>
+            <button id="health_btn" class="secondary">Health</button>
+          </div>
+        </div>
+
+        <div id="panel_server" class="tab-panel">
+          <h2>Server Workspace</h2>
+          <p id="server_lock_hint" class="hint">
+            Server controls are available only for approved operator/admin roles.
+          </p>
+          <div class="row">
+            <label>
+              Active profile
+              <select id="set_profile">
+                <option value="2hop">2hop</option>
+                <option value="1hop">1hop</option>
+                <option value="3hop">3hop</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button id="set_profile_btn">Set Profile</button>
+            <button id="status_btn_server" class="secondary">Status</button>
+            <button id="service_status_btn" class="secondary">Service Status</button>
+            <button id="service_start_btn">Service Start</button>
+            <button id="service_stop_btn" class="secondary">Service Stop</button>
+            <button id="service_restart_btn" class="secondary">Service Restart</button>
+            <button id="update_btn" class="secondary">Update</button>
+          </div>
         </div>
       </section>
 
       <section class="card">
-        <h2>Service</h2>
-        <div class="actions">
-          <button id="service_status_btn" class="secondary">Service Status</button>
-          <button id="service_start_btn">Service Start</button>
-          <button id="service_stop_btn" class="secondary">Service Stop</button>
-          <button id="service_restart_btn" class="secondary">Service Restart</button>
+        <h2>Network & API</h2>
+        <div class="meta">
+          <span id="api_base">API: loading...</span>
+          <span id="api_hints"></span>
+          <span id="manifest_source"></span>
         </div>
       </section>
 
       <section class="card">
         <h2>Output</h2>
-        <div class="meta">
-          <span id="api_base">API: loading...</span>
-          <span id="api_hints"></span>
-        </div>
         <pre id="output"></pre>
       </section>
     </main>

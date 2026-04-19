@@ -102,6 +102,42 @@ preferred_target_group() {
   printf '%s\n' ""
 }
 
+validate_iface_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ -z "$value" || ! "$value" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+    echo "$name contains invalid characters"
+    exit 2
+  fi
+}
+
+resolve_user_home() {
+  local user="$1"
+  local home=""
+  if [[ -n "$user" ]]; then
+    home="$(getent passwd "$user" 2>/dev/null | awk -F: 'NR==1{print $6}')"
+  fi
+  if [[ -z "$home" ]]; then
+    home="${HOME:-}"
+  fi
+  printf '%s\n' "$home"
+}
+
+runtime_fix_default_mutable_allowlist() {
+  local owner_user="$1"
+  local owner_home
+  owner_home="$(resolve_user_home "$owner_user")"
+  local client_vpn_default="$ROOT_DIR/deploy/data/client_vpn"
+  if [[ "$ROOT_DIR" == /mnt/* ]]; then
+    if [[ -n "$owner_home" ]]; then
+      client_vpn_default="$owner_home/.local/state/privacynode/client_vpn"
+    else
+      client_vpn_default="/tmp/privacynode_client_vpn"
+    fi
+  fi
+  printf '%s\n' "$ROOT_DIR/deploy,$ROOT_DIR/.easy-node-logs,$ROOT_DIR/deploy/data/wg_only,$ROOT_DIR/deploy/data/client_vpn,$client_vpn_default"
+}
+
 json_escape() {
   jq -Rn --arg v "$1" '$v'
 }
@@ -146,6 +182,167 @@ validate_manual_validation_summary_payload() {
   return 0
 }
 
+canonicalize_existing_path() {
+  local path="$1"
+  if [[ -d "$path" ]]; then
+    (cd "$path" >/dev/null 2>&1 && pwd -P)
+    return
+  fi
+  if [[ -e "$path" ]]; then
+    local parent base parent_canon
+    parent="$(dirname "$path")"
+    base="$(basename "$path")"
+    parent_canon="$(canonicalize_existing_path "$parent" 2>/dev/null || true)"
+    if [[ -z "$parent_canon" ]]; then
+      return 1
+    fi
+    printf '%s/%s\n' "$parent_canon" "$base"
+    return
+  fi
+  return 1
+}
+
+canonicalize_nearest_existing_dir() {
+  local path="$1"
+  local probe="$path"
+  while [[ ! -e "$probe" ]]; do
+    local next
+    next="$(dirname "$probe")"
+    if [[ "$next" == "$probe" ]]; then
+      return 1
+    fi
+    probe="$next"
+  done
+  if [[ -d "$probe" ]]; then
+    canonicalize_existing_path "$probe"
+  else
+    canonicalize_existing_path "$(dirname "$probe")"
+  fi
+}
+
+canonicalize_path_with_parents() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    canonicalize_existing_path "$path"
+    return
+  fi
+  local parent base parent_canon
+  parent="$(dirname "$path")"
+  base="$(basename "$path")"
+  parent_canon="$(canonicalize_existing_path "$parent" 2>/dev/null || true)"
+  if [[ -z "$parent_canon" ]]; then
+    parent_canon="$(canonicalize_nearest_existing_dir "$parent" 2>/dev/null || true)"
+  fi
+  if [[ -z "$parent_canon" ]]; then
+    return 1
+  fi
+  if [[ "$parent_canon" == "/" ]]; then
+    printf '/%s\n' "$base"
+  else
+    printf '%s/%s\n' "$parent_canon" "$base"
+  fi
+}
+
+path_is_within() {
+  local path="$1"
+  local base="$2"
+  [[ "$path" == "$base" || "$path" == "$base/"* ]]
+}
+
+path_has_invalid_segments() {
+  local path="$1"
+  local normalized="${path#/}"
+  local segment
+  local -a segments=()
+  local IFS='/'
+  read -r -a segments <<<"$normalized"
+  for segment in "${segments[@]}"; do
+    if [[ -z "$segment" || "$segment" == "." || "$segment" == ".." ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+path_allowed_by_prefixes() {
+  local target="$1"
+  local prefix_list="$2"
+  local target_canon
+  target_canon="$(canonicalize_path_with_parents "$target" 2>/dev/null || true)"
+  if [[ -z "$target_canon" ]]; then
+    return 1
+  fi
+
+  local prefix trimmed prefix_canon
+  local -a prefixes=()
+  local IFS=','
+  read -r -a prefixes <<<"$prefix_list"
+  for prefix in "${prefixes[@]}"; do
+    trimmed="$(trim "$prefix")"
+    if [[ -z "$trimmed" ]]; then
+      continue
+    fi
+    if [[ "$trimmed" != /* ]]; then
+      continue
+    fi
+    if path_has_invalid_segments "$trimmed"; then
+      continue
+    fi
+    prefix_canon="$(canonicalize_path_with_parents "$trimmed" 2>/dev/null || true)"
+    if [[ -z "$prefix_canon" ]]; then
+      continue
+    fi
+    if path_is_within "$target_canon" "$prefix_canon"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+validate_mutable_target_path() {
+  local path="$1"
+  local allowlist="$2"
+  if [[ -z "$path" ]]; then
+    echo "mutable path refused: empty path"
+    return 1
+  fi
+  if [[ "$path" != /* ]]; then
+    echo "mutable path refused: path must be absolute: $path"
+    return 1
+  fi
+  if path_has_invalid_segments "$path"; then
+    echo "mutable path refused: path contains invalid segment: $path"
+    return 1
+  fi
+  if ! path_allowed_by_prefixes "$path" "$allowlist"; then
+    echo "mutable path refused: path is outside allowlist ($allowlist): $path"
+    return 1
+  fi
+  return 0
+}
+
+validate_wg_only_prune_target() {
+  local path="$1"
+  local allowlist="$2"
+  if [[ -z "$path" ]]; then
+    echo "wg-only prune refused: empty path"
+    return 1
+  fi
+  if [[ "$path" != /* ]]; then
+    echo "wg-only prune refused: path must be absolute: $path"
+    return 1
+  fi
+  if path_has_invalid_segments "$path"; then
+    echo "wg-only prune refused: path contains invalid segment: $path"
+    return 1
+  fi
+  if ! path_allowed_by_prefixes "$path" "$allowlist"; then
+    echo "wg-only prune refused: path is outside allowlist ($allowlist): $path"
+    return 1
+  fi
+  return 0
+}
+
 show_json="0"
 prune_wg_only_dir="0"
 manual_validation_report_enabled="${RUNTIME_FIX_MANUAL_VALIDATION_REPORT:-1}"
@@ -155,6 +352,7 @@ base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+wg_only_prune_allowlist="${EASY_NODE_RUNTIME_FIX_WG_ONLY_PRUNE_ALLOWLIST:-$ROOT_DIR/deploy/data/wg_only}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -232,10 +430,19 @@ if [[ -z "$client_iface" || -z "$exit_iface" || -z "$vpn_iface" ]]; then
   echo "--client-iface, --exit-iface, and --vpn-iface must be non-empty"
   exit 2
 fi
+validate_iface_or_die "--client-iface" "$client_iface"
+validate_iface_or_die "--exit-iface" "$exit_iface"
+validate_iface_or_die "--vpn-iface" "$vpn_iface"
 
-doctor_script="${RUNTIME_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/runtime_doctor.sh}"
-easy_node_script="${EASY_NODE_RUNTIME_FIX_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
-manual_validation_report_script="${MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
+if [[ "$(effective_uid)" == "0" ]]; then
+  doctor_script="$ROOT_DIR/scripts/runtime_doctor.sh"
+  easy_node_script="$ROOT_DIR/scripts/easy_node.sh"
+  manual_validation_report_script="$ROOT_DIR/scripts/manual_validation_report.sh"
+else
+  doctor_script="${RUNTIME_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/runtime_doctor.sh}"
+  easy_node_script="${EASY_NODE_RUNTIME_FIX_EASY_NODE_SCRIPT:-$ROOT_DIR/scripts/easy_node.sh}"
+  manual_validation_report_script="${MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
+fi
 if [[ ! -x "$doctor_script" ]]; then
   echo "missing runtime doctor script: $doctor_script"
   exit 2
@@ -278,14 +485,23 @@ run_doctor() {
     --show-json 1
   )
   if [[ "$(effective_uid)" == "0" && -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    local sudo_user_home
+    sudo_user_home="$(resolve_user_home "$SUDO_USER")"
+    local -a clean_env=(
+      env -i
+      PATH="$PATH"
+      HOME="$sudo_user_home"
+      USER="$SUDO_USER"
+      LOGNAME="$SUDO_USER"
+    )
     if command -v runuser >/dev/null 2>&1; then
-      if runuser -u "$SUDO_USER" -- "${doctor_cmd[@]}" >"$log_file" 2>&1; then
+      if runuser -u "$SUDO_USER" -- "${clean_env[@]}" "${doctor_cmd[@]}" >"$log_file" 2>&1; then
         rc=0
       else
         rc=$?
       fi
     elif command -v sudo >/dev/null 2>&1; then
-      if sudo -u "$SUDO_USER" "${doctor_cmd[@]}" >"$log_file" 2>&1; then
+      if sudo -u "$SUDO_USER" "${clean_env[@]}" "${doctor_cmd[@]}" >"$log_file" 2>&1; then
         rc=0
       else
         rc=$?
@@ -338,6 +554,11 @@ repair_ownership_path() {
   if [[ -z "$target_owner_spec" ]]; then
     actions_skipped+=("${action_name} (target owner unavailable)")
     echo "[runtime-fix] action_skipped=${action_name} (target owner unavailable)"
+    return
+  fi
+  if ! validate_mutable_target_path "$path" "$mutable_path_allowlist"; then
+    actions_failed+=("$action_name")
+    echo "[runtime-fix] action_failed=${action_name} path=$path reason=unsafe_path"
     return
   fi
   if [[ "$create_dir" == "1" ]]; then
@@ -396,6 +617,11 @@ if [[ -n "$target_owner_user" && -n "$target_owner_group" ]]; then
 else
   target_owner_spec=""
 fi
+if [[ "$current_uid" == "$root_required_uid" ]]; then
+  mutable_path_allowlist="$(runtime_fix_default_mutable_allowlist "$target_owner_user")"
+else
+  mutable_path_allowlist="${EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST:-$(runtime_fix_default_mutable_allowlist "$target_owner_user")}"
+fi
 
 if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_state_stale" or . == "wg_only_client_iface_present" or . == "wg_only_exit_iface_present" or startswith("wg_only_port_busy_"))] | length > 0'; then
   if [[ "$current_uid" == "$root_required_uid" ]]; then
@@ -428,17 +654,17 @@ if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_sta
 fi
 
 if json_has_code "$before_json" '[.findings[].code | select(. == "stale_client_demo_containers")] | length > 0'; then
-  stale_demo_ids=""
+  stale_demo_ids=()
   if command -v docker >/dev/null 2>&1; then
-    stale_demo_ids="$(docker ps -aq --filter 'name=^deploy-client-demo-run-' 2>/dev/null | tr '\n' ' ' | xargs 2>/dev/null || true)"
+    mapfile -t stale_demo_ids < <(docker ps -aq --filter 'name=^deploy-client-demo-run-' 2>/dev/null || true)
   fi
-  if [[ -n "$stale_demo_ids" ]]; then
-    if docker rm -f $stale_demo_ids >/dev/null 2>&1; then
+  if (( ${#stale_demo_ids[@]} > 0 )); then
+    if docker rm -f "${stale_demo_ids[@]}" >/dev/null 2>&1; then
       actions_taken+=("demo container cleanup")
-      echo "[runtime-fix] action=demo container cleanup ids=$stale_demo_ids"
+      echo "[runtime-fix] action=demo container cleanup ids=${stale_demo_ids[*]}"
     else
       actions_failed+=("demo container cleanup")
-      echo "[runtime-fix] action_failed=demo container cleanup ids=$stale_demo_ids"
+      echo "[runtime-fix] action_failed=demo container cleanup ids=${stale_demo_ids[*]}"
     fi
   fi
   if command -v docker >/dev/null 2>&1 && docker network inspect deploy_default >/dev/null 2>&1; then
@@ -475,15 +701,20 @@ fi
 if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_dir_not_writable")] | length > 0'; then
   if [[ "$prune_wg_only_dir" == "1" ]]; then
     if [[ "$current_uid" == "$root_required_uid" ]]; then
-      if [[ -n "$wg_only_dir" ]] && rm -rf "$wg_only_dir"; then
-        actions_taken+=("wg-only runtime dir prune")
-        echo "[runtime-fix] action=wg-only runtime dir prune path=$wg_only_dir"
-        if [[ -n "$target_owner_spec" ]]; then
-          repair_ownership_path "wg-only runtime dir ownership repair" "$wg_only_dir" 1 "700" 1
+      if validate_wg_only_prune_target "$wg_only_dir" "$wg_only_prune_allowlist"; then
+        if rm -rf "$wg_only_dir"; then
+          actions_taken+=("wg-only runtime dir prune")
+          echo "[runtime-fix] action=wg-only runtime dir prune path=$wg_only_dir"
+          if [[ -n "$target_owner_spec" ]]; then
+            repair_ownership_path "wg-only runtime dir ownership repair" "$wg_only_dir" 1 "700" 1
+          fi
+        else
+          actions_failed+=("wg-only runtime dir prune")
+          echo "[runtime-fix] action_failed=wg-only runtime dir prune path=$wg_only_dir"
         fi
       else
         actions_failed+=("wg-only runtime dir prune")
-        echo "[runtime-fix] action_failed=wg-only runtime dir prune path=$wg_only_dir"
+        echo "[runtime-fix] action_failed=wg-only runtime dir prune path=$wg_only_dir reason=unsafe_path"
       fi
     else
       actions_skipped+=("wg-only runtime dir prune (root required)")
@@ -506,6 +737,7 @@ after_status="$(printf '%s\n' "$after_json" | jq -r '.status // "UNKNOWN"')"
 after_findings_total="$(printf '%s\n' "$after_json" | jq -r '.summary.findings_total // 0')"
 
 echo "[runtime-fix] after_status=$after_status findings=$after_findings_total actions_taken=${#actions_taken[@]} actions_skipped=${#actions_skipped[@]} actions_failed=${#actions_failed[@]}"
+echo "[runtime-fix] mutable_path_allowlist=$mutable_path_allowlist"
 if ((${#actions_taken[@]} == 0 && ${#actions_skipped[@]} == 0 && ${#actions_failed[@]} == 0)); then
   echo "[runtime-fix] no cleanup actions were needed"
 fi
@@ -551,6 +783,8 @@ if [[ "$show_json" == "1" ]]; then
       --arg client_iface "$client_iface" \
       --arg exit_iface "$exit_iface" \
       --arg vpn_iface "$vpn_iface" \
+      --arg wg_only_prune_allowlist "$wg_only_prune_allowlist" \
+      --arg mutable_path_allowlist "$mutable_path_allowlist" \
       --argjson prune_wg_only_dir "$prune_wg_only_dir" \
       --argjson root_uid "$current_uid" \
       --arg target_owner_user "$target_owner_user" \
@@ -575,6 +809,8 @@ if [[ "$show_json" == "1" ]]; then
           client_iface: $client_iface,
           exit_iface: $exit_iface,
           vpn_iface: $vpn_iface,
+          wg_only_prune_allowlist: $wg_only_prune_allowlist,
+          mutable_path_allowlist: $mutable_path_allowlist,
           prune_wg_only_dir: ($prune_wg_only_dir == 1),
           effective_uid: $root_uid,
           target_owner_user: $target_owner_user,

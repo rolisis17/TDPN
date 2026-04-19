@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
@@ -116,5 +118,57 @@ func TestChainScaffoldConfigureStateDirRequiresPath(t *testing.T) {
 	scaffold := NewChainScaffold()
 	if err := scaffold.ConfigureStateDir("   "); err == nil {
 		t.Fatal("expected ConfigureStateDir to reject empty state dir")
+	}
+}
+
+func TestChainScaffoldConfigureStateDirRejectsSymlinkStateFile(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "outside-target.json")
+	if err := os.WriteFile(targetPath, []byte("seed\n"), 0o600); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+
+	linkPath := filepath.Join(stateDir, "vpnvalidator.json")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+
+	scaffold := NewChainScaffold()
+	err := scaffold.ConfigureStateDir(stateDir)
+	if err == nil {
+		t.Fatal("expected ConfigureStateDir to reject symlinked scaffold state file")
+	}
+	if !strings.Contains(err.Error(), "resolves to a symlink") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+}
+
+func TestChainScaffoldConfigureStateDirDoesNotWriteThroughDanglingSymlink(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "outside", "never-created.json")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("create target directory: %v", err)
+	}
+
+	linkPath := filepath.Join(stateDir, "vpnvalidator.json")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+
+	scaffold := NewChainScaffold()
+	err := scaffold.ConfigureStateDir(stateDir)
+	if err == nil {
+		t.Fatal("expected ConfigureStateDir to reject dangling symlinked scaffold state file")
+	}
+	if !strings.Contains(err.Error(), "resolves to a symlink") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+
+	if _, statErr := os.Stat(targetPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected dangling symlink target to remain absent, got stat err=%v", statErr)
 	}
 }

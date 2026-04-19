@@ -188,7 +188,6 @@ func protoPenaltyToModule(record *pb.PenaltyDecision) modtypes.PenaltyDecision {
 		SlashBasisPoint: record.GetSlashBasisPoint(),
 		Jailed:          record.GetJailed(),
 		AppliedAtUnix:   record.GetAppliedAtUnix(),
-		Status:          protoStatusToModule(record.GetStatus()),
 	}
 }
 

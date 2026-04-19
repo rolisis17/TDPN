@@ -165,9 +165,21 @@ default_lane_go_cmd="\
 go test ./pkg/settlement/... && \
 go test ./services/issuer ./services/exit ./services/localapi"
 
-lane_cosmos_low_level_cmd="${CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_COSMOS_CMD:-$default_lane_cosmos_cmd}"
-lane_phase_wrappers_cmd="${CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_PHASE_CMD:-$default_lane_phase_cmd}"
-lane_go_tests_cmd="${CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_GO_CMD:-$default_lane_go_cmd}"
+lane_cosmos_override="${CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_COSMOS_CMD:-}"
+lane_phase_override="${CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_PHASE_CMD:-}"
+lane_go_override="${CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_GO_CMD:-}"
+allow_unsafe_cmd_override="${CI_BLOCKCHAIN_PARALLEL_SWEEP_ALLOW_UNSAFE_CMD_OVERRIDE:-0}"
+
+if [[ "$allow_unsafe_cmd_override" != "1" ]]; then
+  if [[ -n "$lane_cosmos_override" || -n "$lane_phase_override" || -n "$lane_go_override" ]]; then
+    echo "unsafe lane command override rejected; set CI_BLOCKCHAIN_PARALLEL_SWEEP_ALLOW_UNSAFE_CMD_OVERRIDE=1 to opt in"
+    exit 2
+  fi
+fi
+
+lane_cosmos_low_level_cmd="${lane_cosmos_override:-$default_lane_cosmos_cmd}"
+lane_phase_wrappers_cmd="${lane_phase_override:-$default_lane_phase_cmd}"
+lane_go_tests_cmd="${lane_go_override:-$default_lane_go_cmd}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

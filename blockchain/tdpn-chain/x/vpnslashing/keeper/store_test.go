@@ -75,9 +75,10 @@ func TestNewKeeperWithStoreNilFallsBackToInMemory(t *testing.T) {
 	k := NewKeeperWithStore(nil)
 
 	record := types.SlashEvidence{
-		EvidenceID: "evidence-fallback",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-fallback"),
+		EvidenceID:    "evidence-fallback",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-fallback"),
+		ViolationType: "double-sign",
 	}
 	k.UpsertEvidence(record)
 
@@ -97,9 +98,10 @@ func TestKeeperDelegatesUpsertAndGetToCustomStore(t *testing.T) {
 	k := NewKeeperWithStore(store)
 
 	evidence := types.SlashEvidence{
-		EvidenceID: "evidence-1",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-1"),
+		EvidenceID:    "evidence-1",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-1"),
+		ViolationType: "double-sign",
 	}
 	k.UpsertEvidence(evidence)
 
@@ -148,10 +150,11 @@ func TestKeeperSubmitAndApplyUseCustomStoreWithEvidenceProgression(t *testing.T)
 	k := NewKeeperWithStore(store)
 
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
-		EvidenceID: "evidence-2",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-2"),
-		Status:     chaintypes.ReconciliationPending,
+		EvidenceID:    "evidence-2",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-2"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
 	})
 	if err != nil {
 		t.Fatalf("SubmitEvidence returned unexpected error: %v", err)

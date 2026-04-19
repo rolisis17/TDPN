@@ -52,6 +52,9 @@ Purpose:
 Behavior notes:
   - In profile signoff auto mode, if campaign artifacts are missing the script
     forces one refresh pass to bootstrap those artifacts.
+  - `--profile-compare-campaign-signoff-refresh-campaign 1` means "attempt
+    campaign refresh now"; `0` means "reuse existing artifacts" unless auto
+    mode escalates to refresh for stale/missing data.
 USAGE
 }
 

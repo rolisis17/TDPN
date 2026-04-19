@@ -301,11 +301,33 @@ func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) 
 	if proof.ReservationID == "" {
 		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires reservation_id")
 	}
+	if proof.SponsorID == "" {
+		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires sponsor_id")
+	}
+	if proof.SubjectID == "" {
+		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires subject_id")
+	}
 
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.paymentAuthByReservationID[proof.ReservationID]; ok {
+		if proof.SponsorID != existing.SponsorID {
+			return PaymentAuthorization{}, fmt.Errorf("reservation sponsor mismatch")
+		}
+		if proof.SubjectID != existing.SubjectID {
+			return PaymentAuthorization{}, fmt.Errorf("reservation subject mismatch")
+		}
+		if existing.SessionID != "" {
+			if proof.SessionID == "" {
+				return PaymentAuthorization{}, fmt.Errorf("authorize payment requires session_id")
+			}
+			if proof.SessionID != existing.SessionID {
+				return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
+			}
+		} else if proof.SessionID != "" {
+			return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
+		}
 		existing.IdempotentReplay = true
 		return existing, nil
 	}
@@ -319,13 +341,20 @@ func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) 
 	if !reservation.ConsumedAt.IsZero() {
 		return PaymentAuthorization{}, fmt.Errorf("reservation already consumed: %s", proof.ReservationID)
 	}
-	if proof.SponsorID != "" && proof.SponsorID != reservation.SponsorID {
+	if proof.SponsorID != reservation.SponsorID {
 		return PaymentAuthorization{}, fmt.Errorf("reservation sponsor mismatch")
 	}
-	if proof.SubjectID != "" && proof.SubjectID != reservation.SubjectID {
+	if proof.SubjectID != reservation.SubjectID {
 		return PaymentAuthorization{}, fmt.Errorf("reservation subject mismatch")
 	}
-	if proof.SessionID != "" && reservation.SessionID != "" && proof.SessionID != reservation.SessionID {
+	if reservation.SessionID != "" {
+		if proof.SessionID == "" {
+			return PaymentAuthorization{}, fmt.Errorf("authorize payment requires session_id")
+		}
+		if proof.SessionID != reservation.SessionID {
+			return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
+		}
+	} else if proof.SessionID != "" {
 		return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
 	}
 

@@ -22,9 +22,15 @@ URL_MAIN="http://127.0.0.1:${PORT_MAIN}"
 URL_PEER_A="http://127.0.0.1:${PORT_PEER_A}"
 URL_PEER_B="http://127.0.0.1:${PORT_PEER_B}"
 
-main_log="/tmp/sync_status_main.log"
-peer_a_log="/tmp/sync_status_peer_a.log"
-peer_b_log="/tmp/sync_status_peer_b.log"
+old_umask="$(umask)"
+umask 077
+tmp_dir="$(mktemp -d /tmp/integration_sync_status_chaos.XXXXXX)"
+umask "$old_umask"
+main_log="$tmp_dir/sync_status_main.log"
+peer_a_log="$tmp_dir/sync_status_peer_a.log"
+peer_b_log="$tmp_dir/sync_status_peer_b.log"
+admin_header_cfg="$tmp_dir/admin_header.cfg"
+(umask 077 && printf 'header = "X-Admin-Token: %s"\n' "$ADMIN_TOKEN" >"$admin_header_cfg")
 
 wait_for_health() {
   local url="$1"
@@ -84,6 +90,7 @@ cleanup() {
   kill "${peer_a_pid:-}" >/dev/null 2>&1 || true
   kill "${peer_b_pid:-}" >/dev/null 2>&1 || true
   kill "${main_pid:-}" >/dev/null 2>&1 || true
+  rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
@@ -91,7 +98,7 @@ wait_for_health "$URL_MAIN" "$main_log" "main directory"
 
 status_initial=""
 for _ in $(seq 1 80); do
-  status_initial="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" -H "X-Admin-Token: ${ADMIN_TOKEN}" || true)"
+  status_initial="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" --config "$admin_header_cfg" || true)"
   if echo "$status_initial" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 2) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null) and ((.peer.source_operators // []) | index("op-sync-peer-b") != null)' >/dev/null; then
     break
   fi
@@ -109,7 +116,7 @@ unset peer_b_pid
 
 status_after_loss=""
 for _ in $(seq 1 80); do
-  status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" -H "X-Admin-Token: ${ADMIN_TOKEN}" || true)"
+  status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" --config "$admin_header_cfg" || true)"
   if echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 1) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null) and ((.peer.source_operators // []) | index("op-sync-peer-b") == null)' >/dev/null; then
     break
   fi
@@ -124,7 +131,7 @@ fi
 
 peer_status_after_loss=""
 for _ in $(seq 1 80); do
-  peer_status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/peer-status" -H "X-Admin-Token: ${ADMIN_TOKEN}" || true)"
+  peer_status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/peer-status" --config "$admin_header_cfg" || true)"
   if echo "$peer_status_after_loss" | jq -e --arg down "${URL_PEER_B}" --arg up "${URL_PEER_A}" '(.peers | map(select(.url == $down)) | length) == 1 and (.peers | map(select(.url == $up)) | length) == 1 and ((.peers | map(select(.url == $down))[0]) | .configured == true and .consecutive_failures >= 1 and ((.last_error // "") | length > 0) and .cooling_down == true and .eligible == false and .retry_after_sec > 0) and ((.peers | map(select(.url == $up))[0]) | .configured == true and .cooling_down == false and .eligible == true)' >/dev/null; then
     break
   fi
@@ -138,7 +145,7 @@ if ! echo "$peer_status_after_loss" | jq -e --arg down "${URL_PEER_B}" --arg up 
 fi
 
 for _ in $(seq 1 6); do
-  status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" -H "X-Admin-Token: ${ADMIN_TOKEN}" || true)"
+  status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" --config "$admin_header_cfg" || true)"
   if ! echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 1) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null)' >/dev/null; then
     echo "expected sync-status to stay healthy across repeated polls after single-peer loss"
     echo "$status_after_loss"

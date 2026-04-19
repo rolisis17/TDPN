@@ -12,6 +12,8 @@ var (
 	ErrDelegationNotFound = errors.New("vpnsponsor: delegation not found")
 )
 
+const maxQueryListResults = 1000
+
 // GetAuthorizationRequest requests sponsor authorization by authorization ID.
 type GetAuthorizationRequest struct {
 	AuthorizationID string
@@ -86,8 +88,9 @@ func (s QueryServer) ListAuthorizations(_ ListAuthorizationsRequest) (ListAuthor
 		return ListAuthorizationsResponse{}, ErrNilKeeper
 	}
 
+	records := s.keeper.ListAuthorizations()
 	return ListAuthorizationsResponse{
-		Authorizations: s.keeper.ListAuthorizations(),
+		Authorizations: clampAuthorizations(records),
 	}, nil
 }
 
@@ -96,7 +99,22 @@ func (s QueryServer) ListDelegations(_ ListDelegationsRequest) (ListDelegationsR
 		return ListDelegationsResponse{}, ErrNilKeeper
 	}
 
+	records := s.keeper.ListDelegations()
 	return ListDelegationsResponse{
-		Delegations: s.keeper.ListDelegations(),
+		Delegations: clampDelegations(records),
 	}, nil
+}
+
+func clampAuthorizations(records []types.SponsorAuthorization) []types.SponsorAuthorization {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampDelegations(records []types.DelegatedSessionCredit) []types.DelegatedSessionCredit {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
 }

@@ -359,7 +359,7 @@ Usage:
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
   ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--defer-no-root [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-profile-compare [--profiles CSV] [--rounds N] [--pause-sec N] [--min-pass-rate-pct N] [--fail-on-any-fail [0|1]] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--run-preflight [0|1]] [--status-check [0|1]] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--public-ip-url URL] [--country-url URL] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status [--show-json [0|1]]
@@ -883,6 +883,10 @@ self_update_repo() {
     echo "self-update requires --remote (or EASY_NODE_AUTO_UPDATE_REMOTE)"
     return 1
   fi
+  if ! is_safe_git_remote_name "$remote"; then
+    echo "self-update requires --remote to be a safe git remote name"
+    return 1
+  fi
   if [[ "$allow_dirty" != "0" && "$allow_dirty" != "1" ]]; then
     echo "self-update requires --allow-dirty (or EASY_NODE_AUTO_UPDATE_ALLOW_DIRTY) to be 0 or 1"
     return 1
@@ -913,6 +917,10 @@ self_update_repo() {
   if [[ -z "$branch" ]]; then
     echo "self-update skipped: detached HEAD (set --branch or EASY_NODE_AUTO_UPDATE_BRANCH)"
     return 0
+  fi
+  if ! is_safe_git_branch_name "$branch"; then
+    echo "self-update requires --branch to be a safe git branch name"
+    return 1
   fi
 
   if [[ "$allow_dirty" != "1" ]]; then
@@ -1203,12 +1211,16 @@ ensure_url_scheme() {
     echo "$raw"
     return
   fi
-  if [[ "$raw" == "$scheme://"* ]]; then
+  if [[ "$raw" == https://* ]]; then
     echo "$raw"
     return
   fi
-  if [[ "$raw" == http://* || "$raw" == https://* ]]; then
-    echo "${scheme}://${raw#*://}"
+  if [[ "$raw" == http://* ]]; then
+    if [[ "$scheme" == "https" ]]; then
+      echo "https://${raw#http://}"
+    else
+      echo "$raw"
+    fi
     return
   fi
   echo "${scheme}://${raw}"
@@ -1218,6 +1230,99 @@ is_https_url() {
   local raw
   raw="$(trim "$1")"
   [[ "$raw" == https://* ]]
+}
+
+url_host_is_loopback() {
+  local raw host
+  raw="$(trim_url "$1")"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  host="$(host_from_url "$raw")"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  host="${host#[}"
+  host="${host%]}"
+  host_is_loopback "$host"
+}
+
+require_https_for_remote_url() {
+  local raw="$1"
+  local context="${2:-url}"
+  raw="$(trim_url "$raw")"
+  if [[ -z "$raw" ]]; then
+    echo "$context requires a URL"
+    return 1
+  fi
+  if is_https_url "$raw"; then
+    return 0
+  fi
+  if [[ "$raw" == http://* ]] && url_host_is_loopback "$raw"; then
+    return 0
+  fi
+  echo "$context refused insecure remote URL: $raw (use https:// or loopback http://)"
+  return 1
+}
+
+require_https_for_remote_csv_urls() {
+  local csv="$1"
+  local context="${2:-url-list}"
+  local item
+  while IFS= read -r item; do
+    item="$(trim "$item")"
+    [[ -z "$item" ]] && continue
+    if ! require_https_for_remote_url "$item" "$context"; then
+      return 1
+    fi
+  done < <(split_csv_lines "$csv")
+  return 0
+}
+
+is_safe_wg_interface_name() {
+  local name
+  name="$(trim "$1")"
+  if [[ -z "$name" || "${#name}" -gt 15 ]]; then
+    return 1
+  fi
+  [[ "$name" =~ ^wg[[:alnum:]_.-]{0,13}$ ]]
+}
+
+is_safe_git_remote_name() {
+  local name
+  name="$(trim "$1")"
+  if [[ -z "$name" || "${#name}" -gt 64 ]]; then
+    return 1
+  fi
+  if [[ "$name" == -* ]]; then
+    return 1
+  fi
+  if [[ "$name" == *$'\n'* || "$name" == *$'\r'* || "$name" == *$'\t'* || "$name" == *" "* ]]; then
+    return 1
+  fi
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$ ]]
+}
+
+is_safe_git_branch_name() {
+  local branch
+  branch="$(trim "$1")"
+  if [[ -z "$branch" || "${#branch}" -gt 255 ]]; then
+    return 1
+  fi
+  if [[ "$branch" == -* || "$branch" == /* || "$branch" == .* ]]; then
+    return 1
+  fi
+  if [[ "$branch" == */ || "$branch" == *. || "$branch" == *.lock ]]; then
+    return 1
+  fi
+  if [[ "$branch" == *".."* || "$branch" == *"//"* || "$branch" == *"@{"* ]]; then
+    return 1
+  fi
+  if [[ "$branch" == *[\~\^\:\?\*\[\\]* ]]; then
+    return 1
+  fi
+  if [[ "$branch" == *$'\n'* || "$branch" == *$'\r'* || "$branch" == *$'\t'* || "$branch" == *" "* ]]; then
+    return 1
+  fi
+  return 0
 }
 
 bootstrap_mtls() {
@@ -1392,7 +1497,52 @@ curl_tls_opts_for_url() {
   fi
 }
 
-build_admin_header_args() {
+curl_config_escape_value() {
+  local raw="$1"
+  raw="${raw//\\/\\\\}"
+  raw="${raw//\"/\\\"}"
+  printf '%s' "$raw"
+}
+
+append_curl_header_config() {
+  local config_file="$1"
+  local header_value="$2"
+  if [[ -z "$config_file" || -z "$header_value" ]]; then
+    echo "missing curl header config parameters" >&2
+    return 1
+  fi
+  if [[ "$header_value" == *$'\n'* || "$header_value" == *$'\r'* ]]; then
+    echo "refusing multiline curl header value" >&2
+    return 1
+  fi
+  local escaped_value
+  escaped_value="$(curl_config_escape_value "$header_value")"
+  printf 'header = "%s"\n' "$escaped_value" >>"$config_file"
+}
+
+build_admin_token_header_config() {
+  local admin_token="$1"
+  local out_var="$2"
+  if [[ -z "$admin_token" ]]; then
+    echo "missing admin token" >&2
+    return 1
+  fi
+  if [[ "$admin_token" == *$'\n'* || "$admin_token" == *$'\r'* ]]; then
+    echo "admin token must be a single line value" >&2
+    return 1
+  fi
+  local header_config
+  header_config="$(mktemp)"
+  chmod 600 "$header_config" 2>/dev/null || true
+  if ! append_curl_header_config "$header_config" "X-Admin-Token: ${admin_token}"; then
+    rm -f "$header_config"
+    return 1
+  fi
+  local -n _header_out="$out_var"
+  _header_out="$header_config"
+}
+
+build_admin_header_config() {
   local method="$1"
   local url="$2"
   local body_file="$3"
@@ -1401,7 +1551,7 @@ build_admin_header_args() {
   local admin_key_file="$6"
   local admin_key_id="$7"
   local out_var="$8"
-  local -a header_args=()
+  local header_config
 
   if [[ "$auth_mode" == "signed" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
@@ -1412,6 +1562,8 @@ build_admin_header_args() {
       echo "admin signing key file not found: $admin_key_file" >&2
       return 1
     fi
+    header_config="$(mktemp)"
+    chmod 600 "$header_config" 2>/dev/null || true
     local sign_json
     local -a sign_cmd=(
       go run ./cmd/adminsig sign
@@ -1435,22 +1587,25 @@ build_admin_header_args() {
     h_sig="$(printf '%s\n' "$sign_json" | jq -r '.headers["X-Admin-Signature"]')"
     if [[ -z "$h_key_id" || -z "$h_ts" || -z "$h_nonce" || -z "$h_sig" || "$h_key_id" == "null" || "$h_sig" == "null" ]]; then
       echo "failed to generate signed admin headers" >&2
+      rm -f "$header_config"
       return 1
     fi
-    header_args+=(-H "X-Admin-Key-Id: ${h_key_id}")
-    header_args+=(-H "X-Admin-Timestamp: ${h_ts}")
-    header_args+=(-H "X-Admin-Nonce: ${h_nonce}")
-    header_args+=(-H "X-Admin-Signature: ${h_sig}")
+    if ! append_curl_header_config "$header_config" "X-Admin-Key-Id: ${h_key_id}" ||
+      ! append_curl_header_config "$header_config" "X-Admin-Timestamp: ${h_ts}" ||
+      ! append_curl_header_config "$header_config" "X-Admin-Nonce: ${h_nonce}" ||
+      ! append_curl_header_config "$header_config" "X-Admin-Signature: ${h_sig}"; then
+      rm -f "$header_config"
+      return 1
+    fi
   else
-    if [[ -z "$admin_token" ]]; then
-      echo "missing admin token" >&2
+    if ! build_admin_token_header_config "$admin_token" header_config; then
+      rm -f "$header_config"
       return 1
     fi
-    header_args+=(-H "X-Admin-Token: ${admin_token}")
   fi
 
   local -n _header_out="$out_var"
-  _header_out=("${header_args[@]}")
+  _header_out="$header_config"
 }
 
 discover_directory_urls() {
@@ -1739,6 +1894,16 @@ random_token() {
   fi
   # Last-resort fallback.
   date +%s%N | sha256sum | awk '{print substr($1,1,32)}'
+}
+
+is_placeholder_admin_token() {
+  local token="$1"
+  case "$token" in
+    ""|"dev-admin-token"|"replace-with-strong-admin-token"|"change-me")
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 random_id_suffix() {
@@ -2503,6 +2668,19 @@ compose_server() {
   compose_with_env "$AUTHORITY_ENV_FILE" "$@"
 }
 
+validate_env_scalar_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "invalid ${name}: multiline values are not allowed"
+    exit 2
+  fi
+  if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    echo "invalid ${name}: control characters are not allowed"
+    exit 2
+  fi
+}
+
 write_authority_env() {
   local public_host="$1"
   local operator_id="$2"
@@ -2530,6 +2708,26 @@ write_authority_env() {
   local peer_sources_count=0
   local peer_gossip_sec="5"
   local entry_directory_urls=""
+
+  validate_env_scalar_or_die "public_host" "$public_host"
+  validate_env_scalar_or_die "operator_id" "$operator_id"
+  validate_env_scalar_or_die "issuer_id" "$issuer_id"
+  validate_env_scalar_or_die "issuer_admin_token" "$issuer_admin_token"
+  validate_env_scalar_or_die "directory_admin_token" "$directory_admin_token"
+  validate_env_scalar_or_die "entry_puzzle_secret" "$entry_puzzle_secret"
+  validate_env_scalar_or_die "peer_dirs" "$peer_dirs"
+  validate_env_scalar_or_die "beta_profile" "$beta_profile"
+  validate_env_scalar_or_die "client_allowlist" "$client_allowlist"
+  validate_env_scalar_or_die "allow_anon_cred" "$allow_anon_cred"
+  validate_env_scalar_or_die "prod_profile" "$prod_profile"
+  validate_env_scalar_or_die "admin_signers_file_container" "$admin_signers_file_container"
+  validate_env_scalar_or_die "admin_sign_key_id" "$admin_sign_key_id"
+  validate_env_scalar_or_die "admin_sign_key_file_local" "$admin_sign_key_file_local"
+  validate_env_scalar_or_die "issuer_urls_csv" "$issuer_urls_csv"
+  validate_env_scalar_or_die "exit_wg_private_key_path" "$exit_wg_private_key_path"
+  validate_env_scalar_or_die "exit_wg_interface" "$exit_wg_interface"
+  validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
+
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
     # In strict prod profile token admin auth is disabled; avoid persisting an unused token.
@@ -2762,6 +2960,19 @@ write_provider_env() {
   local peer_sources_count=0
   local peer_gossip_sec="5"
   local entry_directory_urls=""
+
+  validate_env_scalar_or_die "public_host" "$public_host"
+  validate_env_scalar_or_die "operator_id" "$operator_id"
+  validate_env_scalar_or_die "directory_admin_token" "$directory_admin_token"
+  validate_env_scalar_or_die "entry_puzzle_secret" "$entry_puzzle_secret"
+  validate_env_scalar_or_die "peer_dirs" "$peer_dirs"
+  validate_env_scalar_or_die "beta_profile" "$beta_profile"
+  validate_env_scalar_or_die "authority_issuer" "$authority_issuer"
+  validate_env_scalar_or_die "prod_profile" "$prod_profile"
+  validate_env_scalar_or_die "issuer_urls_csv" "$issuer_urls_csv"
+  validate_env_scalar_or_die "exit_wg_private_key_path" "$exit_wg_private_key_path"
+  validate_env_scalar_or_die "exit_wg_interface" "$exit_wg_interface"
+  validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -3894,7 +4105,7 @@ server_up() {
     entry_puzzle_secret="$(random_token)"
   fi
   if [[ "$prod_profile" == "1" ]]; then
-    if [[ "$directory_admin_token" == "dev-admin-token" || "${#directory_admin_token}" -lt 16 ]]; then
+    if is_placeholder_admin_token "$directory_admin_token" || [[ "${#directory_admin_token}" -lt 16 ]]; then
       echo "server-up requires a strong DIRECTORY_ADMIN_TOKEN in prod profile (len>=16, non-default)"
       exit 2
     fi
@@ -4547,6 +4758,9 @@ server_federation_status() {
       directory_url="$(ensure_url_scheme "$directory_url" "$url_scheme")"
     fi
   fi
+  if ! require_https_for_remote_url "$directory_url" "server-federation-status"; then
+    exit 2
+  fi
 
   if [[ -z "$admin_token" ]]; then
     admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
@@ -4554,6 +4768,11 @@ server_federation_status() {
   admin_token="$(printf '%s' "$admin_token" | tr -d '\r')"
   if [[ -z "$admin_token" ]]; then
     echo "server-federation-status requires directory admin token (set in env file or pass --admin-token)"
+    exit 2
+  fi
+  local admin_header_config=""
+  if ! build_admin_token_header_config "$admin_token" admin_header_config; then
+    echo "server-federation-status refused: invalid directory admin token header value"
     exit 2
   fi
 
@@ -4571,17 +4790,17 @@ server_federation_status() {
     curl -sS -o "$peer_status_body" -w "%{http_code}" \
       --connect-timeout 3 --max-time "$timeout_sec" \
       "${tls_opts[@]}" \
-      -H "X-Admin-Token: ${admin_token}" \
+      --config "$admin_header_config" \
       "$peer_status_url" || true
   )"
   if [[ "$peer_status_code" != "200" ]]; then
     echo "server-federation-status failed: peer-status endpoint returned code=${peer_status_code:-none}"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
   if ! jq -e '.peers | arrays' <"$peer_status_body" >/dev/null 2>&1; then
     echo "server-federation-status failed: invalid peer-status payload from $peer_status_url"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
 
@@ -4590,17 +4809,17 @@ server_federation_status() {
     curl -sS -o "$sync_status_body" -w "%{http_code}" \
       --connect-timeout 3 --max-time "$timeout_sec" \
       "${tls_opts[@]}" \
-      -H "X-Admin-Token: ${admin_token}" \
+      --config "$admin_header_config" \
       "$sync_status_url" || true
   )"
   if [[ "$sync_status_code" != "200" ]]; then
     echo "server-federation-status failed: sync-status endpoint returned code=${sync_status_code:-none}"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
   if ! jq -e '.peer and .issuer' <"$sync_status_body" >/dev/null 2>&1; then
     echo "server-federation-status failed: invalid sync-status payload from $sync_status_url"
-    rm -f "$peer_status_body" "$sync_status_body"
+    rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
     exit 1
   fi
 
@@ -4978,12 +5197,12 @@ server_federation_status() {
       echo "hints:"
       echo "  - run './scripts/easy_node.sh server-federation-wait --directory-url ${directory_url} --ready-timeout-sec 90 --poll-sec 5' to wait for convergence"
       echo "  - verify DIRECTORY_PEERS references healthy peers and tune policy thresholds only when justified"
-      rm -f "$peer_status_body" "$sync_status_body"
+      rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
       exit 1
     fi
   fi
 
-  rm -f "$peer_status_body" "$sync_status_body"
+  rm -f "$peer_status_body" "$sync_status_body" "$admin_header_config"
 }
 
 server_federation_wait() {
@@ -5173,6 +5392,9 @@ server_federation_wait() {
       directory_url="$(ensure_url_scheme "$directory_url" "$url_scheme")"
     fi
   fi
+  if ! require_https_for_remote_url "$directory_url" "server-federation-wait"; then
+    exit 2
+  fi
 
   if [[ -z "$admin_token" ]]; then
     admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
@@ -5180,6 +5402,11 @@ server_federation_wait() {
   admin_token="$(printf '%s' "$admin_token" | tr -d '\r')"
   if [[ -z "$admin_token" ]]; then
     echo "server-federation-wait requires directory admin token (set in env file or pass --admin-token)"
+    exit 2
+  fi
+  local admin_header_config=""
+  if ! build_admin_token_header_config "$admin_token" admin_header_config; then
+    echo "server-federation-wait refused: invalid directory admin token header value"
     exit 2
   fi
 
@@ -5385,14 +5612,14 @@ server_federation_wait() {
       curl -sS -o "$sync_body" -w "%{http_code}" \
         --connect-timeout 3 --max-time "$timeout_sec" \
         "${tls_opts[@]}" \
-        -H "X-Admin-Token: ${admin_token}" \
+        --config "$admin_header_config" \
         "$sync_status_url" || true
     )"
     peer_status_code="$(
       curl -sS -o "$peer_status_body" -w "%{http_code}" \
         --connect-timeout 3 --max-time "$timeout_sec" \
         "${tls_opts[@]}" \
-        -H "X-Admin-Token: ${admin_token}" \
+        --config "$admin_header_config" \
         "$peer_status_url" || true
     )"
 
@@ -5402,6 +5629,7 @@ server_federation_wait() {
       last_failure_state="admin_token_unauthorized"
       last_failure_reasons_json='["admin_token_unauthorized"]'
       emit_federation_wait_summary "fail" "$last_failure_state" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
+      rm -f "$admin_header_config"
       return 1
     fi
 
@@ -5615,6 +5843,7 @@ server_federation_wait() {
         fi
         emit_federation_wait_summary "fail" "$last_failure_state" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
         rm -f "$sync_body" "$peer_status_body"
+        rm -f "$admin_header_config"
         return 1
       fi
 
@@ -5659,6 +5888,7 @@ server_federation_wait() {
         fi
         emit_federation_wait_summary "ready" "ready" "$last_failure_reasons_json" "$last_sync_json" "$last_peer_json"
         rm -f "$sync_body" "$peer_status_body"
+        rm -f "$admin_header_config"
         return 0
       fi
 
@@ -5725,6 +5955,7 @@ server_federation_wait() {
     fi
   fi
   emit_federation_wait_summary "timeout" "timeout" "$timeout_failure_reasons_json" "$last_sync_json" "$last_peer_json"
+  rm -f "$admin_header_config"
   return 1
 }
 
@@ -5972,12 +6203,12 @@ rotate_server_secrets() {
 }
 
 cleanup_client_demo_artifacts() {
-  local stale_runs=""
+  local -a stale_runs=()
 
-  stale_runs="$(docker ps -aq --filter "name=deploy-client-demo-run-" || true)"
-  if [[ -n "$stale_runs" ]]; then
+  mapfile -t stale_runs < <(docker ps -aq --filter "name=deploy-client-demo-run-" || true)
+  if (( ${#stale_runs[@]} > 0 )); then
     # Best-effort cleanup for interrupted client runs.
-    docker rm -f $stale_runs >/dev/null 2>&1 || true
+    docker rm -f "${stale_runs[@]}" >/dev/null 2>&1 || true
   fi
 
   # Remove dangling default network if it is no longer in use.
@@ -6075,16 +6306,16 @@ stop_all() {
   )
   cleanup_client_demo_artifacts
 
-  local compose_ids=""
-  compose_ids="$(docker ps -aq --filter "label=com.docker.compose.project=deploy" || true)"
-  if [[ -n "$compose_ids" ]]; then
-    docker rm -f $compose_ids >/dev/null 2>&1 || true
+  local -a compose_ids=()
+  mapfile -t compose_ids < <(docker ps -aq --filter "label=com.docker.compose.project=deploy" || true)
+  if (( ${#compose_ids[@]} > 0 )); then
+    docker rm -f "${compose_ids[@]}" >/dev/null 2>&1 || true
   fi
 
-  local compose_networks=""
-  compose_networks="$(docker network ls -q --filter "label=com.docker.compose.project=deploy" || true)"
-  if [[ -n "$compose_networks" ]]; then
-    docker network rm $compose_networks >/dev/null 2>&1 || true
+  local -a compose_networks=()
+  mapfile -t compose_networks < <(docker network ls -q --filter "label=com.docker.compose.project=deploy" || true)
+  if (( ${#compose_networks[@]} > 0 )); then
+    docker network rm "${compose_networks[@]}" >/dev/null 2>&1 || true
   fi
 
   echo "all local Privacynode docker resources are stopped"
@@ -8134,9 +8365,9 @@ Run order:
 
 Recommended commands:
   ./scripts/easy_node.sh machine-a-test --public-host A_HOST
-  ./scripts/easy_node.sh machine-b-test --peer-directory-a http://A_HOST:8081 --public-host B_HOST
-  ./scripts/easy_node.sh three-machine-validate --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --prod-profile 1 --path-profile balanced
-  ./scripts/easy_node.sh three-machine-soak --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --rounds 12 --pause-sec 5 --prod-profile 1 --path-profile balanced
+  ./scripts/easy_node.sh machine-b-test --peer-directory-a https://A_HOST:8081 --public-host B_HOST
+  ./scripts/easy_node.sh three-machine-validate --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --prod-profile 1 --path-profile balanced
+  ./scripts/easy_node.sh three-machine-soak --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --rounds 12 --pause-sec 5 --prod-profile 1 --path-profile balanced
   sudo ./scripts/easy_node.sh prod-wg-validate --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --strict-distinct 1
   sudo ./scripts/easy_node.sh prod-wg-soak --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --rounds 12 --pause-sec 10 --strict-distinct 1
   sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084
@@ -8969,7 +9200,7 @@ profile_default_gate_live() {
   echo "profile-default-gate-live:"
   echo "  directory_a: $directory_a"
   echo "  directory_b: $directory_b"
-  echo "  subject: $campaign_subject"
+  echo "  subject: [redacted]"
   echo "  reports_dir: $reports_dir"
   echo "  summary_json: $summary_json"
 
@@ -9562,6 +9793,9 @@ invite_generate() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! require_https_for_remote_url "$issuer_url" "invite-generate"; then
+    exit 2
+  fi
   if ! [[ "$wait_sec" =~ ^[0-9]+$ ]]; then
     echo "invite-generate requires --wait-sec >= 0"
     exit 2
@@ -9603,6 +9837,11 @@ invite_generate() {
     echo "missing helper script: $upsert_script"
     exit 2
   fi
+  local admin_token_file=""
+  if [[ "$auth_mode" == "token" ]]; then
+    admin_token_file="$(mktemp)"
+    (umask 077 && printf '%s' "$admin_token" >"$admin_token_file")
+  fi
 
   local generated=0
   local attempts=0
@@ -9621,6 +9860,7 @@ invite_generate() {
         echo "last error:"
         echo "$last_error"
       fi
+      rm -f "$admin_token_file"
       exit 1
     fi
     key="${prefix}-$(random_token | tr -cd 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]' | head -c 22)"
@@ -9638,7 +9878,7 @@ invite_generate() {
     if [[ "$auth_mode" == "signed" ]]; then
       upsert_cmd+=(--admin-key-file "$admin_key_file" --admin-key-id "$admin_key_id")
     else
-      upsert_cmd+=(--admin-token "$admin_token")
+      upsert_cmd+=(--admin-token-file "$admin_token_file")
     fi
     set +e
     upsert_out="$("${upsert_cmd[@]}" 2>&1)"
@@ -9654,10 +9894,12 @@ invite_generate() {
         if [[ -n "$last_error" ]]; then
           echo "$last_error"
         fi
+        rm -f "$admin_token_file"
         exit 1
       fi
     fi
   done
+  rm -f "$admin_token_file"
   echo "invite keys generated: $generated (issuer=$issuer_url)"
   if [[ -n "$last_error" && "$generated" -lt "$count" ]]; then
     echo "last invite-generate error:"
@@ -9718,6 +9960,9 @@ invite_check() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! require_https_for_remote_url "$issuer_url" "invite-check"; then
+    exit 2
+  fi
   if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
       echo "invite-check requires --admin-key-file and --admin-key-id together"
@@ -9731,13 +9976,17 @@ invite_check() {
   enforce_invite_auth_mode_or_die "invite-check" "$auth_mode"
 
   local request_url="${issuer_url}/v1/admin/subject/get?subject=${key}"
-  local -a header_args=()
+  local header_config=""
   local -a tls_args=()
-  build_admin_header_args "GET" "$request_url" "" "$auth_mode" "$admin_token" "$admin_key_file" "$admin_key_id" header_args
+  if ! build_admin_header_config "GET" "$request_url" "" "$auth_mode" "$admin_token" "$admin_key_file" "$admin_key_id" header_config; then
+    echo "invite-check failed: could not build admin auth headers"
+    exit 2
+  fi
   mapfile -t tls_args < <(curl_tls_opts_for_url "$issuer_url")
 
   local payload
-  payload="$(curl -fsS --connect-timeout 4 --max-time 12 "${tls_args[@]}" "${header_args[@]}" "$request_url" 2>/dev/null || true)"
+  payload="$(curl -fsS --connect-timeout 4 --max-time 12 "${tls_args[@]}" --config "$header_config" "$request_url" 2>/dev/null || true)"
+  rm -f "$header_config"
   if [[ -z "$payload" ]]; then
     echo "invite key not found: $key"
     exit 1
@@ -9807,6 +10056,9 @@ invite_disable() {
   if [[ "$issuer_url" != http://* && "$issuer_url" != https://* ]]; then
     issuer_url="$(ensure_url_scheme "$issuer_url" "http")"
   fi
+  if ! require_https_for_remote_url "$issuer_url" "invite-disable"; then
+    exit 2
+  fi
   if [[ -n "$admin_key_file" || -n "$admin_key_id" ]]; then
     if [[ -z "$admin_key_file" || -z "$admin_key_id" ]]; then
       echo "invite-disable requires --admin-key-file and --admin-key-id together"
@@ -9824,6 +10076,11 @@ invite_disable() {
     echo "missing helper script: $upsert_script"
     exit 2
   fi
+  local admin_token_file=""
+  if [[ "$auth_mode" == "token" ]]; then
+    admin_token_file="$(mktemp)"
+    (umask 077 && printf '%s' "$admin_token" >"$admin_token_file")
+  fi
   local -a upsert_cmd=(
     "$upsert_script"
     --issuer-url "$issuer_url"
@@ -9834,9 +10091,16 @@ invite_disable() {
   if [[ "$auth_mode" == "signed" ]]; then
     upsert_cmd+=(--admin-key-file "$admin_key_file" --admin-key-id "$admin_key_id")
   else
-    upsert_cmd+=(--admin-token "$admin_token")
+    upsert_cmd+=(--admin-token-file "$admin_token_file")
   fi
+  set +e
   "${upsert_cmd[@]}" >/dev/null
+  local upsert_rc=$?
+  set -e
+  rm -f "$admin_token_file"
+  if [[ $upsert_rc -ne 0 ]]; then
+    exit "$upsert_rc"
+  fi
   echo "invite key disabled: $key (issuer=$issuer_url)"
 }
 
@@ -9844,6 +10108,11 @@ set_env_kv() {
   local env_file="$1"
   local key="$2"
   local value="$3"
+  if [[ ! "$key" =~ ^[A-Z0-9_]+$ ]]; then
+    echo "invalid env key: $key"
+    exit 2
+  fi
+  validate_env_scalar_or_die "$key" "$value"
   local escaped
   escaped="$(printf '%s' "$value" | sed -e 's/[&|]/\\&/g')"
   if rg -q "^${key}=" "$env_file"; then
@@ -10232,7 +10501,7 @@ prod_preflight() {
   local directory_admin_token entry_puzzle_secret
   directory_admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
   entry_puzzle_secret="$(identity_value "$env_file" "ENTRY_PUZZLE_SECRET")"
-  if [[ -n "$directory_admin_token" && "$directory_admin_token" != "dev-admin-token" && "${#directory_admin_token}" -ge 16 ]]; then
+  if ! is_placeholder_admin_token "$directory_admin_token" && [[ "${#directory_admin_token}" -ge 16 ]]; then
     check_ok "DIRECTORY_ADMIN_TOKEN configured and non-default"
   else
     check_fail "DIRECTORY_ADMIN_TOKEN must be set, non-default, and len>=16"
@@ -10697,6 +10966,12 @@ prod_preflight() {
     fi
 
     if [[ -n "$directory_public_url" ]]; then
+      local directory_admin_header_config=""
+      if ! require_https_for_remote_url "$directory_public_url" "prod-preflight live directory admin checks"; then
+        check_fail "live directory admin checks refused on insecure URL: ${directory_public_url}"
+      elif ! build_admin_token_header_config "$directory_admin_token" directory_admin_header_config; then
+        check_fail "live directory admin token invalid; skipping directory admin endpoint checks"
+      else
       local governance_url governance_body governance_code
       governance_url="${directory_public_url%/}/v1/admin/governance-status"
       governance_body="$(mktemp)"
@@ -10706,7 +10981,7 @@ prod_preflight() {
         curl -sS -o "$governance_body" -w "%{http_code}" \
           --connect-timeout 3 --max-time "$timeout_sec" \
           "${governance_tls_opts[@]}" \
-          -H "X-Admin-Token: ${directory_admin_token}" \
+          --config "$directory_admin_header_config" \
           "$governance_url" || true
       )"
       if [[ "$governance_code" != "200" ]]; then
@@ -10762,7 +11037,7 @@ prod_preflight() {
         curl -sS -o "$sync_body" -w "%{http_code}" \
           --connect-timeout 3 --max-time "$timeout_sec" \
           "${governance_tls_opts[@]}" \
-          -H "X-Admin-Token: ${directory_admin_token}" \
+          --config "$directory_admin_header_config" \
           "$sync_url" || true
       )"
       if [[ "$sync_code" != "200" ]]; then
@@ -10873,7 +11148,7 @@ prod_preflight() {
         curl -sS -o "$peer_status_body" -w "%{http_code}" \
           --connect-timeout 3 --max-time "$timeout_sec" \
           "${governance_tls_opts[@]}" \
-          -H "X-Admin-Token: ${directory_admin_token}" \
+          --config "$directory_admin_header_config" \
           "$peer_status_url" || true
       )"
       if [[ "$peer_status_code" != "200" ]]; then
@@ -10921,6 +11196,8 @@ prod_preflight() {
         fi
       fi
       rm -f "$peer_status_body"
+      fi
+      rm -f "$directory_admin_header_config"
     fi
 
     if [[ "$mode" == "authority" && -n "$live_issuer_url" ]]; then
@@ -11397,6 +11674,18 @@ client_test() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if ! require_https_for_remote_csv_urls "$directory_urls" "client-test --directory-urls"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$issuer_url" "client-test --issuer-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$entry_url" "client-test --entry-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$exit_url" "client-test --exit-url"; then
+    exit 2
+  fi
   if [[ -z "$container_directory_urls" ]]; then
     container_directory_urls="$directory_urls"
   else
@@ -11494,6 +11783,19 @@ EOF_CLIENT
     echo "note: full fail-closed strict runtime is validated via wg-only/strict integration flows"
   fi
 
+  local runtime_subject_file=""
+  cleanup_client_test_subject_file() {
+    if [[ -n "$runtime_subject_file" ]]; then
+      rm -f "$runtime_subject_file" >/dev/null 2>&1 || true
+      runtime_subject_file=""
+    fi
+  }
+  if [[ -n "$client_subject" ]]; then
+    runtime_subject_file="$(mktemp)"
+    (umask 077 && printf '%s' "$client_subject" >"$runtime_subject_file")
+    secure_file_permissions "$runtime_subject_file"
+  fi
+
   if [[ "$execution_mode" == "docker" ]]; then
     local -a run_cmd
     run_cmd=(
@@ -11522,8 +11824,11 @@ EOF_CLIENT
       -e "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       -e "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
     )
-    if [[ -n "$client_subject" ]]; then
-      run_cmd+=(-e "CLIENT_SUBJECT=$client_subject")
+    if [[ -n "$runtime_subject_file" ]]; then
+      run_cmd+=(
+        -v "${runtime_subject_file}:/tmp/tdpn_client_subject:ro"
+        -e "CLIENT_SUBJECT_FILE=/tmp/tdpn_client_subject"
+      )
     fi
     if [[ -n "$client_anon_cred" ]]; then
       run_cmd+=(-e "CLIENT_ANON_CRED=$client_anon_cred")
@@ -11593,8 +11898,8 @@ EOF_CLIENT
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
     )
-    if [[ -n "$client_subject" ]]; then
-      local_cmd+=("CLIENT_SUBJECT=$client_subject")
+    if [[ -n "$runtime_subject_file" ]]; then
+      local_cmd+=("CLIENT_SUBJECT_FILE=$runtime_subject_file")
     fi
     if [[ -n "$client_anon_cred" ]]; then
       local_cmd+=("CLIENT_ANON_CRED=$client_anon_cred")
@@ -11702,24 +12007,28 @@ EOF_CLIENT
       echo "client test: failed selection volume validation (observed=$selection_count required=$min_selection_lines)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if ((entry_op_count < min_entry_operators)); then
       echo "client test: failed entry-operator diversity validation (observed=$entry_op_count required=$min_entry_operators)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if ((exit_op_count < min_exit_operators)); then
       echo "client test: failed exit-operator diversity validation (observed=$exit_op_count required=$min_exit_operators)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if [[ "$require_cross_operator_pair" == "1" ]] && ((cross_pair_count < 1)); then
       echo "client test: failed cross-operator-pair validation (observed=$cross_pair_count required>=1)"
       echo "client test log: $out"
       rg 'client selected entry=' "$out" || true
+      cleanup_client_test_subject_file
       return 1
     fi
     if [[ "$require_distinct_operators" == "1" ]]; then
@@ -11727,6 +12036,7 @@ EOF_CLIENT
         echo "client test: failed distinct-operator validation (same_ops=$same_ops missing_ops=$missing_ops)"
         echo "client test log: $out"
         rg 'client selected entry=' "$out" || true
+        cleanup_client_test_subject_file
         return 1
       fi
     fi
@@ -11734,12 +12044,14 @@ EOF_CLIENT
     echo "client test log: $out"
     echo "key log lines:"
     rg 'client selected entry=|client received wg-session config|bootstrap failed' "$out" || true
+    cleanup_client_test_subject_file
     return 0
   fi
 
   echo "client test: failed"
   echo "client test log: $out"
   cat "$out"
+  cleanup_client_test_subject_file
   return 1
 }
 
@@ -11994,6 +12306,10 @@ client_vpn_preflight() {
     echo "client-vpn-preflight requires --interface"
     exit 2
   fi
+  if ! is_safe_wg_interface_name "$interface_name"; then
+    echo "client-vpn-preflight requires --interface to start with wg, use only [a-zA-Z0-9_.-], and be <= 15 chars"
+    exit 2
+  fi
 
   local client_url_scheme="http"
   if [[ "$prod_profile" == "1" ]]; then
@@ -12031,6 +12347,18 @@ client_vpn_preflight() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-preflight --directory-urls"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$issuer_url" "client-vpn-preflight --issuer-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$entry_url" "client-vpn-preflight --entry-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$exit_url" "client-vpn-preflight --exit-url"; then
+    exit 2
+  fi
   if [[ -z "$issuer_urls" ]]; then
     issuer_urls="$issuer_url"
   fi
@@ -12744,10 +13072,10 @@ local_api_session() {
   echo "  config_v1_path: ${config_v1_path:-none} (${config_v1_status})"
   echo "  command_timeout_sec: $LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC"
   echo "  allow_update: $LOCAL_CONTROL_API_ALLOW_UPDATE"
-  echo "  service_status_command: ${LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND:-none}"
-  echo "  service_start_command: ${LOCAL_CONTROL_API_SERVICE_START_COMMAND:-none}"
-  echo "  service_stop_command: ${LOCAL_CONTROL_API_SERVICE_STOP_COMMAND:-none}"
-  echo "  service_restart_command: ${LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND:-none}"
+  echo "  service_status_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  service_start_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_START_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  service_stop_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_STOP_COMMAND:-}" ]] && echo configured || echo none)"
+  echo "  service_restart_command: $([[ -n "${LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND:-}" ]] && echo configured || echo none)"
   echo "  connect_path_profile_default: ${LOCAL_CONTROL_API_CONNECT_PATH_PROFILE:-2hop}"
   echo "  connect_interface_default: ${LOCAL_CONTROL_API_CONNECT_INTERFACE:-wgvpn0}"
   echo "  connect_run_preflight_default: ${LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT:-1}"
@@ -12814,7 +13142,7 @@ client_vpn_status() {
     return 0
   fi
 
-  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url subject path_profile prod_profile beta_profile session_reuse allow_session_churn
+  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url path_profile prod_profile beta_profile session_reuse allow_session_churn
   pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
   iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
   log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
@@ -12827,7 +13155,6 @@ client_vpn_status() {
   issuer_urls="$(identity_value "$state_file" "CLIENT_VPN_ISSUER_URLS")"
   entry_url="$(identity_value "$state_file" "CLIENT_VPN_ENTRY_URL")"
   exit_url="$(identity_value "$state_file" "CLIENT_VPN_EXIT_URL")"
-  subject="$(identity_value "$state_file" "CLIENT_VPN_SUBJECT")"
   path_profile="$(identity_value "$state_file" "CLIENT_VPN_PATH_PROFILE")"
   session_reuse="$(identity_value "$state_file" "CLIENT_VPN_SESSION_REUSE")"
   allow_session_churn="$(identity_value "$state_file" "CLIENT_VPN_ALLOW_SESSION_CHURN")"
@@ -12852,7 +13179,6 @@ client_vpn_status() {
         --arg interface "${iface:-}" \
         --arg interface_state "$interface_state" \
         --arg proxy_addr "${proxy_addr:-}" \
-        --arg subject "${subject:-}" \
         --arg path_profile "${path_profile:-}" \
         --arg session_reuse "${session_reuse:-}" \
         --arg allow_session_churn "${allow_session_churn:-}" \
@@ -12873,7 +13199,6 @@ client_vpn_status() {
           interface: $interface,
           interface_state: $interface_state,
           proxy_addr: $proxy_addr,
-          subject: $subject,
           path_profile: $path_profile,
           session_reuse: $session_reuse,
           allow_session_churn: $allow_session_churn,
@@ -12890,12 +13215,11 @@ client_vpn_status() {
           log_file: $log_file
         }'
     else
-      printf '{"running":%s,"pid":"%s","interface":"%s","interface_state":"%s","subject":"%s","path_profile":"%s"}\n' \
+      printf '{"running":%s,"pid":"%s","interface":"%s","interface_state":"%s","path_profile":"%s"}\n' \
         "$([[ "$running" == "yes" ]] && printf 'true' || printf 'false')" \
         "${pid:-}" \
         "${iface:-}" \
         "$interface_state" \
-        "${subject:-}" \
         "${path_profile:-}"
     fi
     return 0
@@ -12906,7 +13230,6 @@ client_vpn_status() {
   echo "  pid: ${pid:-unknown}"
   echo "  interface: ${iface:-unknown}"
   echo "  proxy_addr: ${proxy_addr:-unknown}"
-  echo "  subject: ${subject:-none}"
   echo "  path_profile: ${path_profile:-default}"
   echo "  session_reuse: ${session_reuse:-unknown}"
   echo "  allow_session_churn: ${allow_session_churn:-unknown}"
@@ -14125,6 +14448,7 @@ client_vpn_up() {
   local bootstrap_directory=""
   local discovery_wait_sec="${EASY_NODE_DISCOVERY_WAIT_SEC:-20}"
   local client_subject="${CLIENT_SUBJECT:-}"
+  local client_subject_file=""
   local client_anon_cred="${CLIENT_ANON_CRED:-}"
   local min_sources="1"
   local min_operators="1"
@@ -14204,6 +14528,10 @@ client_vpn_up() {
         ;;
       --subject)
         client_subject="${2:-}"
+        shift 2
+        ;;
+      --subject-file)
+        client_subject_file="${2:-}"
         shift 2
         ;;
       --anon-cred)
@@ -14581,9 +14909,32 @@ client_vpn_up() {
     echo "client-vpn-up requires --interface"
     exit 2
   fi
+  if ! is_safe_wg_interface_name "$interface_name"; then
+    echo "client-vpn-up requires --interface to start with wg, use only [a-zA-Z0-9_.-], and be <= 15 chars"
+    exit 2
+  fi
   if [[ -z "$proxy_addr" ]]; then
     echo "client-vpn-up requires --proxy-addr"
     exit 2
+  fi
+  if [[ -n "$client_subject_file" ]]; then
+    if [[ -n "$client_subject" ]]; then
+      echo "client-vpn-up requires exactly one of --subject or --subject-file"
+      exit 2
+    fi
+    if [[ ! -f "$client_subject_file" ]]; then
+      echo "client-vpn-up requires --subject-file to reference an existing file"
+      exit 2
+    fi
+    if [[ ! -r "$client_subject_file" ]]; then
+      echo "client-vpn-up requires --subject-file to be readable"
+      exit 2
+    fi
+    client_subject="$(tr -d '\r\n' <"$client_subject_file")"
+    if [[ -z "$client_subject" ]]; then
+      echo "client-vpn-up requires --subject-file to contain a non-empty subject"
+      exit 2
+    fi
   fi
   if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
     echo "client-vpn-up requires exactly one of --subject or --anon-cred"
@@ -14653,6 +15004,18 @@ client_vpn_up() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
+  if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-up --directory-urls"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$issuer_url" "client-vpn-up --issuer-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$entry_url" "client-vpn-up --entry-url"; then
+    exit 2
+  fi
+  if ! require_https_for_remote_url "$exit_url" "client-vpn-up --exit-url"; then
+    exit 2
+  fi
   if [[ -z "$issuer_urls" ]]; then
     issuer_urls="$issuer_url"
   fi
@@ -14818,6 +15181,13 @@ client_vpn_up() {
   mkdir -p "$trusted_keys_dir" >/dev/null 2>&1 || true
   seed_client_vpn_trust_file_if_empty "$trusted_keys_file" "$directory_urls"
 
+  local runtime_subject_file=""
+  cleanup_runtime_subject_file() {
+    if [[ -n "$runtime_subject_file" ]]; then
+      rm -f "$runtime_subject_file" >/dev/null 2>&1 || true
+      runtime_subject_file=""
+    fi
+  }
   local -a env_vars
   env_vars=(
     "DATA_PLANE_MODE=opaque"
@@ -14871,7 +15241,10 @@ client_vpn_up() {
     fi
   fi
   if [[ -n "$client_subject" ]]; then
-    env_vars+=("CLIENT_SUBJECT=$client_subject")
+    runtime_subject_file="$(mktemp)"
+    (umask 077 && printf '%s' "$client_subject" >"$runtime_subject_file")
+    secure_file_permissions "$runtime_subject_file"
+    env_vars+=("CLIENT_SUBJECT_FILE=$runtime_subject_file")
   fi
   if [[ -n "$client_anon_cred" ]]; then
     env_vars+=("CLIENT_ANON_CRED=$client_anon_cred")
@@ -14898,9 +15271,15 @@ client_vpn_up() {
     echo "log: $log_file"
     (
       cd "$ROOT_DIR"
-      env "${env_vars[@]}" go run ./cmd/node --client
+      env_kv=""
+      for env_kv in "${env_vars[@]}"; do
+        export "$env_kv"
+      done
+      go run ./cmd/node --client
     ) 2>&1 | tee -a "$log_file"
-    return $?
+    local foreground_rc=$?
+    cleanup_runtime_subject_file
+    return "$foreground_rc"
   fi
 
   local pid=""
@@ -14908,7 +15287,11 @@ client_vpn_up() {
   pid_tmp="$(mktemp)"
   (
     cd "$ROOT_DIR"
-    nohup env "${env_vars[@]}" go run ./cmd/node --client >"$log_file" 2>&1 &
+    env_kv=""
+    for env_kv in "${env_vars[@]}"; do
+      export "$env_kv"
+    done
+    nohup go run ./cmd/node --client >"$log_file" 2>&1 &
     echo "$!" >"$pid_tmp"
   )
   pid="$(cat "$pid_tmp")"
@@ -14917,6 +15300,7 @@ client_vpn_up() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
     echo "client-vpn failed to start; log follows:"
     cat "$log_file"
+    cleanup_runtime_subject_file
     exit 1
   fi
 
@@ -14927,6 +15311,7 @@ client_vpn_up() {
       echo "client-vpn exited before tunnel became ready"
       cat "$log_file"
       print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"
+      cleanup_runtime_subject_file
       exit 1
     fi
     if rg -q "client received wg-session config" "$log_file"; then
@@ -14943,6 +15328,7 @@ client_vpn_up() {
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
 
@@ -14954,6 +15340,7 @@ client_vpn_up() {
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
   if ! is_valid_wg_public_key "$exit_wg_pub"; then
@@ -14962,6 +15349,7 @@ client_vpn_up() {
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
 
@@ -14969,8 +15357,11 @@ client_vpn_up() {
     echo "client-vpn missing interface after session config: $interface_name"
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
+    cleanup_runtime_subject_file
     exit 1
   fi
+
+  cleanup_runtime_subject_file
 
   cat >"$state_file" <<EOF_STATE
 CLIENT_VPN_PID=$pid
@@ -14986,7 +15377,6 @@ CLIENT_VPN_ISSUER_URLS=$issuer_urls
 CLIENT_VPN_ENTRY_URL=$entry_url
 CLIENT_VPN_EXIT_URL=$exit_url
 CLIENT_VPN_EXIT_WG_PUBKEY=$exit_wg_pub
-CLIENT_VPN_SUBJECT=$client_subject
 CLIENT_VPN_PATH_PROFILE=$normalized_path_profile
 CLIENT_VPN_SESSION_REUSE=$session_reuse
 CLIENT_VPN_ALLOW_SESSION_CHURN=$allow_session_churn
@@ -15000,7 +15390,6 @@ EOF_STATE
   echo "  interface: $interface_name"
   echo "  allowed_ips: $allowed_ips"
   echo "  install_route: $install_route"
-  echo "  subject: ${client_subject:-none}"
   echo "  path_profile: ${normalized_path_profile:-default}"
   echo "  session_reuse: $session_reuse"
   echo "  allow_session_churn: $allow_session_churn"

@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=privacynode
+Group=privacynode
 WorkingDirectory=/var/lib/privacynode
 EnvironmentFile=-/etc/privacynode/common.env
 EnvironmentFile=-/etc/privacynode/entry-exit.env
@@ -14,7 +14,17 @@ ExecStart=/usr/local/bin/node --entry --exit
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target
-

@@ -85,6 +85,15 @@ int_arg_or_die() {
   fi
 }
 
+generate_strong_token() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+    return
+  fi
+  # Fallback for minimal environments without openssl.
+  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48
+}
+
 need_cmd_path_or_die() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -95,7 +104,24 @@ need_cmd_path_or_die() {
 
 print_cmd() {
   local arg
+  local redact_next=0
   for arg in "$@"; do
+    if ((redact_next)); then
+      printf '%q ' "[REDACTED]"
+      redact_next=0
+      continue
+    fi
+    case "$arg" in
+      --anon-cred|--invite-key|--campaign-subject|--subject|--token|--auth-token|--admin-token|--authorization|--bearer)
+        printf '%q ' "$arg"
+        redact_next=1
+        continue
+        ;;
+      --anon-cred=*|--invite-key=*|--campaign-subject=*|--subject=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*)
+        printf '%q ' "${arg%%=*}=[REDACTED]"
+        continue
+        ;;
+    esac
     printf '%q ' "$arg"
   done
   printf '\n'
@@ -127,14 +153,18 @@ wait_sync_peer_success_state() {
   local admin_token="$3"
   local expected_success="$4"
   local timeout_sec="$5"
-  local i body
+  local i body header_cfg
+  header_cfg="$(mktemp)"
+  (umask 077 && printf 'header = "X-Admin-Token: %s"\n' "$admin_token" >"$header_cfg")
   for ((i = 1; i <= timeout_sec; i++)); do
-    body="$("$curl_bin" -fsS -H "X-Admin-Token: ${admin_token}" "$status_url" 2>/dev/null || true)"
+    body="$("$curl_bin" -fsS --config "$header_cfg" "$status_url" 2>/dev/null || true)"
     if [[ -n "$body" ]] && printf '%s' "$body" | jq -e --argjson expected "$expected_success" '.peer.success == $expected' >/dev/null 2>&1; then
+      rm -f "$header_cfg"
       return 0
     fi
     sleep 1
   done
+  rm -f "$header_cfg"
   return 1
 }
 
@@ -147,6 +177,8 @@ write_stack_override() {
   local peer_base_port="$6"
   local data_root="$7"
   local docker_host_alias="$8"
+  local directory_admin_token="$9"
+  local issuer_admin_token="${10}"
 
   local dir_port issuer_port entry_port exit_port entry_udp_port exit_udp_port peer_dir_port peer_issuer_port
   dir_port="$((base_port + 1))"
@@ -180,7 +212,7 @@ services:
       DIRECTORY_PROVIDER_ISSUER_URLS: "http://${docker_host_alias}:${issuer_port},http://${docker_host_alias}:${peer_issuer_port}"
       DIRECTORY_MIN_OPERATORS: "1"
       DIRECTORY_MIN_RELAY_VOTES: "1"
-      DIRECTORY_ADMIN_TOKEN: "docker-${stack_id}-directory-admin-token-001"
+      DIRECTORY_ADMIN_TOKEN: "${directory_admin_token}"
     volumes:
       - "${data_root}/${stack_id}/directory:/app/data"
       - ./tls:/app/tls:ro
@@ -190,7 +222,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       ISSUER_ID: "${issuer_id}"
-      ISSUER_ADMIN_TOKEN: "docker-${stack_id}-issuer-admin-token-001"
+      ISSUER_ADMIN_TOKEN: "${issuer_admin_token}"
     volumes:
       - "${data_root}/${stack_id}/issuer:/app/data"
       - ./tls:/app/tls:ro
@@ -661,8 +693,13 @@ mkdir -p \
   "$data_root/a/directory" "$data_root/a/issuer" "$data_root/a/entry-exit" \
   "$data_root/b/directory" "$data_root/b/issuer" "$data_root/b/entry-exit"
 
-write_stack_override "$override_a" "a" "op-docker-a" "issuer-docker-a" "$stack_a_base_port" "$stack_b_base_port" "$data_root" "$docker_host_alias"
-write_stack_override "$override_b" "b" "op-docker-b" "issuer-docker-b" "$stack_b_base_port" "$stack_a_base_port" "$data_root" "$docker_host_alias"
+directory_admin_token_a="${THREE_MACHINE_DOCKER_DIRECTORY_ADMIN_TOKEN_A:-$(generate_strong_token)}"
+directory_admin_token_b="${THREE_MACHINE_DOCKER_DIRECTORY_ADMIN_TOKEN_B:-$(generate_strong_token)}"
+issuer_admin_token_a="${THREE_MACHINE_DOCKER_ISSUER_ADMIN_TOKEN_A:-$(generate_strong_token)}"
+issuer_admin_token_b="${THREE_MACHINE_DOCKER_ISSUER_ADMIN_TOKEN_B:-$(generate_strong_token)}"
+
+write_stack_override "$override_a" "a" "op-docker-a" "issuer-docker-a" "$stack_a_base_port" "$stack_b_base_port" "$data_root" "$docker_host_alias" "$directory_admin_token_a" "$issuer_admin_token_a"
+write_stack_override "$override_b" "b" "op-docker-b" "issuer-docker-b" "$stack_b_base_port" "$stack_a_base_port" "$data_root" "$docker_host_alias" "$directory_admin_token_b" "$issuer_admin_token_b"
 
 cat >"$env_a" <<EOF_ENV_A
 DIRECTORY_PUBLISHED_PORT=$stack_a_dir_port
@@ -785,7 +822,7 @@ fi
 
 if [[ "$run_peer_failover" == "1" ]]; then
   if [[ "$status" == "pass" ]]; then
-    failover_token_a="docker-a-directory-admin-token-001"
+    failover_token_a="$directory_admin_token_a"
     failover_status_url_a="${directory_a_url}/v1/admin/sync-status"
     failover_stop_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" stop directory)"
     failover_start_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" up -d directory)"

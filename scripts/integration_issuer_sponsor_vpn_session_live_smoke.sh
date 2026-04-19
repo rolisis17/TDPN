@@ -148,6 +148,34 @@ dump_logs() {
   fi
 }
 
+write_secret_file() {
+  local secret_value="$1"
+  local prefix="$2"
+  local secret_path
+  secret_path="$(mktemp "${TMP_DIR}/${prefix}.XXXXXX")"
+  chmod 600 "${secret_path}"
+  printf '%s' "${secret_value}" >"${secret_path}"
+  printf '%s\n' "${secret_path}"
+}
+
+redact_sensitive_json() {
+  local payload="$1"
+  if printf '%s' "${payload}" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "${payload}" | jq -c '
+      if type == "object" then
+        (if has("token") then .token = "[redacted]" else . end)
+        | (if has("private_key") then .private_key = "[redacted]" else . end)
+      else
+        .
+      end
+    '
+    return
+  fi
+  printf '%s\n' "${payload}" | sed -E \
+    -e 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g' \
+    -e 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+}
+
 wait_for_health_ready() {
   local url="$1"
   local pid="$2"
@@ -629,7 +657,7 @@ run_mode_scenario() {
   pop_priv_key="$(printf '%s' "${pop_json}" | jq -r '.private_key // empty')"
   if [[ -z "${pop_pub_key}" || -z "${pop_priv_key}" ]]; then
     echo "failed to generate token proof keypair for mode=${mode}"
-    printf '%s\n' "${pop_json}"
+    redact_sensitive_json "${pop_json}"
     dump_logs
     return 1
   fi
@@ -671,21 +699,26 @@ run_mode_scenario() {
   fi
 
   local client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  local pop_priv_file
+  pop_priv_file="$(write_secret_file "${pop_priv_key}" "tokenpop_private_${mode_tag}")"
+  local token_file
+  token_file="$(write_secret_file "${token}" "token_${mode_tag}")"
   local token_proof_json
   token_proof_json="$(go run ./cmd/tokenpop sign \
-    --private-key "${pop_priv_key}" \
-    --token "${token}" \
+    --private-key-file "${pop_priv_file}" \
+    --token-file "${token_file}" \
     --exit-id "${exit_id}" \
     --proof-nonce "${token_nonce}" \
     --client-inner-pub "${client_pub}" \
     --transport "policy-json" \
     --requested-mtu 1280 \
     --requested-region "local")"
+  rm -f "${pop_priv_file}" "${token_file}"
   local token_proof
   token_proof="$(extract_token_proof "${token_proof_json}")"
   if [[ -z "${token_proof}" ]]; then
     echo "failed to sign token proof for mode=${mode}"
-    printf '%s\n' "${token_proof_json}"
+    redact_sensitive_json "${token_proof_json}"
     dump_logs
     return 1
   fi

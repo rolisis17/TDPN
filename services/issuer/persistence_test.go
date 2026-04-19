@@ -3,6 +3,7 @@ package issuer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"privacynode/pkg/proto"
@@ -50,5 +51,45 @@ func TestLoadSubjectsBackfillsMissingKind(t *testing.T) {
 	p := s.subjects["legacy"]
 	if p.Kind != proto.SubjectKindRelayExit {
 		t.Fatalf("expected missing kind backfilled to relay-exit, got %s", p.Kind)
+	}
+}
+
+func TestWriteFileAtomicRejectsSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	if err := os.WriteFile(target, []byte(`{"original":true}`), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "subjects.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	err := writeFileAtomic(link, []byte(`{"new":true}`), 0o600)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink rejection, got %v", err)
+	}
+	b, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target after rejection: %v", readErr)
+	}
+	if string(b) != `{"original":true}` {
+		t.Fatalf("target content unexpectedly changed: %s", string(b))
+	}
+}
+
+func TestWriteFileAtomicReplacesRegularFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(file, []byte(`{"old":true}`), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if err := writeFileAtomic(file, []byte(`{"new":true}`), 0o600); err != nil {
+		t.Fatalf("writeFileAtomic replace: %v", err)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read replaced file: %v", err)
+	}
+	if string(b) != `{"new":true}` {
+		t.Fatalf("unexpected replaced content: %s", string(b))
 	}
 }

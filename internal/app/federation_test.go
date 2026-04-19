@@ -746,7 +746,7 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 		entryURL:                 entryURL,
 		exitControlURL:           exitURL,
 		dataMode:                 "json",
-		clientWGPub:              randomWGPublicKeyLike(),
+		clientWGPub:              mustRandomWGPublicKeyLike(t),
 		pathOpenMaxAttempts:      1,
 		maxPairCandidates:        1,
 		healthCheckEnabled:       false,
@@ -771,6 +771,15 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 	if exitCloseCalls == 0 {
 		t.Fatalf("expected direct fallback session close on exit")
 	}
+}
+
+func mustRandomWGPublicKeyLike(t *testing.T) string {
+	t.Helper()
+	pub, err := randomWGPublicKeyLike()
+	if err != nil {
+		t.Fatalf("randomWGPublicKeyLike: %v", err)
+	}
+	return pub
 }
 
 func signedDesc(t *testing.T, relayID, role string, priv ed25519.PrivateKey) proto.RelayDescriptor {

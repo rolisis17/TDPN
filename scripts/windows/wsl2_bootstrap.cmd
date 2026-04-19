@@ -9,7 +9,13 @@ if not exist "%PS1%" (
   endlocal & exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
+if not "%~1"=="" (
+  echo This wrapper does not accept arguments.
+  echo Use "%PS1%" directly for PowerShell arguments.
+  endlocal & exit /b 1
+)
+
+powershell -NoProfile -File "%PS1%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (

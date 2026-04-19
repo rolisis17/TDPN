@@ -104,7 +104,24 @@ need_cmd() {
 
 print_cmd() {
   local arg
+  local redact_next=0
   for arg in "$@"; do
+    if ((redact_next)); then
+      printf '%q ' "[REDACTED]"
+      redact_next=0
+      continue
+    fi
+    case "$arg" in
+      --anon-cred|--invite-key|--campaign-subject|--subject|--token|--auth-token|--admin-token|--authorization|--bearer)
+        printf '%q ' "$arg"
+        redact_next=1
+        continue
+        ;;
+      --anon-cred=*|--invite-key=*|--campaign-subject=*|--subject=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*)
+        printf '%q ' "${arg%%=*}=[REDACTED]"
+        continue
+        ;;
+    esac
     printf '%q ' "$arg"
   done
   printf '\n'
@@ -717,6 +734,14 @@ else
 fi
 
 profiles_json="$(printf '%s\n' "${profiles[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+anon_cred_present="0"
+if [[ -n "$anon_cred" ]]; then
+  anon_cred_present="1"
+fi
 
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -749,8 +774,8 @@ jq -n \
   --argjson stack_b_base_port "$stack_b_base_port" \
   --arg docker_host_alias "$docker_host_alias" \
   --arg bootstrap_directory "$bootstrap_directory" \
-  --arg subject "$subject" \
-  --arg anon_cred "$anon_cred" \
+  --arg subject "$subject_redacted" \
+  --arg anon_cred_present "$anon_cred_present" \
   --argjson profiles "$profiles_json" \
   --argjson profiles_total "$profiles_total" \
   --argjson profiles_pass "$profiles_pass" \
@@ -788,7 +813,7 @@ jq -n \
       docker_host_alias: $docker_host_alias,
       bootstrap_directory: $bootstrap_directory,
       subject: $subject,
-      anon_cred_present: ($anon_cred | length > 0)
+      anon_cred_present: ($anon_cred_present == "1")
     },
     summary: {
       profiles_total: $profiles_total,

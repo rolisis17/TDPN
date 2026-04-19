@@ -258,15 +258,49 @@ func moduleNameOrDefault(value, fallback string) string {
 }
 
 func ensureScaffoldStateFile(path string) error {
-	info, err := os.Stat(path)
-	if err == nil {
-		if info.IsDir() {
-			return fmt.Errorf("%s resolves to a directory", path)
-		}
-		return nil
+	cleanPath := filepath.Clean(path)
+	parentDir := filepath.Dir(cleanPath)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		return fmt.Errorf("create scaffold state parent directory: %w", err)
 	}
-	if !errors.Is(err, os.ErrNotExist) {
+
+	file, err := os.OpenFile(cleanPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err == nil {
+		if _, writeErr := file.Write([]byte("{}\n")); writeErr != nil {
+			_ = file.Close()
+			return writeErr
+		}
+		if syncErr := file.Sync(); syncErr != nil {
+			_ = file.Close()
+			return syncErr
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			return closeErr
+		}
+		return syncDirectory(parentDir)
+	}
+	if !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	return os.WriteFile(path, []byte("{}\n"), 0o600)
+
+	info, err := os.Lstat(cleanPath)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s resolves to a symlink", cleanPath)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s resolves to a directory", cleanPath)
+	}
+	return nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

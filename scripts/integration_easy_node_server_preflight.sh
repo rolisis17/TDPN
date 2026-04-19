@@ -51,6 +51,10 @@ url="${@: -1}"
 peer_operator="${FAKE_CURL_PEER_OPERATOR_ID:-op-peer}"
 peer_issuer="${FAKE_CURL_PEER_ISSUER_ID:-issuer-peer}"
 
+if [[ "${FAKE_CURL_HTTP_ONLY:-0}" == "1" && "$url" == https://203.0.113.10:* ]]; then
+  exit 7
+fi
+
 case "$url" in
   *"203.0.113.10:8081/v1/relays")
     if [[ "${FAKE_CURL_FAIL_PEER_RELAYS:-0}" == "1" ]]; then
@@ -70,6 +74,39 @@ case "$url" in
 esac
 EOF_CURL
 chmod +x "$TMP_BIN/curl"
+
+set +e
+PATH="$TMP_BIN:$PATH" \
+FAKE_CURL_HTTP_ONLY=1 \
+./scripts/easy_node.sh server-preflight \
+  --mode provider \
+  --authority-directory http://203.0.113.10:8081 \
+  --authority-issuer http://203.0.113.10:8082 \
+  --peer-directories http://203.0.113.10:8081 \
+  --prod-profile 1 \
+  --min-peer-operators 0 >/tmp/integration_easy_node_server_preflight_prod_http_mismatch.log 2>&1
+prod_http_mismatch_rc=$?
+set -e
+if [[ "$prod_http_mismatch_rc" -eq 0 ]]; then
+  echo "expected prod-profile provider preflight to fail when authority is non-prod/http"
+  cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
+  exit 1
+fi
+if ! rg -q "provider preflight is running with --prod-profile 1, so authority URLs are normalized to https before probing" /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log; then
+  echo "missing expected provider prod-profile mismatch diagnostic"
+  cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
+  exit 1
+fi
+if ! rg -q "configured authority looks non-prod/http" /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log; then
+  echo "missing expected non-prod authority hint"
+  cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
+  exit 1
+fi
+if ! rg -q "appears reachable over plain HTTP" /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log; then
+  echo "missing expected plain HTTP mismatch hint"
+  cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
+  exit 1
+fi
 
 PATH="$TMP_BIN:$PATH" \
 FAKE_CURL_FAIL_PEER_RELAYS=1 \

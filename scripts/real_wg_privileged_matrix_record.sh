@@ -82,12 +82,22 @@ print_cmd() {
   printf '\n'
 }
 
+safe_append_to_array() {
+  local array_name="$1"
+  shift
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+  local -n target_array="$array_name"
+  target_array+=("$@")
+}
+
 append_existing_artifact() {
   local array_name="$1"
   local path="$2"
   [[ -z "$path" ]] && return 0
   if [[ -e "$path" ]]; then
-    eval "$array_name+=(\"\$path\")"
+    safe_append_to_array "$array_name" "$path" || return 1
   fi
 }
 

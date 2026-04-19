@@ -10,6 +10,12 @@ import (
 const (
 	// EvidenceKindObjective marks machine-verifiable evidence accepted in v1.
 	EvidenceKindObjective = "objective"
+	maxEvidenceIDLength   = 128
+	maxProviderIDLength   = 128
+	maxSessionIDLength    = 128
+	maxViolationTypeLen   = 64
+	maxProofHashLength    = 1024
+	maxPenaltyIDLength    = 128
 )
 
 var objectiveViolationTypeSet = map[string]struct{}{
@@ -48,32 +54,59 @@ type PenaltyDecision struct {
 }
 
 func (e SlashEvidence) ValidateBasic() error {
-	if e.EvidenceID == "" {
+	evidenceID := strings.TrimSpace(e.EvidenceID)
+	if evidenceID == "" {
 		return errors.New("evidence id is required")
+	}
+	if len(evidenceID) > maxEvidenceIDLength {
+		return errors.New("evidence id exceeds 128 characters")
+	}
+	if providerID := strings.TrimSpace(e.ProviderID); providerID != "" && len(providerID) > maxProviderIDLength {
+		return errors.New("provider id exceeds 128 characters")
+	}
+	if sessionID := strings.TrimSpace(e.SessionID); sessionID != "" && len(sessionID) > maxSessionIDLength {
+		return errors.New("session id exceeds 128 characters")
 	}
 	if e.Kind != EvidenceKindObjective {
 		return errors.New("evidence kind must be objective")
 	}
-	if e.ProofHash == "" {
+	proofHash := strings.TrimSpace(e.ProofHash)
+	if proofHash == "" {
 		return errors.New("proof hash is required")
 	}
-	if !chaintypes.IsObjectiveEvidenceFormat(e.ProofHash) {
+	if len(proofHash) > maxProofHashLength {
+		return errors.New("proof hash exceeds 1024 characters")
+	}
+	if !chaintypes.IsObjectiveEvidenceFormat(proofHash) {
 		return errors.New("proof hash must use objective format (sha256:<value> or obj://<value>)")
 	}
-	if canonicalViolationType := NormalizeViolationType(e.ViolationType); canonicalViolationType != "" {
-		if _, ok := objectiveViolationTypeSet[canonicalViolationType]; !ok {
-			return errors.New("violation type must be one of: double-sign, downtime-proof, invalid-settlement-proof, session-replay-proof, sponsor-overdraft-proof")
-		}
+	canonicalViolationType := NormalizeViolationType(e.ViolationType)
+	if canonicalViolationType == "" {
+		return errors.New("violation type is required")
+	}
+	if len(canonicalViolationType) > maxViolationTypeLen {
+		return errors.New("violation type exceeds 64 characters")
+	}
+	if _, ok := objectiveViolationTypeSet[canonicalViolationType]; !ok {
+		return errors.New("violation type must be one of: double-sign, downtime-proof, invalid-settlement-proof, session-replay-proof, sponsor-overdraft-proof")
 	}
 	return nil
 }
 
 func (d PenaltyDecision) ValidateBasic() error {
-	if d.PenaltyID == "" {
+	penaltyID := strings.TrimSpace(d.PenaltyID)
+	if penaltyID == "" {
 		return errors.New("penalty id is required")
 	}
-	if d.EvidenceID == "" {
+	if len(penaltyID) > maxPenaltyIDLength {
+		return errors.New("penalty id exceeds 128 characters")
+	}
+	evidenceID := strings.TrimSpace(d.EvidenceID)
+	if evidenceID == "" {
 		return errors.New("evidence id is required")
+	}
+	if len(evidenceID) > maxEvidenceIDLength {
+		return errors.New("evidence id exceeds 128 characters")
 	}
 	if d.SlashBasisPoint > 10000 {
 		return errors.New("slash basis points cannot exceed 10000")

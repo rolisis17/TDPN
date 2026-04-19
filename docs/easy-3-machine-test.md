@@ -18,7 +18,7 @@ Identity defaults:
 - IDs are persisted per machine in `deploy/data/easy_node_identity.conf`.
 - Relay IDs and signing key files are derived from those IDs, so machine A/B do not collide by default.
 - Optional invite-only mode: `server-up --client-allowlist 1 --allow-anon-cred 0` plus `./scripts/beta_subject_upsert.sh` lets only allowlisted client subjects receive tokens.
-- Batch invite-only onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --csv invited_clients.csv`.
+- Batch invite-only onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token-file <TOKEN_FILE> --csv invited_clients.csv`.
 - In invite-only mode, pass `--subject <CLIENT_ID>` to `client-test`/`machine-c-test`.
 
 ## 1) Install the easy launcher
@@ -71,7 +71,7 @@ All commands below run from repo root.
 ```bash
 ./scripts/easy_node.sh server-up \
   --public-host B_PUBLIC_IP_OR_DNS \
-  --peer-directories http://A_PUBLIC_IP_OR_DNS:8081 \
+  --peer-directories https://A_PUBLIC_IP_OR_DNS:8081 \
   --beta-profile
 ```
 
@@ -80,7 +80,7 @@ Optional on Machine A to federate both ways:
 ```bash
 ./scripts/easy_node.sh server-up \
   --public-host A_PUBLIC_IP_OR_DNS \
-  --peer-directories http://B_PUBLIC_IP_OR_DNS:8081 \
+  --peer-directories https://B_PUBLIC_IP_OR_DNS:8081 \
   --beta-profile
 ```
 
@@ -88,10 +88,10 @@ Optional on Machine A to federate both ways:
 
 ```bash
 ./scripts/easy_node.sh client-test \
-  --directory-urls http://A_PUBLIC_IP_OR_DNS:8081,http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-urls https://A_PUBLIC_IP_OR_DNS:8081,https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
   --distinct-operators 1 \
   --beta-profile 1
@@ -109,10 +109,10 @@ Real client VPN mode (for external testers on Linux):
 
 ```bash
 sudo ./scripts/easy_node.sh client-vpn-preflight \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081
 
 sudo ./scripts/easy_node.sh client-vpn-up \
-  --bootstrap-directory http://A_PUBLIC_IP_OR_DNS:8081 \
+  --bootstrap-directory https://A_PUBLIC_IP_OR_DNS:8081 \
   --subject <INVITE_KEY> \
   --beta-profile 1 \
   --distinct-operators 1
@@ -127,15 +127,17 @@ sudo ./scripts/easy_node.sh client-vpn-down
 # for single-issuer lab tests only, append: --issuer-quorum-check 0
 ```
 
+If you do not have HTTPS on the bootstrap endpoint yet, keep HTTP-only runs private-network only, enable explicit insecure opt-in (`EASY_NODE_ALLOW_INSECURE_REMOTE_HTTP=1`), and do not use them on an exposed public listener.
+
 Automated validation (recommended on machine C):
 
 ```bash
 ./scripts/easy_node.sh three-machine-validate \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --min-sources 2 \
   --min-operators 2 \
   --distinct-operators 1 \
@@ -159,7 +161,7 @@ Machine B:
 
 ```bash
 ./scripts/easy_node.sh machine-b-test \
-  --peer-directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
+  --peer-directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
   --public-host B_PUBLIC_IP_OR_DNS
 ```
 
@@ -167,11 +169,11 @@ Machine C:
 
 ```bash
 ./scripts/easy_node.sh machine-c-test \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --beta-profile 1 \
   --distinct-operators 1
 ```
@@ -189,13 +191,13 @@ One-bootstrap mode (you know only one server IP):
 ```bash
 # discover server hosts from one known directory and update data/easy_mode_hosts.conf
 ./scripts/easy_node.sh discover-hosts \
-  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --bootstrap-directory https://KNOWN_SERVER_IP:8081 \
   --wait-sec 20 \
   --write-config 1
 
 # run full machine-C validation from one bootstrap URL
 ./scripts/easy_node.sh machine-c-test \
-  --bootstrap-directory http://KNOWN_SERVER_IP:8081 \
+  --bootstrap-directory https://KNOWN_SERVER_IP:8081 \
   --discovery-wait-sec 20 \
   --beta-profile 1 \
   --distinct-operators 1
@@ -205,11 +207,11 @@ Soak test from machine C (optional, recommended before closed beta):
 
 ```bash
 ./scripts/easy_node.sh three-machine-soak \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --rounds 12 \
   --pause-sec 5 \
   --beta-profile 1 \
@@ -388,11 +390,11 @@ Single-command pilot bundle from machine C (validate + soak + snapshots):
 
 ```bash
 ./scripts/beta_pilot_runbook.sh \
-  --directory-a http://A_PUBLIC_IP_OR_DNS:8081 \
-  --directory-b http://B_PUBLIC_IP_OR_DNS:8081 \
-  --issuer-url http://A_PUBLIC_IP_OR_DNS:8082 \
-  --entry-url http://A_PUBLIC_IP_OR_DNS:8083 \
-  --exit-url http://A_PUBLIC_IP_OR_DNS:8084 \
+  --directory-a https://A_PUBLIC_IP_OR_DNS:8081 \
+  --directory-b https://B_PUBLIC_IP_OR_DNS:8081 \
+  --issuer-url https://A_PUBLIC_IP_OR_DNS:8082 \
+  --entry-url https://A_PUBLIC_IP_OR_DNS:8083 \
+  --exit-url https://A_PUBLIC_IP_OR_DNS:8084 \
   --subject client-alice \
   --rounds 10 \
   --pause-sec 5 \

@@ -30,6 +30,7 @@ Usage:
     [--min-operators N] \
     [--federation-timeout-sec N] \
     [--control-timeout-sec N] \
+    [--control-require-issuer-quorum auto|0|1] \
     [--control-soak-rounds N] \
     [--control-soak-pause-sec N] \
     [--wg-client-timeout-sec N] \
@@ -95,6 +96,65 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+url_scheme_from_url() {
+  local value="$1"
+  if [[ "$value" == https://* ]]; then
+    echo "https"
+  else
+    echo "http"
+  fi
+}
+
+hostport_from_url() {
+  local value="$1"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  echo "$value"
+}
+
+host_from_hostport() {
+  local value="$1"
+  if [[ "$value" == \[*\]* ]]; then
+    echo "${value%%]*}]"
+    return
+  fi
+  local colon_count
+  colon_count="$(printf '%s' "$value" | awk -F: '{print NF-1}')"
+  if [[ "$colon_count" == "1" ]]; then
+    local maybe_port="${value##*:}"
+    if [[ "$maybe_port" =~ ^[0-9]+$ ]]; then
+      echo "${value%:*}"
+      return
+    fi
+  fi
+  echo "$value"
+}
+
+host_from_url() {
+  host_from_hostport "$(hostport_from_url "$1")"
+}
+
+normalize_host_for_endpoint() {
+  local host="$1"
+  if [[ "$host" == \[*\] ]]; then
+    echo "$host"
+    return
+  fi
+  if [[ "$host" == *:* ]]; then
+    echo "[$host]"
+    return
+  fi
+  echo "$host"
+}
+
+url_from_host_port() {
+  local host="$1"
+  local port="$2"
+  local scheme="${3:-http}"
+  printf '%s://%s:%s' "$scheme" "$(normalize_host_for_endpoint "$host")" "$port"
 }
 
 valid_failure_class_spec() {
@@ -222,6 +282,7 @@ min_sources="${THREE_MACHINE_MIN_SOURCES:-2}"
 min_operators="${THREE_MACHINE_MIN_OPERATORS:-2}"
 federation_timeout_sec="${THREE_MACHINE_FEDERATION_TIMEOUT_SEC:-90}"
 control_timeout_sec="${THREE_MACHINE_PROD_GATE_CONTROL_TIMEOUT_SEC:-50}"
+control_require_issuer_quorum="${THREE_MACHINE_PROD_GATE_CONTROL_REQUIRE_ISSUER_QUORUM:-auto}"
 control_soak_rounds="${THREE_MACHINE_PROD_GATE_CONTROL_SOAK_ROUNDS:-10}"
 control_soak_pause_sec="${THREE_MACHINE_PROD_GATE_CONTROL_SOAK_PAUSE_SEC:-5}"
 wg_client_timeout_sec="${THREE_MACHINE_PROD_GATE_WG_CLIENT_TIMEOUT_SEC:-120}"
@@ -304,6 +365,9 @@ step_control_validate="pending"
 step_control_soak="pending"
 step_prod_wg_validate="pending"
 step_prod_wg_soak="pending"
+control_require_issuer_quorum_effective="1"
+control_require_issuer_quorum_reason="explicit_strict"
+issuer_b_probe_url=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -357,6 +421,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --control-timeout-sec)
       control_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --control-require-issuer-quorum)
+      control_require_issuer_quorum="${2:-}"
       shift 2
       ;;
     --control-soak-rounds)
@@ -669,6 +737,10 @@ if [[ "$control_continue_on_fail" != "0" && "$control_continue_on_fail" != "1" ]
   echo "--control-continue-on-fail must be 0 or 1"
   exit 2
 fi
+if [[ "$control_require_issuer_quorum" != "0" && "$control_require_issuer_quorum" != "1" && "$control_require_issuer_quorum" != "auto" ]]; then
+  echo "--control-require-issuer-quorum must be one of: auto, 0, 1"
+  exit 2
+fi
 if [[ "$wg_continue_on_fail" != "0" && "$wg_continue_on_fail" != "1" ]]; then
   echo "--wg-continue-on-fail must be 0 or 1"
   exit 2
@@ -738,6 +810,32 @@ if [[ -z "$gate_summary_json" ]]; then
 fi
 echo "[prod-gate] gate_summary_json=$gate_summary_json"
 
+if [[ "$control_require_issuer_quorum" == "auto" ]]; then
+  control_require_issuer_quorum_effective="1"
+  control_require_issuer_quorum_reason="auto_default_strict"
+  if [[ -n "$directory_b" ]]; then
+    issuer_b_probe_url="$(url_from_host_port "$(host_from_url "$directory_b")" 8082 "$(url_scheme_from_url "$directory_b")")"
+    if curl -fsS --connect-timeout 2 --max-time 4 "${directory_b}/v1/relays" >/dev/null 2>&1; then
+      if ! curl -fsS --connect-timeout 2 --max-time 4 "${issuer_b_probe_url}/v1/pubkeys" >/dev/null 2>&1; then
+        control_require_issuer_quorum_effective="0"
+        control_require_issuer_quorum_reason="auto_provider_mode_detected"
+      fi
+    else
+      control_require_issuer_quorum_reason="auto_directory_b_unreachable"
+    fi
+  else
+    control_require_issuer_quorum_reason="auto_directory_b_not_set"
+  fi
+elif [[ "$control_require_issuer_quorum" == "0" ]]; then
+  control_require_issuer_quorum_effective="0"
+  control_require_issuer_quorum_reason="explicit_disabled"
+else
+  control_require_issuer_quorum_effective="1"
+  control_require_issuer_quorum_reason="explicit_strict"
+fi
+
+echo "[prod-gate] control_require_issuer_quorum requested=$control_require_issuer_quorum effective=$control_require_issuer_quorum_effective reason=$control_require_issuer_quorum_reason issuer_b_probe_url=${issuer_b_probe_url:-<unset>}"
+
 emit_wg_soak_summary_once() {
   local strict_missing="${1:-0}"
   if [[ "$wg_soak_summary_emitted" == "1" ]]; then
@@ -793,6 +891,10 @@ write_gate_summary_once() {
     echo "    \"prod_wg_validate\": \"$(json_escape "$step_prod_wg_validate")\","
     echo "    \"prod_wg_soak\": \"$(json_escape "$step_prod_wg_soak")\""
     echo "  },"
+    echo "  \"control_require_issuer_quorum_requested\": \"$(json_escape "$control_require_issuer_quorum")\","
+    echo "  \"control_require_issuer_quorum\": $control_require_issuer_quorum_effective,"
+    echo "  \"control_require_issuer_quorum_reason\": \"$(json_escape "$control_require_issuer_quorum_reason")\","
+    echo "  \"issuer_b_probe_url\": \"$(json_escape "$issuer_b_probe_url")\","
     echo "  \"wg_validate_summary_json\": \"$(json_escape "$wg_validate_summary_json")\","
     echo "  \"wg_validate_status\": \"$(json_escape "$wg_validate_status")\","
     echo "  \"wg_validate_failed_step\": \"$(json_escape "$wg_validate_failed_step")\","
@@ -867,7 +969,7 @@ run_step "control_validate" "$step_dir/01_control_validate.log" \
   --client-min-exit-operators 2 \
   --client-require-cross-operator-pair 1 \
   --distinct-operators "$strict_distinct" \
-  --require-issuer-quorum 1 \
+  --require-issuer-quorum "$control_require_issuer_quorum_effective" \
   --beta-profile 1 \
   --prod-profile 1
 
@@ -888,7 +990,7 @@ if [[ "$skip_control_soak" == "0" ]]; then
     --client-min-exit-operators 2
     --client-require-cross-operator-pair 1
     --distinct-operators "$strict_distinct"
-    --require-issuer-quorum 1
+    --require-issuer-quorum "$control_require_issuer_quorum_effective"
     --beta-profile 1
     --prod-profile 1
     --report-file "$step_dir/02_control_soak.log"

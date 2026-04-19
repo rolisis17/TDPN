@@ -189,7 +189,6 @@ func fromProtoPolicy(in *pb.GovernancePolicy) governtypes.GovernancePolicy {
 		Description:     in.GetDescription(),
 		Version:         in.GetVersion(),
 		ActivatedAtUnix: in.GetActivatedAtUnix(),
-		Status:          fromProtoStatus(in.GetStatus()),
 	}
 }
 
@@ -216,7 +215,6 @@ func fromProtoDecision(in *pb.GovernanceDecision) governtypes.GovernanceDecision
 		Decider:       in.GetDecider(),
 		Reason:        in.GetReason(),
 		DecidedAtUnix: in.GetDecidedAtUnix(),
-		Status:        fromProtoStatus(in.GetStatus()),
 	}
 }
 

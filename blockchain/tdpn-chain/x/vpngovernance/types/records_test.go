@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -165,6 +166,21 @@ func TestGovernanceAuditActionValidateBasic(t *testing.T) {
 			wantErr: "action is required",
 		},
 		{
+			name:    "invalid action",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: "manual_review_only", Actor: base.Actor, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "action must be one of: admin_allow_validator, admin_disable_validator, admin_set_policy, admin_set_quorum, admin_rotate_key",
+		},
+		{
+			name:    "legacy policy bootstrap alias",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: "policy.bootstrap", Actor: base.Actor, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "",
+		},
+		{
+			name:    "legacy manual override alias",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: "manual_override", Actor: base.Actor, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
+			wantErr: "",
+		},
+		{
 			name:    "missing actor",
 			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Reason: base.Reason, EvidencePointer: base.EvidencePointer, TimestampUnix: base.TimestampUnix},
 			wantErr: "actor is required",
@@ -178,6 +194,16 @@ func TestGovernanceAuditActionValidateBasic(t *testing.T) {
 			name:    "missing evidence pointer",
 			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Actor: base.Actor, Reason: base.Reason, TimestampUnix: base.TimestampUnix},
 			wantErr: "evidence pointer is required",
+		},
+		{
+			name:    "invalid evidence pointer format",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Actor: base.Actor, Reason: base.Reason, EvidencePointer: "ftp://audit/action-1", TimestampUnix: base.TimestampUnix},
+			wantErr: "evidence pointer must use objective format (sha256:<value>, obj://<value>, ipfs://<value>, or https://<value>)",
+		},
+		{
+			name:    "evidence pointer too long",
+			record:  GovernanceAuditAction{ActionID: base.ActionID, Action: base.Action, Actor: base.Actor, Reason: base.Reason, EvidencePointer: "ipfs://" + strings.Repeat("x", 1020), TimestampUnix: base.TimestampUnix},
+			wantErr: "evidence pointer exceeds 1024 characters",
 		},
 		{
 			name:    "non-positive timestamp",
@@ -298,6 +324,32 @@ func TestGovernanceAuditActionCanonicalize(t *testing.T) {
 	}
 	if got.Reason != record.Reason {
 		t.Fatalf("expected reason to be preserved, got %q vs %q", got.Reason, record.Reason)
+	}
+}
+
+func TestCanonicalGovernanceAuditActionLegacyAliases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "manual override underscore", in: "MANUAL_OVERRIDE", want: "admin_set_policy"},
+		{name: "manual override hyphen", in: "manual-override", want: "admin_set_policy"},
+		{name: "policy bootstrap dotted", in: "policy.bootstrap", want: "admin_set_policy"},
+		{name: "policy bootstrap snake", in: "policy_bootstrap", want: "admin_set_policy"},
+		{name: "already canonical", in: "admin_set_quorum", want: "admin_set_quorum"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := canonicalGovernanceAuditAction(tc.in); got != tc.want {
+				t.Fatalf("canonicalGovernanceAuditAction(%q)=%q want=%q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

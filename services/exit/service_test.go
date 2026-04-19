@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -148,13 +149,14 @@ func TestHandlePathCloseFinalizeWarningDoesNotFailSessionClose(t *testing.T) {
 			"sid-close-finalize-warning": {
 				claims:       crypto.CapabilityClaims{Subject: "client-1", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
 				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-finalize-warning",
 				ingressBytes: 512,
 				egressBytes:  1024,
 			},
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-finalize-warning"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-finalize-warning","session_key_id":"sk-close-finalize-warning"}`))
 	rr := httptest.NewRecorder()
 	s.handlePathClose(rr, req)
 
@@ -199,6 +201,7 @@ func TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose(t *testing.T
 			"sid-close-reserve-warning": {
 				claims:       crypto.CapabilityClaims{Subject: "client-2", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
 				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-reserve-warning",
 				ingressBytes: 2048,
 				egressBytes:  1024,
 			},
@@ -210,7 +213,7 @@ func TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose(t *testing.T
 		t.Fatalf("expected reserve attempted once, got %d", stub.reserveFundsCalls)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-reserve-warning"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-reserve-warning","session_key_id":"sk-close-reserve-warning"}`))
 	rr := httptest.NewRecorder()
 	s.handlePathClose(rr, req)
 
@@ -235,6 +238,40 @@ func TestSettlementReserveAndFinalizeWarningsDoNotBlockSessionClose(t *testing.T
 	}
 }
 
+func TestHandlePathCloseRejectsSessionKeyMismatch(t *testing.T) {
+	now := time.Now()
+	s := &Service{
+		sessions: map[string]sessionInfo{
+			"sid-close-key-mismatch": {
+				claims:       crypto.CapabilityClaims{Subject: "client-4", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-key-correct",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-key-mismatch","session_key_id":"sk-close-key-wrong"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathCloseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode close response: %v", err)
+	}
+	if resp.Closed {
+		t.Fatalf("expected close rejection for mismatched session key id: %+v", resp)
+	}
+	if resp.Reason != "session-key-id-mismatch" {
+		t.Fatalf("reason=%q want=session-key-id-mismatch", resp.Reason)
+	}
+	if _, exists := s.sessions["sid-close-key-mismatch"]; !exists {
+		t.Fatalf("expected session to remain when session key id mismatches")
+	}
+}
+
 func TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose(t *testing.T) {
 	adapter := &failingSettlementChainAdapter{}
 	memSettlement := settlement.NewMemoryService(
@@ -250,6 +287,7 @@ func TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose(t *testing.
 			"sid-close-deferred-chain": {
 				claims:       crypto.CapabilityClaims{Subject: "client-3", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
 				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-deferred-chain",
 				ingressBytes: 400000,
 				egressBytes:  200000,
 			},
@@ -258,7 +296,7 @@ func TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose(t *testing.
 
 	s.reserveSettlementForSession(context.Background(), "sid-close-deferred-chain", "client-3")
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-deferred-chain"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-deferred-chain","session_key_id":"sk-close-deferred-chain"}`))
 	rr := httptest.NewRecorder()
 	s.handlePathClose(rr, req)
 
@@ -288,6 +326,104 @@ func TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose(t *testing.
 	}
 	if report.FailedOperations < 1 {
 		t.Fatalf("expected failed settlement operations after replayed chain failure, got %d", report.FailedOperations)
+	}
+}
+
+func TestHandlePathOpenRejectsMalformedJSONBodies(t *testing.T) {
+	oversizedSessionID := strings.Repeat("a", int(pathControlJSONBodyMaxBytes)+1024)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"session_id":"sid-open","token":"tok-open","unexpected":true}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"session_id":"sid-open","token":"tok-open"}{"trailing":true}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"session_id":"` + oversizedSessionID + `","token":"tok-open"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{}
+			req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(tc.body))
+			rr := httptest.NewRecorder()
+
+			s.handlePathOpen(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected HTTP 400 for malformed path open body, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestSessionCapacityReachedLockedRejectsOnlyNewSessionsAtCapacity(t *testing.T) {
+	s := &Service{
+		maxActiveSessions: 1,
+		sessions: map[string]sessionInfo{
+			"sid-existing": {},
+		},
+	}
+	if !s.sessionCapacityReachedLocked("sid-new") {
+		t.Fatalf("expected capacity reached for new session id")
+	}
+	if s.sessionCapacityReachedLocked("sid-existing") {
+		t.Fatalf("expected existing session id to bypass capacity rejection")
+	}
+}
+
+func TestEffectiveMaxActiveSessionsDefaults(t *testing.T) {
+	s := &Service{}
+	if got := s.effectiveMaxActiveSessions(); got != defaultMaxActiveSessions {
+		t.Fatalf("effectiveMaxActiveSessions()=%d want=%d", got, defaultMaxActiveSessions)
+	}
+}
+
+func TestHandlePathCloseRejectsMalformedJSONBodies(t *testing.T) {
+	oversizedSessionID := strings.Repeat("a", int(pathControlJSONBodyMaxBytes)+1024)
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"session_id":"sid-close","unexpected":true}`,
+		},
+		{
+			name: "trailing json",
+			body: `{"session_id":"sid-close"}{"trailing":true}`,
+		},
+		{
+			name: "oversized body",
+			body: `{"session_id":"` + oversizedSessionID + `"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{}
+			req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(tc.body))
+			rr := httptest.NewRecorder()
+
+			s.handlePathClose(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected HTTP 400 for malformed path close body, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "invalid json") {
+				t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -472,6 +608,81 @@ func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
 	}
 	if stub.reconcileCalls != 1 {
 		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	}
+}
+
+func TestHandleSettlementStatusStaleClearsAfterRecovery(t *testing.T) {
+	recoveredAt := time.Unix(1700000300, 0).UTC()
+	call := 0
+	stub := &settlementServiceStub{
+		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
+			call++
+			if call == 1 {
+				return settlement.ReconcileReport{}, errors.New("temporary reconcile outage")
+			}
+			return settlement.ReconcileReport{
+				GeneratedAt:               recoveredAt,
+				PendingAdapterOperations:  1,
+				ShadowAdapterConfigured:   true,
+				ShadowAttemptedOperations: 5,
+				ShadowSubmittedOperations: 4,
+				ShadowFailedOperations:    1,
+				PendingOperations:         0,
+				SubmittedOperations:       4,
+				ConfirmedOperations:       3,
+				FailedOperations:          0,
+			}, nil
+		},
+	}
+	s := &Service{settlement: stub}
+	s.settlementStatus.lastReport = settlement.ReconcileReport{
+		GeneratedAt:              time.Unix(1700000200, 0).UTC(),
+		PendingAdapterOperations: 9,
+		PendingOperations:        9,
+		FailedOperations:         2,
+	}
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	firstRR := httptest.NewRecorder()
+	s.handleSettlementStatus(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200 for degraded response, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	var degraded settlementStatusResponse
+	if err := json.Unmarshal(firstRR.Body.Bytes(), &degraded); err != nil {
+		t.Fatalf("decode degraded settlement status response: %v", err)
+	}
+	if !degraded.Stale {
+		t.Fatalf("expected stale response while reconcile is failing")
+	}
+	if !strings.Contains(degraded.LastError, "temporary reconcile outage") {
+		t.Fatalf("expected reconcile error in degraded response, got %q", degraded.LastError)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
+	secondRR := httptest.NewRecorder()
+	s.handleSettlementStatus(secondRR, secondReq)
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("expected status HTTP 200 for recovered response, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	var recovered settlementStatusResponse
+	if err := json.Unmarshal(secondRR.Body.Bytes(), &recovered); err != nil {
+		t.Fatalf("decode recovered settlement status response: %v", err)
+	}
+	if recovered.Stale {
+		t.Fatalf("expected stale=false after recovery")
+	}
+	if recovered.LastError != "" {
+		t.Fatalf("expected last_error cleared after recovery, got %q", recovered.LastError)
+	}
+	if !recovered.ReportGeneratedAt.Equal(recoveredAt) {
+		t.Fatalf("expected recovered report_generated_at %s, got %s", recoveredAt, recovered.ReportGeneratedAt)
+	}
+	if recovered.PendingAdapterOperations != 1 || recovered.PendingOperations != 0 || recovered.SubmittedOperations != 4 || recovered.ConfirmedOperations != 3 || recovered.FailedOperations != 0 {
+		t.Fatalf("unexpected recovered counters: %+v", recovered)
+	}
+	if stub.reconcileCalls != 2 {
+		t.Fatalf("expected two reconcile calls across degrade->recover, got %d", stub.reconcileCalls)
 	}
 }
 
@@ -1197,6 +1408,7 @@ func TestValidatePathOpenClaims(t *testing.T) {
 		Tier:       2,
 		ExpiryUnix: now + 60,
 		TokenID:    "jti-1",
+		ExitScope:  []string{"exit-a"},
 	}
 	if err := validatePathOpenClaims(good, now); err != nil {
 		t.Fatalf("expected valid claims, got err=%v", err)
@@ -1235,6 +1447,18 @@ func TestValidatePathOpenClaims(t *testing.T) {
 			claims: crypto.CapabilityClaims{
 				Audience:   "exit",
 				TokenType:  crypto.TokenTypeClientAccess,
+				Subject:    "client-a",
+				Tier:       1,
+				ExpiryUnix: now + 60,
+				TokenID:    "jti-1",
+			},
+		},
+		{
+			name: "missing exit scope",
+			claims: crypto.CapabilityClaims{
+				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: popPubB64,
 				Subject:    "client-a",
 				Tier:       1,
 				ExpiryUnix: now + 60,
@@ -1368,6 +1592,151 @@ func TestCheckAndRememberProofNonceReplay(t *testing.T) {
 	}
 }
 
+func TestCheckAndRememberProofNoncePerTokenCap(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		tokenProofReplayGuard: true,
+		proofNonceSeen:        make(map[string]map[string]int64),
+	}
+	claims := crypto.CapabilityClaims{TokenID: "jti-cap-1", ExpiryUnix: now + 3600}
+
+	total := tokenProofReplayMaxNoncesPerToken
+	for i := 0; i < total; i++ {
+		req := proto.PathOpenRequest{TokenProofNonce: fmt.Sprintf("nonce-%d", i)}
+		if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+			t.Fatalf("nonce %d should pass: %v", i, err)
+		}
+	}
+	if err := s.checkAndRememberProofNonce(claims, proto.PathOpenRequest{TokenProofNonce: "nonce-overflow"}, now); err == nil {
+		t.Fatalf("expected per-token replay cache saturation")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := s.proofNonceSeen[claims.TokenID]
+	if got := len(seen); got != tokenProofReplayMaxNoncesPerToken {
+		t.Fatalf("expected %d nonces retained, got %d", tokenProofReplayMaxNoncesPerToken, got)
+	}
+	if _, ok := seen[fmt.Sprintf("nonce-%d", total-1)]; !ok {
+		t.Fatalf("expected newest nonce retained")
+	}
+	if _, ok := seen["nonce-overflow"]; ok {
+		t.Fatalf("did not expect overflow nonce retained")
+	}
+}
+
+func TestCheckAndRememberProofNonceTokenIDCap(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		tokenProofReplayGuard: true,
+		proofNonceSeen:        make(map[string]map[string]int64),
+	}
+
+	total := tokenProofReplayMaxTokenIDs
+	for i := 0; i < total; i++ {
+		tokenID := fmt.Sprintf("jti-bucket-%05d", i)
+		claims := crypto.CapabilityClaims{TokenID: tokenID, ExpiryUnix: now + int64(3600+i)}
+		req := proto.PathOpenRequest{TokenProofNonce: "nonce-1"}
+		if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+			t.Fatalf("token %s should pass: %v", tokenID, err)
+		}
+	}
+	overflowTokenID := fmt.Sprintf("jti-bucket-%05d", total)
+	if err := s.checkAndRememberProofNonce(
+		crypto.CapabilityClaims{TokenID: overflowTokenID, ExpiryUnix: now + 7200},
+		proto.PathOpenRequest{TokenProofNonce: "nonce-1"},
+		now,
+	); err == nil {
+		t.Fatalf("expected token replay bucket saturation")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if got := len(s.proofNonceSeen); got != tokenProofReplayMaxTokenIDs {
+		t.Fatalf("expected %d token buckets retained, got %d", tokenProofReplayMaxTokenIDs, got)
+	}
+	newestTokenID := fmt.Sprintf("jti-bucket-%05d", total-1)
+	if _, ok := s.proofNonceSeen[newestTokenID]; !ok {
+		t.Fatalf("expected newest token bucket %q retained", newestTokenID)
+	}
+	if _, ok := s.proofNonceSeen[overflowTokenID]; ok {
+		t.Fatalf("did not expect overflow token bucket retained")
+	}
+}
+
+func TestCheckAndRememberProofNoncePersistsAcrossReload(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store.json")
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-1",
+		ExpiryUnix: now + 3600,
+	}
+	req := proto.PathOpenRequest{TokenProofNonce: "nonce-1"}
+
+	s := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+		proofNonceSeen:            make(map[string]map[string]int64),
+	}
+	if err := s.checkAndRememberProofNonce(claims, req, now); err != nil {
+		t.Fatalf("first nonce should pass: %v", err)
+	}
+
+	loaded := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+	}
+	if err := loaded.loadTokenProofReplayStore(now + 1); err != nil {
+		t.Fatalf("load replay store: %v", err)
+	}
+	if err := loaded.checkAndRememberProofNonce(claims, req, now+1); err == nil || !strings.Contains(err.Error(), "replay") {
+		t.Fatalf("expected replay rejection after reload, got %v", err)
+	}
+}
+
+func TestLoadTokenProofReplayStorePrunesExpiredEntries(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store.json")
+	expiredClaims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-2",
+		ExpiryUnix: now - 10,
+	}
+	freshClaims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-2",
+		ExpiryUnix: now + 3600,
+	}
+
+	seed := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+		proofNonceSeen:            make(map[string]map[string]int64),
+	}
+	if err := seed.checkAndRememberProofNonce(expiredClaims, proto.PathOpenRequest{TokenProofNonce: "nonce-old"}, now-20); err != nil {
+		t.Fatalf("seed old nonce: %v", err)
+	}
+	if err := seed.checkAndRememberProofNonce(freshClaims, proto.PathOpenRequest{TokenProofNonce: "nonce-new"}, now); err != nil {
+		t.Fatalf("seed new nonce: %v", err)
+	}
+
+	loaded := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+	}
+	if err := loaded.loadTokenProofReplayStore(now); err != nil {
+		t.Fatalf("load replay store: %v", err)
+	}
+	bucket := loaded.proofNonceSeen[freshClaims.TokenID]
+	if got := len(bucket); got != 1 {
+		t.Fatalf("expected one non-expired nonce after load, got %d", got)
+	}
+	if _, ok := bucket["nonce-new"]; !ok {
+		t.Fatalf("expected non-expired nonce retained")
+	}
+	if _, ok := bucket["nonce-old"]; ok {
+		t.Fatalf("did not expect expired nonce retained")
+	}
+}
+
 func TestApplyRevocationFeedSigned(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -1418,6 +1787,31 @@ func TestApplyRevocationFeedRejectsBadSignature(t *testing.T) {
 	}
 	if err := s.applyRevocationFeed(feed, now); err == nil {
 		t.Fatalf("expected bad signature to be rejected")
+	}
+}
+
+func TestApplyRevocationFeedRejectsUnsignedFeed(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	feed := proto.RevocationListResponse{
+		Issuer:      "issuer-local",
+		GeneratedAt: now,
+		ExpiresAt:   now + 30,
+		Revocations: []proto.Revocation{{JTI: "jti-unsigned", Until: now + 120}},
+	}
+	s := &Service{
+		issuerPub:  pub,
+		revokedJTI: map[string]int64{},
+	}
+	err = s.applyRevocationFeed(feed, now)
+	if err == nil {
+		t.Fatalf("expected unsigned feed rejection")
+	}
+	if !strings.Contains(err.Error(), "signature") {
+		t.Fatalf("expected signature-related error, got %v", err)
 	}
 }
 
@@ -1500,6 +1894,43 @@ func TestVerifyTokenRejectsIssuerMismatchWhenMapped(t *testing.T) {
 	}
 }
 
+func TestVerifyTokenThrottlesRefreshOnRepeatedInvalidTokens(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	fetchCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pubkeys" {
+			http.NotFound(w, r)
+			return
+		}
+		fetchCount++
+		_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(pub)},
+		})
+	}))
+	defer server.Close()
+
+	s := &Service{
+		issuerURLs:               []string{server.URL},
+		httpClient:               server.Client(),
+		issuerPubs:               map[string]ed25519.PublicKey{issuerKeyID(pub): pub},
+		issuerKeyIssuer:          map[string]string{},
+		verifyRefreshMinInterval: time.Hour,
+	}
+	if _, _, err := s.verifyToken("invalid-token-1"); err == nil {
+		t.Fatalf("expected invalid token verification failure")
+	}
+	if _, _, err := s.verifyToken("invalid-token-2"); err == nil {
+		t.Fatalf("expected repeated invalid token verification failure")
+	}
+	if fetchCount != 0 {
+		t.Fatalf("expected malformed tokens to skip issuer refresh fetches, got %d", fetchCount)
+	}
+}
+
 func TestRevocationScopedByIssuerKey(t *testing.T) {
 	pubA, privA, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -1548,13 +1979,21 @@ func TestRevocationScopedByIssuerKey(t *testing.T) {
 
 func mustSignFeed(t *testing.T, feed proto.RevocationListResponse, priv ed25519.PrivateKey) string {
 	t.Helper()
+	signature, err := signFeed(feed, priv)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return signature
+}
+
+func signFeed(feed proto.RevocationListResponse, priv ed25519.PrivateKey) (string, error) {
 	unsigned := feed
 	unsigned.Signature = ""
 	payload, err := json.Marshal(unsigned)
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload)), nil
 }
 
 func TestNewCommandBackendDisablesOpaqueEchoByDefault(t *testing.T) {
@@ -1876,6 +2315,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequire
 		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
 		issuerMinSources:      2,
 		issuerMinOperators:    2,
+		issuerMinKeyVotes:     2,
 		issuerRequireID:       false,
 	}
 	err := s.validateRuntimeConfig()
@@ -1883,6 +2323,41 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequire
 		t.Fatalf("expected strict mode validation failure")
 	}
 	if !strings.Contains(err.Error(), "EXIT_ISSUER_REQUIRE_ID=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_INSECURE_SKIP_VERIFY", "1")
+
+	s := &Service{
+		prodStrict:            true,
+		betaStrict:            true,
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+		issuerURLs:            []string{"https://issuer-a.example", "https://issuer-b.example"},
+		issuerMinSources:      2,
+		issuerMinOperators:    2,
+		issuerMinKeyVotes:     2,
+		issuerRequireID:       true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	if !strings.Contains(err.Error(), "MTLS_INSECURE_SKIP_VERIFY") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -1967,6 +2442,14 @@ func TestNewCommandBackendKeepsUnsetWGPubKeyForDerivation(t *testing.T) {
 	s := New()
 	if strings.TrimSpace(s.wgPubKey) != "" {
 		t.Fatalf("expected empty EXIT_WG_PUBKEY in command mode for runtime derivation, got %q", s.wgPubKey)
+	}
+}
+
+func TestDecodeBoundedJSONResponseRejectsOversizedBody(t *testing.T) {
+	body := strings.NewReader(`{"value":"` + strings.Repeat("a", int(remoteResponseMaxBodyBytes)+1024) + `"}`)
+	var out map[string]string
+	if err := decodeBoundedJSONResponse(body, &out, remoteResponseMaxBodyBytes); err == nil {
+		t.Fatalf("expected oversized response rejection")
 	}
 }
 
@@ -2062,7 +2545,7 @@ func TestEnsureStartupIssuerSyncTimeout(t *testing.T) {
 }
 
 func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
-	pub, _, err := crypto.GenerateEd25519Keypair()
+	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
@@ -2075,12 +2558,19 @@ func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
 				Issuer:  "issuer-local",
 			})
 		case "/v1/revocations":
-			_ = json.NewEncoder(w).Encode(proto.RevocationListResponse{
+			feed := proto.RevocationListResponse{
 				Issuer:      "issuer-local",
 				GeneratedAt: time.Now().Unix(),
 				ExpiresAt:   time.Now().Add(time.Minute).Unix(),
 				Revocations: []proto.Revocation{},
-			})
+			}
+			signature, err := signFeed(feed, priv)
+			if err != nil {
+				http.Error(w, "sign revocation feed", http.StatusInternalServerError)
+				return
+			}
+			feed.Signature = signature
+			_ = json.NewEncoder(w).Encode(feed)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2108,7 +2598,7 @@ func TestEnsureStartupIssuerSyncSuccess(t *testing.T) {
 
 func newIssuerPubKeyServer(t *testing.T, issuerID string) *httptest.Server {
 	t.Helper()
-	pub, _, err := crypto.GenerateEd25519Keypair()
+	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
@@ -2121,12 +2611,19 @@ func newIssuerPubKeyServer(t *testing.T, issuerID string) *httptest.Server {
 				Issuer:  issuerID,
 			})
 		case "/v1/revocations":
-			_ = json.NewEncoder(w).Encode(proto.RevocationListResponse{
+			feed := proto.RevocationListResponse{
 				Issuer:      issuerID,
 				GeneratedAt: time.Now().Unix(),
 				ExpiresAt:   time.Now().Add(time.Minute).Unix(),
 				Revocations: []proto.Revocation{},
-			})
+			}
+			signature, err := signFeed(feed, priv)
+			if err != nil {
+				http.Error(w, "sign revocation feed", http.StatusInternalServerError)
+				return
+			}
+			feed.Signature = signature
+			_ = json.NewEncoder(w).Encode(feed)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2199,6 +2696,93 @@ func TestRefreshIssuerKeysWithSourceAndOperatorQuorum(t *testing.T) {
 	}
 	if len(s.issuerPubs) == 0 {
 		t.Fatalf("expected issuer keys populated")
+	}
+}
+
+func TestRefreshIssuerKeysRejectsDisjointKeysetByDefault(t *testing.T) {
+	existingPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("existing keygen: %v", err)
+	}
+	newPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("new keygen: %v", err)
+	}
+	newPubB64 := base64.RawURLEncoding.EncodeToString(newPub)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pubkeys" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+			PubKeys: []string{newPubB64},
+			Issuer:  "issuer-rotation",
+		})
+	}))
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 1,
+		httpClient:         srv.Client(),
+		issuerPubs: map[string]ed25519.PublicKey{
+			issuerKeyID(existingPub): existingPub,
+		},
+		issuerKeyIssuer: map[string]string{},
+		minTokenEpoch:   map[string]int64{},
+	}
+	err = s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected disjoint keyset to be rejected")
+	}
+	if !strings.Contains(err.Error(), "continuity check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshIssuerKeysAllowsDisjointKeysetWithDangerousOverride(t *testing.T) {
+	t.Setenv("EXIT_ALLOW_DANGEROUS_ISSUER_KEYSET_REPLACEMENT", "1")
+
+	existingPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("existing keygen: %v", err)
+	}
+	newPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("new keygen: %v", err)
+	}
+	newPubB64 := base64.RawURLEncoding.EncodeToString(newPub)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pubkeys" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+			PubKeys: []string{newPubB64},
+			Issuer:  "issuer-rotation",
+		})
+	}))
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 1,
+		httpClient:         srv.Client(),
+		issuerPubs: map[string]ed25519.PublicKey{
+			issuerKeyID(existingPub): existingPub,
+		},
+		issuerKeyIssuer: map[string]string{},
+		minTokenEpoch:   map[string]int64{},
+	}
+	if err := s.refreshIssuerKeys(context.Background()); err != nil {
+		t.Fatalf("expected dangerous override to allow disjoint rotation, got %v", err)
+	}
+	if _, ok := s.issuerPubs[issuerKeyID(newPub)]; !ok {
+		t.Fatalf("expected refreshed keyset to include new key")
 	}
 }
 
@@ -2346,6 +2930,33 @@ func TestApplyRevocationFeedSetsMinTokenEpoch(t *testing.T) {
 	}
 	if got := s.revocationVersion["issuer-epoch"]; got != 2 {
 		t.Fatalf("expected revocation version 2, got %d", got)
+	}
+}
+
+func TestApplyRevocationFeedRejectsSignerIssuerMismatch(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	feed := proto.RevocationListResponse{
+		Issuer:      "issuer-spoofed",
+		GeneratedAt: now,
+		ExpiresAt:   now + 30,
+		Revocations: []proto.Revocation{{JTI: "jti-spoof", Until: now + 120}},
+	}
+	feed.Signature = mustSignFeed(t, feed, priv)
+	keyID := issuerKeyID(pub)
+
+	s := &Service{
+		issuerPubs:        map[string]ed25519.PublicKey{keyID: pub},
+		issuerKeyIssuer:   map[string]string{keyID: "issuer-real"},
+		revokedJTI:        map[string]int64{},
+		minTokenEpoch:     map[string]int64{},
+		revocationVersion: map[string]int64{},
+	}
+	if err := s.applyRevocationFeed(feed, now); err == nil {
+		t.Fatalf("expected signer/issuer mismatch rejection")
 	}
 }
 
@@ -2694,6 +3305,32 @@ func TestRecordSourceMismatchDropUpdatesMetrics(t *testing.T) {
 	}
 }
 
+func TestAuthorizeNonceCapacityEvictsIncrementally(t *testing.T) {
+	now := time.Now()
+	seen := make(map[uint64]struct{}, 8192)
+	for i := uint64(1); i <= 8192; i++ {
+		seen[i] = struct{}{}
+	}
+	s := &Service{
+		sessions: map[string]sessionInfo{
+			"sid-capacity": {
+				claims:     crypto.CapabilityClaims{ExpiryUnix: now.Add(time.Minute).Unix()},
+				seenNonces: seen,
+			},
+		},
+	}
+	if _, err := s.authorizeNonce("sid-capacity", 9001, now); err != nil {
+		t.Fatalf("authorizeNonce failed: %v", err)
+	}
+	got := s.sessions["sid-capacity"]
+	if len(got.seenNonces) <= 1 {
+		t.Fatalf("expected incremental eviction preserving nonce history, got %d entries", len(got.seenNonces))
+	}
+	if _, ok := got.seenNonces[9001]; !ok {
+		t.Fatalf("expected newly authorized nonce to be tracked")
+	}
+}
+
 func TestApplyRevocationFeedRejectsVersionRollback(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -2783,5 +3420,91 @@ func TestBuildEgressSetupCommandsContainsHardeningRules(t *testing.T) {
 	}
 	if !strings.Contains(joined, "conntrack --ctstate ESTABLISHED,RELATED") {
 		t.Fatalf("expected established conntrack forward rule")
+	}
+}
+
+func TestSanitizeEgressCommandInputsRejectsMaliciousValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		chain string
+		cidr  string
+		iface string
+	}{
+		{
+			name:  "chain injection",
+			chain: "PRIVNODE_EGRESS; touch /tmp/pwned",
+			cidr:  "10.90.0.0/24",
+			iface: "eth0",
+		},
+		{
+			name:  "iface injection",
+			chain: "PRIVNODE_EGRESS",
+			cidr:  "10.90.0.0/24",
+			iface: "eth0; id",
+		},
+		{
+			name:  "cidr injection",
+			chain: "PRIVNODE_EGRESS",
+			cidr:  "10.90.0.0/24; iptables -F",
+			iface: "eth0",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := sanitizeEgressCommandInputs(tc.chain, tc.cidr, tc.iface)
+			if err == nil {
+				t.Fatalf("expected input rejection for %q", tc.name)
+			}
+		})
+	}
+}
+
+func TestSanitizeEgressCommandInputsAcceptsValidValues(t *testing.T) {
+	chain, cidr, iface, err := sanitizeEgressCommandInputs(" CHAIN_X-1 ", "10.90.0.0/24", "eth0.100@uplink")
+	if err != nil {
+		t.Fatalf("expected valid egress command inputs: %v", err)
+	}
+	if chain != "CHAIN_X-1" {
+		t.Fatalf("expected trimmed chain value, got %q", chain)
+	}
+	if cidr != "10.90.0.0/24" {
+		t.Fatalf("expected cidr preserved, got %q", cidr)
+	}
+	if iface != "eth0.100@uplink" {
+		t.Fatalf("expected iface preserved, got %q", iface)
+	}
+}
+
+func TestConfigureEgressRejectsInvalidCommandInputs(t *testing.T) {
+	s := &Service{
+		egressBackend: "command",
+		egressChain:   "PRIVNODE_EGRESS",
+		egressCIDR:    "10.90.0.0/24",
+		egressIface:   "eth0; rm -rf /",
+	}
+	err := s.configureEgress(context.Background())
+	if err == nil {
+		t.Fatalf("expected configureEgress rejection for invalid egress interface")
+	}
+	if s.egressConfigured {
+		t.Fatalf("expected egressConfigured to remain false on validation failure")
+	}
+}
+
+func TestTeardownEgressRejectsInvalidCommandInputs(t *testing.T) {
+	s := &Service{
+		egressBackend:    "command",
+		egressConfigured: true,
+		egressChain:      "PRIVNODE_EGRESS; whoami",
+		egressCIDR:       "10.90.0.0/24",
+		egressIface:      "eth0",
+	}
+	err := s.teardownEgress(context.Background())
+	if err == nil {
+		t.Fatalf("expected teardownEgress rejection for invalid egress chain")
+	}
+	if !s.egressConfigured {
+		t.Fatalf("expected egressConfigured unchanged when teardown validation fails")
 	}
 }

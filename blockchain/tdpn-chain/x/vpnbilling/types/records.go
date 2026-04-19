@@ -70,8 +70,8 @@ func (r SettlementRecord) ValidateBasic() error {
 	if r.SessionID == "" {
 		return errors.New("session id is required")
 	}
-	if r.BilledAmount < 0 {
-		return errors.New("billed amount cannot be negative")
+	if r.BilledAmount <= 0 {
+		return errors.New("billed amount must be positive")
 	}
 	return nil
 }

@@ -1,0 +1,804 @@
+package localapi
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	urlpkg "net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	gpmChallengeTTL        = 5 * time.Minute
+	gpmSessionTTL          = 12 * time.Hour
+	gpmManifestHTTPTimeout = 6 * time.Second
+	gpmManifestBodyLimit   = 1 << 20
+)
+
+type gpmRuntimeState struct {
+	mu         sync.RWMutex
+	challenges map[string]gpmWalletChallenge
+	sessions   map[string]gpmSession
+	operators  map[string]gpmOperatorApplication
+}
+
+type gpmWalletChallenge struct {
+	ChallengeID    string    `json:"challenge_id"`
+	WalletAddress  string    `json:"wallet_address"`
+	WalletProvider string    `json:"wallet_provider"`
+	Message        string    `json:"message"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+type gpmSession struct {
+	Token              string    `json:"token"`
+	WalletAddress      string    `json:"wallet_address"`
+	WalletProvider     string    `json:"wallet_provider"`
+	Role               string    `json:"role"`
+	CreatedAt          time.Time `json:"created_at"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	BootstrapDirectory string    `json:"bootstrap_directory,omitempty"`
+	InviteKey          string    `json:"invite_key,omitempty"`
+	ChainOperatorID    string    `json:"chain_operator_id,omitempty"`
+}
+
+type gpmOperatorApplication struct {
+	WalletAddress   string    `json:"wallet_address"`
+	ChainOperatorID string    `json:"chain_operator_id"`
+	ServerLabel     string    `json:"server_label,omitempty"`
+	Status          string    `json:"status"`
+	Reason          string    `json:"reason,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type gpmBootstrapManifest struct {
+	Version              int            `json:"version"`
+	GeneratedAtUTC       string         `json:"generated_at_utc"`
+	ExpiresAtUTC         string         `json:"expires_at_utc"`
+	BootstrapDirectories []string       `json:"bootstrap_directories"`
+	RelayPolicy          map[string]any `json:"relay_policy,omitempty"`
+}
+
+type gpmBootstrapManifestCacheFile struct {
+	Version           int                  `json:"version"`
+	FetchedAtUTC      string               `json:"fetched_at_utc"`
+	SourceURL         string               `json:"source_url"`
+	SignatureVerified bool                 `json:"signature_verified"`
+	Manifest          gpmBootstrapManifest `json:"manifest"`
+}
+
+type gpmAuthChallengeRequest struct {
+	WalletAddress  string `json:"wallet_address"`
+	WalletProvider string `json:"wallet_provider"`
+}
+
+type gpmAuthVerifyRequest struct {
+	WalletAddress  string `json:"wallet_address"`
+	WalletProvider string `json:"wallet_provider"`
+	ChallengeID    string `json:"challenge_id"`
+	Signature      string `json:"signature"`
+}
+
+type gpmSessionStatusRequest struct {
+	SessionToken string `json:"session_token"`
+}
+
+type gpmClientRegisterRequest struct {
+	SessionToken       string `json:"session_token"`
+	BootstrapDirectory string `json:"bootstrap_directory,omitempty"`
+	InviteKey          string `json:"invite_key,omitempty"`
+	PathProfile        string `json:"path_profile,omitempty"`
+}
+
+type gpmOperatorApplyRequest struct {
+	SessionToken    string `json:"session_token"`
+	ChainOperatorID string `json:"chain_operator_id"`
+	ServerLabel     string `json:"server_label,omitempty"`
+}
+
+type gpmOperatorStatusRequest struct {
+	SessionToken  string `json:"session_token,omitempty"`
+	WalletAddress string `json:"wallet_address,omitempty"`
+}
+
+type gpmOperatorApproveRequest struct {
+	WalletAddress string `json:"wallet_address"`
+	Approved      bool   `json:"approved"`
+	Reason        string `json:"reason,omitempty"`
+	AdminToken    string `json:"admin_token,omitempty"`
+}
+
+func newGPMRuntimeState() *gpmRuntimeState {
+	return &gpmRuntimeState{
+		challenges: map[string]gpmWalletChallenge{},
+		sessions:   map[string]gpmSession{},
+		operators:  map[string]gpmOperatorApplication{},
+	}
+}
+
+func (st *gpmRuntimeState) putChallenge(challenge gpmWalletChallenge) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.challenges[challenge.ChallengeID] = challenge
+}
+
+func (st *gpmRuntimeState) popValidChallenge(challengeID string, now time.Time) (gpmWalletChallenge, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	challenge, ok := st.challenges[challengeID]
+	if !ok {
+		return gpmWalletChallenge{}, false
+	}
+	delete(st.challenges, challengeID)
+	if now.After(challenge.ExpiresAt) {
+		return gpmWalletChallenge{}, false
+	}
+	return challenge, true
+}
+
+func (st *gpmRuntimeState) putSession(session gpmSession) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.sessions[session.Token] = session
+}
+
+func (st *gpmRuntimeState) getSession(token string, now time.Time) (gpmSession, bool) {
+	st.mu.RLock()
+	session, ok := st.sessions[token]
+	st.mu.RUnlock()
+	if !ok {
+		return gpmSession{}, false
+	}
+	if now.After(session.ExpiresAt) {
+		st.mu.Lock()
+		delete(st.sessions, token)
+		st.mu.Unlock()
+		return gpmSession{}, false
+	}
+	return session, true
+}
+
+func (st *gpmRuntimeState) upsertOperator(app gpmOperatorApplication) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.operators[app.WalletAddress] = app
+}
+
+func (st *gpmRuntimeState) getOperator(walletAddress string) (gpmOperatorApplication, bool) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	app, ok := st.operators[walletAddress]
+	return app, ok
+}
+
+func (s *Service) resolveConnectSecretsFromSession(sessionToken string) (string, string, error) {
+	sessionToken = strings.TrimSpace(sessionToken)
+	if sessionToken == "" {
+		return "", "", errors.New("session token is empty")
+	}
+	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
+	if !ok {
+		return "", "", errors.New("session token is missing or expired")
+	}
+	if strings.TrimSpace(session.BootstrapDirectory) == "" || strings.TrimSpace(session.InviteKey) == "" {
+		return "", "", errors.New("session is not fully registered for connect")
+	}
+	return session.BootstrapDirectory, session.InviteKey, nil
+}
+
+func (s *Service) handleGPMBootstrapManifest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	manifest, source, signatureVerified, err := s.resolveBootstrapManifest(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                 true,
+		"source":             source,
+		"signature_verified": signatureVerified,
+		"manifest":           manifest,
+	})
+}
+
+func (s *Service) handleGPMAuthChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireMutationAuth(w, r) {
+		return
+	}
+	var in gpmAuthChallengeRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	in.WalletAddress = normalizeWalletAddress(in.WalletAddress)
+	in.WalletProvider = normalizeWalletProvider(in.WalletProvider)
+	if in.WalletAddress == "" || in.WalletProvider == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "wallet_address and wallet_provider are required (wallet_provider: keplr|leap)",
+		})
+		return
+	}
+	challengeID, err := randomHex(24)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "failed to create challenge"})
+		return
+	}
+	expires := time.Now().UTC().Add(gpmChallengeTTL)
+	challenge := gpmWalletChallenge{
+		ChallengeID:    "gpm-chal-" + challengeID,
+		WalletAddress:  in.WalletAddress,
+		WalletProvider: in.WalletProvider,
+		Message:        "Global Private Mesh authentication challenge: " + challengeID,
+		ExpiresAt:      expires,
+	}
+	s.gpmState.putChallenge(challenge)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"challenge_id":    challenge.ChallengeID,
+		"message":         challenge.Message,
+		"expires_at_utc":  expires.Format(time.RFC3339),
+		"wallet_provider": challenge.WalletProvider,
+	})
+}
+
+func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireMutationAuth(w, r) {
+		return
+	}
+	var in gpmAuthVerifyRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	in.WalletAddress = normalizeWalletAddress(in.WalletAddress)
+	in.WalletProvider = normalizeWalletProvider(in.WalletProvider)
+	in.ChallengeID = strings.TrimSpace(in.ChallengeID)
+	signature := strings.TrimSpace(in.Signature)
+	if in.WalletAddress == "" || in.WalletProvider == "" || in.ChallengeID == "" || signature == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "wallet_address, wallet_provider, challenge_id and signature are required",
+		})
+		return
+	}
+	challenge, ok := s.gpmState.popValidChallenge(in.ChallengeID, time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid or expired challenge"})
+		return
+	}
+	if subtleEqual(challenge.WalletAddress, in.WalletAddress) == false || subtleEqual(challenge.WalletProvider, in.WalletProvider) == false {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "challenge identity mismatch"})
+		return
+	}
+	if len(signature) < 8 {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "signature is too short"})
+		return
+	}
+	now := time.Now().UTC()
+	token, err := randomBase64URL(32)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "failed to mint session"})
+		return
+	}
+	session := gpmSession{
+		Token:          token,
+		WalletAddress:  challenge.WalletAddress,
+		WalletProvider: challenge.WalletProvider,
+		Role:           s.gpmRoleDefault,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(gpmSessionTTL),
+	}
+	if app, ok := s.gpmState.getOperator(challenge.WalletAddress); ok && app.Status == "approved" {
+		session.Role = "operator"
+		session.ChainOperatorID = app.ChainOperatorID
+	}
+	s.gpmState.putSession(session)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"session_token": session.Token,
+		"session":       serializeGPMSession(session),
+	})
+}
+
+func (s *Service) handleGPMSessionStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	var in gpmSessionStatusRequest
+	if err := decodeOptionalJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	token := strings.TrimSpace(in.SessionToken)
+	if token == "" {
+		token = strings.TrimSpace(parseBearerToken(r.Header.Get("Authorization")))
+	}
+	session, ok := s.gpmState.getSession(token, time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session": serializeGPMSession(session)})
+}
+
+func (s *Service) handleGPMClientRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireMutationAuth(w, r) {
+		return
+	}
+	var in gpmClientRegisterRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	session, ok := s.gpmState.getSession(strings.TrimSpace(in.SessionToken), time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "session not found"})
+		return
+	}
+	manifest, source, signatureVerified, err := s.resolveBootstrapManifest(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	bootstrapDirectory := strings.TrimSpace(in.BootstrapDirectory)
+	if bootstrapDirectory == "" {
+		bootstrapDirectory = strings.TrimSpace(manifest.BootstrapDirectories[0])
+	}
+	if err := validateBootstrapDirectoryURL(bootstrapDirectory); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if !slices.Contains(manifest.BootstrapDirectories, bootstrapDirectory) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "bootstrap_directory must come from trusted manifest bootstrap_directories",
+		})
+		return
+	}
+	inviteKey := strings.TrimSpace(in.InviteKey)
+	if inviteKey == "" {
+		inviteKey = firstNonEmpty(
+			os.Getenv("GPM_COMPAT_INVITE_KEY"),
+			os.Getenv("TDPN_COMPAT_INVITE_KEY"),
+			os.Getenv("CAMPAIGN_SUBJECT"),
+			os.Getenv("INVITE_KEY"),
+			"wallet:"+session.WalletAddress,
+		)
+	}
+	if err := validateInviteKey(inviteKey); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	session.BootstrapDirectory = bootstrapDirectory
+	session.InviteKey = inviteKey
+	s.gpmState.putSession(session)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                 true,
+		"source":             source,
+		"signature_verified": signatureVerified,
+		"profile": map[string]any{
+			"wallet_address":      session.WalletAddress,
+			"wallet_provider":     session.WalletProvider,
+			"path_profile":        normalizeGPMPathProfile(in.PathProfile),
+			"bootstrap_directory": bootstrapDirectory,
+			"compat_subject_hint": inviteKey,
+		},
+		"session": serializeGPMSession(session),
+	})
+}
+
+func (s *Service) handleGPMOperatorApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireMutationAuth(w, r) {
+		return
+	}
+	var in gpmOperatorApplyRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	session, ok := s.gpmState.getSession(strings.TrimSpace(in.SessionToken), time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "session not found"})
+		return
+	}
+	chainOperatorID := strings.TrimSpace(in.ChainOperatorID)
+	if chainOperatorID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "chain_operator_id is required"})
+		return
+	}
+	app := gpmOperatorApplication{
+		WalletAddress:   session.WalletAddress,
+		ChainOperatorID: chainOperatorID,
+		ServerLabel:     strings.TrimSpace(in.ServerLabel),
+		Status:          "pending",
+		UpdatedAt:       time.Now().UTC(),
+	}
+	s.gpmState.upsertOperator(app)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
+}
+
+func (s *Service) handleGPMOperatorStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	var in gpmOperatorStatusRequest
+	if err := decodeOptionalJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	walletAddress := normalizeWalletAddress(in.WalletAddress)
+	if walletAddress == "" && strings.TrimSpace(in.SessionToken) != "" {
+		if session, ok := s.gpmState.getSession(strings.TrimSpace(in.SessionToken), time.Now().UTC()); ok {
+			walletAddress = session.WalletAddress
+		}
+	}
+	if walletAddress == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address or session_token is required"})
+		return
+	}
+	app, ok := s.gpmState.getOperator(walletAddress)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+			"application": map[string]any{
+				"wallet_address": walletAddress,
+				"status":         "not_submitted",
+			},
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
+}
+
+func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireMutationAuth(w, r) {
+		return
+	}
+	var in gpmOperatorApproveRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	if strings.TrimSpace(s.gpmApprovalToken) != "" {
+		if subtleEqual(strings.TrimSpace(in.AdminToken), strings.TrimSpace(s.gpmApprovalToken)) == false {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid approval admin token"})
+			return
+		}
+	}
+	walletAddress := normalizeWalletAddress(in.WalletAddress)
+	if walletAddress == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address is required"})
+		return
+	}
+	app, ok := s.gpmState.getOperator(walletAddress)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "operator application not found"})
+		return
+	}
+	if in.Approved {
+		app.Status = "approved"
+	} else {
+		app.Status = "rejected"
+	}
+	app.Reason = strings.TrimSpace(in.Reason)
+	app.UpdatedAt = time.Now().UTC()
+	s.gpmState.upsertOperator(app)
+
+	// Lift session role to operator when approved.
+	s.gpmState.mu.Lock()
+	for token, session := range s.gpmState.sessions {
+		if subtleEqual(session.WalletAddress, walletAddress) {
+			if in.Approved {
+				session.Role = "operator"
+				session.ChainOperatorID = app.ChainOperatorID
+			}
+			s.gpmState.sessions[token] = session
+		}
+	}
+	s.gpmState.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
+}
+
+func serializeGPMSession(session gpmSession) map[string]any {
+	return map[string]any{
+		"wallet_address":      session.WalletAddress,
+		"wallet_provider":     session.WalletProvider,
+		"role":                session.Role,
+		"created_at_utc":      session.CreatedAt.Format(time.RFC3339),
+		"expires_at_utc":      session.ExpiresAt.Format(time.RFC3339),
+		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
+		"chain_operator_id":   strings.TrimSpace(session.ChainOperatorID),
+	}
+}
+
+func serializeGPMOperator(app gpmOperatorApplication) map[string]any {
+	return map[string]any{
+		"wallet_address":    app.WalletAddress,
+		"chain_operator_id": app.ChainOperatorID,
+		"server_label":      app.ServerLabel,
+		"status":            app.Status,
+		"reason":            app.Reason,
+		"updated_at_utc":    app.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func normalizeWalletAddress(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" || len(value) > 256 {
+		return ""
+	}
+	if strings.IndexFunc(value, func(r rune) bool {
+		return !(r == ':' || r == '-' || r == '_' || r == '.' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	}) >= 0 {
+		return ""
+	}
+	return value
+}
+
+func normalizeWalletProvider(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "keplr":
+		return "keplr"
+	case "leap":
+		return "leap"
+	default:
+		return ""
+	}
+}
+
+func normalizeGPMPathProfile(raw string) string {
+	if profile := normalizePathProfile(raw); profile != "" {
+		return profile
+	}
+	return "2hop"
+}
+
+func subtleEqual(a string, b string) bool {
+	return hmac.Equal([]byte(a), []byte(b))
+}
+
+func randomHex(byteLen int) (string, error) {
+	buf := make([]byte, byteLen)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+func randomBase64URL(byteLen int) (string, error) {
+	buf := make([]byte, byteLen)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapManifest, string, bool, error) {
+	manifestURL := strings.TrimSpace(s.gpmManifestURL)
+	if manifestURL == "" {
+		return gpmBootstrapManifest{}, "", false, errors.New("gpm manifest url is not configured")
+	}
+	manifest, signatureVerified, err := s.fetchRemoteManifest(ctx, manifestURL)
+	if err == nil {
+		_ = s.writeBootstrapManifestCache(manifest, signatureVerified)
+		return manifest, "remote", signatureVerified, nil
+	}
+	cacheManifest, cacheSignatureVerified, cacheErr := s.readBootstrapManifestCache()
+	if cacheErr != nil {
+		return gpmBootstrapManifest{}, "", false, fmt.Errorf("manifest fetch failed (%v) and cache fallback failed (%v)", err, cacheErr)
+	}
+	return cacheManifest, "cache", cacheSignatureVerified, nil
+}
+
+func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, error) {
+	client := &http.Client{Timeout: gpmManifestHTTPTimeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return gpmBootstrapManifest{}, false, fmt.Errorf("manifest endpoint returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, gpmManifestBodyLimit+1))
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	if len(body) > gpmManifestBodyLimit {
+		return gpmBootstrapManifest{}, false, errors.New("manifest response too large")
+	}
+	var manifest gpmBootstrapManifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return gpmBootstrapManifest{}, false, fmt.Errorf("invalid manifest json: %w", err)
+	}
+	if err := validateBootstrapManifest(manifest); err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	manifest = normalizeBootstrapManifest(manifest)
+	signatureVerified := false
+	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
+	if hmacKey != "" {
+		received := strings.TrimSpace(resp.Header.Get("X-GPM-Signature"))
+		if received == "" {
+			return gpmBootstrapManifest{}, false, errors.New("manifest signature header missing")
+		}
+		expected := computeManifestHMAC(body, hmacKey)
+		if !subtleEqual(received, expected) {
+			return gpmBootstrapManifest{}, false, errors.New("manifest signature verification failed")
+		}
+		signatureVerified = true
+	}
+	return manifest, signatureVerified, nil
+}
+
+func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
+	if manifest.Version <= 0 {
+		return errors.New("manifest version must be > 0")
+	}
+	if len(manifest.BootstrapDirectories) == 0 {
+		return errors.New("manifest bootstrap_directories is empty")
+	}
+	generatedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(manifest.GeneratedAtUTC))
+	if err != nil {
+		return fmt.Errorf("manifest generated_at_utc invalid: %w", err)
+	}
+	expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(manifest.ExpiresAtUTC))
+	if err != nil {
+		return fmt.Errorf("manifest expires_at_utc invalid: %w", err)
+	}
+	if !expiresAt.After(generatedAt) {
+		return errors.New("manifest expires_at_utc must be after generated_at_utc")
+	}
+	if !expiresAt.After(time.Now().UTC()) {
+		return errors.New("manifest is expired")
+	}
+	for _, dir := range manifest.BootstrapDirectories {
+		dir = strings.TrimSpace(dir)
+		if err := validateBootstrapDirectoryURL(dir); err != nil {
+			return fmt.Errorf("manifest bootstrap directory invalid: %w", err)
+		}
+	}
+	return nil
+}
+
+func normalizeBootstrapManifest(manifest gpmBootstrapManifest) gpmBootstrapManifest {
+	normalized := make([]string, 0, len(manifest.BootstrapDirectories))
+	for _, dir := range manifest.BootstrapDirectories {
+		trimmed := strings.TrimSpace(dir)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	manifest.BootstrapDirectories = normalized
+	return manifest
+}
+
+func computeManifestHMAC(body []byte, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, signatureVerified bool) error {
+	cachePath := strings.TrimSpace(s.gpmManifestCache)
+	if cachePath == "" {
+		return nil
+	}
+	if !filepath.IsAbs(cachePath) {
+		cachePath = filepath.Clean(cachePath)
+	}
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		return err
+	}
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      time.Now().UTC().Format(time.RFC3339),
+		SourceURL:         s.gpmManifestURL,
+		SignatureVerified: signatureVerified || strings.TrimSpace(s.gpmManifestHMACKey) == "",
+		Manifest:          manifest,
+	}
+	body, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cachePath, body, 0o600)
+}
+
+func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, error) {
+	cachePath := strings.TrimSpace(s.gpmManifestCache)
+	if cachePath == "" {
+		return gpmBootstrapManifest{}, false, errors.New("manifest cache path is empty")
+	}
+	body, err := os.ReadFile(cachePath)
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	var cache gpmBootstrapManifestCacheFile
+	if err := json.Unmarshal(body, &cache); err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	if err := validateBootstrapManifest(cache.Manifest); err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	fetchedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(cache.FetchedAtUTC))
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	if time.Since(fetchedAt) > s.gpmManifestMaxAge {
+		return gpmBootstrapManifest{}, false, errors.New("cached manifest is stale")
+	}
+	if strings.TrimSpace(s.gpmManifestHMACKey) != "" && !cache.SignatureVerified {
+		return gpmBootstrapManifest{}, false, errors.New("cached manifest is not signature-verified")
+	}
+	return normalizeBootstrapManifest(cache.Manifest), cache.SignatureVerified, nil
+}
+
+func parseAbsoluteHTTPURL(raw string) (*urlpkg.URL, error) {
+	parsed, err := urlpkg.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, err
+	}
+	if !parsed.IsAbs() {
+		return nil, errors.New("url is not absolute")
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+	default:
+		return nil, errors.New("unsupported url scheme")
+	}
+	return parsed, nil
+}

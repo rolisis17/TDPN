@@ -43,6 +43,19 @@ for path in "${RELEASE_SCAFFOLD_FILES[@]}"; do
 done
 echo "[desktop-scaffold] release scaffold scripts exist"
 
+WINDOWS_NATIVE_BOOTSTRAP_FILES=(
+  "scripts/windows/desktop_native_bootstrap.ps1"
+  "scripts/windows/desktop_native_bootstrap.cmd"
+  "scripts/windows/local_api_session.ps1"
+)
+for path in "${WINDOWS_NATIVE_BOOTSTRAP_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing windows-native bootstrap script: $path"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] windows-native bootstrap scripts exist"
+
 JSON_FILES=(
   "apps/desktop/package.json"
   "apps/desktop/src-tauri/tauri.conf.json"

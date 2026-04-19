@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
 
@@ -187,5 +188,80 @@ func TestFileStorePersistsDeterministicSortedSnapshot(t *testing.T) {
 	}
 	if len(tmpFiles) != 0 {
 		t.Fatalf("expected no leftover temp files after atomic write, found %d: %v", len(tmpFiles), tmpFiles)
+	}
+}
+
+func TestFileStoreUpsertReservationWithErrorRollsBackOnPersistFailure(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "vpnbilling-state.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	// Point to a non-existent parent so persist fails.
+	store.path = filepath.Join(tempDir, "missing-parent", "vpnbilling-state.json")
+	reservation := types.CreditReservation{
+		ReservationID: "res-fail",
+		SessionID:     "sess-fail",
+		Amount:        1,
+	}
+	if err := store.UpsertReservationWithError(reservation); err == nil {
+		t.Fatal("expected UpsertReservationWithError to fail when persist path parent is missing")
+	}
+	if _, ok := store.GetReservation(reservation.ReservationID); ok {
+		t.Fatal("expected reservation to be rolled back after persist failure")
+	}
+}
+
+func TestFileStoreAtomicFinalizeRollsBackOnPersistFailure(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "vpnbilling-state.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	initialReservation := types.CreditReservation{
+		ReservationID: "res-atomic-fail",
+		SessionID:     "sess-atomic-fail",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationPending,
+	}
+	if err := store.UpsertReservationWithError(initialReservation); err != nil {
+		t.Fatalf("UpsertReservationWithError returned unexpected error: %v", err)
+	}
+
+	updatedReservation := initialReservation
+	updatedReservation.Status = chaintypes.ReconciliationConfirmed
+	settlement := types.SettlementRecord{
+		SettlementID:   "set-atomic-fail",
+		ReservationID:  initialReservation.ReservationID,
+		SessionID:      initialReservation.SessionID,
+		BilledAmount:   10,
+		AssetDenom:     initialReservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationSubmitted,
+	}
+
+	// Point to a non-existent parent so persist fails.
+	store.path = filepath.Join(tempDir, "missing-parent", "vpnbilling-state.json")
+	if err := store.UpsertSettlementAndAdvanceReservationWithError(settlement, updatedReservation); err == nil {
+		t.Fatal("expected UpsertSettlementAndAdvanceReservationWithError to fail when persist path parent is missing")
+	}
+
+	gotReservation, ok := store.GetReservation(initialReservation.ReservationID)
+	if !ok {
+		t.Fatal("expected reservation to remain after failed atomic finalize")
+	}
+	if gotReservation.Status != initialReservation.Status {
+		t.Fatalf("expected reservation status %q after rollback, got %q", initialReservation.Status, gotReservation.Status)
+	}
+	if _, ok := store.GetSettlement(settlement.SettlementID); ok {
+		t.Fatal("expected settlement to be rolled back after failed atomic finalize")
 	}
 }

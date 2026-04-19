@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "TDPN desktop scaffold using local daemon control API"
 
+[package.metadata]
+# Scaffold placeholder to satisfy tauri-build metadata probing on Windows.
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -12,4 +15,3 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
-

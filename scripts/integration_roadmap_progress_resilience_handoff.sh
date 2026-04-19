@@ -13,7 +13,21 @@ done
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+INTEGRATION_STDOUT_LOG_DIR="$TMP_DIR/stdout-logs"
+mkdir -p "$INTEGRATION_STDOUT_LOG_DIR"
+ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX="$INTEGRATION_STDOUT_LOG_DIR/integration_roadmap_progress_resilience"
+
+TEST_LOG_DIR="$TMP_DIR/easy-node-logs"
+TEST_STATE_DIR="$TMP_DIR/manual-validation-state"
+mkdir -p "$TEST_LOG_DIR" "$TEST_STATE_DIR"
+export EASY_NODE_LOG_DIR="$TEST_LOG_DIR"
+export EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$TEST_STATE_DIR"
+
 MISSING_SUMMARY="$TMP_DIR/does_not_exist.json"
+ROADMAP_PROGRESS_LOGS_ROOT="$TMP_DIR/roadmap_progress_logs"
+export ROADMAP_PROGRESS_LOGS_ROOT
+mkdir -p "$ROADMAP_PROGRESS_LOGS_ROOT"
 
 MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_summary.json"
 cat >"$MANUAL_SUMMARY_JSON" <<'EOF_MANUAL_SUMMARY'
@@ -41,7 +55,7 @@ ROADMAP_PROGRESS_VPN_RC_RESILIENCE_SUMMARY_JSON="$TMP_DIR/does_not_exist.json" \
   --summary-json "$SUMMARY_MISSING_JSON" \
   --report-md "$REPORT_MISSING_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_missing.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_missing.log 2>&1
 
 if ! jq -e '
   .status == "warn"
@@ -69,18 +83,39 @@ cat >"$RESILIENCE_DIRECT_JSON" <<'EOF_RESILIENCE_DIRECT'
 }
 EOF_RESILIENCE_DIRECT
 
+PHASE1_DIRECT_HANDOFF_JSON="$TMP_DIR/phase1_direct_handoff_summary.json"
+cat >"$PHASE1_DIRECT_HANDOFF_JSON" <<EOF_PHASE1_DIRECT_HANDOFF
+{
+  "schema": {
+    "id": "phase1_resilience_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "handoff": {
+    "profile_matrix_stable": true,
+    "peer_loss_recovery_ok": false,
+    "session_churn_guard_ok": true
+  },
+  "artifacts": {
+    "vpn_rc_resilience_summary_json": "$RESILIENCE_DIRECT_JSON"
+  }
+}
+EOF_PHASE1_DIRECT_HANDOFF
+
 SUMMARY_DIRECT_JSON="$TMP_DIR/roadmap_progress_direct_resilience.json"
 REPORT_DIRECT_MD="$TMP_DIR/roadmap_progress_direct_resilience.md"
 ./scripts/roadmap_progress_report.sh \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$MANUAL_SUMMARY_JSON" \
-  --phase1-resilience-handoff-summary-json "$MISSING_SUMMARY" \
+  --phase1-resilience-handoff-summary-json "$PHASE1_DIRECT_HANDOFF_JSON" \
   --vpn-rc-resilience-summary-json "$RESILIENCE_DIRECT_JSON" \
   --summary-json "$SUMMARY_DIRECT_JSON" \
   --report-md "$REPORT_DIRECT_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_direct.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_direct.log 2>&1
 
 if ! jq -e --arg src "$RESILIENCE_DIRECT_JSON" '
   .vpn_track.resilience_handoff.available == true
@@ -122,7 +157,7 @@ REPORT_LEGACY_MD="$TMP_DIR/roadmap_progress_legacy_resilience.md"
   --summary-json "$SUMMARY_LEGACY_JSON" \
   --report-md "$REPORT_LEGACY_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_legacy.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_legacy.log 2>&1
 
 if ! jq -e --arg src "$RESILIENCE_LEGACY_JSON" '
   .vpn_track.resilience_handoff.available == true
@@ -181,7 +216,7 @@ ROADMAP_PROGRESS_LOGS_ROOT="$RESILIENCE_LOGS_ROOT" \
   --summary-json "$SUMMARY_AUTO_RESILIENCE_JSON" \
   --report-md "$REPORT_AUTO_RESILIENCE_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_auto_source.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_auto_source.log 2>&1
 
 if ! jq -e --arg src "$RESILIENCE_NEW_JSON" '
   .vpn_track.resilience_handoff.available == true
@@ -325,7 +360,7 @@ bash "$PHASE1_LINKED_PREF_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_LINKED_PREF_JSON" \
   --report-md "$REPORT_PHASE1_LINKED_PREF_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_linked_precedence.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_linked_precedence.log 2>&1
 
 if ! jq -e \
   --arg phase1_src "$PHASE1_LINKED_PREF_RUN_JSON" \
@@ -481,7 +516,7 @@ bash "$PHASE1_CONFLICT_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_CONFLICT_JSON" \
   --report-md "$REPORT_PHASE1_CONFLICT_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_conflict.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_conflict.log 2>&1
 
 if ! jq -e \
   --arg phase1_src "$PHASE1_CONFLICT_RUN_JSON" \
@@ -625,7 +660,7 @@ bash "$PHASE1_LINKED_FALLBACK_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_LINKED_FALLBACK_JSON" \
   --report-md "$REPORT_PHASE1_LINKED_FALLBACK_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_linked_fallback.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_linked_fallback.log 2>&1
 
 if ! jq -e \
   --arg phase1_src "$PHASE1_LINKED_FALLBACK_RUN_JSON" \
@@ -681,7 +716,7 @@ REPORT_PHASE1_MD="$TMP_DIR/roadmap_progress_phase1_handoff.md"
   --summary-json "$SUMMARY_PHASE1_JSON" \
   --report-md "$REPORT_PHASE1_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1.log 2>&1
 
 if ! jq -e --arg src "$PHASE1_HANDOFF_JSON" '
   .vpn_track.phase1_resilience_handoff.available == true
@@ -747,7 +782,7 @@ REPORT_PHASE1_FAILURE_MD="$TMP_DIR/roadmap_progress_phase1_handoff_failure.md"
   --summary-json "$SUMMARY_PHASE1_FAILURE_JSON" \
   --report-md "$REPORT_PHASE1_FAILURE_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_failure.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_failure.log 2>&1
 
 if ! jq -e --arg src "$PHASE1_HANDOFF_FAILURE_JSON" '
   .vpn_track.phase1_resilience_handoff.available == true
@@ -803,7 +838,7 @@ REPORT_PHASE1_LEGACY_MD="$TMP_DIR/roadmap_progress_phase1_handoff_legacy.md"
   --summary-json "$SUMMARY_PHASE1_LEGACY_JSON" \
   --report-md "$REPORT_PHASE1_LEGACY_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_legacy.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_legacy.log 2>&1
 
 if ! jq -e --arg src "$PHASE1_HANDOFF_LEGACY_JSON" '
   .vpn_track.phase1_resilience_handoff.available == true
@@ -940,6 +975,9 @@ touch -t 202601020303 "$PHASE1_AUTO_RUN_JSON"
 
 SUMMARY_PHASE1_AUTO_SOURCE_JSON="$TMP_DIR/roadmap_progress_phase1_auto_source.json"
 REPORT_PHASE1_AUTO_SOURCE_MD="$TMP_DIR/roadmap_progress_phase1_auto_source.md"
+ROADMAP_PROGRESS_LOGS_ROOT="$PHASE1_AUTO_LOGS_ROOT" \
+ROADMAP_PROGRESS_LOG_DIR="$PHASE1_AUTO_LOGS_ROOT" \
+EASY_NODE_LOG_DIR="$PHASE1_AUTO_LOGS_ROOT" \
 bash "$PHASE1_AUTO_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -948,7 +986,7 @@ bash "$PHASE1_AUTO_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_AUTO_SOURCE_JSON" \
   --report-md "$REPORT_PHASE1_AUTO_SOURCE_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_auto_source.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_auto_source.log 2>&1
 
 if ! jq -e \
   --arg run_src "$PHASE1_AUTO_RUN_JSON" \
@@ -1101,6 +1139,9 @@ touch -t 202601050201 "$PHASE1_DRY_RUN_JSON"
 
 SUMMARY_PHASE1_DRY_PREF_JSON="$TMP_DIR/roadmap_progress_phase1_dry_pref.json"
 REPORT_PHASE1_DRY_PREF_MD="$TMP_DIR/roadmap_progress_phase1_dry_pref.md"
+ROADMAP_PROGRESS_LOGS_ROOT="$PHASE1_DRY_PREF_LOGS_ROOT" \
+ROADMAP_PROGRESS_LOG_DIR="$PHASE1_DRY_PREF_LOGS_ROOT" \
+EASY_NODE_LOG_DIR="$PHASE1_DRY_PREF_LOGS_ROOT" \
 bash "$PHASE1_DRY_PREF_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -1109,7 +1150,7 @@ bash "$PHASE1_DRY_PREF_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_DRY_PREF_JSON" \
   --report-md "$REPORT_PHASE1_DRY_PREF_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_dry_pref.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_dry_pref.log 2>&1
 
 if ! jq -e \
   --arg non_dry_src "$PHASE1_NON_DRY_RUN_JSON" \
@@ -1260,6 +1301,9 @@ touch -t 202601070201 "$PHASE1_RICH_DRY_RUN_JSON"
 
 SUMMARY_PHASE1_RICH_DRY_JSON="$TMP_DIR/roadmap_progress_phase1_richer_dry_pref.json"
 REPORT_PHASE1_RICH_DRY_MD="$TMP_DIR/roadmap_progress_phase1_richer_dry_pref.md"
+ROADMAP_PROGRESS_LOGS_ROOT="$PHASE1_RICH_DRY_LOGS_ROOT" \
+ROADMAP_PROGRESS_LOG_DIR="$PHASE1_RICH_DRY_LOGS_ROOT" \
+EASY_NODE_LOG_DIR="$PHASE1_RICH_DRY_LOGS_ROOT" \
 bash "$PHASE1_RICH_DRY_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -1268,7 +1312,7 @@ bash "$PHASE1_RICH_DRY_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_RICH_DRY_JSON" \
   --report-md "$REPORT_PHASE1_RICH_DRY_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_richer_dry_pref.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_richer_dry_pref.log 2>&1
 
 if ! jq -e \
   --arg non_dry_src "$PHASE1_RICH_DRY_NON_DRY_RUN_JSON" \
@@ -1427,6 +1471,9 @@ touch -t 202601060201 "$PHASE1_CHECK_ONLY_DRY_JSON"
 
 SUMMARY_PHASE1_CHECK_ONLY_JSON="$TMP_DIR/roadmap_progress_phase1_check_only_dry_pref.json"
 REPORT_PHASE1_CHECK_ONLY_MD="$TMP_DIR/roadmap_progress_phase1_check_only_dry_pref.md"
+ROADMAP_PROGRESS_LOGS_ROOT="$PHASE1_CHECK_ONLY_LOGS_ROOT" \
+ROADMAP_PROGRESS_LOG_DIR="$PHASE1_CHECK_ONLY_LOGS_ROOT" \
+EASY_NODE_LOG_DIR="$PHASE1_CHECK_ONLY_LOGS_ROOT" \
 bash "$PHASE1_CHECK_ONLY_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -1435,7 +1482,7 @@ bash "$PHASE1_CHECK_ONLY_WORKSPACE/scripts/roadmap_progress_report.sh" \
   --summary-json "$SUMMARY_PHASE1_CHECK_ONLY_JSON" \
   --report-md "$REPORT_PHASE1_CHECK_ONLY_MD" \
   --print-report 0 \
-  --print-summary-json 0 >/tmp/integration_roadmap_progress_resilience_phase1_check_only_dry_pref.log 2>&1
+  --print-summary-json 0 >${ROADMAP_PROGRESS_RESILIENCE_LOG_PREFIX}_phase1_check_only_dry_pref.log 2>&1
 
 if ! jq -e \
   --arg non_dry_src "$PHASE1_CHECK_ONLY_NON_DRY_JSON" \

@@ -7,6 +7,8 @@ import (
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
 
+const maxIdentityLength = 128
+
 // SponsorAuthorization grants an app permission to spend sponsor credits.
 type SponsorAuthorization struct {
 	AuthorizationID string
@@ -55,14 +57,26 @@ func (a SponsorAuthorization) ValidateBasic() error {
 	if normalized.AuthorizationID == "" {
 		return errors.New("authorization id is required")
 	}
+	if len(normalized.AuthorizationID) > maxIdentityLength {
+		return errors.New("authorization id exceeds 128 characters")
+	}
 	if normalized.SponsorID == "" {
 		return errors.New("sponsor id is required")
+	}
+	if len(normalized.SponsorID) > maxIdentityLength {
+		return errors.New("sponsor id exceeds 128 characters")
 	}
 	if normalized.AppID == "" {
 		return errors.New("app id is required")
 	}
+	if len(normalized.AppID) > maxIdentityLength {
+		return errors.New("app id exceeds 128 characters")
+	}
 	if a.MaxCredits <= 0 {
 		return errors.New("max credits must be positive")
+	}
+	if a.ExpiresAtUnix < 0 {
+		return errors.New("expires_at_unix cannot be negative")
 	}
 	return nil
 }
@@ -73,14 +87,32 @@ func (d DelegatedSessionCredit) ValidateBasic() error {
 	if normalized.ReservationID == "" {
 		return errors.New("reservation id is required")
 	}
+	if len(normalized.ReservationID) > maxIdentityLength {
+		return errors.New("reservation id exceeds 128 characters")
+	}
 	if normalized.AuthorizationID == "" {
 		return errors.New("authorization id is required")
+	}
+	if len(normalized.AuthorizationID) > maxIdentityLength {
+		return errors.New("authorization id exceeds 128 characters")
 	}
 	if normalized.SponsorID == "" {
 		return errors.New("sponsor id is required")
 	}
+	if len(normalized.SponsorID) > maxIdentityLength {
+		return errors.New("sponsor id exceeds 128 characters")
+	}
+	if normalized.AppID != "" && len(normalized.AppID) > maxIdentityLength {
+		return errors.New("app id exceeds 128 characters")
+	}
+	if normalized.EndUserID != "" && len(normalized.EndUserID) > maxIdentityLength {
+		return errors.New("end user id exceeds 128 characters")
+	}
 	if normalized.SessionID == "" {
 		return errors.New("session id is required")
+	}
+	if len(normalized.SessionID) > maxIdentityLength {
+		return errors.New("session id exceeds 128 characters")
 	}
 	if d.Credits <= 0 {
 		return errors.New("credits must be positive")

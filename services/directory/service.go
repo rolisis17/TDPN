@@ -5,9 +5,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -26,101 +29,109 @@ import (
 )
 
 type Service struct {
-	addr                     string
-	localURL                 string
-	operatorID               string
-	pubKey                   ed25519.PublicKey
-	privKey                  ed25519.PrivateKey
-	server                   *http.Server
-	entryEndpoints           []string
-	endpointRotateSec        int64
-	descriptorEpoch          time.Duration
-	descriptorTTL            time.Duration
-	selectionFeedTTL         time.Duration
-	selectionEpoch           time.Duration
-	trustFeedTTL             time.Duration
-	trustEpoch               time.Duration
-	adminToken               string
-	previousPubKeysFile      string
-	providerIssuerURLs       []string
-	providerRelayMaxTTL      time.Duration
-	providerMinEntryTier     int
-	providerMinExitTier      int
-	providerMaxPerOperator   int
-	providerSplitRoles       bool
-	issuerTrustURLs          []string
-	issuerSyncSec            int
-	issuerTrustMinVotes      int
-	issuerDisputeMinVotes    int
-	issuerAppealMinVotes     int
-	peerURLs                 []string
-	peerSyncSec              int
-	gossipSec                int
-	gossipFanout             int
-	peerListTTL              time.Duration
-	peerDiscoveryEnabled     bool
-	peerDiscoveryMax         int
-	peerDiscoveryTTL         time.Duration
-	peerDiscoveryMinVotes    int
-	peerDiscoveryRequireHint bool
-	peerDiscoveryMaxPerSrc   int
-	peerDiscoveryMaxPerOp    int
-	peerDiscoveryFailN       int
-	peerDiscoveryBackoff     time.Duration
-	peerDiscoveryBackoffMax  time.Duration
-	peerDiscoveryDNSSeeds    []string
-	peerDiscoveryDNSRefresh  time.Duration
-	peerMinOperators         int
-	peerMinVotes             int
-	peerScoreMinVotes        int
-	peerTrustMinVotes        int
-	peerDisputeMinVotes      int
-	peerAppealMinVotes       int
-	adjudicationMetaMin      int
-	finalAdjudicationOps     int
-	finalAdjudicationSources int
-	finalDisputeMinVotes     int
-	finalAppealMinVotes      int
-	finalAdjudicationMin     float64
-	disputeMaxTTL            time.Duration
-	appealMaxTTL             time.Duration
-	issuerMinOperators       int
-	peerMaxHops              int
-	peerMu                   sync.RWMutex
-	peerRelays               map[string]proto.RelayDescriptor
-	providerMu               sync.RWMutex
-	providerRelays           map[string]proto.RelayDescriptor
-	peerScores               map[string]proto.RelaySelectionScore
-	peerTrust                map[string]proto.RelayTrustAttestation
-	issuerTrust              map[string]proto.RelayTrustAttestation
-	discoveredPeers          map[string]time.Time
-	discoveredPeerVoters     map[string]map[string]time.Time
-	discoveredPeerHealth     map[string]discoveredPeerHealth
-	peerHintPubKeys          map[string]string
-	peerHintOperators        map[string]string
-	peerRelayETags           map[string]string
-	peerRelayCache           map[string][]proto.RelayDescriptor
-	peerScoreETags           map[string]string
-	peerScoreCache           map[string]map[string]proto.RelaySelectionScore
-	peerTrustETags           map[string]string
-	peerTrustCache           map[string]map[string]proto.RelayTrustAttestation
-	issuerTrustETags         map[string]string
-	issuerTrustCache         map[string]map[string]proto.RelayTrustAttestation
-	peerTrustStrict          bool
-	peerTrustTOFU            bool
-	peerTrustFile            string
-	betaStrict               bool
-	prodStrict               bool
-	peerTrustMu              sync.Mutex
-	syncStatusMu             sync.RWMutex
-	peerSyncStatus           proto.DirectorySyncRunStatus
-	issuerSyncStatus         proto.DirectorySyncRunStatus
-	keyMu                    sync.RWMutex
-	httpClient               *http.Client
-	privateKeyPath           string
-	keyRotateEvery           time.Duration
-	keyHistory               int
-	dnsLookupTXT             func(context.Context, string) ([]string, error)
+	addr                        string
+	localURL                    string
+	operatorID                  string
+	pubKey                      ed25519.PublicKey
+	privKey                     ed25519.PrivateKey
+	server                      *http.Server
+	entryEndpoints              []string
+	endpointRotateSec           int64
+	descriptorEpoch             time.Duration
+	descriptorTTL               time.Duration
+	selectionFeedTTL            time.Duration
+	selectionEpoch              time.Duration
+	trustFeedTTL                time.Duration
+	trustEpoch                  time.Duration
+	adminToken                  string
+	previousPubKeysFile         string
+	providerIssuerURLs          []string
+	providerIssuerPubCacheTTL   time.Duration
+	providerRelayMaxTTL         time.Duration
+	providerMinEntryTier        int
+	providerMinExitTier         int
+	providerMaxPerOperator      int
+	providerSplitRoles          bool
+	issuerTrustURLs             []string
+	issuerTrustedKeysFile       string
+	issuerTrustedKeys           []ed25519.PublicKey
+	issuerSyncSec               int
+	issuerTrustMinVotes         int
+	issuerDisputeMinVotes       int
+	issuerAppealMinVotes        int
+	peerURLs                    []string
+	peerSyncSec                 int
+	gossipSec                   int
+	gossipFanout                int
+	peerListTTL                 time.Duration
+	peerDiscoveryEnabled        bool
+	peerDiscoveryMax            int
+	peerDiscoveryTTL            time.Duration
+	peerDiscoveryMinVotes       int
+	peerDiscoveryRequireHint    bool
+	peerDiscoveryMaxPerSrc      int
+	peerDiscoveryMaxPerOp       int
+	peerDiscoveryFailN          int
+	peerDiscoveryBackoff        time.Duration
+	peerDiscoveryBackoffMax     time.Duration
+	peerDiscoveryDNSSeeds       []string
+	peerDiscoveryDNSRefresh     time.Duration
+	peerMinOperators            int
+	peerMinVotes                int
+	peerScoreMinVotes           int
+	peerTrustMinVotes           int
+	peerDisputeMinVotes         int
+	peerAppealMinVotes          int
+	adjudicationMetaMin         int
+	finalAdjudicationOps        int
+	finalAdjudicationSources    int
+	finalDisputeMinVotes        int
+	finalAppealMinVotes         int
+	finalAdjudicationMin        float64
+	disputeMaxTTL               time.Duration
+	appealMaxTTL                time.Duration
+	issuerMinOperators          int
+	peerMaxHops                 int
+	peerMu                      sync.RWMutex
+	peerRelays                  map[string]proto.RelayDescriptor
+	providerMu                  sync.RWMutex
+	providerRelays              map[string]proto.RelayDescriptor
+	providerTokenProofSeen      map[string]time.Time
+	providerTokenProofStoreFile string
+	peerScores                  map[string]proto.RelaySelectionScore
+	peerTrust                   map[string]proto.RelayTrustAttestation
+	issuerTrust                 map[string]proto.RelayTrustAttestation
+	discoveredPeers             map[string]time.Time
+	discoveredPeerVoters        map[string]map[string]time.Time
+	discoveredPeerHealth        map[string]discoveredPeerHealth
+	peerHintPubKeys             map[string]string
+	peerHintOperators           map[string]string
+	peerPubKeyCache             map[string]peerPubKeyCacheEntry
+	peerRelayETags              map[string]string
+	peerRelayCache              map[string][]proto.RelayDescriptor
+	peerScoreETags              map[string]string
+	peerScoreCache              map[string]map[string]proto.RelaySelectionScore
+	peerTrustETags              map[string]string
+	peerTrustCache              map[string]map[string]proto.RelayTrustAttestation
+	issuerTrustETags            map[string]string
+	issuerTrustCache            map[string]map[string]proto.RelayTrustAttestation
+	providerIssuerPubCacheMu    sync.RWMutex
+	providerIssuerPubCache      map[string]providerIssuerPubCacheEntry
+	peerTrustStrict             bool
+	peerTrustTOFU               bool
+	peerTrustFile               string
+	betaStrict                  bool
+	prodStrict                  bool
+	peerTrustMu                 sync.Mutex
+	syncStatusMu                sync.RWMutex
+	peerSyncStatus              proto.DirectorySyncRunStatus
+	issuerSyncStatus            proto.DirectorySyncRunStatus
+	keyMu                       sync.RWMutex
+	httpClient                  *http.Client
+	privateKeyPath              string
+	keyRotateEvery              time.Duration
+	keyHistory                  int
+	dnsLookupTXT                func(context.Context, string) ([]string, error)
 }
 
 type discoveredPeerHealth struct {
@@ -131,7 +142,48 @@ type discoveredPeerHealth struct {
 	lastError           string
 }
 
+type providerIssuerPubCacheEntry struct {
+	pubs      []ed25519.PublicKey
+	issuerID  string
+	fetchedAt time.Time
+}
+
+type peerPubKeyCacheEntry struct {
+	pubs             []ed25519.PublicKey
+	operatorID       string
+	fetchedAt        time.Time
+	lastFetchAttempt time.Time
+}
+
 const discoveredPeerUnknownOperator = "_unknown"
+const providerRelayUpsertMaxBodyBytes int64 = 128 * 1024
+const providerRelayUpsertProofContext = "provider_relay_upsert_v1"
+const providerRelayUpsertProofReplayTTL = 15 * time.Minute
+const providerRelayUpsertProofNonceMaxLen = 128
+const providerRelayUpsertProofReplayMaxEntries = 8192
+const providerRelayUpsertProofReplayMaxPerToken = 512
+const gossipRelaysMaxBodyBytes int64 = 1024 * 1024
+const gossipRelaysMaxDescriptors = 512
+const remoteResponseMaxBodyBytes int64 = 1024 * 1024
+const serverReadHeaderTimeout = 10 * time.Second
+const serverReadTimeout = 15 * time.Second
+const serverWriteTimeout = 30 * time.Second
+const serverIdleTimeout = 60 * time.Second
+const serverMaxHeaderBytes = 1 << 20
+const allowInsecureAdminPublicBind = "DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND"
+const allowDangerousDevAdminTokenFallback = "DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
+const allowDangerousIssuerTrustWithoutAnchors = "DIRECTORY_ALLOW_DANGEROUS_ISSUER_TRUST_WITHOUT_ANCHORS"
+const allowDangerousOutboundPrivateDNS = "DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
+const defaultIssuerTrustedKeysFile = "data/directory_issuer_trusted_keys.txt"
+const directoryPrivateKeyMaxBytes int64 = 16 * 1024
+const directoryTrustedKeysFileMaxBytes int64 = 1 * 1024 * 1024
+const directoryPreviousPubKeysFileMaxBytes int64 = 1 * 1024 * 1024
+const directoryProviderReplayStoreMaxBytes int64 = 4 * 1024 * 1024
+const defaultProviderIssuerPubCacheTTL = 30 * time.Second
+const peerGossipPubKeyCacheTTL = 5 * time.Minute
+const peerGossipPubKeyFetchMinInterval = 15 * time.Second
+
+var errProviderRelayOwnershipConflict = errors.New("provider relay owned by different operator")
 
 func New() *Service {
 	addr := os.Getenv("DIRECTORY_ADDR")
@@ -344,9 +396,17 @@ func New() *Service {
 	if len(providerIssuerURLs) == 0 {
 		providerIssuerURLs = append([]string(nil), issuerTrustURLs...)
 	}
+	providerTokenProofStoreFile := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE"))
+	if providerTokenProofStoreFile == "" {
+		providerTokenProofStoreFile = "data/directory_provider_token_proof_replay.json"
+	}
 	providerRelayMaxTTL := 5 * time.Minute
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC")); err == nil && v > 0 {
 		providerRelayMaxTTL = time.Duration(v) * time.Second
+	}
+	providerIssuerPubCacheTTL := defaultProviderIssuerPubCacheTTL
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_ISSUER_PUBKEY_CACHE_SEC")); err == nil && v >= 0 {
+		providerIssuerPubCacheTTL = time.Duration(v) * time.Second
 	}
 	providerMinEntryTier := 1
 	if v := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_MIN_ENTRY_TIER")); v != "" {
@@ -368,18 +428,22 @@ func New() *Service {
 	}
 	providerSplitRoles := os.Getenv("DIRECTORY_PROVIDER_SPLIT_ROLES") == "1"
 	peerTrustStrict := os.Getenv("DIRECTORY_PEER_TRUST_STRICT") == "1"
-	peerTrustTOFU := os.Getenv("DIRECTORY_PEER_TRUST_TOFU") != "0"
+	peerTrustTOFU := os.Getenv("DIRECTORY_PEER_TRUST_TOFU") == "1"
 	peerTrustFile := os.Getenv("DIRECTORY_PEER_TRUSTED_KEYS_FILE")
 	if peerTrustFile == "" {
 		peerTrustFile = "data/directory_peer_trusted_keys.txt"
+	}
+	issuerTrustedKeysFile := strings.TrimSpace(os.Getenv("DIRECTORY_ISSUER_TRUSTED_KEYS_FILE"))
+	if issuerTrustedKeysFile == "" {
+		issuerTrustedKeysFile = defaultIssuerTrustedKeysFile
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_PROD_STRICT") == "1"
 	if betaStrict {
 		providerSplitRoles = true
 	}
-	adminToken := os.Getenv("DIRECTORY_ADMIN_TOKEN")
-	if adminToken == "" {
+	adminToken := strings.TrimSpace(os.Getenv("DIRECTORY_ADMIN_TOKEN"))
+	if adminToken == "" && envEnabled(allowDangerousDevAdminTokenFallback) {
 		adminToken = "dev-admin-token"
 	}
 	previousPubKeysFile := os.Getenv("DIRECTORY_PREVIOUS_PUBKEYS_FILE")
@@ -400,91 +464,97 @@ func New() *Service {
 		keyHistory = v
 	}
 	return &Service{
-		addr:                     addr,
-		localURL:                 localURL,
-		operatorID:               operatorID,
-		entryEndpoints:           eps,
-		endpointRotateSec:        rotateSec,
-		descriptorEpoch:          descriptorEpoch,
-		descriptorTTL:            descriptorTTL,
-		selectionFeedTTL:         selectionFeedTTL,
-		selectionEpoch:           selectionEpoch,
-		trustFeedTTL:             trustFeedTTL,
-		trustEpoch:               trustEpoch,
-		adminToken:               adminToken,
-		previousPubKeysFile:      previousPubKeysFile,
-		providerIssuerURLs:       providerIssuerURLs,
-		providerRelayMaxTTL:      providerRelayMaxTTL,
-		providerMinEntryTier:     providerMinEntryTier,
-		providerMinExitTier:      providerMinExitTier,
-		providerMaxPerOperator:   providerMaxPerOperator,
-		providerSplitRoles:       providerSplitRoles,
-		issuerTrustURLs:          issuerTrustURLs,
-		issuerSyncSec:            issuerSyncSec,
-		issuerTrustMinVotes:      issuerTrustMinVotes,
-		issuerDisputeMinVotes:    issuerDisputeMinVotes,
-		issuerAppealMinVotes:     issuerAppealMinVotes,
-		peerURLs:                 peerURLs,
-		peerSyncSec:              peerSyncSec,
-		gossipSec:                gossipSec,
-		gossipFanout:             gossipFanout,
-		peerListTTL:              peerListTTL,
-		peerDiscoveryEnabled:     peerDiscoveryEnabled,
-		peerDiscoveryMax:         peerDiscoveryMax,
-		peerDiscoveryTTL:         peerDiscoveryTTL,
-		peerDiscoveryMinVotes:    peerDiscoveryMinVotes,
-		peerDiscoveryRequireHint: peerDiscoveryRequireHint,
-		peerDiscoveryMaxPerSrc:   peerDiscoveryMaxPerSrc,
-		peerDiscoveryMaxPerOp:    peerDiscoveryMaxPerOp,
-		peerDiscoveryFailN:       peerDiscoveryFailN,
-		peerDiscoveryBackoff:     peerDiscoveryBackoff,
-		peerDiscoveryBackoffMax:  peerDiscoveryBackoffMax,
-		peerDiscoveryDNSSeeds:    peerDiscoveryDNSSeeds,
-		peerDiscoveryDNSRefresh:  peerDiscoveryDNSRefresh,
-		peerMinOperators:         peerMinOperators,
-		peerMinVotes:             peerMinVotes,
-		peerScoreMinVotes:        peerScoreMinVotes,
-		peerTrustMinVotes:        peerTrustMinVotes,
-		peerDisputeMinVotes:      peerDisputeMinVotes,
-		peerAppealMinVotes:       peerAppealMinVotes,
-		adjudicationMetaMin:      adjudicationMetaMin,
-		finalAdjudicationOps:     finalAdjudicationOps,
-		finalAdjudicationSources: finalAdjudicationSources,
-		finalDisputeMinVotes:     finalDisputeMinVotes,
-		finalAppealMinVotes:      finalAppealMinVotes,
-		finalAdjudicationMin:     finalAdjudicationMin,
-		disputeMaxTTL:            disputeMaxTTL,
-		appealMaxTTL:             appealMaxTTL,
-		issuerMinOperators:       issuerMinOperators,
-		peerMaxHops:              peerMaxHops,
-		peerRelays:               make(map[string]proto.RelayDescriptor),
-		providerRelays:           make(map[string]proto.RelayDescriptor),
-		peerScores:               make(map[string]proto.RelaySelectionScore),
-		peerTrust:                make(map[string]proto.RelayTrustAttestation),
-		issuerTrust:              make(map[string]proto.RelayTrustAttestation),
-		discoveredPeers:          make(map[string]time.Time),
-		discoveredPeerVoters:     make(map[string]map[string]time.Time),
-		discoveredPeerHealth:     make(map[string]discoveredPeerHealth),
-		peerHintPubKeys:          make(map[string]string),
-		peerHintOperators:        make(map[string]string),
-		peerRelayETags:           make(map[string]string),
-		peerRelayCache:           make(map[string][]proto.RelayDescriptor),
-		peerScoreETags:           make(map[string]string),
-		peerScoreCache:           make(map[string]map[string]proto.RelaySelectionScore),
-		peerTrustETags:           make(map[string]string),
-		peerTrustCache:           make(map[string]map[string]proto.RelayTrustAttestation),
-		issuerTrustETags:         make(map[string]string),
-		issuerTrustCache:         make(map[string]map[string]proto.RelayTrustAttestation),
-		peerTrustStrict:          peerTrustStrict,
-		peerTrustTOFU:            peerTrustTOFU,
-		peerTrustFile:            peerTrustFile,
-		betaStrict:               betaStrict,
-		prodStrict:               prodStrict,
-		httpClient:               &http.Client{Timeout: 5 * time.Second},
-		privateKeyPath:           privateKeyPath,
-		keyRotateEvery:           keyRotateEvery,
-		keyHistory:               keyHistory,
-		dnsLookupTXT:             net.DefaultResolver.LookupTXT,
+		addr:                        addr,
+		localURL:                    localURL,
+		operatorID:                  operatorID,
+		entryEndpoints:              eps,
+		endpointRotateSec:           rotateSec,
+		descriptorEpoch:             descriptorEpoch,
+		descriptorTTL:               descriptorTTL,
+		selectionFeedTTL:            selectionFeedTTL,
+		selectionEpoch:              selectionEpoch,
+		trustFeedTTL:                trustFeedTTL,
+		trustEpoch:                  trustEpoch,
+		adminToken:                  adminToken,
+		previousPubKeysFile:         previousPubKeysFile,
+		providerIssuerURLs:          providerIssuerURLs,
+		providerIssuerPubCacheTTL:   providerIssuerPubCacheTTL,
+		providerRelayMaxTTL:         providerRelayMaxTTL,
+		providerMinEntryTier:        providerMinEntryTier,
+		providerMinExitTier:         providerMinExitTier,
+		providerMaxPerOperator:      providerMaxPerOperator,
+		providerSplitRoles:          providerSplitRoles,
+		issuerTrustURLs:             issuerTrustURLs,
+		issuerSyncSec:               issuerSyncSec,
+		issuerTrustMinVotes:         issuerTrustMinVotes,
+		issuerDisputeMinVotes:       issuerDisputeMinVotes,
+		issuerAppealMinVotes:        issuerAppealMinVotes,
+		peerURLs:                    peerURLs,
+		peerSyncSec:                 peerSyncSec,
+		gossipSec:                   gossipSec,
+		gossipFanout:                gossipFanout,
+		peerListTTL:                 peerListTTL,
+		peerDiscoveryEnabled:        peerDiscoveryEnabled,
+		peerDiscoveryMax:            peerDiscoveryMax,
+		peerDiscoveryTTL:            peerDiscoveryTTL,
+		peerDiscoveryMinVotes:       peerDiscoveryMinVotes,
+		peerDiscoveryRequireHint:    peerDiscoveryRequireHint,
+		peerDiscoveryMaxPerSrc:      peerDiscoveryMaxPerSrc,
+		peerDiscoveryMaxPerOp:       peerDiscoveryMaxPerOp,
+		peerDiscoveryFailN:          peerDiscoveryFailN,
+		peerDiscoveryBackoff:        peerDiscoveryBackoff,
+		peerDiscoveryBackoffMax:     peerDiscoveryBackoffMax,
+		peerDiscoveryDNSSeeds:       peerDiscoveryDNSSeeds,
+		peerDiscoveryDNSRefresh:     peerDiscoveryDNSRefresh,
+		peerMinOperators:            peerMinOperators,
+		peerMinVotes:                peerMinVotes,
+		peerScoreMinVotes:           peerScoreMinVotes,
+		peerTrustMinVotes:           peerTrustMinVotes,
+		peerDisputeMinVotes:         peerDisputeMinVotes,
+		peerAppealMinVotes:          peerAppealMinVotes,
+		adjudicationMetaMin:         adjudicationMetaMin,
+		finalAdjudicationOps:        finalAdjudicationOps,
+		finalAdjudicationSources:    finalAdjudicationSources,
+		finalDisputeMinVotes:        finalDisputeMinVotes,
+		finalAppealMinVotes:         finalAppealMinVotes,
+		finalAdjudicationMin:        finalAdjudicationMin,
+		disputeMaxTTL:               disputeMaxTTL,
+		appealMaxTTL:                appealMaxTTL,
+		issuerMinOperators:          issuerMinOperators,
+		peerMaxHops:                 peerMaxHops,
+		peerRelays:                  make(map[string]proto.RelayDescriptor),
+		providerRelays:              make(map[string]proto.RelayDescriptor),
+		providerTokenProofSeen:      make(map[string]time.Time),
+		providerTokenProofStoreFile: providerTokenProofStoreFile,
+		peerScores:                  make(map[string]proto.RelaySelectionScore),
+		peerTrust:                   make(map[string]proto.RelayTrustAttestation),
+		issuerTrust:                 make(map[string]proto.RelayTrustAttestation),
+		discoveredPeers:             make(map[string]time.Time),
+		discoveredPeerVoters:        make(map[string]map[string]time.Time),
+		discoveredPeerHealth:        make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:             make(map[string]string),
+		peerHintOperators:           make(map[string]string),
+		peerPubKeyCache:             make(map[string]peerPubKeyCacheEntry),
+		peerRelayETags:              make(map[string]string),
+		peerRelayCache:              make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:              make(map[string]string),
+		peerScoreCache:              make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:              make(map[string]string),
+		peerTrustCache:              make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:            make(map[string]string),
+		issuerTrustCache:            make(map[string]map[string]proto.RelayTrustAttestation),
+		providerIssuerPubCache:      make(map[string]providerIssuerPubCacheEntry),
+		peerTrustStrict:             peerTrustStrict,
+		peerTrustTOFU:               peerTrustTOFU,
+		peerTrustFile:               peerTrustFile,
+		issuerTrustedKeysFile:       issuerTrustedKeysFile,
+		betaStrict:                  betaStrict,
+		prodStrict:                  prodStrict,
+		httpClient:                  &http.Client{Timeout: 5 * time.Second},
+		privateKeyPath:              privateKeyPath,
+		keyRotateEvery:              keyRotateEvery,
+		keyHistory:                  keyHistory,
+		dnsLookupTXT:                net.DefaultResolver.LookupTXT,
 	}
 }
 
@@ -493,10 +563,23 @@ func (s *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("directory http tls init: %w", err)
 	}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	configureOutboundDialPolicy(httpClient, envEnabled(allowDangerousOutboundPrivateDNS), s.betaStrict || s.prodStrict)
 	s.httpClient = httpClient
 
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
+	}
+	if err := s.loadIssuerTrustedKeys(); err != nil {
+		return err
+	}
+	if err := s.loadProviderTokenProofReplayStore(time.Now()); err != nil {
+		return fmt.Errorf("load provider token proof replay store: %w", err)
+	}
+	if (s.betaStrict || s.prodStrict) && len(s.issuerTrustedKeys) == 0 {
+		return fmt.Errorf("strict mode requires at least one issuer trust anchor key in %s", strings.TrimSpace(s.issuerTrustedKeysFile))
 	}
 	pub, priv, err := s.loadOrCreateKeypair()
 	if err != nil {
@@ -523,8 +606,13 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/admin/peer-status", s.handlePeerStatus)
 
 	s.server = &http.Server{
-		Addr:    s.addr,
-		Handler: mux,
+		Addr:              s.addr,
+		Handler:           mux,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
 	}
 	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_max_per_operator=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d peer_discovery_dns_seeds=%d peer_discovery_dns_refresh_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d provider_split_roles=%t key_rotate_sec=%d key_history=%d",
 		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(0, s.peerDiscoveryMaxPerOp), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), len(s.peerDiscoveryDNSSeeds), int(s.peerDiscoveryDNSRefresh/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), s.providerSplitRoles, int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
@@ -557,15 +645,25 @@ func (s *Service) Run(ctx context.Context) error {
 
 func (s *Service) validateRuntimeConfig() error {
 	if securehttp.Enabled() {
+		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
+		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
 	}
-	if !isLoopbackBindAddr(s.addr) && strings.TrimSpace(s.privateKeyPath) == "data/directory_ed25519.key" {
+	publicBind := !isLoopbackBindAddr(s.addr)
+	if publicBind && strings.TrimSpace(s.privateKeyPath) == "data/directory_ed25519.key" {
 		return fmt.Errorf("public bind rejects legacy DIRECTORY_PRIVATE_KEY_FILE path data/directory_ed25519.key")
 	}
-	if !isLoopbackBindAddr(s.addr) && isWeakAdminToken(s.adminToken) {
+	if publicBind && isWeakAdminToken(s.adminToken) {
 		return fmt.Errorf("public bind requires strong DIRECTORY_ADMIN_TOKEN (len>=16, non-default)")
+	}
+	if publicBind && !securehttp.Enabled() && strings.TrimSpace(s.adminToken) != "" && !envEnabled(allowInsecureAdminPublicBind) {
+		return fmt.Errorf("public bind with DIRECTORY_ADMIN_TOKEN requires MTLS_ENABLE=1 or %s=1", allowInsecureAdminPublicBind)
+	}
+	if err := s.validateIssuerTrustAnchorPolicy(); err != nil {
+		return err
 	}
 	if !s.betaStrict {
 		if s.prodStrict {
@@ -645,6 +743,51 @@ func (s *Service) validateRuntimeConfig() error {
 	return nil
 }
 
+func (s *Service) validateIssuerTrustAnchorPolicy() error {
+	if len(s.issuerTrustURLs) == 0 {
+		return nil
+	}
+	if !issuerTrustURLsRequireAnchors(s.issuerTrustURLs) {
+		return nil
+	}
+	if envEnabled(allowDangerousIssuerTrustWithoutAnchors) {
+		return nil
+	}
+	if len(s.issuerTrustedKeys) > 0 {
+		return nil
+	}
+
+	path := strings.TrimSpace(s.issuerTrustedKeysFile)
+	if path == "" {
+		path = defaultIssuerTrustedKeysFile
+	}
+	keys, err := loadIssuerTrustedKeys(path)
+	if err != nil {
+		return fmt.Errorf("load issuer trusted keys: %w", err)
+	}
+	if len(keys) > 0 {
+		return nil
+	}
+	return fmt.Errorf("non-loopback issuer trust urls require configured issuer trust anchors in %s (set %s=1 only for trusted lab compatibility)", path, allowDangerousIssuerTrustWithoutAnchors)
+}
+
+func issuerTrustURLsRequireAnchors(urls []string) bool {
+	for _, raw := range urls {
+		normalized := normalizePeerURL(raw)
+		if normalized == "" {
+			continue
+		}
+		parsed, err := urlpkg.Parse(normalized)
+		if err != nil || parsed.Hostname() == "" {
+			return true
+		}
+		if !isLoopbackURLHost(parsed.Hostname()) {
+			return true
+		}
+	}
+	return false
+}
+
 func isLoopbackBindAddr(addr string) bool {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
@@ -686,6 +829,16 @@ func isWeakAdminToken(token string) bool {
 		return true
 	}
 	return len(token) < 16
+}
+
+func envEnabled(name string) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) runPeerSync(ctx context.Context) {
@@ -1248,8 +1401,13 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 			lastErr = err
 			continue
 		}
+		verifyPubs, err := issuerVerificationKeysForTrustFeed(pubs, s.issuerTrustedKeys)
+		if err != nil {
+			lastErr = fmt.Errorf("issuer %s trust key validation failed: %w", issuerURL, err)
+			continue
+		}
 		sourceOperator := normalizeSourceOperator(declaredOperator, pubs, issuerURL)
-		attestations, err := s.fetchIssuerTrustAttestations(ctx, issuerURL, pubs)
+		attestations, err := s.fetchIssuerTrustAttestations(ctx, issuerURL, verifyPubs)
 		if err != nil {
 			lastErr = err
 			continue
@@ -1361,7 +1519,7 @@ func (s *Service) fetchIssuerPubKeys(ctx context.Context, issuerURL string) ([]e
 		return nil, "", fmt.Errorf("issuer pubkeys status %d", resp.StatusCode)
 	}
 	var out proto.IssuerPubKeysResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return nil, "", err
 	}
 	keys := make([]ed25519.PublicKey, 0, len(out.PubKeys))
@@ -1376,6 +1534,54 @@ func (s *Service) fetchIssuerPubKeys(ctx context.Context, issuerURL string) ([]e
 		return nil, "", fmt.Errorf("issuer returned no pubkeys")
 	}
 	return keys, strings.TrimSpace(out.Issuer), nil
+}
+
+func cloneIssuerPubKeys(in []ed25519.PublicKey) []ed25519.PublicKey {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ed25519.PublicKey, 0, len(in))
+	for _, key := range in {
+		if len(key) == 0 {
+			continue
+		}
+		dup := make(ed25519.PublicKey, len(key))
+		copy(dup, key)
+		out = append(out, dup)
+	}
+	return out
+}
+
+func (s *Service) fetchIssuerPubKeysForProviderToken(ctx context.Context, issuerURL string, now time.Time) ([]ed25519.PublicKey, string, error) {
+	cacheTTL := s.providerIssuerPubCacheTTL
+	if cacheTTL <= 0 {
+		return s.fetchIssuerPubKeys(ctx, issuerURL)
+	}
+	s.providerIssuerPubCacheMu.RLock()
+	if entry, ok := s.providerIssuerPubCache[issuerURL]; ok {
+		if now.Sub(entry.fetchedAt) <= cacheTTL {
+			s.providerIssuerPubCacheMu.RUnlock()
+			return cloneIssuerPubKeys(entry.pubs), entry.issuerID, nil
+		}
+	}
+	s.providerIssuerPubCacheMu.RUnlock()
+	pubs, issuerID, err := s.fetchIssuerPubKeys(ctx, issuerURL)
+	if err != nil {
+		return nil, "", err
+	}
+	s.providerIssuerPubCacheMu.Lock()
+	defer s.providerIssuerPubCacheMu.Unlock()
+	if entry, ok := s.providerIssuerPubCache[issuerURL]; ok {
+		if now.Sub(entry.fetchedAt) <= cacheTTL {
+			return cloneIssuerPubKeys(entry.pubs), entry.issuerID, nil
+		}
+	}
+	s.providerIssuerPubCache[issuerURL] = providerIssuerPubCacheEntry{
+		pubs:      cloneIssuerPubKeys(pubs),
+		issuerID:  strings.TrimSpace(issuerID),
+		fetchedAt: now,
+	}
+	return pubs, issuerID, nil
 }
 
 func (s *Service) fetchIssuerTrustAttestations(ctx context.Context, issuerURL string, pubs []ed25519.PublicKey) (map[string]proto.RelayTrustAttestation, error) {
@@ -1404,7 +1610,7 @@ func (s *Service) fetchIssuerTrustAttestations(ctx context.Context, issuerURL st
 		return nil, fmt.Errorf("issuer trust feed status %d", resp.StatusCode)
 	}
 	var feed proto.RelayTrustAttestationFeedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&feed); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &feed, remoteResponseMaxBodyBytes); err != nil {
 		return nil, err
 	}
 	if err := verifyIssuerTrustFeedAny(feed, pubs, time.Now()); err != nil {
@@ -1458,6 +1664,73 @@ func verifyIssuerTrustFeedAny(feed proto.RelayTrustAttestationFeedResponse, pubs
 	return lastErr
 }
 
+func (s *Service) loadIssuerTrustedKeys() error {
+	path := strings.TrimSpace(s.issuerTrustedKeysFile)
+	keys, err := loadIssuerTrustedKeys(path)
+	if err != nil {
+		return fmt.Errorf("load issuer trusted keys: %w", err)
+	}
+	s.issuerTrustedKeys = keys
+	if len(keys) > 0 {
+		log.Printf("directory loaded issuer trust anchors count=%d file=%s", len(keys), path)
+	}
+	return nil
+}
+
+func loadIssuerTrustedKeys(path string) ([]ed25519.PublicKey, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	b, err := readFileBounded(path, directoryTrustedKeysFileMaxBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	out := make([]ed25519.PublicKey, 0)
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		key := fields[len(fields)-1]
+		raw, decErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(key))
+		if decErr != nil || len(raw) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid issuer trusted key: %s", key)
+		}
+		encoded := base64.RawURLEncoding.EncodeToString(raw)
+		if _, ok := seen[encoded]; ok {
+			continue
+		}
+		seen[encoded] = struct{}{}
+		out = append(out, ed25519.PublicKey(raw))
+	}
+	return out, nil
+}
+
+func issuerVerificationKeysForTrustFeed(remote []ed25519.PublicKey, anchors []ed25519.PublicKey) ([]ed25519.PublicKey, error) {
+	if len(remote) == 0 {
+		return nil, fmt.Errorf("no issuer pubkeys available")
+	}
+	if len(anchors) == 0 {
+		return remote, nil
+	}
+	for _, remotePub := range remote {
+		for _, anchor := range anchors {
+			if len(remotePub) == ed25519.PublicKeySize &&
+				len(anchor) == ed25519.PublicKeySize &&
+				subtle.ConstantTimeCompare(remotePub, anchor) == 1 {
+				return anchors, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("remote issuer pubkeys do not match configured trust anchors")
+}
+
 func (s *Service) fetchPeerRelays(ctx context.Context, peerURL string) ([]proto.RelayDescriptor, error) {
 	pubs, _, err := s.fetchPeerPubKeys(ctx, peerURL)
 	if err != nil {
@@ -1494,7 +1767,7 @@ func (s *Service) fetchPeerRelaysWithPubs(ctx context.Context, peerURL string, p
 	}
 
 	var out proto.RelayListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return nil, err
 	}
 	verified := make([]proto.RelayDescriptor, 0, len(out.Relays))
@@ -1542,7 +1815,7 @@ func (s *Service) fetchPeerSelectionScores(ctx context.Context, peerURL string, 
 		return nil, fmt.Errorf("peer selection feed status %d", resp.StatusCode)
 	}
 	var feed proto.RelaySelectionFeedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&feed); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &feed, remoteResponseMaxBodyBytes); err != nil {
 		return nil, err
 	}
 	if err := verifyRelaySelectionFeedAny(feed, pubs, time.Now()); err != nil {
@@ -1597,7 +1870,7 @@ func (s *Service) fetchPeerTrustAttestations(ctx context.Context, peerURL string
 		return nil, fmt.Errorf("peer trust feed status %d", resp.StatusCode)
 	}
 	var feed proto.RelayTrustAttestationFeedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&feed); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &feed, remoteResponseMaxBodyBytes); err != nil {
 		return nil, err
 	}
 	if err := verifyRelayTrustFeedAny(feed, pubs, time.Now()); err != nil {
@@ -1644,6 +1917,24 @@ func (s *Service) fetchPeerPubKey(ctx context.Context, peerURL string) (ed25519.
 	return pubs[0], nil
 }
 
+func (s *Service) fetchPeerPubKeyForGossip(ctx context.Context, peerURL string, now time.Time) (ed25519.PublicKey, error) {
+	pubs, _, ok := s.cachedPeerPubKeys(peerURL, now)
+	if ok && len(pubs) > 0 {
+		return pubs[0], nil
+	}
+	if !s.beginPeerPubKeyFetch(peerURL, now) {
+		return nil, fmt.Errorf("peer pubkey refresh cooldown")
+	}
+	pubs, _, err := s.fetchPeerPubKeys(ctx, peerURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(pubs) == 0 {
+		return nil, fmt.Errorf("peer returned no pubkeys")
+	}
+	return pubs[0], nil
+}
+
 func (s *Service) fetchPeerPubKeys(ctx context.Context, peerURL string) ([]ed25519.PublicKey, string, error) {
 	peerURL = normalizePeerURL(peerURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(peerURL, "/v1/pubkeys"), nil)
@@ -1656,35 +1947,55 @@ func (s *Service) fetchPeerPubKeys(ctx context.Context, peerURL string) ([]ed255
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return s.fetchPeerPubKeyLegacy(ctx, peerURL)
+		keys, operatorID, legacyErr := s.fetchPeerPubKeyLegacy(ctx, peerURL)
+		if legacyErr != nil {
+			return nil, "", legacyErr
+		}
+		s.setPeerPubKeyCache(peerURL, keys, operatorID, time.Now().UTC())
+		return keys, operatorID, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("peer pubkeys status %d", resp.StatusCode)
 	}
 	var out proto.DirectoryPubKeysResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return nil, "", err
 	}
-	keys := make([]ed25519.PublicKey, 0, len(out.PubKeys))
+	keysByB64 := make(map[string]ed25519.PublicKey, len(out.PubKeys))
 	keysB64 := make([]string, 0, len(out.PubKeys))
 	for _, key := range dedupeStrings(out.PubKeys) {
 		raw, decErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(key))
 		if decErr != nil || len(raw) != ed25519.PublicKeySize {
 			return nil, "", fmt.Errorf("invalid peer pubkey")
 		}
-		keys = append(keys, ed25519.PublicKey(raw))
-		keysB64 = append(keysB64, base64.RawURLEncoding.EncodeToString(raw))
+		canonical := base64.RawURLEncoding.EncodeToString(raw)
+		if _, exists := keysByB64[canonical]; exists {
+			continue
+		}
+		keysByB64[canonical] = ed25519.PublicKey(raw)
+		keysB64 = append(keysB64, canonical)
 	}
-	if len(keys) == 0 {
+	if len(keysB64) == 0 {
 		return nil, "", fmt.Errorf("peer returned no pubkeys")
 	}
 	if expected := s.peerHintPubKey(peerURL); expected != "" && !containsString(keysB64, expected) {
 		return nil, "", fmt.Errorf("peer pubkey mismatch with signed hint for %s", peerURL)
 	}
-	if err := s.enforcePeerTrustSet(peerURL, keysB64); err != nil {
+	selectedKeysB64, err := s.selectTrustedPeerPubKeys(peerURL, keysB64)
+	if err != nil {
 		return nil, "", err
 	}
-	return keys, normalizeOperatorID(out.Operator), nil
+	keys := make([]ed25519.PublicKey, 0, len(selectedKeysB64))
+	for _, key := range selectedKeysB64 {
+		raw, ok := keysByB64[key]
+		if !ok {
+			return nil, "", fmt.Errorf("peer returned invalid trusted key set")
+		}
+		keys = append(keys, raw)
+	}
+	operatorID := normalizeOperatorID(out.Operator)
+	s.setPeerPubKeyCache(peerURL, keys, operatorID, time.Now().UTC())
+	return keys, operatorID, nil
 }
 
 func (s *Service) fetchPeerPubKeyLegacy(ctx context.Context, peerURL string) ([]ed25519.PublicKey, string, error) {
@@ -1701,7 +2012,7 @@ func (s *Service) fetchPeerPubKeyLegacy(ctx context.Context, peerURL string) ([]
 		return nil, "", fmt.Errorf("peer pubkey status %d", resp.StatusCode)
 	}
 	var out map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return nil, "", err
 	}
 	pubB64 := strings.TrimSpace(out["pub_key"])
@@ -1735,7 +2046,7 @@ func (s *Service) fetchPeerDirectoryPeers(ctx context.Context, peerURL string, p
 		return nil, fmt.Errorf("peer list status %d", resp.StatusCode)
 	}
 	var out proto.DirectoryPeerListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return nil, err
 	}
 	if err := verifyDirectoryPeerListAny(out, pubs, time.Now()); err != nil {
@@ -1897,6 +2208,9 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 		if peerURL == "" {
 			continue
 		}
+		if isDisallowedDiscoveredPeerURL(peerURL) {
+			continue
+		}
 		if operator := normalizeOperatorID(hint.Operator); operator != "" {
 			s.peerHintOperators[peerURL] = operator
 		}
@@ -2052,10 +2366,49 @@ func validDNSDiscoveryURL(raw string) bool {
 	if host == "" {
 		return false
 	}
+	if isDisallowedDiscoveredPeerHost(host) {
+		return false
+	}
 	if !strings.Contains(host, ".") && net.ParseIP(host) == nil {
 		return false
 	}
 	return true
+}
+
+func isDisallowedDiscoveredPeerURL(raw string) bool {
+	parsed, err := urlpkg.Parse(raw)
+	if err != nil {
+		return true
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return true
+	}
+	return isDisallowedDiscoveredPeerHost(host)
+}
+
+func isDisallowedDiscoveredPeerHost(host string) bool {
+	if hasZoneIdentifierHost(host) {
+		return true
+	}
+	normalized := normalizeHostForCompare(host)
+	if normalized == "" {
+		return true
+	}
+	if normalized == "localhost" || strings.HasSuffix(normalized, ".localhost") {
+		return true
+	}
+	if isAmbiguousNumericHostAlias(normalized) {
+		return true
+	}
+	ip := net.ParseIP(normalized)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	return false
 }
 
 func (s *Service) peerDiscoveryMaxPerSource() int {
@@ -2490,6 +2843,84 @@ func (s *Service) setIssuerTrustCache(issuerURL string, etag string, attestation
 	}
 }
 
+func clonePeerPubKeys(in []ed25519.PublicKey) []ed25519.PublicKey {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ed25519.PublicKey, 0, len(in))
+	for _, key := range in {
+		if len(key) == 0 {
+			continue
+		}
+		dup := make(ed25519.PublicKey, len(key))
+		copy(dup, key)
+		out = append(out, dup)
+	}
+	return out
+}
+
+func (s *Service) cachedPeerPubKeys(peerURL string, now time.Time) ([]ed25519.PublicKey, string, bool) {
+	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" {
+		return nil, "", false
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	s.peerMu.RLock()
+	entry, ok := s.peerPubKeyCache[peerURL]
+	s.peerMu.RUnlock()
+	if !ok || len(entry.pubs) == 0 {
+		return nil, "", false
+	}
+	if now.Sub(entry.fetchedAt) > peerGossipPubKeyCacheTTL {
+		return nil, "", false
+	}
+	return clonePeerPubKeys(entry.pubs), normalizeOperatorID(entry.operatorID), true
+}
+
+func (s *Service) beginPeerPubKeyFetch(peerURL string, now time.Time) bool {
+	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	if s.peerPubKeyCache == nil {
+		s.peerPubKeyCache = make(map[string]peerPubKeyCacheEntry)
+	}
+	entry := s.peerPubKeyCache[peerURL]
+	if !entry.lastFetchAttempt.IsZero() && now.Sub(entry.lastFetchAttempt) < peerGossipPubKeyFetchMinInterval {
+		return false
+	}
+	entry.lastFetchAttempt = now
+	s.peerPubKeyCache[peerURL] = entry
+	return true
+}
+
+func (s *Service) setPeerPubKeyCache(peerURL string, pubs []ed25519.PublicKey, operatorID string, fetchedAt time.Time) {
+	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" || len(pubs) == 0 {
+		return
+	}
+	if fetchedAt.IsZero() {
+		fetchedAt = time.Now().UTC()
+	}
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	if s.peerPubKeyCache == nil {
+		s.peerPubKeyCache = make(map[string]peerPubKeyCacheEntry)
+	}
+	entry := s.peerPubKeyCache[peerURL]
+	entry.pubs = clonePeerPubKeys(pubs)
+	entry.operatorID = normalizeOperatorID(operatorID)
+	entry.fetchedAt = fetchedAt
+	s.peerPubKeyCache[peerURL] = entry
+}
+
 func (s *Service) peerHintPubKey(peerURL string) string {
 	peerURL = normalizePeerURL(peerURL)
 	s.peerMu.RLock()
@@ -2509,44 +2940,51 @@ func (s *Service) enforcePeerTrust(peerURL string, pubB64 string) error {
 }
 
 func (s *Service) enforcePeerTrustSet(peerURL string, pubB64Set []string) error {
+	_, err := s.selectTrustedPeerPubKeys(peerURL, pubB64Set)
+	return err
+}
+
+func (s *Service) selectTrustedPeerPubKeys(peerURL string, pubB64Set []string) ([]string, error) {
+	filtered := dedupeStrings(pubB64Set)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("peer returned no pubkeys")
+	}
 	if !s.peerTrustStrict {
-		return nil
+		return filtered, nil
 	}
 	peerURL = normalizePeerURL(peerURL)
 	s.peerTrustMu.Lock()
 	defer s.peerTrustMu.Unlock()
-
-	filtered := dedupeStrings(pubB64Set)
-	if len(filtered) == 0 {
-		return fmt.Errorf("peer returned no pubkeys")
-	}
 	trusted, err := loadPeerTrustedKeys(s.peerTrustFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if pinned, ok := trusted[peerURL]; ok {
 		for _, key := range filtered {
 			if pinned == key {
-				return nil
+				if len(filtered) > 1 {
+					log.Printf("directory ignored %d untrusted peer pubkeys for %s in strict mode", len(filtered)-1, peerURL)
+				}
+				return []string{pinned}, nil
 			}
 		}
-		return fmt.Errorf("peer key mismatch for %s", peerURL)
+		return nil, fmt.Errorf("peer key mismatch for %s", peerURL)
 	}
 	if s.peerTrustTOFU {
 		if err := appendPeerTrustedKey(s.peerTrustFile, peerURL, filtered[0]); err != nil {
-			return err
+			return nil, err
 		}
 		log.Printf("directory TOFU pinned peer key for %s to %s", peerURL, s.peerTrustFile)
-		return nil
+		return []string{filtered[0]}, nil
 	}
-	return fmt.Errorf("peer key is not trusted for %s", peerURL)
+	return nil, fmt.Errorf("peer key is not trusted for %s", peerURL)
 }
 
 func (s *Service) loadOrCreateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	if s.privateKeyPath == "" {
 		return crypto.GenerateEd25519Keypair()
 	}
-	b, err := os.ReadFile(s.privateKeyPath)
+	b, err := readFileBounded(s.privateKeyPath, directoryPrivateKeyMaxBytes)
 	if err == nil {
 		trimmed := strings.TrimSpace(string(b))
 		raw, decErr := base64.RawURLEncoding.DecodeString(trimmed)
@@ -2663,7 +3101,7 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req proto.RelayGossipPushRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrictJSONBody(w, r, &req, gossipRelaysMaxBodyBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -2672,12 +3110,16 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown peer", http.StatusForbidden)
 		return
 	}
-	pub, err := s.fetchPeerPubKey(r.Context(), peerURL)
+	if len(req.Relays) > gossipRelaysMaxDescriptors {
+		http.Error(w, "too many relays", http.StatusRequestEntityTooLarge)
+		return
+	}
+	now := time.Now().UTC()
+	pub, err := s.fetchPeerPubKeyForGossip(r.Context(), peerURL, now)
 	if err != nil {
 		http.Error(w, "peer pubkey unavailable", http.StatusBadGateway)
 		return
 	}
-	now := time.Now().UTC()
 	validated := make([]proto.RelayDescriptor, 0, len(req.Relays))
 	for _, desc := range req.Relays {
 		if strings.TrimSpace(desc.RelayID) == "" {
@@ -2739,7 +3181,7 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req proto.ProviderRelayUpsertRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrictJSONBody(w, r, &req, providerRelayUpsertMaxBodyBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -2757,18 +3199,49 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.upsertProviderRelay(desc); err != nil {
-		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		status := http.StatusTooManyRequests
+		if errors.Is(err, errProviderRelayOwnershipConflict) {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(proto.ProviderRelayUpsertResponse{Accepted: true, Relay: desc})
 }
 
+func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing json")
+		}
+		return err
+	}
+	return nil
+}
+
+func decodeBoundedJSONResponse(body io.Reader, dst any, maxBytes int64) error {
+	payload, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(payload)) > maxBytes {
+		return fmt.Errorf("response body too large")
+	}
+	return json.NewDecoder(bytes.NewReader(payload)).Decode(dst)
+}
+
 func providerTokenFromRequest(r *http.Request, bodyToken string) string {
 	if token := parseBearerToken(r.Header.Get("Authorization")); token != "" {
 		return token
 	}
-	return strings.TrimSpace(bodyToken)
+	_ = bodyToken
+	return ""
 }
 
 func parseBearerToken(raw string) string {
@@ -2776,11 +3249,11 @@ func parseBearerToken(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	const prefix = "Bearer "
-	if len(raw) > len(prefix) && strings.EqualFold(raw[:len(prefix)], prefix) {
-		return strings.TrimSpace(raw[len(prefix):])
+	parts := strings.Fields(raw)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
 	}
-	return ""
+	return strings.TrimSpace(parts[1])
 }
 
 func (s *Service) verifyProviderToken(ctx context.Context, token string, nowUnix int64) (crypto.CapabilityClaims, error) {
@@ -2792,15 +3265,33 @@ func (s *Service) verifyProviderToken(ctx context.Context, token string, nowUnix
 	if len(issuerURLs) == 0 {
 		return crypto.CapabilityClaims{}, fmt.Errorf("provider issuer urls unavailable")
 	}
+	if len(s.issuerTrustedKeys) == 0 {
+		if s.betaStrict || s.prodStrict {
+			return crypto.CapabilityClaims{}, fmt.Errorf("provider token verification requires issuer trust anchors in strict mode")
+		}
+		for _, issuerURL := range issuerURLs {
+			if !isLocalDevelopmentIssuerURL(issuerURL) {
+				return crypto.CapabilityClaims{}, fmt.Errorf(
+					"provider token verification requires issuer trust anchors for non-local issuer url %q",
+					issuerURL,
+				)
+			}
+		}
+	}
 
 	var lastErr error
 	for _, issuerURL := range issuerURLs {
-		pubs, declaredIssuer, err := s.fetchIssuerPubKeys(ctx, issuerURL)
+		pubs, declaredIssuer, err := s.fetchIssuerPubKeysForProviderToken(ctx, issuerURL, time.Now())
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		for _, pub := range pubs {
+		verifyPubs, verifyErr := issuerVerificationKeysForTrustFeed(pubs, s.issuerTrustedKeys)
+		if verifyErr != nil {
+			lastErr = verifyErr
+			continue
+		}
+		for _, pub := range verifyPubs {
 			claims, verifyErr := crypto.VerifyClaims(token, pub)
 			if verifyErr != nil {
 				lastErr = verifyErr
@@ -2845,6 +3336,290 @@ func validateProviderTokenClaims(claims crypto.CapabilityClaims, nowUnix int64) 
 	return nil
 }
 
+func (s *Service) validateProviderTokenCNFBinding(claims crypto.CapabilityClaims, relayPubKey string) error {
+	cnf := strings.TrimSpace(claims.CNFEd25519)
+	if cnf == "" {
+		if s.betaStrict || s.prodStrict {
+			return fmt.Errorf("provider token cnf_ed25519 missing in strict mode")
+		}
+		return nil
+	}
+	normalizedCNF, err := crypto.NormalizeEd25519PublicKey(cnf)
+	if err != nil {
+		return fmt.Errorf("provider token cnf_ed25519 invalid")
+	}
+	if relayPubKey == "" {
+		return fmt.Errorf("provider pub_key invalid")
+	}
+	if subtle.ConstantTimeCompare([]byte(normalizedCNF), []byte(relayPubKey)) != 1 {
+		return fmt.Errorf("provider token cnf_ed25519 must match relay pub_key")
+	}
+	return nil
+}
+
+func (s *Service) validateProviderTokenProof(
+	req proto.ProviderRelayUpsertRequest,
+	claims crypto.CapabilityClaims,
+	relayID string,
+	role string,
+	relayPubKey string,
+	endpoint string,
+	controlURL string,
+	now time.Time,
+) error {
+	cnf := strings.TrimSpace(claims.CNFEd25519)
+	requireProof := cnf != "" || s.betaStrict || s.prodStrict
+	if !requireProof {
+		return nil
+	}
+	if cnf == "" {
+		return fmt.Errorf("provider token cnf_ed25519 missing")
+	}
+
+	nonce := strings.TrimSpace(req.TokenProofNonce)
+	proof := strings.TrimSpace(req.TokenProof)
+	if nonce == "" || proof == "" {
+		return fmt.Errorf("provider token proof and token_proof_nonce are required")
+	}
+	if len(nonce) > providerRelayUpsertProofNonceMaxLen {
+		return fmt.Errorf("provider token proof nonce exceeds %d characters", providerRelayUpsertProofNonceMaxLen)
+	}
+	if strings.ContainsAny(nonce, " \t\r\n") {
+		return fmt.Errorf("provider token proof nonce must not contain whitespace")
+	}
+
+	pubKey, err := crypto.ParseEd25519PublicKey(cnf)
+	if err != nil {
+		return fmt.Errorf("provider token cnf_ed25519 invalid")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(proof)
+	if err != nil {
+		return fmt.Errorf("provider token proof encoding invalid")
+	}
+	if len(signature) != ed25519.SignatureSize {
+		return fmt.Errorf("provider token proof signature size invalid")
+	}
+
+	message, err := providerRelayUpsertProofMessage(claims.TokenID, claims.Subject, relayID, role, relayPubKey, endpoint, controlURL, nonce)
+	if err != nil {
+		return fmt.Errorf("provider token proof payload invalid")
+	}
+	if !ed25519.Verify(pubKey, message, signature) {
+		return fmt.Errorf("provider token proof signature invalid")
+	}
+	if err := s.markProviderTokenProofReplay(claims.TokenID, nonce, now); err != nil {
+		return err
+	}
+	return nil
+}
+
+func providerRelayUpsertProofMessage(
+	tokenID string,
+	subject string,
+	relayID string,
+	role string,
+	relayPubKey string,
+	endpoint string,
+	controlURL string,
+	nonce string,
+) ([]byte, error) {
+	payload := struct {
+		Context    string `json:"context"`
+		TokenID    string `json:"token_id"`
+		Subject    string `json:"subject"`
+		RelayID    string `json:"relay_id"`
+		Role       string `json:"role"`
+		PubKey     string `json:"pub_key"`
+		Endpoint   string `json:"endpoint"`
+		ControlURL string `json:"control_url"`
+		Nonce      string `json:"nonce"`
+	}{
+		Context:    providerRelayUpsertProofContext,
+		TokenID:    strings.TrimSpace(tokenID),
+		Subject:    normalizeOperatorID(subject),
+		RelayID:    strings.TrimSpace(relayID),
+		Role:       strings.TrimSpace(strings.ToLower(role)),
+		PubKey:     strings.TrimSpace(relayPubKey),
+		Endpoint:   strings.TrimSpace(endpoint),
+		ControlURL: strings.TrimSpace(controlURL),
+		Nonce:      strings.TrimSpace(nonce),
+	}
+	return json.Marshal(payload)
+}
+
+func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now time.Time) error {
+	tokenID = strings.TrimSpace(tokenID)
+	nonce = strings.TrimSpace(nonce)
+	if tokenID == "" || nonce == "" {
+		return fmt.Errorf("provider token proof token id and nonce are required")
+	}
+	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
+
+	s.providerMu.Lock()
+	defer s.providerMu.Unlock()
+
+	if s.providerTokenProofSeen == nil {
+		s.providerTokenProofSeen = make(map[string]time.Time)
+	}
+	for key, seenAt := range s.providerTokenProofSeen {
+		if seenAt.Before(cutoff) {
+			delete(s.providerTokenProofSeen, key)
+		}
+	}
+
+	replayKey := tokenID + ":" + nonce
+	if seenAt, ok := s.providerTokenProofSeen[replayKey]; ok && !seenAt.Before(cutoff) {
+		return fmt.Errorf("provider token proof nonce replayed")
+	}
+	removed := make(map[string]time.Time)
+	rememberRemoved := func(key string) {
+		if seenAt, ok := s.providerTokenProofSeen[key]; ok {
+			removed[key] = seenAt
+			delete(s.providerTokenProofSeen, key)
+		}
+	}
+	tokenCount := 0
+	oldestTokenKey := ""
+	oldestTokenSeenAt := now
+	for key, seenAt := range s.providerTokenProofSeen {
+		if !strings.HasPrefix(key, tokenID+":") {
+			continue
+		}
+		tokenCount++
+		if oldestTokenKey == "" || seenAt.Before(oldestTokenSeenAt) {
+			oldestTokenKey = key
+			oldestTokenSeenAt = seenAt
+		}
+	}
+	if tokenCount >= providerRelayUpsertProofReplayMaxPerToken && oldestTokenKey != "" {
+		rememberRemoved(oldestTokenKey)
+	}
+	for len(s.providerTokenProofSeen) >= providerRelayUpsertProofReplayMaxEntries {
+		oldestKey := ""
+		oldestSeenAt := now
+		for key, seenAt := range s.providerTokenProofSeen {
+			if oldestKey == "" || seenAt.Before(oldestSeenAt) {
+				oldestKey = key
+				oldestSeenAt = seenAt
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		rememberRemoved(oldestKey)
+	}
+	s.providerTokenProofSeen[replayKey] = now
+	if err := s.persistProviderTokenProofReplayLocked(now); err != nil {
+		delete(s.providerTokenProofSeen, replayKey)
+		for key, seenAt := range removed {
+			s.providerTokenProofSeen[key] = seenAt
+		}
+		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
+	}
+	return nil
+}
+
+type providerTokenReplayStoreSnapshot struct {
+	Version     int              `json:"version"`
+	SavedAtUnix int64            `json:"saved_at_unix"`
+	Seen        map[string]int64 `json:"seen"`
+}
+
+func (s *Service) loadProviderTokenProofReplayStore(now time.Time) error {
+	path := strings.TrimSpace(s.providerTokenProofStoreFile)
+	if path == "" {
+		return nil
+	}
+	b, err := readFileBounded(path, directoryProviderReplayStoreMaxBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var snapshot providerTokenReplayStoreSnapshot
+	if err := json.Unmarshal(b, &snapshot); err != nil {
+		return fmt.Errorf("invalid replay store json: %w", err)
+	}
+	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
+	type replayItem struct {
+		key    string
+		seenAt time.Time
+	}
+	items := make([]replayItem, 0, len(snapshot.Seen))
+	for key, seenUnix := range snapshot.Seen {
+		seenAt := time.Unix(seenUnix, 0)
+		if seenAt.Before(cutoff) {
+			continue
+		}
+		items = append(items, replayItem{key: key, seenAt: seenAt})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].seenAt.Equal(items[j].seenAt) {
+			return items[i].key < items[j].key
+		}
+		return items[i].seenAt.After(items[j].seenAt)
+	})
+	if len(items) > providerRelayUpsertProofReplayMaxEntries {
+		items = items[:providerRelayUpsertProofReplayMaxEntries]
+	}
+	perTokenCounts := make(map[string]int)
+	seen := make(map[string]time.Time, len(items))
+	for _, item := range items {
+		tokenID := item.key
+		if cut := strings.IndexByte(tokenID, ':'); cut >= 0 {
+			tokenID = tokenID[:cut]
+		}
+		if tokenID != "" {
+			if perTokenCounts[tokenID] >= providerRelayUpsertProofReplayMaxPerToken {
+				continue
+			}
+			perTokenCounts[tokenID]++
+		}
+		seen[item.key] = item.seenAt
+	}
+	s.providerMu.Lock()
+	s.providerTokenProofSeen = seen
+	s.providerMu.Unlock()
+	return nil
+}
+
+func (s *Service) persistProviderTokenProofReplayLocked(now time.Time) error {
+	path := strings.TrimSpace(s.providerTokenProofStoreFile)
+	if path == "" {
+		return nil
+	}
+	snapshot := providerTokenReplayStoreSnapshot{
+		Version:     1,
+		SavedAtUnix: now.Unix(),
+		Seen:        make(map[string]int64, len(s.providerTokenProofSeen)),
+	}
+	for key, seenAt := range s.providerTokenProofSeen {
+		snapshot.Seen[key] = seenAt.Unix()
+	}
+	b, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, b, 0o600)
+}
+
+func isLocalDevelopmentIssuerURL(raw string) bool {
+	parsed, err := urlpkg.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if isLoopbackURLHost(parsed.Host) {
+		return true
+	}
+	host := normalizeHostForCompare(parsed.Hostname())
+	return host != "" && (host == "localhost" || strings.HasSuffix(host, ".local"))
+}
+
 func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequest, claims crypto.CapabilityClaims, now time.Time) (proto.RelayDescriptor, error) {
 	role := strings.TrimSpace(strings.ToLower(req.Role))
 	if role != "entry" && role != "exit" {
@@ -2862,6 +3637,9 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 	if pubKey == "" {
 		return proto.RelayDescriptor{}, fmt.Errorf("provider pub_key invalid")
 	}
+	if err := s.validateProviderTokenCNFBinding(claims, pubKey); err != nil {
+		return proto.RelayDescriptor{}, err
+	}
 	endpoint := strings.TrimSpace(req.Endpoint)
 	if endpoint == "" {
 		return proto.RelayDescriptor{}, fmt.Errorf("provider endpoint is required")
@@ -2869,6 +3647,12 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 	controlURL := normalizeHTTPURL(req.ControlURL)
 	if controlURL == "" {
 		return proto.RelayDescriptor{}, fmt.Errorf("provider control_url is required")
+	}
+	if err := validateProviderControlURL(controlURL, endpoint, s.betaStrict || s.prodStrict); err != nil {
+		return proto.RelayDescriptor{}, err
+	}
+	if err := s.validateProviderTokenProof(req, claims, relayID, role, pubKey, endpoint, controlURL, now); err != nil {
+		return proto.RelayDescriptor{}, err
 	}
 	operatorID := normalizeOperatorID(claims.Subject)
 	if operatorID == "" {
@@ -2923,14 +3707,16 @@ func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) error {
 		s.providerRelays = make(map[string]proto.RelayDescriptor)
 	}
 	prev, ok := s.providerRelays[key]
+	if ok {
+		prevOperatorID := normalizeOperatorID(prev.OperatorID)
+		nextOperatorID := normalizeOperatorID(desc.OperatorID)
+		if prevOperatorID != "" && prevOperatorID != nextOperatorID {
+			return fmt.Errorf("%w: relay_id=%s role=%s existing_operator=%s requested_operator=%s", errProviderRelayOwnershipConflict, desc.RelayID, desc.Role, prevOperatorID, nextOperatorID)
+		}
+	}
 	maxPerOperator := s.effectiveProviderMaxRelaysPerOperator()
 	if maxPerOperator > 0 {
 		count := s.providerRelayCountByOperatorLocked(desc.OperatorID)
-		if ok && normalizeOperatorID(prev.OperatorID) != normalizeOperatorID(desc.OperatorID) {
-			if count >= maxPerOperator {
-				return fmt.Errorf("provider operator relay limit reached")
-			}
-		}
 		if !ok && count >= maxPerOperator {
 			return fmt.Errorf("provider operator relay limit reached")
 		}
@@ -3584,10 +4370,302 @@ func normalizeHTTPURL(raw string) string {
 	if v == "" {
 		return ""
 	}
-	if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
-		return v
+	if !strings.Contains(v, "://") {
+		base := strings.TrimRight(v, "/")
+		host := base
+		if cut, _, ok := strings.Cut(base, "/"); ok {
+			host = cut
+		}
+		if isLoopbackURLHost(host) {
+			v = "http://" + base
+		} else {
+			v = "https://" + base
+		}
 	}
-	return "http://" + v
+	parsed, err := urlpkg.Parse(v)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.Scheme == "http" &&
+		!isLoopbackURLHost(parsed.Host) &&
+		!isLocalDevelopmentURLHost(parsed.Host) &&
+		enforceHTTPSControlURL() &&
+		!allowDangerousInsecureControlURLHTTP() {
+		return ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func enforceHTTPSControlURL() bool {
+	raw := strings.TrimSpace(os.Getenv("DIRECTORY_REQUIRE_HTTPS_CONTROL_URL"))
+	if raw == "" {
+		return true
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func allowDangerousInsecureControlURLHTTP() bool {
+	raw := strings.TrimSpace(os.Getenv("DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP"))
+	return raw == "1" || strings.EqualFold(raw, "true")
+}
+
+func isLoopbackURLHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.Count(host, ":") == 1 || strings.HasPrefix(host, "[") {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+func isLocalDevelopmentURLHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.Count(host, ":") == 1 || strings.HasPrefix(host, "[") {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	return host != "" && (host == "localhost" || strings.HasSuffix(host, ".local"))
+}
+
+func validateProviderControlURL(controlURL, endpoint string, strict bool) error {
+	parsed, err := urlpkg.Parse(controlURL)
+	if err != nil {
+		return fmt.Errorf("provider control_url invalid")
+	}
+	controlHost := normalizeHostForCompare(parsed.Hostname())
+	if controlHost == "" {
+		return fmt.Errorf("provider control_url host is required")
+	}
+	if strict && isDisallowedStrictControlHost(controlHost) {
+		return fmt.Errorf("provider control_url host is not allowed")
+	}
+	endpointHost := hostFromEndpoint(endpoint)
+	if endpointHost == "" {
+		return fmt.Errorf("provider endpoint host is invalid")
+	}
+	if !strings.EqualFold(endpointHost, controlHost) {
+		return fmt.Errorf("provider control_url host must match endpoint host")
+	}
+	return nil
+}
+
+func hostFromEndpoint(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return ""
+	}
+	if hasZoneIdentifierHost(host) {
+		return ""
+	}
+	return normalizeHostForCompare(host)
+}
+
+func normalizeHostForCompare(host string) string {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	return strings.TrimRight(normalized, ".")
+}
+
+func hasZoneIdentifierHost(host string) bool {
+	normalized := strings.TrimSpace(strings.Trim(host, "[]"))
+	return strings.Contains(normalized, "%")
+}
+
+func isAmbiguousNumericHostAlias(host string) bool {
+	host = normalizeHostForCompare(host)
+	if host == "" || net.ParseIP(host) != nil {
+		return false
+	}
+	decimalOrDotted := true
+	for _, ch := range host {
+		if (ch < '0' || ch > '9') && ch != '.' {
+			decimalOrDotted = false
+			break
+		}
+	}
+	if decimalOrDotted {
+		return true
+	}
+	if strings.HasPrefix(host, "0x") {
+		hexPart := strings.TrimPrefix(host, "0x")
+		if hexPart == "" {
+			return false
+		}
+		for _, ch := range hexPart {
+			if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func isDisallowedStrictControlHost(host string) bool {
+	if hasZoneIdentifierHost(host) {
+		return true
+	}
+	host = normalizeHostForCompare(host)
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if isAmbiguousNumericHostAlias(host) {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	return false
+}
+
+type outboundIPResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+func configureOutboundDialPolicy(client *http.Client, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) {
+	if client == nil {
+		return
+	}
+	transport := cloneHTTPTransport(client.Transport)
+	transport.Proxy = nil
+	if envEnabled("MTLS_ALLOW_PROXY_FROM_ENV") {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	resolver := net.DefaultResolver
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		safeAddress, err := resolveSafeDialAddress(ctx, resolver, address, allowDangerousPrivateDNS, strictBlockPrivateLiteral)
+		if err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, safeAddress)
+	}
+	client.Transport = transport
+}
+
+func cloneHTTPTransport(base http.RoundTripper) *http.Transport {
+	if tr, ok := base.(*http.Transport); ok && tr != nil {
+		return tr.Clone()
+	}
+	if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
+		return tr.Clone()
+	}
+	return &http.Transport{}
+}
+
+func resolveSafeDialAddress(ctx context.Context, resolver outboundIPResolver, address string, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return "", fmt.Errorf("invalid outbound address %q: %w", address, err)
+	}
+	if hasZoneIdentifierHost(host) {
+		return "", fmt.Errorf("outbound host %q includes unsupported zone identifier", host)
+	}
+	host = normalizeHostForCompare(host)
+	if host == "" {
+		return "", fmt.Errorf("outbound host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isDisallowedOutboundDialIP(ip) {
+			if strictBlockPrivateLiteral {
+				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy (strict mode)", ip.String())
+			}
+			if !allowDangerousPrivateDNS {
+				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy", ip.String())
+			}
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve outbound host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("resolve outbound host %q returned no addresses", host)
+	}
+	loopbackHostname := host == "localhost"
+	if loopbackHostname && !allowDangerousPrivateDNS {
+		var selectedLoopback net.IP
+		for _, candidate := range ips {
+			ip := candidate.IP
+			if ip == nil {
+				continue
+			}
+			if !ip.IsLoopback() {
+				return "", fmt.Errorf("outbound host %q resolved to non-loopback address %q", host, ip.String())
+			}
+			if selectedLoopback == nil {
+				selectedLoopback = ip
+			}
+		}
+		if selectedLoopback == nil {
+			return "", fmt.Errorf("outbound host %q resolved only to blocked address classes", host)
+		}
+		return net.JoinHostPort(selectedLoopback.String(), port), nil
+	}
+	for _, candidate := range ips {
+		ip := candidate.IP
+		if ip == nil {
+			continue
+		}
+		if allowDangerousPrivateDNS {
+			return net.JoinHostPort(ip.String(), port), nil
+		}
+		if isDisallowedOutboundDialIP(ip) {
+			if loopbackHostname && ip.IsLoopback() {
+				return net.JoinHostPort(ip.String(), port), nil
+			}
+			continue
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	return "", fmt.Errorf("outbound host %q resolved only to blocked address classes", host)
+}
+
+func isDisallowedOutboundDialIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
 func relayKey(relayID, role string) string {
@@ -3811,7 +4889,7 @@ func verifyDirectoryPeerList(feed proto.DirectoryPeerListResponse, pub ed25519.P
 
 func loadPeerTrustedKeys(path string) (map[string]string, error) {
 	keys := make(map[string]string)
-	b, err := os.ReadFile(path)
+	b, err := readFileBounded(path, directoryTrustedKeysFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return keys, nil
@@ -4430,6 +5508,15 @@ func cloneDirectorySyncRunStatus(in proto.DirectorySyncRunStatus) proto.Director
 	return out
 }
 
+func secureTokenMatch(candidate string, expected string) bool {
+	candidate = strings.TrimSpace(candidate)
+	expected = strings.TrimSpace(expected)
+	if expected == "" || len(candidate) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(candidate), []byte(expected)) == 1
+}
+
 func (s *Service) handlePubKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -4484,7 +5571,7 @@ func (s *Service) handleRotateKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+	if !secureTokenMatch(r.Header.Get("X-Admin-Token"), s.adminToken) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -4503,7 +5590,7 @@ func (s *Service) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+	if !secureTokenMatch(r.Header.Get("X-Admin-Token"), s.adminToken) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -4522,7 +5609,7 @@ func (s *Service) handlePeerStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+	if !secureTokenMatch(r.Header.Get("X-Admin-Token"), s.adminToken) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -4540,7 +5627,7 @@ func (s *Service) handleGovernanceStatus(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != s.adminToken {
+	if !secureTokenMatch(r.Header.Get("X-Admin-Token"), s.adminToken) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -4973,7 +6060,7 @@ func (s *Service) persistPrivateKey(priv ed25519.PrivateKey) error {
 		return err
 	}
 	enc := base64.RawURLEncoding.EncodeToString(priv)
-	return os.WriteFile(s.privateKeyPath, []byte(enc+"\n"), 0o600)
+	return writeFileAtomic(s.privateKeyPath, []byte(enc+"\n"), 0o600)
 }
 
 func appendPreviousPubKey(path string, key string, maxHistory int) error {
@@ -4996,14 +6083,14 @@ func appendPreviousPubKey(path string, key string, maxHistory int) error {
 	if data != "" {
 		data += "\n"
 	}
-	return os.WriteFile(path, []byte(data), 0o644)
+	return writeFileAtomic(path, []byte(data), 0o644)
 }
 
 func loadPreviousPubKeys(path string) ([]string, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := readFileBounded(path, directoryPreviousPubKeysFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -5023,6 +6110,99 @@ func loadPreviousPubKeys(path string) ([]string, error) {
 		out = append(out, line)
 	}
 	return out, nil
+}
+
+func readFileBounded(path string, maxBytes int64) ([]byte, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("file path is required")
+	}
+	lstatInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if lstatInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("file %s must not be a symlink", path)
+	}
+	if !lstatInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s must be a regular file", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, statErr := file.Stat()
+	if statErr != nil {
+		return nil, statErr
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s must be a regular file", path)
+	}
+	if !os.SameFile(lstatInfo, info) {
+		return nil, fmt.Errorf("file %s changed during open", path)
+	}
+	if maxBytes > 0 {
+		if info.Size() > maxBytes {
+			return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
+		}
+	}
+	limit := maxBytes
+	if limit <= 0 {
+		limit = 1
+	}
+	b, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if maxBytes > 0 && int64(len(b)) > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
+	}
+	return b, nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("file %s must not be a symlink", path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("file %s must be a regular file", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	tmpDir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(tmpDir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if perm != 0 {
+		if err := tmpFile.Chmod(perm); err != nil {
+			_ = tmpFile.Close()
+			return err
+		}
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func dedupeStrings(in []string) []string {

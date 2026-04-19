@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +95,59 @@ func TestDerivePublicKeyFromPrivateFileRejectsInvalidOutput(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected invalid output error")
+	}
+}
+
+func TestRunWGPubkeyCommandFailsWhenBinaryLookupFails(t *testing.T) {
+	original := commandManagerLookPath
+	t.Cleanup(func() { commandManagerLookPath = original })
+	commandManagerLookPath = func(string) (string, error) {
+		return "", fmt.Errorf("wg not found")
+	}
+
+	_, err := runWGPubkeyCommand(context.Background(), []byte("private-key\n"))
+	if err == nil {
+		t.Fatalf("expected binary lookup failure")
+	}
+	if !strings.Contains(err.Error(), "resolve wg binary") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadPrivateKeyFileStrictRejectsOversizedFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wg-private.key")
+	data := []byte(strings.Repeat("a", int(wgPrivateKeyFileMaxBytes+1)))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	_, err := readPrivateKeyFileStrict(path)
+	if err == nil {
+		t.Fatalf("expected max size error")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Fatalf("expected max size error, got: %v", err)
+	}
+}
+
+func TestReadPrivateKeyFileStrictReadsValidFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wg-private.key")
+	expected := []byte("private-key-material")
+	if err := os.WriteFile(path, expected, 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	got, err := readPrivateKeyFileStrict(path)
+	if err != nil {
+		t.Fatalf("read private key file: %v", err)
+	}
+	if string(got) != string(expected) {
+		t.Fatalf("unexpected key file content: got %q want %q", string(got), string(expected))
 	}
 }

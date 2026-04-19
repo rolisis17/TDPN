@@ -178,7 +178,8 @@ type InnerPacket struct {
 }
 
 type PathCloseRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID    string `json:"session_id"`
+	SessionKeyID string `json:"session_key_id,omitempty"`
 }
 
 type PathCloseResponse struct {
@@ -508,24 +509,26 @@ type DirectoryGovernanceStatusResponse struct {
 }
 
 type ProviderRelayUpsertRequest struct {
-	Token         string   `json:"token,omitempty"`
-	RelayID       string   `json:"relay_id"`
-	Role          string   `json:"role"`
-	PubKey        string   `json:"pub_key"`
-	Endpoint      string   `json:"endpoint"`
-	ControlURL    string   `json:"control_url"`
-	CountryCode   string   `json:"country_code,omitempty"`
-	GeoConfidence float64  `json:"geo_confidence,omitempty"`
-	Region        string   `json:"region,omitempty"`
-	Capabilities  []string `json:"capabilities,omitempty"`
-	HopRoles      []string `json:"hop_roles,omitempty"`
-	Reputation    float64  `json:"reputation_score,omitempty"`
-	Uptime        float64  `json:"uptime_score,omitempty"`
-	Capacity      float64  `json:"capacity_score,omitempty"`
-	AbusePenalty  float64  `json:"abuse_penalty,omitempty"`
-	BondScore     float64  `json:"bond_score,omitempty"`
-	StakeScore    float64  `json:"stake_score,omitempty"`
-	ValidForSec   int64    `json:"valid_for_sec,omitempty"`
+	Token           string   `json:"token,omitempty"`
+	TokenProof      string   `json:"token_proof,omitempty"`
+	TokenProofNonce string   `json:"token_proof_nonce,omitempty"`
+	RelayID         string   `json:"relay_id"`
+	Role            string   `json:"role"`
+	PubKey          string   `json:"pub_key"`
+	Endpoint        string   `json:"endpoint"`
+	ControlURL      string   `json:"control_url"`
+	CountryCode     string   `json:"country_code,omitempty"`
+	GeoConfidence   float64  `json:"geo_confidence,omitempty"`
+	Region          string   `json:"region,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
+	HopRoles        []string `json:"hop_roles,omitempty"`
+	Reputation      float64  `json:"reputation_score,omitempty"`
+	Uptime          float64  `json:"uptime_score,omitempty"`
+	Capacity        float64  `json:"capacity_score,omitempty"`
+	AbusePenalty    float64  `json:"abuse_penalty,omitempty"`
+	BondScore       float64  `json:"bond_score,omitempty"`
+	StakeScore      float64  `json:"stake_score,omitempty"`
+	ValidForSec     int64    `json:"valid_for_sec,omitempty"`
 }
 
 type ProviderRelayUpsertResponse struct {

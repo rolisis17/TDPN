@@ -8,24 +8,35 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tdpn/tdpn-chain/app"
+	"github.com/tdpn/tdpn-chain/internal/fsguard"
+	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
 
 const gracefulShutdownTimeout = 5 * time.Second
+const loopbackHostnameLookupTimeout = 2 * time.Second
+const maxRuntimeAuthTokenFileBytes int64 = 16 << 10
 
-const tdpnMethodPrefix = "/tdpn."
+const grpcHealthCheckMethod = "/grpc.health.v1.Health/Check"
+const grpcHealthWatchMethod = "/grpc.health.v1.Health/Watch"
+
+const dangerousInsecureAuthBindEnvVar = "TDPN_ALLOW_DANGEROUS_INSECURE_AUTH_BIND"
+const dangerousPublicListenEnvVar = "TDPN_ALLOW_DANGEROUS_PUBLIC_LISTEN"
 
 type chainScaffold interface {
 	ModuleNames() []string
@@ -61,6 +72,8 @@ type settlementHTTPConfig struct {
 type stateDirConfigurableScaffold interface {
 	ConfigureStateDir(string) error
 }
+
+type hostLookupFunc func(context.Context, string) ([]net.IPAddr, error)
 
 func newChainScaffold() chainScaffold {
 	return app.NewChainScaffold()
@@ -103,14 +116,27 @@ func runTDPND(
 		deps.NewGRPCServer = func(opts ...grpc.ServerOption) grpcRuntimeServer { return grpc.NewServer(opts...) }
 	}
 
+	allowDangerousInsecureAuthBind, insecureBindErr := dangerousInsecureAuthBindDefault()
+	if insecureBindErr != nil {
+		return insecureBindErr
+	}
+	allowDangerousPublicListen, publicListenErr := dangerousPublicListenDefault()
+	if publicListenErr != nil {
+		return publicListenErr
+	}
+
 	flags := flag.NewFlagSet("tdpnd", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	grpcListen := flags.String("grpc-listen", "", "listen address for gRPC server")
 	grpcTLSCert := flags.String("grpc-tls-cert", "", "path to TLS cert PEM for gRPC server")
 	grpcTLSKey := flags.String("grpc-tls-key", "", "path to TLS key PEM for gRPC server")
 	grpcAuthToken := flags.String("grpc-auth-token", "", "optional bearer token for module gRPC methods")
+	grpcAuthTokenFile := flags.String("grpc-auth-token-file", "", "path to file containing gRPC bearer token")
+	allowDangerousInsecureAuthBindFlag := flags.Bool("allow-dangerous-insecure-auth-bind", allowDangerousInsecureAuthBind, "allow non-loopback listeners when auth is enabled")
+	allowDangerousPublicListenFlag := flags.Bool("allow-dangerous-public-listen", allowDangerousPublicListen, "allow unauthenticated non-loopback listeners")
 	settlementHTTPListen := flags.String("settlement-http-listen", "", "listen address for settlement HTTP bridge")
 	settlementHTTPAuthToken := flags.String("settlement-http-auth-token", "", "optional bearer token for settlement HTTP POST endpoints")
+	settlementHTTPAuthTokenFile := flags.String("settlement-http-auth-token-file", "", "path to file containing settlement HTTP bearer token")
 	cometHome := flags.String("comet-home", "", "home directory for CometBFT runtime")
 	cometMoniker := flags.String("comet-moniker", "", "moniker for CometBFT runtime")
 	cometP2PLAddr := flags.String("comet-p2p-laddr", "", "listen address for CometBFT p2p networking")
@@ -155,15 +181,52 @@ func runTDPND(
 		return nil
 	}
 
+	grpcAuthTokenValue := strings.TrimSpace(*grpcAuthToken)
+	grpcAuthTokenFileValue := strings.TrimSpace(*grpcAuthTokenFile)
+	if grpcAuthTokenValue != "" && grpcAuthTokenFileValue != "" {
+		return errors.New("only one of --grpc-auth-token and --grpc-auth-token-file may be set")
+	}
+	if grpcAuthTokenValue == "" && grpcAuthTokenFileValue != "" {
+		rawToken, err := fsguard.ReadRegularFileBounded(grpcAuthTokenFileValue, maxRuntimeAuthTokenFileBytes)
+		if err != nil {
+			return fmt.Errorf("read --grpc-auth-token-file: %w", err)
+		}
+		grpcAuthTokenValue = strings.TrimSpace(string(rawToken))
+		if grpcAuthTokenValue == "" {
+			return errors.New("--grpc-auth-token-file is empty")
+		}
+	}
+	if grpcAuthTokenValue == "" {
+		grpcAuthTokenValue = strings.TrimSpace(os.Getenv("GRPC_AUTH_TOKEN"))
+	}
+
 	grpcCfg := grpcRuntimeConfig{
 		listenAddr:  grpcListenAddr,
 		tlsCertPath: strings.TrimSpace(*grpcTLSCert),
 		tlsKeyPath:  strings.TrimSpace(*grpcTLSKey),
-		authToken:   strings.TrimSpace(*grpcAuthToken),
+		authToken:   grpcAuthTokenValue,
+	}
+	settlementAuthToken := strings.TrimSpace(*settlementHTTPAuthToken)
+	settlementAuthTokenFile := strings.TrimSpace(*settlementHTTPAuthTokenFile)
+	if settlementAuthToken != "" && settlementAuthTokenFile != "" {
+		return errors.New("only one of --settlement-http-auth-token and --settlement-http-auth-token-file may be set")
+	}
+	if settlementAuthToken == "" && settlementAuthTokenFile != "" {
+		rawToken, err := fsguard.ReadRegularFileBounded(settlementAuthTokenFile, maxRuntimeAuthTokenFileBytes)
+		if err != nil {
+			return fmt.Errorf("read --settlement-http-auth-token-file: %w", err)
+		}
+		settlementAuthToken = strings.TrimSpace(string(rawToken))
+		if settlementAuthToken == "" {
+			return errors.New("--settlement-http-auth-token-file is empty")
+		}
+	}
+	if settlementAuthToken == "" {
+		settlementAuthToken = strings.TrimSpace(os.Getenv("SETTLEMENT_HTTP_AUTH_TOKEN"))
 	}
 	settlementCfg := settlementHTTPConfig{
 		listenAddr: settlementListenAddr,
-		authToken:  strings.TrimSpace(*settlementHTTPAuthToken),
+		authToken:  settlementAuthToken,
 	}
 
 	var (
@@ -172,6 +235,19 @@ func runTDPND(
 		grpcOptions       []grpc.ServerOption
 		err               error
 	)
+
+	if err := validateAuthBindPolicy(
+		grpcCfg,
+		settlementCfg,
+		cometCfg,
+		grpcEnabled,
+		settlementEnabled,
+		cometEnabled,
+		*allowDangerousInsecureAuthBindFlag,
+		*allowDangerousPublicListenFlag,
+	); err != nil {
+		return err
+	}
 
 	if grpcEnabled {
 		if err = validateGRPCRuntimeConfig(grpcCfg); err != nil {
@@ -247,6 +323,109 @@ func validateGRPCRuntimeConfig(cfg grpcRuntimeConfig) error {
 	return nil
 }
 
+func dangerousInsecureAuthBindDefault() (bool, error) {
+	raw, ok := os.LookupEnv(dangerousInsecureAuthBindEnvVar)
+	if !ok {
+		return false, nil
+	}
+
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return false, nil
+	}
+
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", dangerousInsecureAuthBindEnvVar, err)
+	}
+	return enabled, nil
+}
+
+func dangerousPublicListenDefault() (bool, error) {
+	raw, ok := os.LookupEnv(dangerousPublicListenEnvVar)
+	if !ok {
+		return false, nil
+	}
+
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return false, nil
+	}
+
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", dangerousPublicListenEnvVar, err)
+	}
+	return enabled, nil
+}
+
+func validateAuthBindPolicy(
+	grpcCfg grpcRuntimeConfig,
+	settlementCfg settlementHTTPConfig,
+	cometCfg cometRuntimeConfig,
+	grpcEnabled bool,
+	settlementEnabled bool,
+	cometEnabled bool,
+	allowDangerousInsecureAuthBind bool,
+	allowDangerousPublicListen bool,
+) error {
+	if !allowDangerousPublicListen {
+		if grpcEnabled && grpcCfg.authToken == "" && !isLoopbackListenAddr(grpcCfg.listenAddr) {
+			return errors.New("--grpc-listen without --grpc-auth-token must be loopback unless --allow-dangerous-public-listen is set")
+		}
+		if settlementEnabled && settlementCfg.authToken == "" && !isLoopbackListenAddr(settlementCfg.listenAddr) {
+			return errors.New("--settlement-http-listen without --settlement-http-auth-token must be loopback unless --allow-dangerous-public-listen is set")
+		}
+		if cometEnabled && !isLoopbackListenAddr(cometCfg.rpcListen) {
+			return errors.New("--comet-rpc-laddr must be loopback unless --allow-dangerous-public-listen is set")
+		}
+	}
+
+	if !allowDangerousInsecureAuthBind && grpcEnabled && grpcCfg.authToken != "" && grpcCfg.tlsCertPath == "" && grpcCfg.tlsKeyPath == "" && !isLoopbackListenAddr(grpcCfg.listenAddr) {
+		return errors.New("--grpc-auth-token requires TLS or a loopback listener unless --allow-dangerous-insecure-auth-bind is set")
+	}
+	if !allowDangerousInsecureAuthBind && settlementEnabled && settlementCfg.authToken != "" && !isLoopbackListenAddr(settlementCfg.listenAddr) {
+		return errors.New("--settlement-http-auth-token requires a loopback listener unless --allow-dangerous-insecure-auth-bind is set")
+	}
+	return nil
+}
+
+func isLoopbackListenAddr(listenAddr string) bool {
+	return isLoopbackListenAddrWithLookup(listenAddr, lookupHostIPAddrs)
+}
+
+func isLoopbackListenAddrWithLookup(listenAddr string, lookup hostLookupFunc) bool {
+	addr := strings.TrimSpace(listenAddr)
+	if addr == "" {
+		return false
+	}
+	if strings.HasPrefix(addr, "unix:") {
+		return true
+	}
+	// Test harnesses and in-memory transports (for example "bufnet") are local.
+	// Numeric port-only addresses (for example "8080") bind wildcard interfaces and are not loopback-safe.
+	if !strings.Contains(addr, ":") {
+		if _, err := strconv.Atoi(addr); err == nil {
+			return false
+		}
+		if ip := net.ParseIP(addr); ip != nil {
+			return ip.IsLoopback()
+		}
+		return true
+	}
+
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+
+	host = strings.TrimSpace(host)
+	if host == "" || strings.EqualFold(host, "*") {
+		return false
+	}
+	return isLoopbackHostWithLookup(host, lookup)
+}
+
 func buildGRPCServerOptions(cfg grpcRuntimeConfig) ([]grpc.ServerOption, error) {
 	options := make([]grpc.ServerOption, 0, 3)
 
@@ -258,12 +437,10 @@ func buildGRPCServerOptions(cfg grpcRuntimeConfig) ([]grpc.ServerOption, error) 
 		options = append(options, grpc.Creds(tlsCreds))
 	}
 
-	if cfg.authToken != "" {
-		options = append(options,
-			grpc.UnaryInterceptor(authUnaryInterceptor(cfg.authToken)),
-			grpc.StreamInterceptor(authStreamInterceptor(cfg.authToken)),
-		)
-	}
+	options = append(options,
+		grpc.UnaryInterceptor(authUnaryInterceptor(cfg.authToken)),
+		grpc.StreamInterceptor(authStreamInterceptor(cfg.authToken)),
+	)
 
 	return options, nil
 }
@@ -333,29 +510,116 @@ func runGRPCMode(
 func authUnaryInterceptor(expectedToken string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if !methodRequiresAuth(info.FullMethod) {
-			return handler(ctx, req)
+			if expectedToken != "" && isHealthMethod(info.FullMethod) && !isLoopbackPeer(ctx) && !hasValidBearerToken(ctx, expectedToken) {
+				return nil, status.Error(codes.Unauthenticated, "missing or invalid bearer token")
+			}
+			return handler(withRuntimeRequestContext(ctx), req)
 		}
 		if !hasValidBearerToken(ctx, expectedToken) {
 			return nil, status.Error(codes.Unauthenticated, "missing or invalid bearer token")
 		}
-		return handler(ctx, req)
+		return handler(withRuntimeRequestContext(ctx), req)
 	}
 }
 
 func authStreamInterceptor(expectedToken string) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		stream := runtimeContextServerStream{
+			ServerStream: ss,
+			ctx:          withRuntimeRequestContext(ss.Context()),
+		}
 		if !methodRequiresAuth(info.FullMethod) {
-			return handler(srv, ss)
+			if expectedToken != "" && isHealthMethod(info.FullMethod) && !isLoopbackPeer(ss.Context()) && !hasValidBearerToken(ss.Context(), expectedToken) {
+				return status.Error(codes.Unauthenticated, "missing or invalid bearer token")
+			}
+			return handler(srv, stream)
 		}
 		if !hasValidBearerToken(ss.Context(), expectedToken) {
 			return status.Error(codes.Unauthenticated, "missing or invalid bearer token")
 		}
-		return handler(srv, ss)
+		return handler(srv, stream)
 	}
 }
 
 func methodRequiresAuth(fullMethod string) bool {
-	return strings.HasPrefix(fullMethod, tdpnMethodPrefix)
+	switch strings.TrimSpace(fullMethod) {
+	case grpcHealthCheckMethod:
+		return false
+	default:
+		return true
+	}
+}
+
+func isHealthMethod(fullMethod string) bool {
+	switch strings.TrimSpace(fullMethod) {
+	case grpcHealthCheckMethod, grpcHealthWatchMethod:
+		return true
+	default:
+		return false
+	}
+}
+
+func isLoopbackPeer(ctx context.Context) bool {
+	return isLoopbackPeerWithLookup(ctx, lookupHostIPAddrs)
+}
+
+func isLoopbackPeerWithLookup(ctx context.Context, lookup hostLookupFunc) bool {
+	peerInfo, ok := peer.FromContext(ctx)
+	if !ok || peerInfo == nil || peerInfo.Addr == nil {
+		return false
+	}
+	host := strings.TrimSpace(peerInfo.Addr.String())
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" {
+		return false
+	}
+	return isLoopbackHostWithLookup(host, lookup)
+}
+
+func lookupHostIPAddrs(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
+
+func isLoopbackHost(host string) bool {
+	return isLoopbackHostWithLookup(host, lookupHostIPAddrs)
+}
+
+func isLoopbackHostWithLookup(host string, lookup hostLookupFunc) bool {
+	normalizedHost := normalizeHostForLookup(host)
+	if normalizedHost == "" {
+		return false
+	}
+	if ip := net.ParseIP(normalizedHost); ip != nil {
+		return ip.IsLoopback()
+	}
+	if lookup == nil {
+		return false
+	}
+
+	lookupCtx, cancel := context.WithTimeout(context.Background(), loopbackHostnameLookupTimeout)
+	defer cancel()
+
+	addrs, err := lookup(lookupCtx, normalizedHost)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, addr := range addrs {
+		if addr.IP == nil || !addr.IP.IsLoopback() {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeHostForLookup(host string) string {
+	normalizedHost := strings.Trim(strings.TrimSpace(host), "[]")
+	if zoneIndex := strings.Index(normalizedHost, "%"); zoneIndex >= 0 {
+		normalizedHost = normalizedHost[:zoneIndex]
+	}
+	return normalizedHost
 }
 
 func hasValidBearerToken(ctx context.Context, expectedToken string) bool {
@@ -380,6 +644,25 @@ func hasValidBearerToken(ctx context.Context, expectedToken string) bool {
 		}
 	}
 	return false
+}
+
+type runtimeContextServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s runtimeContextServerStream) Context() context.Context {
+	return s.ctx
+}
+
+func withRuntimeRequestContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if sponsormodule.CurrentTimeUnixFromContext(ctx) > 0 {
+		return ctx
+	}
+	return sponsormodule.WithCurrentTimeUnix(ctx, time.Now().Unix())
 }
 
 func runRuntimeServers(ctx context.Context, runners ...func(context.Context) error) error {

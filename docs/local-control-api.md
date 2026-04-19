@@ -19,6 +19,10 @@ Defaults:
 - command timeout: `120s` (`LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC`)
 - update endpoint disabled by default (`LOCAL_CONTROL_API_ALLOW_UPDATE=1` to enable)
 - optional mutation auth token: `LOCAL_CONTROL_API_AUTH_TOKEN`
+- unauthenticated loopback mode is disabled by default; explicit developer-only opt-in:
+  - `LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK=1`
+- non-loopback HTTP binds are blocked by default; explicit dangerous opt-in for lab-only usage:
+  - `LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=1`
 - optional service lifecycle command hooks:
   - `LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND`
   - `LOCAL_CONTROL_API_SERVICE_START_COMMAND`
@@ -41,15 +45,35 @@ Desktop scaffold defaults (`apps/desktop`):
 - optional bearer auth for daemon API: `TDPN_LOCAL_API_AUTH_BEARER`
 - local-only transport enforcement by default, with explicit opt-out:
   - `TDPN_LOCAL_API_ALLOW_REMOTE=1`
-- renderer CSP: locked down in `apps/desktop/src-tauri/tauri.conf.json` and allows only Tauri IPC, local dev HMR (`localhost:5173`), and local control API origins (`127.0.0.1:8095` / `localhost:8095`)
+  - in local-only mode (`TDPN_LOCAL_API_ALLOW_REMOTE=0`), use a literal loopback IP host (`127.0.0.1` or `::1`), not a hostname.
+- desktop mutating action gates are disabled by default (explicit opt-in):
+  - `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` for `control_update`
+  - `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` for `control_service_start|stop|restart`
+  - when either mutating gate is enabled, `TDPN_LOCAL_API_AUTH_BEARER` is required (including loopback-only desktop sessions)
+- desktop bearer token format is strict: token68 charset only (`A-Za-z0-9-._~+/=`), single-line, no whitespace/control characters, max 4096 chars
+- renderer CSP is locked down in `apps/desktop/src-tauri/tauri.conf.json`:
+  - production: only app resources + Tauri IPC (`ipc:`), no direct remote daemon origin, and no `unsafe-inline` in `style-src`
+  - development: adds local HMR (`http://localhost:5173`, `ws://localhost:5173`)
 
 ## Endpoints
 
 ## Authentication
 
-Mutating endpoints (`POST /v1/connect`, `POST /v1/disconnect`, `POST /v1/set_profile`, `POST /v1/update`, `POST /v1/service/start`, `POST /v1/service/stop`, `POST /v1/service/restart`) require auth when either:
-- bind address is non-loopback (for example `0.0.0.0:8095`), or
-- `LOCAL_CONTROL_API_AUTH_TOKEN` is set (including loopback binds).
+Mutating endpoints (`POST /v1/connect`, `POST /v1/disconnect`, `POST /v1/set_profile`, `POST /v1/update`, `POST /v1/service/start`, `POST /v1/service/stop`, `POST /v1/service/restart`) require auth by default.
+
+Auth can be bypassed only in explicit developer mode when all of the following are true:
+- bind address is loopback-only, and
+- `LOCAL_CONTROL_API_AUTH_TOKEN` is not set, and
+- `LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK=1`.
+
+For transport hardening, non-loopback binds are rejected unless `LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=1` is set. Keep this unset in production.
+
+Secret handling guidance:
+- avoid passing `LOCAL_CONTROL_API_AUTH_TOKEN` / `TDPN_LOCAL_API_AUTH_BEARER` in CLI args; use process-local env vars instead
+- avoid persisting tokens in shared shell profiles/history; prefer short-lived shell/session scope
+- never include invite keys or bearer tokens in logs, screenshots, or support tickets
+
+Command-backed read endpoints (`GET /v1/status`, `GET /v1/get_diagnostics`, `GET /v1/service/status`) follow the same auth policy.
 
 Header format:
 
@@ -59,7 +83,7 @@ Authorization: Bearer <LOCAL_CONTROL_API_AUTH_TOKEN>
 
 If auth is required and missing/invalid, the API returns `401`.
 
-Read-only endpoints (`/v1/health`, `/v1/status`, `/v1/get_diagnostics`, `/v1/service/status`) remain open by default.
+`GET /v1/health` remains open for liveness checks.
 
 ### `GET /v1/health`
 - Liveness for desktop app process supervision.
@@ -72,7 +96,7 @@ Body:
 
 ```json
 {
-  "bootstrap_directory": "http://HOST:8081",
+  "bootstrap_directory": "https://HOST:8081",
   "invite_key": "inv-...",
   "path_profile": "1hop|2hop|3hop",
   "interface": "wgvpn0",
@@ -83,6 +107,11 @@ Body:
   "install_route": true
 }
 ```
+
+Notes:
+- use `https://` for non-loopback bootstrap hosts.
+- loopback-only developer bootstrap may use `http://127.0.0.1:...` or `http://[::1]:...` when explicitly intended.
+- `http://localhost:...` is intentionally rejected by desktop validation; use literal loopback IPs to avoid hostname/DNS ambiguity.
 
 Behavior:
 - runs optional `client-vpn-preflight`
@@ -144,5 +173,6 @@ Command names exposed to the UI:
 - `control_config` -> local desktop config only (no daemon call)
 
 Scaffold note:
-- this bridge is intentionally minimal; mutating daemon actions are now protected by loopback-aware/token auth.
+- this bridge is intentionally minimal; daemon actions are token-auth protected by default, with explicit loopback-only developer opt-in for unauthenticated mode.
+- desktop payload shaping removes unbounded `output`/`raw` fields and redacts secret-like keys before UI rendering, including common snake/camel/compact forms (for example `accessToken`, `clientSecret`, `refreshToken`, `api_key`).
 - additional hardening (service lifecycle, signed updates, telemetry) is tracked for the Windows parity phases.

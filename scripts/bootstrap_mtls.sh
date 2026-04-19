@@ -151,6 +151,8 @@ if ! [[ "$days" =~ ^[0-9]+$ ]] || ((days < 1)); then
   exit 2
 fi
 
+umask 077
+
 mkdir -p "$out_dir"
 ca_key="$out_dir/ca.key"
 ca_crt="$out_dir/ca.crt"

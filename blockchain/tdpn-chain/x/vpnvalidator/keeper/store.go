@@ -10,8 +10,11 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/tdpn/tdpn-chain/internal/fsguard"
 	"github.com/tdpn/tdpn-chain/x/vpnvalidator/types"
 )
+
+const fileStoreMaxSnapshotBytes int64 = 16 << 20
 
 // KeeperStore is the internal persistence seam for vpnvalidator state.
 type KeeperStore interface {
@@ -21,6 +24,13 @@ type KeeperStore interface {
 	UpsertStatusRecord(record types.ValidatorStatusRecord)
 	GetStatusRecord(statusID string) (types.ValidatorStatusRecord, bool)
 	ListStatusRecords() []types.ValidatorStatusRecord
+}
+
+// KeeperStoreWithWriteErrors allows callers to observe persistence failures.
+// Implementations should leave in-memory state unchanged when returning an error.
+type KeeperStoreWithWriteErrors interface {
+	UpsertEligibilityWithError(record types.ValidatorEligibility) error
+	UpsertStatusRecordWithError(record types.ValidatorStatusRecord) error
 }
 
 // InMemoryStore is the default keeper store implementation.
@@ -38,6 +48,11 @@ func NewInMemoryStore() *InMemoryStore {
 
 func (s *InMemoryStore) UpsertEligibility(record types.ValidatorEligibility) {
 	s.eligibilities[record.ValidatorID] = record
+}
+
+func (s *InMemoryStore) UpsertEligibilityWithError(record types.ValidatorEligibility) error {
+	s.UpsertEligibility(record)
+	return nil
 }
 
 func (s *InMemoryStore) GetEligibility(validatorID string) (types.ValidatorEligibility, bool) {
@@ -61,6 +76,11 @@ func (s *InMemoryStore) ListEligibilities() []types.ValidatorEligibility {
 
 func (s *InMemoryStore) UpsertStatusRecord(record types.ValidatorStatusRecord) {
 	s.statusRecords[record.StatusID] = record
+}
+
+func (s *InMemoryStore) UpsertStatusRecordWithError(record types.ValidatorStatusRecord) error {
+	s.UpsertStatusRecord(record)
+	return nil
 }
 
 func (s *InMemoryStore) GetStatusRecord(statusID string) (types.ValidatorStatusRecord, bool) {
@@ -115,7 +135,7 @@ func NewFileStore(path string) (*FileStore, error) {
 }
 
 func (s *FileStore) load() error {
-	payload, err := os.ReadFile(s.path)
+	payload, err := fsguard.ReadRegularFileBounded(s.path, fileStoreMaxSnapshotBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -133,21 +153,42 @@ func (s *FileStore) load() error {
 	}
 
 	if snapshot.Eligibilities != nil {
-		s.eligibilities = snapshot.Eligibilities
+		eligibilities, err := buildEligibilitySnapshotMap(snapshot.Eligibilities)
+		if err != nil {
+			return fmt.Errorf("validate eligibilities snapshot: %w", err)
+		}
+		s.eligibilities = eligibilities
 	}
 	if snapshot.StatusRecords != nil {
-		s.statusRecords = snapshot.StatusRecords
+		statusRecords, err := buildStatusSnapshotMap(snapshot.StatusRecords)
+		if err != nil {
+			return fmt.Errorf("validate status records snapshot: %w", err)
+		}
+		s.statusRecords = statusRecords
 	}
 
 	return nil
 }
 
 func (s *FileStore) UpsertEligibility(record types.ValidatorEligibility) {
+	_ = s.UpsertEligibilityWithError(record)
+}
+
+func (s *FileStore) UpsertEligibilityWithError(record types.ValidatorEligibility) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.eligibilities[record.ValidatorID]
 	s.eligibilities[record.ValidatorID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.eligibilities[record.ValidatorID] = previous
+		} else {
+			delete(s.eligibilities, record.ValidatorID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) GetEligibility(validatorID string) (types.ValidatorEligibility, bool) {
@@ -175,11 +216,24 @@ func (s *FileStore) ListEligibilities() []types.ValidatorEligibility {
 }
 
 func (s *FileStore) UpsertStatusRecord(record types.ValidatorStatusRecord) {
+	_ = s.UpsertStatusRecordWithError(record)
+}
+
+func (s *FileStore) UpsertStatusRecordWithError(record types.ValidatorStatusRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous, hadPrevious := s.statusRecords[record.StatusID]
 	s.statusRecords[record.StatusID] = record
-	_ = s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.statusRecords[record.StatusID] = previous
+		} else {
+			delete(s.statusRecords, record.StatusID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) GetStatusRecord(statusID string) (types.ValidatorStatusRecord, bool) {
@@ -257,7 +311,49 @@ func writeFileAtomic(path string, payload []byte) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
+	if err := syncDirectory(dir); err != nil {
+		return err
+	}
 
 	keepTmp = false
 	return nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func buildEligibilitySnapshotMap(input map[string]types.ValidatorEligibility) (map[string]types.ValidatorEligibility, error) {
+	loaded := make(map[string]types.ValidatorEligibility, len(input))
+	for key, record := range input {
+		normalized := normalizeEligibility(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid eligibility %q: %w", key, err)
+		}
+		if existing, ok := loaded[normalized.ValidatorID]; ok && !eligibilityRecordsEqual(existing, normalized) {
+			return nil, fmt.Errorf("conflicting eligibility entries for id %q", normalized.ValidatorID)
+		}
+		loaded[normalized.ValidatorID] = normalized
+	}
+	return loaded, nil
+}
+
+func buildStatusSnapshotMap(input map[string]types.ValidatorStatusRecord) (map[string]types.ValidatorStatusRecord, error) {
+	loaded := make(map[string]types.ValidatorStatusRecord, len(input))
+	for key, record := range input {
+		normalized := normalizeStatusRecord(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid status record %q: %w", key, err)
+		}
+		if existing, ok := loaded[normalized.StatusID]; ok && !statusRecordEqual(existing, normalized) {
+			return nil, fmt.Errorf("conflicting status record entries for id %q", normalized.StatusID)
+		}
+		loaded[normalized.StatusID] = normalized
+	}
+	return loaded, nil
 }

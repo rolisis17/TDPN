@@ -7,6 +7,25 @@ import (
 	"strings"
 )
 
+var blockedGenericConfigFileEnvKeys = map[string]struct{}{
+	"LOCAL_CONTROL_API_AUTH_TOKEN":                    {},
+	"LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK":         {},
+	"LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP":    {},
+	"LOCAL_CONTROL_API_SCRIPT":                        {},
+	"LOCAL_CONTROL_API_RUNNER":                        {},
+	"LOCAL_CONTROL_API_ADDR":                          {},
+	"MTLS_ALLOW_PROXY_FROM_ENV":                       {},
+	"COSMOS_ADAPTER_ALLOW_PROXY_FROM_ENV":             {},
+	"COSMOS_ADAPTER_ALLOW_DANGEROUS_PRIVATE_ENDPOINT": {},
+	"CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS":     {},
+	"ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS":      {},
+	"EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS":       {},
+	"DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS":  {},
+	"WG_ALLOW_UNTRUSTED_BINARY_PATH":                  {},
+	"CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP":          {},
+	"CLIENT_REQUIRE_HTTPS_CONTROL_URL":                {},
+}
+
 func applyConfigFile(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -49,6 +68,9 @@ func applyConfigFile(path string) error {
 	}
 
 	for key, val := range values {
+		if isBlockedGenericConfigFileEnvKey(key) {
+			continue
+		}
 		setEnvIfUnset(key, val)
 	}
 	return nil
@@ -141,6 +163,18 @@ func normalizeConfigV1Bool01(raw string, fallback string) string {
 		}
 		return "1"
 	}
+}
+
+func isBlockedGenericConfigFileEnvKey(key string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(key))
+	if normalized == "" {
+		return false
+	}
+	if _, blocked := blockedGenericConfigFileEnvKeys[normalized]; blocked {
+		return true
+	}
+	return strings.HasPrefix(normalized, "LOCAL_CONTROL_API_SERVICE_") &&
+		strings.HasSuffix(normalized, "_COMMAND")
 }
 
 func setEnvIfUnset(key string, value string) {

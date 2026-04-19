@@ -55,6 +55,14 @@ body {
   gap: 10px;
 }
 
+.grid-3 {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.grid-4 {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
 .row {
   display: grid;
   grid-template-columns: minmax(220px, 320px);
@@ -98,6 +106,50 @@ select {
   gap: 8px;
 }
 
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  background: #fff;
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tab.locked,
+.tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.tab-panel.locked {
+  opacity: 0.8;
+}
+
+.hint {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.advanced {
+  margin-top: 12px;
+}
+
 button {
   padding: 9px 12px;
   background: var(--accent);
@@ -114,6 +166,11 @@ button:hover {
 button.secondary {
   background: #fff;
   color: var(--text);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .meta {

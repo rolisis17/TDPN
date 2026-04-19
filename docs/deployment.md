@@ -90,9 +90,9 @@ Quick non-interactive examples:
 # optional preflight before server-up (peer reachability + identity/quorum readiness)
 ./scripts/easy_node.sh server-preflight \
   --mode provider \
-  --authority-directory http://<AUTHORITY_IP_OR_DNS>:8081 \
-  --authority-issuer http://<AUTHORITY_IP_OR_DNS>:8082 \
-  --peer-directories http://<AUTHORITY_IP_OR_DNS>:8081 \
+  --authority-directory https://<AUTHORITY_IP_OR_DNS>:8081 \
+  --authority-issuer https://<AUTHORITY_IP_OR_DNS>:8082 \
+  --peer-directories https://<AUTHORITY_IP_OR_DNS>:8081 \
   --beta-profile 1
 
 # authority/admin node (runs directory + issuer + entry + exit)
@@ -105,15 +105,15 @@ Quick non-interactive examples:
 # provider node (runs directory + entry + exit, no local issuer admin)
 ./scripts/easy_node.sh server-up --mode provider \
   --public-host <PROVIDER_IP_OR_DNS> \
-  --authority-directory http://<AUTHORITY_IP_OR_DNS>:8081 \
-  --authority-issuer http://<AUTHORITY_IP_OR_DNS>:8082 \
+  --authority-directory https://<AUTHORITY_IP_OR_DNS>:8081 \
+  --authority-issuer https://<AUTHORITY_IP_OR_DNS>:8082 \
   --beta-profile
 
 ./scripts/easy_node.sh client-test \
-  --directory-urls http://<SERVER_IP>:8081 \
-  --issuer-url http://<SERVER_IP>:8082 \
-  --entry-url http://<SERVER_IP>:8083 \
-  --exit-url http://<SERVER_IP>:8084 \
+  --directory-urls https://<SERVER_IP>:8081 \
+  --issuer-url https://<SERVER_IP>:8082 \
+  --entry-url https://<SERVER_IP>:8083 \
+  --exit-url https://<SERVER_IP>:8084 \
   --path-profile balanced
 
 # local profile comparison (single-machine decision support)
@@ -173,9 +173,9 @@ Quick non-interactive examples:
 
 # real client VPN session (Linux + sudo)
 sudo ./scripts/easy_node.sh client-vpn-preflight \
-  --bootstrap-directory http://<SERVER_IP>:8081
+  --bootstrap-directory https://<SERVER_IP>:8081
 sudo ./scripts/easy_node.sh client-vpn-up \
-  --bootstrap-directory http://<SERVER_IP>:8081 \
+  --bootstrap-directory https://<SERVER_IP>:8081 \
   --subject <INVITE_KEY> \
   --path-profile balanced
 ./scripts/easy_node.sh client-vpn-status
@@ -188,43 +188,43 @@ sudo ./scripts/easy_node.sh client-vpn-down
 # for single-issuer lab tests only, append: --issuer-quorum-check 0
 
 ./scripts/easy_node.sh three-machine-validate \
-  --directory-a http://<A_SERVER_IP>:8081 \
-  --directory-b http://<B_SERVER_IP>:8081 \
-  --issuer-url http://<A_SERVER_IP>:8082 \
-  --entry-url http://<A_SERVER_IP>:8083 \
-  --exit-url http://<A_SERVER_IP>:8084 \
+  --directory-a https://<A_SERVER_IP>:8081 \
+  --directory-b https://<B_SERVER_IP>:8081 \
+  --issuer-url https://<A_SERVER_IP>:8082 \
+  --entry-url https://<A_SERVER_IP>:8083 \
+  --exit-url https://<A_SERVER_IP>:8084 \
   --min-sources 2 \
   --min-operators 2 \
   --path-profile balanced
 
 ./scripts/easy_node.sh three-machine-soak \
-  --directory-a http://<A_SERVER_IP>:8081 \
-  --directory-b http://<B_SERVER_IP>:8081 \
-  --issuer-url http://<A_SERVER_IP>:8082 \
-  --entry-url http://<A_SERVER_IP>:8083 \
-  --exit-url http://<A_SERVER_IP>:8084 \
+  --directory-a https://<A_SERVER_IP>:8081 \
+  --directory-b https://<B_SERVER_IP>:8081 \
+  --issuer-url https://<A_SERVER_IP>:8082 \
+  --entry-url https://<A_SERVER_IP>:8083 \
+  --exit-url https://<A_SERVER_IP>:8084 \
   --rounds 12 \
   --pause-sec 5 \
   --path-profile balanced
 
 ./scripts/easy_node.sh discover-hosts \
-  --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
+  --bootstrap-directory https://<KNOWN_SERVER_IP>:8081 \
   --wait-sec 20 \
   --write-config 1
 
 ./scripts/easy_node.sh machine-c-test \
-  --bootstrap-directory http://<KNOWN_SERVER_IP>:8081 \
+  --bootstrap-directory https://<KNOWN_SERVER_IP>:8081 \
   --discovery-wait-sec 20 \
   --path-profile balanced
 
 ./scripts/easy_node.sh machine-a-test --public-host <A_SERVER_IP_OR_DNS>
-./scripts/easy_node.sh machine-b-test --peer-directory-a http://<A_SERVER_IP_OR_DNS>:8081 --public-host <B_SERVER_IP_OR_DNS>
+./scripts/easy_node.sh machine-b-test --peer-directory-a https://<A_SERVER_IP_OR_DNS>:8081 --public-host <B_SERVER_IP_OR_DNS>
 ./scripts/easy_node.sh machine-c-test \
-  --directory-a http://<A_SERVER_IP_OR_DNS>:8081 \
-  --directory-b http://<B_SERVER_IP_OR_DNS>:8081 \
-  --issuer-url http://<A_SERVER_IP_OR_DNS>:8082 \
-  --entry-url http://<A_SERVER_IP_OR_DNS>:8083 \
-  --exit-url http://<A_SERVER_IP_OR_DNS>:8084 \
+  --directory-a https://<A_SERVER_IP_OR_DNS>:8081 \
+  --directory-b https://<B_SERVER_IP_OR_DNS>:8081 \
+  --issuer-url https://<A_SERVER_IP_OR_DNS>:8082 \
+  --entry-url https://<A_SERVER_IP_OR_DNS>:8083 \
+  --exit-url https://<A_SERVER_IP_OR_DNS>:8084 \
   --path-profile balanced
 
 # host real-WireGuard preflight and local validation (Linux + sudo required)
@@ -246,7 +246,7 @@ sudo ./scripts/easy_node.sh stop-all --with-wg-only 1 --force-iface-cleanup 1
 ./scripts/easy_node.sh runtime-doctor --show-json 1
 sudo ./scripts/easy_node.sh runtime-fix-record --prune-wg-only-dir 1 --print-summary-json 1
 sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1
-sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country
+sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory https://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country
 sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1
 
 Both wrappers now persist runtime hygiene evidence alongside the summary output:
@@ -319,8 +319,8 @@ If `client-vpn-smoke` fails, it now also auto-captures a client incident bundle,
 
 Invite-only beta option:
 - add `--client-allowlist 1 --allow-anon-cred 0` to `server-up` so only explicitly onboarded client subjects can receive tokens.
-- onboard subjects with `./scripts/beta_subject_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --subject <CLIENT_ID> --kind client --tier 1`.
-- batch onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token <TOKEN> --csv invited_clients.csv`.
+- onboard subjects with `./scripts/beta_subject_upsert.sh --issuer-url <ISSUER_URL> --admin-token-file <TOKEN_FILE> --subject <CLIENT_ID> --kind client --tier 1`.
+- batch onboarding: `./scripts/beta_subject_batch_upsert.sh --issuer-url <ISSUER_URL> --admin-token-file <TOKEN_FILE> --csv invited_clients.csv`.
 - pass `--subject <CLIENT_ID>` to `client-test`/`machine-c-test` for invited users.
 - one-command validation+soak bundle from machine C: `./scripts/beta_pilot_runbook.sh ...` (outputs `.tar.gz` report bundle under `.easy-node-logs`).
 
@@ -335,6 +335,7 @@ Prod strict additions:
 - authority mode can auto-generate invite keys at startup (`--auto-invite 1`, optional `--auto-invite-count`, `--auto-invite-tier`, `--auto-invite-wait-sec`); `--auto-invite-fail-open 1` keeps startup non-blocking if invite generation fails.
 - prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds) and sets entry-exit compose runtime privileges (`ENTRY_EXIT_USER=0:0`, `ENTRY_EXIT_PRIVILEGED=true`).
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
+- run `./scripts/security_secret_guard.sh` before packaging/release to fail fast on tracked invite-key/private-key leakage in `docs/` and `deploy/`.
 - use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.
 - use `./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12` before external beta/production traffic cutover; live mode now verifies endpoint reachability, governance policy floors (`/v1/admin/governance-status`), peer-status payload validity, optional strict federation health thresholds (`--live-require-configured-healthy`, `--live-max-cooling-retry-sec`), optional sync freshness thresholds (`--live-max-peer-sync-age-sec`, `--live-max-issuer-sync-age-sec`), and optional sync source-diversity floors (`--live-min-peer-success-sources`, `--live-min-issuer-success-sources`, `--live-min-peer-source-operators`, `--live-min-issuer-source-operators`).
 - use `./scripts/easy_node.sh prod-key-rotation-runbook ...` for operator-safe maintenance windows (automatic backup + optional pre/post preflight + rollback-on-failure summary JSON).

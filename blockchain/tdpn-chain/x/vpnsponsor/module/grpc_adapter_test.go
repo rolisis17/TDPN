@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	sponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -133,7 +132,7 @@ func TestGRPCMsgServerAdapterDelegateSessionCredit(t *testing.T) {
 	}
 }
 
-func TestGRPCMsgServerAdapterDelegateSessionCreditFallsBackToServerTime(t *testing.T) {
+func TestGRPCMsgServerAdapterDelegateSessionCreditRequiresExplicitContextTime(t *testing.T) {
 	t.Parallel()
 
 	k := keeper.NewKeeper()
@@ -145,14 +144,14 @@ func TestGRPCMsgServerAdapterDelegateSessionCreditFallsBackToServerTime(t *testi
 			SponsorId:       "sponsor-fallback-1",
 			AppId:           "app-fallback-1",
 			MaxCredits:      100,
-			ExpiresAtUnix:   time.Now().Add(time.Hour).Unix(),
+			ExpiresAtUnix:   4102444800,
 		},
 	})
 	if err != nil {
 		t.Fatalf("expected create authorization success, got %v", err)
 	}
 
-	resp, err := adapter.DelegateSessionCredit(context.Background(), &sponsorpb.MsgDelegateSessionCreditRequest{
+	_, err = adapter.DelegateSessionCredit(context.Background(), &sponsorpb.MsgDelegateSessionCreditRequest{
 		Delegation: &sponsorpb.DelegatedSessionCredit{
 			ReservationId:   "res-fallback-1",
 			AuthorizationId: "auth-fallback-1",
@@ -163,11 +162,14 @@ func TestGRPCMsgServerAdapterDelegateSessionCreditFallsBackToServerTime(t *testi
 			Credits:         10,
 		},
 	})
-	if err != nil {
-		t.Fatalf("expected delegate session credit success with server-time fallback, got %v", err)
+	if err == nil {
+		t.Fatal("expected missing context time to fail delegation")
 	}
-	if resp.GetDelegation() == nil {
-		t.Fatal("expected delegation in response")
+	if !errors.Is(err, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "current_time_unix is required in context") {
+		t.Fatalf("expected missing context time details, got %v", err)
 	}
 }
 

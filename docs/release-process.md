@@ -66,7 +66,7 @@ When the tag is pushed, `.github/workflows/release.yml` will:
   ```
 - Explicit tag verification:
   ```bash
-  ./scripts/release_verify_tag.sh --version v0.1.0 --require-head-match 1 --require-signature 0
+  ./scripts/release_verify_tag.sh --version v0.1.0 --require-head-match 1 --require-signature 1
   ```
 - Explicit release policy gate:
   ```bash

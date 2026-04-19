@@ -10,6 +10,15 @@ DOCKER_BIN="${PROD_KEY_ROTATION_DOCKER_BIN:-docker}"
 MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 AUTH_ENV_FILE="$ROOT_DIR/deploy/.env.easy.server"
 PROVIDER_ENV_FILE="$ROOT_DIR/deploy/.env.easy.provider"
+RUNBOOK_MANAGED_PATHS=(
+  "deploy/data/easy_node_server_mode.conf"
+  "deploy/.env.easy.server"
+  "deploy/.env.easy.provider"
+  "deploy/data/easy_node_identity.conf"
+  "deploy/data/issuer"
+  "deploy/tls"
+  "data/easy_mode_hosts.conf"
+)
 
 default_log_dir() {
   echo "${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
@@ -34,6 +43,128 @@ abs_path() {
   else
     echo "$ROOT_DIR/$path"
   fi
+}
+
+canonicalize_existing_path() {
+  local path="$1"
+  if [[ -d "$path" ]]; then
+    (cd "$path" >/dev/null 2>&1 && pwd -P)
+    return
+  fi
+  if [[ -e "$path" ]]; then
+    local parent base parent_canon
+    parent="$(dirname "$path")"
+    base="$(basename "$path")"
+    parent_canon="$(canonicalize_existing_path "$parent" 2>/dev/null || true)"
+    if [[ -z "$parent_canon" ]]; then
+      return 1
+    fi
+    printf '%s/%s\n' "$parent_canon" "$base"
+    return
+  fi
+  return 1
+}
+
+canonicalize_nearest_existing_dir() {
+  local path="$1"
+  local probe="$path"
+  while [[ ! -e "$probe" ]]; do
+    local next
+    next="$(dirname "$probe")"
+    if [[ "$next" == "$probe" ]]; then
+      return 1
+    fi
+    probe="$next"
+  done
+  if [[ -d "$probe" ]]; then
+    canonicalize_existing_path "$probe"
+  else
+    canonicalize_existing_path "$(dirname "$probe")"
+  fi
+}
+
+canonicalize_path_with_parents() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    canonicalize_existing_path "$path"
+    return
+  fi
+  local parent base parent_canon
+  parent="$(dirname "$path")"
+  base="$(basename "$path")"
+  parent_canon="$(canonicalize_existing_path "$parent" 2>/dev/null || true)"
+  if [[ -z "$parent_canon" ]]; then
+    parent_canon="$(canonicalize_nearest_existing_dir "$parent" 2>/dev/null || true)"
+  fi
+  if [[ -z "$parent_canon" ]]; then
+    return 1
+  fi
+  if [[ "$parent_canon" == "/" ]]; then
+    printf '/%s\n' "$base"
+  else
+    printf '%s/%s\n' "$parent_canon" "$base"
+  fi
+}
+
+path_is_within() {
+  local path="$1"
+  local base="$2"
+  [[ "$path" == "$base" || "$path" == "$base/"* ]]
+}
+
+manifest_relpath_is_allowed() {
+  local rel="$1"
+  local allowed
+  for allowed in "${RUNBOOK_MANAGED_PATHS[@]}"; do
+    if [[ "$rel" == "$allowed" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+validate_manifest_relpath() {
+  local rel="$1"
+  if [[ -z "$rel" ]]; then
+    echo "rollback refused: empty manifest path entry"
+    return 1
+  fi
+  if [[ "$rel" == /* ]]; then
+    echo "rollback refused: manifest path must be relative: $rel"
+    return 1
+  fi
+  local part
+  local -a parts=()
+  local IFS='/'
+  read -r -a parts <<<"$rel"
+  for part in "${parts[@]}"; do
+    if [[ -z "$part" || "$part" == "." || "$part" == ".." ]]; then
+      echo "rollback refused: manifest path contains invalid segment: $rel"
+      return 1
+    fi
+  done
+  if ! manifest_relpath_is_allowed "$rel"; then
+    echo "rollback refused: manifest path is not runbook-managed: $rel"
+    return 1
+  fi
+  return 0
+}
+
+validate_restore_target_path() {
+  local rel="$1"
+  local root_canon="$2"
+  local target="$ROOT_DIR/$rel"
+  local target_canon
+  target_canon="$(canonicalize_path_with_parents "$target" 2>/dev/null || true)"
+  if [[ -z "$target_canon" ]]; then
+    echo "rollback refused: unable to resolve destination path: $target"
+    return 1
+  fi
+  if ! path_is_within "$target_canon" "$root_canon"; then
+    echo "rollback refused: destination escapes project root: $rel (resolved=$target_canon)"
+    return 1
+  fi
+  return 0
 }
 
 need_cmd() {
@@ -131,20 +262,11 @@ create_backup() {
   local manifest_file="$backup_dir/backup_manifest.jsonl"
   local snapshot_dir="$backup_dir/snapshot"
   local rel src dst
-  local -a paths=(
-    "deploy/data/easy_node_server_mode.conf"
-    "deploy/.env.easy.server"
-    "deploy/.env.easy.provider"
-    "deploy/data/easy_node_identity.conf"
-    "deploy/data/issuer"
-    "deploy/tls"
-    "data/easy_mode_hosts.conf"
-  )
 
   mkdir -p "$snapshot_dir"
   : >"$manifest_file"
 
-  for rel in "${paths[@]}"; do
+  for rel in "${RUNBOOK_MANAGED_PATHS[@]}"; do
     src="$ROOT_DIR/$rel"
     if [[ -e "$src" ]]; then
       dst="$snapshot_dir/$rel"
@@ -167,7 +289,7 @@ restore_from_backup() {
   local snapshot_dir="$backup_dir/snapshot"
   local manifest_json="$backup_dir/backup_manifest.json"
   local rel src dst
-  local idx count
+  local idx count root_canon
 
   if [[ ! -d "$snapshot_dir" ]]; then
     echo "rollback failed: missing snapshot directory: $snapshot_dir"
@@ -183,10 +305,21 @@ restore_from_backup() {
     echo "rollback failed: invalid backup manifest: $manifest_json"
     return 1
   fi
+  root_canon="$(canonicalize_existing_path "$ROOT_DIR" 2>/dev/null || true)"
+  if [[ -z "$root_canon" ]]; then
+    echo "rollback failed: unable to resolve project root canonical path: $ROOT_DIR"
+    return 1
+  fi
 
   for ((idx = 0; idx < count; idx++)); do
     rel="$(jq -r ".[$idx].path // \"\"" "$manifest_json")"
     [[ -z "$rel" ]] && continue
+    if ! validate_manifest_relpath "$rel"; then
+      return 1
+    fi
+    if ! validate_restore_target_path "$rel" "$root_canon"; then
+      return 1
+    fi
     src="$snapshot_dir/$rel"
     dst="$ROOT_DIR/$rel"
     if [[ -e "$src" ]]; then
@@ -644,6 +777,8 @@ bool_or_die "--print-summary-json" "$print_summary_json"
 int_or_die "--preflight-timeout-sec" "$preflight_timeout_sec"
 int_or_die "--key-history" "$key_history"
 
+umask 077
+
 timestamp="$(date +%Y%m%d_%H%M%S)"
 if [[ -z "$backup_dir" ]]; then
   backup_dir="$(default_log_dir)/prod_key_rotation_$timestamp"
@@ -662,6 +797,7 @@ if [[ -n "$rollback_from" ]]; then
 fi
 
 mkdir -p "$backup_dir"
+chmod 700 "$backup_dir" 2>/dev/null || true
 create_backup "$backup_dir"
 echo "[prod-key-rotation-runbook] backup_dir=$backup_dir"
 echo "[prod-key-rotation-runbook] mode=$mode"

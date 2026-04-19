@@ -33,7 +33,15 @@ func (k *Keeper) UpsertPolicy(record types.GovernancePolicy) {
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertPolicy(record)
+	_ = k.upsertPolicyLocked(record)
+}
+
+func (k *Keeper) UpsertPolicyWithError(record types.GovernancePolicy) error {
+	record = normalizePolicy(record)
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.upsertPolicyLocked(record)
 }
 
 // CreatePolicy inserts a governance policy with idempotency semantics keyed by PolicyID.
@@ -58,12 +66,16 @@ func (k *Keeper) CreatePolicy(record types.GovernancePolicy) (types.GovernancePo
 
 		// Avoid introducing duplicate logical IDs when only legacy keys exist.
 		if hasCanonicalKey {
-			k.store.UpsertPolicy(normalized)
+			if err := k.upsertPolicyLocked(normalized); err != nil {
+				return types.GovernancePolicy{}, err
+			}
 		}
 		return normalized, nil
 	}
 
-	k.store.UpsertPolicy(normalized)
+	if err := k.upsertPolicyLocked(normalized); err != nil {
+		return types.GovernancePolicy{}, err
+	}
 	return normalized, nil
 }
 
@@ -90,7 +102,15 @@ func (k *Keeper) UpsertDecision(record types.GovernanceDecision) {
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertDecision(record)
+	_ = k.upsertDecisionLocked(record)
+}
+
+func (k *Keeper) UpsertDecisionWithError(record types.GovernanceDecision) error {
+	record = normalizeDecision(record)
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.upsertDecisionLocked(record)
 }
 
 // RecordDecision inserts a governance decision with idempotency semantics keyed by DecisionID.
@@ -119,12 +139,19 @@ func (k *Keeper) RecordDecision(record types.GovernanceDecision) (types.Governan
 
 		// Avoid introducing duplicate logical IDs when only legacy keys exist.
 		if hasCanonicalKey {
-			k.store.UpsertDecision(normalized)
+			if err := k.upsertDecisionLocked(normalized); err != nil {
+				return types.GovernanceDecision{}, err
+			}
 		}
 		return normalized, nil
 	}
+	if existingByBusinessKey, found := k.decisionByPolicyProposalLocked(normalized.PolicyID, normalized.ProposalID); found {
+		return types.GovernanceDecision{}, decisionBusinessKeyConflictError(normalized, existingByBusinessKey.DecisionID)
+	}
 
-	k.store.UpsertDecision(normalized)
+	if err := k.upsertDecisionLocked(normalized); err != nil {
+		return types.GovernanceDecision{}, err
+	}
 	return normalized, nil
 }
 
@@ -169,13 +196,53 @@ func (k *Keeper) RecordAuditAction(record types.GovernanceAuditAction) (types.Go
 
 		// Avoid introducing duplicate logical IDs when only legacy keys exist.
 		if hasCanonicalKey {
-			k.store.PutAuditAction(normalized)
+			if err := k.putAuditActionLocked(normalized); err != nil {
+				return types.GovernanceAuditAction{}, err
+			}
 		}
 		return normalized, nil
 	}
 
-	k.store.PutAuditAction(normalized)
+	if err := k.putAuditActionLocked(normalized); err != nil {
+		return types.GovernanceAuditAction{}, err
+	}
 	return normalized, nil
+}
+
+func (k *Keeper) upsertPolicyLocked(record types.GovernancePolicy) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertPolicyWithError(record); err != nil {
+			return fmt.Errorf("persist policy %q: %w", record.PolicyID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertPolicy(record)
+	return nil
+}
+
+func (k *Keeper) upsertDecisionLocked(record types.GovernanceDecision) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertDecisionWithError(record); err != nil {
+			return fmt.Errorf("persist decision %q: %w", record.DecisionID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertDecision(record)
+	return nil
+}
+
+func (k *Keeper) putAuditActionLocked(record types.GovernanceAuditAction) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.PutAuditActionWithError(record); err != nil {
+			return fmt.Errorf("persist audit action %q: %w", record.ActionID, err)
+		}
+		return nil
+	}
+
+	k.store.PutAuditAction(record)
+	return nil
 }
 
 func (k *Keeper) GetAuditAction(actionID string) (types.GovernanceAuditAction, bool) {
@@ -226,6 +293,17 @@ func (k *Keeper) findDecisionsByCanonicalIDLocked(decisionID string) []types.Gov
 		}
 	}
 	return matches
+}
+
+func (k *Keeper) decisionByPolicyProposalLocked(policyID, proposalID string) (types.GovernanceDecision, bool) {
+	for _, record := range k.store.ListDecisions() {
+		normalized := normalizeDecision(record)
+		if normalized.PolicyID != policyID || normalized.ProposalID != proposalID {
+			continue
+		}
+		return normalized, true
+	}
+	return types.GovernanceDecision{}, false
 }
 
 func (k *Keeper) findAuditActionsByCanonicalIDLocked(actionID string) []types.GovernanceAuditAction {
@@ -545,6 +623,18 @@ func auditActionRecordsEqual(a, b types.GovernanceAuditAction) bool {
 
 func conflictError(kind string, id string) error {
 	return fmt.Errorf("%s %q already exists with conflicting fields", kind, id)
+}
+
+func decisionBusinessKeyConflictError(record types.GovernanceDecision, existingDecisionID string) error {
+	return fmt.Errorf(
+		"decision business key %q already exists with conflicting fields (existing decision %q)",
+		decisionBusinessKeyID(record.PolicyID, record.ProposalID),
+		existingDecisionID,
+	)
+}
+
+func decisionBusinessKeyID(policyID, proposalID string) string {
+	return fmt.Sprintf("policy=%q proposal=%q", policyID, proposalID)
 }
 
 func policyNotFoundError(policyID string) error {

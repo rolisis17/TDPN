@@ -102,6 +102,27 @@ EOF_PRE_READY_MD
       exit 1
     fi
     mkdir -p "$(dirname "$summary_json")"
+    if [[ "${FAKE_PRE_REAL_HOST_FAIL_ROOT_REQUIRED:-0}" == "1" ]]; then
+      cat >"$summary_json" <<EOF_PRE_REAL_ROOT_FAIL
+{"status":"fail","stage":"wg_only_stack_selftest","notes":"WG-only stack selftest requires root privileges (run with sudo)","machine_c_smoke_gate":{"ready":false,"blockers":["wg_only_stack_selftest"],"next_command":"sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"},"manual_validation_report":{"summary_json":"$readiness_summary_json","report_md":"$readiness_report_md","readiness_status":"NOT_READY"}}
+EOF_PRE_REAL_ROOT_FAIL
+      echo "[pre-real-host-readiness] status=FAIL stage=wg_only_stack_selftest"
+      echo "[pre-real-host-readiness] machine_c_smoke_ready=false"
+      echo "[pre-real-host-readiness] blockers=wg_only_stack_selftest"
+      echo "[pre-real-host-readiness] manual_validation_readiness_status=NOT_READY"
+      echo "[pre-real-host-readiness] next_machine_c_command=sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"
+      echo "[pre-real-host-readiness] summary_json=$summary_json"
+      echo "[pre-real-host-readiness] summary_log=${summary_json%.json}.log"
+      if [[ -n "$readiness_summary_json" ]]; then
+        echo "[pre-real-host-readiness] readiness_report_json=$readiness_summary_json"
+      fi
+      if [[ -n "$readiness_report_md" ]]; then
+        echo "[pre-real-host-readiness] readiness_report_md=$readiness_report_md"
+      fi
+      echo "[pre-real-host-readiness] summary_json_payload:"
+      cat "$summary_json"
+      exit 1
+    fi
     if [[ "${FAKE_PRE_REAL_HOST_FAIL:-0}" == "1" ]]; then
       cat >"$summary_json" <<EOF_PRE_REAL_FAIL
 {"status":"fail","machine_c_smoke_gate":{"ready":false,"blockers":["runtime_hygiene"],"next_command":"sudo ./scripts/easy_node.sh client-vpn-smoke --runtime-fix 1"},"manual_validation_report":{"summary_json":"$readiness_summary_json","report_md":"$readiness_report_md","readiness_status":"NOT_READY"}}
@@ -656,6 +677,100 @@ if ! rg -q 'manual_validation_readiness_report\.md' "$CAPTURE"; then
   exit 1
 fi
 
+echo "[three-machine-prod-signoff] defer-no-root pre-real-host readiness root-required path"
+: >"$CAPTURE"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_PRE_REAL_HOST_FAIL_ROOT_REQUIRED=1 \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 \
+  --defer-no-root 1 \
+  --pre-real-host-readiness 1 \
+  --print-summary-json 1 >/tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log 2>&1
+
+if ! rg -q 'three-machine-prod-signoff: status=skip stage=pre-real-host-readiness' /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log; then
+  echo "expected skip status for defer-no-root root-required pre-real-host readiness path"
+  cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log
+  exit 1
+fi
+if rg -q '^three-machine-prod-bundle ' "$CAPTURE"; then
+  echo "did not expect bundle command in defer-no-root root-required pre-real-host readiness path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if rg -q '^runtime-doctor ' "$CAPTURE"; then
+  echo "did not expect runtime-doctor call in defer-no-root root-required pre-real-host readiness path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id three_machine_prod_signoff --status skip ' "$CAPTURE"; then
+  echo "expected manual-validation-record skip call missing in defer-no-root root-required pre-real-host readiness path"
+  cat "$CAPTURE"
+  exit 1
+fi
+pre_ready_defer_root_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log | tail -n 1)"
+if [[ -z "$pre_ready_defer_root_summary_json" || ! -f "$pre_ready_defer_root_summary_json" ]]; then
+  echo "expected defer-no-root root-required pre-real-host readiness summary json file missing"
+  cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log
+  exit 1
+fi
+if ! jq -e '.status == "skip" and .stage == "pre-real-host-readiness" and .defer_no_root == true and .deferred_no_root == true and .pre_real_host_readiness.status == "fail" and (.notes | test("requires root"; "i"))' "$pre_ready_defer_root_summary_json" >/dev/null 2>&1; then
+  echo "defer-no-root root-required pre-real-host readiness summary JSON missing expected defer metadata"
+  cat "$pre_ready_defer_root_summary_json"
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] defer-no-root pre-real-host readiness non-root-independent failure path"
+: >"$CAPTURE"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_PRE_REAL_HOST_FAIL=1 \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 \
+  --defer-no-root 1 \
+  --pre-real-host-readiness 1 >/tmp/integration_three_machine_prod_signoff_pre_readiness_defer_non_root.log 2>&1 && {
+    echo "expected non-root-independent pre-real-host readiness failure to return non-zero with defer-no-root"
+    cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_non_root.log
+    exit 1
+  }
+
+if ! rg -q 'three-machine-prod-signoff: status=fail stage=pre-real-host-readiness' /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_non_root.log; then
+  echo "expected fail status for non-root-independent pre-real-host readiness failure with defer-no-root"
+  cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_non_root.log
+  exit 1
+fi
+if rg -q '^runtime-doctor ' "$CAPTURE"; then
+  echo "did not expect runtime-doctor after non-root-independent pre-real-host readiness failure path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id three_machine_prod_signoff --status fail ' "$CAPTURE"; then
+  echo "expected manual-validation-record fail call missing for non-root-independent pre-real-host readiness failure with defer-no-root"
+  cat "$CAPTURE"
+  exit 1
+fi
+pre_ready_defer_non_root_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_non_root.log | tail -n 1)"
+if [[ -z "$pre_ready_defer_non_root_summary_json" || ! -f "$pre_ready_defer_non_root_summary_json" ]]; then
+  echo "expected non-root-independent defer-no-root pre-real-host readiness summary json file missing"
+  cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_non_root.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .stage == "pre-real-host-readiness" and .defer_no_root == true and .deferred_no_root == false and .pre_real_host_readiness.status == "fail"' "$pre_ready_defer_non_root_summary_json" >/dev/null 2>&1; then
+  echo "non-root-independent defer-no-root pre-real-host readiness summary JSON missing expected fail metadata"
+  cat "$pre_ready_defer_non_root_summary_json"
+  exit 1
+fi
+
 echo "[three-machine-prod-signoff] easy_node forwarding"
 cat >"$FAKE_SIGNOFF" <<'EOF_FAKE_SIGNOFF'
 #!/usr/bin/env bash
@@ -673,6 +788,7 @@ THREE_MACHINE_PROD_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --issuer-url https://198.51.100.10:8082 \
   --entry-url https://198.51.100.10:8083 \
   --exit-url https://203.0.113.20:8084 \
+  --defer-no-root 1 \
   --pre-real-host-readiness 1 \
   --print-summary-json 1 >/tmp/integration_three_machine_prod_signoff_wrapper.log 2>&1
 
@@ -688,6 +804,11 @@ if ! rg -q -- '--directory-b https://203\.0\.113\.20:8081' "$TMP_DIR/signoff_wra
 fi
 if ! rg -q -- '--pre-real-host-readiness 1' "$TMP_DIR/signoff_wrapper_calls.log"; then
   echo "easy_node three-machine-prod-signoff forwarding missing pre-real-host-readiness"
+  cat "$TMP_DIR/signoff_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--defer-no-root 1' "$TMP_DIR/signoff_wrapper_calls.log"; then
+  echo "easy_node three-machine-prod-signoff forwarding missing defer-no-root"
   cat "$TMP_DIR/signoff_wrapper_calls.log"
   exit 1
 fi

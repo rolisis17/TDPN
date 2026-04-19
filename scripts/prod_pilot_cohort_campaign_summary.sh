@@ -616,6 +616,14 @@ elif [[ -n "$trend_decision" && "$trend_decision" != "GO" ]]; then
 fi
 
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+subject_configured=0
+if [[ -n "$subject" ]]; then
+  subject_configured=1
+fi
 
 jq -nc \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -626,7 +634,8 @@ jq -nc \
   --arg report_md "$report_md" \
   --arg reports_dir "$reports_dir" \
   --arg bootstrap_directory "$bootstrap_directory" \
-  --arg subject "$subject" \
+  --arg subject "$subject_redacted" \
+  --argjson subject_configured "$subject_configured" \
   --arg runbook_status "$runbook_status" \
   --arg runbook_failure_step "$runbook_failure_step" \
   --arg quick_status "$quick_status" \
@@ -727,6 +736,7 @@ jq -nc \
     campaign: {
       bootstrap_directory: ($bootstrap_directory // ""),
       subject: ($subject // ""),
+      subject_configured: ($subject_configured == 1),
       rounds: $campaign_rounds,
       pause_sec: $campaign_pause_sec,
       max_alert_severity: ($max_alert_severity // "")
@@ -830,7 +840,7 @@ jq -nc \
   printf -- '- Runbook failure step: %s\n' "${runbook_failure_step:-none}"
   printf -- '- Final rc: %s\n' "$runbook_final_rc"
   printf -- '- Bootstrap directory: `%s`\n' "$(md_escape "${bootstrap_directory:-}")"
-  printf -- '- Subject: `%s`\n' "$(md_escape "${subject:-}")"
+  printf -- '- Subject: `%s`\n' "$(md_escape "${subject_redacted:-}")"
   printf -- '- Duration sec: %s\n' "$runbook_duration_sec"
   printf -- '- Campaign config: rounds=%s pause_sec=%s max_alert_severity=%s\n' "$campaign_rounds" "$campaign_pause_sec" "${max_alert_severity:-}"
   printf -- '- Quick status: %s (rc=%s signoff_attempted=%s signoff_rc=%s)\n' "${quick_status:-unknown}" "$quick_final_rc" "$quick_signoff_attempted" "$quick_signoff_rc"

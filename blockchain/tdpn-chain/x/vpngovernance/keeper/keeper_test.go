@@ -231,6 +231,46 @@ func TestKeeperRecordDecisionConflict(t *testing.T) {
 	}
 }
 
+func TestKeeperRecordDecisionRejectsDuplicatePolicyProposalAcrossDecisionIDs(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreatePolicy(types.GovernancePolicy{
+		PolicyID:        "policy-dup-scope-1",
+		Title:           "Policy Scope",
+		Version:         1,
+		ActivatedAtUnix: 4102444800,
+	}); err != nil {
+		t.Fatalf("CreatePolicy returned unexpected error: %v", err)
+	}
+
+	if _, err := k.RecordDecision(types.GovernanceDecision{
+		DecisionID:    "decision-dup-scope-1",
+		PolicyID:      "policy-dup-scope-1",
+		ProposalID:    "proposal-dup-scope-1",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council-dup-scope-1",
+		DecidedAtUnix: 4102444800,
+	}); err != nil {
+		t.Fatalf("RecordDecision returned unexpected error: %v", err)
+	}
+
+	_, err := k.RecordDecision(types.GovernanceDecision{
+		DecisionID:    "decision-dup-scope-2",
+		PolicyID:      "POLICY-DUP-SCOPE-1",
+		ProposalID:    "PROPOSAL-DUP-SCOPE-1",
+		Outcome:       types.DecisionOutcomeReject,
+		Decider:       "council-dup-scope-1",
+		DecidedAtUnix: 4102444801,
+	})
+	if err == nil {
+		t.Fatal("expected conflict for duplicate policy/proposal decision business key")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error details, got %v", err)
+	}
+}
+
 func TestKeeperRecordDecisionValidation(t *testing.T) {
 	t.Parallel()
 

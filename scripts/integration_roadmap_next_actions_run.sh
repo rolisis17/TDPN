@@ -574,7 +574,7 @@ if ! jq -e '
   and .rc == 0
   and .inputs.allow_profile_default_gate_unreachable == false
   and .inputs.action_timeout_sec == 0
-  and .inputs.profile_default_gate_default_timeout_sec == 1200
+  and .inputs.profile_default_gate_default_timeout_sec == 2400
   and .inputs.profile_default_gate_subject == "inv-override-subject"
   and .summary.actions_executed == 1
   and .summary.pass == 1
@@ -584,7 +584,7 @@ if ! jq -e '
   and .actions[0].id == "profile_default_gate"
   and ((.actions[0].command // "") | contains("fake_easy_node"))
   and .actions[0].status == "pass"
-  and .actions[0].timeout_sec == 1200
+  and .actions[0].timeout_sec == 2400
   and ((.actions[0].command // "") | contains("--campaign-subject"))
   and ((.actions[0].soft_failed // false) == false)
 ' "$SUMMARY_PROFILE_SUBJECT_OVERRIDE" >/dev/null; then

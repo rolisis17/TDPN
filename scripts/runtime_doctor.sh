@@ -46,6 +46,34 @@ bool_arg_or_die() {
   fi
 }
 
+validate_iface_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ -z "$value" || ! "$value" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+    echo "$name contains invalid characters"
+    exit 2
+  fi
+}
+
+sanitize_owner_component() {
+  local value="$1"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$value" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+    printf '%s' "$value"
+    return
+  fi
+  printf '%s' ""
+}
+
+shell_quote() {
+  local value="$1"
+  printf '%q' "$value"
+}
+
 abs_path() {
   local path="$1"
   path="$(trim "$path")"
@@ -58,10 +86,66 @@ abs_path() {
   fi
 }
 
+path_is_within() {
+  local path="$1"
+  local base="$2"
+  [[ "$path" == "$base" || "$path" == "$base/"* ]]
+}
+
+path_has_invalid_segments() {
+  local path="$1"
+  local normalized="${path#/}"
+  local segment
+  local -a segments=()
+  local IFS='/'
+  read -r -a segments <<<"$normalized"
+  for segment in "${segments[@]}"; do
+    if [[ -z "$segment" || "$segment" == "." || "$segment" == ".." ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+wg_only_prune_remediation() {
+  local path="$1"
+  local allowlist="$2"
+  if [[ -z "$path" || "$path" != /* ]]; then
+    printf 'refuse prune: unsafe wg-only path (%s); inspect EASY_NODE_DOCTOR_WG_ONLY_DIR' "$path"
+    return
+  fi
+  if path_has_invalid_segments "$path"; then
+    printf 'refuse prune: unsafe wg-only path (%s); inspect EASY_NODE_DOCTOR_WG_ONLY_DIR' "$path"
+    return
+  fi
+  local prefix trimmed
+  local -a prefixes=()
+  local IFS=','
+  read -r -a prefixes <<<"$allowlist"
+  for prefix in "${prefixes[@]}"; do
+    trimmed="$(trim "$prefix")"
+    if [[ -z "$trimmed" || "$trimmed" != /* ]]; then
+      continue
+    fi
+    if path_has_invalid_segments "$trimmed"; then
+      continue
+    fi
+    if path_is_within "$path" "$trimmed"; then
+      printf "sudo rm -rf '%s'" "$path"
+      return
+    fi
+  done
+  printf 'refuse prune outside allowlist (%s): %s' "$allowlist" "$path"
+}
+
 preferred_local_user() {
   if [[ -n "${EASY_NODE_DOCTOR_PREFERRED_USER:-}" ]]; then
-    printf '%s\n' "${EASY_NODE_DOCTOR_PREFERRED_USER}"
-    return
+    local candidate
+    candidate="$(sanitize_owner_component "${EASY_NODE_DOCTOR_PREFERRED_USER}")"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
   fi
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
     printf '%s\n' "${SUDO_USER}"
@@ -72,8 +156,12 @@ preferred_local_user() {
 
 preferred_local_group() {
   if [[ -n "${EASY_NODE_DOCTOR_PREFERRED_GROUP:-}" ]]; then
-    printf '%s\n' "${EASY_NODE_DOCTOR_PREFERRED_GROUP}"
-    return
+    local candidate
+    candidate="$(sanitize_owner_component "${EASY_NODE_DOCTOR_PREFERRED_GROUP}")"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
   fi
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
     if id -gn "${SUDO_USER}" >/dev/null 2>&1; then
@@ -202,9 +290,6 @@ check_writable_target() {
     return
   fi
   parent="$(dirname "$path")"
-  if [[ ! -d "$parent" ]]; then
-    mkdir -p "$parent" >/dev/null 2>&1 || true
-  fi
   if [[ ! -d "$parent" || ! -w "$parent" ]]; then
     add_finding "$severity" "$code" "$label parent directory not writable ($parent, $(owner_mode_summary "$parent"))" "$remediation"
   fi
@@ -246,6 +331,7 @@ base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${EASY_NODE_DOCTOR_EXIT_IFACE:-wgestack0}"
 vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
+wg_only_prune_allowlist="${EASY_NODE_RUNTIME_FIX_WG_ONLY_PRUNE_ALLOWLIST:-$ROOT_DIR/deploy/data/wg_only}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -291,6 +377,9 @@ if [[ ! "$base_port" =~ ^[0-9]+$ ]]; then
   echo "--base-port must be an integer"
   exit 2
 fi
+validate_iface_or_die "--client-iface" "$client_iface"
+validate_iface_or_die "--exit-iface" "$exit_iface"
+validate_iface_or_die "--vpn-iface" "$vpn_iface"
 
 client_env_file="$(abs_path "${EASY_NODE_DOCTOR_CLIENT_ENV_FILE:-${EASY_NODE_CLIENT_ENV_FILE:-$ROOT_DIR/deploy/.env.easy.client}}")"
 authority_env_file="$(abs_path "${EASY_NODE_DOCTOR_AUTHORITY_ENV_FILE:-$ROOT_DIR/deploy/.env.easy.server}")"
@@ -302,14 +391,17 @@ wg_only_state_file="$(abs_path "${EASY_NODE_DOCTOR_WG_ONLY_STATE_FILE:-$ROOT_DIR
 client_vpn_state_file="$(abs_path "${EASY_NODE_DOCTOR_CLIENT_VPN_STATE_FILE:-$ROOT_DIR/deploy/data/client_vpn.state}")"
 preferred_owner_user="$(preferred_local_user)"
 preferred_owner_group="$(preferred_local_group)"
+preferred_owner_user="$(sanitize_owner_component "$preferred_owner_user")"
+preferred_owner_group="$(sanitize_owner_component "$preferred_owner_group")"
 preferred_owner_spec="${preferred_owner_user}:${preferred_owner_group}"
+wg_only_prune_hint="$(wg_only_prune_remediation "$wg_only_dir" "$wg_only_prune_allowlist")"
 
-check_writable_target "WARN" "client_env_file_not_writable" "client env file" "$client_env_file" "1" "sudo chown ${preferred_owner_spec} '$client_env_file'"
-check_writable_target "FAIL" "authority_env_file_not_writable" "authority env file" "$authority_env_file" "0" "sudo chown ${preferred_owner_spec} '$authority_env_file'"
-check_writable_target "FAIL" "provider_env_file_not_writable" "provider env file" "$provider_env_file" "0" "sudo chown ${preferred_owner_spec} '$provider_env_file'"
-check_writable_target "WARN" "wg_only_dir_not_writable" "wg-only runtime dir" "$wg_only_dir" "0" "sudo rm -rf '$wg_only_dir'"
-check_writable_target "FAIL" "client_vpn_key_dir_not_writable" "client VPN key dir" "$client_vpn_key_dir" "0" "mkdir -p '$client_vpn_key_dir' && sudo chown -R ${preferred_owner_spec} '$client_vpn_key_dir' && chmod 700 '$client_vpn_key_dir'"
-check_writable_target "FAIL" "log_dir_not_writable" "log dir" "$log_dir" "0" "mkdir -p '$log_dir' && sudo chown ${preferred_owner_spec} '$log_dir' && chmod 700 '$log_dir'"
+check_writable_target "WARN" "client_env_file_not_writable" "client env file" "$client_env_file" "1" "sudo chown $(shell_quote "$preferred_owner_spec") $(shell_quote "$client_env_file")"
+check_writable_target "FAIL" "authority_env_file_not_writable" "authority env file" "$authority_env_file" "0" "sudo chown $(shell_quote "$preferred_owner_spec") $(shell_quote "$authority_env_file")"
+check_writable_target "FAIL" "provider_env_file_not_writable" "provider env file" "$provider_env_file" "0" "sudo chown $(shell_quote "$preferred_owner_spec") $(shell_quote "$provider_env_file")"
+check_writable_target "WARN" "wg_only_dir_not_writable" "wg-only runtime dir" "$wg_only_dir" "0" "$wg_only_prune_hint"
+check_writable_target "FAIL" "client_vpn_key_dir_not_writable" "client VPN key dir" "$client_vpn_key_dir" "0" "mkdir -p $(shell_quote "$client_vpn_key_dir") && sudo chown -R $(shell_quote "$preferred_owner_spec") $(shell_quote "$client_vpn_key_dir") && chmod 700 $(shell_quote "$client_vpn_key_dir")"
+check_writable_target "FAIL" "log_dir_not_writable" "log dir" "$log_dir" "0" "mkdir -p $(shell_quote "$log_dir") && sudo chown $(shell_quote "$preferred_owner_spec") $(shell_quote "$log_dir") && chmod 700 $(shell_quote "$log_dir")"
 
 if [[ "$client_vpn_key_dir" == /mnt/* ]]; then
   add_finding "WARN" "client_vpn_key_dir_on_drvfs" "client VPN key dir resolves under /mnt ($client_vpn_key_dir); Linux-private state dir is safer for keys" "export EASY_NODE_CLIENT_VPN_KEY_DIR=\"\$HOME/.local/state/privacynode/client_vpn\""
@@ -318,30 +410,30 @@ fi
 if [[ -f "$wg_only_state_file" ]]; then
   wg_only_pid="$(state_value "$wg_only_state_file" "WG_ONLY_PID")"
   if [[ -z "$wg_only_pid" || ! "$wg_only_pid" =~ ^[0-9]+$ || ! -d "/proc/$wg_only_pid" ]]; then
-    add_finding "WARN" "wg_only_state_stale" "wg-only stack state file looks stale ($wg_only_state_file, pid=${wg_only_pid:-unset})" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $base_port --client-iface $client_iface --exit-iface $exit_iface"
+    add_finding "WARN" "wg_only_state_stale" "wg-only stack state file looks stale ($wg_only_state_file, pid=${wg_only_pid:-unset})" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $(shell_quote "$base_port") --client-iface $(shell_quote "$client_iface") --exit-iface $(shell_quote "$exit_iface")"
   fi
 fi
 
 if [[ -f "$client_vpn_state_file" ]]; then
   client_vpn_pid="$(state_value "$client_vpn_state_file" "CLIENT_VPN_PID")"
   if [[ -z "$client_vpn_pid" || ! "$client_vpn_pid" =~ ^[0-9]+$ || ! -d "/proc/$client_vpn_pid" ]]; then
-    add_finding "WARN" "client_vpn_state_stale" "client-vpn state file looks stale ($client_vpn_state_file, pid=${client_vpn_pid:-unset})" "sudo ./scripts/easy_node.sh client-vpn-down --force-iface-cleanup 1 --iface $vpn_iface"
+    add_finding "WARN" "client_vpn_state_stale" "client-vpn state file looks stale ($client_vpn_state_file, pid=${client_vpn_pid:-unset})" "sudo ./scripts/easy_node.sh client-vpn-down --force-iface-cleanup 1 --iface $(shell_quote "$vpn_iface")"
   fi
 fi
 
 if [[ "$(iface_present01 "$client_iface")" == "1" ]]; then
-  add_finding "WARN" "wg_only_client_iface_present" "wg-only client interface still exists ($client_iface)" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $base_port --client-iface $client_iface --exit-iface $exit_iface"
+  add_finding "WARN" "wg_only_client_iface_present" "wg-only client interface still exists ($client_iface)" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $(shell_quote "$base_port") --client-iface $(shell_quote "$client_iface") --exit-iface $(shell_quote "$exit_iface")"
 fi
 if [[ "$(iface_present01 "$exit_iface")" == "1" ]]; then
-  add_finding "WARN" "wg_only_exit_iface_present" "wg-only exit interface still exists ($exit_iface)" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $base_port --client-iface $client_iface --exit-iface $exit_iface"
+  add_finding "WARN" "wg_only_exit_iface_present" "wg-only exit interface still exists ($exit_iface)" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $(shell_quote "$base_port") --client-iface $(shell_quote "$client_iface") --exit-iface $(shell_quote "$exit_iface")"
 fi
 if [[ "$(iface_present01 "$vpn_iface")" == "1" ]]; then
-  add_finding "WARN" "client_vpn_iface_present" "client VPN interface still exists ($vpn_iface)" "sudo ./scripts/easy_node.sh client-vpn-down --force-iface-cleanup 1 --iface $vpn_iface"
+  add_finding "WARN" "client_vpn_iface_present" "client VPN interface still exists ($vpn_iface)" "sudo ./scripts/easy_node.sh client-vpn-down --force-iface-cleanup 1 --iface $(shell_quote "$vpn_iface")"
 fi
 
 for port in "$((base_port + 1))" "$((base_port + 2))" "$((base_port + 3))" "$((base_port + 4))" "$((base_port + 100))" "$((base_port + 101))" "$((base_port + 102))" "$((base_port + 103))"; do
   if [[ "$(port_busy01 "$port")" == "1" ]]; then
-    add_finding "WARN" "wg_only_port_busy_${port}" "wg-only default port still busy ($port): $(port_busy_detail "$port")" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $base_port --client-iface $client_iface --exit-iface $exit_iface"
+    add_finding "WARN" "wg_only_port_busy_${port}" "wg-only default port still busy ($port): $(port_busy_detail "$port")" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $(shell_quote "$base_port") --client-iface $(shell_quote "$client_iface") --exit-iface $(shell_quote "$exit_iface")"
   fi
 done
 

@@ -35,6 +35,9 @@ Purpose:
 Notes:
   - Uses one shared reports directory across matrix + signoff + roadmap handoff.
   - Fail-close policy is explicit via --signoff-fail-on-no-go (default: 1).
+  - `--signoff-refresh-campaign 1` means signoff attempts a fresh campaign
+    refresh; `0` means signoff reuses existing campaign artifacts (default,
+    since step 1 already refreshes).
 USAGE
 }
 

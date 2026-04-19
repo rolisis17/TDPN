@@ -27,13 +27,108 @@ cat >"$FAKE_EASY_NODE" <<'EOF_FAKE_EASY_NODE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${CAPTURE_FILE:?}"
-exit 0
+
+mode="${FAKE_MODE:-pass}"
+cmd="${1:-}"
+
+summary_json_path() {
+  local prev=""
+  local arg=""
+  for arg in "$@"; do
+    if [[ "$prev" == "--summary-json" ]]; then
+      printf '%s\n' "$arg"
+      return 0
+    fi
+    prev="$arg"
+  done
+  printf '%s\n' ""
+}
+
+write_summary_json_if_requested() {
+  local payload="$1"
+  shift
+  local path
+  path="$(summary_json_path "$@")"
+  if [[ -n "$path" ]]; then
+    mkdir -p "$(dirname "$path")"
+    printf '%s\n' "$payload" >"$path"
+  fi
+}
+
+case "$cmd" in
+  pre-real-host-readiness)
+    if [[ "$mode" == "root-deferred" ]]; then
+      summary_payload='{
+  "version": 1,
+  "status": "fail",
+  "stage": "wg_only_stack_selftest",
+  "notes": "WG-only stack selftest deferred: requires root privileges",
+  "wg_only_stack_selftest": {
+    "status": "skip",
+    "notes": "WG-only stack selftest deferred: requires root privileges"
+  },
+  "machine_c_smoke_gate": {
+    "ready": false,
+    "blockers": ["wg_only_stack_selftest"]
+  }
+}'
+      write_summary_json_if_requested "$summary_payload" "$@"
+      echo "[pre-real-host-readiness] status=FAIL stage=wg_only_stack_selftest"
+      echo "[pre-real-host-readiness] summary_json_payload:"
+      printf '%s\n' "$summary_payload"
+      exit 1
+    fi
+    if [[ "$mode" == "non-root-fail" ]]; then
+      summary_payload='{
+  "version": 1,
+  "status": "fail",
+  "stage": "runtime_fix",
+  "notes": "runtime hygiene failed without root-specific reason",
+  "wg_only_stack_selftest": {
+    "status": "skipped",
+    "notes": ""
+  },
+  "machine_c_smoke_gate": {
+    "ready": false,
+    "blockers": ["runtime_hygiene"]
+  }
+}'
+      write_summary_json_if_requested "$summary_payload" "$@"
+      echo "[pre-real-host-readiness] status=FAIL stage=runtime_fix"
+      echo "[pre-real-host-readiness] summary_json_payload:"
+      printf '%s\n' "$summary_payload"
+      exit 1
+    fi
+    summary_payload='{
+  "version": 1,
+  "status": "pass",
+  "stage": "complete",
+  "notes": "ready",
+  "machine_c_smoke_gate": {
+    "ready": true,
+    "blockers": []
+  }
+}'
+    write_summary_json_if_requested "$summary_payload" "$@"
+    echo "[pre-real-host-readiness] status=PASS stage=complete"
+    echo "[pre-real-host-readiness] summary_json_payload:"
+    printf '%s\n' "$summary_payload"
+    exit 0
+    ;;
+  three-machine-prod-bundle|prod-gate-slo-dashboard)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
 EOF_FAKE_EASY_NODE
 chmod +x "$FAKE_EASY_NODE"
 
 echo "[prod-pilot] wrapper defaults + forwarding"
 CAPTURE_FILE="$CAPTURE" \
 EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE=1000 \
 ./scripts/prod_pilot_runbook.sh \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
@@ -68,6 +163,11 @@ fi
 
 if ! printf '%s\n' "$pre_line" | rg -q -- '^pre-real-host-readiness '; then
   echo "prod-pilot wrapper first dispatch should be pre-real-host-readiness"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$pre_line" | rg -q -- '--defer-no-root 1'; then
+  echo "prod-pilot wrapper should default to --defer-no-root 1 for non-root pre-real-host readiness"
   cat "$CAPTURE"
   exit 1
 fi
@@ -194,6 +294,77 @@ if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-validate-strict-di
 fi
 if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-soak-diversity-pass 1'; then
   echo "prod-pilot wrapper missing dashboard --require-wg-soak-diversity-pass 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+echo "[prod-pilot] root-only deferred pre-real-host readiness continues"
+set +e
+CAPTURE_FILE="$CAPTURE" \
+FAKE_MODE="root-deferred" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE=1000 \
+./scripts/prod_pilot_runbook.sh \
+  --bootstrap-directory https://dir-a:8081 >/tmp/integration_prod_pilot_runbook_root_deferred.log 2>&1
+root_deferred_rc=$?
+set -e
+if [[ "$root_deferred_rc" -ne 0 ]]; then
+  echo "prod-pilot wrapper should continue when pre-real-host readiness reports root-only deferred condition"
+  cat /tmp/integration_prod_pilot_runbook_root_deferred.log
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- 'warning: pre-real-host readiness reported root-only deferred condition; continuing to bundle flow' /tmp/integration_prod_pilot_runbook_root_deferred.log; then
+  echo "prod-pilot wrapper missing root-only deferred continuation warning"
+  cat /tmp/integration_prod_pilot_runbook_root_deferred.log
+  exit 1
+fi
+if ! rg -q -- '^pre-real-host-readiness .*--defer-no-root 1 ' "$CAPTURE"; then
+  echo "prod-pilot wrapper root-deferred run missing --defer-no-root 1 forwarding"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^three-machine-prod-bundle' "$CAPTURE"; then
+  echo "prod-pilot wrapper root-deferred run should continue to three-machine-prod-bundle"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^prod-gate-slo-dashboard' "$CAPTURE"; then
+  echo "prod-pilot wrapper root-deferred run should continue to prod-gate-slo-dashboard"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+echo "[prod-pilot] non-root-independent pre-real-host readiness failure blocks"
+set +e
+CAPTURE_FILE="$CAPTURE" \
+FAKE_MODE="non-root-fail" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE=1000 \
+./scripts/prod_pilot_runbook.sh \
+  --bootstrap-directory https://dir-a:8081 >/tmp/integration_prod_pilot_runbook_non_root_fail.log 2>&1
+non_root_fail_rc=$?
+set -e
+if [[ "$non_root_fail_rc" -eq 0 ]]; then
+  echo "prod-pilot wrapper should fail closed on non-root-independent pre-real-host readiness failures"
+  cat /tmp/integration_prod_pilot_runbook_non_root_fail.log
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '^pre-real-host-readiness ' "$CAPTURE"; then
+  echo "prod-pilot wrapper non-root-fail run missing pre-real-host-readiness dispatch"
+  cat "$CAPTURE"
+  exit 1
+fi
+if rg -q -- '^three-machine-prod-bundle' "$CAPTURE"; then
+  echo "prod-pilot wrapper non-root-fail run should not continue to three-machine-prod-bundle"
+  cat "$CAPTURE"
+  exit 1
+fi
+if rg -q -- '^prod-gate-slo-dashboard' "$CAPTURE"; then
+  echo "prod-pilot wrapper non-root-fail run should not continue to prod-gate-slo-dashboard"
   cat "$CAPTURE"
   exit 1
 fi

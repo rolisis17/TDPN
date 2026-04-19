@@ -158,12 +158,28 @@ fi
 mkdir -p "$(dirname "$summary_json")"
 status="${FAKE_PRE_READINESS_STATUS:-pass}"
 ready="${FAKE_PRE_READINESS_READY:-true}"
+stage="${FAKE_PRE_READINESS_STAGE:-complete}"
+blockers_json="${FAKE_PRE_READINESS_BLOCKERS_JSON:-[]}"
+notes="${FAKE_PRE_READINESS_NOTES:-}"
+runtime_fix_notes="${FAKE_PRE_READINESS_RUNTIME_FIX_NOTES:-}"
+wg_only_notes="${FAKE_PRE_READINESS_WG_ONLY_NOTES:-$notes}"
+if [[ -n "${FAKE_PRE_READINESS_OUTPUT_NOTE:-}" ]]; then
+  printf '%s\n' "${FAKE_PRE_READINESS_OUTPUT_NOTE:-}"
+fi
 cat >"$summary_json" <<EOF_PRE
 {
   "status": "$status",
+  "stage": "$stage",
+  "notes": "$notes",
+  "runtime_fix": {
+    "notes": "$runtime_fix_notes"
+  },
+  "wg_only_stack_selftest": {
+    "notes": "$wg_only_notes"
+  },
   "machine_c_smoke_gate": {
     "ready": $ready,
-    "blockers": [],
+    "blockers": $blockers_json,
     "next_command": "sudo ./scripts/easy_node.sh client-vpn-smoke --pre-real-host-readiness 1"
   },
   "manual_validation_report": {
@@ -268,6 +284,25 @@ fi
 if [[ "$(rg -c '^--summary-json ' "$PRE_READINESS_CAPTURE")" -ne 1 ]]; then
   echo "prod-pilot-cohort success path expected one pre-real-host readiness invocation"
   cat "$PRE_READINESS_CAPTURE"
+  exit 1
+fi
+expected_pre_readiness_defer_no_root="0"
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  expected_pre_readiness_defer_no_root="1"
+fi
+expected_pre_readiness_defer_no_root_bool="false"
+if [[ "$expected_pre_readiness_defer_no_root" == "1" ]]; then
+  expected_pre_readiness_defer_no_root_bool="true"
+fi
+if [[ "$(rg -c -- "--defer-no-root ${expected_pre_readiness_defer_no_root}" "$PRE_READINESS_CAPTURE")" -ne 1 ]]; then
+  echo "prod-pilot-cohort success path expected forwarded --defer-no-root ${expected_pre_readiness_defer_no_root}"
+  cat "$PRE_READINESS_CAPTURE"
+  cat "$SUCCESS_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.pre_real_host_readiness.defer_no_root' "$SUCCESS_SUMMARY")" != "$expected_pre_readiness_defer_no_root_bool" ]]; then
+  echo "prod-pilot-cohort success summary has unexpected pre_real_host_readiness.defer_no_root"
+  cat "$SUCCESS_SUMMARY"
   exit 1
 fi
 if ! rg -q -- '--bootstrap-directory https://dir-a:8081' "$PILOT_CAPTURE"; then
@@ -481,6 +516,73 @@ if [[ "$(jq -r '.rounds.stopped_early' "$FAIL_SUMMARY")" != "true" ]]; then
   exit 1
 fi
 
+echo "[prod-pilot-cohort] pre-real-host readiness deferred-no-root continue path"
+PRE_DEFER_SUMMARY="$TMP_DIR/pre_defer_summary.json"
+PRE_DEFER_REPORTS_DIR="$TMP_DIR/pre_defer_reports"
+: >"$PILOT_CAPTURE"
+: >"$TREND_CAPTURE"
+: >"$ALERT_CAPTURE"
+: >"$PRE_READINESS_CAPTURE"
+rm -f "$PILOT_COUNTER"
+PILOT_CAPTURE_FILE="$PILOT_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PRE_READINESS_CAPTURE_FILE="$PRE_READINESS_CAPTURE" \
+PILOT_COUNTER_FILE="$PILOT_COUNTER" \
+PROD_PILOT_RUNBOOK_SCRIPT="$FAKE_PILOT" \
+PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
+PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
+PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_READINESS" \
+PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS_DEFER_NO_ROOT=1 \
+FAKE_PRE_READINESS_STATUS=fail \
+FAKE_PRE_READINESS_READY=false \
+FAKE_PRE_READINESS_RC=41 \
+FAKE_PRE_READINESS_STAGE=wg_only_stack_selftest \
+FAKE_PRE_READINESS_BLOCKERS_JSON='["wg_only_stack_selftest"]' \
+FAKE_PRE_READINESS_NOTES='pre-real-host readiness requires root privileges (rerun with sudo)' \
+./scripts/prod_pilot_cohort_runbook.sh \
+  --rounds 2 \
+  --pause-sec 0 \
+  --continue-on-fail 0 \
+  --require-all-rounds-ok 1 \
+  --reports-dir "$PRE_DEFER_REPORTS_DIR" \
+  --summary-json "$PRE_DEFER_SUMMARY" >/tmp/integration_prod_pilot_cohort_runbook_pre_defer.log 2>&1
+if [[ ! -f "$PRE_DEFER_SUMMARY" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred path did not produce summary json"
+  cat /tmp/integration_prod_pilot_cohort_runbook_pre_defer.log
+  exit 1
+fi
+if [[ "$(jq -r '.status' "$PRE_DEFER_SUMMARY")" != "ok" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected status=ok"
+  cat "$PRE_DEFER_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.pre_real_host_readiness.deferred_no_root' "$PRE_DEFER_SUMMARY")" != "true" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected deferred_no_root=true"
+  cat "$PRE_DEFER_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.pre_real_host_readiness.defer_no_root' "$PRE_DEFER_SUMMARY")" != "true" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected defer_no_root=true"
+  cat "$PRE_DEFER_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.rounds.attempted' "$PRE_DEFER_SUMMARY")" != "2" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected rounds.attempted=2"
+  cat "$PRE_DEFER_SUMMARY"
+  exit 1
+fi
+if [[ "$(rg -c -- '--defer-no-root 1' "$PRE_READINESS_CAPTURE")" -ne 1 ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred path expected forwarded --defer-no-root 1"
+  cat "$PRE_READINESS_CAPTURE"
+  exit 1
+fi
+if [[ "$(rg -c '^--bundle-dir ' "$PILOT_CAPTURE")" -ne 2 ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred path expected pilot rounds to continue"
+  cat "$PILOT_CAPTURE"
+  exit 1
+fi
+
 echo "[prod-pilot-cohort] pre-real-host readiness fail path"
 PRE_FAIL_SUMMARY="$TMP_DIR/pre_fail_summary.json"
 PRE_FAIL_REPORTS_DIR="$TMP_DIR/pre_fail_reports"
@@ -499,8 +601,11 @@ PROD_PILOT_RUNBOOK_SCRIPT="$FAKE_PILOT" \
 PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
 PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
 PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_READINESS" \
+PROD_PILOT_COHORT_PRE_REAL_HOST_READINESS_DEFER_NO_ROOT=1 \
 FAKE_PRE_READINESS_STATUS=fail \
 FAKE_PRE_READINESS_READY=false \
+FAKE_PRE_READINESS_STAGE=runtime_fix \
+FAKE_PRE_READINESS_BLOCKERS_JSON='["runtime_hygiene"]' \
 FAKE_PRE_READINESS_RC=31 \
 ./scripts/prod_pilot_cohort_runbook.sh \
   --rounds 4 \
@@ -518,6 +623,11 @@ if [[ "$pre_fail_rc" -ne 31 ]]; then
 fi
 if [[ "$(jq -r '.failure_step' "$PRE_FAIL_SUMMARY")" != "pre_real_host_readiness" ]]; then
   echo "prod-pilot-cohort pre-real-host readiness fail summary has unexpected failure_step"
+  cat "$PRE_FAIL_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.pre_real_host_readiness.deferred_no_root' "$PRE_FAIL_SUMMARY")" != "false" ]]; then
+  echo "prod-pilot-cohort pre-real-host readiness fail summary expected deferred_no_root=false"
   cat "$PRE_FAIL_SUMMARY"
   exit 1
 fi

@@ -163,7 +163,6 @@ func fromProtoEligibility(pb *validatorpb.ValidatorEligibility) validatortypes.V
 		Eligible:        pb.GetEligible(),
 		PolicyReason:    pb.GetPolicyReason(),
 		UpdatedAtUnix:   pb.GetUpdatedAtUnix(),
-		Status:          statusFromProto(pb.GetStatus()),
 	}
 }
 
@@ -191,7 +190,6 @@ func fromProtoStatusRecord(pb *validatorpb.ValidatorStatusRecord) validatortypes
 		EvidenceHeight:   pb.GetEvidenceHeight(),
 		EvidenceRef:      pb.GetEvidenceRef(),
 		RecordedAtUnix:   pb.GetRecordedAtUnix(),
-		Status:           statusFromProto(pb.GetStatus()),
 	}
 }
 

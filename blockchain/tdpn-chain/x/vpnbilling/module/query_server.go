@@ -12,6 +12,8 @@ var (
 	ErrSettlementNotFound = errors.New("vpnbilling: settlement not found")
 )
 
+const maxQueryListResults = 1000
+
 // GetReservationRequest requests a reservation by reservation ID.
 type GetReservationRequest struct {
 	ReservationID string
@@ -85,12 +87,28 @@ func (s QueryServer) ListReservations(_ ListReservationsRequest) (ListReservatio
 	if s.keeper == nil {
 		return ListReservationsResponse{}, ErrNilKeeper
 	}
-	return ListReservationsResponse{Reservations: s.keeper.ListReservations()}, nil
+	records := s.keeper.ListReservations()
+	return ListReservationsResponse{Reservations: clampReservations(records)}, nil
 }
 
 func (s QueryServer) ListSettlements(_ ListSettlementsRequest) (ListSettlementsResponse, error) {
 	if s.keeper == nil {
 		return ListSettlementsResponse{}, ErrNilKeeper
 	}
-	return ListSettlementsResponse{Settlements: s.keeper.ListSettlements()}, nil
+	records := s.keeper.ListSettlements()
+	return ListSettlementsResponse{Settlements: clampSettlements(records)}, nil
+}
+
+func clampReservations(records []types.CreditReservation) []types.CreditReservation {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampSettlements(records []types.SettlementRecord) []types.SettlementRecord {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
 }

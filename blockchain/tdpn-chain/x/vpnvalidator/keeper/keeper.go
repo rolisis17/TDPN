@@ -31,10 +31,14 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertEligibility(record types.ValidatorEligibility) {
+	_ = k.UpsertEligibilityWithError(record)
+}
+
+func (k *Keeper) UpsertEligibilityWithError(record types.ValidatorEligibility) error {
 	record = normalizeEligibility(record)
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertEligibility(record)
+	return k.upsertEligibilityLocked(record)
 }
 
 // CreateEligibility inserts eligibility with idempotency semantics keyed by ValidatorID.
@@ -62,11 +66,15 @@ func (k *Keeper) CreateEligibility(record types.ValidatorEligibility) (types.Val
 				return types.ValidatorEligibility{}, conflictError("validator eligibility", normalized.ValidatorID)
 			}
 		}
-		k.store.UpsertEligibility(normalized)
+		if err := k.upsertEligibilityLocked(normalized); err != nil {
+			return types.ValidatorEligibility{}, err
+		}
 		return normalized, nil
 	}
 
-	k.store.UpsertEligibility(normalized)
+	if err := k.upsertEligibilityLocked(normalized); err != nil {
+		return types.ValidatorEligibility{}, err
+	}
 	return normalized, nil
 }
 
@@ -107,10 +115,14 @@ func (k *Keeper) ListEligibilities() []types.ValidatorEligibility {
 }
 
 func (k *Keeper) UpsertStatusRecord(record types.ValidatorStatusRecord) {
+	_ = k.UpsertStatusRecordWithError(record)
+}
+
+func (k *Keeper) UpsertStatusRecordWithError(record types.ValidatorStatusRecord) error {
 	record = normalizeStatusRecord(record)
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.store.UpsertStatusRecord(record)
+	return k.upsertStatusRecordLocked(record)
 }
 
 // CreateStatusRecord inserts status with idempotency semantics keyed by StatusID.
@@ -150,11 +162,15 @@ func (k *Keeper) CreateStatusRecord(record types.ValidatorStatusRecord) (types.V
 				return types.ValidatorStatusRecord{}, conflictError("validator status", normalized.StatusID)
 			}
 		}
-		k.store.UpsertStatusRecord(normalized)
+		if err := k.upsertStatusRecordLocked(normalized); err != nil {
+			return types.ValidatorStatusRecord{}, err
+		}
 		return normalized, nil
 	}
 
-	k.store.UpsertStatusRecord(normalized)
+	if err := k.upsertStatusRecordLocked(normalized); err != nil {
+		return types.ValidatorStatusRecord{}, err
+	}
 	return normalized, nil
 }
 
@@ -255,6 +271,30 @@ func compareByID(a, b string) int {
 	default:
 		return 0
 	}
+}
+
+func (k *Keeper) upsertEligibilityLocked(record types.ValidatorEligibility) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertEligibilityWithError(record); err != nil {
+			return fmt.Errorf("persist eligibility %q: %w", record.ValidatorID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertEligibility(record)
+	return nil
+}
+
+func (k *Keeper) upsertStatusRecordLocked(record types.ValidatorStatusRecord) error {
+	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
+		if err := writeAwareStore.UpsertStatusRecordWithError(record); err != nil {
+			return fmt.Errorf("persist status record %q: %w", record.StatusID, err)
+		}
+		return nil
+	}
+
+	k.store.UpsertStatusRecord(record)
+	return nil
 }
 
 func listEligibilityByCanonicalID(records []types.ValidatorEligibility, canonicalValidatorID string) []types.ValidatorEligibility {

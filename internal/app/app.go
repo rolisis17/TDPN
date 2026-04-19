@@ -133,7 +133,16 @@ func setURLFromAddrIfUnset(urlEnv string, addrEnv string) {
 		return
 	}
 	if !strings.Contains(addr, "://") {
-		addr = "http://" + addr
+		base := strings.TrimRight(addr, "/")
+		host := base
+		if cut, _, ok := strings.Cut(base, "/"); ok {
+			host = cut
+		}
+		if isLoopbackURLHost(host) {
+			addr = "http://" + base
+		} else {
+			addr = "https://" + base
+		}
 	}
 	_ = os.Setenv(urlEnv, addr)
 }

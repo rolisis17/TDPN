@@ -73,11 +73,13 @@ abs_path() {
 }
 
 print_cmd() {
+  local line=""
   local arg
   for arg in "$@"; do
-    printf '%q ' "$arg"
+    line+=$(printf '%q ' "$arg")
   done
-  printf '\n'
+  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
+  printf '%s\n' "$line"
 }
 
 bool_arg_or_die() {
@@ -986,6 +988,15 @@ else
   notes="All executed profile runs failed"
 fi
 
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+anon_cred_present="0"
+if [[ -n "$anon_cred" ]]; then
+  anon_cred_present="1"
+fi
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$status" \
@@ -1004,8 +1015,8 @@ jq -n \
   --arg issuer_url "$issuer_url" \
   --arg entry_url "$entry_url" \
   --arg exit_url "$exit_url" \
-  --arg subject "$subject" \
-  --arg anon_cred "$anon_cred" \
+  --arg subject "$subject_redacted" \
+  --arg anon_cred_present "$anon_cred_present" \
   --arg min_sources "$min_sources" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
@@ -1056,7 +1067,7 @@ jq -n \
       entry_url: $entry_url,
       exit_url: $exit_url,
       subject: $subject,
-      anon_cred_present: ($anon_cred | length > 0),
+      anon_cred_present: ($anon_cred_present == "1"),
       min_sources: ($min_sources | tonumber),
       beta_profile: ($beta_profile == "1"),
       prod_profile: ($prod_profile == "1"),

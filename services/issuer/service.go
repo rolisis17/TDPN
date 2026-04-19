@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -69,6 +71,9 @@ type Service struct {
 	sponsorMaxIDLen               int
 	sponsorMaxCurrencyLen         int
 	sponsorMaxReservationMicros   int64
+	issuedPaymentReservations     map[string]int64
+	issuedPaymentReplayMaxEntries int
+	issuedPaymentReplayTTL        time.Duration
 	mu                            sync.RWMutex
 	subjects                      map[string]proto.SubjectProfile
 	subjectsFile                  string
@@ -112,14 +117,32 @@ type issuerSettlementStatusResponse struct {
 }
 
 const (
-	defaultSponsorMaxSubjectLen        = 128
-	defaultSponsorMaxIDLen             = 128
-	defaultSponsorMaxCurrencyLen       = 16
-	defaultSponsorMaxReservationMicros = int64(1000000000)
-	issueTokenRequestMaxBytes          = int64(64 * 1024)
-	revokeTokenRequestMaxBytes         = int64(8 * 1024)
-	serverReadHeaderTimeout            = 10 * time.Second
+	defaultSponsorMaxSubjectLen          = 128
+	defaultSponsorMaxIDLen               = 128
+	defaultSponsorMaxCurrencyLen         = 16
+	defaultSponsorMaxReservationMicros   = int64(1000000000)
+	issueTokenRequestMaxBytes            = int64(64 * 1024)
+	revokeTokenRequestMaxBytes           = int64(8 * 1024)
+	hostResolveTimeout                   = 2 * time.Second
+	serverReadHeaderTimeout              = 10 * time.Second
+	serverReadTimeout                    = 15 * time.Second
+	serverWriteTimeout                   = 30 * time.Second
+	serverIdleTimeout                    = 60 * time.Second
+	serverMaxHeaderBytes                 = 1 << 20
+	allowInsecureTokenAuthPublicBind     = "ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND"
+	allowInsecurePublicIssueNoPayment    = "ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF"
+	allowDangerousDevAdminTokenFallback  = "ISSUER_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
+	issuerPrivateKeyFileMaxBytes         = int64(16 * 1024)
+	issuerAdminKeysFileMaxBytes          = int64(1 * 1024 * 1024)
+	issuerPreviousPubKeysFileMaxBytes    = int64(1 * 1024 * 1024)
+	issuerStateFileMaxBytes              = int64(32 * 1024 * 1024)
+	defaultIssuedPaymentReplayMaxEntries = 1 << 17
+	defaultIssuedPaymentReplayTTL        = 24 * time.Hour
 )
+
+var lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
 
 func New() *Service {
 	addr := os.Getenv("ISSUER_ADDR")
@@ -130,8 +153,8 @@ func New() *Service {
 	if issuerID == "" {
 		issuerID = "issuer-local"
 	}
-	adminToken := os.Getenv("ISSUER_ADMIN_TOKEN")
-	if adminToken == "" {
+	adminToken := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_TOKEN"))
+	if adminToken == "" && envEnabled(allowDangerousDevAdminTokenFallback) {
 		adminToken = "dev-admin-token"
 	}
 	adminAllowTokenRaw := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_ALLOW_TOKEN"))
@@ -275,6 +298,18 @@ func New() *Service {
 			sponsorMaxReservationMicros = n
 		}
 	}
+	issuedPaymentReplayMaxEntries := defaultIssuedPaymentReplayMaxEntries
+	if v := strings.TrimSpace(os.Getenv("ISSUER_PAYMENT_REPLAY_MAX_ENTRIES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			issuedPaymentReplayMaxEntries = n
+		}
+	}
+	issuedPaymentReplayTTL := defaultIssuedPaymentReplayTTL
+	if v := strings.TrimSpace(os.Getenv("ISSUER_PAYMENT_REPLAY_TTL_SEC")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			issuedPaymentReplayTTL = time.Duration(n) * time.Second
+		}
+	}
 	settlementSvc := newSettlementServiceFromEnv()
 	return &Service{
 		addr:                          addr,
@@ -314,6 +349,9 @@ func New() *Service {
 		sponsorMaxIDLen:               sponsorMaxIDLen,
 		sponsorMaxCurrencyLen:         sponsorMaxCurrencyLen,
 		sponsorMaxReservationMicros:   sponsorMaxReservationMicros,
+		issuedPaymentReservations:     make(map[string]int64),
+		issuedPaymentReplayMaxEntries: issuedPaymentReplayMaxEntries,
+		issuedPaymentReplayTTL:        issuedPaymentReplayTTL,
 		subjects:                      make(map[string]proto.SubjectProfile),
 		subjectsFile:                  subjectsFile,
 		revocations:                   make(map[string]int64),
@@ -394,7 +432,15 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/admin/slash/evidence", s.handleSubmitSlashEvidence)
 	mux.HandleFunc("/v1/revocations", s.handleRevocations)
 
-	s.httpSrv = &http.Server{Addr: s.addr, Handler: mux, ReadHeaderTimeout: serverReadHeaderTimeout}
+	s.httpSrv = &http.Server{
+		Addr:              s.addr,
+		Handler:           mux,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("issuer listening on %s", s.addr)
@@ -489,19 +535,29 @@ func (s *Service) reconcileSettlementStatus(ctx context.Context) (settlement.Rec
 
 func (s *Service) validateRuntimeConfig() error {
 	if securehttp.Enabled() {
+		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
+		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
 	}
 	adminTokenAuthEnabled := s.isAdminTokenAuthEnabled()
-	if !isLoopbackBindAddr(s.addr) && strings.TrimSpace(s.privateKeyPath) == "data/issuer_ed25519.key" {
+	publicBind := !isLoopbackBindAddr(s.addr)
+	if publicBind && strings.TrimSpace(s.privateKeyPath) == "data/issuer_ed25519.key" {
 		return fmt.Errorf("public bind rejects legacy ISSUER_PRIVATE_KEY_FILE path data/issuer_ed25519.key")
 	}
-	if !isLoopbackBindAddr(s.addr) && adminTokenAuthEnabled && isWeakAdminToken(s.adminToken) {
+	if publicBind && adminTokenAuthEnabled && isWeakAdminToken(s.adminToken) {
 		return fmt.Errorf("public bind requires strong ISSUER_ADMIN_TOKEN when token admin auth is enabled")
 	}
-	if !isLoopbackBindAddr(s.addr) && strings.TrimSpace(s.sponsorAPIToken) != "" && isWeakSponsorToken(s.sponsorAPIToken) {
+	if publicBind && strings.TrimSpace(s.sponsorAPIToken) != "" && isWeakSponsorToken(s.sponsorAPIToken) {
 		return fmt.Errorf("public bind requires strong ISSUER_SPONSOR_API_TOKEN when sponsor auth is enabled")
+	}
+	if publicBind && !securehttp.Enabled() && !envEnabled(allowInsecureTokenAuthPublicBind) {
+		return fmt.Errorf("public bind requires MTLS_ENABLE=1 or %s=1", allowInsecureTokenAuthPublicBind)
+	}
+	if publicBind && !s.requirePaymentProof && !envEnabled(allowInsecurePublicIssueNoPayment) {
+		return fmt.Errorf("public bind requires ISSUER_REQUIRE_PAYMENT_PROOF=1 or %s=1", allowInsecurePublicIssueNoPayment)
 	}
 	if !adminTokenAuthEnabled && !s.adminRequireSigned {
 		return fmt.Errorf("issuer admin auth misconfigured: no admin auth method enabled")
@@ -520,6 +576,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if adminTokenAuthEnabled && len(strings.TrimSpace(s.adminToken)) < 16 {
 		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_ADMIN_TOKEN length>=16")
+	}
+	if !s.requirePaymentProof {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_REQUIRE_PAYMENT_PROOF=1")
 	}
 	if s.keyRotateSec <= 0 {
 		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_KEY_ROTATE_SEC>0")
@@ -548,7 +607,7 @@ func (s *Service) loadOrCreateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, 
 	if s.privateKeyPath == "" {
 		return crypto.GenerateEd25519Keypair()
 	}
-	b, err := os.ReadFile(s.privateKeyPath)
+	b, err := readFileBounded(s.privateKeyPath, issuerPrivateKeyFileMaxBytes)
 	if err == nil {
 		trimmed := strings.TrimSpace(string(b))
 		raw, decErr := base64.RawURLEncoding.DecodeString(trimmed)
@@ -574,7 +633,7 @@ func (s *Service) loadOrCreateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, 
 		return nil, nil, err
 	}
 	enc := base64.RawURLEncoding.EncodeToString(priv)
-	if err := os.WriteFile(s.privateKeyPath, []byte(enc+"\n"), 0o600); err != nil {
+	if err := writeFileAtomic(s.privateKeyPath, []byte(enc+"\n"), 0o600); err != nil {
 		return nil, nil, err
 	}
 	return pub, priv, nil
@@ -643,16 +702,22 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "invalid token_type", http.StatusBadRequest)
 		return
 	}
+	if tokenType == crypto.TokenTypeProviderRole && !forcePaymentProof {
+		http.Error(w, "provider_role token issuance requires sponsor-authenticated endpoint", http.StatusForbidden)
+		return
+	}
 	popPubKey, err := crypto.NormalizeEd25519PublicKey(req.PopPubKey)
 	if err != nil {
 		http.Error(w, "invalid pop_pub_key", http.StatusBadRequest)
 		return
 	}
+	exitScope := normalizeExitScopeIDs(req.ExitScope)
 
 	keyEpoch, priv := s.signingKeySnapshot()
 	expires := time.Now().Add(s.tokenTTL)
 	nowUnix := time.Now().Unix()
 	var claims crypto.CapabilityClaims
+	var paymentAuth settlement.PaymentAuthorization
 	switch tokenType {
 	case crypto.TokenTypeClientAccess:
 		if req.AnonCred != "" {
@@ -682,11 +747,12 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 				effectiveTier = capTier
 			}
 			subject := anonymousSubjectAlias(cred.CredentialID)
-			if err := s.ensureClientPaymentAuthorization(ctx, req, subject, forcePaymentProof); err != nil {
+			paymentAuth, err = s.ensureClientPaymentAuthorization(ctx, req, subject, forcePaymentProof)
+			if err != nil {
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
-			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
+			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope)
 			claims.AnonCredID = anonymousCredentialPresentationID(s.issuerID, cred.CredentialID, claims.TokenID, s.anonCredExposeID)
 		} else {
 			if s.clientAllowlistOnly && !s.subjectEligibleForClientToken(req.Subject) {
@@ -694,11 +760,12 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 				return
 			}
 			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
-			if err := s.ensureClientPaymentAuthorization(ctx, req, req.Subject, forcePaymentProof); err != nil {
+			paymentAuth, err = s.ensureClientPaymentAuthorization(ctx, req, req.Subject, forcePaymentProof)
+			if err != nil {
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
-			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, req.ExitScope)
+			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope)
 		}
 	case crypto.TokenTypeProviderRole:
 		if req.Subject == "" {
@@ -710,10 +777,25 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "unsupported token_type", http.StatusBadRequest)
 		return
 	}
+	if paymentAuth.ReservationID != "" && paymentAuth.IdempotentReplay && s.hasIssuedPaymentReservation(paymentAuth.ReservationID) {
+		http.Error(w, "payment proof already used", http.StatusConflict)
+		return
+	}
 	tok, err := crypto.SignClaims(claims, priv)
 	if err != nil {
 		http.Error(w, "failed to sign token", http.StatusInternalServerError)
 		return
+	}
+	if paymentAuth.ReservationID != "" {
+		marked, saturated := s.markIssuedPaymentReservation(paymentAuth.ReservationID)
+		if !marked {
+			if saturated {
+				http.Error(w, "payment replay cache saturated", http.StatusServiceUnavailable)
+				return
+			}
+			http.Error(w, "payment proof already used", http.StatusConflict)
+			return
+		}
 	}
 
 	resp := proto.IssueTokenResponse{Token: tok, Expires: claims.ExpiryUnix, JTI: claims.TokenID}
@@ -978,20 +1060,25 @@ func (s *Service) effectiveSponsorMaxReservationMicros() int64 {
 	return defaultSponsorMaxReservationMicros
 }
 
-func (s *Service) ensureClientPaymentAuthorization(ctx context.Context, req proto.IssueTokenRequest, defaultSubject string, force bool) error {
+func (s *Service) ensureClientPaymentAuthorization(
+	ctx context.Context,
+	req proto.IssueTokenRequest,
+	defaultSubject string,
+	force bool,
+) (settlement.PaymentAuthorization, error) {
 	if req.TokenType == crypto.TokenTypeProviderRole {
-		return nil
+		return settlement.PaymentAuthorization{}, nil
 	}
 	if !force && !s.requirePaymentProof && req.PaymentProof == nil {
-		return nil
+		return settlement.PaymentAuthorization{}, nil
 	}
 	if req.PaymentProof == nil {
-		return fmt.Errorf("payment proof required")
+		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof required")
 	}
 	requestSubject := strings.TrimSpace(req.Subject)
 	subject := strings.TrimSpace(req.PaymentProof.Subject)
 	if subject != "" && requestSubject != "" && subject != requestSubject {
-		return fmt.Errorf("payment proof invalid: request subject mismatch")
+		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: request subject mismatch")
 	}
 	if subject == "" {
 		subject = strings.TrimSpace(defaultSubject)
@@ -999,16 +1086,88 @@ func (s *Service) ensureClientPaymentAuthorization(ctx context.Context, req prot
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.settlementService().AuthorizePayment(ctx, settlement.PaymentProof{
+	auth, err := s.settlementService().AuthorizePayment(ctx, settlement.PaymentProof{
 		ReservationID: strings.TrimSpace(req.PaymentProof.ReservationID),
 		SponsorID:     strings.TrimSpace(req.PaymentProof.SponsorID),
 		SubjectID:     subject,
 		SessionID:     strings.TrimSpace(req.PaymentProof.SessionID),
 	})
 	if err != nil {
-		return fmt.Errorf("payment proof invalid: %w", err)
+		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: %w", err)
 	}
-	return nil
+	return auth, nil
+}
+
+func (s *Service) hasIssuedPaymentReservation(reservationID string) bool {
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneIssuedPaymentReservationsLocked(time.Now().Unix())
+	_, ok := s.issuedPaymentReservations[reservationID]
+	return ok
+}
+
+func (s *Service) markIssuedPaymentReservation(reservationID string) (bool, bool) {
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return true, false
+	}
+	now := time.Now().Unix()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.issuedPaymentReservations == nil {
+		s.issuedPaymentReservations = make(map[string]int64)
+	}
+	s.pruneIssuedPaymentReservationsLocked(now)
+	if _, exists := s.issuedPaymentReservations[reservationID]; exists {
+		return false, false
+	}
+	maxEntries := s.issuedPaymentReplayCacheMaxEntries()
+	if maxEntries > 0 && len(s.issuedPaymentReservations) >= maxEntries {
+		return false, true
+	}
+	s.issuedPaymentReservations[reservationID] = now
+	return true, false
+}
+
+func (s *Service) issuedPaymentReplayCacheMaxEntries() int {
+	if s == nil {
+		return defaultIssuedPaymentReplayMaxEntries
+	}
+	if s.issuedPaymentReplayMaxEntries > 0 {
+		return s.issuedPaymentReplayMaxEntries
+	}
+	return defaultIssuedPaymentReplayMaxEntries
+}
+
+func (s *Service) issuedPaymentReplayRetentionSec() int64 {
+	if s == nil {
+		return int64(defaultIssuedPaymentReplayTTL / time.Second)
+	}
+	ttl := s.issuedPaymentReplayTTL
+	if ttl <= 0 {
+		ttl = defaultIssuedPaymentReplayTTL
+	}
+	sec := int64(ttl / time.Second)
+	if sec <= 0 {
+		sec = 1
+	}
+	return sec
+}
+
+func (s *Service) pruneIssuedPaymentReservationsLocked(now int64) {
+	if s == nil || len(s.issuedPaymentReservations) == 0 {
+		return
+	}
+	cutoff := now - s.issuedPaymentReplayRetentionSec()
+	for reservationID, seenAt := range s.issuedPaymentReservations {
+		if seenAt <= cutoff {
+			delete(s.issuedPaymentReservations, reservationID)
+		}
+	}
 }
 
 func (s *Service) settlementService() settlement.Service {
@@ -1922,7 +2081,7 @@ func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 			return false
 		}
 	}
-	if adminTokenAuthEnabled && strings.TrimSpace(r.Header.Get("X-Admin-Token")) == s.adminToken {
+	if adminTokenAuthEnabled && secureTokenMatch(r.Header.Get("X-Admin-Token"), s.adminToken) {
 		return true
 	}
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -1939,11 +2098,20 @@ func (s *Service) requireSponsor(w http.ResponseWriter, r *http.Request) bool {
 	if token == "" {
 		token = parseBearerToken(r.Header.Get("Authorization"))
 	}
-	if token == expected {
+	if secureTokenMatch(token, expected) {
 		return true
 	}
 	http.Error(w, "unauthorized sponsor", http.StatusUnauthorized)
 	return false
+}
+
+func secureTokenMatch(candidate string, expected string) bool {
+	candidate = strings.TrimSpace(candidate)
+	expected = strings.TrimSpace(expected)
+	if expected == "" || len(candidate) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(candidate), []byte(expected)) == 1
 }
 
 func parseBearerToken(raw string) string {
@@ -1967,12 +2135,31 @@ func isLoopbackBindAddr(addr string) bool {
 	if host == "" {
 		return false
 	}
-	host = strings.Trim(host, "[]")
-	if strings.EqualFold(host, "localhost") {
-		return true
+	return hostResolvesToLoopback(host)
+}
+
+func hostResolvesToLoopback(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), hostResolveTimeout)
+	defer cancel()
+
+	addrs, err := lookupIPAddr(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, addr := range addrs {
+		if addr.IP == nil || !addr.IP.IsLoopback() {
+			return false
+		}
+	}
+	return true
 }
 
 func bindAddrHost(addr string) string {
@@ -2010,6 +2197,16 @@ func isWeakSponsorToken(token string) bool {
 		return true
 	}
 	return len(token) < 16
+}
+
+func envEnabled(name string) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) isAdminTokenAuthEnabled() bool {
@@ -2125,7 +2322,7 @@ func (s *Service) loadAdminSigningKeys() error {
 		}
 	}
 	if path := strings.TrimSpace(s.adminKeysFile); path != "" {
-		b, err := os.ReadFile(path)
+		b, err := readFileBounded(path, issuerAdminKeysFileMaxBytes)
 		if err != nil {
 			return fmt.Errorf("read admin signing key file: %w", err)
 		}
@@ -2395,6 +2592,14 @@ func newSettlementServiceFromEnv() settlement.Service {
 		if endpoint == "" {
 			return nil, "", nil
 		}
+		allowInsecureHTTP := false
+		if raw := strings.TrimSpace(os.Getenv(prefix + "ALLOW_INSECURE_HTTP")); raw != "" {
+			v, err := strconv.ParseBool(raw)
+			if err != nil {
+				return nil, endpoint, fmt.Errorf("%sALLOW_INSECURE_HTTP must be boolean: %w", prefix, err)
+			}
+			allowInsecureHTTP = v
+		}
 
 		queueSize := 256
 		if raw := strings.TrimSpace(os.Getenv(prefix + "QUEUE_SIZE")); raw != "" {
@@ -2432,6 +2637,7 @@ func newSettlementServiceFromEnv() settlement.Service {
 			MaxRetries:            retries,
 			BaseBackoff:           backoff,
 			HTTPTimeout:           timeout,
+			AllowInsecureHTTP:     allowInsecureHTTP,
 			SubmitMode:            submitMode,
 			SignedTxBroadcastPath: strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_BROADCAST_PATH")),
 			SignedTxChainID:       strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_CHAIN_ID")),
@@ -2454,7 +2660,7 @@ func newSettlementServiceFromEnv() settlement.Service {
 			log.Printf("issuer settlement: cosmos adapter init failed (%v); running memory-only mode", err)
 		} else {
 			opts = append(opts, settlement.WithChainAdapter(adapter))
-			log.Printf("issuer settlement: cosmos adapter enabled endpoint=%s", endpoint)
+			log.Printf("issuer settlement: cosmos adapter enabled endpoint=%s", redactEndpointForLog(endpoint))
 		}
 
 		shadowAdapter, shadowEndpoint, shadowErr := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_SHADOW_")
@@ -2463,12 +2669,47 @@ func newSettlementServiceFromEnv() settlement.Service {
 				log.Printf("issuer settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter", shadowErr)
 			} else {
 				opts = append(opts, settlement.WithShadowChainAdapter(shadowAdapter))
-				log.Printf("issuer settlement: cosmos shadow adapter enabled endpoint=%s", shadowEndpoint)
+				log.Printf("issuer settlement: cosmos shadow adapter enabled endpoint=%s", redactEndpointForLog(shadowEndpoint))
 			}
 		}
 	}
 
 	return settlement.NewMemoryService(opts...)
+}
+
+func normalizeExitScopeIDs(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, v := range raw {
+		id := strings.TrimSpace(v)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func redactEndpointForLog(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "<invalid-endpoint>"
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string) crypto.CapabilityClaims {
@@ -2678,7 +2919,7 @@ func loadPreviousPubKeys(path string) ([]string, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := readFileBounded(path, issuerPreviousPubKeysFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -2745,14 +2986,14 @@ func (s *Service) saveSubjects() error {
 		return err
 	}
 	dir := filepath.Dir(s.subjectsFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.subjectsFile, data, 0o644)
+	return writeFileAtomic(s.subjectsFile, data, 0o600)
 }
 
 func (s *Service) loadSubjects() error {
-	b, err := os.ReadFile(s.subjectsFile)
+	b, err := readFileBounded(s.subjectsFile, issuerStateFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -2790,14 +3031,14 @@ func (s *Service) saveRevocations() error {
 		return err
 	}
 	dir := filepath.Dir(s.revocationsFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.revocationsFile, data, 0o644)
+	return writeFileAtomic(s.revocationsFile, data, 0o600)
 }
 
 func (s *Service) loadRevocations() error {
-	b, err := os.ReadFile(s.revocationsFile)
+	b, err := readFileBounded(s.revocationsFile, issuerStateFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -2844,14 +3085,14 @@ func (s *Service) saveAnonRevocations() error {
 		return err
 	}
 	dir := filepath.Dir(s.anonRevocationsFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.anonRevocationsFile, data, 0o644)
+	return writeFileAtomic(s.anonRevocationsFile, data, 0o600)
 }
 
 func (s *Service) loadAnonRevocations() error {
-	b, err := os.ReadFile(s.anonRevocationsFile)
+	b, err := readFileBounded(s.anonRevocationsFile, issuerStateFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -2883,17 +3124,17 @@ func (s *Service) saveAnonDisputes() error {
 		return err
 	}
 	dir := filepath.Dir(s.anonDisputesFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.anonDisputesFile, data, 0o644)
+	return writeFileAtomic(s.anonDisputesFile, data, 0o600)
 }
 
 func (s *Service) loadAnonDisputes() error {
 	if strings.TrimSpace(s.anonDisputesFile) == "" {
 		return nil
 	}
-	b, err := os.ReadFile(s.anonDisputesFile)
+	b, err := readFileBounded(s.anonDisputesFile, issuerStateFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -2951,7 +3192,7 @@ func (s *Service) loadOrCreateEpochState() error {
 	if strings.TrimSpace(s.epochStateFile) == "" {
 		return nil
 	}
-	b, err := os.ReadFile(s.epochStateFile)
+	b, err := readFileBounded(s.epochStateFile, issuerStateFileMaxBytes)
 	if err == nil {
 		var st issuerEpochState
 		if decErr := json.Unmarshal(b, &st); decErr != nil {
@@ -3048,10 +3289,10 @@ func (s *Service) saveEpochState() error {
 		return err
 	}
 	dir := filepath.Dir(s.epochStateFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.epochStateFile, data, 0o644)
+	return writeFileAtomic(s.epochStateFile, data, 0o600)
 }
 
 func (s *Service) signingKeySnapshot() (int64, ed25519.PrivateKey) {
@@ -3114,7 +3355,7 @@ func (s *Service) persistPrivateKey(priv ed25519.PrivateKey) error {
 		return err
 	}
 	enc := base64.RawURLEncoding.EncodeToString(priv)
-	return os.WriteFile(s.privateKeyPath, []byte(enc+"\n"), 0o600)
+	return writeFileAtomic(s.privateKeyPath, []byte(enc+"\n"), 0o600)
 }
 
 func appendPreviousPubKey(path string, key string, keep int) error {
@@ -3138,7 +3379,7 @@ func appendPreviousPubKey(path string, key string, keep int) error {
 	if data != "" {
 		data += "\n"
 	}
-	return os.WriteFile(path, []byte(data), 0o644)
+	return writeFileAtomic(path, []byte(data), 0o644)
 }
 
 func cloneRevocations(in map[string]int64) map[string]int64 {
@@ -3302,14 +3543,14 @@ func (s *Service) saveAudit() error {
 		return err
 	}
 	dir := filepath.Dir(s.auditFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.auditFile, data, 0o644)
+	return writeFileAtomic(s.auditFile, data, 0o600)
 }
 
 func (s *Service) loadAudit() error {
-	b, err := os.ReadFile(s.auditFile)
+	b, err := readFileBounded(s.auditFile, issuerStateFileMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -3331,6 +3572,99 @@ func (s *Service) loadAudit() error {
 	s.auditSeq = maxID
 	s.mu.Unlock()
 	return nil
+}
+
+func readFileBounded(path string, maxBytes int64) ([]byte, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("file path is required")
+	}
+	lstatInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if lstatInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("file %s must not be a symlink", path)
+	}
+	if !lstatInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s must be a regular file", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, statErr := file.Stat()
+	if statErr != nil {
+		return nil, statErr
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s must be a regular file", path)
+	}
+	if !os.SameFile(lstatInfo, info) {
+		return nil, fmt.Errorf("file %s changed during open", path)
+	}
+	if maxBytes > 0 {
+		if info.Size() > maxBytes {
+			return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
+		}
+	}
+	limit := maxBytes
+	if limit <= 0 {
+		limit = 1
+	}
+	b, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if maxBytes > 0 && int64(len(b)) > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
+	}
+	return b, nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("file %s must not be a symlink", path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("file %s must be a regular file", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	tmpDir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(tmpDir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if perm != 0 {
+		if err := tmpFile.Chmod(perm); err != nil {
+			_ = tmpFile.Close()
+			return err
+		}
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func tickerC(t *time.Ticker) <-chan time.Time {

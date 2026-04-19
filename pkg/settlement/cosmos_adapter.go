@@ -10,18 +10,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"privacynode/internal/fileperm"
 )
 
 const (
-	CosmosSubmitModeHTTP     = "http"
-	CosmosSubmitModeSignedTx = "signed-tx"
+	CosmosSubmitModeHTTP                          = "http"
+	CosmosSubmitModeSignedTx                      = "signed-tx"
+	cosmosSignedTxSecretFileMaxBytes              = int64(8 * 1024)
+	cosmosAllowProxyFromEnvConfigName             = "COSMOS_ADAPTER_ALLOW_PROXY_FROM_ENV"
+	cosmosAllowDangerousPrivateEndpointConfigName = "COSMOS_ADAPTER_ALLOW_DANGEROUS_PRIVATE_ENDPOINT"
+	cosmosDeferredOperationDefaultMax             = 4096
 )
+
+var cosmosLookupIPAddrs = net.DefaultResolver.LookupIPAddr
 
 type CosmosAdapterConfig struct {
 	Endpoint    string
@@ -30,6 +39,9 @@ type CosmosAdapterConfig struct {
 	MaxRetries  int
 	BaseBackoff time.Duration
 	HTTPTimeout time.Duration
+	// AllowInsecureHTTP permits non-loopback plain HTTP endpoints.
+	// Keep disabled outside controlled local development.
+	AllowInsecureHTTP bool
 
 	SubmitMode            string
 	SignedTxBroadcastPath string
@@ -52,9 +64,10 @@ type CosmosAdapter struct {
 
 	signedTxSubmitter cosmosSignedTxSubmitter
 
-	stateMu    sync.Mutex
-	closed     bool
-	deferredOp map[string]cosmosDeferredOperation
+	stateMu       sync.Mutex
+	closed        bool
+	deferredOp    map[string]cosmosDeferredOperation
+	deferredOpMax int
 
 	workerCtx    context.Context
 	workerCancel context.CancelFunc
@@ -153,13 +166,55 @@ type cosmosBroadcastRequest struct {
 	Tx   cosmosSignedTx `json:"tx"`
 }
 
+type cosmosBroadcastResponse struct {
+	TxResponse *cosmosBroadcastTxResponse `json:"tx_response"`
+}
+
+type cosmosBroadcastTxResponse struct {
+	Code   uint32 `json:"code"`
+	RawLog string `json:"raw_log"`
+}
+
 type cosmosHTTPStatusError struct {
 	message    string
 	statusCode int
 }
 
+type cosmosEndpointPolicyRoundTripper struct {
+	inner                         http.RoundTripper
+	resolver                      cosmosOutboundIPResolver
+	allowDangerousPrivateEndpoint bool
+}
+
 func (e *cosmosHTTPStatusError) Error() string {
 	return e.message
+}
+
+func (rt *cosmosEndpointPolicyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, fmt.Errorf("cosmos request URL is required")
+	}
+	host := strings.TrimSpace(req.URL.Hostname())
+	if host == "" {
+		return nil, fmt.Errorf("cosmos request host is required")
+	}
+	port := strings.TrimSpace(req.URL.Port())
+	if port == "" {
+		if strings.EqualFold(req.URL.Scheme, "https") {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	address := net.JoinHostPort(host, port)
+	if _, err := resolveCosmosSafeDialAddress(req.Context(), rt.resolver, address, rt.allowDangerousPrivateEndpoint); err != nil {
+		return nil, err
+	}
+	inner := rt.inner
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	return inner.RoundTrip(req)
 }
 
 type cosmosRetryableError struct {
@@ -177,9 +232,9 @@ func (e *cosmosRetryableError) Unwrap() error {
 var errCosmosAdapterClosedWithBacklog = errors.New("cosmos adapter closed with backlog")
 
 func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
-	endpoint := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
-	if endpoint == "" {
-		return nil, fmt.Errorf("cosmos adapter endpoint required")
+	endpoint, err := normalizeCosmosAdapterEndpoint(cfg.Endpoint, cfg.AllowInsecureHTTP)
+	if err != nil {
+		return nil, err
 	}
 	queueSize := cfg.QueueSize
 	if queueSize <= 0 {
@@ -208,7 +263,47 @@ func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 		return nil, fmt.Errorf("invalid cosmos submit mode %q", cfg.SubmitMode)
 	}
 
-	client := &http.Client{Timeout: httpTimeout}
+	transport := &http.Transport{
+		Proxy:                 nil,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	if strings.TrimSpace(os.Getenv(cosmosAllowProxyFromEnvConfigName)) == "1" {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	allowDangerousPrivateEndpoint := strings.TrimSpace(os.Getenv(cosmosAllowDangerousPrivateEndpointConfigName)) == "1"
+	resolver := cosmosDefaultResolver{}
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		safeAddress, resolveErr := resolveCosmosSafeDialAddress(
+			ctx,
+			resolver,
+			address,
+			allowDangerousPrivateEndpoint,
+		)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		return dialer.DialContext(ctx, network, safeAddress)
+	}
+	client := &http.Client{
+		Timeout: httpTimeout,
+		Transport: &cosmosEndpointPolicyRoundTripper{
+			inner:                         transport,
+			resolver:                      resolver,
+			allowDangerousPrivateEndpoint: allowDangerousPrivateEndpoint,
+		},
+		// Never follow redirects for settlement transport/auth requests.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	var signedTxSubmitter cosmosSignedTxSubmitter
 	if submitMode == CosmosSubmitModeSignedTx {
@@ -227,13 +322,10 @@ func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 		if secret == "" {
 			secretFile := strings.TrimSpace(cfg.SignedTxSecretFile)
 			if secretFile != "" {
-				secretBytes, err := os.ReadFile(secretFile)
-				if err != nil {
-					return nil, fmt.Errorf("read cosmos signed-tx secret file: %w", err)
-				}
-				secret = strings.TrimSpace(string(secretBytes))
-				if secret == "" {
-					return nil, fmt.Errorf("cosmos signed-tx secret file %q is empty", secretFile)
+				var readErr error
+				secret, readErr = readCosmosSignedTxSecretFile(secretFile)
+				if readErr != nil {
+					return nil, readErr
 				}
 			}
 		}
@@ -263,12 +355,225 @@ func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 		queue:             make(chan cosmosQueuedOperation, queueSize),
 		signedTxSubmitter: signedTxSubmitter,
 		deferredOp:        map[string]cosmosDeferredOperation{},
+		deferredOpMax:     cosmosDeferredOperationDefaultMax,
 		workerCtx:         workerCtx,
 		workerCancel:      workerCancel,
 	}
 	a.workerWG.Add(1)
 	go a.runWorker()
 	return a, nil
+}
+
+func normalizeCosmosAdapterEndpoint(raw string, allowInsecureHTTP bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("cosmos adapter endpoint required")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid cosmos adapter endpoint %q: %w", raw, err)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("cosmos adapter endpoint must not include user info")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return "", fmt.Errorf("cosmos adapter endpoint must include host")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("cosmos adapter endpoint must not include query or fragment")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "https" && scheme != "http" {
+		return "", fmt.Errorf("cosmos adapter endpoint scheme must be http or https")
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if cosmosHostHasZoneIdentifier(host) {
+		return "", fmt.Errorf("cosmos adapter endpoint host must not include a zone identifier")
+	}
+	if scheme == "http" && !allowInsecureHTTP && !isLoopbackHost(host) {
+		return "", fmt.Errorf("cosmos adapter endpoint must use https for non-loopback hosts")
+	}
+	normalized := strings.TrimRight(raw, "/")
+	return normalized, nil
+}
+
+type cosmosOutboundIPResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+type cosmosDefaultResolver struct{}
+
+func (cosmosDefaultResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	lookup := cosmosLookupIPAddrs
+	if lookup == nil {
+		lookup = net.DefaultResolver.LookupIPAddr
+	}
+	return lookup(ctx, host)
+}
+
+func resolveCosmosSafeDialAddress(
+	ctx context.Context,
+	resolver cosmosOutboundIPResolver,
+	address string,
+	allowDangerousPrivateEndpoint bool,
+) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return "", fmt.Errorf("invalid cosmos endpoint address %q: %w", address, err)
+	}
+	if cosmosHostHasZoneIdentifier(host) {
+		return "", fmt.Errorf("cosmos endpoint host %q includes unsupported zone identifier", host)
+	}
+	host = normalizeCosmosDialHost(host)
+	if host == "" {
+		return "", fmt.Errorf("cosmos endpoint host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isDisallowedCosmosEndpointIP(ip) && !allowDangerousPrivateEndpoint && !ip.IsLoopback() {
+			return "", fmt.Errorf("cosmos endpoint host %q is blocked by outbound dial policy", ip.String())
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+
+	if resolver == nil {
+		resolver = cosmosDefaultResolver{}
+	}
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve cosmos endpoint host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("resolve cosmos endpoint host %q returned no addresses", host)
+	}
+
+	loopbackHostname := host == "localhost"
+	loopbackDialAddress := ""
+	for _, candidate := range ips {
+		ip := candidate.IP
+		if ip == nil {
+			continue
+		}
+		if loopbackHostname {
+			if !ip.IsLoopback() {
+				return "", fmt.Errorf("cosmos localhost host %q resolved to non-loopback address %q", host, ip.String())
+			}
+			if loopbackDialAddress == "" {
+				loopbackDialAddress = net.JoinHostPort(ip.String(), port)
+			}
+			continue
+		}
+		if ip.IsLoopback() && !allowDangerousPrivateEndpoint {
+			continue
+		}
+		if isDisallowedCosmosEndpointIP(ip) && !allowDangerousPrivateEndpoint {
+			continue
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	if loopbackHostname && loopbackDialAddress != "" {
+		return loopbackDialAddress, nil
+	}
+	return "", fmt.Errorf("cosmos endpoint host %q resolved only to blocked address classes", host)
+}
+
+func normalizeCosmosDialHost(host string) string {
+	host = strings.TrimSpace(host)
+	host = strings.Trim(host, "[]")
+	return strings.ToLower(host)
+}
+
+func cosmosHostHasZoneIdentifier(host string) bool {
+	return strings.Contains(strings.TrimSpace(host), "%")
+}
+
+func isDisallowedCosmosEndpointIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	return ip.IsPrivate()
+}
+
+func readCosmosSignedTxSecretFile(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("cosmos signed-tx secret file path is required")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open cosmos signed-tx secret file: %w", err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat cosmos signed-tx secret file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("cosmos signed-tx secret file %q must be a regular file", path)
+	}
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("lstat cosmos signed-tx secret file: %w", err)
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("cosmos signed-tx secret file %q must not be a symlink", path)
+	}
+	if !os.SameFile(info, pathInfo) {
+		return "", fmt.Errorf("cosmos signed-tx secret file %q changed while opening", path)
+	}
+	if err := fileperm.ValidateOwnerOnly(path, info); err != nil {
+		return "", err
+	}
+	if info.Size() > cosmosSignedTxSecretFileMaxBytes {
+		return "", fmt.Errorf("cosmos signed-tx secret file %q exceeds max size %d bytes", path, cosmosSignedTxSecretFileMaxBytes)
+	}
+	secretBytes, err := io.ReadAll(io.LimitReader(f, cosmosSignedTxSecretFileMaxBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read cosmos signed-tx secret file: %w", err)
+	}
+	if int64(len(secretBytes)) > cosmosSignedTxSecretFileMaxBytes {
+		return "", fmt.Errorf("cosmos signed-tx secret file %q exceeds max size %d bytes", path, cosmosSignedTxSecretFileMaxBytes)
+	}
+	secret := strings.TrimSpace(string(secretBytes))
+	if secret == "" {
+		return "", fmt.Errorf("cosmos signed-tx secret file %q is empty", path)
+	}
+	return secret, nil
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip.IsLoopback()
+	}
+	// Treat localhost as loopback-safe only when all resolver answers are loopback.
+	if !strings.EqualFold(host, "localhost") {
+		return false
+	}
+	lookup := cosmosLookupIPAddrs
+	if lookup == nil {
+		lookup = net.DefaultResolver.LookupIPAddr
+	}
+	addrs, err := lookup(context.Background(), host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, addr := range addrs {
+		if addr.IP == nil || !addr.IP.IsLoopback() {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *CosmosAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
@@ -490,6 +795,7 @@ func (a *CosmosAdapter) markDeferredOperation(op cosmosQueuedOperation, attempts
 	defer a.stateMu.Unlock()
 	entry, ok := a.deferredOp[op.idempotencyKey]
 	if !ok {
+		a.enforceDeferredOperationLimitLocked()
 		entry = cosmosDeferredOperation{
 			operation:  op,
 			deferredAt: now,
@@ -506,6 +812,31 @@ func (a *CosmosAdapter) markDeferredOperation(op cosmosQueuedOperation, attempts
 		entry.lastError = submitErr.Error()
 	}
 	a.deferredOp[op.idempotencyKey] = entry
+}
+
+func (a *CosmosAdapter) enforceDeferredOperationLimitLocked() {
+	limit := a.deferredOpMax
+	if limit <= 0 {
+		limit = cosmosDeferredOperationDefaultMax
+	}
+	if limit <= 0 {
+		return
+	}
+	for len(a.deferredOp) >= limit {
+		oldestKey := ""
+		var oldestAt time.Time
+		for key, entry := range a.deferredOp {
+			if oldestKey == "" || entry.deferredAt.Before(oldestAt) ||
+				(entry.deferredAt.Equal(oldestAt) && key < oldestKey) {
+				oldestKey = key
+				oldestAt = entry.deferredAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(a.deferredOp, oldestKey)
+	}
 }
 
 func (a *CosmosAdapter) clearDeferredOperation(idempotencyKey string) {
@@ -686,6 +1017,45 @@ func (s *cosmosHTTPSignedTxSubmitter) Submit(ctx context.Context, op cosmosQueue
 		return &cosmosHTTPStatusError{
 			message:    fmt.Sprintf("cosmos signed-tx submit %s status %d: %s", s.broadcastPath, resp.StatusCode, trimmed),
 			statusCode: resp.StatusCode,
+		}
+	}
+
+	const maxBody = 4096
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if err != nil {
+		return fmt.Errorf("read cosmos signed-tx submit %s response: %w", s.broadcastPath, err)
+	}
+	if len(bodyBytes) > maxBody {
+		return fmt.Errorf("cosmos signed-tx submit %s response exceeded %d bytes", s.broadcastPath, maxBody)
+	}
+	var broadcastResp cosmosBroadcastResponse
+	if err := json.Unmarshal(bodyBytes, &broadcastResp); err != nil {
+		trimmed := strings.TrimSpace(string(bodyBytes))
+		if trimmed == "" {
+			trimmed = "<empty>"
+		}
+		return fmt.Errorf(
+			"cosmos signed-tx submit %s returned invalid JSON response: %s",
+			s.broadcastPath,
+			trimmed,
+		)
+	}
+	if broadcastResp.TxResponse == nil {
+		return fmt.Errorf("cosmos signed-tx submit %s missing tx_response", s.broadcastPath)
+	}
+	if broadcastResp.TxResponse.Code != 0 {
+		rawLog := strings.TrimSpace(broadcastResp.TxResponse.RawLog)
+		if rawLog == "" {
+			rawLog = "no raw_log"
+		}
+		return &cosmosHTTPStatusError{
+			message: fmt.Sprintf(
+				"cosmos signed-tx submit %s tx failed code %d: %s",
+				s.broadcastPath,
+				broadcastResp.TxResponse.Code,
+				rawLog,
+			),
+			statusCode: http.StatusUnprocessableEntity,
 		}
 	}
 	return nil

@@ -544,6 +544,11 @@ if [[ "$duration_sec" -lt 0 ]]; then
   duration_sec=0
 fi
 
+subject_redacted=""
+if [[ -n "$subject" ]]; then
+  subject_redacted="[redacted]"
+fi
+
 jq -nc \
   --arg started_at "$started_at" \
   --arg finished_at "$finished_at" \
@@ -554,7 +559,7 @@ jq -nc \
   --arg run_report_json "$run_report_json" \
   --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
   --arg bootstrap_directory "$bootstrap_directory" \
-  --arg subject "$subject" \
+  --arg subject "$subject_redacted" \
   --arg max_alert_severity "$max_alert_severity" \
   --argjson rounds "$rounds" \
   --argjson pause_sec "$pause_sec" \

@@ -58,3 +58,21 @@ func TestReadBodyPreserve(t *testing.T) {
 		t.Fatalf("unexpected preserved body: %s", string(body2))
 	}
 }
+
+func TestReadBodyPreserveWithLimitRejectsOversizedBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/v1/admin/test", strings.NewReader(`{"x":123}`))
+	_, err := ReadBodyPreserveWithLimit(req, 8)
+	if err == nil {
+		t.Fatalf("expected oversized body to fail")
+	}
+	if !strings.Contains(err.Error(), "request body too large") {
+		t.Fatalf("unexpected oversized body error: %v", err)
+	}
+	body, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("ReadAll preserved oversized body: %v", readErr)
+	}
+	if len(body) == 0 {
+		t.Fatalf("expected preserved body reader to remain available")
+	}
+}

@@ -11,7 +11,25 @@ const (
 	DecisionOutcomeApprove = "approve"
 	DecisionOutcomeReject  = "reject"
 	DecisionOutcomeAbstain = "abstain"
+	maxAuditActionLength   = 64
+	maxEvidencePointerLen  = 1024
 )
+
+var governanceAuditActionSet = map[string]struct{}{
+	"admin_allow_validator":   {},
+	"admin_disable_validator": {},
+	"admin_set_policy":        {},
+	"admin_set_quorum":        {},
+	"admin_rotate_key":        {},
+}
+
+var governanceAuditActionAliases = map[string]string{
+	"manual_override":  "admin_set_policy",
+	"manual-override":  "admin_set_policy",
+	"policy.bootstrap": "admin_set_policy",
+	"policy_bootstrap": "admin_set_policy",
+	"bootstrap":        "admin_set_policy",
+}
 
 // GovernancePolicy captures chain governance rules active for a policy scope.
 type GovernancePolicy struct {
@@ -66,7 +84,7 @@ func (d GovernanceDecision) Canonicalize() GovernanceDecision {
 // Canonicalize normalizes identity and enum-like fields while preserving free-text fields.
 func (a GovernanceAuditAction) Canonicalize() GovernanceAuditAction {
 	a.ActionID = canonicalIdentifier(a.ActionID)
-	a.Action = canonicalEnum(a.Action)
+	a.Action = canonicalGovernanceAuditAction(a.Action)
 	a.Actor = canonicalIdentifier(a.Actor)
 	a.EvidencePointer = strings.TrimSpace(a.EvidencePointer)
 	return a
@@ -114,8 +132,15 @@ func (a GovernanceAuditAction) ValidateBasic() error {
 	if strings.TrimSpace(a.ActionID) == "" {
 		return errors.New("action id is required")
 	}
-	if strings.TrimSpace(a.Action) == "" {
+	action := canonicalGovernanceAuditAction(a.Action)
+	if action == "" {
 		return errors.New("action is required")
+	}
+	if len(action) > maxAuditActionLength {
+		return errors.New("action exceeds 64 characters")
+	}
+	if _, ok := governanceAuditActionSet[action]; !ok {
+		return errors.New("action must be one of: admin_allow_validator, admin_disable_validator, admin_set_policy, admin_set_quorum, admin_rotate_key")
 	}
 	if strings.TrimSpace(a.Actor) == "" {
 		return errors.New("actor is required")
@@ -123,8 +148,15 @@ func (a GovernanceAuditAction) ValidateBasic() error {
 	if strings.TrimSpace(a.Reason) == "" {
 		return errors.New("reason is required")
 	}
-	if strings.TrimSpace(a.EvidencePointer) == "" {
+	evidencePointer := strings.TrimSpace(a.EvidencePointer)
+	if evidencePointer == "" {
 		return errors.New("evidence pointer is required")
+	}
+	if len(evidencePointer) > maxEvidencePointerLen {
+		return errors.New("evidence pointer exceeds 1024 characters")
+	}
+	if !isValidGovernanceEvidencePointer(evidencePointer) {
+		return errors.New("evidence pointer must use objective format (sha256:<value>, obj://<value>, ipfs://<value>, or https://<value>)")
 	}
 	if a.TimestampUnix <= 0 {
 		return errors.New("timestamp_unix must be positive")
@@ -141,12 +173,37 @@ func isValidDecisionOutcome(outcome string) bool {
 	}
 }
 
+func isValidGovernanceEvidencePointer(value string) bool {
+	if strings.ContainsAny(value, " \t\r\n") {
+		return false
+	}
+	if chaintypes.IsObjectiveEvidenceFormat(value) {
+		return true
+	}
+	lowerValue := strings.ToLower(value)
+	if strings.HasPrefix(lowerValue, "ipfs://") {
+		return len(value) > len("ipfs://")
+	}
+	if strings.HasPrefix(lowerValue, "https://") {
+		return len(value) > len("https://")
+	}
+	return false
+}
+
 func canonicalIdentifier(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func canonicalEnum(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func canonicalGovernanceAuditAction(value string) string {
+	action := canonicalEnum(value)
+	if mapped, ok := governanceAuditActionAliases[action]; ok {
+		return mapped
+	}
+	return action
 }
 
 func canonicalStatus(value chaintypes.ReconciliationStatus) chaintypes.ReconciliationStatus {

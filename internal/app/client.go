@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	crand "crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -143,6 +143,18 @@ type clientActiveSession struct {
 	exitRelayID     string
 }
 
+const (
+	clientPathControlResponseMaxBytes         int64 = 64 << 10
+	clientDirectoryRelaysResponseMaxBytes     int64 = 4 << 20
+	clientDirectoryFeedResponseMaxBytes       int64 = 2 << 20
+	clientDirectoryPubKeyResponseMaxBytes     int64 = 256 << 10
+	clientIssueTokenResponseMaxBytes          int64 = 64 << 10
+	clientSubjectFileMaxBytes                 int64 = 8 << 10
+	clientHealthCacheMaxEntries                     = 1024
+	clientMaxPuzzleDifficulty                       = 64
+	clientAllowDangerousOutboundPrivateDNSEnv       = "CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
+)
+
 type middleSelectionStatus int
 
 const (
@@ -153,6 +165,27 @@ const (
 )
 
 var deriveClientWGPublicFromPrivateFile = wg.DerivePublicKeyFromPrivateFile
+
+func loadClientSubject() string {
+	subject := strings.TrimSpace(os.Getenv("CLIENT_SUBJECT"))
+	if subject != "" {
+		return subject
+	}
+	subjectFile := strings.TrimSpace(os.Getenv("CLIENT_SUBJECT_FILE"))
+	if subjectFile == "" {
+		return ""
+	}
+	raw, err := readAppFileBounded(subjectFile, clientSubjectFileMaxBytes)
+	if err != nil {
+		log.Printf("client subject file read warning: %v", err)
+		return ""
+	}
+	subject = strings.TrimSpace(string(raw))
+	if err := os.Remove(subjectFile); err != nil && !os.IsNotExist(err) {
+		log.Printf("client subject file cleanup warning: %v", err)
+	}
+	return subject
+}
 
 func NewClient() *Client {
 	directoryURL := os.Getenv("DIRECTORY_URL")
@@ -193,7 +226,7 @@ func NewClient() *Client {
 	if issuerURL == "" {
 		issuerURL = "http://127.0.0.1:8082"
 	}
-	subject := strings.TrimSpace(os.Getenv("CLIENT_SUBJECT"))
+	subject := loadClientSubject()
 	anonCred := strings.TrimSpace(os.Getenv("CLIENT_ANON_CRED"))
 	entryURL := os.Getenv("ENTRY_URL")
 	if entryURL == "" {
@@ -209,10 +242,23 @@ func NewClient() *Client {
 	}
 	clientWGPub := os.Getenv("CLIENT_WG_PUBLIC_KEY")
 	if clientWGPub == "" {
-		clientWGPub = randomWGPublicKeyLike()
+		generatedPub, genErr := randomWGPublicKeyLike()
+		if genErr != nil {
+			log.Printf("client failed to generate CLIENT_WG_PUBLIC_KEY: %v", genErr)
+		} else {
+			clientWGPub = generatedPub
+		}
 	}
-	trustStrict := os.Getenv("DIRECTORY_TRUST_STRICT") == "1"
-	trustTOFU := os.Getenv("DIRECTORY_TRUST_TOFU") != "0"
+	trustStrict := true
+	if raw := strings.TrimSpace(strings.ToLower(os.Getenv("DIRECTORY_TRUST_STRICT"))); raw != "" {
+		switch raw {
+		case "1", "true", "yes", "on":
+			trustStrict = true
+		case "0", "false", "no", "off":
+			trustStrict = false
+		}
+	}
+	trustTOFU := os.Getenv("DIRECTORY_TRUST_TOFU") == "1"
 	trustFile := os.Getenv("DIRECTORY_TRUSTED_KEYS_FILE")
 	if trustFile == "" {
 		trustFile = "data/trusted_directory_keys.txt"
@@ -538,6 +584,11 @@ func (c *Client) Run(ctx context.Context) error {
 		return fmt.Errorf("client http tls init: %w", err)
 	}
 	c.httpClient = httpClient
+	configureClientOutboundDialPolicy(
+		c.httpClient,
+		strings.TrimSpace(os.Getenv(clientAllowDangerousOutboundPrivateDNSEnv)) == "1",
+		c.betaStrict || c.prodStrict,
+	)
 
 	bootstrapInterval := c.bootstrapInterval
 	if bootstrapInterval <= 0 {
@@ -551,8 +602,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject=%s anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d path_profile=%s middle_pref=%t middle_required=%t exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d min_refresh_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t direct_exit_forced=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, c.subject, c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.sessionMinRefreshSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, c.forceDirectExit, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject_set=%t anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d path_profile=%s middle_pref=%t middle_required=%t exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d min_refresh_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t direct_exit_forced=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, strings.TrimSpace(c.subject) != "", c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.sessionMinRefreshSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, c.forceDirectExit, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -566,7 +617,14 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	if c.dataMode == "opaque" && !wg.IsValidPublicKey(c.clientWGPub) {
 		log.Printf("client invalid CLIENT_WG_PUBLIC_KEY format; falling back to generated key")
-		c.clientWGPub = randomWGPublicKeyLike()
+		generatedPub, genErr := randomWGPublicKeyLike()
+		if genErr != nil {
+			return fmt.Errorf("generate CLIENT_WG_PUBLIC_KEY: %w", genErr)
+		}
+		if !wg.IsValidPublicKey(generatedPub) {
+			return fmt.Errorf("generate CLIENT_WG_PUBLIC_KEY: invalid key material")
+		}
+		c.clientWGPub = generatedPub
 	}
 
 	if initialDelay > 0 {
@@ -627,6 +685,15 @@ func (c *Client) validateRuntimeConfig() error {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
 	}
+	issuerRaw := strings.TrimSpace(c.issuerURL)
+	if issuerRaw == "" {
+		issuerRaw = "http://127.0.0.1:8082"
+	}
+	issuerURL := normalizeControlURL(issuerRaw)
+	if issuerURL == "" {
+		return fmt.Errorf("invalid ISSUER_URL")
+	}
+	c.issuerURL = issuerURL
 	if c.anonCred != "" && c.subject != "" {
 		return fmt.Errorf("CLIENT_ANON_CRED cannot be combined with CLIENT_SUBJECT")
 	}
@@ -640,8 +707,8 @@ func (c *Client) validateRuntimeConfig() error {
 		if strings.TrimSpace(c.wgProxyAddr) == "" {
 			return fmt.Errorf("CLIENT_WG_KERNEL_PROXY requires CLIENT_WG_PROXY_ADDR")
 		}
-		if _, err := net.ResolveUDPAddr("udp", c.wgProxyAddr); err != nil {
-			return fmt.Errorf("invalid CLIENT_WG_PROXY_ADDR: %w", err)
+		if err := validateLoopbackWGProxyAddr(c.wgProxyAddr); err != nil {
+			return err
 		}
 	}
 	if c.wgBackend == "command" {
@@ -711,6 +778,9 @@ func (c *Client) validateRuntimeConfig() error {
 		if !c.trustStrict {
 			return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_TRUST_STRICT=1")
 		}
+		if c.trustTOFU {
+			return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_TRUST_TOFU=0")
+		}
 		if c.wgBackend != "command" {
 			return fmt.Errorf("BETA_STRICT_MODE requires CLIENT_WG_BACKEND=command")
 		}
@@ -747,6 +817,9 @@ func (c *Client) validateRuntimeConfig() error {
 		}
 		if !securehttp.Enabled() {
 			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
+		}
+		if securehttp.InsecureSkipVerifyConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
 		}
 		if c.trustTOFU {
 			return fmt.Errorf("PROD_STRICT_MODE requires DIRECTORY_TRUST_TOFU=0")
@@ -962,12 +1035,16 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		openReq := proto.PathOpenRequest{
 			ExitID:          pair.exit.RelayID,
 			Token:           tok.Token,
-			TokenProofNonce: randomProofNonce(),
 			ClientInnerPub:  c.clientWGPub,
 			Transport:       requestedTransport(c.dataMode),
 			RequestedMTU:    1280,
 			RequestedRegion: pair.exit.Region,
 		}
+		tokenProofNonce, nonceErr := randomProofNonce()
+		if nonceErr != nil {
+			return fmt.Errorf("generate token proof nonce for exit=%s: %w", pair.exit.RelayID, nonceErr)
+		}
+		openReq.TokenProofNonce = tokenProofNonce
 		if pair.hasMiddle {
 			openReq.MiddleRelayID = strings.TrimSpace(pair.middle.RelayID)
 		}
@@ -1017,40 +1094,6 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			log.Printf("client direct-exit mode engaged entry=%s exit=%s", pair.entry.RelayID, pair.exit.RelayID)
 		} else {
 			resp, openErr = c.openPathWithChallenge(ctx, entryControlURL, openReq)
-			if openErr != nil && c.shouldRetryUnknownExitFallback(openErr) {
-				// Compatibility retry for mixed/federated topologies where entry cannot
-				// currently resolve requested exit id but can still service local exit.
-				fallbackTokenReq := tokenReq
-				fallbackTokenReq.ExitScope = nil
-				fallbackTok, fallbackTokErr := c.issueToken(ctx, fallbackTokenReq)
-				if fallbackTokErr != nil {
-					return fmt.Errorf("issue fallback token after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackTokErr)
-				}
-				fallbackReq := openReq
-				fallbackReq.ExitID = ""
-				fallbackReq.Token = fallbackTok.Token
-				fallbackReq.TokenProofNonce = randomProofNonce()
-				fallbackReq.RequestedRegion = ""
-				fallbackProof, fallbackProofErr := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
-					Token:           fallbackReq.Token,
-					ExitID:          fallbackReq.ExitID,
-					MiddleRelayID:   fallbackReq.MiddleRelayID,
-					TokenProofNonce: fallbackReq.TokenProofNonce,
-					ClientInnerPub:  fallbackReq.ClientInnerPub,
-					Transport:       fallbackReq.Transport,
-					RequestedMTU:    fallbackReq.RequestedMTU,
-					RequestedRegion: fallbackReq.RequestedRegion,
-				})
-				if fallbackProofErr != nil {
-					return fmt.Errorf("sign fallback token proof after unknown-exit for exit=%s: %w", pair.exit.RelayID, fallbackProofErr)
-				}
-				fallbackReq.TokenProof = fallbackProof
-				resp, openErr = c.openPathWithChallenge(ctx, entryControlURL, fallbackReq)
-				if openErr == nil {
-					log.Printf("client unknown-exit fallback engaged entry=%s requested_exit=%s", pair.entry.RelayID, pair.exit.RelayID)
-					tok = fallbackTok
-				}
-			}
 			if openErr != nil && c.shouldRetryDirectExitFallback(openErr) {
 				exitDataAddr := strings.TrimSpace(pair.exit.Endpoint)
 				if exitDataAddr == "" {
@@ -1102,9 +1145,17 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	if pathResp.Transport != "" && pathResp.Transport != requestedTransport(c.dataMode) {
 		return fmt.Errorf("path transport mismatch: requested=%s got=%s", requestedTransport(c.dataMode), pathResp.Transport)
 	}
+	if err := c.validatePathOpenEntryDataAddrBinding(pathControlURL, selectedPair, pathResp.EntryDataAddr); err != nil {
+		return err
+	}
 	transport := pathResp.Transport
 	if transport == "" {
 		transport = requestedTransport(c.dataMode)
+	}
+	if transport == "wireguard-udp" {
+		if err := validatePathOpenWireGuardFields(pathResp.ExitInnerPub, pathResp.ClientInnerIP, pathResp.EntryDataAddr); err != nil {
+			return err
+		}
 	}
 	var wgKernelProxy *clientWGKernelProxy
 	if transport == "wireguard-udp" && c.wgKernelProxy {
@@ -1237,22 +1288,109 @@ func requestedTransport(mode string) string {
 	return "policy-json"
 }
 
+func validateLoopbackWGProxyAddr(raw string) error {
+	addr, err := net.ResolveUDPAddr("udp", strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid CLIENT_WG_PROXY_ADDR: %w", err)
+	}
+	if addr == nil || addr.IP == nil {
+		return fmt.Errorf("CLIENT_WG_PROXY_ADDR must include an explicit loopback host")
+	}
+	if !addr.IP.IsLoopback() {
+		return fmt.Errorf("CLIENT_WG_PROXY_ADDR must resolve to loopback host, got %s", addr.IP.String())
+	}
+	return nil
+}
+
+func validatePathOpenWireGuardFields(exitInnerPub, clientInnerIP, entryDataAddr string) error {
+	if !wg.IsValidPublicKey(strings.TrimSpace(exitInnerPub)) {
+		return fmt.Errorf("path open returned invalid exit_inner_pub wireguard public key")
+	}
+	clientInnerIP = strings.TrimSpace(clientInnerIP)
+	if clientInnerIP == "" {
+		return fmt.Errorf("path open missing client_inner_ip")
+	}
+	if _, _, err := net.ParseCIDR(clientInnerIP); err != nil {
+		return fmt.Errorf("path open invalid client_inner_ip CIDR: %w", err)
+	}
+	entryDataAddr = strings.TrimSpace(entryDataAddr)
+	if entryDataAddr == "" {
+		return fmt.Errorf("path open missing entry_data_addr")
+	}
+	if _, err := net.ResolveUDPAddr("udp", entryDataAddr); err != nil {
+		return fmt.Errorf("path open invalid entry_data_addr udp host:port: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) validatePathOpenEntryDataAddrBinding(pathControlURL string, pair relayPair, entryDataAddr string) error {
+	entryDataAddr = strings.TrimSpace(entryDataAddr)
+	if entryDataAddr == "" {
+		return fmt.Errorf("path open missing entry_data_addr")
+	}
+	expected := strings.TrimSpace(pair.entry.Endpoint)
+	mode := "entry"
+	exitControlURL := normalizeControlURL(c.exitControlURLFor(pair.exit))
+	if normalizeControlURL(pathControlURL) != "" && normalizeControlURL(pathControlURL) == exitControlURL {
+		expected = strings.TrimSpace(pair.exit.Endpoint)
+		mode = "direct-exit"
+	}
+	if expected == "" {
+		return fmt.Errorf("path open %s mode missing advertised endpoint", mode)
+	}
+	if !udpEndpointEqual(expected, entryDataAddr) {
+		return fmt.Errorf(
+			"path open returned untrusted entry_data_addr %q (expected %q for %s mode)",
+			entryDataAddr,
+			expected,
+			mode,
+		)
+	}
+	return nil
+}
+
+func udpEndpointEqual(expected string, got string) bool {
+	expectedAddr, err := net.ResolveUDPAddr("udp", strings.TrimSpace(expected))
+	if err != nil || expectedAddr == nil {
+		return false
+	}
+	gotAddr, err := net.ResolveUDPAddr("udp", strings.TrimSpace(got))
+	if err != nil || gotAddr == nil {
+		return false
+	}
+	if expectedAddr.Port != gotAddr.Port {
+		return false
+	}
+	if expectedAddr.IP == nil || gotAddr.IP == nil {
+		return false
+	}
+	return expectedAddr.IP.Equal(gotAddr.IP)
+}
+
 func (c *Client) sendTrafficForTransport(ctx context.Context, transport string, entryDataAddr string, sessionID string) error {
 	switch transport {
 	case "wireguard-udp":
 		return c.sendOpaqueTraffic(ctx, entryDataAddr, sessionID)
 	case "policy-json":
+		firstNonce, firstNonceErr := randomNonce()
+		if firstNonceErr != nil {
+			return firstNonceErr
+		}
 		if err := c.sendJSONInnerPacket(entryDataAddr, sessionID, proto.InnerPacket{
 			DestinationPort: 443,
 			Payload:         "hello-over-two-hop",
-			Nonce:           randomNonce(),
+			Nonce:           firstNonce,
 		}); err != nil {
 			return err
+		}
+		secondNonce, secondNonceErr := randomNonce()
+		if secondNonceErr != nil {
+			return secondNonceErr
 		}
 		if err := c.sendJSONInnerPacket(entryDataAddr, sessionID, proto.InnerPacket{
 			DestinationPort: 25,
 			Payload:         "smtp-probe",
-			Nonce:           randomNonce(),
+			Nonce:           secondNonce,
 		}); err != nil {
 			return err
 		}
@@ -1415,7 +1553,12 @@ func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKer
 				continue
 			}
 			proxy.setWGPeer(src)
-			if err := c.sendOpaqueInnerPacketConn(proxy.outerConn, proxy.sessionID, randomNonce(), payload); err != nil {
+			nonce, nonceErr := randomNonce()
+			if nonceErr != nil {
+				setErr(nonceErr)
+				return
+			}
+			if err := c.sendOpaqueInnerPacketConn(proxy.outerConn, proxy.sessionID, nonce, payload); err != nil {
 				setErr(err)
 				return
 			}
@@ -1537,7 +1680,11 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 	}
 
 	sendOpaque := func(payload []byte) error {
-		return c.sendOpaqueInnerPacketConn(outerConn, sessionID, randomNonce(), payload)
+		nonce, nonceErr := randomNonce()
+		if nonceErr != nil {
+			return nonceErr
+		}
+		return c.sendOpaqueInnerPacketConn(outerConn, sessionID, nonce, payload)
 	}
 	if c.opaqueSessionSec > 0 {
 		return c.runOpaqueSession(ctx, outerConn, sessionID, sinkConn, sendOpaque)
@@ -2027,7 +2174,10 @@ func (c *Client) closeSession(ctx context.Context, session clientActiveSession) 
 		return nil
 	}
 	if strings.TrimSpace(session.entryControlURL) != "" {
-		if err := c.closePath(ctx, session.entryControlURL, proto.PathCloseRequest{SessionID: session.sessionID}); err != nil {
+		if err := c.closePath(ctx, session.entryControlURL, proto.PathCloseRequest{
+			SessionID:    session.sessionID,
+			SessionKeyID: session.sessionKeyID,
+		}); err != nil {
 			log.Printf("client close-path warning session=%s control=%s err=%v", session.sessionID, session.entryControlURL, err)
 		}
 	}
@@ -2229,10 +2379,10 @@ func (c *Client) sendFrame(entryDataAddr string, sessionID string, payload []byt
 	return nil
 }
 
-func randomNonce() uint64 {
+func randomNonce() (uint64, error) {
 	var b [8]byte
 	if _, err := io.ReadFull(crand.Reader, b[:]); err != nil {
-		return uint64(time.Now().UnixNano())
+		return 0, fmt.Errorf("generate random nonce: %w", err)
 	}
 	nonce := uint64(b[0])<<56 |
 		uint64(b[1])<<48 |
@@ -2243,17 +2393,17 @@ func randomNonce() uint64 {
 		uint64(b[6])<<8 |
 		uint64(b[7])
 	if nonce == 0 {
-		return 1
+		return 1, nil
 	}
-	return nonce
+	return nonce, nil
 }
 
-func randomProofNonce() string {
+func randomProofNonce() (string, error) {
 	buf := make([]byte, 12)
 	if _, err := io.ReadFull(crand.Reader, buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return "", fmt.Errorf("generate random token proof nonce: %w", err)
 	}
-	return hex.EncodeToString(buf)
+	return hex.EncodeToString(buf), nil
 }
 
 func randomSessionIDHex(size int) (string, error) {
@@ -2267,21 +2417,50 @@ func randomSessionIDHex(size int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func randomWGPublicKeyLike() string {
+func randomWGPublicKeyLike() (string, error) {
 	b := make([]byte, 32)
 	if _, err := io.ReadFull(crand.Reader, b); err != nil {
-		for i := range b {
-			b[i] = byte(i + 1)
-		}
+		return "", fmt.Errorf("generate random wireguard-like public key bytes: %w", err)
 	}
 	encoded, err := wg.EncodeKeyBase64(b)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("encode generated wireguard-like public key: %w", err)
 	}
-	return encoded
+	return encoded, nil
+}
+
+func decodeBoundedJSONResponse(body io.Reader, maxBytes int64, out interface{}) error {
+	if body == nil {
+		return fmt.Errorf("empty response body")
+	}
+	if maxBytes <= 0 {
+		return fmt.Errorf("invalid response size limit: %d", maxBytes)
+	}
+	reader := &io.LimitedReader{R: body, N: maxBytes + 1}
+	dec := json.NewDecoder(reader)
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	if reader.N <= 0 {
+		return fmt.Errorf("response body exceeds %d bytes", maxBytes)
+	}
+	var trailer json.RawMessage
+	if err := dec.Decode(&trailer); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing json content")
+		}
+		return err
+	}
+	if reader.N <= 0 {
+		return fmt.Errorf("response body exceeds %d bytes", maxBytes)
+	}
+	return nil
 }
 
 func solvePuzzle(challenge string, difficulty int, maxIters int) (string, string, bool) {
+	if difficulty <= 0 || difficulty > clientMaxPuzzleDifficulty {
+		return "", "", false
+	}
 	prefix := strings.Repeat("0", difficulty)
 	for i := 0; i < maxIters; i++ {
 		nonce := fmt.Sprintf("%x", i)
@@ -2314,7 +2493,7 @@ func (c *Client) openPath(ctx context.Context, entryControlURL string, in proto.
 	if resp.StatusCode != http.StatusOK {
 		return out, fmt.Errorf("entry returned status %d", resp.StatusCode)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientPathControlResponseMaxBytes, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -2326,6 +2505,9 @@ func (c *Client) openPathWithChallenge(ctx context.Context, entryControlURL stri
 		return proto.PathOpenResponse{}, err
 	}
 	if !resp.Accepted && resp.Reason == "challenge-required" && resp.Challenge != "" && resp.Difficulty > 0 {
+		if resp.Difficulty > clientMaxPuzzleDifficulty {
+			return proto.PathOpenResponse{}, fmt.Errorf("entry challenge difficulty %d exceeds max %d", resp.Difficulty, clientMaxPuzzleDifficulty)
+		}
 		nonce, digest, ok := solvePuzzle(resp.Challenge, resp.Difficulty, 250000)
 		if !ok {
 			return proto.PathOpenResponse{}, fmt.Errorf("failed to solve entry challenge")
@@ -2363,7 +2545,7 @@ func (c *Client) closePath(ctx context.Context, entryControlURL string, in proto
 		return fmt.Errorf("entry returned status %d on path close", resp.StatusCode)
 	}
 	var out proto.PathCloseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientPathControlResponseMaxBytes, &out); err != nil {
 		return err
 	}
 	if !out.Closed {
@@ -2387,7 +2569,7 @@ func (c *Client) fetchRelaysFrom(ctx context.Context, directoryURL string, dirPu
 	}
 
 	var out proto.RelayListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryRelaysResponseMaxBytes, &out); err != nil {
 		return nil, err
 	}
 	for _, desc := range out.Relays {
@@ -2416,7 +2598,7 @@ func (c *Client) fetchSelectionFeedFrom(ctx context.Context, directoryURL string
 	}
 
 	var out proto.RelaySelectionFeedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryFeedResponseMaxBytes, &out); err != nil {
 		return nil, false, err
 	}
 	if err := verifySelectionFeedAny(out, dirPubs, time.Now()); err != nil {
@@ -2460,7 +2642,7 @@ func (c *Client) fetchTrustFeedFrom(ctx context.Context, directoryURL string, di
 	}
 
 	var out proto.RelayTrustAttestationFeedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryFeedResponseMaxBytes, &out); err != nil {
 		return nil, false, err
 	}
 	if err := verifyTrustFeedAny(out, dirPubs, time.Now()); err != nil {
@@ -2572,25 +2754,14 @@ func (c *Client) fetchDirectoryPubKeysFrom(ctx context.Context, directoryURL str
 		return nil, "", fmt.Errorf("directory pubkeys status %d", resp.StatusCode)
 	}
 	var out proto.DirectoryPubKeysResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryPubKeyResponseMaxBytes, &out); err != nil {
 		return nil, "", err
 	}
-	if err := c.enforceDirectoryTrustSet(out.PubKeys); err != nil {
+	pubKeys, keys, err := c.selectTrustedDirectoryPubKeys(out.PubKeys)
+	if err != nil {
 		return nil, "", err
 	}
-	keys := make([]ed25519.PublicKey, 0, len(out.PubKeys))
-	for _, pubB64 := range out.PubKeys {
-		pubB64 = strings.TrimSpace(pubB64)
-		raw, decErr := base64.RawURLEncoding.DecodeString(pubB64)
-		if decErr != nil || len(raw) != ed25519.PublicKeySize {
-			return nil, "", fmt.Errorf("invalid directory pubkey")
-		}
-		keys = append(keys, ed25519.PublicKey(raw))
-	}
-	if len(keys) == 0 {
-		return nil, "", fmt.Errorf("directory returned no pubkeys")
-	}
-	return keys, normalizeDirectoryOperator(out.Operator, out.PubKeys, directoryURL), nil
+	return keys, normalizeDirectoryOperator(out.Operator, pubKeys, directoryURL), nil
 }
 
 func (c *Client) fetchDirectoryPubKeyLegacy(ctx context.Context, directoryURL string) ([]ed25519.PublicKey, string, error) {
@@ -2607,18 +2778,17 @@ func (c *Client) fetchDirectoryPubKeyLegacy(ctx context.Context, directoryURL st
 		return nil, "", fmt.Errorf("directory pubkey status %d", resp.StatusCode)
 	}
 	var out map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryPubKeyResponseMaxBytes, &out); err != nil {
 		return nil, "", err
 	}
-	pubB64 := strings.TrimSpace(out["pub_key"])
-	raw, err := base64.RawURLEncoding.DecodeString(pubB64)
-	if err != nil || len(raw) != ed25519.PublicKeySize {
-		return nil, "", fmt.Errorf("invalid directory pubkey")
+	pubB64, raw, err := validateDirectoryPubKey(out["pub_key"])
+	if err != nil {
+		return nil, "", err
 	}
 	if err := c.enforceDirectoryTrust(pubB64); err != nil {
 		return nil, "", err
 	}
-	return []ed25519.PublicKey{ed25519.PublicKey(raw)}, normalizeDirectoryOperator("", []string{pubB64}, directoryURL), nil
+	return []ed25519.PublicKey{raw}, normalizeDirectoryOperator("", []string{pubB64}, directoryURL), nil
 }
 
 type relayCandidate struct {
@@ -2936,7 +3106,7 @@ func (c *Client) issueToken(ctx context.Context, in proto.IssueTokenRequest) (pr
 		return out, fmt.Errorf("issuer returned status %d: %s", resp.StatusCode, msg)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeBoundedJSONResponse(resp.Body, clientIssueTokenResponseMaxBytes, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -3807,9 +3977,40 @@ func (c *Client) relayHealthy(ctx context.Context, controlURL string) bool {
 	if c.healthCache == nil {
 		c.healthCache = make(map[string]healthProbeState)
 	}
+	c.pruneHealthCacheLocked(now)
 	c.healthCache[controlURL] = healthProbeState{ok: ok, checkedAt: now}
 	c.healthMu.Unlock()
 	return ok
+}
+
+func (c *Client) pruneHealthCacheLocked(now time.Time) {
+	if c.healthCache == nil {
+		return
+	}
+	if c.healthCacheTTL > 0 {
+		cutoff := now.Add(-c.healthCacheTTL)
+		for key, state := range c.healthCache {
+			if state.checkedAt.Before(cutoff) {
+				delete(c.healthCache, key)
+			}
+		}
+	}
+	for len(c.healthCache) > clientHealthCacheMaxEntries {
+		oldestKey := ""
+		var oldestTime time.Time
+		first := true
+		for key, state := range c.healthCache {
+			if first || state.checkedAt.Before(oldestTime) {
+				first = false
+				oldestKey = key
+				oldestTime = state.checkedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(c.healthCache, oldestKey)
+	}
 }
 
 func normalizeCountryCode(raw string) string {
@@ -3870,10 +4071,271 @@ func normalizeControlURL(raw string) string {
 	if v == "" {
 		return ""
 	}
-	if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
-		return v
+	if !strings.Contains(v, "://") {
+		base := strings.TrimRight(v, "/")
+		host := base
+		if cut, _, ok := strings.Cut(base, "/"); ok {
+			host = cut
+		}
+		if isLoopbackURLHost(host) {
+			v = "http://" + base
+		} else {
+			v = "https://" + base
+		}
 	}
-	return "http://" + v
+	parsed, err := url.Parse(v)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.Scheme == "http" &&
+		!isLoopbackURLHost(parsed.Host) &&
+		!isLocalDevelopmentURLHost(parsed.Host) &&
+		enforceHTTPSControlURL() &&
+		!allowDangerousInsecureControlURLHTTP() {
+		return ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func enforceHTTPSControlURL() bool {
+	raw := strings.TrimSpace(os.Getenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL"))
+	if raw == "" {
+		return true
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func allowDangerousInsecureControlURLHTTP() bool {
+	raw := strings.TrimSpace(os.Getenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP"))
+	return raw == "1" || strings.EqualFold(raw, "true")
+}
+
+func envEnabled(name string) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+type clientOutboundIPResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+type clientOutboundPolicyRoundTripper struct {
+	inner                     http.RoundTripper
+	resolver                  clientOutboundIPResolver
+	allowDangerousPrivateDNS  bool
+	strictBlockPrivateLiteral bool
+}
+
+func (rt *clientOutboundPolicyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, fmt.Errorf("outbound request URL is required")
+	}
+	host := strings.TrimSpace(req.URL.Hostname())
+	if host == "" {
+		return nil, fmt.Errorf("outbound request host is required")
+	}
+	port := strings.TrimSpace(req.URL.Port())
+	if port == "" {
+		if strings.EqualFold(req.URL.Scheme, "https") {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	address := net.JoinHostPort(host, port)
+	if _, err := resolveClientSafeDialAddress(
+		req.Context(),
+		rt.resolver,
+		address,
+		rt.allowDangerousPrivateDNS,
+		rt.strictBlockPrivateLiteral,
+	); err != nil {
+		return nil, err
+	}
+	inner := rt.inner
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	return inner.RoundTrip(req)
+}
+
+func configureClientOutboundDialPolicy(client *http.Client, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) {
+	if client == nil {
+		return
+	}
+	transport := cloneClientHTTPTransport(client.Transport)
+	transport.Proxy = nil
+	if envEnabled("MTLS_ALLOW_PROXY_FROM_ENV") {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	resolver := net.DefaultResolver
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		safeAddress, err := resolveClientSafeDialAddress(ctx, resolver, address, allowDangerousPrivateDNS, strictBlockPrivateLiteral)
+		if err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, safeAddress)
+	}
+	client.Transport = &clientOutboundPolicyRoundTripper{
+		inner:                     transport,
+		resolver:                  resolver,
+		allowDangerousPrivateDNS:  allowDangerousPrivateDNS,
+		strictBlockPrivateLiteral: strictBlockPrivateLiteral,
+	}
+}
+
+func cloneClientHTTPTransport(base http.RoundTripper) *http.Transport {
+	if tr, ok := base.(*http.Transport); ok && tr != nil {
+		return tr.Clone()
+	}
+	if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
+		return tr.Clone()
+	}
+	return &http.Transport{}
+}
+
+func resolveClientSafeDialAddress(ctx context.Context, resolver clientOutboundIPResolver, address string, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return "", fmt.Errorf("invalid outbound address %q: %w", address, err)
+	}
+	if clientHostHasZoneIdentifier(host) {
+		return "", fmt.Errorf("outbound host %q includes unsupported zone identifier", host)
+	}
+	host = normalizeClientDialHost(host)
+	if host == "" {
+		return "", fmt.Errorf("outbound host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isClientDisallowedOutboundDialIP(ip) {
+			if strictBlockPrivateLiteral {
+				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy (strict mode)", ip.String())
+			}
+			if !allowDangerousPrivateDNS {
+				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy", ip.String())
+			}
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve outbound host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("resolve outbound host %q returned no addresses", host)
+	}
+	loopbackHostname := host == "localhost"
+	localDevelopmentHostname := clientHostIsLocalDevelopment(host)
+	loopbackDialAddress := ""
+	for _, candidate := range ips {
+		ip := candidate.IP
+		if ip == nil {
+			continue
+		}
+		if loopbackHostname {
+			if !ip.IsLoopback() {
+				return "", fmt.Errorf("outbound localhost host %q resolved to non-loopback address %q", host, ip.String())
+			}
+			if loopbackDialAddress == "" {
+				loopbackDialAddress = net.JoinHostPort(ip.String(), port)
+			}
+			continue
+		}
+		if localDevelopmentHostname && !allowDangerousPrivateDNS && !isClientDisallowedOutboundDialIP(ip) {
+			return "", fmt.Errorf("outbound local-development host %q resolved to non-local address %q", host, ip.String())
+		}
+		if strictBlockPrivateLiteral && isClientDisallowedOutboundDialIP(ip) {
+			continue
+		}
+		if allowDangerousPrivateDNS {
+			return net.JoinHostPort(ip.String(), port), nil
+		}
+		if isClientDisallowedOutboundDialIP(ip) {
+			continue
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+	if loopbackHostname && loopbackDialAddress != "" {
+		return loopbackDialAddress, nil
+	}
+	return "", fmt.Errorf("outbound host %q resolved only to blocked address classes", host)
+}
+
+func normalizeClientDialHost(host string) string {
+	host = strings.TrimSpace(host)
+	host = strings.Trim(host, "[]")
+	return strings.ToLower(host)
+}
+
+func clientHostHasZoneIdentifier(host string) bool {
+	return strings.Contains(strings.TrimSpace(host), "%")
+}
+
+func isClientDisallowedOutboundDialIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+}
+
+func isLoopbackURLHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.Count(host, ":") == 1 || strings.HasPrefix(host, "[") {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+func isLocalDevelopmentURLHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.Count(host, ":") == 1 || strings.HasPrefix(host, "[") {
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+	}
+	return clientHostIsLocalDevelopment(host)
+}
+
+func clientHostIsLocalDevelopment(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	return host != "" && (host == "localhost" || strings.HasSuffix(host, ".local"))
 }
 
 func joinURL(base string, path string) string {

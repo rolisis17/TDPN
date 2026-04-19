@@ -14,6 +14,49 @@ GRPC_PREVIEW_HELPER_FILE=""
 CHAIN_TMP_DIR=""
 TDPND_PID=""
 
+write_bearer_curl_config() {
+  local token="$1"
+  local old_umask
+  local cfg_file
+  if [[ -z "$token" ]]; then
+    echo "refusing empty bearer token for curl auth config" >&2
+    return 1
+  fi
+  if ((${#token} > 4096)); then
+    echo "refusing oversized bearer token for curl auth config" >&2
+    return 1
+  fi
+  if printf '%s' "$token" | LC_ALL=C grep -q '[[:cntrl:][:space:]]'; then
+    echo "refusing bearer token with whitespace/control characters for curl auth config" >&2
+    return 1
+  fi
+  if [[ "$token" == *\"* || "$token" == *\\* ]]; then
+    echo "refusing bearer token with unsafe quote/backslash characters for curl auth config" >&2
+    return 1
+  fi
+  old_umask="$(umask)"
+  umask 077
+  cfg_file="$(mktemp -t tdpnd-settlement-bridge-auth.XXXXXX.cfg)"
+  umask "$old_umask"
+  printf 'header = "Authorization: Bearer %s"\n' "$token" >"${cfg_file}"
+  printf '%s\n' "${cfg_file}"
+}
+
+curl_with_bearer_config() {
+  local token="$1"
+  shift
+  local cfg_file
+  local rc
+  cfg_file="$(write_bearer_curl_config "$token")"
+  if curl --config "${cfg_file}" "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  rm -f "${cfg_file}"
+  return "${rc}"
+}
+
 signal_runtime() {
   local sig="$1"
   if [[ -n "${TDPND_PID}" ]]; then
@@ -161,7 +204,7 @@ post_expect_status() {
   local token="${4:-}"
   local code
   if [[ -n "${token}" ]]; then
-    code="$(curl -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Content-Type: application/json" -H "Authorization: Bearer ${token}" -d "${payload}" "${url}" || true)"
+    code="$(curl_with_bearer_config "${token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
   else
     code="$(curl -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
   fi
@@ -182,7 +225,7 @@ get_expect_status() {
   local token="${3:-}"
   local code
   if [[ -n "${token}" ]]; then
-    code="$(curl -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Authorization: Bearer ${token}" "${url}" || true)"
+    code="$(curl_with_bearer_config "${token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" "${url}" || true)"
   else
     code="$(curl -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" "${url}" || true)"
   fi

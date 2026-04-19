@@ -19,6 +19,8 @@ const (
 	HeaderTimestamp = "X-Admin-Timestamp"
 	HeaderNonce     = "X-Admin-Nonce"
 	HeaderSignature = "X-Admin-Signature"
+
+	defaultReadBodyLimitBytes = int64(1 << 20) // 1 MiB
 )
 
 func PathWithQuery(u *urlpkg.URL) string {
@@ -101,15 +103,25 @@ func Verify(pub ed25519.PublicKey, signature string, method string, pathWithQuer
 }
 
 func ReadBodyPreserve(r *http.Request) ([]byte, error) {
+	return ReadBodyPreserveWithLimit(r, defaultReadBodyLimitBytes)
+}
+
+func ReadBodyPreserveWithLimit(r *http.Request, maxBytes int64) ([]byte, error) {
 	if r == nil || r.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(r.Body)
+	if maxBytes <= 0 {
+		maxBytes = defaultReadBodyLimitBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(body))
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("request body too large: max %d bytes", maxBytes)
+	}
 	return body, nil
 }
 

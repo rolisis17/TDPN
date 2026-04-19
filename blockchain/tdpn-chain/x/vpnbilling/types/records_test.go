@@ -94,9 +94,14 @@ func TestSettlementRecordValidateBasic(t *testing.T) {
 			wantErr: "session id is required",
 		},
 		{
+			name:    "zero billed amount",
+			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, BilledAmount: 0},
+			wantErr: "billed amount must be positive",
+		},
+		{
 			name:    "negative billed amount",
 			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, BilledAmount: -1},
-			wantErr: "billed amount cannot be negative",
+			wantErr: "billed amount must be positive",
 		},
 	}
 

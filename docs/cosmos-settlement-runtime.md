@@ -88,6 +88,7 @@ Shadow dual-write note:
     - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
     - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
   - when `--settlement-http-auth-token` is set, bearer auth is required on all `POST` endpoints (including validator/governance writes) only; `GET` query paths and `GET /health` remain open.
+  - if you use that mode, bind the bridge to `127.0.0.1` only or another private-only transport and do not expose it on a reachable listener; unauthenticated GETs can leak settlement, validator, and governance state to any caller.
 - VPN services can target this bridge with `COSMOS_SETTLEMENT_ENDPOINT=http://127.0.0.1:8080`.
 - Bridge responsibilities remain control-plane only; VPN dataplane forwarding does not couple to bridge liveness.
 

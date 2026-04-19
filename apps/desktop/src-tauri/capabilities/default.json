@@ -3,5 +3,16 @@
   "identifier": "default",
   "description": "Default desktop capability for TDPN scaffold",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to",
+    "core:webview:deny-internal-toggle-devtools",
+    "core:window:deny-create",
+    "core:window:deny-destroy",
+    "core:window:deny-get-all-windows",
+    "core:menu:deny-new",
+    "core:tray:deny-new"
+  ]
 }

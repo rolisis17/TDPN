@@ -1,12 +1,78 @@
 package keeper
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
+
+type failWriteStore struct {
+	reservations map[string]types.CreditReservation
+	settlements  map[string]types.SettlementRecord
+
+	failReservationWrite bool
+	failSettlementWrite  bool
+}
+
+func newFailWriteStore() *failWriteStore {
+	return &failWriteStore{
+		reservations: make(map[string]types.CreditReservation),
+		settlements:  make(map[string]types.SettlementRecord),
+	}
+}
+
+func (s *failWriteStore) UpsertReservation(record types.CreditReservation) {
+	s.reservations[record.ReservationID] = record
+}
+
+func (s *failWriteStore) UpsertReservationWithError(record types.CreditReservation) error {
+	if s.failReservationWrite {
+		return errors.New("reservation write failed")
+	}
+	s.UpsertReservation(record)
+	return nil
+}
+
+func (s *failWriteStore) GetReservation(reservationID string) (types.CreditReservation, bool) {
+	record, ok := s.reservations[reservationID]
+	return record, ok
+}
+
+func (s *failWriteStore) ListReservations() []types.CreditReservation {
+	records := make([]types.CreditReservation, 0, len(s.reservations))
+	for _, record := range s.reservations {
+		records = append(records, record)
+	}
+	return records
+}
+
+func (s *failWriteStore) UpsertSettlement(record types.SettlementRecord) {
+	s.settlements[record.SettlementID] = record
+}
+
+func (s *failWriteStore) UpsertSettlementWithError(record types.SettlementRecord) error {
+	if s.failSettlementWrite {
+		return errors.New("settlement write failed")
+	}
+	s.UpsertSettlement(record)
+	return nil
+}
+
+func (s *failWriteStore) GetSettlement(settlementID string) (types.SettlementRecord, bool) {
+	record, ok := s.settlements[settlementID]
+	return record, ok
+}
+
+func (s *failWriteStore) ListSettlements() []types.SettlementRecord {
+	records := make([]types.SettlementRecord, 0, len(s.settlements))
+	for _, record := range s.settlements {
+		records = append(records, record)
+	}
+	return records
+}
 
 func TestKeeperReservationUpsertAndGet(t *testing.T) {
 	t.Parallel()
@@ -241,6 +307,47 @@ func TestKeeperFinalizeSettlementConflict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "conflicting fields") {
 		t.Fatalf("expected conflict error message, got: %v", err)
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsDuplicateReservationSettlement(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-duplicate-settlement",
+		SessionID:     "sess-duplicate-settlement",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	first := types.SettlementRecord{
+		SettlementID:  "set-duplicate-1",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  60,
+		AssetDenom:    reservation.AssetDenom,
+	}
+	if _, err = k.FinalizeSettlement(first); err != nil {
+		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
+	}
+
+	second := types.SettlementRecord{
+		SettlementID:  "set-duplicate-2",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  40,
+		AssetDenom:    reservation.AssetDenom,
+	}
+	_, err = k.FinalizeSettlement(second)
+	if err == nil {
+		t.Fatal("expected duplicate reservation settlement to be rejected")
+	}
+	if !strings.Contains(err.Error(), "already settled") {
+		t.Fatalf("expected already settled error, got: %v", err)
 	}
 }
 
@@ -567,6 +674,66 @@ func TestKeeperCreateReservationConflictCanonicalBoundary(t *testing.T) {
 	}
 }
 
+func TestKeeperCreateReservationRejectsDuplicateBusinessKeyAcrossReservationIDs(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	if _, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-primary-1",
+		SponsorID:     "sponsor-a",
+		SessionID:     "sess-dup-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	}); err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-secondary-1",
+		SponsorID:     "SPONSOR-A",
+		SessionID:     "SESS-DUP-1",
+		AssetDenom:    "UUSDC",
+		Amount:        100,
+	})
+	if err == nil {
+		t.Fatal("expected conflict error for duplicate reservation business key")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error message, got: %v", err)
+	}
+}
+
+func TestKeeperCreateReservationBusinessKeyLegacyCanonicalReplay(t *testing.T) {
+	t.Parallel()
+
+	store := newFailWriteStore()
+	store.UpsertReservation(types.CreditReservation{
+		ReservationID: "Res-Legacy-1",
+		SponsorID:     "sponsor-a",
+		SessionID:     "sess-legacy-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	k := NewKeeperWithStore(store)
+
+	replayed, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "  res-legacy-1  ",
+		SponsorID:     "  SPONSOR-A ",
+		SessionID:     "  SESS-LEGACY-1 ",
+		AssetDenom:    "  UUSDC ",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("expected canonical business-key replay to succeed, got %v", err)
+	}
+	if replayed.ReservationID != "res-legacy-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "res-legacy-1", replayed.ReservationID)
+	}
+}
+
 func TestKeeperFinalizeSettlementCanonicalizationCreateGetListAndReplay(t *testing.T) {
 	t.Parallel()
 
@@ -673,5 +840,119 @@ func TestKeeperFinalizeSettlementConflictCanonicalBoundary(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "conflicting fields") {
 		t.Fatalf("expected conflict error message, got: %v", err)
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsDuplicateBusinessKeyViaDifferentReservationID(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	k.UpsertReservation(types.CreditReservation{
+		ReservationID: "res-key-1",
+		SponsorID:     "sponsor-a",
+		SessionID:     "sess-key-1",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	k.UpsertReservation(types.CreditReservation{
+		ReservationID: "res-key-2",
+		SponsorID:     "SPONSOR-A",
+		SessionID:     "SESS-KEY-1",
+		AssetDenom:    "UUSDC",
+		Amount:        100,
+	})
+
+	if _, err := k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-key-1",
+		ReservationID: "res-key-1",
+		SessionID:     "sess-key-1",
+		BilledAmount:  50,
+		AssetDenom:    "uusdc",
+	}); err != nil {
+		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
+	}
+
+	_, err := k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-key-2",
+		ReservationID: "res-key-2",
+		SessionID:     "sess-key-1",
+		BilledAmount:  50,
+		AssetDenom:    "uusdc",
+	})
+	if err == nil {
+		t.Fatal("expected duplicate business-key settlement to be rejected")
+	}
+	if !strings.Contains(err.Error(), "business key") {
+		t.Fatalf("expected business-key conflict detail, got: %v", err)
+	}
+}
+
+func TestKeeperCreateReservationPropagatesStoreWriteErrors(t *testing.T) {
+	t.Parallel()
+
+	store := newFailWriteStore()
+	store.failReservationWrite = true
+	k := NewKeeperWithStore(store)
+
+	_, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-write-fail",
+		SessionID:     "sess-write-fail",
+		AssetDenom:    "uusdc",
+		Amount:        10,
+	})
+	if err == nil {
+		t.Fatal("expected create reservation to return write error")
+	}
+	if !strings.Contains(err.Error(), "persist reservation") {
+		t.Fatalf("expected persistence error context, got: %v", err)
+	}
+	if _, ok := k.GetReservation("res-write-fail"); ok {
+		t.Fatal("expected reservation to remain absent after write failure")
+	}
+}
+
+func TestKeeperFinalizeSettlementRollsBackReservationOnSettlementWriteError(t *testing.T) {
+	t.Parallel()
+
+	store := newFailWriteStore()
+	k := NewKeeperWithStore(store)
+
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-rollback",
+		SessionID:     "sess-rollback",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+	if reservation.Status != chaintypes.ReconciliationPending {
+		t.Fatalf("expected initial status %q, got %q", chaintypes.ReconciliationPending, reservation.Status)
+	}
+
+	store.failSettlementWrite = true
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-rollback",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  10,
+		AssetDenom:    reservation.AssetDenom,
+	})
+	if err == nil {
+		t.Fatal("expected finalize settlement to return write error")
+	}
+	if !strings.Contains(err.Error(), "persist settlement") {
+		t.Fatalf("expected settlement persistence error context, got: %v", err)
+	}
+	if _, ok := k.GetSettlement("set-rollback"); ok {
+		t.Fatal("expected settlement to remain absent after write failure")
+	}
+
+	after, ok := k.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatal("expected reservation to remain present after rollback")
+	}
+	if after.Status != chaintypes.ReconciliationPending {
+		t.Fatalf("expected reservation status rollback to %q, got %q", chaintypes.ReconciliationPending, after.Status)
 	}
 }

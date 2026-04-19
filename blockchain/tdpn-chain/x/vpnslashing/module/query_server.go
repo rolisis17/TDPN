@@ -12,6 +12,8 @@ var (
 	ErrPenaltyNotFound = errors.New("vpnslashing: penalty not found")
 )
 
+const maxQueryListResults = 1000
+
 // GetEvidenceRequest requests slash evidence by evidence ID.
 type GetEvidenceRequest struct {
 	EvidenceID string
@@ -82,17 +84,35 @@ func (s QueryServer) GetPenalty(req GetPenaltyRequest) (GetPenaltyResponse, erro
 }
 
 func (s QueryServer) ListEvidence(req ListEvidenceRequest) (ListEvidenceResponse, error) {
+	_ = req
 	if s.keeper == nil {
 		return ListEvidenceResponse{}, ErrNilKeeper
 	}
 
-	return ListEvidenceResponse{Evidence: s.keeper.ListEvidence()}, nil
+	records := s.keeper.ListEvidence()
+	return ListEvidenceResponse{Evidence: clampEvidence(records)}, nil
 }
 
 func (s QueryServer) ListPenalties(req ListPenaltiesRequest) (ListPenaltiesResponse, error) {
+	_ = req
 	if s.keeper == nil {
 		return ListPenaltiesResponse{}, ErrNilKeeper
 	}
 
-	return ListPenaltiesResponse{Penalties: s.keeper.ListPenalties()}, nil
+	records := s.keeper.ListPenalties()
+	return ListPenaltiesResponse{Penalties: clampPenalties(records)}, nil
+}
+
+func clampEvidence(records []types.SlashEvidence) []types.SlashEvidence {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
+}
+
+func clampPenalties(records []types.PenaltyDecision) []types.PenaltyDecision {
+	if len(records) <= maxQueryListResults {
+		return records
+	}
+	return records[:maxQueryListResults]
 }

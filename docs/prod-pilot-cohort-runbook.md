@@ -40,6 +40,27 @@ Command:
    - checksum sidecar (`.sha256`)
    - manifest JSON (`prod_pilot_cohort_bundle_manifest.json`)
 
+## Pre-Readiness Defer Semantics (Operator Practical)
+
+Top-level pre-readiness runs once before cohort rounds by default.
+
+Non-root default:
+- wrapper auto-enables pre-readiness defer mode for root-required checks.
+- if pre-readiness fails only because WG-only proof is root-required/deferred, cohort continues with a warning so you can still gather bundle evidence.
+
+Fail-closed rule:
+- if pre-readiness fails for any non-root-independent reason (runtime hygiene, malformed outputs, unrelated blockers), cohort stops immediately.
+
+What to run next after a root-only deferred warning:
+
+```bash
+sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1
+sudo ./scripts/easy_node.sh prod-pilot-cohort-runbook --rounds 5 --pause-sec 60 -- --bootstrap-directory https://<A_HOST>:8081 --subject pilot-client
+```
+
+Diagnostics-only override:
+- skip pre-readiness gate entirely with `--pre-real-host-readiness 0` (not for final signoff posture).
+
 Then verify artifacts:
 
 ```bash

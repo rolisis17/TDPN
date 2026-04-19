@@ -20,6 +20,11 @@ Purpose:
   Run the locked VPN RC one-host execution path in one command:
     1) single-machine-prod-readiness (strict defaults + docker rehearsal)
     2) roadmap-progress-report refresh based on that output
+
+Notes:
+  - `--profile-compare-campaign-signoff-refresh-campaign 1` means attempt a
+    fresh campaign refresh; `0` means reuse existing campaign artifacts unless
+    single-machine auto mode escalates to refresh for stale/missing data.
 USAGE
 }
 

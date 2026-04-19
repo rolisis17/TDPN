@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,63 @@ func TestHandlePathOpenLiveModeRejectsNonWireGuardTransport(t *testing.T) {
 	}
 	if exitCalls != 0 {
 		t.Fatalf("expected no call to exit, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenStrictRequiresTokenProofNonce(t *testing.T) {
+	s := &Service{betaStrict: true}
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		TokenProof: "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:40000"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open without nonce in strict mode")
+	}
+	if out.Reason != "token-proof-nonce-required" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+}
+
+func TestHandlePathOpenStrictRejectsMalformedTokenProof(t *testing.T) {
+	s := &Service{betaStrict: true}
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		TokenProof:      "not-base64",
+		TokenProofNonce: "nonce-a",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:40000"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open for malformed proof in strict mode")
+	}
+	if out.Reason != "token-proof-invalid" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
 	}
 }
 
@@ -126,6 +184,125 @@ func TestHandlePathOpenLiveModeAllowsWireGuardTransport(t *testing.T) {
 	}
 	if out.SessionID == "" || out.EntryDataAddr == "" {
 		t.Fatalf("expected session details in response, got %+v", out)
+	}
+}
+
+func TestHandlePathOpenRejectsWhenSessionCapacityReached(t *testing.T) {
+	exitCalls := 0
+	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exitCalls++
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{
+			Accepted:   true,
+			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
+			Transport:  "wireguard-udp",
+		})
+	}))
+	defer exitSrv.Close()
+
+	s := &Service{
+		dataAddr:              "127.0.0.1:51820",
+		httpClient:            exitSrv.Client(),
+		maxSessions:           1,
+		sessions:              map[string]sessionState{"existing": {expiresUnix: time.Now().Add(5 * time.Minute).Unix()}},
+		exitRouteCache:        map[string]exitRoute{"exit-a": {controlURL: exitSrv.URL, dataAddr: "127.0.0.1:51821", operatorID: "op-b", fetchedAt: time.Now()}},
+		buckets:               map[string]rateBucket{},
+		abuse:                 map[string]abuseState{},
+		openRPS:               100,
+		routeTTL:              time.Minute,
+		requireDistinctExitOp: false,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:     "exit-a",
+		Transport:  "wireguard-udp",
+		TokenProof: "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:40102"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open when session capacity is reached")
+	}
+	if out.Reason != "entry-capacity-exceeded" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no exit call when at session capacity, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenChecksBanBeforeDirectoryFetch(t *testing.T) {
+	durl := "http://directory.local"
+	directoryCalls := 0
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		durl + "/v1/pubkeys": func(req *http.Request) (*http.Response, error) {
+			directoryCalls++
+			return jsonResp(proto.DirectoryPubKeysResponse{
+				Operator: "op-dir",
+				PubKeys:  []string{"invalid"},
+			})(req)
+		},
+	}
+	now := time.Now()
+	s := &Service{
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		directoryURLs:         []string{durl},
+		directoryMinSources:   1,
+		directoryMinOperators: 1,
+		directoryMinVotes:     1,
+		sessions:              map[string]sessionState{},
+		exitRouteCache:        map[string]exitRoute{},
+		buckets:               map[string]rateBucket{},
+		abuse: map[string]abuseState{
+			"127.0.0.1": {
+				lastSeenSec:    now.Unix(),
+				bannedUntilSec: now.Add(time.Minute).Unix(),
+			},
+		},
+		openRPS:  100,
+		routeTTL: time.Minute,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:     "exit-unknown",
+		Transport:  "wireguard-udp",
+		TokenProof: "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41006"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open for banned source")
+	}
+	if out.Reason != "source-temporarily-blocked" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if directoryCalls != 0 {
+		t.Fatalf("expected ban check to short-circuit before directory fetch, got calls=%d", directoryCalls)
 	}
 }
 
@@ -609,5 +786,59 @@ func TestHandlePathOpenPreservesProofBoundTransportForForwarding(t *testing.T) {
 	}
 	if out.Transport != "policy-json" {
 		t.Fatalf("expected entry response transport to normalize to policy-json, got %q", out.Transport)
+	}
+}
+
+func TestHandlePathOpenRejectsUnknownFieldJSON(t *testing.T) {
+	s := &Service{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(`{"token_proof":"proof","unexpected":true}`))
+	rr := httptest.NewRecorder()
+
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid json") {
+		t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+	}
+}
+
+func TestHandlePathOpenRejectsTrailingJSON(t *testing.T) {
+	s := &Service{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(`{"token_proof":"proof"}{"extra":1}`))
+	rr := httptest.NewRecorder()
+
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid json") {
+		t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+	}
+}
+
+func TestHandlePathOpenRejectsOversizedJSON(t *testing.T) {
+	s := &Service{}
+	body := `{"token_proof":"` + strings.Repeat("a", 70*1024) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid json") {
+		t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+	}
+}
+
+func TestDecodeBoundedJSONResponseRejectsOversizedBody(t *testing.T) {
+	body := strings.NewReader(`{"value":"` + strings.Repeat("a", int(remoteResponseMaxBodyBytes)+1024) + `"}`)
+	var out map[string]string
+	if err := decodeBoundedJSONResponse(body, &out, remoteResponseMaxBodyBytes); err == nil {
+		t.Fatalf("expected oversized response rejection")
 	}
 }

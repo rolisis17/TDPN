@@ -63,20 +63,66 @@ abs_path() {
   fi
 }
 
+is_safe_username() {
+  local username="$1"
+  [[ "$username" =~ ^[A-Za-z_][A-Za-z0-9_.-]*[$]?$ ]]
+}
+
+resolve_sudo_user() {
+  local candidate
+  candidate="$(trim "${SUDO_USER:-}")"
+  if [[ -z "$candidate" || "$candidate" == "root" ]]; then
+    printf '%s\n' ""
+    return
+  fi
+  if ! is_safe_username "$candidate"; then
+    printf '%s\n' ""
+    return
+  fi
+  if ! id -u "$candidate" >/dev/null 2>&1; then
+    printf '%s\n' ""
+    return
+  fi
+  printf '%s\n' "$candidate"
+}
+
+lookup_home_dir_for_user() {
+  local username="$1"
+  local passwd_entry=""
+  local home_dir=""
+  if [[ -z "$username" ]]; then
+    printf '%s\n' ""
+    return
+  fi
+  if command -v getent >/dev/null 2>&1; then
+    passwd_entry="$(getent passwd "$username" 2>/dev/null || true)"
+  fi
+  if [[ -z "$passwd_entry" && -r /etc/passwd ]]; then
+    passwd_entry="$(awk -F: -v user="$username" '$1 == user { print; exit }' /etc/passwd 2>/dev/null || true)"
+  fi
+  if [[ -n "$passwd_entry" ]]; then
+    home_dir="$(printf '%s\n' "$passwd_entry" | cut -d: -f6)"
+  fi
+  if [[ "$home_dir" == /* ]]; then
+    printf '%s\n' "$home_dir"
+  else
+    printf '%s\n' ""
+  fi
+}
+
 manual_validation_state_dir() {
   if [[ -n "${EASY_NODE_MANUAL_VALIDATION_STATE_DIR:-}" ]]; then
     printf '%s\n' "${EASY_NODE_MANUAL_VALIDATION_STATE_DIR}"
     return
   fi
 
+  local sudo_user=""
   local home_dir=""
   local state_home=""
-  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
-    home_dir="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
-    if [[ -z "$home_dir" ]]; then
-      home_dir="$(eval echo "~$SUDO_USER" 2>/dev/null || true)"
-    fi
-    if [[ -n "$home_dir" && "$home_dir" != "~$SUDO_USER" ]]; then
+  sudo_user="$(resolve_sudo_user)"
+  if [[ -n "$sudo_user" ]]; then
+    home_dir="$(lookup_home_dir_for_user "$sudo_user")"
+    if [[ -n "$home_dir" ]]; then
       state_home="$home_dir/.local/state"
     fi
   fi
@@ -93,11 +139,13 @@ manual_validation_state_dir() {
 }
 
 resolve_target_owner_spec() {
+  local sudo_user=""
   local owner_user=""
   local owner_group=""
-  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
-    owner_user="${SUDO_USER}"
-    owner_group="$(id -gn "$SUDO_USER" 2>/dev/null || true)"
+  sudo_user="$(resolve_sudo_user)"
+  if [[ -n "$sudo_user" ]]; then
+    owner_user="${sudo_user}"
+    owner_group="$(id -gn "$sudo_user" 2>/dev/null || true)"
   else
     owner_user="$(id -un 2>/dev/null || printf '%s' "${USER:-}")"
     owner_group="$(id -gn 2>/dev/null || true)"

@@ -209,6 +209,44 @@ if [[ "$(jq -r '.status' "$ROLLBACK_SUMMARY")" != "ok" ]]; then
   exit 1
 fi
 
+echo "[prod-upgrade] rollback blocks unsafe manifest paths"
+UNSAFE_BACKUP="$TMP_DIR/unsafe_backup"
+UNSAFE_SUMMARY="$TMP_DIR/unsafe_summary.json"
+mkdir -p "$UNSAFE_BACKUP/snapshot"
+cat >"$UNSAFE_BACKUP/backup_manifest.json" <<'EOF_UNSAFE_MANIFEST'
+[
+  {"path":"../escape","exists":true}
+]
+EOF_UNSAFE_MANIFEST
+set +e
+PATH="$TMP_BIN:$PATH" \
+DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
+EASY_CAPTURE_FILE="$EASY_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_UPGRADE_DOCKER_BIN=docker \
+./scripts/prod_upgrade_runbook.sh \
+  --rollback-from "$UNSAFE_BACKUP" \
+  --mode authority \
+  --restart-after-rollback 0 \
+  --summary-json "$UNSAFE_SUMMARY" >/tmp/integration_prod_upgrade_runbook_unsafe.log 2>&1
+unsafe_rc=$?
+set -e
+if [[ "$unsafe_rc" -eq 0 ]]; then
+  echo "prod-upgrade rollback accepted unsafe manifest path unexpectedly"
+  cat /tmp/integration_prod_upgrade_runbook_unsafe.log
+  exit 1
+fi
+if ! rg -q 'rollback refused: manifest path contains invalid segment' /tmp/integration_prod_upgrade_runbook_unsafe.log; then
+  echo "prod-upgrade rollback did not report unsafe manifest path refusal"
+  cat /tmp/integration_prod_upgrade_runbook_unsafe.log
+  exit 1
+fi
+if [[ "$(jq -r '.status' "$UNSAFE_SUMMARY")" != "fail" ]]; then
+  echo "prod-upgrade unsafe rollback summary should be fail"
+  cat "$UNSAFE_SUMMARY"
+  exit 1
+fi
+
 FAKE_RUNBOOK="$TMP_DIR/fake_prod_upgrade_runbook.sh"
 DISPATCH_CAPTURE="$TMP_DIR/dispatch_capture.log"
 cat >"$FAKE_RUNBOOK" <<'EOF_FAKE_RUNBOOK'

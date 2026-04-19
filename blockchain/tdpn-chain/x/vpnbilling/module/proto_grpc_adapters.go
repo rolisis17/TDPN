@@ -151,7 +151,8 @@ func fromProtoCreditReservation(in *pb.CreditReservation) billingtypes.CreditRes
 		SessionID:     in.GetSessionId(),
 		AssetDenom:    in.GetAssetDenom(),
 		Amount:        in.GetAmount(),
-		Status:        fromProtoStatus(in.GetStatus()),
+		// Server owns reconciliation lifecycle transitions for writes.
+		Status:        "",
 		CreatedAtUnix: in.GetCreatedAtUnix(),
 	}
 }
@@ -173,14 +174,15 @@ func fromProtoSettlementRecord(in *pb.SettlementRecord) billingtypes.SettlementR
 		return billingtypes.SettlementRecord{}
 	}
 	return billingtypes.SettlementRecord{
-		SettlementID:   in.GetSettlementId(),
-		ReservationID:  in.GetReservationId(),
-		SessionID:      in.GetSessionId(),
-		BilledAmount:   in.GetBilledAmount(),
-		UsageBytes:     in.GetUsageBytes(),
-		AssetDenom:     in.GetAssetDenom(),
-		SettledAtUnix:  in.GetSettledAtUnix(),
-		OperationState: fromProtoStatus(in.GetOperationState()),
+		SettlementID:  in.GetSettlementId(),
+		ReservationID: in.GetReservationId(),
+		SessionID:     in.GetSessionId(),
+		BilledAmount:  in.GetBilledAmount(),
+		UsageBytes:    in.GetUsageBytes(),
+		AssetDenom:    in.GetAssetDenom(),
+		SettledAtUnix: in.GetSettledAtUnix(),
+		// Server owns reconciliation lifecycle transitions for writes.
+		OperationState: "",
 	}
 }
 

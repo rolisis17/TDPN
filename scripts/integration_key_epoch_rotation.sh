@@ -11,14 +11,28 @@ ISSUER_KEY_ROTATE_SEC="${ISSUER_KEY_ROTATE_SEC:-2}"
 EXIT_REVOCATION_REFRESH_SEC="${EXIT_REVOCATION_REFRESH_SEC:-1}"
 ISSUER_KEY_HISTORY="${ISSUER_KEY_HISTORY:-4}"
 
+redact_token_json() {
+  local payload="$1"
+  printf '%s\n' "$payload" | sed -E \
+    -e 's/"token":"[^"]*"/"token":"[redacted]"/g' \
+    -e 's/"private_key":"[^"]*"/"private_key":"[redacted]"/g' \
+    -e 's/"credential":"[^"]*"/"credential":"[redacted]"/g'
+}
+
 ISSUER_KEY_ROTATE_SEC="$ISSUER_KEY_ROTATE_SEC" \
 EXIT_REVOCATION_REFRESH_SEC="$EXIT_REVOCATION_REFRESH_SEC" \
 ISSUER_KEY_HISTORY="$ISSUER_KEY_HISTORY" \
 timeout 45s go run ./cmd/node --directory --issuer --entry --exit >/tmp/key_epoch_node.log 2>&1 &
 node_pid=$!
-trap 'kill $node_pid >/dev/null 2>&1 || true' EXIT
+TOKEN_POP_PRIVATE_KEY_FILE=""
+TOKEN_POP_FILE=""
+trap 'kill $node_pid >/dev/null 2>&1 || true; rm -f "${TOKEN_POP_PRIVATE_KEY_FILE:-}" "${TOKEN_POP_FILE:-}"' EXIT
 
 sleep 3
+
+TOKEN_POP_PRIVATE_KEY_FILE="$(mktemp)"
+TOKEN_POP_FILE="$(mktemp)"
+chmod 600 "$TOKEN_POP_PRIVATE_KEY_FILE" "$TOKEN_POP_FILE"
 
 TOKEN_POP_PRIVATE_KEY=""
 ISSUE_TOKEN_JSON=""
@@ -29,7 +43,7 @@ issue_token() {
   pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
   if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
     echo "failed to generate PoP keypair for token" >&2
-    echo "$pop_json" >&2
+    redact_token_json "$pop_json" >&2
     return 1
   fi
   TOKEN_POP_PRIVATE_KEY="$pop_priv"
@@ -44,10 +58,12 @@ path_open() {
   local client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   local token_proof_nonce
   token_proof_nonce="$(date +%s%N)-key-epoch-$RANDOM"
+  printf '%s' "$pop_priv" >"$TOKEN_POP_PRIVATE_KEY_FILE"
+  printf '%s' "$token" >"$TOKEN_POP_FILE"
   local token_proof
   token_proof=$(go run ./cmd/tokenpop sign \
-    --private-key "$pop_priv" \
-    --token "$token" \
+    --private-key-file "$TOKEN_POP_PRIVATE_KEY_FILE" \
+    --token-file "$TOKEN_POP_FILE" \
     --exit-id "exit-local-1" \
     --proof-nonce "$token_proof_nonce" \
     --client-inner-pub "$client_pub" \
@@ -72,7 +88,7 @@ token_1=$(echo "$token_json_1" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 token_1_pop_priv="$TOKEN_POP_PRIVATE_KEY"
 if [[ -z "$token_1" ]]; then
   echo "failed to issue initial token"
-  echo "$token_json_1"
+  redact_token_json "$token_json_1"
   cat /tmp/key_epoch_node.log
   exit 1
 fi
@@ -107,7 +123,7 @@ token_2=$(echo "$token_json_2" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 token_2_pop_priv="$TOKEN_POP_PRIVATE_KEY"
 if [[ -z "$token_2" ]]; then
   echo "failed to issue rotated-epoch token"
-  echo "$token_json_2"
+  redact_token_json "$token_json_2"
   cat /tmp/key_epoch_node.log
   exit 1
 fi

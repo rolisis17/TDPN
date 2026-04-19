@@ -19,6 +19,7 @@ Usage:
     [--bundle-dir PATH] \
     [--run-report-json PATH] \
     [--record-result [0|1]] \
+    [--defer-no-root [0|1]] \
     [--pre-real-host-readiness [0|1]] \
     [--pre-real-host-readiness-summary-json PATH] \
     [--runtime-doctor [0|1]] \
@@ -28,6 +29,7 @@ Usage:
     [--runtime-client-iface IFACE] \
     [--runtime-exit-iface IFACE] \
     [--runtime-vpn-iface IFACE] \
+    [--control-require-issuer-quorum auto|0|1] \
     [--manual-validation-report [0|1]] \
     [--manual-validation-report-summary-json PATH] \
     [--manual-validation-report-md PATH] \
@@ -76,10 +78,37 @@ prepare_log_dir() {
 
 print_cmd() {
   local arg
+  local redact_next=0
   for arg in "$@"; do
+    if ((redact_next)); then
+      printf '%q ' "[REDACTED]"
+      redact_next=0
+      continue
+    fi
+    case "$arg" in
+      --anon-cred|--invite-key|--campaign-subject|--subject|--token|--auth-token|--admin-token|--authorization|--bearer)
+        printf '%q ' "$arg"
+        redact_next=1
+        continue
+        ;;
+      --anon-cred=*|--invite-key=*|--campaign-subject=*|--subject=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*)
+        printf '%q ' "${arg%%=*}=[REDACTED]"
+        continue
+        ;;
+    esac
     printf '%q ' "$arg"
   done
   printf '\n'
+}
+
+safe_append_to_array() {
+  local array_name="$1"
+  shift
+  if [[ ! "$array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    return 1
+  fi
+  local -n target_array="$array_name"
+  target_array+=("$@")
 }
 
 append_existing_artifact() {
@@ -87,7 +116,7 @@ append_existing_artifact() {
   local path="$2"
   [[ -z "$path" ]] && return 0
   if [[ -e "$path" ]]; then
-    eval "$array_name+=(\"\$path\")"
+    safe_append_to_array "$array_name" "$path" || return 1
   fi
 }
 
@@ -143,6 +172,7 @@ run_report_json=""
 summary_json=""
 print_summary_json="0"
 record_result="1"
+defer_no_root="${THREE_MACHINE_PROD_SIGNOFF_DEFER_NO_ROOT:-0}"
 pre_real_host_readiness_enabled="0"
 pre_real_host_readiness_summary_json=""
 runtime_doctor_enabled="1"
@@ -179,6 +209,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         record_result="1"
+        shift
+      fi
+      ;;
+    --defer-no-root)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        defer_no_root="${2:-}"
+        shift 2
+      else
+        defer_no_root="1"
         shift
       fi
       ;;
@@ -288,6 +327,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--record-result" "$record_result"
+bool_arg_or_die "--defer-no-root" "$defer_no_root"
 bool_arg_or_die "--pre-real-host-readiness" "$pre_real_host_readiness_enabled"
 bool_arg_or_die "--runtime-doctor" "$runtime_doctor_enabled"
 bool_arg_or_die "--runtime-fix" "$runtime_fix_on_non_ok"
@@ -366,6 +406,7 @@ pre_real_host_readiness_cmd=(
   "--exit-iface" "$runtime_exit_iface"
   "--vpn-iface" "$runtime_vpn_iface"
   "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
+  "--defer-no-root" "$defer_no_root"
   "--summary-json" "$pre_real_host_readiness_summary_json"
   "--manual-validation-report-summary-json" "$manual_validation_report_summary_json"
   "--manual-validation-report-md" "$manual_validation_report_md"
@@ -432,6 +473,7 @@ runtime_gate_failure_note=""
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+signoff_deferred_no_root="0"
 
 extract_json_payload() {
   local prefix="$1"
@@ -469,6 +511,76 @@ run_and_capture() {
     rm -f "$tmp"
     return "$rc"
   fi
+}
+
+pre_real_host_readiness_failure_requires_root() {
+  local readiness_output="$1"
+  local readiness_json="$2"
+  local readiness_notes=""
+  local readiness_stage=""
+  local blockers_only_wg_only="false"
+
+  if [[ -n "$readiness_output" ]] && printf '%s\n' "$readiness_output" | grep -Eqi 'requires root|run with sudo|must be root|root privileges required'; then
+    return 0
+  fi
+
+  if [[ -z "$readiness_json" ]]; then
+    return 1
+  fi
+
+  readiness_notes="$(
+    printf '%s\n' "$readiness_json" | jq -r '
+      [
+        (.notes // ""),
+        (.runtime_fix.notes // ""),
+        (.wg_only_stack_selftest.notes // "")
+      ] | map(select(type == "string")) | join("\n")
+    ' 2>/dev/null || true
+  )"
+  if [[ -n "$readiness_notes" ]] && printf '%s\n' "$readiness_notes" | grep -Eqi 'requires root|run with sudo|must be root|root privileges required'; then
+    return 0
+  fi
+
+  readiness_stage="$(printf '%s\n' "$readiness_json" | jq -r '.stage // ""' 2>/dev/null || true)"
+  blockers_only_wg_only="$(
+    printf '%s\n' "$readiness_json" | jq -r '
+      (.machine_c_smoke_gate.blockers // []) as $b
+      | (($b | type) == "array")
+        and (($b | length) == 1)
+        and (($b[0] // "") == "wg_only_stack_selftest")
+    ' 2>/dev/null || printf 'false'
+  )"
+  if [[ "${EUID:-$(id -u)}" -ne 0 && "$readiness_stage" == "wg_only_stack_selftest" && "$blockers_only_wg_only" == "true" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+derive_bundle_failure_notes() {
+  local default_notes="$1"
+  local failed_step=""
+  local gate_report_path=""
+
+  if [[ -z "$gate_summary_json" || ! -f "$gate_summary_json" ]]; then
+    printf '%s\n' "$default_notes"
+    return 0
+  fi
+
+  failed_step="$(jq -r '.failed_step // ""' "$gate_summary_json" 2>/dev/null || true)"
+  gate_report_path="$(jq -r '.report_file // ""' "$gate_summary_json" 2>/dev/null || true)"
+  if [[ -n "$gate_report_path" && ! -f "$gate_report_path" ]] && [[ "$gate_report_path" != /* ]]; then
+    gate_report_path="$ROOT_DIR/$gate_report_path"
+  fi
+
+  if [[ "$failed_step" == "control_validate" || "$failed_step" == "control_soak" ]] &&
+    [[ -n "$gate_report_path" && -f "$gate_report_path" ]] &&
+    grep -Eq 'issuer B did not become healthy|issuer quorum check failed' "$gate_report_path"; then
+    printf '%s\n' "three-machine production signoff failed: issuer-B control-plane check failed. If machine B runs provider mode (no local issuer on :8082), use --control-require-issuer-quorum auto (recommended) or 0; if machine B is authority mode, keep strict quorum (1) and restore issuer B /v1/pubkeys."
+    return 0
+  fi
+
+  printf '%s\n' "$default_notes"
 }
 
 run_runtime_gate() {
@@ -590,6 +702,10 @@ run_pre_real_host_readiness_gate() {
 
   if [[ "$readiness_rc" -ne 0 || "$pre_real_host_readiness_machine_c_ready" != "true" ]]; then
     runtime_gate_failure_note="pre-real-host readiness gate blocked three-machine signoff"
+    if [[ "$defer_no_root" == "1" ]] && pre_real_host_readiness_failure_requires_root "$readiness_output" "$readiness_json"; then
+      runtime_gate_failure_note="three-machine production signoff deferred: pre-real-host readiness requires root privileges (rerun with sudo)"
+      return 2
+    fi
     return 1
   fi
 
@@ -794,6 +910,8 @@ write_summary_json() {
     --arg status "$signoff_status" \
     --arg stage "$result_stage" \
     --arg notes "$notes" \
+    --arg defer_no_root "$defer_no_root" \
+    --arg signoff_deferred_no_root "$signoff_deferred_no_root" \
     --arg bundle_dir "$bundle_dir" \
     --arg run_report_json "$run_report_json" \
     --arg run_report_status "$run_report_status" \
@@ -854,6 +972,8 @@ write_summary_json() {
       status: $status,
       stage: $stage,
       notes: $notes,
+      defer_no_root: ($defer_no_root == "1"),
+      deferred_no_root: ($signoff_deferred_no_root == "1"),
       pre_real_host_readiness: {
         enabled: ($pre_real_host_readiness_enabled == 1),
         status: $pre_real_host_readiness_status,
@@ -925,9 +1045,16 @@ write_summary_json() {
     }' >"$summary_json"
 }
 
-if ! run_pre_real_host_readiness_gate; then
+if run_pre_real_host_readiness_gate; then
+  :
+else
+  pre_real_host_readiness_rc=$?
   result_stage="$stage"
   signoff_status="fail"
+  if [[ "$pre_real_host_readiness_rc" -eq 2 ]]; then
+    signoff_status="skip"
+    signoff_deferred_no_root="1"
+  fi
   notes="$runtime_gate_failure_note"
   write_summary_json
   refresh_manual_validation_report
@@ -950,6 +1077,9 @@ if ! run_pre_real_host_readiness_gate; then
   echo "summary_json: $summary_json"
   if [[ "$print_summary_json" == "1" ]]; then
     cat "$summary_json"
+  fi
+  if [[ "$pre_real_host_readiness_rc" -eq 2 ]]; then
+    exit 0
   fi
   exit 1
 fi
@@ -1031,7 +1161,7 @@ if [[ "${bundle_rc:-1}" == "0" ]]; then
   notes="three-machine production signoff completed successfully"
 else
   signoff_status="fail"
-  notes="three-machine production signoff failed"
+  notes="$(derive_bundle_failure_notes "three-machine production signoff failed")"
 fi
 
 write_summary_json

@@ -13,6 +13,7 @@ Usage:
     [--roadmap-summary-json PATH] \
     [--roadmap-report-md PATH] \
     [--action-timeout-sec N] \
+    [--allow-unsafe-shell-commands [0|1]] \
     [--refresh-manual-validation [0|1]] \
     [--refresh-single-machine-readiness [0|1]] \
     [--parallel [0|1]] \
@@ -30,7 +31,8 @@ Purpose:
 
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
-  profile_default_gate default timeout sec: 1200
+  --allow-unsafe-shell-commands 0
+  profile_default_gate default timeout sec: 2400
     (env ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC)
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
@@ -154,6 +156,14 @@ command_replace_profile_subject_placeholder() {
   printf '%s' "$command_text"
 }
 
+redact_command_secrets() {
+  local line="${1:-}"
+  line="$(printf '%s' "$line" | sed -E \
+    -e 's/(--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)([[:space:]]+)[^[:space:]]+/\1\2[redacted]/g' \
+    -e 's/(--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)=[^[:space:]]+/\1=[redacted]/g')"
+  printf '%s' "$line"
+}
+
 profile_default_gate_extract_arg_value_from_cmd() {
   local cmd
   local opt
@@ -271,6 +281,147 @@ log_has_failure_kind_marker() {
   grep -E -q "failure_kind[=:]\"?${marker}\"?([[:space:],]|$)" "$log_path"
 }
 
+command_requires_shell_execution() {
+  local command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+  if [[ "$command_text" == *$'\n'* || "$command_text" == *$'\r'* ]]; then
+    return 0
+  fi
+  if [[ "$command_text" =~ [\;\|\&\<\>\`\$\(\)\{\}] ]]; then
+    return 0
+  fi
+  return 1
+}
+
+command_string_to_argv() {
+  local command_text="${1:-}"
+  COMMAND_STRING_ARGV=()
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! mapfile -d '' -t COMMAND_STRING_ARGV < <(
+    python3 - "$command_text" <<'PY'
+import shlex
+import sys
+
+try:
+    for token in shlex.split(sys.argv[1], posix=True):
+        sys.stdout.write(token)
+        sys.stdout.write("\0")
+except ValueError:
+    sys.exit(1)
+PY
+  ); then
+    COMMAND_STRING_ARGV=()
+    return 1
+  fi
+  return 0
+}
+
+action_command_argv_allowed() {
+  local -a argv=("$@")
+  local cmd
+  local script_path
+  if [[ "${#argv[@]}" -eq 0 ]]; then
+    return 1
+  fi
+  cmd="${argv[0]}"
+  if [[ "$cmd" == "bash" ]]; then
+    if [[ "${#argv[@]}" -lt 2 ]]; then
+      return 1
+    fi
+    script_path="${argv[1]}"
+  else
+    script_path="$cmd"
+  fi
+  case "$script_path" in
+    "$ROOT_DIR"/scripts/*)
+      ;;
+    scripts/*)
+      script_path="$ROOT_DIR/$script_path"
+      ;;
+    ./scripts/*)
+      script_path="$ROOT_DIR/${script_path#./}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  if [[ "$script_path" == *".."* ]]; then
+    return 1
+  fi
+  [[ -f "$script_path" ]]
+}
+
+run_action_command_string() {
+  local command_text="${1:-}"
+  local log_path="${2:-}"
+  local timeout_sec="${3:-0}"
+  local -a command_argv=()
+  local -a env_prefix=()
+  local token
+
+  if [[ -z "$command_text" ]]; then
+    return 4
+  fi
+
+  if ! command_requires_shell_execution "$command_text" && command_string_to_argv "$command_text"; then
+    for token in "${COMMAND_STRING_ARGV[@]}"; do
+      if [[ "${#command_argv[@]}" -eq 0 && "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+        env_prefix+=("$token")
+        continue
+      fi
+      command_argv+=("$token")
+    done
+
+    if [[ "${#command_argv[@]}" -gt 0 ]]; then
+      if ! action_command_argv_allowed "${command_argv[@]}"; then
+        {
+          echo "refusing untrusted action command (outside scripts allowlist)"
+          echo "command: $command_text"
+        } >"$log_path"
+        return 6
+      fi
+      if (( timeout_sec > 0 )); then
+        if [[ "${#env_prefix[@]}" -gt 0 ]]; then
+          timeout --foreground "${timeout_sec}s" env "${env_prefix[@]}" "${command_argv[@]}" >"$log_path" 2>&1
+        else
+          timeout --foreground "${timeout_sec}s" "${command_argv[@]}" >"$log_path" 2>&1
+        fi
+      else
+        if [[ "${#env_prefix[@]}" -gt 0 ]]; then
+          env "${env_prefix[@]}" "${command_argv[@]}" >"$log_path" 2>&1
+        else
+          "${command_argv[@]}" >"$log_path" 2>&1
+        fi
+      fi
+      return $?
+    fi
+  fi
+
+  if (( timeout_sec > 0 )); then
+    if [[ "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
+      {
+        echo "refusing shell-evaluated action command (set --allow-unsafe-shell-commands 1 to override)"
+        echo "command: $command_text"
+      } >"$log_path"
+      return 5
+    fi
+    timeout --foreground "${timeout_sec}s" bash -lc "$command_text" >"$log_path" 2>&1
+  else
+    if [[ "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
+      {
+        echo "refusing shell-evaluated action command (set --allow-unsafe-shell-commands 1 to override)"
+        echo "command: $command_text"
+      } >"$log_path"
+      return 5
+    fi
+    bash -lc "$command_text" >"$log_path" 2>&1
+  fi
+}
+
 need_cmd jq
 need_cmd bash
 need_cmd date
@@ -290,7 +441,8 @@ include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
 print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC:-0}"
-profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-1200}"
+allow_unsafe_shell_commands="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
+profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-2400}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -318,6 +470,15 @@ while [[ $# -gt 0 ]]; do
       require_value_or_die "$1" "${2:-}"
       action_timeout_sec="${2:-}"
       shift 2
+      ;;
+    --allow-unsafe-shell-commands)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_unsafe_shell_commands="${2:-}"
+        shift 2
+      else
+        allow_unsafe_shell_commands="1"
+        shift
+      fi
       ;;
     --refresh-manual-validation)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -401,6 +562,7 @@ bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_re
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-profile-default-gate-unreachable" "$allow_profile_default_gate_unreachable"
+bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
 int_arg_or_die "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC" "$profile_default_gate_default_timeout_sec"
@@ -505,6 +667,7 @@ if [[ -z "$selected_action_ids_csv" ]]; then
   selected_action_ids_csv="none"
 fi
 echo "[roadmap-next-actions-run] selected_actions=$actions_count parallel=$parallel action_timeout_sec=$action_timeout_sec"
+echo "[roadmap-next-actions-run] allow_unsafe_shell_commands=$allow_unsafe_shell_commands"
 echo "[roadmap-next-actions-run] include_id_prefix=${include_id_prefix:-none} exclude_id_prefix=${exclude_id_prefix:-none}"
 echo "[roadmap-next-actions-run] action_ids=$selected_action_ids_csv"
 if (( actions_count == 0 )); then
@@ -522,6 +685,7 @@ declare -a action_ids
 declare -a action_labels
 declare -a action_reasons
 declare -a action_commands
+declare -a action_commands_redacted
 declare -a action_logs
 declare -a action_timeout_secs
 
@@ -563,11 +727,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_id_safe="$(sanitize_id "$action_id")"
   action_log="$reports_dir/action_$((idx + 1))_${action_id_safe}.log"
   action_result_file="$actions_results_tmp_dir/action_$((idx + 1))_${action_id_safe}.json"
+  action_command_redacted="$(redact_command_secrets "$action_command")"
 
   action_ids[$idx]="$action_id"
   action_labels[$idx]="$action_label"
   action_reasons[$idx]="$action_reason"
   action_commands[$idx]="$action_command"
+  action_commands_redacted[$idx]="$action_command_redacted"
   action_logs[$idx]="$action_log"
   action_timeout_secs[$idx]="$action_timeout_sec_effective"
   action_result_files[$idx]="$action_result_file"
@@ -577,7 +743,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --arg id "$action_id" \
       --arg label "$action_label" \
       --arg reason "$action_reason" \
-      --arg command "$action_command" \
+      --arg command "$action_command_redacted" \
       --arg status "fail" \
       --arg notes "missing command" \
       --arg log "$action_log" \
@@ -611,11 +777,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         action_failure_kind="command_failed"
         action_notes="command failed"
         set +e
-        if (( action_timeout_sec_effective > 0 )); then
-          timeout --foreground "${action_timeout_sec_effective}s" bash -lc "$action_command" >"$action_log" 2>&1
-        else
-          bash -lc "$action_command" >"$action_log" 2>&1
-        fi
+        run_action_command_string "$action_command" "$action_log" "$action_timeout_sec_effective"
         command_rc=$?
         set -e
         if (( command_rc == 0 )); then
@@ -636,7 +798,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --arg id "$action_id" \
           --arg label "$action_label" \
           --arg reason "$action_reason" \
-          --arg command "$action_command" \
+          --arg command "$action_command_redacted" \
           --arg status "$action_status" \
           --arg notes "$action_notes" \
           --arg log "$action_log" \
@@ -669,11 +831,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       action_failure_kind="command_failed"
       action_notes="command failed"
       set +e
-      if (( action_timeout_sec_effective > 0 )); then
-        timeout --foreground "${action_timeout_sec_effective}s" bash -lc "$action_command" >"$action_log" 2>&1
-      else
-        bash -lc "$action_command" >"$action_log" 2>&1
-      fi
+      run_action_command_string "$action_command" "$action_log" "$action_timeout_sec_effective"
       command_rc=$?
       set -e
       if (( command_rc == 0 )); then
@@ -694,7 +852,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --arg id "$action_id" \
         --arg label "$action_label" \
         --arg reason "$action_reason" \
-        --arg command "$action_command" \
+        --arg command "$action_command_redacted" \
         --arg status "$action_status" \
         --arg notes "$action_notes" \
         --arg log "$action_log" \
@@ -734,6 +892,7 @@ if [[ "$parallel" == "1" ]]; then
         action_label="${action_labels[$idx]}"
         action_reason="${action_reasons[$idx]}"
         action_command="${action_commands[$idx]}"
+        action_command_redacted="${action_commands_redacted[$idx]}"
         action_log="${action_logs[$idx]}"
         action_timeout_sec_effective="${action_timeout_secs[$idx]:-$action_timeout_sec}"
         action_result_file="${action_result_files[$idx]}"
@@ -741,7 +900,7 @@ if [[ "$parallel" == "1" ]]; then
           --arg id "$action_id" \
           --arg label "$action_label" \
           --arg reason "$action_reason" \
-          --arg command "$action_command" \
+          --arg command "$action_command_redacted" \
           --arg status "fail" \
           --arg notes "internal runner error (wait rc=$wait_rc)" \
           --arg log "$action_log" \
@@ -775,6 +934,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_label="${action_labels[$idx]}"
   action_reason="${action_reasons[$idx]}"
   action_command="${action_commands[$idx]}"
+  action_command_redacted="${action_commands_redacted[$idx]}"
   action_log="${action_logs[$idx]}"
   action_timeout_sec_effective="${action_timeout_secs[$idx]:-$action_timeout_sec}"
 
@@ -783,7 +943,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --arg id "$action_id" \
       --arg label "$action_label" \
       --arg reason "$action_reason" \
-      --arg command "$action_command" \
+      --arg command "$action_command_redacted" \
       --arg status "fail" \
       --arg notes "internal runner error (missing or invalid action result)" \
       --arg log "$action_log" \
@@ -895,12 +1055,19 @@ if (( actions_count == 0 )); then
   final_status="pass"
   final_rc=0
 fi
+summary_command_redacted="$(redact_command_secrets "./scripts/roadmap_next_actions_run.sh $*")"
+profile_default_gate_subject_configured=0
+profile_default_gate_subject_redacted=""
+if [[ -n "$profile_default_gate_subject" ]]; then
+  profile_default_gate_subject_configured=1
+  profile_default_gate_subject_redacted="[redacted]"
+fi
 
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$final_status" \
   --argjson rc "$final_rc" \
-  --arg command "./scripts/roadmap_next_actions_run.sh $*" \
+  --arg command "$summary_command_redacted" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
   --arg roadmap_summary_json "$roadmap_summary_json" \
@@ -913,10 +1080,12 @@ jq -n \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
   --argjson parallel "$parallel" \
   --argjson max_actions "$max_actions" \
-  --arg profile_default_gate_subject "$profile_default_gate_subject" \
+  --arg profile_default_gate_subject_redacted "$profile_default_gate_subject_redacted" \
+  --argjson profile_default_gate_subject_configured "$profile_default_gate_subject_configured" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
   --argjson profile_default_gate_default_timeout_sec "$profile_default_gate_default_timeout_sec" \
   --argjson action_timeout_sec "$action_timeout_sec" \
+  --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
   --argjson actions_count "$actions_count" \
   --argjson selected_action_ids "$selected_action_ids_json" \
   --argjson executed_count "$executed_count" \
@@ -938,8 +1107,10 @@ jq -n \
       parallel: ($parallel == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
+      allow_unsafe_shell_commands: $allow_unsafe_shell_commands,
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
-      profile_default_gate_subject: (if $profile_default_gate_subject == "" then null else $profile_default_gate_subject end),
+      profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
+      profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
       exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end)

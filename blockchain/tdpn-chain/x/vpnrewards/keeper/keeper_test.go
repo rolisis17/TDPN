@@ -321,6 +321,40 @@ func TestKeeperRecordDistributionConflict(t *testing.T) {
 	}
 }
 
+func TestKeeperRecordDistributionRejectsDuplicateAccrualWithDifferentDistributionID(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	if _, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  "acc-dup-1",
+		SessionID:  "sess-dup-1",
+		ProviderID: "provider-dup-1",
+		Amount:     20,
+	}); err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	if _, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-dup-1",
+		AccrualID:      "acc-dup-1",
+		PayoutRef:      "payout-dup-1",
+	}); err != nil {
+		t.Fatalf("RecordDistribution returned unexpected error: %v", err)
+	}
+
+	_, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-dup-2",
+		AccrualID:      "acc-dup-1",
+		PayoutRef:      "payout-dup-2",
+	})
+	if err == nil {
+		t.Fatal("expected conflict for second distribution id on same accrual")
+	}
+	if !strings.Contains(err.Error(), "accrual_id") {
+		t.Fatalf("expected accrual_id conflict detail, got: %v", err)
+	}
+}
+
 func TestKeeperRecordDistributionValidation(t *testing.T) {
 	t.Parallel()
 

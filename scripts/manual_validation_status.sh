@@ -911,7 +911,7 @@ build_profile_default_gate_json() {
   local signoff_summary_json="$1"
   local docker_rehearsal_check_json="${2:-}"
   local default_signoff_summary_json="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
-  local campaign_timeout_sec_default="${MANUAL_VALIDATION_PROFILE_DEFAULT_GATE_CAMPAIGN_TIMEOUT_SEC:-1200}"
+  local campaign_timeout_sec_default="${MANUAL_VALIDATION_PROFILE_DEFAULT_GATE_CAMPAIGN_TIMEOUT_SEC:-2400}"
   local campaign_timeout_sec_arg=""
   local reports_dir=""
   local reports_dir_arg=""
@@ -979,7 +979,7 @@ build_profile_default_gate_json() {
   local docker_hint_requires_local_stack_root="0"
 
   if [[ ! "$campaign_timeout_sec_default" =~ ^[0-9]+$ ]]; then
-    campaign_timeout_sec_default="1200"
+    campaign_timeout_sec_default="2400"
   fi
   printf -v campaign_timeout_sec_arg '%q' "$campaign_timeout_sec_default"
 

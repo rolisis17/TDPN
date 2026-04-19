@@ -121,18 +121,7 @@ func newDefaultCometRuntime(ctx context.Context, cfg cometRuntimeConfig, scaffol
 	}
 
 	cmtcfg.EnsureRoot(cfg.homeDir)
-
-	cometCfg := cmtcfg.DefaultConfig().SetRoot(cfg.homeDir)
-	cometCfg.BaseConfig.Moniker = cfg.moniker
-	cometCfg.BaseConfig.ProxyApp = cfg.proxyApp
-	cometCfg.P2P.ListenAddress = cfg.p2pListen
-	cometCfg.P2P.Seeds = ""
-	cometCfg.P2P.PersistentPeers = ""
-	cometCfg.P2P.PexReactor = false
-	cometCfg.P2P.MaxNumInboundPeers = 0
-	cometCfg.P2P.MaxNumOutboundPeers = 0
-	cometCfg.P2P.AllowDuplicateIP = true
-	cometCfg.RPC.ListenAddress = cfg.rpcListen
+	cometCfg := buildCometConfig(cfg)
 
 	nodeKeyPath := filepath.Join(cfg.homeDir, cmtcfg.DefaultConfigDir, cmtcfg.DefaultNodeKeyName)
 	nodeKey, err := cmtp2p.LoadOrGenNodeKey(nodeKeyPath)
@@ -175,6 +164,21 @@ func newDefaultCometRuntime(ctx context.Context, cfg cometRuntimeConfig, scaffol
 	}
 
 	return &realCometRuntime{node: node}, nil
+}
+
+func buildCometConfig(cfg cometRuntimeConfig) *cmtcfg.Config {
+	cometCfg := cmtcfg.DefaultConfig().SetRoot(cfg.homeDir)
+	cometCfg.BaseConfig.Moniker = cfg.moniker
+	cometCfg.BaseConfig.ProxyApp = cfg.proxyApp
+	cometCfg.P2P.ListenAddress = cfg.p2pListen
+	cometCfg.P2P.Seeds = ""
+	cometCfg.P2P.PersistentPeers = ""
+	cometCfg.P2P.PexReactor = false
+	cometCfg.P2P.MaxNumInboundPeers = 0
+	cometCfg.P2P.MaxNumOutboundPeers = 0
+	cometCfg.P2P.AllowDuplicateIP = false
+	cometCfg.RPC.ListenAddress = cfg.rpcListen
+	return cometCfg
 }
 
 func runCometMode(

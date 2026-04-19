@@ -865,3 +865,109 @@ func TestKeeperUpsertDelegationCanonicalLookupContract(t *testing.T) {
 		t.Fatalf("expected trimmed session id %q, got %q", "Session-Legacy-1", got.SessionID)
 	}
 }
+
+func TestKeeperCreateAuthorizationLegacyCanonicalReplayNoDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	store.authorizations["Auth-Legacy-Create-1"] = types.SponsorAuthorization{
+		AuthorizationID: "Auth-Legacy-Create-1",
+		SponsorID:       "Sponsor-Legacy-Create-1",
+		AppID:           "App-Legacy-Create-1",
+		MaxCredits:      100,
+		Status:          chaintypes.ReconciliationPending,
+	}
+	k := NewKeeperWithStore(store)
+
+	replayed, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: " auth-legacy-create-1 ",
+		SponsorID:       " sponsor-legacy-create-1 ",
+		AppID:           " app-legacy-create-1 ",
+		MaxCredits:      100,
+		Status:          chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("expected canonical replay against legacy key to succeed, got %v", err)
+	}
+	if replayed.AuthorizationID != "auth-legacy-create-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-legacy-create-1", replayed.AuthorizationID)
+	}
+	if gotKeys := len(store.authorizations); gotKeys != 1 {
+		t.Fatalf("expected canonical replay to avoid duplicate authorization keys, got %d keys", gotKeys)
+	}
+}
+
+func TestKeeperDelegateSessionCreditLegacyAuthorizationCanonicalLookup(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	store.authorizations["Auth-Legacy-Delegate-1"] = types.SponsorAuthorization{
+		AuthorizationID: "Auth-Legacy-Delegate-1",
+		SponsorID:       "Sponsor-Legacy-Delegate-1",
+		AppID:           "App-Legacy-Delegate-1",
+		MaxCredits:      100,
+		Status:          chaintypes.ReconciliationPending,
+	}
+	k := NewKeeperWithStore(store)
+
+	delegated, err := k.DelegateSessionCreditAtUnix(types.DelegatedSessionCredit{
+		ReservationID:   "res-legacy-delegate-1",
+		AuthorizationID: " auth-legacy-delegate-1 ",
+		SponsorID:       " sponsor-legacy-delegate-1 ",
+		AppID:           " app-legacy-delegate-1 ",
+		EndUserID:       "end-user-legacy-delegate-1",
+		SessionID:       "session-legacy-delegate-1",
+		Credits:         10,
+		Status:          chaintypes.ReconciliationPending,
+	}, 0)
+	if err != nil {
+		t.Fatalf("expected delegation with canonical authorization id to succeed, got %v", err)
+	}
+	if delegated.AuthorizationID != "auth-legacy-delegate-1" {
+		t.Fatalf("expected canonical authorization id %q, got %q", "auth-legacy-delegate-1", delegated.AuthorizationID)
+	}
+}
+
+func TestKeeperDelegateSessionCreditLegacyCanonicalReplayNoDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	store.authorizations["auth-legacy-replay-1"] = types.SponsorAuthorization{
+		AuthorizationID: "auth-legacy-replay-1",
+		SponsorID:       "sponsor-legacy-replay-1",
+		AppID:           "app-legacy-replay-1",
+		MaxCredits:      100,
+		Status:          chaintypes.ReconciliationPending,
+	}
+	store.delegations["Res-Legacy-Replay-1"] = types.DelegatedSessionCredit{
+		ReservationID:   "Res-Legacy-Replay-1",
+		AuthorizationID: "auth-legacy-replay-1",
+		SponsorID:       "sponsor-legacy-replay-1",
+		AppID:           "app-legacy-replay-1",
+		EndUserID:       "end-user-legacy-replay-1",
+		SessionID:       "session-legacy-replay-1",
+		Credits:         10,
+		Status:          chaintypes.ReconciliationPending,
+	}
+	k := NewKeeperWithStore(store)
+
+	replayed, err := k.DelegateSessionCreditAtUnix(types.DelegatedSessionCredit{
+		ReservationID:   " res-legacy-replay-1 ",
+		AuthorizationID: " auth-legacy-replay-1 ",
+		SponsorID:       " sponsor-legacy-replay-1 ",
+		AppID:           " app-legacy-replay-1 ",
+		EndUserID:       "end-user-legacy-replay-1",
+		SessionID:       "session-legacy-replay-1",
+		Credits:         10,
+		Status:          chaintypes.ReconciliationPending,
+	}, 0)
+	if err != nil {
+		t.Fatalf("expected canonical replay against legacy delegation key to succeed, got %v", err)
+	}
+	if replayed.ReservationID != "res-legacy-replay-1" {
+		t.Fatalf("expected canonical reservation id %q, got %q", "res-legacy-replay-1", replayed.ReservationID)
+	}
+	if gotKeys := len(store.delegations); gotKeys != 1 {
+		t.Fatalf("expected canonical replay to avoid duplicate delegation keys, got %d keys", gotKeys)
+	}
+}

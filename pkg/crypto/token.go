@@ -14,6 +14,19 @@ const (
 	TokenTypeProviderRole = "provider_role"
 
 	pathOpenProofContext = "path_open_v1"
+
+	maxSignedTokenChars     = 16 * 1024
+	maxTokenPayloadB64Chars = 12 * 1024
+	maxTokenSigB64Chars     = 512
+	maxPathOpenProofChars   = 1024
+	maxKeyB64Chars          = 256
+
+	maxProofIDChars     = 256
+	maxProofNonceChars  = 1024
+	maxProofPubKeyChars = 1024
+	maxProofTokenChars  = maxSignedTokenChars
+	maxProofRegionChars = 128
+	maxProofTransport   = 64
 )
 
 type CapabilityClaims struct {
@@ -65,7 +78,11 @@ func EncodeEd25519PublicKey(pub ed25519.PublicKey) string {
 }
 
 func ParseEd25519PublicKey(pubB64 string) (ed25519.PublicKey, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(pubB64))
+	pubB64 = strings.TrimSpace(pubB64)
+	if len(pubB64) > maxKeyB64Chars {
+		return nil, fmt.Errorf("public key exceeds max encoded size")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(pubB64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public key encoding: %w", err)
 	}
@@ -88,6 +105,9 @@ func GenerateEd25519Keypair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 }
 
 func SignClaims(claims CapabilityClaims, priv ed25519.PrivateKey) (string, error) {
+	if len(priv) != ed25519.PrivateKeySize {
+		return "", fmt.Errorf("invalid private key size")
+	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
@@ -99,9 +119,19 @@ func SignClaims(claims CapabilityClaims, priv ed25519.PrivateKey) (string, error
 func VerifyClaims(token string, pub ed25519.PublicKey) (CapabilityClaims, error) {
 	var claims CapabilityClaims
 
+	token = strings.TrimSpace(token)
+	if len(token) > maxSignedTokenChars {
+		return claims, fmt.Errorf("token exceeds max size")
+	}
 	payloadB64, sigB64, ok := strings.Cut(token, ".")
 	if !ok || payloadB64 == "" || sigB64 == "" {
 		return claims, fmt.Errorf("invalid token format")
+	}
+	if len(payloadB64) > maxTokenPayloadB64Chars {
+		return claims, fmt.Errorf("token payload exceeds max size")
+	}
+	if len(sigB64) > maxTokenSigB64Chars {
+		return claims, fmt.Errorf("token signature exceeds max size")
 	}
 
 	payload, err := base64.RawURLEncoding.DecodeString(payloadB64)
@@ -111,6 +141,9 @@ func VerifyClaims(token string, pub ed25519.PublicKey) (CapabilityClaims, error)
 	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
 	if err != nil {
 		return claims, fmt.Errorf("invalid signature encoding: %w", err)
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return claims, fmt.Errorf("invalid signature size")
 	}
 
 	if !ed25519.Verify(pub, payload, sig) {
@@ -136,20 +169,49 @@ func SignPathOpenProof(priv ed25519.PrivateKey, input PathOpenProofInput) (strin
 }
 
 func VerifyPathOpenProof(proof string, pub ed25519.PublicKey, input PathOpenProofInput) error {
-	if strings.TrimSpace(proof) == "" {
+	return verifyPathOpenProof(proof, pub, input, false)
+}
+
+// VerifyPathOpenProofCompat verifies a proof and accepts legacy payload variants.
+// Use this only during controlled migration windows.
+func VerifyPathOpenProofCompat(proof string, pub ed25519.PublicKey, input PathOpenProofInput) error {
+	return verifyPathOpenProof(proof, pub, input, true)
+}
+
+// VerifyPathOpenProofStrict verifies only the canonical path-open proof payload.
+// It rejects legacy proof variants that omit fields such as middle_relay_id.
+func VerifyPathOpenProofStrict(proof string, pub ed25519.PublicKey, input PathOpenProofInput) error {
+	return verifyPathOpenProof(proof, pub, input, false)
+}
+
+func verifyPathOpenProof(proof string, pub ed25519.PublicKey, input PathOpenProofInput, allowLegacyVariants bool) error {
+	proof = strings.TrimSpace(proof)
+	if proof == "" {
 		return fmt.Errorf("missing token proof")
+	}
+	if len(proof) > maxPathOpenProofChars {
+		return fmt.Errorf("token proof exceeds max size")
 	}
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid public key size")
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(proof))
+	sig, err := base64.RawURLEncoding.DecodeString(proof)
 	if err != nil {
 		return fmt.Errorf("invalid token proof encoding: %w", err)
 	}
 	if len(sig) != ed25519.SignatureSize {
 		return fmt.Errorf("invalid token proof size")
 	}
-	msgs, err := pathOpenProofMessagesForVerification(input)
+	var msgs [][]byte
+	if allowLegacyVariants {
+		msgs, err = pathOpenProofMessagesForVerification(input)
+	} else {
+		msg, err := pathOpenProofMessage(input)
+		if err != nil {
+			return err
+		}
+		msgs = [][]byte{msg}
+	}
 	if err != nil {
 		return err
 	}
@@ -205,6 +267,27 @@ func pathOpenProofMessagesForVerification(input PathOpenProofInput) ([][]byte, e
 
 func pathOpenProofMessageVariant(input PathOpenProofInput, includeMiddleRelayID bool, includeTransport bool, includeRequestedMTU bool, includeRequestedRegion bool) ([]byte, error) {
 	normalized := normalizePathOpenProofInput(input)
+	if len(normalized.Token) > maxProofTokenChars {
+		return nil, fmt.Errorf("token exceeds max size")
+	}
+	if len(normalized.ExitID) > maxProofIDChars {
+		return nil, fmt.Errorf("exit id exceeds max size")
+	}
+	if len(normalized.MiddleRelayID) > maxProofIDChars {
+		return nil, fmt.Errorf("middle relay id exceeds max size")
+	}
+	if len(normalized.TokenProofNonce) > maxProofNonceChars {
+		return nil, fmt.Errorf("token proof nonce exceeds max size")
+	}
+	if len(normalized.ClientInnerPub) > maxProofPubKeyChars {
+		return nil, fmt.Errorf("client inner pub exceeds max size")
+	}
+	if len(normalized.Transport) > maxProofTransport {
+		return nil, fmt.Errorf("transport exceeds max size")
+	}
+	if len(normalized.RequestedRegion) > maxProofRegionChars {
+		return nil, fmt.Errorf("requested region exceeds max size")
+	}
 	middleRelayID := normalized.MiddleRelayID
 	transport := normalized.Transport
 	requestedMTU := normalized.RequestedMTU
