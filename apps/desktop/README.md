@@ -6,6 +6,7 @@ It is intentionally lightweight and not production-ready yet.
 What this scaffold includes:
 - Tauri app shell (`src-tauri`)
 - minimal desktop UI (`src`)
+- one desktop window with `Client` and `Server` tabs; role-ineligible tab remains visible but non-clickable, with lock-status guidance in UI hints
 - Windows release bundle scaffold scripts:
   - `scripts/windows/desktop_release_bundle.ps1`
   - `scripts/windows/desktop_release_bundle.cmd`

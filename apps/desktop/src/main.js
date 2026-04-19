@@ -30,6 +30,7 @@ const auditWalletAddressEl = byId("audit_wallet_address");
 const auditOrderEl = byId("audit_order");
 const pathProfileEl = byId("path_profile");
 const serverLockHintEl = byId("server_lock_hint");
+const clientLockHintEl = byId("client_lock_hint");
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 
@@ -1035,10 +1036,12 @@ function parseServerReadiness(payload) {
   return {
     role: normalizedRole || undefined,
     tabVisible: toBooleanLike(readiness.tab_visible),
+    clientTabVisible: toBooleanLike(firstDefined(readiness.client_tab_visible, readiness.client_tab_enabled)),
     lifecycleActionsUnlocked: toBooleanLike(readiness.lifecycle_actions_unlocked),
     serviceMutationsConfigured: toBooleanLike(readiness.service_mutations_configured),
     operatorApplicationStatus: normalizeOperatorApplicationStatus(readiness.operator_application_status),
     lockReason: toDetailText(readiness.lock_reason),
+    clientLockReason: toDetailText(firstDefined(readiness.client_lock_reason, readiness.client_lock_hint)),
     unlockActions
   };
 }
@@ -1056,7 +1059,21 @@ function isServerTabVisibleRole(role = state.role) {
     return state.serverReadiness.tabVisible;
   }
   const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
-  return normalized === "operator" || normalized === "admin";
+  return normalized === "operator" || normalized === "admin" || normalized === "server" || normalized === "server_only";
+}
+
+function isClientTabVisibleRole(role = state.role) {
+  if (state.serverReadiness && typeof state.serverReadiness.clientTabVisible === "boolean") {
+    return state.serverReadiness.clientTabVisible;
+  }
+  const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
+  if (normalized === "server" || normalized === "server_only") {
+    return false;
+  }
+  if (normalized === "operator" || normalized === "admin") {
+    return !!state.clientRegistered;
+  }
+  return true;
 }
 
 function isServerMutationRoleEligible(role = state.role, operatorApplicationStatus = state.operatorApplicationStatus) {
@@ -1066,6 +1083,9 @@ function isServerMutationRoleEligible(role = state.role, operatorApplicationStat
   const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
   const effectiveOperatorStatus = state.serverReadiness?.operatorApplicationStatus || operatorApplicationStatus;
   if (normalized === "admin") {
+    return true;
+  }
+  if (normalized === "server" || normalized === "server_only") {
     return true;
   }
   if (normalized === "operator") {
@@ -1197,19 +1217,76 @@ function computeServerLockHintText() {
     }
     return "Operator role detected; check operator status and refresh session after approval to unlock server lifecycle actions.";
   }
+  if (role === "server" || role === "server_only") {
+    if (!state.serviceMutationsAllowed) {
+      return "Server-only role detected. Service lifecycle actions are disabled by environment policy.";
+    }
+    return "Server controls are unlocked for server-only role.";
+  }
   return "Apply operator role to start server approval.";
 }
 
+function computeClientLockHintText() {
+  if (state.serverReadiness) {
+    const readiness = state.serverReadiness;
+    if (readiness.clientTabVisible === false) {
+      return readiness.clientLockReason || "Client controls are locked by backend readiness policy for this role.";
+    }
+    if (readiness.clientTabVisible === true) {
+      if (state.connectRequireSession && !state.sessionToken) {
+        return "Client controls are unlocked. Sign in to connect while session-required mode is enabled.";
+      }
+      return "Client controls are unlocked by backend readiness policy.";
+    }
+  }
+  if (!isClientTabVisibleRole()) {
+    const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
+    if (!state.sessionToken) {
+      return "Sign in first to unlock client controls.";
+    }
+    if ((role === "operator" || role === "admin") && !state.clientRegistered) {
+      return "Server-capable session detected. Register client profile to unlock the Client tab for dual-role use.";
+    }
+    if (role === "server" || role === "server_only") {
+      return "Client controls are disabled for server-only role.";
+    }
+    return "Client controls are locked by current role policy.";
+  }
+  const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
+  if ((role === "operator" || role === "admin") && state.clientRegistered) {
+    return "Client controls are unlocked for dual-role operation.";
+  }
+  if (state.connectRequireSession && !state.sessionToken) {
+    return "Client controls are available. Sign in to connect while session-required mode is enabled.";
+  }
+  return "Client controls are available for client-capable roles.";
+}
+
 function syncServerRoleLockState() {
+  const clientTabVisible = isClientTabVisibleRole();
   const serverTabVisible = isServerTabVisibleRole();
+  tabClientEl.disabled = !clientTabVisible;
+  tabClientEl.classList.toggle("locked", !clientTabVisible);
+  panelClientEl.classList.toggle("locked", !clientTabVisible);
   tabServerEl.disabled = !serverTabVisible;
   tabServerEl.classList.toggle("locked", !serverTabVisible);
   panelServerEl.classList.toggle("locked", !serverTabVisible);
-  if (!serverTabVisible && tabServerEl.classList.contains("active")) {
-    activateTab("client");
+  const clientTabActive = tabClientEl.classList.contains("active");
+  const serverTabActive = tabServerEl.classList.contains("active");
+  if ((clientTabActive && !clientTabVisible) || (serverTabActive && !serverTabVisible)) {
+    if (clientTabVisible) {
+      activateTab("client");
+    } else if (serverTabVisible) {
+      activateTab("server");
+    }
   }
   syncServerMutationControls();
+  if (clientLockHintEl) {
+    clientLockHintEl.textContent = computeClientLockHintText();
+    clientLockHintEl.classList.toggle("locked", !clientTabVisible);
+  }
   serverLockHintEl.textContent = computeServerLockHintText();
+  serverLockHintEl.classList.toggle("locked", !serverTabVisible);
   syncDesktopOnboardingSteps();
 }
 
@@ -1317,7 +1394,16 @@ function applyConnectModePolicy(enabled) {
 }
 
 function activateTab(name) {
-  const isClient = name === "client";
+  const wantsClient = name === "client";
+  const clientEnabled = !tabClientEl.disabled;
+  const serverEnabled = !tabServerEl.disabled;
+  let selectedTab = wantsClient ? "client" : "server";
+  if (selectedTab === "client" && !clientEnabled && serverEnabled) {
+    selectedTab = "server";
+  } else if (selectedTab === "server" && !serverEnabled && clientEnabled) {
+    selectedTab = "client";
+  }
+  const isClient = selectedTab === "client";
   tabClientEl.classList.toggle("active", isClient);
   tabServerEl.classList.toggle("active", !isClient);
   panelClientEl.classList.toggle("active", isClient);
@@ -1594,7 +1680,11 @@ async function loadNextOperatorListPage() {
   return requestOperatorList("gpm_operator_list_next_page", filter, { cursor });
 }
 
-tabClientEl.addEventListener("click", () => activateTab("client"));
+tabClientEl.addEventListener("click", () => {
+  if (!tabClientEl.disabled) {
+    activateTab("client");
+  }
+});
 tabServerEl.addEventListener("click", () => {
   if (!tabServerEl.disabled) {
     activateTab("server");

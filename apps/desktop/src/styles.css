@@ -425,6 +425,10 @@ button:disabled {
   line-height: 1.4;
 }
 
+.hint.locked {
+  color: #ffd6a1;
+}
+
 .desktop-onboarding-tracker,
 .desktop-onboarding-steps,
 #desktop_onboarding_tracker {

@@ -272,6 +272,79 @@ if ! grep -qF 'windows-native' "$LOCAL_API_SESSION_SCRIPT"; then
 fi
 echo "[desktop-scaffold] bootstrap and local API marker strings present"
 
+DESKTOP_HTML_FILE="apps/desktop/index.html"
+JS_FILE="apps/desktop/src/main.js"
+if ! grep -qF 'id="tab_client"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing client tab marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'id="tab_server"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing server tab marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'id="panel_client"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing client panel marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'id="panel_server"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing server panel marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'id="server_lock_hint"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing server lock hint marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+
+client_hint_marker_present="0"
+if grep -qF 'id="client_lock_hint"' "$DESKTOP_HTML_FILE"; then
+  client_hint_marker_present="1"
+elif grep -qF 'id="desktop_step_client"' "$DESKTOP_HTML_FILE"; then
+  client_hint_marker_present="1"
+fi
+if [[ "$client_hint_marker_present" != "1" ]]; then
+  echo "desktop scaffold contract failed: missing client-side lock hint marker (expected client_lock_hint or desktop_step_client) in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+echo "[desktop-scaffold] client/server lock hint elements are present"
+
+if ! grep -qF 'function syncServerRoleLockState()' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server role lock sync function in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'tabServerEl.disabled = !serverTabVisible;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server tab disabled handling marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'tabServerEl.classList.toggle("locked", !serverTabVisible);' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server tab locked-class marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'serverLockHintEl.textContent = computeServerLockHintText();' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server lock hint update marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'if (!tabServerEl.disabled) {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing disabled-tab click guard marker in $JS_FILE"
+  exit 1
+fi
+if ! rg -q -- 'tab(Server|Client)El\.disabled[[:space:]]*=' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing tab disabled assignment markers in $JS_FILE"
+  exit 1
+fi
+
+if grep -qF 'id="client_lock_hint"' "$DESKTOP_HTML_FILE"; then
+  if ! rg -q -- 'clientLockHintEl|client_lock_hint' "$JS_FILE"; then
+    echo "desktop scaffold contract failed: client lock hint element exists but no client lock hint logic marker found in $JS_FILE"
+    exit 1
+  fi
+else
+  if ! grep -qF 'setDesktopStepState(desktopStepClientEl' "$JS_FILE"; then
+    echo "desktop scaffold contract failed: missing client onboarding lock-state marker in $JS_FILE"
+    exit 1
+  fi
+fi
+echo "[desktop-scaffold] role-lock logic markers are present (client+server hints, disabled-tab handling)"
+
 JSON_FILES=(
   "apps/desktop/package.json"
   "apps/desktop/src-tauri/tauri.conf.json"
@@ -429,6 +502,22 @@ if ! rg -qi -- 'update[[:space:]-]*channel' "$README_FILE"; then
 fi
 if ! rg -q -- 'TDPN_[A-Z0-9_]*UPDATE[A-Z0-9_]*CHANNEL[A-Z0-9_]*' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must document update channel env knobs (for example TDPN_*UPDATE*CHANNEL*)"
+  exit 1
+fi
+if ! rg -qi -- 'one[^[:alnum:]]+.*window|single[^[:alnum:]]+.*window|single-window|one-window' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must describe the single-window desktop workspace model"
+  exit 1
+fi
+if ! rg -qi -- 'client/server tabs|client and server tabs|client.*server.*tabs|tabs.*client.*server' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention client/server tab UX"
+  exit 1
+fi
+if ! rg -qi -- 'non-clickable|disabled[[:space:]]+tab|role-ineligible[[:space:]]+tab' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must describe role-ineligible tab lock behavior"
+  exit 1
+fi
+if ! rg -qi -- 'status reason|lock reason|unlock' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must describe lock-status reason guidance"
   exit 1
 fi
 echo "[desktop-scaffold] README states scaffold/non-production intent"
