@@ -180,6 +180,13 @@ What this path does:
 - prefers packaged desktop launch for installer-style smoke checks
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
+- packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE`, then `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+
+Env override example (PowerShell):
+
+```powershell
+$env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\TDPN\TDPN Desktop\TDPN Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
+```
 
 Recommended sequence for installer testing:
 1. Build the bundle (`desktop_release_bundle`).

@@ -94,6 +94,29 @@ run_expect_pass \
     -DryRun \
     -DesktopExecutablePath "$FAKE_EXECUTABLE_PATH_PS"
 
+GPM_DESKTOP_PACKAGED_EXE_WAS_SET="0"
+GPM_DESKTOP_PACKAGED_EXE_ORIGINAL=""
+if [[ "${GPM_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
+  GPM_DESKTOP_PACKAGED_EXE_WAS_SET="1"
+  GPM_DESKTOP_PACKAGED_EXE_ORIGINAL="$GPM_DESKTOP_PACKAGED_EXE"
+fi
+
+echo "[windows-desktop-packaged-run-guardrails] dry-run passes with env override and no explicit override path"
+run_expect_pass \
+  "dry_run_packaged_env_override_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+
+if [[ "$GPM_DESKTOP_PACKAGED_EXE_WAS_SET" == "1" ]]; then
+  if [[ "${GPM_DESKTOP_PACKAGED_EXE-}" != "$GPM_DESKTOP_PACKAGED_EXE_ORIGINAL" ]]; then
+    echo "windows desktop packaged-run guardrails failed: leaked GPM_DESKTOP_PACKAGED_EXE changes into caller environment"
+    exit 1
+  fi
+elif [[ "${GPM_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
+  echo "windows desktop packaged-run guardrails failed: leaked GPM_DESKTOP_PACKAGED_EXE into caller environment"
+  exit 1
+fi
+
 echo "[windows-desktop-packaged-run-guardrails] missing executable override path fails with expected message"
 run_expect_fail_regex \
   "missing_override_fail" \

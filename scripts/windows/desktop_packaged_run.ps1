@@ -20,6 +20,187 @@ if ([string]::IsNullOrWhiteSpace($scriptDir)) {
   $scriptDir = Split-Path -Parent $PSCommandPath
 }
 
+function Write-PackagedRunStep {
+  param([string]$Message)
+  Write-Host "[desktop-packaged-run] $Message"
+}
+
+function Normalize-PathCandidate {
+  param([string]$Value)
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+
+  $candidate = $Value.Trim()
+  if ($candidate.Length -ge 2 -and $candidate.StartsWith('"') -and $candidate.EndsWith('"')) {
+    $candidate = $candidate.Substring(1, $candidate.Length - 2).Trim()
+  }
+
+  return $candidate
+}
+
+function Get-InstalledPackagedExecutableCandidates {
+  $localAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA", "Process")
+  if ([string]::IsNullOrWhiteSpace($localAppData)) {
+    $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+  }
+
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+
+  $rootCandidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+    $rootCandidates += $localAppData
+    $rootCandidates += (Join-Path $localAppData "Programs")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($programFiles)) {
+    $rootCandidates += $programFiles
+  }
+  if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
+    $rootCandidates += $programFilesX86
+  }
+
+  $roots = @()
+  $rootSeen = @{}
+  foreach ($rootCandidate in $rootCandidates) {
+    if ([string]::IsNullOrWhiteSpace($rootCandidate)) {
+      continue
+    }
+
+    $normalizedRoot = $rootCandidate.Trim().TrimEnd("\")
+    if ([string]::IsNullOrWhiteSpace($normalizedRoot)) {
+      continue
+    }
+
+    $rootKey = $normalizedRoot.ToLowerInvariant()
+    if ($rootSeen.ContainsKey($rootKey)) {
+      continue
+    }
+    $rootSeen[$rootKey] = $true
+    $roots += $normalizedRoot
+  }
+
+  $relativePaths = @(
+    "TDPN Desktop\TDPN Desktop.exe",
+    "TDPN Desktop\tdpn-desktop.exe",
+    "TDPN\TDPN Desktop\TDPN Desktop.exe",
+    "TDPN\TDPN Desktop\tdpn-desktop.exe",
+    "GPM Desktop\GPM Desktop.exe",
+    "GPM Desktop\gpm-desktop.exe",
+    "GPM\GPM Desktop\GPM Desktop.exe",
+    "GPM\GPM Desktop\gpm-desktop.exe"
+  )
+
+  $candidates = @()
+  $candidateSeen = @{}
+  foreach ($root in $roots) {
+    foreach ($relativePath in $relativePaths) {
+      $candidate = Join-Path $root $relativePath
+      $candidateKey = $candidate.TrimEnd("\").ToLowerInvariant()
+      if ($candidateSeen.ContainsKey($candidateKey)) {
+        continue
+      }
+      $candidateSeen[$candidateKey] = $true
+      $candidates += $candidate
+    }
+  }
+
+  return $candidates
+}
+
+function Get-RepoPackagedExecutableCandidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($RepoRootPath)) {
+    return @()
+  }
+
+  $releaseRoot = Join-Path $RepoRootPath "apps\desktop\src-tauri\target\release"
+  $relativePaths = @(
+    "tdpn-desktop.exe",
+    "TDPN Desktop.exe",
+    "bundle\nsis\tdpn-desktop.exe",
+    "bundle\nsis\tdpn-desktop\tdpn-desktop.exe",
+    "bundle\nsis\TDPN Desktop.exe",
+    "bundle\nsis\TDPN Desktop\TDPN Desktop.exe",
+    "bundle\msi\tdpn-desktop.exe",
+    "bundle\msi\tdpn-desktop\tdpn-desktop.exe",
+    "bundle\msi\TDPN Desktop.exe",
+    "bundle\msi\TDPN Desktop\TDPN Desktop.exe"
+  )
+
+  $candidates = @()
+  $seen = @{}
+  foreach ($relativePath in $relativePaths) {
+    $candidate = Join-Path $releaseRoot $relativePath
+    $candidateKey = $candidate.TrimEnd("\").ToLowerInvariant()
+    if ($seen.ContainsKey($candidateKey)) {
+      continue
+    }
+    $seen[$candidateKey] = $true
+    $candidates += $candidate
+  }
+
+  return $candidates
+}
+
+function Resolve-DesktopPackagedExecutableAuto {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptDirectory
+  )
+
+  $envOverrides = @(
+    @{ Name = "GPM_DESKTOP_PACKAGED_EXE"; Value = [Environment]::GetEnvironmentVariable("GPM_DESKTOP_PACKAGED_EXE", "Process") },
+    @{ Name = "TDPN_DESKTOP_PACKAGED_EXE"; Value = [Environment]::GetEnvironmentVariable("TDPN_DESKTOP_PACKAGED_EXE", "Process") }
+  )
+
+  foreach ($envOverride in $envOverrides) {
+    $candidate = Normalize-PathCandidate -Value ([string]$envOverride.Value)
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return [PSCustomObject]@{
+        Path = (Resolve-Path -LiteralPath $candidate).Path
+        Source = "env"
+      }
+    }
+    Write-Warning ("[desktop-packaged-run] env override {0} points to a missing file: {1}" -f $envOverride.Name, $candidate)
+  }
+
+  foreach ($candidate in (Get-InstalledPackagedExecutableCandidates)) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return [PSCustomObject]@{
+        Path = (Resolve-Path -LiteralPath $candidate).Path
+        Source = "install"
+      }
+    }
+  }
+
+  $repoRoot = ""
+  try {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptDirectory "..\..")).Path
+  } catch {
+    $repoRoot = ""
+  }
+
+  foreach ($candidate in (Get-RepoPackagedExecutableCandidates -RepoRootPath $repoRoot)) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return [PSCustomObject]@{
+        Path = (Resolve-Path -LiteralPath $candidate).Path
+        Source = "repo"
+      }
+    }
+  }
+
+  return $null
+}
+
 $doctorScript = Join-Path $scriptDir "desktop_doctor.ps1"
 if (-not (Test-Path -LiteralPath $doctorScript -PathType Leaf)) {
   throw "missing doctor script: $doctorScript"
@@ -60,14 +241,23 @@ if ($doctorExitCode -ne 0) {
   exit $doctorExitCode
 }
 
+$resolvedDesktopExecutablePath = $DesktopExecutablePath
+if ([string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
+  $autoDiscoveredDesktopExecutable = Resolve-DesktopPackagedExecutableAuto -ScriptDirectory $scriptDir
+  if ($null -ne $autoDiscoveredDesktopExecutable -and -not [string]::IsNullOrWhiteSpace($autoDiscoveredDesktopExecutable.Path)) {
+    $resolvedDesktopExecutablePath = $autoDiscoveredDesktopExecutable.Path
+    Write-PackagedRunStep ("packaged executable auto-discovered ({0}): {1}" -f $autoDiscoveredDesktopExecutable.Source, $resolvedDesktopExecutablePath)
+  }
+}
+
 $bootstrapInvokeArgs = @(
   "-Mode", "run-full",
   "-DesktopLaunchStrategy", "packaged",
   "-ApiAddr", $ApiAddr
 )
 
-if (-not [string]::IsNullOrWhiteSpace($DesktopExecutablePath)) {
-  $bootstrapInvokeArgs += @("-DesktopExecutableOverridePath", $DesktopExecutablePath)
+if (-not [string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
+  $bootstrapInvokeArgs += @("-DesktopExecutableOverridePath", $resolvedDesktopExecutablePath)
 }
 if ($InstallMissing) {
   $bootstrapInvokeArgs += "-InstallMissing"
