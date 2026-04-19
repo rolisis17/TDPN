@@ -21,6 +21,7 @@ const onboardingStepOperatorEl = document.getElementById("onboarding_step_operat
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const OPERATOR_PENDING_LIST_LIMIT = 25;
+const OPERATOR_LIST_ALL_LIMIT = 100;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const PERSISTED_FIELD_IDS = [
   "api_base",
@@ -153,6 +154,10 @@ function numberOrUndefined(value) {
     return parsed;
   }
   return undefined;
+}
+
+function operatorModerationReason() {
+  return byId("operator_reason").value.trim();
 }
 
 function extractOperatorListEntries(payload) {
@@ -659,6 +664,18 @@ async function requestServerStatus() {
   return post("/v1/gpm/onboarding/server/status", request);
 }
 
+async function requestOperatorList(status, limit) {
+  const sessionToken = byId("session_token").value.trim();
+  if (!sessionToken) {
+    throw new Error("session_token is required to list operators. Sign in first.");
+  }
+  return post("/v1/gpm/onboarding/operator/list", {
+    session_token: sessionToken,
+    status,
+    limit
+  });
+}
+
 async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
   if (!byId("session_token").value.trim()) {
@@ -874,20 +891,21 @@ byId("operator_status_btn").addEventListener("click", () =>
 byId("operator_list_pending_btn").addEventListener("click", () =>
   run(
     "operator_list_pending",
-    async () => {
-      const sessionToken = byId("session_token").value.trim();
-      if (!sessionToken) {
-        throw new Error("session_token is required to list pending operators. Sign in first.");
-      }
-      return post("/v1/gpm/onboarding/operator/list", {
-        session_token: sessionToken,
-        status: "pending",
-        limit: OPERATOR_PENDING_LIST_LIMIT
-      });
-    },
+    async () => requestOperatorList("pending", OPERATOR_PENDING_LIST_LIMIT),
     {
       outputMapper: (result) => summarizeOperatorList(result).output,
       successDetail: (result) => summarizeOperatorList(result).detail
+    }
+  )
+);
+
+byId("operator_list_all_btn").addEventListener("click", () =>
+  run(
+    "operator_list_all",
+    async () => requestOperatorList("", OPERATOR_LIST_ALL_LIMIT),
+    {
+      outputMapper: (result) => summarizeOperatorList(result, "all", OPERATOR_LIST_ALL_LIMIT).output,
+      successDetail: (result) => summarizeOperatorList(result, "all", OPERATOR_LIST_ALL_LIMIT).detail
     }
   )
 );
@@ -898,6 +916,37 @@ byId("approve_operator_btn").addEventListener("click", () =>
       wallet_address: byId("wallet_address").value.trim(),
       approved: true,
       session_token: byId("session_token").value.trim() || undefined
+    };
+    const adminToken = byId("admin_token").value.trim();
+    if (adminToken) {
+      request.admin_token = adminToken;
+    }
+    const reason = operatorModerationReason();
+    if (reason) {
+      request.reason = reason;
+    }
+    const result = await post("/v1/gpm/onboarding/operator/approve", request);
+    await refreshOperatorApplicationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
+    return result;
+  })
+);
+
+byId("reject_operator_btn").addEventListener("click", () =>
+  run("operator_reject", async () => {
+    const sessionToken = byId("session_token").value.trim();
+    if (!sessionToken) {
+      throw new Error("session_token is required to reject an operator. Sign in first.");
+    }
+    const reason = operatorModerationReason();
+    if (!reason) {
+      throw new Error("moderation reason is required to reject an operator.");
+    }
+    const request = {
+      wallet_address: byId("wallet_address").value.trim(),
+      approved: false,
+      reason,
+      session_token: sessionToken
     };
     const adminToken = byId("admin_token").value.trim();
     if (adminToken) {

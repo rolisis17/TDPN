@@ -54,6 +54,11 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - Operator approval (`POST /v1/gpm/onboarding/operator/approve`) now expects an admin session token (`session_token`) by default; legacy `admin_token` fallback remains supported when `GPM_APPROVAL_ADMIN_TOKEN` is configured.
 - Operator queue listing is available via `POST /v1/gpm/onboarding/operator/list`; desktop provides a “List Pending Operators” action that sends the active `session_token` with `status=pending` and a bounded `limit`.
  
+Operator moderation UX notes:
+- Desktop now includes explicit `Approve Operator` and `Reject Operator` actions with a moderation reason input.
+- Rejection requires a non-empty `reason`; approval includes `reason` when provided.
+- Desktop operator listing now includes `List All Operators` (`status=""`, `limit=100`) in addition to `List Pending Operators`.
+
 Remote hardening guardrails:
 - non-loopback `TDPN_LOCAL_API_BASE_URL` requires `TDPN_LOCAL_API_ALLOW_REMOTE=1`
 - non-loopback `TDPN_LOCAL_API_BASE_URL` with remote opt-in also requires:

@@ -17,6 +17,7 @@ const sessionTokenEl = byId("session_token");
 const walletProviderEl = byId("wallet_provider");
 const walletAddressEl = byId("wallet_address");
 const chainOperatorIdEl = byId("chain_operator_id");
+const operatorReasonEl = byId("operator_reason");
 const pathProfileEl = byId("path_profile");
 const serverLockHintEl = byId("server_lock_hint");
 const connectionStateEl = document.getElementById("connection_state");
@@ -40,6 +41,7 @@ const desktopStepClientEl = document.getElementById("desktop_step_client");
 const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const OPERATOR_PENDING_LIST_LIMIT = 25;
+const OPERATOR_LIST_ALL_LIMIT = 100;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
@@ -668,6 +670,10 @@ function requireSessionToken(actionLabel) {
   return true;
 }
 
+function operatorModerationReason() {
+  return operatorReasonEl.value.trim();
+}
+
 function serviceLifecycleRequest() {
   return {
     session_token: state.sessionToken
@@ -1032,14 +1038,50 @@ byId("operator_list_pending_btn").addEventListener("click", async () => {
   await call("gpm_operator_list_pending", "control_gpm_operator_list", { request });
 });
 
+byId("operator_list_all_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("list all operators")) {
+    return;
+  }
+  const request = {
+    session_token: state.sessionToken,
+    status: "",
+    limit: OPERATOR_LIST_ALL_LIMIT
+  };
+  await call("gpm_operator_list_all", "control_gpm_operator_list", { request });
+});
+
 byId("approve_operator_btn").addEventListener("click", async () => {
   const request = {
     wallet_address: walletAddressEl.value.trim(),
     approved: true,
     session_token: state.sessionToken || undefined
   };
+  const reason = operatorModerationReason();
+  if (reason) {
+    request.reason = reason;
+  }
   await call("gpm_operator_approve", "control_gpm_operator_approve", { request });
   await refreshSession();
+});
+
+byId("reject_operator_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("reject an operator")) {
+    return;
+  }
+  const reason = operatorModerationReason();
+  if (!reason) {
+    print("validation", "moderation reason is required to reject an operator");
+    return;
+  }
+  const request = {
+    wallet_address: walletAddressEl.value.trim(),
+    approved: false,
+    reason,
+    session_token: state.sessionToken
+  };
+  await call("gpm_operator_reject", "control_gpm_operator_approve", { request });
+  await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
 });
 
 byId("connect_btn").addEventListener("click", async () => {

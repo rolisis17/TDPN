@@ -33,3 +33,6 @@ Then open:
 - If `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host, including cache fallback source URLs. This hardening is skipped when the main domain is unset for dev compatibility, and it sits alongside existing signature verification and expiry checks.
 - Portal onboarding fields are persisted in browser `localStorage` and restored on reload; session refresh/revoke keeps stored token/role in sync.
 - Wallet verification is currently challenge+signature contract wiring; production wallet extension integration is a follow-on milestone.
+- Portal moderation UI now includes explicit `Approve Operator` and `Reject Operator` actions with a moderation reason input.
+- Rejection requires a non-empty `reason`; approval includes `reason` when provided.
+- Portal operator listing now includes `List All Operators` (`status=""`, `limit=100`) in addition to `List Pending Operators`.
