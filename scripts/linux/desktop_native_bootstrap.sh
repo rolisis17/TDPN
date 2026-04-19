@@ -12,12 +12,17 @@ INSTALL_MISSING="0"
 DRY_RUN="0"
 API_ADDR="127.0.0.1:8095"
 FORCE_NPM_INSTALL="0"
+SUMMARY_JSON_PATH=""
+PRINT_SUMMARY_JSON="0"
 
 RESOLVED_DESKTOP_STRATEGY=""
 RESOLVED_DESKTOP_EXECUTABLE_PATH=""
 RESOLVED_DESKTOP_EXECUTABLE_SOURCE=""
 API_BG_PID=""
 API_HEALTH_ENDPOINT=""
+SUMMARY_STATUS="ok"
+SUMMARY_ERROR=""
+RECOMMENDED_COMMANDS=()
 
 log() {
   echo "[desktop-native-bootstrap] $*"
@@ -25,7 +30,52 @@ log() {
 
 die() {
   echo "[desktop-native-bootstrap] error: $*" >&2
+  SUMMARY_ERROR="$*"
   exit 1
+}
+
+json_escape() {
+  local value="${1-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+json_bool() {
+  if [[ "${1:-0}" == "1" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+json_array_from_values() {
+  local output="["
+  local first="1"
+  local value
+  for value in "$@"; do
+    if [[ "$first" == "0" ]]; then
+      output+=", "
+    fi
+    first="0"
+    output+="\"$(json_escape "$value")\""
+  done
+  output+="]"
+  printf '%s' "$output"
+}
+
+write_summary_json_file() {
+  local path="$1"
+  local payload="$2"
+  [[ -z "$path" ]] && return 0
+  local parent_dir
+  parent_dir="$(dirname "$path")"
+  mkdir -p "$parent_dir"
+  printf '%s\n' "$payload" >"$path"
+  log "summary json written: $path"
 }
 
 show_usage() {
@@ -43,6 +93,8 @@ Options:
   --dry-run                                   Print actions without executing
   --api-addr HOST:PORT                        Local API bind/health address (default: 127.0.0.1:8095)
   --force-npm-install                         Force npm install before desktop dev launch
+  --summary-json PATH                         Write run summary JSON to PATH
+  --print-summary-json 0|1                    Print summary JSON to stdout (default: 0)
   --help, -h                                  Show this help
 
 Modes:
@@ -94,6 +146,88 @@ cleanup_background_api() {
     log "stopped local API background process pid=$API_BG_PID"
   fi
 }
+
+build_recommended_commands() {
+  RECOMMENDED_COMMANDS=(
+    "./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1"
+    "./scripts/linux/desktop_doctor.sh --mode fix --install-missing"
+    "./scripts/linux/desktop_native_bootstrap.sh --mode bootstrap --install-missing --print-summary-json 1"
+    "./scripts/linux/desktop_native_bootstrap.sh --mode run-api --api-addr $API_ADDR"
+    "./scripts/linux/desktop_native_bootstrap.sh --mode run-desktop --desktop-launch-strategy auto"
+    "./scripts/linux/desktop_native_bootstrap.sh --mode run-full --desktop-launch-strategy auto --api-addr $API_ADDR"
+    "./scripts/linux/desktop_one_click.sh"
+  )
+}
+
+emit_recommended_guidance() {
+  build_recommended_commands
+  log "recommended remediation commands:"
+  local cmd
+  for cmd in "${RECOMMENDED_COMMANDS[@]}"; do
+    echo "  - $cmd"
+  done
+}
+
+emit_summary_payload() {
+  local exit_code="$1"
+  if [[ "$PRINT_SUMMARY_JSON" != "1" && -z "$SUMMARY_JSON_PATH" ]]; then
+    return 0
+  fi
+
+  local status="$SUMMARY_STATUS"
+  if [[ "$exit_code" -ne 0 ]]; then
+    status="error"
+    if [[ -z "$SUMMARY_ERROR" ]]; then
+      SUMMARY_ERROR="command failed with exit code $exit_code"
+    fi
+  fi
+
+  build_recommended_commands
+
+  local generated_at_utc
+  generated_at_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  local recommended_commands_json
+  recommended_commands_json="$(json_array_from_values "${RECOMMENDED_COMMANDS[@]}")"
+
+  local summary_json_payload
+  summary_json_payload=$(
+    cat <<EOF
+{
+  "version": 1,
+  "generated_at_utc": "$(json_escape "$generated_at_utc")",
+  "status": "$(json_escape "$status")",
+  "mode": "$(json_escape "$MODE")",
+  "dry_run": $(json_bool "$DRY_RUN"),
+  "install_missing": $(json_bool "$INSTALL_MISSING"),
+  "desktop_launch_strategy": "$(json_escape "$DESKTOP_LAUNCH_STRATEGY")",
+  "resolved_desktop_launch_strategy": "$(json_escape "$RESOLVED_DESKTOP_STRATEGY")",
+  "resolved_desktop_executable_path": "$(json_escape "$RESOLVED_DESKTOP_EXECUTABLE_PATH")",
+  "resolved_desktop_executable_source": "$(json_escape "$RESOLVED_DESKTOP_EXECUTABLE_SOURCE")",
+  "api_addr": "$(json_escape "$API_ADDR")",
+  "error": "$(json_escape "$SUMMARY_ERROR")",
+  "notes": "Linux desktop native bootstrap scaffold helper.",
+  "recommended_commands": $recommended_commands_json
+}
+EOF
+  )
+
+  if [[ -n "$SUMMARY_JSON_PATH" ]]; then
+    write_summary_json_file "$SUMMARY_JSON_PATH" "$summary_json_payload"
+  fi
+  if [[ "$PRINT_SUMMARY_JSON" == "1" ]]; then
+    printf '%s\n' "$summary_json_payload"
+  fi
+}
+
+on_exit() {
+  local exit_code=$?
+  emit_recommended_guidance
+  emit_summary_payload "$exit_code"
+  return "$exit_code"
+}
+
+trap on_exit EXIT
 
 resolve_local_api_health_endpoint() {
   local addr="$1"
@@ -387,6 +521,20 @@ while [[ $# -gt 0 ]]; do
       FORCE_NPM_INSTALL="1"
       shift
       ;;
+    --summary-json)
+      if [[ $# -lt 2 ]]; then
+        die "--summary-json requires a value"
+      fi
+      SUMMARY_JSON_PATH="$2"
+      shift 2
+      ;;
+    --print-summary-json)
+      if [[ $# -lt 2 ]]; then
+        die "--print-summary-json requires 0 or 1"
+      fi
+      PRINT_SUMMARY_JSON="$2"
+      shift 2
+      ;;
     --help|-h)
       show_usage
       exit 0
@@ -408,6 +556,13 @@ case "$DESKTOP_LAUNCH_STRATEGY" in
   dev|packaged|auto) ;;
   *)
     die "invalid --desktop-launch-strategy '$DESKTOP_LAUNCH_STRATEGY' (allowed: dev, packaged, auto)"
+    ;;
+esac
+
+case "$PRINT_SUMMARY_JSON" in
+  0|1) ;;
+  *)
+    die "invalid --print-summary-json value: $PRINT_SUMMARY_JSON (expected 0|1)"
     ;;
 esac
 

@@ -571,6 +571,72 @@ function Get-DependencyInstallHint {
   }
 }
 
+function Add-UniqueValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyCollection()]
+    [System.Collections.ArrayList]$List,
+    [Parameter(Mandatory = $true)]
+    [string]$Value
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return
+  }
+  if ($List -notcontains $Value) {
+    [void]$List.Add($Value)
+  }
+}
+
+function Get-WingetInstallCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  return ("winget install --id {0} --exact --accept-source-agreements --accept-package-agreements --silent" -f $PackageId)
+}
+
+function Get-RecommendedCommands {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$MissingPackageIds = @(),
+    [string]$SelectedMode = "bootstrap"
+  )
+
+  $commands = New-Object System.Collections.ArrayList
+  $normalizedMode = $SelectedMode
+  if ([string]::IsNullOrWhiteSpace($normalizedMode)) {
+    $normalizedMode = "bootstrap"
+  }
+
+  Add-UniqueValue -List $commands -Value "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0}" -f $normalizedMode)
+  foreach ($packageId in $MissingPackageIds) {
+    Add-UniqueValue -List $commands -Value (Get-WingetInstallCommand -PackageId $packageId)
+  }
+  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0} -InstallMissing -EnablePolicyBypass" -f $normalizedMode)
+  Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
+
+  return @($commands.ToArray())
+}
+
+function Show-RecommendedCommands {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$Commands = @()
+  )
+
+  if ($Commands.Count -eq 0) {
+    return
+  }
+
+  Write-Step "recommended commands (copy/paste):"
+  foreach ($command in $Commands) {
+    Write-Host ("  - {0}" -f $command)
+  }
+}
+
 function Format-MissingDependencyMessage {
   param(
     [Parameter(Mandatory = $true)]
@@ -1119,6 +1185,7 @@ $script:BootstrapSummary = [ordered]@{
   api_addr = $ApiAddr
   tool_report = (Get-SummaryToolReport -Report $null)
   missing_package_ids = @()
+  recommended_commands = @()
   install_missing = [bool]$InstallMissing
   install_attempted = $false
   error = ""
@@ -1135,8 +1202,11 @@ try {
   if (-not [string]::IsNullOrWhiteSpace($script:BootstrapErrorMessage)) {
     $script:BootstrapSummary.error = $script:BootstrapErrorMessage
   }
+  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -SelectedMode $Mode)
+  $script:BootstrapSummary.recommended_commands = @($recommendedCommands)
   $script:BootstrapSummary.generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
   $script:BootstrapSummary.status = Resolve-SummaryStatus -ExitCode $script:BootstrapExitCode -DryRunEnabled ([bool]$DryRun) -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -HasError (-not [string]::IsNullOrWhiteSpace($script:BootstrapSummary.error))
+  Show-RecommendedCommands -Commands $recommendedCommands
   Emit-Summary -Summary $script:BootstrapSummary
 }
 

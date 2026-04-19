@@ -140,6 +140,7 @@ What this solves automatically:
 - checks Go/Node/npm/Rust/Cargo/Git Bash
 - optionally installs missing dependencies via `winget` (`-InstallMissing`)
 - launches local API + desktop dev in one flow (`-Mode run-full`)
+- prints copy/paste remediation guidance and mirrors it in summary JSON `recommended_commands` when using `-SummaryJson` and/or `-PrintSummaryJson 1`
 
 Other modes:
 - `-Mode check` (diagnostics only)
@@ -305,6 +306,7 @@ Linux native bootstrap modes:
 - `run-api` runs `go run ./cmd/node --local-api`.
 - `run-desktop` launches desktop only (dev/packaged/auto).
 - `run-full` starts local API + desktop in one scaffold flow.
+- native bootstrap also emits copy/paste remediation guidance and can write/print `recommended_commands` via `--summary-json` and `--print-summary-json 1`.
 
 Launch strategy behavior for `desktop_native_bootstrap`:
 - `dev` keeps the backward-compatible development flow.
