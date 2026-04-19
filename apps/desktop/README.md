@@ -325,6 +325,21 @@ References:
 - `docs/local-control-api.md`
 - `docs/full-execution-plan-2026-2027.md`
 
+## Linux Release Bundle Scaffold (Non-Production)
+
+Use this only as scaffolding while we build the real signing/release pipeline.
+It does not implement production secret handling or production signing.
+
+Run from repository root:
+
+```bash
+bash ./scripts/linux/desktop_release_bundle.sh --channel beta
+```
+
+Skip-build validation mode:
+- `--skip-build` runs scaffold validation and env-scoping checks without requiring Node.js/npm/Rust toolchain.
+- real build path (without `--skip-build`) still requires toolchain and runs the Tauri bundle build.
+
 ## Windows Release Bundle Scaffold (Non-Production)
 
 Use this only as scaffolding while we build the real signing/release pipeline.
@@ -347,6 +362,10 @@ From `cmd.exe`:
 ```cmd
 scripts\windows\desktop_release_bundle.cmd -Channel beta
 ```
+
+Skip-build validation mode:
+- `-SkipBuild` runs scaffold validation and env-scoping checks without requiring Node.js/npm/Rust toolchain.
+- real build path (without `-SkipBuild`) still requires toolchain and runs the Tauri bundle build.
 
 Optional scaffold-only signing placeholders:
 - `-SigningIdentity`
@@ -372,4 +391,5 @@ Run these from repository root to validate scaffold guardrails without building 
 ```bash
 bash ./scripts/integration_desktop_scaffold_contract.sh
 bash ./scripts/integration_desktop_release_bundle_guardrails.sh
+bash ./scripts/integration_desktop_linux_release_bundle_guardrails.sh
 ```

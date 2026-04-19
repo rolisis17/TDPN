@@ -73,6 +73,18 @@ run_expect_fail() {
   fi
 }
 
+assert_log_contains() {
+  local name="$1"
+  local expected_pattern="$2"
+  local log_path="$TMP_DIR/${name}.log"
+  if ! grep -F -- "$expected_pattern" "$log_path" >/dev/null 2>&1; then
+    echo "desktop release bundle guardrails failed: missing expected log text for $name"
+    echo "expected pattern: $expected_pattern"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
 echo "[desktop-release-bundle-guardrails] https update feed passes"
 run_expect_pass \
   "https_feed_pass" \
@@ -106,6 +118,26 @@ run_expect_fail \
     -Channel beta \
     -UpdateFeedUrl "ftp://updates.example.invalid/tdpn/beta.json" \
     -SkipBuild
+
+POWERSHELL_CONSTRAINED_PATH_PREFLIGHT="\$ErrorActionPreference='Stop'; \$env:PATH=''; foreach (\$tool in 'node','npm.cmd','rustc','cargo') { if (Get-Command \$tool -CommandType Application -ErrorAction SilentlyContinue) { throw \"constrained PATH unexpectedly resolved '\$tool'\" } };"
+
+echo "[desktop-release-bundle-guardrails] constrained PATH keeps -SkipBuild update-feed guardrails active"
+run_expect_fail \
+  "constrained_path_unsupported_scheme_fail" \
+  "allowed schemes: http, https" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "$POWERSHELL_CONSTRAINED_PATH_PREFLIGHT & '$SCRIPT_UNDER_TEST_PS' -Channel beta -UpdateFeedUrl 'ftp://updates.example.invalid/tdpn/beta.json' -SkipBuild"
+
+run_expect_pass \
+  "constrained_path_https_skipbuild_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "$POWERSHELL_CONSTRAINED_PATH_PREFLIGHT & '$SCRIPT_UNDER_TEST_PS' -Channel beta -UpdateFeedUrl 'https://updates.example.invalid/tdpn/beta.json' -SkipBuild"
+assert_log_contains \
+  "constrained_path_https_skipbuild_pass" \
+  "[desktop-release-bundle] mode=scaffold-non-production"
+assert_log_contains \
+  "constrained_path_https_skipbuild_pass" \
+  "[desktop-release-bundle] build skipped by -SkipBuild"
 
 echo "[desktop-release-bundle-guardrails] signing password without cert path fails"
 run_expect_fail \
