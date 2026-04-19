@@ -56,6 +56,7 @@ cat >"$PASS_ROADMAP" <<'EOF_PASS_ROADMAP'
   "vpn_track": {
     "phase4_windows_full_parity_handoff": {
       "windows_server_packaging_ok": true,
+      "windows_native_bootstrap_guardrails_ok": true,
       "windows_role_runbooks_ok": true,
       "cross_platform_interop_ok": true,
       "role_combination_validation_ok": true
@@ -76,6 +77,7 @@ cat >"$PASS_CHECK" <<'EOF_PASS_CHECK'
   "rc": 0,
   "signals": {
     "windows_server_packaging_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true,
     "windows_role_runbooks_ok": true,
     "cross_platform_interop_ok": true,
     "role_combination_validation_ok": true
@@ -131,17 +133,21 @@ if ! jq -e '
   and .fail_closed == true
   and .inputs.usable.phase4_run_summary_json == true
   and .inputs.usable.roadmap_summary_json == true
+  and .inputs.requirements.windows_native_bootstrap_guardrails_ok == false
   and .handoff.run_pipeline_ok == true
   and .handoff.windows_server_packaging_ok == true
+  and .handoff.windows_native_bootstrap_guardrails_ok == true
   and .handoff.windows_role_runbooks_ok == true
   and .handoff.cross_platform_interop_ok == true
   and .handoff.role_combination_validation_ok == true
   and .handoff.sources.windows_server_packaging_ok == "roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok"
+  and .handoff.sources.windows_native_bootstrap_guardrails_ok == "roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok"
   and .decision.failure_kind == "none"
   and ((.decision.reason_codes // []) | length) == 0
   and .failure.kind == "none"
   and .handoff_semantics.run_pipeline_ok.failure_kind == "ok"
   and .handoff_semantics.windows_server_packaging_ok.failure_kind == "ok"
+  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
   and .handoff_semantics.windows_role_runbooks_ok.failure_kind == "ok"
   and .handoff_semantics.cross_platform_interop_ok.failure_kind == "ok"
   and .handoff_semantics.role_combination_validation_ok.failure_kind == "ok"
@@ -164,6 +170,7 @@ cat >"$FALLBACK_CHECK" <<'EOF_FALLBACK_CHECK'
   "rc": 0,
   "signals": {
     "windows_server_packaging_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true,
     "windows_role_runbooks_ok": true,
     "cross_platform_interop_ok": true,
     "role_combination_validation_ok": true
@@ -228,10 +235,12 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .handoff.windows_server_packaging_ok == true
+  and .handoff.windows_native_bootstrap_guardrails_ok == true
   and .handoff.windows_role_runbooks_ok == true
   and .handoff.cross_platform_interop_ok == true
   and .handoff.role_combination_validation_ok == true
   and .handoff.sources.windows_server_packaging_ok == "phase4_windows_full_parity_check_summary.windows_server_packaging_ok"
+  and .handoff.sources.windows_native_bootstrap_guardrails_ok == "phase4_windows_full_parity_check_summary.windows_server_packaging_ok"
   and .handoff.sources.windows_role_runbooks_ok == "phase4_windows_full_parity_check_summary.windows_role_runbooks_ok"
   and .handoff.sources.cross_platform_interop_ok == "phase4_windows_full_parity_check_summary.cross_platform_interop_ok"
   and .handoff.sources.role_combination_validation_ok == "phase4_windows_full_parity_check_summary.role_combination_validation_ok"
@@ -295,6 +304,7 @@ echo "[phase4-windows-full-parity-handoff-check] unresolved booleans with relaxe
   --summary-json "$UNRESOLVED_OUTPUT" \
   --require-run-pipeline-ok 0 \
   --require-windows-server-packaging-ok 0 \
+  --require-windows-native-bootstrap-guardrails-ok 0 \
   --require-windows-role-runbooks-ok 0 \
   --require-cross-platform-interop-ok 0 \
   --require-role-combination-validation-ok 0 \
@@ -305,11 +315,13 @@ if ! jq -e '
   and .rc == 0
   and .handoff.run_pipeline_ok == true
   and .handoff.windows_server_packaging_ok == null
+  and .handoff.windows_native_bootstrap_guardrails_ok == null
   and .handoff.windows_role_runbooks_ok == null
   and .handoff.cross_platform_interop_ok == null
   and .handoff.role_combination_validation_ok == null
   and .handoff_semantics.run_pipeline_ok.failure_kind == "not_required"
   and .handoff_semantics.windows_server_packaging_ok.failure_kind == "not_required"
+  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
   and .handoff_semantics.windows_role_runbooks_ok.failure_kind == "not_required"
   and .handoff_semantics.cross_platform_interop_ok.failure_kind == "not_required"
   and .handoff_semantics.role_combination_validation_ok.failure_kind == "not_required"
@@ -341,19 +353,26 @@ if ! jq -e '
   and .handoff.run_pipeline_ok == true
   and .handoff.windows_server_packaging_ok == null
   and .handoff.windows_server_packaging_resolved == false
+  and .handoff.windows_native_bootstrap_guardrails_ok == null
+  and .handoff.windows_native_bootstrap_guardrails_resolved == false
   and .handoff.cross_platform_interop_ok == null
   and .handoff.cross_platform_interop_resolved == false
   and .handoff.sources.windows_server_packaging_ok == "unresolved"
+  and .handoff.sources.windows_native_bootstrap_guardrails_ok == "unresolved"
   and .handoff.sources.cross_platform_interop_ok == "unresolved"
   and .handoff_semantics.windows_server_packaging_ok.failure_kind == "unresolved"
+  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
   and .handoff_semantics.cross_platform_interop_ok.failure_kind == "unresolved"
   and .decision.failure_kind == "policy_no_go"
   and .failure.kind == "policy_no_go"
   and ((.decision.reason_codes // []) | any(. == "windows_server_packaging_ok_unresolved"))
+  and ((.decision.reason_codes // []) | any(. == "windows_native_bootstrap_guardrails_ok_unresolved") | not)
   and ((.decision.reason_codes // []) | any(. == "cross_platform_interop_ok_unresolved"))
   and ((.decision.reason_details // []) | any(.code == "windows_server_packaging_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
+  and ((.decision.reason_details // []) | any(.code == "windows_native_bootstrap_guardrails_ok_unresolved") | not)
   and ((.decision.reason_details // []) | any(.code == "cross_platform_interop_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
   and ((.decision.reasons // []) | any(test("windows_server_packaging_ok unresolved from provided artifacts")))
+  and ((.decision.reasons // []) | any(test("windows_native_bootstrap_guardrails_ok unresolved from provided artifacts")) | not)
   and ((.decision.reasons // []) | any(test("cross_platform_interop_ok unresolved from provided artifacts")))
 ' "$UNRESOLVED_STRICT_OUTPUT" >/dev/null; then
   echo "unresolved strict summary mismatch"
@@ -400,6 +419,7 @@ cat >"$FAIL_ROADMAP" <<'EOF_FAIL_ROADMAP'
   "vpn_track": {
     "phase4_windows_full_parity_handoff": {
       "windows_server_packaging_ok": true,
+      "windows_native_bootstrap_guardrails_ok": true,
       "windows_role_runbooks_ok": true,
       "cross_platform_interop_ok": true,
       "role_combination_validation_ok": true

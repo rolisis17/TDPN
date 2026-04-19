@@ -13,6 +13,7 @@ Usage:
     [--print-summary-json [0|1]] \
     [--dry-run [0|1]] \
     [--run-windows-server-packaging [0|1]] \
+    [--run-windows-native-bootstrap-guardrails [0|1]] \
     [--run-windows-role-runbooks [0|1]] \
     [--run-cross-platform-interop [0|1]] \
     [--run-role-combination-validation [0|1]] \
@@ -110,6 +111,7 @@ print_summary_json="${CI_PHASE4_WINDOWS_FULL_PARITY_PRINT_SUMMARY_JSON:-1}"
 dry_run="${CI_PHASE4_WINDOWS_FULL_PARITY_DRY_RUN:-0}"
 
 run_windows_server_packaging="${CI_PHASE4_WINDOWS_FULL_PARITY_RUN_WINDOWS_SERVER_PACKAGING:-1}"
+run_windows_native_bootstrap_guardrails="${CI_PHASE4_WINDOWS_FULL_PARITY_RUN_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS:-1}"
 run_windows_role_runbooks="${CI_PHASE4_WINDOWS_FULL_PARITY_RUN_WINDOWS_ROLE_RUNBOOKS:-1}"
 run_cross_platform_interop="${CI_PHASE4_WINDOWS_FULL_PARITY_RUN_CROSS_PLATFORM_INTEROP:-1}"
 run_role_combination_validation="${CI_PHASE4_WINDOWS_FULL_PARITY_RUN_ROLE_COMBINATION_VALIDATION:-1}"
@@ -152,6 +154,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_windows_server_packaging="1"
+        shift
+      fi
+      ;;
+    --run-windows-native-bootstrap-guardrails)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_windows_native_bootstrap_guardrails="${2:-}"
+        shift 2
+      else
+        run_windows_native_bootstrap_guardrails="1"
         shift
       fi
       ;;
@@ -233,6 +244,7 @@ done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
 bool_arg_or_die "--run-windows-server-packaging" "$run_windows_server_packaging"
+bool_arg_or_die "--run-windows-native-bootstrap-guardrails" "$run_windows_native_bootstrap_guardrails"
 bool_arg_or_die "--run-windows-role-runbooks" "$run_windows_role_runbooks"
 bool_arg_or_die "--run-cross-platform-interop" "$run_cross_platform_interop"
 bool_arg_or_die "--run-role-combination-validation" "$run_role_combination_validation"
@@ -249,6 +261,11 @@ phase4_windows_full_parity_check_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_
 phase4_windows_full_parity_run_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_WINDOWS_FULL_PARITY_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase4_windows_full_parity_run.sh}"
 phase4_windows_full_parity_handoff_check_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase4_windows_full_parity_handoff_check.sh}"
 phase4_windows_full_parity_handoff_run_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase4_windows_full_parity_handoff_run.sh}"
+
+windows_server_packaging_effective="$run_windows_server_packaging"
+if [[ "$run_windows_native_bootstrap_guardrails" != "1" ]]; then
+  windows_server_packaging_effective="0"
+fi
 
 stage_ids=(
   "windows_server_packaging"
@@ -273,7 +290,7 @@ declare -A stage_script=(
 )
 
 declare -A stage_enabled=(
-  ["windows_server_packaging"]="$run_windows_server_packaging"
+  ["windows_server_packaging"]="$windows_server_packaging_effective"
   ["windows_role_runbooks"]="$run_windows_role_runbooks"
   ["cross_platform_interop"]="$run_cross_platform_interop"
   ["role_combination_validation"]="$run_role_combination_validation"
@@ -385,6 +402,7 @@ jq -n \
   --arg dry_run "$dry_run" \
   --arg print_summary_json "$print_summary_json" \
   --arg run_windows_server_packaging "$run_windows_server_packaging" \
+  --arg run_windows_native_bootstrap_guardrails "$run_windows_native_bootstrap_guardrails" \
   --arg run_windows_role_runbooks "$run_windows_role_runbooks" \
   --arg run_cross_platform_interop "$run_cross_platform_interop" \
   --arg run_role_combination_validation "$run_role_combination_validation" \
@@ -407,6 +425,7 @@ jq -n \
       dry_run: ($dry_run == "1"),
       print_summary_json: ($print_summary_json == "1"),
       run_windows_server_packaging: ($run_windows_server_packaging == "1"),
+      run_windows_native_bootstrap_guardrails: ($run_windows_native_bootstrap_guardrails == "1"),
       run_windows_role_runbooks: ($run_windows_role_runbooks == "1"),
       run_cross_platform_interop: ($run_cross_platform_interop == "1"),
       run_role_combination_validation: ($run_role_combination_validation == "1"),

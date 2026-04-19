@@ -34,10 +34,35 @@ capture="${PHASE4_WINDOWS_FULL_PARITY_RUN_CAPTURE_FILE:?}"
 printf 'ci\t%s\n' "$*" >>"$capture"
 
 summary_json=""
+require_windows_server_packaging_ok="0"
+require_windows_role_runbooks_ok="0"
+require_cross_platform_interop_ok="0"
+require_role_combination_validation_ok="0"
+require_windows_native_bootstrap_guardrails_ok="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
       summary_json="${2:-}"
+      shift 2
+      ;;
+    --require-windows-server-packaging-ok)
+      require_windows_server_packaging_ok="${2:-1}"
+      shift 2
+      ;;
+    --require-windows-role-runbooks-ok)
+      require_windows_role_runbooks_ok="${2:-1}"
+      shift 2
+      ;;
+    --require-cross-platform-interop-ok)
+      require_cross_platform_interop_ok="${2:-1}"
+      shift 2
+      ;;
+    --require-role-combination-validation-ok)
+      require_role_combination_validation_ok="${2:-1}"
+      shift 2
+      ;;
+    --require-windows-native-bootstrap-guardrails-ok)
+      require_windows_native_bootstrap_guardrails_ok="${2:-1}"
       shift 2
       ;;
     *)
@@ -136,13 +161,15 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
     "require_windows_server_packaging_ok": true,
     "require_windows_role_runbooks_ok": true,
     "require_cross_platform_interop_ok": true,
-    "require_role_combination_validation_ok": true
+    "require_role_combination_validation_ok": true,
+    "require_windows_native_bootstrap_guardrails_ok": true
   },
   "signals": {
     "windows_server_packaging_ok": true,
     "windows_role_runbooks_ok": true,
     "cross_platform_interop_ok": true,
-    "role_combination_validation_ok": true
+    "role_combination_validation_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true
   },
   "stages": {
     "windows_server_packaging": {
@@ -161,6 +188,11 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
       "ok": true
     },
     "role_combination_validation": {
+      "status": "$status",
+      "resolved": true,
+      "ok": true
+    },
+    "windows_native_bootstrap_guardrails": {
       "status": "$status",
       "resolved": true,
       "ok": true
@@ -196,6 +228,7 @@ bash "$RUNNER" \
   --ci-run-windows-server-packaging 1 \
   --check-require-windows-server-packaging-ok 1 \
   --check-require-cross-platform-interop-ok 1 \
+  --check-require-windows-native-bootstrap-guardrails-ok 1 \
   --check-show-json 1 >"$DRY_RUN_LOG" 2>&1
 
 ci_line="$(grep '^ci	' "$CAPTURE" | tail -n 1 || true)"
@@ -228,6 +261,11 @@ if [[ "$check_line" != *"--summary-json $TMP_DIR/check_dry_summary.json"* ]]; th
 fi
 if [[ "$check_line" != *"--require-windows-server-packaging-ok 1"* || "$check_line" != *"--require-cross-platform-interop-ok 1"* ]]; then
   echo "check passthrough contract mismatch"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" != *"--require-windows-native-bootstrap-guardrails-ok 1"* ]]; then
+  echo "check guardrail passthrough mismatch"
   echo "$check_line"
   exit 1
 fi
@@ -273,6 +311,17 @@ if ! jq -e '
 ' "$DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "dry-run combined summary contract mismatch"
   cat "$DRY_RUN_RUN_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .policy.require_windows_native_bootstrap_guardrails_ok == true
+  and .signals.windows_native_bootstrap_guardrails_ok == true
+  and .stages.windows_native_bootstrap_guardrails.status == "pass"
+  and .stages.windows_native_bootstrap_guardrails.resolved == true
+  and .stages.windows_native_bootstrap_guardrails.ok == true
+' "$TMP_DIR/check_dry_summary.json" >/dev/null; then
+  echo "dry-run checker summary missing windows native bootstrap guardrails contract fields"
+  cat "$TMP_DIR/check_dry_summary.json"
   exit 1
 fi
 

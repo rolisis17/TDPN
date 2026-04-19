@@ -287,6 +287,8 @@ declare ci_contract_error=""
 declare check_contract_error=""
 declare ci_command=""
 declare check_command=""
+declare check_actionable_recommended_gate_id=""
+declare check_actionable_count=-1
 
 ci_command_args=("$ci_script")
 if [[ "$dry_run" == "1" ]]; then
@@ -331,6 +333,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-windows-server-packaging-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-windows-server-packaging-ok 0)
   fi
+  if ! array_has_arg "--require-windows-native-bootstrap-guardrails-ok" "${check_command_args[@]:1}"; then
+    check_command_args+=(--require-windows-native-bootstrap-guardrails-ok 0)
+  fi
   if ! array_has_arg "--require-windows-role-runbooks-ok" "${check_command_args[@]:1}"; then
     check_command_args+=(--require-windows-role-runbooks-ok 0)
   fi
@@ -350,6 +355,11 @@ if check_summary_contract_valid "$check_summary_json"; then
   check_contract_valid=1
   check_status="$(jq -r '.status // "fail"' "$check_summary_json" 2>/dev/null || echo "fail")"
   check_rc="$(jq -r '.rc // 0' "$check_summary_json" 2>/dev/null || echo 0)"
+  check_actionable_recommended_gate_id="$(jq -r '.decision.actionable.recommended_gate_id // ""' "$check_summary_json" 2>/dev/null || true)"
+  check_actionable_count="$(jq -r 'if (.decision.actionable.count | type) == "number" then .decision.actionable.count else -1 end' "$check_summary_json" 2>/dev/null || echo -1)"
+  if ! [[ "$check_actionable_count" =~ ^-?[0-9]+$ ]]; then
+    check_actionable_count=-1
+  fi
   if [[ "$check_command_rc" -ne 0 ]]; then
     check_status="fail"
     check_rc="$check_command_rc"
@@ -411,6 +421,8 @@ jq -n \
   --argjson check_contract_valid "$check_contract_valid" \
   --arg ci_contract_error "$ci_contract_error" \
   --arg check_contract_error "$check_contract_error" \
+  --arg check_actionable_recommended_gate_id "$check_actionable_recommended_gate_id" \
+  --argjson check_actionable_count "$check_actionable_count" \
   --argjson ci_summary_exists "$ci_summary_exists" \
   --argjson check_summary_exists "$check_summary_exists" \
   '{
@@ -471,6 +483,10 @@ jq -n \
           else "stage_failed"
           end
         ),
+        actionable: {
+          recommended_gate_id: (if $check_actionable_recommended_gate_id == "" then null else $check_actionable_recommended_gate_id end),
+          count: (if $check_actionable_count < 0 then null else $check_actionable_count end)
+        },
         artifacts: {
           summary_json: $check_summary_json,
           summary_exists: ($check_summary_exists == 1)

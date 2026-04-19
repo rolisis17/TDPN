@@ -72,6 +72,8 @@ check_summary="${FAKE_RUN_CHECK_SUMMARY:-${reports_dir}/phase4_windows_full_pari
 roadmap_summary="${FAKE_RUN_ROADMAP_SUMMARY:-${reports_dir}/roadmap_progress_summary.json}"
 mkdir -p "$(dirname "$check_summary")" "$(dirname "$roadmap_summary")"
 
+windows_native_bootstrap_guardrails_ok="${FAKE_RUN_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_OK:-1}"
+
 cat >"$check_summary" <<'EOF_CHECK'
 {
   "version": 1,
@@ -86,7 +88,8 @@ cat >"$check_summary" <<'EOF_CHECK'
     "windows_server_packaging_ok": true,
     "windows_role_runbooks_ok": true,
     "cross_platform_interop_ok": true,
-    "role_combination_validation_ok": true
+    "role_combination_validation_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true
   }
 }
 EOF_CHECK
@@ -101,7 +104,8 @@ cat >"$roadmap_summary" <<'EOF_ROADMAP'
       "windows_server_packaging_ok": true,
       "windows_role_runbooks_ok": true,
       "cross_platform_interop_ok": true,
-      "role_combination_validation_ok": true
+      "role_combination_validation_ok": true,
+      "windows_native_bootstrap_guardrails_ok": true
     }
   }
 }
@@ -161,10 +165,15 @@ capture="${PHASE4_HANDOFF_RUN_CAPTURE_FILE:?}"
 printf 'handoff\t%s\n' "$*" >>"$capture"
 
 summary_json=""
+require_windows_native_bootstrap_guardrails_ok="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
       summary_json="${2:-}"
+      shift 2
+      ;;
+    --require-windows-native-bootstrap-guardrails-ok)
+      require_windows_native_bootstrap_guardrails_ok="${2:-1}"
       shift 2
       ;;
     *)
@@ -198,7 +207,11 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
     "windows_server_packaging_ok": true,
     "windows_role_runbooks_ok": true,
     "cross_platform_interop_ok": true,
-    "role_combination_validation_ok": true
+    "role_combination_validation_ok": true,
+    "windows_native_bootstrap_guardrails_ok": true
+  },
+  "sources": {
+    "windows_native_bootstrap_guardrails_ok": "roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok"
   },
   "decision": {
     "pass": true,
@@ -298,7 +311,8 @@ bash "$RUNNER" \
   --print-summary-json 0 \
   --run-theta 9 \
   --handoff-require-windows-role-runbooks-ok 1 \
-  --handoff-require-role-combination-validation-ok 1 >"$DRY_STDOUT" 2>&1
+  --handoff-require-role-combination-validation-ok 1 \
+  --handoff-require-windows-native-bootstrap-guardrails-ok 1 >"$DRY_STDOUT" 2>&1
 
 run_line="$(grep '^run	' "$CAPTURE" | tail -n 1 || true)"
 handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
@@ -309,6 +323,11 @@ if [[ "$run_line" != *"--dry-run 1"* || "$run_line" != *"--theta 9"* ]]; then
 fi
 if [[ "$handoff_line" != *"--require-run-pipeline-ok 0"* || "$handoff_line" != *"--require-windows-server-packaging-ok 0"* || "$handoff_line" != *"--require-windows-role-runbooks-ok 1"* || "$handoff_line" != *"--require-cross-platform-interop-ok 0"* || "$handoff_line" != *"--require-role-combination-validation-ok 1"* ]]; then
   echo "dry-run handoff relax/override mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" != *"--require-windows-native-bootstrap-guardrails-ok 1"* ]]; then
+  echo "dry-run handoff guardrail passthrough mismatch"
   echo "$handoff_line"
   exit 1
 fi
@@ -330,6 +349,14 @@ if ! jq -e '
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .handoff.windows_native_bootstrap_guardrails_ok == true
+  and .sources.windows_native_bootstrap_guardrails_ok == "roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok"
+' "$TMP_DIR/dry_handoff_summary.json" >/dev/null; then
+  echo "dry-run handoff summary missing windows native bootstrap guardrails contract fields"
+  cat "$TMP_DIR/dry_handoff_summary.json"
   exit 1
 fi
 

@@ -49,6 +49,9 @@ cat >"$PASS_SUMMARY" <<'EOF_PASS'
     "windows_server_packaging": {
       "status": "pass"
     },
+    "windows_native_bootstrap_guardrails": {
+      "status": "pass"
+    },
     "windows_role_runbooks": {
       "status": "pass"
     },
@@ -74,6 +77,9 @@ cat >"$FAIL_SUMMARY" <<'EOF_FAIL'
   "rc": 0,
   "steps": {
     "windows_server_packaging": {
+      "status": "pass"
+    },
+    "windows_native_bootstrap_guardrails": {
       "status": "pass"
     },
     "windows_role_runbooks": {
@@ -103,6 +109,9 @@ cat >"$RELAXED_SUMMARY" <<'EOF_RELAXED'
     "windows_server_packaging": {
       "status": "pass"
     },
+    "windows_native_bootstrap_guardrails": {
+      "status": "fail"
+    },
     "windows_role_runbooks": {
       "status": "fail"
     },
@@ -129,10 +138,12 @@ if ! jq -e '
   and .rc == 0
   and .inputs.usable.ci_phase4_summary_json == true
   and .policy.require_windows_server_packaging_ok == true
+  and .policy.require_windows_native_bootstrap_guardrails_ok == false
   and .policy.require_windows_role_runbooks_ok == true
   and .policy.require_cross_platform_interop_ok == true
   and .policy.require_role_combination_validation_ok == true
   and .signals.windows_server_packaging_ok == true
+  and .signals.windows_native_bootstrap_guardrails_ok == true
   and .signals.windows_role_runbooks_ok == true
   and .signals.cross_platform_interop_ok == true
   and .signals.role_combination_validation_ok == true
@@ -140,6 +151,7 @@ if ! jq -e '
   and ((.decision.reason_codes // []) | length) == 0
   and .failure.kind == "none"
   and .signal_semantics.windows_server_packaging_ok.failure_kind == "ok"
+  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
   and .signal_semantics.windows_role_runbooks_ok.failure_kind == "ok"
   and .signal_semantics.cross_platform_interop_ok.failure_kind == "ok"
   and .signal_semantics.role_combination_validation_ok.failure_kind == "ok"
@@ -188,16 +200,22 @@ echo "[phase4-windows-full-parity-check] relaxed policy toggle path"
 "$SCRIPT_UNDER_TEST" \
   --ci-phase4-summary-json "$RELAXED_SUMMARY" \
   --summary-json "$RELAXED_OUTPUT" \
+  --require-windows-native-bootstrap-guardrails-ok 0 \
   --require-windows-role-runbooks-ok 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .policy.require_windows_native_bootstrap_guardrails_ok == false
   and .policy.require_windows_role_runbooks_ok == false
+  and .signals.windows_native_bootstrap_guardrails_ok == false
+  and .stages.windows_native_bootstrap_guardrails.status == "fail"
+  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
   and .signals.windows_role_runbooks_ok == false
   and .stages.windows_role_runbooks.status == "fail"
   and .signal_semantics.windows_role_runbooks_ok.failure_kind == "not_required"
+  and ((.decision.reason_codes // []) | any(. == "windows_native_bootstrap_guardrails_ok_false") | not)
   and ((.decision.reason_codes // []) | any(. == "windows_role_runbooks_ok_false") | not)
 ' "$RELAXED_OUTPUT" >/dev/null; then
   echo "relaxed-policy summary mismatch"
@@ -226,6 +244,7 @@ if ! jq -e '
   and ((.decision.reasons // []) | any(test("summary file not found or invalid JSON")))
   and ((.decision.reason_codes // []) | any(. == "ci_phase4_summary_unusable"))
   and .signal_semantics.windows_server_packaging_ok.failure_kind == "unresolved"
+  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
   and .signal_semantics.windows_role_runbooks_ok.failure_kind == "unresolved"
   and .signal_semantics.cross_platform_interop_ok.failure_kind == "unresolved"
   and .signal_semantics.role_combination_validation_ok.failure_kind == "unresolved"

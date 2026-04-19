@@ -370,7 +370,10 @@ Status:
 - `phase4_windows_full_parity_handoff_run.sh` runs the Phase-4 handoff check in one command; use `--resume 1 --reports-dir <same-run-dir>` to reuse passing run/handoff summaries on retry.
 - `integration_phase4_windows_full_parity_handoff_check.sh` validates handoff checker behavior/contract.
 - `integration_phase4_windows_full_parity_handoff_run.sh` validates handoff wrapper behavior/contract.
-- `integration_roadmap_progress_phase4_handoff.sh` validates roadmap progress ingestion of the Phase-4 handoff.
+- `integration_roadmap_progress_phase4_handoff.sh` validates roadmap progress ingestion of the Phase-4 handoff, including the optional `windows_native_bootstrap_guardrails_ok` signal when it is present.
+- Phase-4 wrapper integration also exercises the bootstrap-guardrail passthrough knobs used by the phase-3-style desktop bootstrap flow:
+  - `--check-require-windows-native-bootstrap-guardrails-ok`
+  - `--handoff-require-windows-native-bootstrap-guardrails-ok`
 
 Usage:
 

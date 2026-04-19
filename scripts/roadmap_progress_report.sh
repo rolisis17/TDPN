@@ -4581,6 +4581,7 @@ phase4_windows_full_parity_handoff_windows_server_packaging_ok_json="null"
 phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json="null"
 phase4_windows_full_parity_handoff_cross_platform_interop_ok_json="null"
 phase4_windows_full_parity_handoff_role_combination_validation_ok_json="null"
+phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json="null"
 if [[ -n "$phase4_windows_full_parity_summary_json" ]]; then
   phase4_windows_full_parity_handoff_input_summary_json="$phase4_windows_full_parity_summary_json"
   if [[ "$(phase4_windows_full_parity_summary_usable_01 "$phase4_windows_full_parity_summary_json")" == "1" ]]; then
@@ -4702,6 +4703,26 @@ if [[ -n "$phase4_windows_full_parity_summary_json" ]]; then
               ((.stages.role_combination_validation.ok | type) == "boolean") as $has_ok
               | if $has_ok then .stages.role_combination_validation.ok
                 else ((.stages.role_combination_validation.status // .stages.role_combination_matrix.status // .steps.role_combination_validation.status // .steps.role_combination_matrix.status // "") | ascii_downcase) as $s
+                  | if $s == "pass" then true
+                    elif $s == "fail" then false
+                    else empty end
+                end
+            end')"
+      phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json="$(resolve_phase4_bool_with_fallback \
+        "$phase4_windows_full_parity_handoff_source_summary_json" \
+        'if (.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .windows_native_bootstrap_guardrails_ok
+          elif (.summary.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .summary.windows_native_bootstrap_guardrails_ok
+          elif (.handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .handoff.windows_native_bootstrap_guardrails_ok
+          elif (.signals.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .signals.windows_native_bootstrap_guardrails_ok
+          elif (.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok
+          elif (.vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok
+          else empty end' \
+        '((.signals.windows_native_bootstrap_guardrails_ok | type) == "boolean") as $direct
+          | if $direct then empty
+            else
+              ((.stages.windows_native_bootstrap_guardrails.ok | type) == "boolean") as $has_ok
+              | if $has_ok then .stages.windows_native_bootstrap_guardrails.ok
+                else ((.stages.windows_native_bootstrap_guardrails.status // .steps.windows_native_bootstrap_guardrails.status // "") | ascii_downcase) as $s
                   | if $s == "pass" then true
                     elif $s == "fail" then false
                     else empty end
@@ -6556,7 +6577,8 @@ if [[ "$phase4_windows_full_parity_handoff_available_json" == "true" \
    && "$phase4_windows_full_parity_handoff_windows_server_packaging_ok_json" == "true" \
    && "$phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json" == "true" \
    && "$phase4_windows_full_parity_handoff_cross_platform_interop_ok_json" == "true" \
-   && "$phase4_windows_full_parity_handoff_role_combination_validation_ok_json" == "true" ]]; then
+   && "$phase4_windows_full_parity_handoff_role_combination_validation_ok_json" == "true" \
+   && ( "$phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json" == "null" || "$phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json" == "true" ) ]]; then
   phase4_needs_attention_json="false"
 fi
 
@@ -6598,8 +6620,9 @@ phase4_actionable_reason="phase4_windows_full_parity_handoff status=${phase4_win
 if [[ "$phase4_windows_full_parity_handoff_windows_server_packaging_ok_json" != "true" \
    || "$phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json" != "true" \
    || "$phase4_windows_full_parity_handoff_cross_platform_interop_ok_json" != "true" \
-   || "$phase4_windows_full_parity_handoff_role_combination_validation_ok_json" != "true" ]]; then
-  phase4_actionable_reason="$phase4_actionable_reason signals=[windows_server_packaging_ok=${phase4_windows_full_parity_handoff_windows_server_packaging_ok_json},windows_role_runbooks_ok=${phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json},cross_platform_interop_ok=${phase4_windows_full_parity_handoff_cross_platform_interop_ok_json},role_combination_validation_ok=${phase4_windows_full_parity_handoff_role_combination_validation_ok_json}]"
+   || "$phase4_windows_full_parity_handoff_role_combination_validation_ok_json" != "true" \
+   || ( "$phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json" != "null" && "$phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json" != "true" ) ]]; then
+  phase4_actionable_reason="$phase4_actionable_reason signals=[windows_server_packaging_ok=${phase4_windows_full_parity_handoff_windows_server_packaging_ok_json},windows_role_runbooks_ok=${phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json},cross_platform_interop_ok=${phase4_windows_full_parity_handoff_cross_platform_interop_ok_json},role_combination_validation_ok=${phase4_windows_full_parity_handoff_role_combination_validation_ok_json},windows_native_bootstrap_guardrails_ok=${phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json}]"
 fi
 
 phase0_ci_script_exists_json="false"
@@ -6944,6 +6967,7 @@ summary_payload="$(jq -n \
   --argjson phase4_windows_full_parity_handoff_windows_role_runbooks_ok "$phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json" \
   --argjson phase4_windows_full_parity_handoff_cross_platform_interop_ok "$phase4_windows_full_parity_handoff_cross_platform_interop_ok_json" \
   --argjson phase4_windows_full_parity_handoff_role_combination_validation_ok "$phase4_windows_full_parity_handoff_role_combination_validation_ok_json" \
+  --argjson phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok "$phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json" \
   --argjson phase5_settlement_layer_handoff_available "$phase5_settlement_layer_handoff_available_json" \
   --arg phase5_settlement_layer_handoff_input_summary_json "$phase5_settlement_layer_handoff_input_summary_json" \
   --arg phase5_settlement_layer_handoff_source_summary_json "$phase5_settlement_layer_handoff_source_summary_json" \
@@ -7197,7 +7221,8 @@ summary_payload="$(jq -n \
         windows_server_packaging_ok: $phase4_windows_full_parity_handoff_windows_server_packaging_ok,
         windows_role_runbooks_ok: $phase4_windows_full_parity_handoff_windows_role_runbooks_ok,
         cross_platform_interop_ok: $phase4_windows_full_parity_handoff_cross_platform_interop_ok,
-        role_combination_validation_ok: $phase4_windows_full_parity_handoff_role_combination_validation_ok
+        role_combination_validation_ok: $phase4_windows_full_parity_handoff_role_combination_validation_ok,
+        windows_native_bootstrap_guardrails_ok: $phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok
       },
       phase5_settlement_layer_handoff: {
         available: $phase5_settlement_layer_handoff_available,
@@ -7518,6 +7543,7 @@ cat >"$report_tmp" <<EOF_MD
 - Phase-4 windows_role_runbooks_ok: $(jq -r '.vpn_track.phase4_windows_full_parity_handoff.windows_role_runbooks_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-4 cross_platform_interop_ok: $(jq -r '.vpn_track.phase4_windows_full_parity_handoff.cross_platform_interop_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-4 role_combination_validation_ok: $(jq -r '.vpn_track.phase4_windows_full_parity_handoff.role_combination_validation_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-4 windows_native_bootstrap_guardrails_ok: $(jq -r '.vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-5 handoff available: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.available' "$summary_json")
 - Phase-5 handoff input: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.input_summary_json // "none"' "$summary_json")
 - Phase-5 handoff source: $(jq -r '.vpn_track.phase5_settlement_layer_handoff.source_summary_json // "none"' "$summary_json")
@@ -7714,7 +7740,7 @@ echo "[roadmap-progress-report] phase2_linux_prod_candidate_handoff_release_inte
 echo "[roadmap-progress-report] phase3_windows_client_beta_handoff_available=$phase3_windows_client_beta_handoff_available_json source_summary_json=${phase3_windows_client_beta_handoff_source_summary_json:-} source_kind=${phase3_windows_client_beta_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase3_windows_client_beta_handoff_windows_parity_ok=$phase3_windows_client_beta_handoff_windows_parity_ok_json desktop_contract_ok=$phase3_windows_client_beta_handoff_desktop_contract_ok_json installer_update_ok=$phase3_windows_client_beta_handoff_installer_update_ok_json telemetry_stability_ok=$phase3_windows_client_beta_handoff_telemetry_stability_ok_json"
 echo "[roadmap-progress-report] phase4_windows_full_parity_handoff_available=$phase4_windows_full_parity_handoff_available_json source_summary_json=${phase4_windows_full_parity_handoff_source_summary_json:-} source_kind=${phase4_windows_full_parity_handoff_source_summary_kind:-}"
-echo "[roadmap-progress-report] phase4_windows_full_parity_handoff_windows_server_packaging_ok=$phase4_windows_full_parity_handoff_windows_server_packaging_ok_json windows_role_runbooks_ok=$phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json cross_platform_interop_ok=$phase4_windows_full_parity_handoff_cross_platform_interop_ok_json role_combination_validation_ok=$phase4_windows_full_parity_handoff_role_combination_validation_ok_json"
+echo "[roadmap-progress-report] phase4_windows_full_parity_handoff_windows_server_packaging_ok=$phase4_windows_full_parity_handoff_windows_server_packaging_ok_json windows_native_bootstrap_guardrails_ok=$phase4_windows_full_parity_handoff_windows_native_bootstrap_guardrails_ok_json windows_role_runbooks_ok=$phase4_windows_full_parity_handoff_windows_role_runbooks_ok_json cross_platform_interop_ok=$phase4_windows_full_parity_handoff_cross_platform_interop_ok_json role_combination_validation_ok=$phase4_windows_full_parity_handoff_role_combination_validation_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_available=$phase5_settlement_layer_handoff_available_json source_summary_json=${phase5_settlement_layer_handoff_source_summary_json:-} source_kind=${phase5_settlement_layer_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_failsoft_ok=$phase5_settlement_layer_handoff_settlement_failsoft_ok_json settlement_acceptance_ok=$phase5_settlement_layer_handoff_settlement_acceptance_ok_json settlement_bridge_smoke_ok=$phase5_settlement_layer_handoff_settlement_bridge_smoke_ok_json settlement_state_persistence_ok=$phase5_settlement_layer_handoff_settlement_state_persistence_ok_json"
 echo "[roadmap-progress-report] phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status=${phase5_settlement_layer_handoff_settlement_adapter_roundtrip_status_json:-null} settlement_adapter_roundtrip_ok=$phase5_settlement_layer_handoff_settlement_adapter_roundtrip_ok_json"

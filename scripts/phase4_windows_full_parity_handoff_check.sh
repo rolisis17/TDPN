@@ -12,6 +12,7 @@ Usage:
     [--roadmap-summary-json PATH] \
     [--require-run-pipeline-ok [0|1]] \
     [--require-windows-server-packaging-ok [0|1]] \
+    [--require-windows-native-bootstrap-guardrails-ok [0|1]] \
     [--require-windows-role-runbooks-ok [0|1]] \
     [--require-cross-platform-interop-ok [0|1]] \
     [--require-role-combination-validation-ok [0|1]] \
@@ -208,10 +209,18 @@ resolve_handoff_bool() {
   local resolved="0"
 
   if [[ "$roadmap_summary_usable" == "1" ]]; then
-    value="$(json_bool_or_empty "$roadmap_summary_json" "if (.vpn_track.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .vpn_track.phase4_windows_full_parity_handoff.$signal elif (.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .phase4_windows_full_parity_handoff.$signal else empty end")"
+    if [[ "$signal" == "windows_native_bootstrap_guardrails_ok" ]]; then
+      value="$(json_bool_or_empty "$roadmap_summary_json" 'if (.vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok elif (.vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok elif (.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok elif (.phase4_windows_full_parity_handoff.windows_server_packaging_ok | type) == "boolean" then .phase4_windows_full_parity_handoff.windows_server_packaging_ok else empty end')"
+    else
+      value="$(json_bool_or_empty "$roadmap_summary_json" "if (.vpn_track.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .vpn_track.phase4_windows_full_parity_handoff.$signal elif (.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .phase4_windows_full_parity_handoff.$signal else empty end")"
+    fi
     if [[ -n "$value" ]]; then
       status="$( [[ "$value" == "true" ]] && printf '%s' "pass" || printf '%s' "fail" )"
-      source="roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.$signal"
+      if [[ "$signal" == "windows_native_bootstrap_guardrails_ok" ]]; then
+        source="roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok"
+      else
+        source="roadmap_progress_summary.vpn_track.phase4_windows_full_parity_handoff.$signal"
+      fi
       resolved="1"
       printf '%s|%s|%s|%s\n' "$value" "$status" "$source" "$resolved"
       return
@@ -224,10 +233,18 @@ resolve_handoff_bool() {
     if [[ -n "$check_summary_json" ]]; then
       check_summary_json="$(resolve_path_with_base "$check_summary_json" "$run_summary_json")"
       if [[ "$(json_file_valid_01 "$check_summary_json")" == "1" ]]; then
-        value="$(json_bool_or_empty "$check_summary_json" "if (.signals.$signal | type) == \"boolean\" then .signals.$signal elif (.handoff.$signal | type) == \"boolean\" then .handoff.$signal elif (.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .phase4_windows_full_parity_handoff.$signal elif (.vpn_track.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .vpn_track.phase4_windows_full_parity_handoff.$signal else empty end")"
+        if [[ "$signal" == "windows_native_bootstrap_guardrails_ok" ]]; then
+          value="$(json_bool_or_empty "$check_summary_json" 'if (.signals.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .signals.windows_native_bootstrap_guardrails_ok elif (.signals.windows_server_packaging_ok | type) == "boolean" then .signals.windows_server_packaging_ok elif (.handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .handoff.windows_native_bootstrap_guardrails_ok elif (.handoff.windows_server_packaging_ok | type) == "boolean" then .handoff.windows_server_packaging_ok elif (.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok elif (.phase4_windows_full_parity_handoff.windows_server_packaging_ok | type) == "boolean" then .phase4_windows_full_parity_handoff.windows_server_packaging_ok elif (.vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff.windows_native_bootstrap_guardrails_ok elif (.vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok | type) == "boolean" then .vpn_track.phase4_windows_full_parity_handoff.windows_server_packaging_ok else empty end')"
+        else
+          value="$(json_bool_or_empty "$check_summary_json" "if (.signals.$signal | type) == \"boolean\" then .signals.$signal elif (.handoff.$signal | type) == \"boolean\" then .handoff.$signal elif (.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .phase4_windows_full_parity_handoff.$signal elif (.vpn_track.phase4_windows_full_parity_handoff.$signal | type) == \"boolean\" then .vpn_track.phase4_windows_full_parity_handoff.$signal else empty end")"
+        fi
         if [[ -n "$value" ]]; then
           status="$( [[ "$value" == "true" ]] && printf '%s' "pass" || printf '%s' "fail" )"
-          source="phase4_windows_full_parity_check_summary.$signal"
+          if [[ "$signal" == "windows_native_bootstrap_guardrails_ok" ]]; then
+            source="phase4_windows_full_parity_check_summary.windows_server_packaging_ok"
+          else
+            source="phase4_windows_full_parity_check_summary.$signal"
+          fi
           resolved="1"
           printf '%s|%s|%s|%s\n' "$value" "$status" "$source" "$resolved"
           return
@@ -254,31 +271,36 @@ emit_summary_json() {
   local show_json="$9"
   local require_run_pipeline_ok="${10}"
   local require_windows_server_packaging_ok="${11}"
-  local require_windows_role_runbooks_ok="${12}"
-  local require_cross_platform_interop_ok="${13}"
-  local require_role_combination_validation_ok="${14}"
-  local run_pipeline_status="${15}"
-  local run_pipeline_ok="${16}"
-  local run_pipeline_resolved="${17}"
-  local run_pipeline_source="${18}"
-  local run_pipeline_contract_valid="${19}"
-  local windows_server_packaging_status="${20}"
-  local windows_role_runbooks_status="${21}"
-  local cross_platform_interop_status="${22}"
-  local role_combination_validation_status="${23}"
-  local windows_server_packaging_ok="${24}"
-  local windows_role_runbooks_ok="${25}"
-  local cross_platform_interop_ok="${26}"
-  local role_combination_validation_ok="${27}"
-  local windows_server_packaging_resolved="${28}"
-  local windows_role_runbooks_resolved="${29}"
-  local cross_platform_interop_resolved="${30}"
-  local role_combination_validation_resolved="${31}"
-  local windows_server_packaging_source="${32}"
-  local windows_role_runbooks_source="${33}"
-  local cross_platform_interop_source="${34}"
-  local role_combination_validation_source="${35}"
-  local reasons_json="${36}"
+  local require_windows_native_bootstrap_guardrails_ok="${12}"
+  local require_windows_role_runbooks_ok="${13}"
+  local require_cross_platform_interop_ok="${14}"
+  local require_role_combination_validation_ok="${15}"
+  local run_pipeline_status="${16}"
+  local run_pipeline_ok="${17}"
+  local run_pipeline_resolved="${18}"
+  local run_pipeline_source="${19}"
+  local run_pipeline_contract_valid="${20}"
+  local windows_server_packaging_status="${21}"
+  local windows_native_bootstrap_guardrails_status="${22}"
+  local windows_role_runbooks_status="${23}"
+  local cross_platform_interop_status="${24}"
+  local role_combination_validation_status="${25}"
+  local windows_server_packaging_ok="${26}"
+  local windows_native_bootstrap_guardrails_ok="${27}"
+  local windows_role_runbooks_ok="${28}"
+  local cross_platform_interop_ok="${29}"
+  local role_combination_validation_ok="${30}"
+  local windows_server_packaging_resolved="${31}"
+  local windows_native_bootstrap_guardrails_resolved="${32}"
+  local windows_role_runbooks_resolved="${33}"
+  local cross_platform_interop_resolved="${34}"
+  local role_combination_validation_resolved="${35}"
+  local windows_server_packaging_source="${36}"
+  local windows_native_bootstrap_guardrails_source="${37}"
+  local windows_role_runbooks_source="${38}"
+  local cross_platform_interop_source="${39}"
+  local role_combination_validation_source="${40}"
+  local reasons_json="${41}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -294,6 +316,7 @@ emit_summary_json() {
     --arg show_json "$show_json" \
     --argjson require_run_pipeline_ok "$require_run_pipeline_ok" \
     --argjson require_windows_server_packaging_ok "$require_windows_server_packaging_ok" \
+    --argjson require_windows_native_bootstrap_guardrails_ok "$require_windows_native_bootstrap_guardrails_ok" \
     --argjson require_windows_role_runbooks_ok "$require_windows_role_runbooks_ok" \
     --argjson require_cross_platform_interop_ok "$require_cross_platform_interop_ok" \
     --argjson require_role_combination_validation_ok "$require_role_combination_validation_ok" \
@@ -303,23 +326,51 @@ emit_summary_json() {
     --arg run_pipeline_source "$run_pipeline_source" \
     --argjson run_pipeline_contract_valid "$run_pipeline_contract_valid" \
     --arg windows_server_packaging_status "$windows_server_packaging_status" \
+    --arg windows_native_bootstrap_guardrails_status "$windows_native_bootstrap_guardrails_status" \
     --arg windows_role_runbooks_status "$windows_role_runbooks_status" \
     --arg cross_platform_interop_status "$cross_platform_interop_status" \
     --arg role_combination_validation_status "$role_combination_validation_status" \
     --argjson windows_server_packaging_ok "$windows_server_packaging_ok" \
+    --argjson windows_native_bootstrap_guardrails_ok "$windows_native_bootstrap_guardrails_ok" \
     --argjson windows_role_runbooks_ok "$windows_role_runbooks_ok" \
     --argjson cross_platform_interop_ok "$cross_platform_interop_ok" \
     --argjson role_combination_validation_ok "$role_combination_validation_ok" \
     --argjson windows_server_packaging_resolved "$windows_server_packaging_resolved" \
+    --argjson windows_native_bootstrap_guardrails_resolved "$windows_native_bootstrap_guardrails_resolved" \
     --argjson windows_role_runbooks_resolved "$windows_role_runbooks_resolved" \
     --argjson cross_platform_interop_resolved "$cross_platform_interop_resolved" \
     --argjson role_combination_validation_resolved "$role_combination_validation_resolved" \
     --arg windows_server_packaging_source "$windows_server_packaging_source" \
+    --arg windows_native_bootstrap_guardrails_source "$windows_native_bootstrap_guardrails_source" \
     --arg windows_role_runbooks_source "$windows_role_runbooks_source" \
     --arg cross_platform_interop_source "$cross_platform_interop_source" \
     --arg role_combination_validation_source "$role_combination_validation_source" \
     --argjson reasons "$reasons_json" \
-    '{
+    '
+      def actionable_gate($id; $signal; $enabled; $ok; $resolved; $status):
+        {
+          id: $id,
+          signal: $signal,
+          required: $enabled,
+          ok: $ok,
+          resolved: $resolved,
+          status: $status,
+          failure_kind: (
+            if ($enabled | not) then "not_required"
+            elif $ok == true then "ok"
+            elif $resolved == false then "unresolved"
+            else "false"
+            end
+          ),
+          reason: (
+            if ($enabled | not) then "not_required"
+            elif $ok == true then "pass"
+            elif $resolved == false then "required_signal_unresolved"
+            else "required_signal_false"
+            end
+          )
+        };
+      {
       version: 1,
       schema: {
         id: "phase4_windows_full_parity_handoff_check_summary",
@@ -341,6 +392,7 @@ emit_summary_json() {
         requirements: {
           run_pipeline_ok: ($require_run_pipeline_ok == 1),
           windows_server_packaging_ok: ($require_windows_server_packaging_ok == 1),
+          windows_native_bootstrap_guardrails_ok: ($require_windows_native_bootstrap_guardrails_ok == 1),
           windows_role_runbooks_ok: ($require_windows_role_runbooks_ok == 1),
           cross_platform_interop_ok: ($require_cross_platform_interop_ok == 1),
           role_combination_validation_ok: ($require_role_combination_validation_ok == 1)
@@ -358,6 +410,9 @@ emit_summary_json() {
         windows_server_packaging_ok: $windows_server_packaging_ok,
         windows_server_packaging_status: $windows_server_packaging_status,
         windows_server_packaging_resolved: ($windows_server_packaging_resolved == 1),
+        windows_native_bootstrap_guardrails_ok: $windows_native_bootstrap_guardrails_ok,
+        windows_native_bootstrap_guardrails_status: $windows_native_bootstrap_guardrails_status,
+        windows_native_bootstrap_guardrails_resolved: ($windows_native_bootstrap_guardrails_resolved == 1),
         windows_role_runbooks_ok: $windows_role_runbooks_ok,
         windows_role_runbooks_status: $windows_role_runbooks_status,
         windows_role_runbooks_resolved: ($windows_role_runbooks_resolved == 1),
@@ -370,6 +425,7 @@ emit_summary_json() {
         sources: {
           run_pipeline_ok: $run_pipeline_source,
           windows_server_packaging_ok: $windows_server_packaging_source,
+          windows_native_bootstrap_guardrails_ok: $windows_native_bootstrap_guardrails_source,
           windows_role_runbooks_ok: $windows_role_runbooks_source,
           cross_platform_interop_ok: $cross_platform_interop_source,
           role_combination_validation_ok: $role_combination_validation_source
@@ -387,6 +443,9 @@ emit_summary_json() {
            else empty end),
           (if ($require_windows_server_packaging_ok == 1 and $windows_server_packaging_resolved != 1) then "windows_server_packaging_ok_unresolved"
            elif ($require_windows_server_packaging_ok == 1 and $windows_server_packaging_ok != true) then "windows_server_packaging_ok_false"
+           else empty end),
+          (if ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_resolved != 1) then "windows_native_bootstrap_guardrails_ok_unresolved"
+           elif ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_ok != true) then "windows_native_bootstrap_guardrails_ok_false"
            else empty end),
           (if ($require_windows_role_runbooks_ok == 1 and $windows_role_runbooks_resolved != 1) then "windows_role_runbooks_ok_unresolved"
            elif ($require_windows_role_runbooks_ok == 1 and $windows_role_runbooks_ok != true) then "windows_role_runbooks_ok_false"
@@ -466,6 +525,25 @@ emit_summary_json() {
             observed: false,
             stage_status: $windows_server_packaging_status
           } else empty end),
+          (if ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_resolved != 1) then {
+            code: "windows_native_bootstrap_guardrails_ok_unresolved",
+            signal: "windows_native_bootstrap_guardrails_ok",
+            kind: "unresolved",
+            source: $windows_native_bootstrap_guardrails_source,
+            required: true,
+            resolved: false,
+            observed: $windows_native_bootstrap_guardrails_ok,
+            stage_status: $windows_native_bootstrap_guardrails_status
+          } elif ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_ok != true) then {
+            code: "windows_native_bootstrap_guardrails_ok_false",
+            signal: "windows_native_bootstrap_guardrails_ok",
+            kind: "false",
+            source: $windows_native_bootstrap_guardrails_source,
+            required: true,
+            resolved: true,
+            observed: false,
+            stage_status: $windows_native_bootstrap_guardrails_status
+          } else empty end),
           (if ($require_windows_role_runbooks_ok == 1 and $windows_role_runbooks_resolved != 1) then {
             code: "windows_role_runbooks_ok_unresolved",
             signal: "windows_role_runbooks_ok",
@@ -524,6 +602,22 @@ emit_summary_json() {
             stage_status: $role_combination_validation_status
           } else empty end)
         ],
+        actionable: (
+          [
+            actionable_gate("phase4_windows_full_parity_run_pipeline_gate"; "run_pipeline_ok"; ($require_run_pipeline_ok == 1); ($run_pipeline_ok == true); ($run_pipeline_resolved == 1); $run_pipeline_status),
+            actionable_gate("phase4_windows_full_parity_windows_server_packaging_gate"; "windows_server_packaging_ok"; ($require_windows_server_packaging_ok == 1); ($windows_server_packaging_ok == true); ($windows_server_packaging_resolved == 1); $windows_server_packaging_status),
+            actionable_gate("phase4_windows_full_parity_windows_native_bootstrap_guardrails_gate"; "windows_native_bootstrap_guardrails_ok"; ($require_windows_native_bootstrap_guardrails_ok == 1); ($windows_native_bootstrap_guardrails_ok == true); ($windows_native_bootstrap_guardrails_resolved == 1); $windows_native_bootstrap_guardrails_status),
+            actionable_gate("phase4_windows_full_parity_windows_role_runbooks_gate"; "windows_role_runbooks_ok"; ($require_windows_role_runbooks_ok == 1); ($windows_role_runbooks_ok == true); ($windows_role_runbooks_resolved == 1); $windows_role_runbooks_status),
+            actionable_gate("phase4_windows_full_parity_cross_platform_interop_gate"; "cross_platform_interop_ok"; ($require_cross_platform_interop_ok == 1); ($cross_platform_interop_ok == true); ($cross_platform_interop_resolved == 1); $cross_platform_interop_status),
+            actionable_gate("phase4_windows_full_parity_role_combination_validation_gate"; "role_combination_validation_ok"; ($require_role_combination_validation_ok == 1); ($role_combination_validation_ok == true); ($role_combination_validation_resolved == 1); $role_combination_validation_status)
+          ] as $all_gates
+          | ($all_gates | map(select(.required == true and .ok != true))) as $failed_required
+          | {
+              count: ($failed_required | length),
+              recommended_gate_id: ($failed_required[0].id // null),
+              gates: $failed_required
+            }
+        ),
         failure_kind: (if $status == "pass" then "none" else "policy_no_go" end),
         warnings: []
       },
@@ -559,6 +653,20 @@ emit_summary_json() {
             if ($require_windows_server_packaging_ok != 1) then "not_required"
             elif ($windows_server_packaging_resolved != 1) then "unresolved"
             elif ($windows_server_packaging_ok == true) then "ok"
+            else "false"
+            end
+          )
+        },
+        windows_native_bootstrap_guardrails_ok: {
+          required: ($require_windows_native_bootstrap_guardrails_ok == 1),
+          resolved: ($windows_native_bootstrap_guardrails_resolved == 1),
+          observed: $windows_native_bootstrap_guardrails_ok,
+          status: $windows_native_bootstrap_guardrails_status,
+          source: $windows_native_bootstrap_guardrails_source,
+          failure_kind: (
+            if ($require_windows_native_bootstrap_guardrails_ok != 1) then "not_required"
+            elif ($windows_native_bootstrap_guardrails_resolved != 1) then "unresolved"
+            elif ($windows_native_bootstrap_guardrails_ok == true) then "ok"
             else "false"
             end
           )
@@ -623,6 +731,7 @@ summary_json="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SUMMARY_JSON:-$ROOT_DIR
 show_json="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SHOW_JSON:-0}"
 require_run_pipeline_ok="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_REQUIRE_RUN_PIPELINE_OK:-1}"
 require_windows_server_packaging_ok="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}"
+require_windows_native_bootstrap_guardrails_ok="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_REQUIRE_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_OK:-0}"
 require_windows_role_runbooks_ok="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}"
 require_cross_platform_interop_ok="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}"
 require_role_combination_validation_ok="${PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}"
@@ -652,6 +761,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_windows_server_packaging_ok="1"
+        shift
+      fi
+      ;;
+    --require-windows-native-bootstrap-guardrails-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_windows_native_bootstrap_guardrails_ok="${2:-}"
+        shift 2
+      else
+        require_windows_native_bootstrap_guardrails_ok="1"
         shift
       fi
       ;;
@@ -709,6 +827,7 @@ done
 
 bool_arg_or_die "--require-run-pipeline-ok" "$require_run_pipeline_ok"
 bool_arg_or_die "--require-windows-server-packaging-ok" "$require_windows_server_packaging_ok"
+bool_arg_or_die "--require-windows-native-bootstrap-guardrails-ok" "$require_windows_native_bootstrap_guardrails_ok"
 bool_arg_or_die "--require-windows-role-runbooks-ok" "$require_windows_role_runbooks_ok"
 bool_arg_or_die "--require-cross-platform-interop-ok" "$require_cross_platform_interop_ok"
 bool_arg_or_die "--require-role-combination-validation-ok" "$require_role_combination_validation_ok"
@@ -768,6 +887,7 @@ else
 fi
 
 windows_server_packaging_pair="$(resolve_handoff_bool "windows_server_packaging_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
+windows_native_bootstrap_guardrails_pair="$(resolve_handoff_bool "windows_native_bootstrap_guardrails_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
 windows_role_runbooks_pair="$(resolve_handoff_bool "windows_role_runbooks_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
 cross_platform_interop_pair="$(resolve_handoff_bool "cross_platform_interop_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
 role_combination_validation_pair="$(resolve_handoff_bool "role_combination_validation_ok" "$roadmap_summary_json" "$roadmap_summary_usable" "$phase4_run_summary_json" "$phase4_run_summary_usable")"
@@ -778,6 +898,13 @@ windows_server_packaging_status="${windows_server_packaging_pair%%|*}"
 windows_server_packaging_pair="${windows_server_packaging_pair#*|}"
 windows_server_packaging_source="${windows_server_packaging_pair%%|*}"
 windows_server_packaging_resolved="${windows_server_packaging_pair##*|}"
+
+windows_native_bootstrap_guardrails_ok="${windows_native_bootstrap_guardrails_pair%%|*}"
+windows_native_bootstrap_guardrails_pair="${windows_native_bootstrap_guardrails_pair#*|}"
+windows_native_bootstrap_guardrails_status="${windows_native_bootstrap_guardrails_pair%%|*}"
+windows_native_bootstrap_guardrails_pair="${windows_native_bootstrap_guardrails_pair#*|}"
+windows_native_bootstrap_guardrails_source="${windows_native_bootstrap_guardrails_pair%%|*}"
+windows_native_bootstrap_guardrails_resolved="${windows_native_bootstrap_guardrails_pair##*|}"
 
 windows_role_runbooks_ok="${windows_role_runbooks_pair%%|*}"
 windows_role_runbooks_pair="${windows_role_runbooks_pair#*|}"
@@ -812,6 +939,13 @@ if [[ "$require_windows_server_packaging_ok" == "1" && "$windows_server_packagin
     reasons+=("windows_server_packaging_ok unresolved from provided artifacts")
   else
     reasons+=("windows_server_packaging_ok is false")
+  fi
+fi
+if [[ "$require_windows_native_bootstrap_guardrails_ok" == "1" && "$windows_native_bootstrap_guardrails_ok" != "true" ]]; then
+  if [[ "$windows_native_bootstrap_guardrails_status" == "missing" ]]; then
+    reasons+=("windows_native_bootstrap_guardrails_ok unresolved from provided artifacts")
+  else
+    reasons+=("windows_native_bootstrap_guardrails_ok is false")
   fi
 fi
 if [[ "$require_windows_role_runbooks_ok" == "1" && "$windows_role_runbooks_ok" != "true" ]]; then
@@ -861,6 +995,7 @@ emit_summary_json \
   "$show_json" \
   "$require_run_pipeline_ok" \
   "$require_windows_server_packaging_ok" \
+  "$require_windows_native_bootstrap_guardrails_ok" \
   "$require_windows_role_runbooks_ok" \
   "$require_cross_platform_interop_ok" \
   "$require_role_combination_validation_ok" \
@@ -870,18 +1005,22 @@ emit_summary_json \
   "$run_pipeline_source" \
   "$run_pipeline_contract_valid" \
   "$windows_server_packaging_status" \
+  "$windows_native_bootstrap_guardrails_status" \
   "$windows_role_runbooks_status" \
   "$cross_platform_interop_status" \
   "$role_combination_validation_status" \
   "$windows_server_packaging_ok" \
+  "$windows_native_bootstrap_guardrails_ok" \
   "$windows_role_runbooks_ok" \
   "$cross_platform_interop_ok" \
   "$role_combination_validation_ok" \
   "$windows_server_packaging_resolved" \
+  "$windows_native_bootstrap_guardrails_resolved" \
   "$windows_role_runbooks_resolved" \
   "$cross_platform_interop_resolved" \
   "$role_combination_validation_resolved" \
   "$windows_server_packaging_source" \
+  "$windows_native_bootstrap_guardrails_source" \
   "$windows_role_runbooks_source" \
   "$cross_platform_interop_source" \
   "$role_combination_validation_source" \

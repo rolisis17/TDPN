@@ -10,6 +10,7 @@ Usage:
   ./scripts/phase4_windows_full_parity_check.sh \
     [--ci-phase4-summary-json PATH] \
     [--require-windows-server-packaging-ok [0|1]] \
+    [--require-windows-native-bootstrap-guardrails-ok [0|1]] \
     [--require-windows-role-runbooks-ok [0|1]] \
     [--require-cross-platform-interop-ok [0|1]] \
     [--require-role-combination-validation-ok [0|1]] \
@@ -20,6 +21,7 @@ Purpose:
   Fail-closed checker for the Phase-4 Windows full-parity readiness contract.
   Evaluates required readiness booleans derived from the CI Phase-4 summary:
     - windows_server_packaging_ok
+    - windows_native_bootstrap_guardrails_ok
     - windows_role_runbooks_ok
     - cross_platform_interop_ok
     - role_combination_validation_ok
@@ -142,6 +144,16 @@ resolve_signal_raw_or_empty() {
         elif (.steps.windows_server_packaging.status? != null) then .steps.windows_server_packaging.status
         else empty end'
       ;;
+    windows_native_bootstrap_guardrails_ok)
+      json_text_or_empty "$path" 'if (.windows_native_bootstrap_guardrails_ok? != null) then .windows_native_bootstrap_guardrails_ok
+        elif (.summary.windows_native_bootstrap_guardrails_ok? != null) then .summary.windows_native_bootstrap_guardrails_ok
+        elif (.signals.windows_native_bootstrap_guardrails_ok? != null) then .signals.windows_native_bootstrap_guardrails_ok
+        elif (.stages.windows_native_bootstrap_guardrails.status? != null) then .stages.windows_native_bootstrap_guardrails.status
+        elif (.steps.windows_native_bootstrap_guardrails.status? != null) then .steps.windows_native_bootstrap_guardrails.status
+        elif (.stages.windows_server_packaging.status? != null) then .stages.windows_server_packaging.status
+        elif (.steps.windows_server_packaging.status? != null) then .steps.windows_server_packaging.status
+        else empty end'
+      ;;
     windows_role_runbooks_ok)
       json_text_or_empty "$path" 'if (.windows_role_runbooks_ok? != null) then .windows_role_runbooks_ok
         elif (.summary.windows_role_runbooks_ok? != null) then .summary.windows_role_runbooks_ok
@@ -181,22 +193,26 @@ emit_summary_json() {
   local ci_phase4_summary_usable="$6"
   local show_json="$7"
   local require_windows_server_packaging_ok="$8"
-  local require_windows_role_runbooks_ok="$9"
-  local require_cross_platform_interop_ok="${10}"
-  local require_role_combination_validation_ok="${11}"
-  local windows_server_packaging_status="${12}"
-  local windows_role_runbooks_status="${13}"
-  local cross_platform_interop_status="${14}"
-  local role_combination_validation_status="${15}"
-  local windows_server_packaging_ok="${16}"
-  local windows_role_runbooks_ok="${17}"
-  local cross_platform_interop_ok="${18}"
-  local role_combination_validation_ok="${19}"
-  local windows_server_packaging_resolved="${20}"
-  local windows_role_runbooks_resolved="${21}"
-  local cross_platform_interop_resolved="${22}"
-  local role_combination_validation_resolved="${23}"
-  local reasons_json="${24}"
+  local require_windows_native_bootstrap_guardrails_ok="$9"
+  local require_windows_role_runbooks_ok="${10}"
+  local require_cross_platform_interop_ok="${11}"
+  local require_role_combination_validation_ok="${12}"
+  local windows_server_packaging_status="${13}"
+  local windows_native_bootstrap_guardrails_status="${14}"
+  local windows_role_runbooks_status="${15}"
+  local cross_platform_interop_status="${16}"
+  local role_combination_validation_status="${17}"
+  local windows_server_packaging_ok="${18}"
+  local windows_native_bootstrap_guardrails_ok="${19}"
+  local windows_role_runbooks_ok="${20}"
+  local cross_platform_interop_ok="${21}"
+  local role_combination_validation_ok="${22}"
+  local windows_server_packaging_resolved="${23}"
+  local windows_native_bootstrap_guardrails_resolved="${24}"
+  local windows_role_runbooks_resolved="${25}"
+  local cross_platform_interop_resolved="${26}"
+  local role_combination_validation_resolved="${27}"
+  local reasons_json="${28}"
 
   local summary_tmp
   summary_tmp="$(mktemp)"
@@ -209,23 +225,51 @@ emit_summary_json() {
     --argjson ci_phase4_summary_usable "$ci_phase4_summary_usable" \
     --arg show_json "$show_json" \
     --argjson require_windows_server_packaging_ok "$require_windows_server_packaging_ok" \
+    --argjson require_windows_native_bootstrap_guardrails_ok "$require_windows_native_bootstrap_guardrails_ok" \
     --argjson require_windows_role_runbooks_ok "$require_windows_role_runbooks_ok" \
     --argjson require_cross_platform_interop_ok "$require_cross_platform_interop_ok" \
     --argjson require_role_combination_validation_ok "$require_role_combination_validation_ok" \
     --arg windows_server_packaging_status "$windows_server_packaging_status" \
+    --arg windows_native_bootstrap_guardrails_status "$windows_native_bootstrap_guardrails_status" \
     --arg windows_role_runbooks_status "$windows_role_runbooks_status" \
     --arg cross_platform_interop_status "$cross_platform_interop_status" \
     --arg role_combination_validation_status "$role_combination_validation_status" \
     --argjson windows_server_packaging_ok "$windows_server_packaging_ok" \
+    --argjson windows_native_bootstrap_guardrails_ok "$windows_native_bootstrap_guardrails_ok" \
     --argjson windows_role_runbooks_ok "$windows_role_runbooks_ok" \
     --argjson cross_platform_interop_ok "$cross_platform_interop_ok" \
     --argjson role_combination_validation_ok "$role_combination_validation_ok" \
     --argjson windows_server_packaging_resolved "$windows_server_packaging_resolved" \
+    --argjson windows_native_bootstrap_guardrails_resolved "$windows_native_bootstrap_guardrails_resolved" \
     --argjson windows_role_runbooks_resolved "$windows_role_runbooks_resolved" \
     --argjson cross_platform_interop_resolved "$cross_platform_interop_resolved" \
     --argjson role_combination_validation_resolved "$role_combination_validation_resolved" \
     --argjson reasons "$reasons_json" \
-    '{
+    '
+      def actionable_gate($id; $signal; $enabled; $ok; $resolved; $status):
+        {
+          id: $id,
+          signal: $signal,
+          required: $enabled,
+          ok: $ok,
+          resolved: $resolved,
+          status: $status,
+          failure_kind: (
+            if ($enabled | not) then "not_required"
+            elif $ok == true then "ok"
+            elif $resolved == false then "unresolved"
+            else "false"
+            end
+          ),
+          reason: (
+            if ($enabled | not) then "not_required"
+            elif $ok == true then "pass"
+            elif $resolved == false then "required_signal_unresolved"
+            else "required_signal_false"
+            end
+          )
+        };
+      {
       version: 1,
       schema: {
         id: "phase4_windows_full_parity_check_summary",
@@ -249,6 +293,7 @@ emit_summary_json() {
       },
       policy: {
         require_windows_server_packaging_ok: ($require_windows_server_packaging_ok == 1),
+        require_windows_native_bootstrap_guardrails_ok: ($require_windows_native_bootstrap_guardrails_ok == 1),
         require_windows_role_runbooks_ok: ($require_windows_role_runbooks_ok == 1),
         require_cross_platform_interop_ok: ($require_cross_platform_interop_ok == 1),
         require_role_combination_validation_ok: ($require_role_combination_validation_ok == 1)
@@ -259,6 +304,12 @@ emit_summary_json() {
           status: $windows_server_packaging_status,
           resolved: ($windows_server_packaging_resolved == 1),
           ok: ($windows_server_packaging_ok == true)
+        },
+        windows_native_bootstrap_guardrails: {
+          enabled: ($require_windows_native_bootstrap_guardrails_ok == 1),
+          status: $windows_native_bootstrap_guardrails_status,
+          resolved: ($windows_native_bootstrap_guardrails_resolved == 1),
+          ok: ($windows_native_bootstrap_guardrails_ok == true)
         },
         windows_role_runbooks: {
           enabled: ($require_windows_role_runbooks_ok == 1),
@@ -281,6 +332,7 @@ emit_summary_json() {
       },
       signals: {
         windows_server_packaging_ok: ($windows_server_packaging_ok == true),
+        windows_native_bootstrap_guardrails_ok: ($windows_native_bootstrap_guardrails_ok == true),
         windows_role_runbooks_ok: ($windows_role_runbooks_ok == true),
         cross_platform_interop_ok: ($cross_platform_interop_ok == true),
         role_combination_validation_ok: ($role_combination_validation_ok == true)
@@ -292,6 +344,9 @@ emit_summary_json() {
           (if ($ci_phase4_summary_usable != 1) then "ci_phase4_summary_unusable" else empty end),
           (if ($require_windows_server_packaging_ok == 1 and $windows_server_packaging_resolved != 1) then "windows_server_packaging_ok_unresolved"
            elif ($require_windows_server_packaging_ok == 1 and $windows_server_packaging_resolved == 1 and $windows_server_packaging_ok != true) then "windows_server_packaging_ok_false"
+           else empty end),
+          (if ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_resolved != 1) then "windows_native_bootstrap_guardrails_ok_unresolved"
+           elif ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_resolved == 1 and $windows_native_bootstrap_guardrails_ok != true) then "windows_native_bootstrap_guardrails_ok_false"
            else empty end),
           (if ($require_windows_role_runbooks_ok == 1 and $windows_role_runbooks_resolved != 1) then "windows_role_runbooks_ok_unresolved"
            elif ($require_windows_role_runbooks_ok == 1 and $windows_role_runbooks_resolved == 1 and $windows_role_runbooks_ok != true) then "windows_role_runbooks_ok_false"
@@ -332,6 +387,25 @@ emit_summary_json() {
             resolved: true,
             observed: false,
             stage_status: $windows_server_packaging_status
+          } else empty end),
+          (if ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_resolved != 1) then {
+            code: "windows_native_bootstrap_guardrails_ok_unresolved",
+            signal: "windows_native_bootstrap_guardrails_ok",
+            kind: "unresolved",
+            source: "signals.windows_native_bootstrap_guardrails_ok",
+            required: true,
+            resolved: false,
+            observed: ($windows_native_bootstrap_guardrails_ok == true),
+            stage_status: $windows_native_bootstrap_guardrails_status
+          } elif ($require_windows_native_bootstrap_guardrails_ok == 1 and $windows_native_bootstrap_guardrails_resolved == 1 and $windows_native_bootstrap_guardrails_ok != true) then {
+            code: "windows_native_bootstrap_guardrails_ok_false",
+            signal: "windows_native_bootstrap_guardrails_ok",
+            kind: "false",
+            source: "signals.windows_native_bootstrap_guardrails_ok",
+            required: true,
+            resolved: true,
+            observed: false,
+            stage_status: $windows_native_bootstrap_guardrails_status
           } else empty end),
           (if ($require_windows_role_runbooks_ok == 1 and $windows_role_runbooks_resolved != 1) then {
             code: "windows_role_runbooks_ok_unresolved",
@@ -391,6 +465,21 @@ emit_summary_json() {
             stage_status: $role_combination_validation_status
           } else empty end)
         ],
+        actionable: (
+          [
+            actionable_gate("phase4_windows_full_parity_windows_server_packaging_gate"; "windows_server_packaging_ok"; ($require_windows_server_packaging_ok == 1); ($windows_server_packaging_ok == true); ($windows_server_packaging_resolved == 1); $windows_server_packaging_status),
+            actionable_gate("phase4_windows_full_parity_windows_native_bootstrap_guardrails_gate"; "windows_native_bootstrap_guardrails_ok"; ($require_windows_native_bootstrap_guardrails_ok == 1); ($windows_native_bootstrap_guardrails_ok == true); ($windows_native_bootstrap_guardrails_resolved == 1); $windows_native_bootstrap_guardrails_status),
+            actionable_gate("phase4_windows_full_parity_windows_role_runbooks_gate"; "windows_role_runbooks_ok"; ($require_windows_role_runbooks_ok == 1); ($windows_role_runbooks_ok == true); ($windows_role_runbooks_resolved == 1); $windows_role_runbooks_status),
+            actionable_gate("phase4_windows_full_parity_cross_platform_interop_gate"; "cross_platform_interop_ok"; ($require_cross_platform_interop_ok == 1); ($cross_platform_interop_ok == true); ($cross_platform_interop_resolved == 1); $cross_platform_interop_status),
+            actionable_gate("phase4_windows_full_parity_role_combination_validation_gate"; "role_combination_validation_ok"; ($require_role_combination_validation_ok == 1); ($role_combination_validation_ok == true); ($role_combination_validation_resolved == 1); $role_combination_validation_status)
+          ] as $all_gates
+          | ($all_gates | map(select(.required == true and .ok != true))) as $failed_required
+          | {
+              count: ($failed_required | length),
+              recommended_gate_id: ($failed_required[0].id // null),
+              gates: $failed_required
+            }
+        ),
         failure_kind: (if $status == "pass" then "none" else "policy_no_go" end)
       },
       failure: {
@@ -408,6 +497,19 @@ emit_summary_json() {
             if ($require_windows_server_packaging_ok != 1) then "not_required"
             elif ($windows_server_packaging_resolved != 1) then "unresolved"
             elif ($windows_server_packaging_ok == true) then "ok"
+            else "false"
+            end
+          )
+        },
+        windows_native_bootstrap_guardrails_ok: {
+          required: ($require_windows_native_bootstrap_guardrails_ok == 1),
+          resolved: ($windows_native_bootstrap_guardrails_resolved == 1),
+          observed: ($windows_native_bootstrap_guardrails_ok == true),
+          stage_status: $windows_native_bootstrap_guardrails_status,
+          failure_kind: (
+            if ($require_windows_native_bootstrap_guardrails_ok != 1) then "not_required"
+            elif ($windows_native_bootstrap_guardrails_resolved != 1) then "unresolved"
+            elif ($windows_native_bootstrap_guardrails_ok == true) then "ok"
             else "false"
             end
           )
@@ -464,6 +566,7 @@ ci_phase4_summary_json="${PHASE4_WINDOWS_FULL_PARITY_CHECK_CI_PHASE4_SUMMARY_JSO
 summary_json="${PHASE4_WINDOWS_FULL_PARITY_CHECK_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/phase4_windows_full_parity_check_summary.json}"
 show_json="${PHASE4_WINDOWS_FULL_PARITY_CHECK_SHOW_JSON:-0}"
 require_windows_server_packaging_ok="${PHASE4_WINDOWS_FULL_PARITY_CHECK_REQUIRE_WINDOWS_SERVER_PACKAGING_OK:-1}"
+require_windows_native_bootstrap_guardrails_ok="${PHASE4_WINDOWS_FULL_PARITY_CHECK_REQUIRE_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_OK:-0}"
 require_windows_role_runbooks_ok="${PHASE4_WINDOWS_FULL_PARITY_CHECK_REQUIRE_WINDOWS_ROLE_RUNBOOKS_OK:-1}"
 require_cross_platform_interop_ok="${PHASE4_WINDOWS_FULL_PARITY_CHECK_REQUIRE_CROSS_PLATFORM_INTEROP_OK:-1}"
 require_role_combination_validation_ok="${PHASE4_WINDOWS_FULL_PARITY_CHECK_REQUIRE_ROLE_COMBINATION_VALIDATION_OK:-1}"
@@ -480,6 +583,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         require_windows_server_packaging_ok="1"
+        shift
+      fi
+      ;;
+    --require-windows-native-bootstrap-guardrails-ok)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_windows_native_bootstrap_guardrails_ok="${2:-}"
+        shift 2
+      else
+        require_windows_native_bootstrap_guardrails_ok="1"
         shift
       fi
       ;;
@@ -536,6 +648,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--require-windows-server-packaging-ok" "$require_windows_server_packaging_ok"
+bool_arg_or_die "--require-windows-native-bootstrap-guardrails-ok" "$require_windows_native_bootstrap_guardrails_ok"
 bool_arg_or_die "--require-windows-role-runbooks-ok" "$require_windows_role_runbooks_ok"
 bool_arg_or_die "--require-cross-platform-interop-ok" "$require_cross_platform_interop_ok"
 bool_arg_or_die "--require-role-combination-validation-ok" "$require_role_combination_validation_ok"
@@ -552,12 +665,14 @@ ci_phase4_summary_usable="$(json_file_valid_01 "$ci_phase4_summary_json")"
 declare -a reasons=()
 
 windows_server_packaging_raw=""
+windows_native_bootstrap_guardrails_raw=""
 windows_role_runbooks_raw=""
 cross_platform_interop_raw=""
 role_combination_validation_raw=""
 
 if [[ "$ci_phase4_summary_usable" == "1" ]]; then
   windows_server_packaging_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "windows_server_packaging_ok")"
+  windows_native_bootstrap_guardrails_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "windows_native_bootstrap_guardrails_ok")"
   windows_role_runbooks_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "windows_role_runbooks_ok")"
   cross_platform_interop_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "cross_platform_interop_ok")"
   role_combination_validation_raw="$(resolve_signal_raw_or_empty "$ci_phase4_summary_json" "role_combination_validation_ok")"
@@ -566,12 +681,16 @@ else
 fi
 
 windows_server_packaging_ok="$(normalize_boolish_or_empty "$windows_server_packaging_raw")"
+windows_native_bootstrap_guardrails_ok="$(normalize_boolish_or_empty "$windows_native_bootstrap_guardrails_raw")"
 windows_role_runbooks_ok="$(normalize_boolish_or_empty "$windows_role_runbooks_raw")"
 cross_platform_interop_ok="$(normalize_boolish_or_empty "$cross_platform_interop_raw")"
 role_combination_validation_ok="$(normalize_boolish_or_empty "$role_combination_validation_raw")"
 
 if [[ -z "$windows_server_packaging_ok" ]]; then
   windows_server_packaging_ok="false"
+fi
+if [[ -z "$windows_native_bootstrap_guardrails_ok" ]]; then
+  windows_native_bootstrap_guardrails_ok="false"
 fi
 if [[ -z "$windows_role_runbooks_ok" ]]; then
   windows_role_runbooks_ok="false"
@@ -584,11 +703,13 @@ if [[ -z "$role_combination_validation_ok" ]]; then
 fi
 
 windows_server_packaging_resolved="0"
+windows_native_bootstrap_guardrails_resolved="0"
 windows_role_runbooks_resolved="0"
 cross_platform_interop_resolved="0"
 role_combination_validation_resolved="0"
 
 windows_server_packaging_status="$(stage_status_from_raw "$windows_server_packaging_raw")"
+windows_native_bootstrap_guardrails_status="$(stage_status_from_raw "$windows_native_bootstrap_guardrails_raw")"
 windows_role_runbooks_status="$(stage_status_from_raw "$windows_role_runbooks_raw")"
 cross_platform_interop_status="$(stage_status_from_raw "$cross_platform_interop_raw")"
 role_combination_validation_status="$(stage_status_from_raw "$role_combination_validation_raw")"
@@ -597,6 +718,11 @@ if [[ -n "$(trim "$windows_server_packaging_raw")" ]]; then
   windows_server_packaging_resolved="1"
 elif [[ "$ci_phase4_summary_usable" == "1" ]]; then
   reasons+=("windows_server_packaging_ok could not be resolved from ci phase4 summary")
+fi
+if [[ -n "$(trim "$windows_native_bootstrap_guardrails_raw")" ]]; then
+  windows_native_bootstrap_guardrails_resolved="1"
+elif [[ "$ci_phase4_summary_usable" == "1" ]]; then
+  reasons+=("windows_native_bootstrap_guardrails_ok could not be resolved from ci phase4 summary")
 fi
 if [[ -n "$(trim "$windows_role_runbooks_raw")" ]]; then
   windows_role_runbooks_resolved="1"
@@ -616,6 +742,9 @@ fi
 
 if [[ "$require_windows_server_packaging_ok" == "1" && "$windows_server_packaging_resolved" == "1" && "$windows_server_packaging_ok" != "true" ]]; then
   reasons+=("windows_server_packaging_ok is false")
+fi
+if [[ "$require_windows_native_bootstrap_guardrails_ok" == "1" && "$windows_native_bootstrap_guardrails_resolved" == "1" && "$windows_native_bootstrap_guardrails_ok" != "true" ]]; then
+  reasons+=("windows_native_bootstrap_guardrails_ok is false")
 fi
 if [[ "$require_windows_role_runbooks_ok" == "1" && "$windows_role_runbooks_resolved" == "1" && "$windows_role_runbooks_ok" != "true" ]]; then
   reasons+=("windows_role_runbooks_ok is false")
@@ -649,18 +778,22 @@ emit_summary_json \
   "$ci_phase4_summary_usable" \
   "$show_json" \
   "$require_windows_server_packaging_ok" \
+  "$require_windows_native_bootstrap_guardrails_ok" \
   "$require_windows_role_runbooks_ok" \
   "$require_cross_platform_interop_ok" \
   "$require_role_combination_validation_ok" \
   "$windows_server_packaging_status" \
+  "$windows_native_bootstrap_guardrails_status" \
   "$windows_role_runbooks_status" \
   "$cross_platform_interop_status" \
   "$role_combination_validation_status" \
   "$windows_server_packaging_ok" \
+  "$windows_native_bootstrap_guardrails_ok" \
   "$windows_role_runbooks_ok" \
   "$cross_platform_interop_ok" \
   "$role_combination_validation_ok" \
   "$windows_server_packaging_resolved" \
+  "$windows_native_bootstrap_guardrails_resolved" \
   "$windows_role_runbooks_resolved" \
   "$cross_platform_interop_resolved" \
   "$role_combination_validation_resolved" \

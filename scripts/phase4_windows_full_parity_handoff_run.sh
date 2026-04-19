@@ -406,6 +406,8 @@ declare handoff_command=""
 declare run_roadmap_summary_json=""
 declare run_reused_artifact="false"
 declare handoff_reused_artifact="false"
+declare handoff_actionable_recommended_gate_id=""
+declare handoff_actionable_count=-1
 
 declare -a run_cmd=("$run_script" --reports-dir "$reports_dir" --summary-json "$run_summary_json")
 if [[ "$dry_run" == "1" ]]; then
@@ -474,6 +476,9 @@ if [[ "$dry_run" == "1" ]]; then
   if ! array_has_arg "--require-windows-server-packaging-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-windows-server-packaging-ok 0)
   fi
+  if ! array_has_arg "--require-windows-native-bootstrap-guardrails-ok" "${handoff_cmd[@]:1}"; then
+    handoff_cmd+=(--require-windows-native-bootstrap-guardrails-ok 0)
+  fi
   if ! array_has_arg "--require-windows-role-runbooks-ok" "${handoff_cmd[@]:1}"; then
     handoff_cmd+=(--require-windows-role-runbooks-ok 0)
   fi
@@ -503,6 +508,11 @@ if [[ "$run_phase4_windows_full_parity_handoff_check" == "1" ]]; then
       handoff_contract_valid=1
       handoff_status="$(jq -r '.status // "fail"' "$handoff_summary_json" 2>/dev/null || echo fail)"
       handoff_rc="$(jq -r '.rc // 0' "$handoff_summary_json" 2>/dev/null || echo 0)"
+      handoff_actionable_recommended_gate_id="$(jq -r '.decision.actionable.recommended_gate_id // ""' "$handoff_summary_json" 2>/dev/null || true)"
+      handoff_actionable_count="$(jq -r 'if (.decision.actionable.count | type) == "number" then .decision.actionable.count else -1 end' "$handoff_summary_json" 2>/dev/null || echo -1)"
+      if ! [[ "$handoff_actionable_count" =~ ^-?[0-9]+$ ]]; then
+        handoff_actionable_count=-1
+      fi
       if [[ "$handoff_command_rc" -ne 0 ]]; then
         handoff_status="fail"
         handoff_rc="$handoff_command_rc"
@@ -579,6 +589,8 @@ jq -n \
   --arg handoff_command "$handoff_command" \
   --arg handoff_contract_valid "$handoff_contract_valid" \
   --arg handoff_contract_error "$handoff_contract_error" \
+  --arg handoff_actionable_recommended_gate_id "$handoff_actionable_recommended_gate_id" \
+  --argjson handoff_actionable_count "$handoff_actionable_count" \
   --arg handoff_summary_exists "$handoff_summary_exists" \
   --arg handoff_log "$handoff_log" \
   --arg handoff_reused_artifact "$handoff_reused_artifact" \
@@ -658,6 +670,10 @@ jq -n \
           else "stage_failed"
           end
         ),
+        actionable: {
+          recommended_gate_id: (if $handoff_actionable_recommended_gate_id == "" then null else $handoff_actionable_recommended_gate_id end),
+          count: (if $handoff_actionable_count < 0 then null else $handoff_actionable_count end)
+        },
         artifacts: {
           summary_json: $handoff_summary_json,
           summary_exists: ($handoff_summary_exists == "true"),
