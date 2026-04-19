@@ -18,7 +18,7 @@ function Show-Usage {
   Write-Host "GPM desktop release bundle scaffold (non-production signing flow)"
   Write-Host ""
   Write-Host "Usage:"
-  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SigningIdentity ID] [-SigningCertPath PATH] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
+  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SigningIdentity ID] [-SigningCertPath PATH] [-SigningCertPassword VALUE] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
   Write-Host ""
   Write-Host "Examples:"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1"
@@ -30,8 +30,26 @@ function Show-Usage {
   Write-Host "  - Tauri build runs from apps/desktop via: npm run tauri -- build ..."
   Write-Host "  - -InstallMissing may use winget to install missing Node.js, Rust, and Git prerequisites non-interactively."
   Write-Host "  - Sets GPM_DESKTOP_* vars and mirrors TDPN_DESKTOP_* compatibility vars for this process."
+  Write-Host "  - If -UpdateFeedUrl is omitted, the script falls back to GPM_DESKTOP_UPDATE_FEED_URL then TDPN_DESKTOP_UPDATE_FEED_URL."
+  Write-Host "  - -SigningCertPassword requires -SigningCertPath."
   Write-Host "  - Validates update feed URL and signing placeholder input consistency before invoking build."
-  Write-Host "  - -SigningCertPassword is intentionally rejected; pass signing secrets through a secure path instead."
+}
+
+function Resolve-UpdateFeedUrl {
+  param(
+    [string]$ParameterValue
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($ParameterValue)) {
+    return $ParameterValue.Trim()
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:GPM_DESKTOP_UPDATE_FEED_URL)) {
+    return $env:GPM_DESKTOP_UPDATE_FEED_URL.Trim()
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:TDPN_DESKTOP_UPDATE_FEED_URL)) {
+    return $env:TDPN_DESKTOP_UPDATE_FEED_URL.Trim()
+  }
+  return ""
 }
 
 function Get-CanonicalHost {
@@ -83,8 +101,8 @@ function Validate-SigningPlaceholders {
   $hasCertPath = -not [string]::IsNullOrWhiteSpace($CertPath)
   $hasCertPassword = -not [string]::IsNullOrWhiteSpace($CertPassword)
 
-  if ($hasCertPassword) {
-    throw "-SigningCertPassword is not supported in this scaffold."
+  if ($hasCertPassword -and -not $hasCertPath) {
+    throw "-SigningCertPassword requires -SigningCertPath."
   }
   if ($hasCertPath) {
     if (-not (Test-Path -LiteralPath $CertPath -PathType Leaf)) {
@@ -327,6 +345,13 @@ function Ensure-TauriIconScaffold {
   Write-Host "[desktop-release-bundle] icon_scaffold=created ($iconPath)"
 }
 
+if (-not [string]::IsNullOrWhiteSpace($UpdateFeedUrl)) {
+  $UpdateFeedUrl = $UpdateFeedUrl.Trim()
+}
+if (-not [string]::IsNullOrWhiteSpace($SigningCertPath)) {
+  $SigningCertPath = $SigningCertPath.Trim()
+}
+
 if ($Help -or $TauriArgs -contains "-h" -or $TauriArgs -contains "--help" -or $TauriArgs -contains "/?") {
   Show-Usage
   exit 0
@@ -340,6 +365,7 @@ if ($TauriArgs.Count -gt 0 -and $TauriArgs[0] -eq "--") {
   }
 }
 
+$UpdateFeedUrl = Resolve-UpdateFeedUrl -ParameterValue $UpdateFeedUrl
 Validate-UpdateFeedUrl -CandidateUrl $UpdateFeedUrl
 Validate-SigningPlaceholders -Identity $SigningIdentity -CertPath $SigningCertPath -CertPassword $SigningCertPassword
 
@@ -356,13 +382,17 @@ if (-not (Test-Path (Join-Path $desktopDir "package.json"))) {
 
 $scopedEnvNames = @(
   "GPM_DESKTOP_UPDATE_CHANNEL",
+  "GPM_DESKTOP_UPDATE_FEED_URL",
   "GPM_DESKTOP_UPDATE_FEED_CONFIGURED",
   "GPM_DESKTOP_SIGNING_IDENTITY",
   "GPM_DESKTOP_SIGNING_CERT_PATH",
+  "GPM_DESKTOP_SIGNING_CERT_PASSWORD",
   "TDPN_DESKTOP_UPDATE_CHANNEL",
+  "TDPN_DESKTOP_UPDATE_FEED_URL",
   "TDPN_DESKTOP_UPDATE_FEED_CONFIGURED",
   "TDPN_DESKTOP_SIGNING_IDENTITY",
-  "TDPN_DESKTOP_SIGNING_CERT_PATH"
+  "TDPN_DESKTOP_SIGNING_CERT_PATH",
+  "TDPN_DESKTOP_SIGNING_CERT_PASSWORD"
 )
 $scopedEnvSnapshot = Save-ScopedEnvironment -VariableNames $scopedEnvNames
 
@@ -370,8 +400,12 @@ try {
   $env:GPM_DESKTOP_UPDATE_CHANNEL = $Channel
   $env:TDPN_DESKTOP_UPDATE_CHANNEL = $env:GPM_DESKTOP_UPDATE_CHANNEL
   if ([string]::IsNullOrWhiteSpace($UpdateFeedUrl)) {
+    Remove-Item Env:GPM_DESKTOP_UPDATE_FEED_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:TDPN_DESKTOP_UPDATE_FEED_URL -ErrorAction SilentlyContinue
     $env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED = "0"
   } else {
+    $env:GPM_DESKTOP_UPDATE_FEED_URL = $UpdateFeedUrl
+    $env:TDPN_DESKTOP_UPDATE_FEED_URL = $env:GPM_DESKTOP_UPDATE_FEED_URL
     $env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED = "1"
   }
   $env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED = $env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED
@@ -391,15 +425,22 @@ try {
     $env:GPM_DESKTOP_SIGNING_CERT_PATH = $SigningCertPath
     $env:TDPN_DESKTOP_SIGNING_CERT_PATH = $env:GPM_DESKTOP_SIGNING_CERT_PATH
   }
+  if ([string]::IsNullOrWhiteSpace($SigningCertPassword)) {
+    Remove-Item Env:GPM_DESKTOP_SIGNING_CERT_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:TDPN_DESKTOP_SIGNING_CERT_PASSWORD -ErrorAction SilentlyContinue
+  } else {
+    $env:GPM_DESKTOP_SIGNING_CERT_PASSWORD = $SigningCertPassword
+    $env:TDPN_DESKTOP_SIGNING_CERT_PASSWORD = $env:GPM_DESKTOP_SIGNING_CERT_PASSWORD
+  }
 
   Write-Host "[desktop-release-bundle] mode=scaffold-non-production"
   Write-Host "[desktop-release-bundle] channel=$($env:GPM_DESKTOP_UPDATE_CHANNEL)"
-  if ($env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED -eq "1") {
-    Write-Host "[desktop-release-bundle] update_feed=configured"
+  if (-not [string]::IsNullOrWhiteSpace($env:GPM_DESKTOP_UPDATE_FEED_URL)) {
+    Write-Host "[desktop-release-bundle] update_feed=$($env:GPM_DESKTOP_UPDATE_FEED_URL)"
   } else {
     Write-Host "[desktop-release-bundle] update_feed=(not set)"
   }
-  if ($env:GPM_DESKTOP_SIGNING_IDENTITY -or $env:GPM_DESKTOP_SIGNING_CERT_PATH) {
+  if ($env:GPM_DESKTOP_SIGNING_IDENTITY -or $env:GPM_DESKTOP_SIGNING_CERT_PATH -or $env:GPM_DESKTOP_SIGNING_CERT_PASSWORD) {
     Write-Host "[desktop-release-bundle] signing_placeholders=provided (scaffold-only)"
   } else {
     Write-Host "[desktop-release-bundle] signing_placeholders=not provided"

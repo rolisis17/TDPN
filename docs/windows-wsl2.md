@@ -73,10 +73,10 @@ Or directly in WSL shell:
 This flow is scaffold-only. It is not a production signing/release pipeline.
 
 Update channel env:
-- `TDPN_DESKTOP_UPDATE_CHANNEL=stable|beta|canary` (default in script: `stable`)
+- `GPM_DESKTOP_UPDATE_CHANNEL=stable|beta|canary` (default in script: `stable`, legacy alias: `TDPN_DESKTOP_UPDATE_CHANNEL`)
 
 Optional update feed URL env:
-- `TDPN_DESKTOP_UPDATE_FEED_URL=https://updates.example.invalid/tdpn/beta.json`
+- `GPM_DESKTOP_UPDATE_FEED_URL=https://updates.example.invalid/gpm/beta.json` (legacy alias: `TDPN_DESKTOP_UPDATE_FEED_URL`)
 
 Run from repository root in PowerShell:
 
@@ -94,11 +94,12 @@ Optional scaffold signing placeholders:
 - `-SigningIdentity`
 - `-SigningCertPath`
 - `-SigningCertPassword`
+- `-SigningCertPassword` is a scaffold placeholder only; do not echo or log this value.
 
 Scaffold guardrails now enforced by script:
 - `-UpdateFeedUrl` must be an absolute `http/https` URL.
 - non-local update feeds (anything except `localhost`/loopback) must use `https`.
-- `-SigningCertPassword` requires `-SigningCertPath`.
+- `-SigningCertPassword` is allowed only when `-SigningCertPath` is provided.
 - when `-SigningCertPath` is provided, the certificate file must exist.
 
 Pass extra Tauri build arguments after `--`:

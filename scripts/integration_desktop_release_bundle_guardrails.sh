@@ -156,7 +156,7 @@ assert_log_contains \
 echo "[desktop-release-bundle-guardrails] signing password without cert path fails"
 run_expect_fail \
   "password_without_cert_fail" \
-  "-SigningCertPassword is not supported in this scaffold." \
+  "-SigningCertPassword requires -SigningCertPath." \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
     -SigningCertPassword "placeholder" \
@@ -186,10 +186,9 @@ run_expect_pass \
     -SigningCertPath "$DUMMY_CERT_PATH_PS" \
     -SkipBuild
 
-echo "[desktop-release-bundle-guardrails] signing cert password with cert path fails"
-run_expect_fail \
-  "password_with_cert_fail" \
-  "-SigningCertPassword is not supported in this scaffold." \
+echo "[desktop-release-bundle-guardrails] signing cert password with cert path passes"
+run_expect_pass \
+  "password_with_cert_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
     -SigningCertPath "$DUMMY_CERT_PATH_PS" \
@@ -200,6 +199,6 @@ echo "[desktop-release-bundle-guardrails] scoped environment restore is preserve
 run_expect_pass \
   "scoped_env_restore_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; \$env:GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; \$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED='orig-tdpn-feed-configured'; \$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED='orig-gpm-feed-configured'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -UpdateFeedUrl 'https://updates.example.invalid/gpm/canary.json' -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-tdpn-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }; if (\$env:GPM_DESKTOP_UPDATE_CHANNEL -ne 'orig-gpm-channel') { throw 'env restore failed for GPM_DESKTOP_UPDATE_CHANNEL' }; if (\$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-tdpn-feed-configured') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_FEED_CONFIGURED' }; if (\$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-gpm-feed-configured') { throw 'env restore failed for GPM_DESKTOP_UPDATE_FEED_CONFIGURED' }"
+    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; \$env:GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; \$env:TDPN_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-tdpn.json'; \$env:GPM_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-gpm.json'; \$env:TDPN_DESKTOP_SIGNING_IDENTITY='orig-tdpn-signing-identity'; \$env:GPM_DESKTOP_SIGNING_IDENTITY='orig-gpm-signing-identity'; \$env:TDPN_DESKTOP_SIGNING_CERT_PATH='orig-tdpn-cert-path'; \$env:GPM_DESKTOP_SIGNING_CERT_PATH='orig-gpm-cert-path'; \$env:TDPN_DESKTOP_SIGNING_CERT_PASSWORD='orig-tdpn-cert-password'; \$env:GPM_DESKTOP_SIGNING_CERT_PASSWORD='orig-gpm-cert-password'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -UpdateFeedUrl 'https://updates.example.invalid/gpm/canary.json' -SigningIdentity 'scaffold-signing-identity' -SigningCertPath '$DUMMY_CERT_PATH_PS' -SigningCertPassword 'placeholder' -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-tdpn-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }; if (\$env:GPM_DESKTOP_UPDATE_CHANNEL -ne 'orig-gpm-channel') { throw 'env restore failed for GPM_DESKTOP_UPDATE_CHANNEL' }; if (\$env:TDPN_DESKTOP_UPDATE_FEED_URL -ne 'https://updates.example.invalid/orig-tdpn.json') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_FEED_URL' }; if (\$env:GPM_DESKTOP_UPDATE_FEED_URL -ne 'https://updates.example.invalid/orig-gpm.json') { throw 'env restore failed for GPM_DESKTOP_UPDATE_FEED_URL' }; if (\$env:TDPN_DESKTOP_SIGNING_IDENTITY -ne 'orig-tdpn-signing-identity') { throw 'env restore failed for TDPN_DESKTOP_SIGNING_IDENTITY' }; if (\$env:GPM_DESKTOP_SIGNING_IDENTITY -ne 'orig-gpm-signing-identity') { throw 'env restore failed for GPM_DESKTOP_SIGNING_IDENTITY' }; if (\$env:TDPN_DESKTOP_SIGNING_CERT_PATH -ne 'orig-tdpn-cert-path') { throw 'env restore failed for TDPN_DESKTOP_SIGNING_CERT_PATH' }; if (\$env:GPM_DESKTOP_SIGNING_CERT_PATH -ne 'orig-gpm-cert-path') { throw 'env restore failed for GPM_DESKTOP_SIGNING_CERT_PATH' }; if (\$env:TDPN_DESKTOP_SIGNING_CERT_PASSWORD -ne 'orig-tdpn-cert-password') { throw 'env restore failed for TDPN_DESKTOP_SIGNING_CERT_PASSWORD' }; if (\$env:GPM_DESKTOP_SIGNING_CERT_PASSWORD -ne 'orig-gpm-cert-password') { throw 'env restore failed for GPM_DESKTOP_SIGNING_CERT_PASSWORD' }"
 
 echo "desktop release bundle guardrails integration check ok"

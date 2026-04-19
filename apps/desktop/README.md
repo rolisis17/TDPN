@@ -376,11 +376,12 @@ Optional scaffold-only signing placeholders:
 - `-SigningIdentity`
 - `-SigningCertPath`
 - `-SigningCertPassword`
+- `-SigningCertPassword` is a scaffold placeholder only and should never be echoed or logged.
 
 Release scaffold guardrails:
 - `-UpdateFeedUrl` must be an absolute `http/https` URL
 - non-local update feeds must use `https`
-- `-SigningCertPassword` requires `-SigningCertPath`
+- `-SigningCertPassword` is allowed only when `-SigningCertPath` is provided
 - `-SigningCertPath` must point to an existing file
 
 Pass extra Tauri build arguments after `--`:
