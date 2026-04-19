@@ -163,28 +163,52 @@ func (s *Service) appendGPMAudit(event string, fields map[string]any) {
 	}
 }
 
-func (s *Service) readGPMAuditRecent(limit int) ([]map[string]any, error) {
+type gpmAuditRecentQuery struct {
+	Limit         int
+	Offset        int
+	Event         string
+	WalletAddress string
+	Order         string
+}
+
+type gpmAuditRecentResult struct {
+	Total   int
+	Entries []map[string]any
+}
+
+func (s *Service) readGPMAuditRecent(query gpmAuditRecentQuery) (gpmAuditRecentResult, error) {
 	path := strings.TrimSpace(s.gpmAuditLogPath)
 	if path == "" {
-		return nil, nil
+		return gpmAuditRecentResult{}, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return gpmAuditRecentResult{}, nil
 		}
-		return nil, err
+		return gpmAuditRecentResult{}, err
 	}
 	defer f.Close()
 
-	if limit <= 0 {
+	limit := query.Limit
+	if limit < 1 {
 		limit = 25
 	}
 	if limit > 200 {
 		limit = 200
 	}
+	offset := query.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	eventFilter := strings.ToLower(strings.TrimSpace(query.Event))
+	walletFilter := normalizeWalletAddress(query.WalletAddress)
+	order := strings.ToLower(strings.TrimSpace(query.Order))
+	if order == "" {
+		order = "desc"
+	}
 
-	lines := make([]string, 0, limit)
+	entries := make([]map[string]any, 0)
 	scanner := bufio.NewScanner(f)
 	const maxLine = 1 << 20
 	buffer := make([]byte, 64*1024)
@@ -194,22 +218,45 @@ func (s *Service) readGPMAuditRecent(limit int) ([]map[string]any, error) {
 		if line == "" {
 			continue
 		}
-		lines = append(lines, line)
-		if len(lines) > limit {
-			lines = lines[1:]
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan audit log: %w", err)
-	}
 
-	entries := make([]map[string]any, 0, len(lines))
-	for _, line := range lines {
 		record := map[string]any{}
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			continue
 		}
+		if eventFilter != "" {
+			event, _ := record["event"].(string)
+			if strings.ToLower(strings.TrimSpace(event)) != eventFilter {
+				continue
+			}
+		}
+		if walletFilter != "" {
+			fields, _ := record["fields"].(map[string]any)
+			walletAddress, _ := fields["wallet_address"].(string)
+			if normalizeWalletAddress(walletAddress) != walletFilter {
+				continue
+			}
+		}
 		entries = append(entries, record)
 	}
-	return entries, nil
+	if err := scanner.Err(); err != nil {
+		return gpmAuditRecentResult{}, fmt.Errorf("scan audit log: %w", err)
+	}
+	if order == "desc" {
+		for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+			entries[i], entries[j] = entries[j], entries[i]
+		}
+	}
+	total := len(entries)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	return gpmAuditRecentResult{
+		Total:   total,
+		Entries: entries[offset:end],
+	}, nil
 }

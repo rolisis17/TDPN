@@ -97,6 +97,32 @@
             <button id="audit_recent_btn" class="secondary">Recent Audit</button>
           </div>
 
+          <div class="grid grid-2">
+            <label>
+              Audit limit
+              <input id="audit_limit" type="number" min="1" max="200" value="25" />
+            </label>
+            <label>
+              Audit offset
+              <input id="audit_offset" type="number" min="0" value="0" />
+            </label>
+            <label>
+              Audit event
+              <input id="audit_event" placeholder="auth_verified" />
+            </label>
+            <label>
+              Audit wallet address
+              <input id="audit_wallet_address" placeholder="cosmos1..." />
+            </label>
+            <label class="span-2">
+              Audit order
+              <select id="audit_order">
+                <option value="desc">desc (recent first)</option>
+                <option value="asc">asc (oldest first)</option>
+              </select>
+            </label>
+          </div>
+
           <div class="divider"></div>
 
           <div class="grid grid-2">
@@ -120,15 +146,38 @@
               Moderation reason
               <input id="operator_reason" placeholder="required for rejection; optional for approval" />
             </label>
+            <label>
+              Queue status
+              <select id="operator_list_status">
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+            <label>
+              Queue search
+              <input id="operator_list_search" placeholder="wallet, operator ID, or label" />
+            </label>
+            <label>
+              Queue limit
+              <input id="operator_list_limit" type="number" min="1" value="25" />
+            </label>
+            <label class="span-2">
+              Queue next cursor
+              <input id="operator_list_next_cursor" placeholder="set by latest list response" readonly />
+            </label>
           </div>
 
           <div class="actions">
             <button id="register_client_btn">Register Client</button>
             <button id="apply_operator_btn" class="secondary">Apply Operator Role</button>
             <button id="operator_status_btn" class="secondary">Operator Status</button>
+            <button id="operator_list_filter_btn" class="secondary">List Operator Queue</button>
             <button id="operator_list_pending_btn" class="secondary">List Pending Operators</button>
             <button id="operator_load_next_pending_btn" class="secondary">Load Next Pending</button>
             <button id="operator_list_all_btn" class="secondary">List All Operators</button>
+            <button id="operator_list_next_btn" class="secondary" disabled>Next Queue Page</button>
             <button id="approve_operator_btn" class="secondary">Approve Operator</button>
             <button id="reject_operator_btn" class="secondary">Reject Operator</button>
           </div>

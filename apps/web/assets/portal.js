@@ -16,14 +16,29 @@ const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
 const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
 const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
+const operatorListStatusEl = byId("operator_list_status");
+const operatorListSearchEl = byId("operator_list_search");
+const operatorListLimitEl = byId("operator_list_limit");
+const operatorListNextCursorEl = byId("operator_list_next_cursor");
+const operatorListNextPageBtnEl = byId("operator_list_next_page_btn");
+const auditLimitEl = byId("audit_limit");
+const auditOffsetEl = byId("audit_offset");
+const auditEventEl = byId("audit_event");
+const auditWalletAddressEl = byId("audit_wallet_address");
+const auditOrderEl = byId("audit_order");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
+const OPERATOR_LIST_STATUS_FILTERS = new Set(["pending", "approved", "rejected"]);
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
 const OPERATOR_LIST_ALL_LIMIT = 100;
+const AUDIT_RECENT_DEFAULT_LIMIT = 25;
+const AUDIT_RECENT_MAX_LIMIT = 200;
+const AUDIT_RECENT_DEFAULT_ORDER = "desc";
+const AUDIT_RECENT_ORDERS = new Set(["desc", "asc"]);
 const OPERATOR_DECISION_CONFLICT_GUIDANCE =
   "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
@@ -36,6 +51,14 @@ const PERSISTED_FIELD_IDS = [
   "chain_operator_id",
   "selected_application_updated_at",
   "server_label",
+  "operator_list_status",
+  "operator_list_search",
+  "operator_list_limit",
+  "audit_limit",
+  "audit_offset",
+  "audit_event",
+  "audit_wallet_address",
+  "audit_order",
   "path_profile",
   "bootstrap_directory"
 ];
@@ -43,6 +66,12 @@ let operatorApplicationStatus = undefined;
 let selectedApplicationUpdatedAtUtc = "";
 let serverReadiness = null;
 let clientRegistered = false;
+let operatorListActiveFilters = {
+  status: "",
+  search: "",
+  limit: OPERATOR_LIST_ALL_LIMIT
+};
+let operatorListNextCursor = "";
 
 function localStore() {
   try {
@@ -162,6 +191,171 @@ function numberOrUndefined(value) {
   return undefined;
 }
 
+function normalizeOperatorListStatusFilter(value, fallback = "") {
+  const normalize = (input) => {
+    if (typeof input !== "string") {
+      return undefined;
+    }
+    const normalized = input.trim().toLowerCase();
+    if (!normalized || normalized === "all") {
+      return "";
+    }
+    if (OPERATOR_LIST_STATUS_FILTERS.has(normalized)) {
+      return normalized;
+    }
+    return undefined;
+  };
+  const parsed = normalize(value);
+  if (parsed !== undefined) {
+    return parsed;
+  }
+  const fallbackParsed = normalize(fallback);
+  return fallbackParsed !== undefined ? fallbackParsed : "";
+}
+
+function normalizeOperatorListSearch(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+}
+
+function normalizeOperatorListLimit(value, fallback = OPERATOR_LIST_ALL_LIMIT) {
+  const parsed = numberOrUndefined(value);
+  if (parsed !== undefined && parsed >= 1) {
+    return Math.floor(parsed);
+  }
+  const fallbackParsed = numberOrUndefined(fallback);
+  if (fallbackParsed !== undefined && fallbackParsed >= 1) {
+    return Math.floor(fallbackParsed);
+  }
+  return OPERATOR_LIST_ALL_LIMIT;
+}
+
+function normalizeAuditRecentLimit(value, fallback = AUDIT_RECENT_DEFAULT_LIMIT) {
+  const parsed = numberOrUndefined(value);
+  if (parsed !== undefined && parsed >= 1) {
+    return Math.min(Math.floor(parsed), AUDIT_RECENT_MAX_LIMIT);
+  }
+  const fallbackParsed = numberOrUndefined(fallback);
+  if (fallbackParsed !== undefined && fallbackParsed >= 1) {
+    return Math.min(Math.floor(fallbackParsed), AUDIT_RECENT_MAX_LIMIT);
+  }
+  return AUDIT_RECENT_DEFAULT_LIMIT;
+}
+
+function normalizeAuditRecentOffset(value, fallback = 0) {
+  const parsed = numberOrUndefined(value);
+  if (parsed !== undefined && parsed >= 0) {
+    return Math.floor(parsed);
+  }
+  const fallbackParsed = numberOrUndefined(fallback);
+  if (fallbackParsed !== undefined && fallbackParsed >= 0) {
+    return Math.floor(fallbackParsed);
+  }
+  return 0;
+}
+
+function normalizeAuditRecentOrder(value, fallback = AUDIT_RECENT_DEFAULT_ORDER) {
+  const normalized = nonEmptyString(value)?.toLowerCase();
+  if (normalized && AUDIT_RECENT_ORDERS.has(normalized)) {
+    return normalized;
+  }
+  const fallbackNormalized = nonEmptyString(fallback)?.toLowerCase();
+  if (fallbackNormalized && AUDIT_RECENT_ORDERS.has(fallbackNormalized)) {
+    return fallbackNormalized;
+  }
+  return AUDIT_RECENT_DEFAULT_ORDER;
+}
+
+function readAuditRecentFilters(options = {}) {
+  return {
+    limit: normalizeAuditRecentLimit(auditLimitEl.value, options.fallbackLimit),
+    offset: normalizeAuditRecentOffset(auditOffsetEl.value, options.fallbackOffset),
+    event: nonEmptyString(auditEventEl.value) || "",
+    walletAddress: nonEmptyString(auditWalletAddressEl.value) || "",
+    order: normalizeAuditRecentOrder(auditOrderEl.value, options.fallbackOrder)
+  };
+}
+
+function buildAuditRecentPath(filters = {}) {
+  const limit = normalizeAuditRecentLimit(filters.limit, AUDIT_RECENT_DEFAULT_LIMIT);
+  const offset = normalizeAuditRecentOffset(filters.offset, 0);
+  const event = nonEmptyString(filters.event) || "";
+  const walletAddress = nonEmptyString(filters.walletAddress) || "";
+  const order = normalizeAuditRecentOrder(filters.order, AUDIT_RECENT_DEFAULT_ORDER);
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
+  if (event) {
+    params.set("event", event);
+  }
+  if (walletAddress) {
+    params.set("wallet_address", walletAddress);
+  }
+  if (order !== AUDIT_RECENT_DEFAULT_ORDER) {
+    params.set("order", order);
+  }
+  return {
+    path: `/v1/gpm/audit/recent?${params.toString()}`,
+    request: {
+      limit,
+      offset,
+      event,
+      wallet_address: walletAddress,
+      order
+    }
+  };
+}
+
+function operatorListStatusLabel(statusValue) {
+  const normalized = normalizeOperatorListStatusFilter(statusValue, "");
+  return normalized || "all";
+}
+
+function readOperatorListFilters(options = {}) {
+  const { fallbackStatus = "", fallbackLimit = OPERATOR_LIST_ALL_LIMIT } = options;
+  return {
+    status: normalizeOperatorListStatusFilter(operatorListStatusEl.value, fallbackStatus),
+    search: normalizeOperatorListSearch(operatorListSearchEl.value),
+    limit: normalizeOperatorListLimit(operatorListLimitEl.value, fallbackLimit)
+  };
+}
+
+function writeOperatorListFilters(filters = {}) {
+  const status = normalizeOperatorListStatusFilter(filters.status, "");
+  const search = normalizeOperatorListSearch(filters.search);
+  const limit = normalizeOperatorListLimit(filters.limit, OPERATOR_LIST_ALL_LIMIT);
+  operatorListStatusEl.value = status;
+  operatorListSearchEl.value = search;
+  operatorListLimitEl.value = String(limit);
+}
+
+function syncOperatorListNextPageAction() {
+  const isBusy = document.body.classList.contains("is-busy");
+  const disabled = isBusy || operatorListNextCursor.length === 0;
+  operatorListNextPageBtnEl.disabled = disabled;
+  operatorListNextPageBtnEl.setAttribute("aria-disabled", String(disabled));
+}
+
+function setOperatorListNextCursor(value) {
+  operatorListNextCursor = normalizeOperatorListSearch(value);
+  operatorListNextCursorEl.value = operatorListNextCursor;
+  syncOperatorListNextPageAction();
+}
+
+function updateOperatorListContext(filters, nextCursor) {
+  operatorListActiveFilters = {
+    status: normalizeOperatorListStatusFilter(filters?.status, ""),
+    search: normalizeOperatorListSearch(filters?.search),
+    limit: normalizeOperatorListLimit(filters?.limit, OPERATOR_LIST_ALL_LIMIT)
+  };
+  writeOperatorListFilters(operatorListActiveFilters);
+  setOperatorListNextCursor(nextCursor);
+}
+
 function operatorModerationReason() {
   return byId("operator_reason").value.trim();
 }
@@ -198,7 +392,64 @@ function formatOperatorListItemLabel(entry, index) {
   );
 }
 
-function summarizeOperatorList(payload, fallbackStatus = "pending", fallbackLimit = OPERATOR_PENDING_LIST_LIMIT) {
+function extractOperatorListPagination(payload, options = {}) {
+  const { fallbackCursor = "" } = options;
+  const cursor = nonEmptyString(
+    firstDefined(
+      payload?.cursor,
+      payload?.request?.cursor,
+      payload?.pagination?.cursor,
+      payload?.pagination?.current_cursor,
+      payload?.meta?.cursor,
+      payload?.meta?.current_cursor,
+      payload?.page?.cursor,
+      fallbackCursor
+    )
+  );
+  const nextCursor = nonEmptyString(
+    firstDefined(
+      payload?.next_cursor,
+      payload?.nextCursor,
+      payload?.pagination?.next_cursor,
+      payload?.pagination?.nextCursor,
+      payload?.pagination?.cursor_next,
+      payload?.meta?.next_cursor,
+      payload?.meta?.nextCursor,
+      payload?.meta?.cursor_next,
+      payload?.queue?.next_cursor,
+      payload?.queue?.nextCursor,
+      payload?.list?.next_cursor,
+      payload?.list?.nextCursor,
+      payload?.data?.next_cursor,
+      payload?.data?.nextCursor,
+      payload?.result?.next_cursor,
+      payload?.result?.nextCursor
+    )
+  );
+  const hasMoreValue = parseBooleanLike(
+    firstDefined(
+      payload?.has_more,
+      payload?.hasMore,
+      payload?.pagination?.has_more,
+      payload?.pagination?.hasMore,
+      payload?.meta?.has_more,
+      payload?.meta?.hasMore
+    )
+  );
+  return {
+    cursor,
+    nextCursor,
+    hasMore: hasMoreValue !== undefined ? hasMoreValue : nextCursor ? true : undefined
+  };
+}
+
+function summarizeOperatorList(payload, options = {}) {
+  const {
+    fallbackStatus = "pending",
+    fallbackLimit = OPERATOR_PENDING_LIST_LIMIT,
+    fallbackSearch = "",
+    fallbackCursor = ""
+  } = options;
   const entries = extractOperatorListEntries(payload);
   const status =
     nonEmptyString(
@@ -206,13 +457,20 @@ function summarizeOperatorList(payload, fallbackStatus = "pending", fallbackLimi
         payload?.status,
         payload?.filter?.status,
         payload?.request?.status,
-        payload?.meta?.status
+        payload?.meta?.status,
+        fallbackStatus
       )
-    ) || fallbackStatus;
+    ) || "pending";
   const limit =
     numberOrUndefined(
-      firstDefined(payload?.limit, payload?.request?.limit, payload?.meta?.limit, payload?.pagination?.limit)
-    ) ?? fallbackLimit;
+      firstDefined(
+        payload?.limit,
+        payload?.request?.limit,
+        payload?.meta?.limit,
+        payload?.pagination?.limit,
+        fallbackLimit
+      )
+    ) ?? OPERATOR_PENDING_LIST_LIMIT;
   const total =
     numberOrUndefined(
       firstDefined(
@@ -224,19 +482,199 @@ function summarizeOperatorList(payload, fallbackStatus = "pending", fallbackLimi
         payload?.pagination?.total
       )
     ) ?? entries.length;
+  const search = normalizeOperatorListSearch(
+    firstDefined(payload?.search, payload?.filter?.search, payload?.request?.search, payload?.meta?.search, fallbackSearch)
+  );
+  const pagination = extractOperatorListPagination(payload, { fallbackCursor });
   const sample = entries.slice(0, 3).map(formatOperatorListItemLabel);
-  const detailParts = [`status=${status}`, `returned=${entries.length}`, `limit=${limit}`, `total=${total}`];
+  const detailParts = [
+    `status=${operatorListStatusLabel(status)}`,
+    `returned=${entries.length}`,
+    `limit=${limit}`,
+    `total=${total}`
+  ];
+  if (search) {
+    detailParts.push(`search=${search}`);
+  }
+  if (pagination.cursor) {
+    detailParts.push(`cursor=${pagination.cursor}`);
+  }
+  if (pagination.nextCursor) {
+    detailParts.push(`next_cursor=${pagination.nextCursor}`);
+  }
+  if (pagination.hasMore !== undefined) {
+    detailParts.push(`has_more=${pagination.hasMore}`);
+  }
   if (sample.length > 0) {
     detailParts.push(`sample=${sample.join(", ")}`);
   }
   return {
     detail: `Operator queue: ${detailParts.join(" | ")}`,
     output: {
-      status,
+      status: operatorListStatusLabel(status),
       returned: entries.length,
       limit,
       total,
+      search,
+      cursor: pagination.cursor || null,
+      next_cursor: pagination.nextCursor || null,
+      has_more: pagination.hasMore,
       sample
+    }
+  };
+}
+
+function extractAuditRecentEntries(payload) {
+  const containers = [payload, payload?.data, payload?.result, payload?.audit, payload?.recent, payload?.page];
+  for (const container of containers) {
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+    for (const key of ["entries", "items", "records", "results", "events", "logs"]) {
+      if (Array.isArray(container[key])) {
+        return container[key];
+      }
+    }
+  }
+  return [];
+}
+
+function formatAuditEntryLabel(entry, index) {
+  if (!entry || typeof entry !== "object") {
+    return `entry-${index + 1}`;
+  }
+  const event = nonEmptyString(entry.event);
+  const timestamp = nonEmptyString(firstDefined(entry.timestamp, entry.time, entry.created_at, entry.createdAt));
+  if (event && timestamp) {
+    return `${event}@${timestamp}`;
+  }
+  return event || timestamp || `entry-${index + 1}`;
+}
+
+function summarizeAuditRecent(payload, request = {}) {
+  const entries = extractAuditRecentEntries(payload);
+  const returnedFromPayload = numberOrUndefined(
+    firstDefined(
+      payload?.returned,
+      payload?.result_count,
+      payload?.entries_count,
+      payload?.meta?.returned,
+      payload?.pagination?.returned
+    )
+  );
+  const returnedCountHint = numberOrUndefined(firstDefined(payload?.count, payload?.meta?.count, payload?.pagination?.count));
+  const returned = Math.max(
+    entries.length,
+    Math.floor(returnedFromPayload ?? returnedCountHint ?? entries.length)
+  );
+  const limit = normalizeAuditRecentLimit(
+    firstDefined(
+      payload?.limit,
+      payload?.request?.limit,
+      payload?.meta?.limit,
+      payload?.pagination?.limit,
+      request.limit
+    ),
+    request.limit
+  );
+  const offset = normalizeAuditRecentOffset(
+    firstDefined(
+      payload?.offset,
+      payload?.request?.offset,
+      payload?.meta?.offset,
+      payload?.pagination?.offset,
+      request.offset
+    ),
+    request.offset
+  );
+  const total = numberOrUndefined(
+    firstDefined(payload?.total, payload?.total_count, payload?.meta?.total, payload?.pagination?.total)
+  );
+  const nextOffsetRaw = numberOrUndefined(
+    firstDefined(
+      payload?.next_offset,
+      payload?.nextOffset,
+      payload?.meta?.next_offset,
+      payload?.meta?.nextOffset,
+      payload?.pagination?.next_offset,
+      payload?.pagination?.nextOffset
+    )
+  );
+  const hasMoreRaw = parseBooleanLike(
+    firstDefined(
+      payload?.has_more,
+      payload?.hasMore,
+      payload?.meta?.has_more,
+      payload?.meta?.hasMore,
+      payload?.pagination?.has_more,
+      payload?.pagination?.hasMore
+    )
+  );
+  const hasMore = hasMoreRaw !== undefined ? hasMoreRaw : total !== undefined ? offset + returned < total : undefined;
+  const nextOffset = nextOffsetRaw !== undefined ? Math.floor(nextOffsetRaw) : hasMore ? offset + returned : undefined;
+  const order = normalizeAuditRecentOrder(
+    firstDefined(
+      payload?.order,
+      payload?.request?.order,
+      payload?.meta?.order,
+      payload?.pagination?.order,
+      request.order
+    ),
+    request.order
+  );
+  const event = nonEmptyString(
+    firstDefined(payload?.event, payload?.request?.event, payload?.meta?.event, request.event)
+  );
+  const walletAddress = nonEmptyString(
+    firstDefined(
+      payload?.wallet_address,
+      payload?.request?.wallet_address,
+      payload?.meta?.wallet_address,
+      request.wallet_address
+    )
+  );
+  const sample = entries.slice(0, 3).map(formatAuditEntryLabel);
+  const detailParts = [
+    `returned=${returned}`,
+    `limit=${limit}`,
+    `offset=${offset}`,
+    `order=${order}`
+  ];
+  if (total !== undefined) {
+    detailParts.push(`total=${Math.floor(total)}`);
+  }
+  if (nextOffset !== undefined) {
+    detailParts.push(`next_offset=${nextOffset}`);
+  }
+  if (hasMore !== undefined) {
+    detailParts.push(`has_more=${hasMore}`);
+  }
+  if (event) {
+    detailParts.push(`event=${event}`);
+  }
+  if (walletAddress) {
+    detailParts.push(`wallet_address=${walletAddress}`);
+  }
+  return {
+    detail: `Audit recent: ${detailParts.join(" | ")}`,
+    output: {
+      request: {
+        limit,
+        offset,
+        event: event || null,
+        wallet_address: walletAddress || null,
+        order
+      },
+      pagination: {
+        returned,
+        limit,
+        offset,
+        total: total !== undefined ? Math.floor(total) : null,
+        next_offset: nextOffset !== undefined ? nextOffset : null,
+        has_more: hasMore
+      },
+      sample,
+      entries
     }
   };
 }
@@ -704,6 +1142,7 @@ function bindReadinessListeners() {
     setOperatorApplicationStatus(undefined);
     setSelectedApplicationUpdatedAt("");
     clientRegistered = false;
+    setOperatorListNextCursor("");
   });
   byId("wallet_address").addEventListener("input", () => {
     setSelectedApplicationUpdatedAt("");
@@ -713,12 +1152,23 @@ function bindReadinessListeners() {
   });
 }
 
+function bindOperatorListFilterListeners() {
+  const clearPaginationCursor = () => {
+    operatorListActiveFilters = readOperatorListFilters();
+    setOperatorListNextCursor("");
+  };
+  operatorListStatusEl.addEventListener("change", clearPaginationCursor);
+  operatorListSearchEl.addEventListener("input", clearPaginationCursor);
+  operatorListLimitEl.addEventListener("input", clearPaginationCursor);
+}
+
 function setBusy(isBusy) {
   document.body.classList.toggle("is-busy", isBusy);
   for (const button of actionButtons) {
     button.disabled = isBusy;
     button.setAttribute("aria-disabled", String(isBusy));
   }
+  syncOperatorListNextPageAction();
 }
 
 function setStatus(kind, title, detail) {
@@ -870,16 +1320,81 @@ async function requestServerStatus() {
   return post("/v1/gpm/onboarding/server/status", request);
 }
 
-async function requestOperatorList(status, limit) {
+async function requestAuditRecent() {
+  const filters = readAuditRecentFilters({
+    fallbackLimit: AUDIT_RECENT_DEFAULT_LIMIT,
+    fallbackOffset: 0,
+    fallbackOrder: AUDIT_RECENT_DEFAULT_ORDER
+  });
+  const { path, request } = buildAuditRecentPath(filters);
+  const result = await get(path);
+  return {
+    result,
+    summary: summarizeAuditRecent(result, request)
+  };
+}
+
+async function requestOperatorList(statusOrOptions, limitValue) {
   const sessionToken = byId("session_token").value.trim();
   if (!sessionToken) {
     throw new Error("session_token is required to list operators. Sign in first.");
   }
-  return post("/v1/gpm/onboarding/operator/list", {
-    session_token: sessionToken,
-    status,
-    limit
-  });
+  let status = statusOrOptions;
+  let limit = limitValue;
+  let search = undefined;
+  let cursor = undefined;
+  if (statusOrOptions && typeof statusOrOptions === "object" && !Array.isArray(statusOrOptions)) {
+    status = statusOrOptions.status;
+    limit = statusOrOptions.limit;
+    search = statusOrOptions.search;
+    cursor = statusOrOptions.cursor;
+  }
+  const request = {
+    session_token: sessionToken
+  };
+  if (status !== undefined) {
+    request.status = typeof status === "string" ? status : String(status);
+  }
+  const normalizedLimit = numberOrUndefined(limit);
+  if (normalizedLimit !== undefined && normalizedLimit >= 1) {
+    request.limit = Math.floor(normalizedLimit);
+  }
+  const normalizedSearch = nonEmptyString(search);
+  if (normalizedSearch) {
+    request.search = normalizedSearch;
+  }
+  const normalizedCursor = nonEmptyString(cursor);
+  if (normalizedCursor) {
+    request.cursor = normalizedCursor;
+  }
+  return post("/v1/gpm/onboarding/operator/list", request);
+}
+
+function operatorListSummaryOptions(request = {}) {
+  return {
+    fallbackStatus: operatorListStatusLabel(request.status),
+    fallbackLimit: normalizeOperatorListLimit(request.limit, OPERATOR_LIST_ALL_LIMIT),
+    fallbackSearch: normalizeOperatorListSearch(request.search),
+    fallbackCursor: normalizeOperatorListSearch(request.cursor)
+  };
+}
+
+async function runOperatorListQuery(request) {
+  const result = await requestOperatorList(request);
+  prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
+  const pagination = extractOperatorListPagination(result, { fallbackCursor: request?.cursor });
+  updateOperatorListContext(
+    {
+      status: request?.status,
+      search: request?.search,
+      limit: request?.limit
+    },
+    pagination.nextCursor || ""
+  );
+  return {
+    result,
+    summary: summarizeOperatorList(result, operatorListSummaryOptions(request))
+  };
 }
 
 async function loadNextPendingOperator() {
@@ -1124,7 +1639,10 @@ byId("manifest_btn").addEventListener("click", () =>
 );
 
 byId("audit_recent_btn").addEventListener("click", () =>
-  run("audit_recent", async () => get("/v1/gpm/audit/recent?limit=25"))
+  run("audit_recent", requestAuditRecent, {
+    outputMapper: (result) => result.summary.output,
+    successDetail: (result) => result.summary.detail
+  })
 );
 
 byId("register_client_btn").addEventListener("click", () =>
@@ -1182,13 +1700,19 @@ byId("operator_list_pending_btn").addEventListener("click", () =>
   run(
     "operator_list_pending",
     async () => {
-      const result = await requestOperatorList("pending", OPERATOR_PENDING_LIST_LIMIT);
-      prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
-      return result;
+      const filters = readOperatorListFilters({
+        fallbackStatus: "pending",
+        fallbackLimit: OPERATOR_PENDING_LIST_LIMIT
+      });
+      return runOperatorListQuery({
+        status: "pending",
+        search: filters.search,
+        limit: OPERATOR_PENDING_LIST_LIMIT
+      });
     },
     {
-      outputMapper: (result) => summarizeOperatorList(result).output,
-      successDetail: (result) => summarizeOperatorList(result).detail
+      outputMapper: (result) => result.summary.output,
+      successDetail: (result) => result.summary.detail
     }
   )
 );
@@ -1204,13 +1728,30 @@ byId("operator_list_all_btn").addEventListener("click", () =>
   run(
     "operator_list_all",
     async () => {
-      const result = await requestOperatorList("", OPERATOR_LIST_ALL_LIMIT);
-      prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
-      return result;
+      return runOperatorListQuery(readOperatorListFilters({ fallbackLimit: OPERATOR_LIST_ALL_LIMIT }));
     },
     {
-      outputMapper: (result) => summarizeOperatorList(result, "all", OPERATOR_LIST_ALL_LIMIT).output,
-      successDetail: (result) => summarizeOperatorList(result, "all", OPERATOR_LIST_ALL_LIMIT).detail
+      outputMapper: (result) => result.summary.output,
+      successDetail: (result) => result.summary.detail
+    }
+  )
+);
+
+byId("operator_list_next_page_btn").addEventListener("click", () =>
+  run(
+    "operator_list_next_page",
+    async () => {
+      if (!operatorListNextCursor) {
+        throw new Error("No next_cursor is available. Run an operator list query first.");
+      }
+      return runOperatorListQuery({
+        ...operatorListActiveFilters,
+        cursor: operatorListNextCursor
+      });
+    },
+    {
+      outputMapper: (result) => result.summary.output,
+      successDetail: (result) => result.summary.detail
     }
   )
 );
@@ -1364,8 +1905,12 @@ async function restoreSessionStatusBestEffort() {
 function initializePortal() {
   restorePortalState();
   setSelectedApplicationUpdatedAt(selectedApplicationUpdatedAtEl.value, { persist: false });
+  operatorListActiveFilters = readOperatorListFilters({ fallbackLimit: OPERATOR_LIST_ALL_LIMIT });
+  writeOperatorListFilters(operatorListActiveFilters);
+  setOperatorListNextCursor("");
   bindPersistenceListeners();
   bindReadinessListeners();
+  bindOperatorListFilterListeners();
   persistPortalState();
   refreshOperatorReadiness();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");

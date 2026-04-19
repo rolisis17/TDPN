@@ -75,8 +75,9 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and chain-id sync hints)
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
-- `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`) and optional `limit` (default `100`, clamped `1..500`))
+- `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`), optional `search` substring filter (`wallet_address`, `chain_operator_id`, `server_label`, `status`, `reason`), optional `limit` (default `100`, clamped `1..500`), and optional cursor pagination via `cursor="<updated_at_utc>|<wallet_address>"`; response includes additive pagination metadata `total`, `has_more`, `next_cursor`, and echoed `request` fields)
 - `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
+- `GET /v1/gpm/audit/recent` (command-read auth; supports optional `limit` (default `25`, clamped `1..200`), optional `offset` (`>=0`), optional exact case-insensitive `event` filter, optional normalized `wallet_address` filter against `fields.wallet_address`, and optional `order` (`desc|asc`, default `desc`); response includes additive metadata `total`, `count`, `limit`, `offset`, `has_more`, `next_offset`, and echoed `filters`)
 
 ## Authentication
 
@@ -86,6 +87,7 @@ GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/serv
 - missing `session_token`: `400` (`session_token is required`)
 - missing/expired session token: `404` (`session not found`)
 - non-admin session role: `403` (`admin session role is required`)
+- invalid cursor format: `400` (`cursor must be in the format <updated_at_utc>|<wallet_address>`)
 `POST /v1/gpm/onboarding/operator/approve` also requires admin-level authorization:
 - preferred: `session_token` for a valid `admin` session.
 - compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (or legacy alias) when configured.
@@ -115,7 +117,7 @@ Secret handling guidance:
 - avoid persisting tokens in shared shell profiles/history; prefer short-lived shell/session scope
 - never include invite keys or bearer tokens in logs, screenshots, or support tickets
 
-Command-backed read endpoints (`GET /v1/status`, `GET /v1/get_diagnostics`, `GET /v1/service/status`) follow the same auth policy.
+Command-backed read endpoints (`GET /v1/status`, `GET /v1/get_diagnostics`, `GET /v1/service/status`, `GET /v1/gpm/audit/recent`) follow the same auth policy.
 
 Header format:
 
@@ -248,6 +250,35 @@ Behavior:
   - `false` when no reconciliation change was needed.
 - `refresh` rotates `session_token` and extends session TTL.
 - `revoke` deletes the session and does not include `session_reconciled`.
+
+### `GET /v1/gpm/audit/recent`
+Returns recent GPM local-audit JSONL entries from `GPM_AUDIT_LOG_PATH`.
+
+Query parameters:
+- `limit` (optional): default `25`; clamped to `1..200`
+- `offset` (optional): default `0`; must be a non-negative integer
+- `event` (optional): exact event-name match, case-insensitive
+- `wallet_address` (optional): normalized wallet filter matched against `fields.wallet_address`
+- `order` (optional): `desc|asc`; defaults to `desc`
+
+Success payload:
+- `ok`: `true`
+- `entries`: filtered/paginated audit entries
+- additive metadata:
+  - `total`: total matching entries before pagination
+  - `count`: number of entries returned in this page
+  - `limit`: applied page size
+  - `offset`: applied start offset
+  - `has_more`: whether another page exists
+  - `next_offset`: next offset to request (`offset + count`)
+  - `filters.event`: normalized event filter
+  - `filters.wallet_address`: normalized wallet filter
+  - `filters.order`: applied ordering (`desc|asc`)
+
+Validation errors:
+- invalid `offset`: `400` (`offset must be a non-negative integer`)
+- invalid `order`: `400` (`order must be one of: desc, asc`)
+- invalid `wallet_address` filter: `400` (`wallet_address filter must be a valid wallet address`)
 
 ## Desktop Command Bridge (Scaffold)
 

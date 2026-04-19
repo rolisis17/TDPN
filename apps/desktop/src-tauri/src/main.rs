@@ -2,7 +2,7 @@ mod local_api;
 
 use local_api::{
     ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMOperatorApplyRequest,
-    GPMOperatorApproveRequest, GPMOperatorListRequest, GPMOperatorStatusRequest,
+    GPMAuditRecentRequest, GPMOperatorApproveRequest, GPMOperatorListRequest, GPMOperatorStatusRequest,
     GPMServerStatusRequest, GPMSessionStatusRequest, GPMWalletChallengeRequest,
     GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig, ProfileRequest,
 };
@@ -422,11 +422,22 @@ async fn control_gpm_session(
 async fn control_gpm_audit_recent(
     state: State<'_, AppState>,
     limit: Option<u32>,
+    offset: Option<u32>,
+    event: Option<String>,
+    wallet_address: Option<String>,
+    order: Option<String>,
 ) -> Result<Value, String> {
-    let limit = limit.unwrap_or(25).clamp(1, 200);
+    let query = GPMAuditRecentRequest {
+        limit,
+        offset,
+        event,
+        wallet_address,
+        order,
+    }
+    .sanitize()?;
     state
         .local_api
-        .get_json(&format!("/v1/gpm/audit/recent?limit={limit}"))
+        .get_json_with_query("/v1/gpm/audit/recent", &query)
         .await
         .map(sanitize_desktop_payload)
 }

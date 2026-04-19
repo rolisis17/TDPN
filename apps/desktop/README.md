@@ -62,6 +62,8 @@ Operator moderation UX notes:
 - Approve/reject requests now include optimistic stale-decision protection via `if_updated_at_utc` when `selected application updated at` is populated.
 - If approve/reject returns `409 Conflict`, desktop now keeps the flow running and shows explicit guidance to reload the pending queue (`Load Next Pending`) and retry with the refreshed entry.
 - Desktop operator listing now includes `List All Operators` (`status=""`, `limit=100`) in addition to `List Pending Operators`.
+- Desktop moderation UI also includes `List Operator Queue` filter controls (`status`, `search`, `limit`) plus `Next Queue Page`; list requests now forward optional `search`/`cursor` and surface `returned`/`has_more`/`next_cursor` metadata in output when available.
+- Desktop `Recent Audit` now includes optional filters (`limit`, `offset`, `event`, `wallet_address`, `order`) and surfaces audit paging metadata (`count`, `total`, `limit`, `offset`, `has_more`, `next_offset`) in output when present.
 - After approve/reject decisions, desktop forces a session status refresh so role/readiness lock state reconciles immediately and surfaces backend `session_reconciled` hints when present.
 
 Remote hardening guardrails:

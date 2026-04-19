@@ -111,6 +111,31 @@
             <input id="signature" placeholder="wallet signature" />
           </label>
         </div>
+        <div class="fields">
+          <label>
+            Audit limit
+            <input id="audit_limit" type="number" min="1" max="200" step="1" value="25" />
+          </label>
+          <label>
+            Audit offset
+            <input id="audit_offset" type="number" min="0" step="1" value="0" />
+          </label>
+          <label>
+            Audit event (optional)
+            <input id="audit_event" placeholder="auth_verified" />
+          </label>
+          <label>
+            Audit wallet address (optional)
+            <input id="audit_wallet_address" placeholder="cosmos1..." />
+          </label>
+          <label>
+            Audit order
+            <select id="audit_order">
+              <option value="desc" selected>desc (newest first)</option>
+              <option value="asc">asc (oldest first)</option>
+            </select>
+          </label>
+        </div>
         <div class="actions">
           <button class="btn secondary" id="challenge_btn">Request Challenge</button>
           <button class="btn primary" id="signin_btn">Verify + Create Session</button>
@@ -196,13 +221,35 @@
             Moderation reason
             <input id="operator_reason" placeholder="required for rejection; optional for approval" />
           </label>
+          <label>
+            Queue status filter
+            <select id="operator_list_status">
+              <option value="" selected>all</option>
+              <option value="pending">pending</option>
+              <option value="approved">approved</option>
+              <option value="rejected">rejected</option>
+            </select>
+          </label>
+          <label>
+            Queue search (optional)
+            <input id="operator_list_search" placeholder="wallet, operator ID, or label" />
+          </label>
+          <label>
+            Queue limit
+            <input id="operator_list_limit" type="number" min="1" step="1" value="100" />
+          </label>
+          <label>
+            Next page cursor
+            <input id="operator_list_next_cursor" placeholder="set after queue listing" readonly />
+          </label>
         </div>
         <div class="actions">
           <button class="btn secondary" id="apply_operator_btn">Apply Operator Role</button>
           <button class="btn secondary" id="operator_status_btn">Check Operator Status</button>
           <button class="btn secondary" id="operator_list_pending_btn">List Pending Operators</button>
           <button class="btn secondary" id="operator_load_next_pending_btn">Load Next Pending</button>
-          <button class="btn secondary" id="operator_list_all_btn">List All Operators</button>
+          <button class="btn secondary" id="operator_list_all_btn">List Operators</button>
+          <button class="btn secondary" id="operator_list_next_page_btn">Next Page</button>
           <button class="btn secondary" id="approve_operator_btn">Approve Operator</button>
           <button class="btn secondary" id="reject_operator_btn">Reject Operator</button>
         </div>

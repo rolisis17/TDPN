@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -3502,6 +3503,126 @@ func TestGPMOperatorList(t *testing.T) {
 			t.Fatalf("error=%q payload=%v", errMsg, payload)
 		}
 	})
+
+	t.Run("search filter works across wallet and chain operator id", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-search-token", now)
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1searchalpha",
+			ChainOperatorID: "operator-search-alpha",
+			Status:          "pending",
+			UpdatedAt:       now,
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1searchbeta",
+			ChainOperatorID: "operator-target-beta",
+			Status:          "approved",
+			UpdatedAt:       now.Add(-time.Minute),
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1other",
+			ChainOperatorID: "operator-other",
+			Status:          "pending",
+			UpdatedAt:       now.Add(-2 * time.Minute),
+		})
+
+		body := `{"session_token":"gpm-admin-list-search-token","search":"target-beta","limit":10}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if count, _ := payload["count"].(float64); int(count) != 1 {
+			t.Fatalf("count=%v want=1 payload=%v", count, payload)
+		}
+		applications, _ := payload["applications"].([]any)
+		if len(applications) != 1 {
+			t.Fatalf("applications len=%d want=1 payload=%v", len(applications), payload)
+		}
+		first, _ := applications[0].(map[string]any)
+		if got, _ := first["wallet_address"].(string); got != "cosmos1searchbeta" {
+			t.Fatalf("wallet_address=%q want=cosmos1searchbeta payload=%v", got, payload)
+		}
+	})
+
+	t.Run("cursor pagination returns next page and cursor metadata", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-cursor-token", now)
+
+		entries := []gpmOperatorApplication{
+			{
+				WalletAddress:   "cosmos1cursorone",
+				ChainOperatorID: "operator-cursor-one",
+				Status:          "pending",
+				UpdatedAt:       now,
+			},
+			{
+				WalletAddress:   "cosmos1cursortwo",
+				ChainOperatorID: "operator-cursor-two",
+				Status:          "pending",
+				UpdatedAt:       now.Add(-time.Minute),
+			},
+			{
+				WalletAddress:   "cosmos1cursorthree",
+				ChainOperatorID: "operator-cursor-three",
+				Status:          "pending",
+				UpdatedAt:       now.Add(-2 * time.Minute),
+			},
+		}
+		for _, entry := range entries {
+			svc.gpmState.upsertOperator(entry)
+		}
+
+		firstBody := `{"session_token":"gpm-admin-list-cursor-token","status":"pending","limit":2}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", firstBody)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if hasMore, _ := payload["has_more"].(bool); !hasMore {
+			t.Fatalf("has_more=%v want=true payload=%v", payload["has_more"], payload)
+		}
+		nextCursor, _ := payload["next_cursor"].(string)
+		if strings.TrimSpace(nextCursor) == "" {
+			t.Fatalf("next_cursor=%q want non-empty payload=%v", nextCursor, payload)
+		}
+		applications, _ := payload["applications"].([]any)
+		if len(applications) != 2 {
+			t.Fatalf("applications len=%d want=2 payload=%v", len(applications), payload)
+		}
+
+		secondBody := fmt.Sprintf(`{"session_token":"gpm-admin-list-cursor-token","status":"pending","limit":2,"cursor":%q}`, nextCursor)
+		code, payload = callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", secondBody)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if hasMore, _ := payload["has_more"].(bool); hasMore {
+			t.Fatalf("has_more=%v want=false payload=%v", payload["has_more"], payload)
+		}
+		applications, _ = payload["applications"].([]any)
+		if len(applications) != 1 {
+			t.Fatalf("applications len=%d want=1 payload=%v", len(applications), payload)
+		}
+		first, _ := applications[0].(map[string]any)
+		if got, _ := first["wallet_address"].(string); got != "cosmos1cursorthree" {
+			t.Fatalf("wallet_address=%q want=cosmos1cursorthree payload=%v", got, payload)
+		}
+	})
+
+	t.Run("invalid cursor format returns 400", func(t *testing.T) {
+		svc := newOperatorListService(t)
+		now := time.Now().UTC()
+		putAdminSession(svc, "gpm-admin-list-invalid-cursor-token", now)
+		body := `{"session_token":"gpm-admin-list-invalid-cursor-token","cursor":"invalid-cursor"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorList, http.MethodPost, "/v1/gpm/onboarding/operator/list", body)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "cursor must be in the format") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
 }
 
 func TestGPMOperatorApproveAuthorization(t *testing.T) {
@@ -4088,7 +4209,72 @@ func TestGPMAuditAppendWritesJSONLine(t *testing.T) {
 	}
 }
 
-func TestGPMAuditRecentHandlerReturnsMostRecentEntries(t *testing.T) {
+func TestGPMAuditRecentHandlerDefaultBehavior(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
+	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+
+	count, _ := payload["count"].(float64)
+	if int(count) != 2 {
+		t.Fatalf("count=%v want=2 payload=%v", count, payload)
+	}
+	total, _ := payload["total"].(float64)
+	if int(total) != 2 {
+		t.Fatalf("total=%v want=2 payload=%v", total, payload)
+	}
+	limit, _ := payload["limit"].(float64)
+	if int(limit) != 25 {
+		t.Fatalf("limit=%v want=25 payload=%v", limit, payload)
+	}
+	offset, _ := payload["offset"].(float64)
+	if int(offset) != 0 {
+		t.Fatalf("offset=%v want=0 payload=%v", offset, payload)
+	}
+	nextOffset, _ := payload["next_offset"].(float64)
+	if int(nextOffset) != 2 {
+		t.Fatalf("next_offset=%v want=2 payload=%v", nextOffset, payload)
+	}
+	hasMore, _ := payload["has_more"].(bool)
+	if hasMore {
+		t.Fatalf("has_more=%v want=false payload=%v", hasMore, payload)
+	}
+	filters, _ := payload["filters"].(map[string]any)
+	if got, _ := filters["event"].(string); got != "" {
+		t.Fatalf("filters.event=%q want empty payload=%v", got, payload)
+	}
+	if got, _ := filters["wallet_address"].(string); got != "" {
+		t.Fatalf("filters.wallet_address=%q want empty payload=%v", got, payload)
+	}
+	if got, _ := filters["order"].(string); got != "desc" {
+		t.Fatalf("filters.order=%q want=desc payload=%v", got, payload)
+	}
+
+	entries, _ := payload["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries len=%d want=2 payload=%v", len(entries), payload)
+	}
+	entry, _ := entries[0].(map[string]any)
+	if event, _ := entry["event"].(string); event != "event_two" {
+		t.Fatalf("event=%q want=event_two entry=%v", event, entry)
+	}
+	entry, _ = entries[1].(map[string]any)
+	if event, _ := entry["event"].(string); event != "event_one" {
+		t.Fatalf("event=%q want=event_one entry=%v", event, entry)
+	}
+}
+
+func TestGPMAuditRecentHandlerLimitQueryBackwardCompatible(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
 	svc := &Service{
 		addr:                "127.0.0.1:8095",
@@ -4107,6 +4293,22 @@ func TestGPMAuditRecentHandlerReturnsMostRecentEntries(t *testing.T) {
 	if int(count) != 1 {
 		t.Fatalf("count=%v want=1 payload=%v", count, payload)
 	}
+	total, _ := payload["total"].(float64)
+	if int(total) != 2 {
+		t.Fatalf("total=%v want=2 payload=%v", total, payload)
+	}
+	limit, _ := payload["limit"].(float64)
+	if int(limit) != 1 {
+		t.Fatalf("limit=%v want=1 payload=%v", limit, payload)
+	}
+	hasMore, _ := payload["has_more"].(bool)
+	if !hasMore {
+		t.Fatalf("has_more=%v want=true payload=%v", hasMore, payload)
+	}
+	nextOffset, _ := payload["next_offset"].(float64)
+	if int(nextOffset) != 1 {
+		t.Fatalf("next_offset=%v want=1 payload=%v", nextOffset, payload)
+	}
 	entries, _ := payload["entries"].([]any)
 	if len(entries) != 1 {
 		t.Fatalf("entries len=%d want=1 payload=%v", len(entries), payload)
@@ -4114,5 +4316,178 @@ func TestGPMAuditRecentHandlerReturnsMostRecentEntries(t *testing.T) {
 	entry, _ := entries[0].(map[string]any)
 	if event, _ := entry["event"].(string); event != "event_two" {
 		t.Fatalf("event=%q want=event_two entry=%v", event, entry)
+	}
+}
+
+func TestGPMAuditRecentHandlerEventFilter(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+	svc.appendGPMAudit("auth_verified", map[string]any{"idx": 1})
+	svc.appendGPMAudit("session_refreshed", map[string]any{"idx": 2})
+	svc.appendGPMAudit("AUTH_VERIFIED", map[string]any{"idx": 3})
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?event=AuTh_VeRiFiEd", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	count, _ := payload["count"].(float64)
+	if int(count) != 2 {
+		t.Fatalf("count=%v want=2 payload=%v", count, payload)
+	}
+	total, _ := payload["total"].(float64)
+	if int(total) != 2 {
+		t.Fatalf("total=%v want=2 payload=%v", total, payload)
+	}
+	filters, _ := payload["filters"].(map[string]any)
+	if got, _ := filters["event"].(string); got != "auth_verified" {
+		t.Fatalf("filters.event=%q want=auth_verified payload=%v", got, payload)
+	}
+	entries, _ := payload["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries len=%d want=2 payload=%v", len(entries), payload)
+	}
+	first, _ := entries[0].(map[string]any)
+	if event, _ := first["event"].(string); event != "AUTH_VERIFIED" {
+		t.Fatalf("event[0]=%q want=AUTH_VERIFIED payload=%v", event, payload)
+	}
+	second, _ := entries[1].(map[string]any)
+	if event, _ := second["event"].(string); event != "auth_verified" {
+		t.Fatalf("event[1]=%q want=auth_verified payload=%v", event, payload)
+	}
+}
+
+func TestGPMAuditRecentHandlerWalletFilter(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+	svc.appendGPMAudit("auth_verified", map[string]any{"wallet_address": "Cosmos1WalletA"})
+	svc.appendGPMAudit("session_refreshed", map[string]any{"wallet_address": "cosmos1walletb"})
+	svc.appendGPMAudit("session_revoked", map[string]any{"role": "client"})
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?wallet_address=COSMOS1WALLETA", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	count, _ := payload["count"].(float64)
+	if int(count) != 1 {
+		t.Fatalf("count=%v want=1 payload=%v", count, payload)
+	}
+	total, _ := payload["total"].(float64)
+	if int(total) != 1 {
+		t.Fatalf("total=%v want=1 payload=%v", total, payload)
+	}
+	filters, _ := payload["filters"].(map[string]any)
+	if got, _ := filters["wallet_address"].(string); got != "cosmos1walleta" {
+		t.Fatalf("filters.wallet_address=%q want=cosmos1walleta payload=%v", got, payload)
+	}
+	entries, _ := payload["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries len=%d want=1 payload=%v", len(entries), payload)
+	}
+	entry, _ := entries[0].(map[string]any)
+	if event, _ := entry["event"].(string); event != "auth_verified" {
+		t.Fatalf("event=%q want=auth_verified entry=%v", event, entry)
+	}
+}
+
+func TestGPMAuditRecentHandlerOffsetPagingMetadata(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
+	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
+	svc.appendGPMAudit("event_three", map[string]any{"idx": 3})
+	svc.appendGPMAudit("event_four", map[string]any{"idx": 4})
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?limit=2&offset=1&order=desc", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	total, _ := payload["total"].(float64)
+	if int(total) != 4 {
+		t.Fatalf("total=%v want=4 payload=%v", total, payload)
+	}
+	count, _ := payload["count"].(float64)
+	if int(count) != 2 {
+		t.Fatalf("count=%v want=2 payload=%v", count, payload)
+	}
+	offset, _ := payload["offset"].(float64)
+	if int(offset) != 1 {
+		t.Fatalf("offset=%v want=1 payload=%v", offset, payload)
+	}
+	hasMore, _ := payload["has_more"].(bool)
+	if !hasMore {
+		t.Fatalf("has_more=%v want=true payload=%v", hasMore, payload)
+	}
+	nextOffset, _ := payload["next_offset"].(float64)
+	if int(nextOffset) != 3 {
+		t.Fatalf("next_offset=%v want=3 payload=%v", nextOffset, payload)
+	}
+	filters, _ := payload["filters"].(map[string]any)
+	if got, _ := filters["order"].(string); got != "desc" {
+		t.Fatalf("filters.order=%q want=desc payload=%v", got, payload)
+	}
+	entries, _ := payload["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries len=%d want=2 payload=%v", len(entries), payload)
+	}
+	first, _ := entries[0].(map[string]any)
+	if event, _ := first["event"].(string); event != "event_three" {
+		t.Fatalf("event[0]=%q want=event_three payload=%v", event, payload)
+	}
+	second, _ := entries[1].(map[string]any)
+	if event, _ := second["event"].(string); event != "event_two" {
+		t.Fatalf("event[1]=%q want=event_two payload=%v", event, payload)
+	}
+}
+
+func TestGPMAuditRecentHandlerRejectsInvalidOrder(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?order=sideways", "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "order must be one of") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMAuditRecentHandlerRejectsInvalidWalletFilter(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?wallet_address=bad!", "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "wallet_address") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 }

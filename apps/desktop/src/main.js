@@ -19,6 +19,15 @@ const walletAddressEl = byId("wallet_address");
 const chainOperatorIdEl = byId("chain_operator_id");
 const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
 const operatorReasonEl = byId("operator_reason");
+const operatorListStatusEl = byId("operator_list_status");
+const operatorListSearchEl = byId("operator_list_search");
+const operatorListLimitEl = byId("operator_list_limit");
+const operatorListNextCursorEl = byId("operator_list_next_cursor");
+const auditLimitEl = byId("audit_limit");
+const auditOffsetEl = byId("audit_offset");
+const auditEventEl = byId("audit_event");
+const auditWalletAddressEl = byId("audit_wallet_address");
+const auditOrderEl = byId("audit_order");
 const pathProfileEl = byId("path_profile");
 const serverLockHintEl = byId("server_lock_hint");
 const connectionStateEl = document.getElementById("connection_state");
@@ -40,10 +49,12 @@ const compatAdvancedHintEl = document.querySelector("details.advanced > p");
 const desktopStepSessionEl = document.getElementById("desktop_step_session");
 const desktopStepClientEl = document.getElementById("desktop_step_client");
 const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
+const operatorListNextBtnEl = byId("operator_list_next_btn");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
 const OPERATOR_LIST_ALL_LIMIT = 100;
+const OPERATOR_FILTER_DEFAULT_LIMIT = 25;
 const OPERATOR_DECISION_CONFLICT_GUIDANCE =
   "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
 const CONNECTION_DEFAULT_STATE = "Unknown";
@@ -73,7 +84,9 @@ const state = {
   connectRequireSession: false,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
-  connectionDetail: CONNECTION_DEFAULT_DETAIL
+  connectionDetail: CONNECTION_DEFAULT_DETAIL,
+  operatorListNextCursor: "",
+  operatorListRequestContext: null
 };
 
 function readPersistedValue(key) {
@@ -127,6 +140,32 @@ function numberOrUndefined(value) {
     return n;
   }
   return undefined;
+}
+
+function nonNegativeIntegerOrUndefined(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return undefined;
+  }
+  return Math.trunc(n);
+}
+
+function nonEmptyStringOrUndefined(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function compactObject(value) {
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) {
+      out[key] = entry;
+    }
+  }
+  return out;
 }
 
 function firstDefined(...values) {
@@ -502,6 +541,17 @@ function parseOperatorApplicationStatus(payload) {
   return normalizeOperatorApplicationStatus(payload?.application?.status);
 }
 
+function normalizeOperatorListStatusFilter(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized || normalized === "all") {
+    return "";
+  }
+  if (normalized === "pending" || normalized === "approved" || normalized === "rejected") {
+    return normalized;
+  }
+  return "";
+}
+
 function extractOperatorListEntries(payload) {
   const containers = [payload, payload?.data, payload?.result, payload?.queue, payload?.list];
   for (const container of containers) {
@@ -615,6 +665,355 @@ function prefillSelectedOperatorFromListPayload(payload, options = {}) {
   }
   applySelectedOperatorPrefill(extractOperatorPrefillValues(entries[0]), options);
   return true;
+}
+
+function extractOperatorListPageInfo(payload) {
+  const entries = extractOperatorListEntries(payload);
+  const containers = [
+    payload,
+    payload?.data,
+    payload?.result,
+    payload?.queue,
+    payload?.list,
+    payload?.meta,
+    payload?.page,
+    payload?.pagination
+  ];
+  let returned;
+  let hasMore;
+  let nextCursor;
+  for (const container of containers) {
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+    if (returned === undefined) {
+      returned = nonNegativeIntegerOrUndefined(
+        firstDefined(
+          container.returned,
+          container.count,
+          container.returned_count,
+          container.results_count,
+          container.result_count,
+          container.items_count,
+          container.item_count
+        )
+      );
+    }
+    if (hasMore === undefined) {
+      hasMore = toBooleanLike(
+        firstDefined(
+          container.has_more,
+          container.hasMore,
+          container.has_next,
+          container.hasNext,
+          container.more
+        )
+      );
+    }
+    if (!nextCursor) {
+      nextCursor = nonEmptyStringOrUndefined(
+        firstDefined(
+          container.next_cursor,
+          container.nextCursor,
+          container.next_page_cursor,
+          container.nextPageCursor,
+          container.continuation_cursor,
+          container.continuationCursor
+        )
+      );
+    }
+  }
+  if (returned === undefined) {
+    returned = entries.length;
+  }
+  if (hasMore === undefined && nextCursor) {
+    hasMore = true;
+  }
+  return {
+    returned,
+    hasMore,
+    nextCursor: nextCursor || ""
+  };
+}
+
+function normalizeOperatorListFilterContext(context = {}) {
+  const status = Object.prototype.hasOwnProperty.call(context, "status")
+    ? normalizeOperatorListStatusFilter(context.status)
+    : "";
+  const search = nonEmptyStringOrUndefined(context.search);
+  const limit = numberOrUndefined(context.limit);
+  return {
+    status,
+    search,
+    limit: limit || OPERATOR_FILTER_DEFAULT_LIMIT
+  };
+}
+
+function syncOperatorListPaginationControlState() {
+  const canPage =
+    !!state.sessionToken &&
+    !!state.operatorListNextCursor &&
+    !!state.operatorListRequestContext;
+  operatorListNextBtnEl.disabled = !canPage;
+}
+
+function setOperatorListRequestContext(context) {
+  state.operatorListRequestContext = context ? normalizeOperatorListFilterContext(context) : null;
+  syncOperatorListPaginationControlState();
+}
+
+function setOperatorListNextCursor(value) {
+  const cursor = nonEmptyStringOrUndefined(value) || "";
+  state.operatorListNextCursor = cursor;
+  operatorListNextCursorEl.value = cursor;
+  syncOperatorListPaginationControlState();
+}
+
+function clearOperatorListPaginationState() {
+  state.operatorListRequestContext = null;
+  setOperatorListNextCursor("");
+}
+
+function readOperatorListFilterControls() {
+  return normalizeOperatorListFilterContext({
+    status: operatorListStatusEl.value,
+    search: operatorListSearchEl.value,
+    limit: operatorListLimitEl.value
+  });
+}
+
+function buildOperatorListRequest(filter, options = {}) {
+  const request = {
+    session_token: state.sessionToken
+  };
+  if (Object.prototype.hasOwnProperty.call(filter, "status")) {
+    request.status = filter.status;
+  }
+  if (filter.limit !== undefined) {
+    request.limit = filter.limit;
+  }
+  if (filter.search) {
+    request.search = filter.search;
+  }
+  const cursor = nonEmptyStringOrUndefined(options.cursor);
+  if (cursor) {
+    request.cursor = cursor;
+  }
+  return request;
+}
+
+function formatOperatorListDisplayPayload(result, request) {
+  const page = extractOperatorListPageInfo(result);
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return {
+      ...result,
+      queue_page: {
+        returned: page.returned,
+        has_more: page.hasMore ?? null,
+        next_cursor: page.nextCursor || null
+      },
+      request_page: {
+        status: request.status ?? null,
+        search: request.search ?? null,
+        limit: request.limit ?? null,
+        cursor: request.cursor ?? null
+      }
+    };
+  }
+  return {
+    result,
+    queue_page: {
+      returned: page.returned,
+      has_more: page.hasMore ?? null,
+      next_cursor: page.nextCursor || null
+    },
+    request_page: {
+      status: request.status ?? null,
+      search: request.search ?? null,
+      limit: request.limit ?? null,
+      cursor: request.cursor ?? null
+    }
+  };
+}
+
+async function requestOperatorList(label, filter, options = {}) {
+  const { cursor, prefillMode = "merge", syncControls = false } = options;
+  const normalizedFilter = normalizeOperatorListFilterContext(filter);
+  const request = buildOperatorListRequest(normalizedFilter, { cursor });
+  const result = await call(label, "control_gpm_operator_list", { request }, {
+    formatResultForDisplay: (payload) => formatOperatorListDisplayPayload(payload, request)
+  });
+  prefillSelectedOperatorFromListPayload(result, { mode: prefillMode });
+  const page = extractOperatorListPageInfo(result);
+  setOperatorListRequestContext(normalizedFilter);
+  setOperatorListNextCursor(page.nextCursor);
+  if (syncControls) {
+    operatorListStatusEl.value = normalizedFilter.status;
+    operatorListSearchEl.value = normalizedFilter.search || "";
+    operatorListLimitEl.value = String(normalizedFilter.limit);
+  }
+  return result;
+}
+
+function normalizeAuditOrder(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "asc") {
+    return "asc";
+  }
+  return "desc";
+}
+
+function normalizeAuditRecentRequestContext(context = {}) {
+  const limit = numberOrUndefined(context.limit) || 25;
+  const offset = nonNegativeIntegerOrUndefined(context.offset);
+  return {
+    limit,
+    offset: offset === undefined ? 0 : offset,
+    event: nonEmptyStringOrUndefined(context.event),
+    wallet_address: nonEmptyStringOrUndefined(context.wallet_address),
+    order: normalizeAuditOrder(context.order)
+  };
+}
+
+function readAuditRecentControls() {
+  return normalizeAuditRecentRequestContext({
+    limit: auditLimitEl.value,
+    offset: auditOffsetEl.value,
+    event: auditEventEl.value,
+    wallet_address: auditWalletAddressEl.value,
+    order: auditOrderEl.value
+  });
+}
+
+function buildAuditRecentRequest(context) {
+  const request = {
+    limit: context.limit
+  };
+  if (context.offset !== undefined) {
+    request.offset = context.offset;
+  }
+  if (context.event) {
+    request.event = context.event;
+  }
+  if (context.wallet_address) {
+    request.wallet_address = context.wallet_address;
+  }
+  if (context.order) {
+    request.order = context.order;
+  }
+  return request;
+}
+
+function extractAuditRecentEntries(payload) {
+  const containers = [payload, payload?.data, payload?.result, payload?.audit, payload?.records];
+  for (const container of containers) {
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+    for (const key of ["entries", "items", "results", "events", "records", "logs"]) {
+      if (Array.isArray(container[key])) {
+        return container[key];
+      }
+    }
+  }
+  return [];
+}
+
+function extractAuditRecentPageInfo(payload) {
+  const entries = extractAuditRecentEntries(payload);
+  const containers = [payload, payload?.data, payload?.result, payload?.meta, payload?.page, payload?.pagination];
+  let returned;
+  let total;
+  let limit;
+  let offset;
+  let hasMore;
+  let nextOffset;
+  for (const container of containers) {
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+    if (returned === undefined) {
+      returned = nonNegativeIntegerOrUndefined(
+        firstDefined(container.count, container.returned, container.returned_count, container.result_count)
+      );
+    }
+    if (total === undefined) {
+      total = nonNegativeIntegerOrUndefined(
+        firstDefined(container.total, container.total_count, container.total_results, container.results_total)
+      );
+    }
+    if (limit === undefined) {
+      limit = nonNegativeIntegerOrUndefined(
+        firstDefined(container.limit, container.page_size, container.pageSize)
+      );
+    }
+    if (offset === undefined) {
+      offset = nonNegativeIntegerOrUndefined(
+        firstDefined(container.offset, container.page_offset, container.pageOffset)
+      );
+    }
+    if (hasMore === undefined) {
+      hasMore = toBooleanLike(
+        firstDefined(container.has_more, container.hasMore, container.has_next, container.hasNext, container.more)
+      );
+    }
+    if (nextOffset === undefined) {
+      nextOffset = nonNegativeIntegerOrUndefined(
+        firstDefined(container.next_offset, container.nextOffset, container.next_page_offset, container.nextPageOffset)
+      );
+    }
+  }
+  if (returned === undefined) {
+    returned = entries.length;
+  }
+  if (nextOffset === undefined && returned !== undefined && offset !== undefined) {
+    nextOffset = offset + returned;
+  }
+  if (hasMore === undefined && total !== undefined && nextOffset !== undefined) {
+    hasMore = nextOffset < total;
+  }
+  return {
+    returned,
+    total,
+    limit,
+    offset,
+    hasMore,
+    nextOffset
+  };
+}
+
+function formatAuditRecentDisplayPayload(result, request) {
+  const page = extractAuditRecentPageInfo(result);
+  const auditPage = compactObject({
+    returned: page.returned,
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+    has_more: page.hasMore,
+    next_offset: page.nextOffset
+  });
+  const requestPage = compactObject({
+    limit: request.limit,
+    offset: request.offset,
+    event: request.event,
+    wallet_address: request.wallet_address,
+    order: request.order
+  });
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return {
+      ...result,
+      ...(Object.keys(auditPage).length > 0 ? { audit_page: auditPage } : {}),
+      request_page: requestPage
+    };
+  }
+  const payload = {
+    result,
+    request_page: requestPage
+  };
+  if (Object.keys(auditPage).length > 0) {
+    payload.audit_page = auditPage;
+  }
+  return payload;
 }
 
 function parseServerReadiness(payload) {
@@ -828,6 +1227,7 @@ function setSessionToken(value, options = {}) {
     setSelectedApplicationUpdatedAt("", { persist });
     state.serverReadiness = null;
     state.clientRegistered = false;
+    clearOperatorListPaginationState();
   }
   state.sessionToken = nextValue;
   sessionTokenEl.value = state.sessionToken;
@@ -835,6 +1235,7 @@ function setSessionToken(value, options = {}) {
     writePersistedValue(STORAGE_KEYS.sessionToken, state.sessionToken);
   }
   syncServerRoleLockState();
+  syncOperatorListPaginationControlState();
 }
 
 function setOperatorApplicationStatus(value) {
@@ -928,10 +1329,15 @@ function parseSessionRole(payload) {
   );
 }
 
-async function call(label, command, args = {}) {
+async function call(label, command, args = {}, options = {}) {
+  const { formatResultForDisplay } = options;
   try {
     const result = await invoke(command, args);
-    print(label, withSessionReconciledHint(result));
+    const payloadForDisplay =
+      typeof formatResultForDisplay === "function"
+        ? formatResultForDisplay(result)
+        : result;
+    print(label, withSessionReconciledHint(payloadForDisplay, result));
     return result;
   } catch (err) {
     print(`${label} (error)`, err);
@@ -1118,6 +1524,9 @@ async function loadNextPendingOperator() {
     limit: OPERATOR_LOAD_NEXT_LIMIT
   };
   const result = await call("gpm_operator_load_next_pending", "control_gpm_operator_list", { request });
+  const page = extractOperatorListPageInfo(result);
+  setOperatorListRequestContext({ status: "pending", limit: OPERATOR_LOAD_NEXT_LIMIT });
+  setOperatorListNextCursor(page.nextCursor);
   const entries = extractOperatorListEntries(result);
   if (entries.length === 0) {
     print(
@@ -1127,7 +1536,9 @@ async function loadNextPendingOperator() {
           message: "No pending operator applications are currently queued.",
           status: "pending",
           limit: OPERATOR_LOAD_NEXT_LIMIT,
-          returned: 0
+          returned: page.returned,
+          has_more: page.hasMore ?? null,
+          next_cursor: page.nextCursor || null
         },
         result
       )
@@ -1155,12 +1566,27 @@ async function loadNextPendingOperator() {
         selected_application_updated_at: selectedApplicationUpdatedAtUtc || null,
         status: "pending",
         limit: OPERATOR_LOAD_NEXT_LIMIT,
-        returned: entries.length
+        returned: page.returned,
+        has_more: page.hasMore ?? null,
+        next_cursor: page.nextCursor || null
       },
       result
     )
   );
   return result;
+}
+
+async function loadNextOperatorListPage() {
+  if (!requireSessionToken("load the next operator queue page")) {
+    return undefined;
+  }
+  const cursor = nonEmptyStringOrUndefined(state.operatorListNextCursor);
+  if (!cursor) {
+    print("validation", "next_cursor is not available; run an operator list request first");
+    return undefined;
+  }
+  const filter = state.operatorListRequestContext || readOperatorListFilterControls();
+  return requestOperatorList("gpm_operator_list_next_page", filter, { cursor });
 }
 
 tabClientEl.addEventListener("click", () => activateTab("client"));
@@ -1185,6 +1611,15 @@ chainOperatorIdEl.addEventListener("input", () => {
 });
 pathProfileEl.addEventListener("change", () => {
   writePersistedValue(STORAGE_KEYS.pathProfile, pathProfileEl.value);
+});
+operatorListStatusEl.addEventListener("change", () => {
+  clearOperatorListPaginationState();
+});
+operatorListSearchEl.addEventListener("input", () => {
+  clearOperatorListPaginationState();
+});
+operatorListLimitEl.addEventListener("input", () => {
+  clearOperatorListPaginationState();
 });
 
 byId("challenge_btn").addEventListener("click", async () => {
@@ -1237,7 +1672,11 @@ byId("manifest_btn").addEventListener("click", async () => {
 });
 
 byId("audit_recent_btn").addEventListener("click", async () => {
-  await call("gpm_audit_recent", "control_gpm_audit_recent", { limit: 25 });
+  const requestContext = readAuditRecentControls();
+  const request = buildAuditRecentRequest(requestContext);
+  await call("gpm_audit_recent", "control_gpm_audit_recent", request, {
+    formatResultForDisplay: (payload) => formatAuditRecentDisplayPayload(payload, requestContext)
+  });
 });
 
 byId("register_client_btn").addEventListener("click", async () => {
@@ -1285,17 +1724,23 @@ byId("operator_status_btn").addEventListener("click", async () => {
   await refreshServerReadinessStatus({ quiet: true });
 });
 
+byId("operator_list_filter_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("list the operator queue")) {
+    return;
+  }
+  await requestOperatorList("gpm_operator_list_filtered", readOperatorListFilterControls(), {
+    syncControls: true
+  });
+});
+
 byId("operator_list_pending_btn").addEventListener("click", async () => {
   if (!requireSessionToken("list pending operators")) {
     return;
   }
-  const request = {
-    session_token: state.sessionToken,
+  await requestOperatorList("gpm_operator_list_pending", {
     status: "pending",
     limit: OPERATOR_PENDING_LIST_LIMIT
-  };
-  const result = await call("gpm_operator_list_pending", "control_gpm_operator_list", { request });
-  prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
+  }, { syncControls: true });
 });
 
 byId("operator_load_next_pending_btn").addEventListener("click", async () => {
@@ -1306,13 +1751,14 @@ byId("operator_list_all_btn").addEventListener("click", async () => {
   if (!requireSessionToken("list all operators")) {
     return;
   }
-  const request = {
-    session_token: state.sessionToken,
+  await requestOperatorList("gpm_operator_list_all", {
     status: "",
     limit: OPERATOR_LIST_ALL_LIMIT
-  };
-  const result = await call("gpm_operator_list_all", "control_gpm_operator_list", { request });
-  prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
+  }, { syncControls: true });
+});
+
+byId("operator_list_next_btn").addEventListener("click", async () => {
+  await loadNextOperatorListPage();
 });
 
 byId("approve_operator_btn").addEventListener("click", async () => {

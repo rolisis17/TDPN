@@ -131,6 +131,8 @@ type gpmOperatorListRequest struct {
 	SessionToken string `json:"session_token"`
 	Status       string `json:"status,omitempty"`
 	Limit        *int   `json:"limit,omitempty"`
+	Search       string `json:"search,omitempty"`
+	Cursor       string `json:"cursor,omitempty"`
 }
 
 type gpmOperatorApproveRequest struct {
@@ -653,19 +655,70 @@ func (s *Service) handleGPMAuditRecent(w http.ResponseWriter, r *http.Request) {
 
 	limit := 25
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 200 {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			if parsed < 1 {
+				parsed = 1
+			}
+			if parsed > 200 {
+				parsed = 200
+			}
 			limit = parsed
 		}
 	}
-	entries, err := s.readGPMAuditRecent(limit)
+
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "offset must be a non-negative integer"})
+			return
+		}
+		offset = parsed
+	}
+
+	eventFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("event")))
+	walletFilter := ""
+	if raw := strings.TrimSpace(r.URL.Query().Get("wallet_address")); raw != "" {
+		walletFilter = normalizeWalletAddress(raw)
+		if walletFilter == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address filter must be a valid wallet address"})
+			return
+		}
+	}
+	orderFilter, validOrder := normalizeGPMAuditOrder(r.URL.Query().Get("order"))
+	if !validOrder {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "order must be one of: desc, asc"})
+		return
+	}
+
+	result, err := s.readGPMAuditRecent(gpmAuditRecentQuery{
+		Limit:         limit,
+		Offset:        offset,
+		Event:         eventFilter,
+		WalletAddress: walletFilter,
+		Order:         orderFilter,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	count := len(result.Entries)
+	nextOffset := offset + count
+	hasMore := nextOffset < result.Total
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"count":   len(entries),
-		"entries": entries,
+		"ok":          true,
+		"total":       result.Total,
+		"count":       count,
+		"limit":       limit,
+		"offset":      offset,
+		"has_more":    hasMore,
+		"next_offset": nextOffset,
+		"filters": map[string]any{
+			"event":          eventFilter,
+			"wallet_address": walletFilter,
+			"order":          orderFilter,
+		},
+		"entries": result.Entries,
 	})
 }
 
@@ -1029,6 +1082,23 @@ func (s *Service) handleGPMOperatorList(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "status must be one of: pending, approved, rejected"})
 		return
 	}
+	searchFilter := strings.ToLower(strings.TrimSpace(in.Search))
+
+	cursorRaw := strings.TrimSpace(in.Cursor)
+	cursorEnabled := cursorRaw != ""
+	var cursorUpdatedAt time.Time
+	var cursorWalletAddress string
+	if cursorEnabled {
+		var ok bool
+		cursorUpdatedAt, cursorWalletAddress, ok = parseGPMOperatorListCursor(cursorRaw)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "cursor must be in the format <updated_at_utc>|<wallet_address>",
+			})
+			return
+		}
+	}
 
 	limit := 100
 	if in.Limit != nil {
@@ -1048,20 +1118,44 @@ func (s *Service) handleGPMOperatorList(w http.ResponseWriter, r *http.Request) 
 		if statusFilter != "" && status != statusFilter {
 			continue
 		}
+		if searchFilter != "" {
+			haystack := strings.ToLower(strings.Join([]string{
+				strings.TrimSpace(app.WalletAddress),
+				strings.TrimSpace(app.ChainOperatorID),
+				strings.TrimSpace(app.ServerLabel),
+				strings.TrimSpace(app.Status),
+				strings.TrimSpace(app.Reason),
+			}, " "))
+			if !strings.Contains(haystack, searchFilter) {
+				continue
+			}
+		}
+		if cursorEnabled && compareGPMOperatorListSortKey(
+			app.UpdatedAt,
+			strings.TrimSpace(app.WalletAddress),
+			cursorUpdatedAt,
+			cursorWalletAddress,
+		) <= 0 {
+			continue
+		}
 		filtered = append(filtered, app)
 	}
 	slices.SortFunc(filtered, func(a, b gpmOperatorApplication) int {
-		switch {
-		case a.UpdatedAt.After(b.UpdatedAt):
-			return -1
-		case a.UpdatedAt.Before(b.UpdatedAt):
-			return 1
-		default:
-			return strings.Compare(a.WalletAddress, b.WalletAddress)
-		}
+		return compareGPMOperatorListSortKey(
+			a.UpdatedAt,
+			strings.TrimSpace(a.WalletAddress),
+			b.UpdatedAt,
+			strings.TrimSpace(b.WalletAddress),
+		)
 	})
+	total := len(filtered)
+	hasMore := false
+	nextCursor := ""
 	if len(filtered) > limit {
+		hasMore = true
 		filtered = filtered[:limit]
+		last := filtered[len(filtered)-1]
+		nextCursor = formatGPMOperatorListCursor(last.UpdatedAt, strings.TrimSpace(last.WalletAddress))
 	}
 
 	out := make([]map[string]any, 0, len(filtered))
@@ -1071,7 +1165,16 @@ func (s *Service) handleGPMOperatorList(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"count":        len(out),
+		"total":        total,
+		"has_more":     hasMore,
+		"next_cursor":  nextCursor,
 		"applications": out,
+		"request": map[string]any{
+			"status": statusFilter,
+			"search": searchFilter,
+			"limit":  limit,
+			"cursor": cursorRaw,
+		},
 	})
 }
 
@@ -1246,6 +1349,17 @@ func normalizeGPMSessionAction(raw string) string {
 	}
 }
 
+func normalizeGPMAuditOrder(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "desc":
+		return "desc", true
+	case "asc":
+		return "asc", true
+	default:
+		return "", false
+	}
+}
+
 func normalizeGPMOperatorListStatus(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "":
@@ -1259,6 +1373,37 @@ func normalizeGPMOperatorListStatus(raw string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func compareGPMOperatorListSortKey(aUpdatedAt time.Time, aWalletAddress string, bUpdatedAt time.Time, bWalletAddress string) int {
+	switch {
+	case aUpdatedAt.After(bUpdatedAt):
+		return -1
+	case aUpdatedAt.Before(bUpdatedAt):
+		return 1
+	default:
+		return strings.Compare(strings.TrimSpace(aWalletAddress), strings.TrimSpace(bWalletAddress))
+	}
+}
+
+func formatGPMOperatorListCursor(updatedAt time.Time, walletAddress string) string {
+	return updatedAt.UTC().Format(time.RFC3339Nano) + "|" + strings.TrimSpace(walletAddress)
+}
+
+func parseGPMOperatorListCursor(raw string) (time.Time, string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(raw), "|", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", false
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(parts[0]))
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	walletAddress := normalizeWalletAddress(parts[1])
+	if walletAddress == "" {
+		return time.Time{}, "", false
+	}
+	return updatedAt.UTC(), walletAddress, true
 }
 
 func normalizeGPMPathProfile(raw string) string {

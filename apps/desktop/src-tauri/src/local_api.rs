@@ -171,6 +171,20 @@ impl LocalApiClient {
         self.parse_response(path, response).await
     }
 
+    pub async fn get_json_with_query<T: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        query: &T,
+    ) -> Result<Value, String> {
+        let request = self.client.get(self.config.endpoint(path)).query(query);
+        let response = self
+            .with_optional_auth(request)
+            .send()
+            .await
+            .map_err(|e| format!("GET {path} failed: {e}"))?;
+        self.parse_response(path, response).await
+    }
+
     pub async fn post_json<T: Serialize + ?Sized>(&self, path: &str, payload: &T) -> Result<Value, String> {
         let request = self.client.post(self.config.endpoint(path)).json(payload);
         let response = self
@@ -547,6 +561,52 @@ impl GPMSessionStatusRequest {
     }
 }
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct GPMAuditRecentRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
+}
+
+impl GPMAuditRecentRequest {
+    pub fn sanitize(self) -> Result<Self, String> {
+        let limit = self.limit.unwrap_or(25).clamp(1, 200);
+        let offset = self.offset.unwrap_or(0);
+        let event = self
+            .event
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase());
+        let wallet_address = self
+            .wallet_address
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+        let normalized_order = self.order.unwrap_or_else(|| "desc".to_string());
+        let order = match normalized_order.trim().to_ascii_lowercase().as_str() {
+            "" | "desc" => "desc".to_string(),
+            "asc" => "asc".to_string(),
+            _ => return Err("order must be one of: desc, asc".to_string()),
+        };
+        Ok(Self {
+            limit: Some(limit),
+            offset: Some(offset),
+            event,
+            wallet_address,
+            order: Some(order),
+        })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMClientStatusRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -597,6 +657,10 @@ pub struct GPMOperatorListRequest {
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
