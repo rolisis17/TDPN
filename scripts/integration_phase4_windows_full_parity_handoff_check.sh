@@ -133,7 +133,7 @@ if ! jq -e '
   and .fail_closed == true
   and .inputs.usable.phase4_run_summary_json == true
   and .inputs.usable.roadmap_summary_json == true
-  and .inputs.requirements.windows_native_bootstrap_guardrails_ok == false
+  and .inputs.requirements.windows_native_bootstrap_guardrails_ok == true
   and .handoff.run_pipeline_ok == true
   and .handoff.windows_server_packaging_ok == true
   and .handoff.windows_native_bootstrap_guardrails_ok == true
@@ -147,7 +147,7 @@ if ! jq -e '
   and .failure.kind == "none"
   and .handoff_semantics.run_pipeline_ok.failure_kind == "ok"
   and .handoff_semantics.windows_server_packaging_ok.failure_kind == "ok"
-  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
+  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "ok"
   and .handoff_semantics.windows_role_runbooks_ok.failure_kind == "ok"
   and .handoff_semantics.cross_platform_interop_ok.failure_kind == "ok"
   and .handoff_semantics.role_combination_validation_ok.failure_kind == "ok"
@@ -361,18 +361,18 @@ if ! jq -e '
   and .handoff.sources.windows_native_bootstrap_guardrails_ok == "unresolved"
   and .handoff.sources.cross_platform_interop_ok == "unresolved"
   and .handoff_semantics.windows_server_packaging_ok.failure_kind == "unresolved"
-  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
+  and .handoff_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "unresolved"
   and .handoff_semantics.cross_platform_interop_ok.failure_kind == "unresolved"
   and .decision.failure_kind == "policy_no_go"
   and .failure.kind == "policy_no_go"
   and ((.decision.reason_codes // []) | any(. == "windows_server_packaging_ok_unresolved"))
-  and ((.decision.reason_codes // []) | any(. == "windows_native_bootstrap_guardrails_ok_unresolved") | not)
+  and ((.decision.reason_codes // []) | any(. == "windows_native_bootstrap_guardrails_ok_unresolved"))
   and ((.decision.reason_codes // []) | any(. == "cross_platform_interop_ok_unresolved"))
   and ((.decision.reason_details // []) | any(.code == "windows_server_packaging_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
-  and ((.decision.reason_details // []) | any(.code == "windows_native_bootstrap_guardrails_ok_unresolved") | not)
+  and ((.decision.reason_details // []) | any(.code == "windows_native_bootstrap_guardrails_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
   and ((.decision.reason_details // []) | any(.code == "cross_platform_interop_ok_unresolved" and .kind == "unresolved" and .source == "unresolved"))
   and ((.decision.reasons // []) | any(test("windows_server_packaging_ok unresolved from provided artifacts")))
-  and ((.decision.reasons // []) | any(test("windows_native_bootstrap_guardrails_ok unresolved from provided artifacts")) | not)
+  and ((.decision.reasons // []) | any(test("windows_native_bootstrap_guardrails_ok unresolved from provided artifacts")))
   and ((.decision.reasons // []) | any(test("cross_platform_interop_ok unresolved from provided artifacts")))
 ' "$UNRESOLVED_STRICT_OUTPUT" >/dev/null; then
   echo "unresolved strict summary mismatch"

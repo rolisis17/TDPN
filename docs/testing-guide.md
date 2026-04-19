@@ -324,7 +324,7 @@ Status:
 - `ci_phase3_windows_client_beta.sh` is the focused Phase-3 gate runner for desktop/control API/config and launcher contract checks.
 - `integration_ci_phase3_windows_client_beta.sh` validates the Phase-3 gate contract.
 - `phase3_windows_client_beta_check.sh` validates the Phase-3 readiness/check artifact contract.
-  - Includes the Windows-native bootstrap guardrails policy/signal gate: `require_windows_native_bootstrap_guardrails_ok` must align with `windows_native_bootstrap_guardrails_ok` (stage `windows_native_bootstrap_guardrails`).
+  - Includes the Windows-native bootstrap guardrails required-default policy/signal gate: `require_windows_native_bootstrap_guardrails_ok` must align with `windows_native_bootstrap_guardrails_ok` on stage `windows_native_bootstrap_guardrails`.
 - `phase3_windows_client_beta_run.sh` runs the Phase-3 gate + check in one command.
 - `integration_windows_desktop_native_bootstrap_guardrails.sh` validates Windows-native bootstrap dry-run modes, invalid-mode failure behavior, summary-json write, and print-summary-json output contract.
 - `integration_phase3_windows_client_beta_check.sh` validates checker behavior/contract.
@@ -370,7 +370,7 @@ Status:
 - `phase4_windows_full_parity_handoff_run.sh` runs the Phase-4 handoff check in one command; use `--resume 1 --reports-dir <same-run-dir>` to reuse passing run/handoff summaries on retry.
 - `integration_phase4_windows_full_parity_handoff_check.sh` validates handoff checker behavior/contract.
 - `integration_phase4_windows_full_parity_handoff_run.sh` validates handoff wrapper behavior/contract.
-- `integration_roadmap_progress_phase4_handoff.sh` validates roadmap progress ingestion of the Phase-4 handoff, including the optional `windows_native_bootstrap_guardrails_ok` signal when it is present.
+- `integration_roadmap_progress_phase4_handoff.sh` validates roadmap progress ingestion of the Phase-4 handoff, including the explicit `windows_native_bootstrap_guardrails_ok_source` label when present and the stage-based compatibility fallback when the newer direct signal is absent.
 - Phase-4 wrapper integration also exercises the bootstrap-guardrail passthrough knobs used by the phase-3-style desktop bootstrap flow:
   - `--check-require-windows-native-bootstrap-guardrails-ok`
   - `--handoff-require-windows-native-bootstrap-guardrails-ok`

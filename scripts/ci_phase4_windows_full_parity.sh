@@ -26,13 +26,14 @@ Purpose:
   Run a focused Phase-4 Windows full-parity CI gate around server/federation/
   multi-machine readiness and full-parity wrappers:
     1) integration_easy_node_server_preflight.sh
-    2) integration_prod_operator_lifecycle_runbook.sh
-    3) integration_three_machine_prod_signoff.sh
-    4) integration_machine_b_federation_check.sh
-    5) integration_phase4_windows_full_parity_check.sh
-    6) integration_phase4_windows_full_parity_run.sh
-    7) integration_phase4_windows_full_parity_handoff_check.sh
-    8) integration_phase4_windows_full_parity_handoff_run.sh
+    2) integration_windows_desktop_native_bootstrap_guardrails.sh
+    3) integration_prod_operator_lifecycle_runbook.sh
+    4) integration_three_machine_prod_signoff.sh
+    5) integration_machine_b_federation_check.sh
+    6) integration_phase4_windows_full_parity_check.sh
+    7) integration_phase4_windows_full_parity_run.sh
+    8) integration_phase4_windows_full_parity_handoff_check.sh
+    9) integration_phase4_windows_full_parity_handoff_run.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -254,6 +255,7 @@ bool_arg_or_die "--run-phase4-windows-full-parity-handoff-check" "$run_phase4_wi
 bool_arg_or_die "--run-phase4-windows-full-parity-handoff-run" "$run_phase4_windows_full_parity_handoff_run"
 
 windows_server_packaging_script="${CI_PHASE4_WINDOWS_FULL_PARITY_WINDOWS_SERVER_PACKAGING_SCRIPT:-$ROOT_DIR/scripts/integration_easy_node_server_preflight.sh}"
+windows_native_bootstrap_guardrails_script="${CI_PHASE4_WINDOWS_FULL_PARITY_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_windows_desktop_native_bootstrap_guardrails.sh}"
 windows_role_runbooks_script="${CI_PHASE4_WINDOWS_FULL_PARITY_WINDOWS_ROLE_RUNBOOKS_SCRIPT:-$ROOT_DIR/scripts/integration_prod_operator_lifecycle_runbook.sh}"
 cross_platform_interop_script="${CI_PHASE4_WINDOWS_FULL_PARITY_CROSS_PLATFORM_INTEROP_SCRIPT:-$ROOT_DIR/scripts/integration_three_machine_prod_signoff.sh}"
 role_combination_validation_script="${CI_PHASE4_WINDOWS_FULL_PARITY_ROLE_COMBINATION_VALIDATION_SCRIPT:-$ROOT_DIR/scripts/integration_machine_b_federation_check.sh}"
@@ -262,13 +264,9 @@ phase4_windows_full_parity_run_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_WI
 phase4_windows_full_parity_handoff_check_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_CHECK_SCRIPT:-$ROOT_DIR/scripts/integration_phase4_windows_full_parity_handoff_check.sh}"
 phase4_windows_full_parity_handoff_run_script="${CI_PHASE4_WINDOWS_FULL_PARITY_PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_SCRIPT:-$ROOT_DIR/scripts/integration_phase4_windows_full_parity_handoff_run.sh}"
 
-windows_server_packaging_effective="$run_windows_server_packaging"
-if [[ "$run_windows_native_bootstrap_guardrails" != "1" ]]; then
-  windows_server_packaging_effective="0"
-fi
-
 stage_ids=(
   "windows_server_packaging"
+  "windows_native_bootstrap_guardrails"
   "windows_role_runbooks"
   "cross_platform_interop"
   "role_combination_validation"
@@ -280,6 +278,7 @@ stage_ids=(
 
 declare -A stage_script=(
   ["windows_server_packaging"]="$windows_server_packaging_script"
+  ["windows_native_bootstrap_guardrails"]="$windows_native_bootstrap_guardrails_script"
   ["windows_role_runbooks"]="$windows_role_runbooks_script"
   ["cross_platform_interop"]="$cross_platform_interop_script"
   ["role_combination_validation"]="$role_combination_validation_script"
@@ -290,7 +289,8 @@ declare -A stage_script=(
 )
 
 declare -A stage_enabled=(
-  ["windows_server_packaging"]="$windows_server_packaging_effective"
+  ["windows_server_packaging"]="$run_windows_server_packaging"
+  ["windows_native_bootstrap_guardrails"]="$run_windows_native_bootstrap_guardrails"
   ["windows_role_runbooks"]="$run_windows_role_runbooks"
   ["cross_platform_interop"]="$run_cross_platform_interop"
   ["role_combination_validation"]="$run_role_combination_validation"

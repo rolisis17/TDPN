@@ -360,6 +360,36 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[phase4-windows-full-parity-handoff-run] dry-run default relax for native guardrails"
+: >"$CAPTURE"
+DRY_RELAX_WRAPPER_SUMMARY="$TMP_DIR/dry_relax_wrapper.json"
+PHASE4_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
+PHASE4_WINDOWS_FULL_PARITY_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_dry_relax" \
+  --run-summary-json "$TMP_DIR/dry_relax_run_summary.json" \
+  --handoff-summary-json "$TMP_DIR/dry_relax_handoff_summary.json" \
+  --summary-json "$DRY_RELAX_WRAPPER_SUMMARY" \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --run-theta 9 \
+  --handoff-require-run-pipeline-ok 1 \
+  --handoff-require-windows-role-runbooks-ok 1 \
+  --handoff-require-role-combination-validation-ok 1 >"$TMP_DIR/dry_relax.stdout" 2>&1
+
+handoff_line="$(grep '^handoff	' "$CAPTURE" | tail -n 1 || true)"
+if [[ "$handoff_line" != *"--require-windows-native-bootstrap-guardrails-ok 0"* ]]; then
+  echo "dry-run default native guardrail relax mismatch"
+  echo "$handoff_line"
+  exit 1
+fi
+if [[ "$handoff_line" == *"--require-windows-native-bootstrap-guardrails-ok 1"* ]]; then
+  echo "dry-run default native guardrail should not stay required"
+  echo "$handoff_line"
+  exit 1
+fi
+
 echo "[phase4-windows-full-parity-handoff-run] resume mode reuses pass summaries"
 : >"$CAPTURE"
 RESUME_WRAPPER_SUMMARY="$TMP_DIR/resume_wrapper.json"

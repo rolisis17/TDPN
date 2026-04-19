@@ -138,7 +138,7 @@ if ! jq -e '
   and .rc == 0
   and .inputs.usable.ci_phase4_summary_json == true
   and .policy.require_windows_server_packaging_ok == true
-  and .policy.require_windows_native_bootstrap_guardrails_ok == false
+  and .policy.require_windows_native_bootstrap_guardrails_ok == true
   and .policy.require_windows_role_runbooks_ok == true
   and .policy.require_cross_platform_interop_ok == true
   and .policy.require_role_combination_validation_ok == true
@@ -151,7 +151,7 @@ if ! jq -e '
   and ((.decision.reason_codes // []) | length) == 0
   and .failure.kind == "none"
   and .signal_semantics.windows_server_packaging_ok.failure_kind == "ok"
-  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
+  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "ok"
   and .signal_semantics.windows_role_runbooks_ok.failure_kind == "ok"
   and .signal_semantics.cross_platform_interop_ok.failure_kind == "ok"
   and .signal_semantics.role_combination_validation_ok.failure_kind == "ok"
@@ -244,7 +244,8 @@ if ! jq -e '
   and ((.decision.reasons // []) | any(test("summary file not found or invalid JSON")))
   and ((.decision.reason_codes // []) | any(. == "ci_phase4_summary_unusable"))
   and .signal_semantics.windows_server_packaging_ok.failure_kind == "unresolved"
-  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "not_required"
+  and .signal_semantics.windows_native_bootstrap_guardrails_ok.failure_kind == "unresolved"
+  and ((.decision.reason_codes // []) | any(. == "windows_native_bootstrap_guardrails_ok_unresolved"))
   and .signal_semantics.windows_role_runbooks_ok.failure_kind == "unresolved"
   and .signal_semantics.cross_platform_interop_ok.failure_kind == "unresolved"
   and .signal_semantics.role_combination_validation_ok.failure_kind == "unresolved"

@@ -280,6 +280,35 @@ if [[ "$check_line" == *"--dry-run 1"* || "$check_line" == *"--print-summary-jso
   exit 1
 fi
 
+echo "[phase4-windows-full-parity-run] dry-run default relax for native guardrails"
+: >"$CAPTURE"
+DRY_RUN_RELAX_SUMMARY="$TMP_DIR/dry_run_relax_summary.json"
+PHASE4_WINDOWS_FULL_PARITY_RUN_CAPTURE_FILE="$CAPTURE" \
+PHASE4_WINDOWS_FULL_PARITY_RUN_CI_SCRIPT="$FAKE_CI" \
+PHASE4_WINDOWS_FULL_PARITY_RUN_CHECK_SCRIPT="$FAKE_CHECK" \
+bash "$RUNNER" \
+  --reports-dir "$TMP_DIR/reports_dry_relax" \
+  --ci-summary-json "$TMP_DIR/ci_dry_relax_summary.json" \
+  --check-summary-json "$TMP_DIR/check_dry_relax_summary.json" \
+  --summary-json "$DRY_RUN_RELAX_SUMMARY" \
+  --dry-run 1 \
+  --print-summary-json 0 \
+  --ci-run-windows-server-packaging 1 \
+  --check-require-windows-server-packaging-ok 1 \
+  --check-require-cross-platform-interop-ok 1 >"$TMP_DIR/dry_run_relax.log" 2>&1
+
+check_line="$(grep '^check	' "$CAPTURE" | tail -n 1 || true)"
+if [[ "$check_line" != *"--require-windows-native-bootstrap-guardrails-ok 0"* ]]; then
+  echo "default dry-run guardrail relax mismatch"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" == *"--require-windows-native-bootstrap-guardrails-ok 1"* ]]; then
+  echo "default dry-run guardrail should not stay required"
+  echo "$check_line"
+  exit 1
+fi
+
 if [[ ! -f "$DRY_RUN_RUN_SUMMARY" ]]; then
   echo "missing dry-run combined summary JSON: $DRY_RUN_RUN_SUMMARY"
   cat "$DRY_RUN_LOG"

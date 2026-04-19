@@ -8,6 +8,7 @@ full_plan="docs/full-execution-plan-2026-2027.md"
 product_roadmap="docs/product-roadmap.md"
 roadmap_script="scripts/roadmap_progress_report.sh"
 roadmap_integration_script="scripts/integration_roadmap_progress_report.sh"
+phase4_integration_script="scripts/integration_roadmap_progress_phase4_handoff.sh"
 roadmap_blockchain_actionable_run_script="scripts/roadmap_blockchain_actionable_run.sh"
 roadmap_blockchain_actionable_run_integration_script="scripts/integration_roadmap_blockchain_actionable_run.sh"
 easy_node_roadmap_blockchain_actionable_run_integration_script="scripts/integration_easy_node_roadmap_blockchain_actionable_run.sh"
@@ -3023,6 +3024,54 @@ if ! rg -Fq '.blockchain_track.bootstrap_governance_graduation_gate.source_summa
 fi
 if ! rg -Fq 'derived from phase7 bootstrap_governance_graduation_gate_go signal=false' "$roadmap_integration_script"; then
   echo "roadmap progress report integration script must validate phase7 NO-GO reason propagation for bootstrap governance graduation gate fallback"
+  exit 1
+fi
+if ! rg -Fq "windows_native_bootstrap_guardrails_ok_source" "$roadmap_script"; then
+  echo "roadmap progress report helper must surface explicit phase4 native bootstrap source labels"
+  exit 1
+fi
+if ! rg -Fq "signals.windows_native_bootstrap_guardrails_ok" "$roadmap_script"; then
+  echo "roadmap progress report helper must surface direct phase4 native bootstrap signal labels"
+  exit 1
+fi
+if ! rg -Fq "stages.windows_native_bootstrap_guardrails.ok" "$roadmap_script"; then
+  echo "roadmap progress report helper must surface phase4 native bootstrap stage fallback labels"
+  exit 1
+fi
+if ! rg -Fq "windows_native_bootstrap_guardrails_ok_source" "$phase4_integration_script"; then
+  echo "phase4 roadmap progress integration must validate explicit native bootstrap source labels"
+  exit 1
+fi
+if ! rg -Fq "stage-based guardrail fallback path" "$phase4_integration_script"; then
+  echo "phase4 roadmap progress integration must validate stage-based guardrail fallback coverage"
+  exit 1
+fi
+if ! rg -Fq "stages.windows_native_bootstrap_guardrails.ok" "$phase4_integration_script"; then
+  echo "phase4 roadmap progress integration must validate stage-based native bootstrap source labels"
+  exit 1
+fi
+if ! rg -Fq "signals.windows_native_bootstrap_guardrails_ok" "$phase4_integration_script"; then
+  echo "phase4 roadmap progress integration must validate direct native bootstrap source labels"
+  exit 1
+fi
+if ! rg -Fq "required-default policy/signal gate" "$testing_guide_doc"; then
+  echo "testing guide must document the phase4 native bootstrap required-default policy"
+  exit 1
+fi
+if ! rg -Fq "windows_native_bootstrap_guardrails_ok_source" "$testing_guide_doc"; then
+  echo "testing guide must document the phase4 native bootstrap source label"
+  exit 1
+fi
+if ! rg -Fq "windows_native_bootstrap_guardrails" "$testing_guide_doc"; then
+  echo "testing guide must reference the phase4 native bootstrap guardrail stage"
+  exit 1
+fi
+if ! rg -Fq -- "--check-require-windows-native-bootstrap-guardrails-ok" "$testing_guide_doc"; then
+  echo "testing guide must document the phase4 native bootstrap check requirement flag"
+  exit 1
+fi
+if ! rg -Fq -- "--handoff-require-windows-native-bootstrap-guardrails-ok" "$testing_guide_doc"; then
+  echo "testing guide must document the phase4 native bootstrap handoff requirement flag"
   exit 1
 fi
 for phase7_summary_signal in \

@@ -38,6 +38,7 @@ FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 
 STAGE_ENV_NAMES=(
   "CI_PHASE4_WINDOWS_FULL_PARITY_WINDOWS_SERVER_PACKAGING_SCRIPT"
+  "CI_PHASE4_WINDOWS_FULL_PARITY_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT"
   "CI_PHASE4_WINDOWS_FULL_PARITY_WINDOWS_ROLE_RUNBOOKS_SCRIPT"
   "CI_PHASE4_WINDOWS_FULL_PARITY_CROSS_PLATFORM_INTEROP_SCRIPT"
   "CI_PHASE4_WINDOWS_FULL_PARITY_ROLE_COMBINATION_VALIDATION_SCRIPT"
@@ -49,6 +50,7 @@ STAGE_ENV_NAMES=(
 
 STAGE_IDS=(
   "windows_server_packaging"
+  "windows_native_bootstrap_guardrails"
   "windows_role_runbooks"
   "cross_platform_interop"
   "role_combination_validation"
@@ -61,6 +63,17 @@ STAGE_IDS=(
 TOGGLE_STAGE_IDS=(
   "cross_platform_interop"
   "role_combination_validation"
+)
+
+GUARDRAILS_TOGGLE_STAGE_IDS=(
+  "windows_server_packaging"
+  "windows_role_runbooks"
+  "cross_platform_interop"
+  "role_combination_validation"
+  "phase4_windows_full_parity_check"
+  "phase4_windows_full_parity_run"
+  "phase4_windows_full_parity_handoff_check"
+  "phase4_windows_full_parity_handoff_run"
 )
 
 FAKE_STAGE_HELPER="$TMP_DIR/fake_stage_helper.sh"
@@ -184,6 +197,8 @@ if ! jq -e '
   and .inputs.run_phase4_windows_full_parity_handoff_check == true
   and .inputs.run_phase4_windows_full_parity_handoff_run == true
   and (.steps | to_entries | all(.value.enabled == true and .value.status == "pass" and .value.rc == 0 and .value.command != null))
+  and .steps.windows_native_bootstrap_guardrails.status == "pass"
+  and .steps.windows_native_bootstrap_guardrails.rc == 0
   and .steps.phase4_windows_full_parity_check.status == "pass"
   and .steps.phase4_windows_full_parity_check.rc == 0
   and .steps.phase4_windows_full_parity_run.status == "pass"
@@ -223,6 +238,8 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.dry_run == true
+  and .steps.windows_native_bootstrap_guardrails.status == "skip"
+  and .steps.windows_native_bootstrap_guardrails.reason == "dry-run"
   and .steps.phase4_windows_full_parity_check.status == "skip"
   and .steps.phase4_windows_full_parity_check.reason == "dry-run"
   and .steps.phase4_windows_full_parity_run.status == "skip"
@@ -248,6 +265,44 @@ if ! grep -Fq -- 'step=windows_server_packaging status=skip reason=dry-run' "$DR
   exit 1
 fi
 
+echo "[ci-phase4-windows-full-parity] native bootstrap guardrails toggle path"
+: >"$CAPTURE"
+CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
+"$GATE_SCRIPT" \
+  --reports-dir "$TOGGLE_REPORTS_DIR" \
+  --summary-json "$TOGGLE_SUMMARY_JSON" \
+  --print-summary-json 0 \
+  --run-windows-native-bootstrap-guardrails 0 >"$TOGGLE_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "${GUARDRAILS_TOGGLE_STAGE_IDS[@]}"
+
+if [[ ! -f "$TOGGLE_SUMMARY_JSON" ]]; then
+  echo "missing guardrails toggle summary json: $TOGGLE_SUMMARY_JSON"
+  cat "$TOGGLE_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.run_windows_native_bootstrap_guardrails == false
+  and .steps.windows_server_packaging.enabled == true
+  and .steps.windows_server_packaging.status == "pass"
+  and .steps.windows_native_bootstrap_guardrails.enabled == false
+  and .steps.windows_native_bootstrap_guardrails.status == "skip"
+  and .steps.windows_native_bootstrap_guardrails.reason == "disabled"
+  and .steps.windows_role_runbooks.enabled == true
+  and .steps.windows_role_runbooks.status == "pass"
+' "$TOGGLE_SUMMARY_JSON" >/dev/null; then
+  echo "guardrails toggle summary missing expected isolated toggle accounting"
+  cat "$TOGGLE_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq -- '[ci-phase4-windows-full-parity] status=pass rc=0 dry_run=0' "$TOGGLE_LOG"; then
+  echo "guardrails toggle log missing final pass status line"
+  cat "$TOGGLE_LOG"
+  exit 1
+fi
+
 echo "[ci-phase4-windows-full-parity] toggle path"
 : >"$CAPTURE"
 CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
@@ -256,6 +311,7 @@ CI_PHASE4_CAPTURE_FILE="$CAPTURE" \
   --summary-json "$TOGGLE_SUMMARY_JSON" \
   --print-summary-json 0 \
   --run-windows-server-packaging 0 \
+  --run-windows-native-bootstrap-guardrails 0 \
   --run-windows-role-runbooks 0 \
   --run-phase4-windows-full-parity-check 0 \
   --run-phase4-windows-full-parity-run 0 \
@@ -276,6 +332,10 @@ if ! jq -e '
   and .steps.windows_server_packaging.enabled == false
   and .steps.windows_server_packaging.status == "skip"
   and .steps.windows_server_packaging.reason == "disabled"
+  and .inputs.run_windows_native_bootstrap_guardrails == false
+  and .steps.windows_native_bootstrap_guardrails.enabled == false
+  and .steps.windows_native_bootstrap_guardrails.status == "skip"
+  and .steps.windows_native_bootstrap_guardrails.reason == "disabled"
   and .steps.cross_platform_interop.enabled == true
   and .steps.cross_platform_interop.status == "pass"
   and .inputs.run_phase4_windows_full_parity_check == false
@@ -329,6 +389,8 @@ if ! jq -e '
   .status == "fail"
   and .rc == 23
   and .inputs.dry_run == false
+  and .steps.windows_native_bootstrap_guardrails.status == "pass"
+  and .steps.windows_native_bootstrap_guardrails.rc == 0
   and .steps.windows_role_runbooks.status == "fail"
   and .steps.windows_role_runbooks.rc == 23
   and .steps.cross_platform_interop.status == "fail"
