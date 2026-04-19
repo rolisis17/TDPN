@@ -213,6 +213,44 @@ function Validate-ConnectDefaults {
   }
 }
 
+function Resolve-GoExecutable {
+  $cmd = Get-Command go -ErrorAction SilentlyContinue
+  if ($cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source) -and (Test-Path -LiteralPath $cmd.Source -PathType Leaf)) {
+    return $cmd.Source
+  }
+
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:GOROOT)) {
+    $candidates += (Join-Path $env:GOROOT "bin\go.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    $candidates += (Join-Path $env:ProgramFiles "Go\bin\go.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "Go\bin\go.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:SystemDrive)) {
+    $candidates += (Join-Path $env:SystemDrive "Go\bin\go.exe")
+  }
+
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  throw @"
+go was not found in PATH (or common install paths).
+Install Go with:
+  winget install --id GoLang.Go --exact
+Then open a new terminal and rerun:
+  .\scripts\windows\local_api_session.ps1
+"@
+}
+
 if ($CommandTimeoutSec -lt 5) {
   throw "-CommandTimeoutSec must be >= 5"
 }
@@ -297,13 +335,11 @@ if ($DryRun) {
   exit 0
 }
 
-if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "go was not found in PATH."
-}
+$goExe = Resolve-GoExecutable
 
 Push-Location $repoRoot.Path
 try {
-  & go @goArgs
+  & $goExe @goArgs
   if ($LASTEXITCODE -ne 0) {
     throw "local-api session exited with code $LASTEXITCODE"
   }

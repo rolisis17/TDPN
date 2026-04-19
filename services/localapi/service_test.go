@@ -2746,15 +2746,17 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 	svc.gpmManifestMaxAge = 24 * time.Hour
 
 	bootstrapDirectory := "https://directory.globalprivatemesh.example:8081"
+	now := time.Now().UTC()
 	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"version":               1,
-			"generated_at_utc":      time.Now().UTC().Format(time.RFC3339),
-			"expires_at_utc":        time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
 			"bootstrap_directories": []string{bootstrapDirectory},
 		})
 	}))
 	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
 	svc.gpmManifestURL = manifestServer.URL
 
 	const token = "gpm-session-token"
@@ -2763,8 +2765,8 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 		WalletAddress:  "cosmos1registeredclient",
 		WalletProvider: "keplr",
 		Role:           "client",
-		CreatedAt:      time.Now().UTC(),
-		ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
@@ -2792,6 +2794,112 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 	}
 	if !strings.HasPrefix(session.InviteKey, "wallet:") {
 		t.Fatalf("session invite_key=%q want wallet:* fallback", session.InviteKey)
+	}
+}
+
+func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+
+	var manifestHits int
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{"https://directory.globalprivatemesh.example:8081"},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = "https://pinned.globalprivatemesh.example:8443"
+	svc.gpmManifestURL = manifestServer.URL
+
+	const token = "gpm-session-token-mismatch"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1registeredclientmismatch",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusBadGateway {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "host mismatch") || !strings.Contains(errMsg, "pinned gpm main domain") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+	if manifestHits != 0 {
+		t.Fatalf("expected manifest fetch to be blocked before contact, got %d hits", manifestHits)
+	}
+}
+
+func TestGPMClientRegisterRejectsPinnedCacheFallbackSourceHostMismatch(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	cachePath := svc.gpmManifestCache
+	cache := gpmBootstrapManifestCacheFile{
+		Version:      1,
+		FetchedAtUTC: now.Format(time.RFC3339),
+		SourceURL:    "https://cache-source.globalprivatemesh.example:8443/v1/bootstrap/manifest",
+		Manifest: gpmBootstrapManifest{
+			Version:               1,
+			GeneratedAtUTC:        now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:          now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	const token = "gpm-session-token-cache-mismatch"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1cachemismatch",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusBadGateway {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "cached manifest source host mismatch") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+	if !strings.Contains(errMsg, "pinned gpm main domain") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 }
 

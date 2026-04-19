@@ -57,6 +57,7 @@ Remote hardening guardrails:
   - `https` scheme
 - enabling desktop mutation actions (`TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` or `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) requires `TDPN_LOCAL_API_AUTH_BEARER` even for loopback targets
 - `TDPN_LOCAL_API_AUTH_BEARER` must be a single-line token with no whitespace/control characters and only token68 chars (`A-Za-z0-9-._~+/=`); desktop rejects invalid values
+- if `GPM_MAIN_DOMAIN` (legacy alias `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host; cache fallback checks the cached manifest source URL host too. This hardening is skipped when main domain is unset for dev compatibility, and it complements existing signature verification and expiry checks.
 - `control_connect` bootstrap URL validation allows `http://` only for literal loopback IPs (`127.0.0.1` / `::1`); `http://localhost:...` is rejected
 - desktop response rendering strips unbounded `output`/`raw` fields and redacts secret-like keys (including snake/camel/compact forms such as `accessToken`, `clientSecret`, `refreshToken`, `private_key`, `invite_key`, `api_key`)
 

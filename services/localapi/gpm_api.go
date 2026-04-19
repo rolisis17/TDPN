@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	urlpkg "net/url"
 	"os"
@@ -867,6 +868,19 @@ func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapMan
 	if manifestURL == "" {
 		return gpmBootstrapManifest{}, "", false, errors.New("gpm manifest url is not configured")
 	}
+	pinnedHost, err := s.pinnedGPMMainDomainHost()
+	if err != nil {
+		return gpmBootstrapManifest{}, "", false, err
+	}
+	if pinnedHost != "" {
+		manifestHost, err := normalizeHTTPHost(manifestURL)
+		if err != nil {
+			return gpmBootstrapManifest{}, "", false, fmt.Errorf("gpm manifest url is invalid for pinned gpm main domain host %q: %w", pinnedHost, err)
+		}
+		if manifestHost != pinnedHost {
+			return gpmBootstrapManifest{}, "", false, fmt.Errorf("gpm manifest url host mismatch: got %q, pinned gpm main domain host %q; update GPM_MAIN_DOMAIN or GPM_BOOTSTRAP_MANIFEST_URL", manifestHost, pinnedHost)
+		}
+	}
 	manifest, signatureVerified, err := s.fetchRemoteManifest(ctx, manifestURL)
 	if err == nil {
 		_ = s.writeBootstrapManifestCache(manifest, signatureVerified)
@@ -1021,10 +1035,52 @@ func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, erro
 	if time.Since(fetchedAt) > s.gpmManifestMaxAge {
 		return gpmBootstrapManifest{}, false, errors.New("cached manifest is stale")
 	}
+	pinnedHost, err := s.pinnedGPMMainDomainHost()
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	if pinnedHost != "" {
+		cacheSourceHost, hostErr := normalizeHTTPHost(strings.TrimSpace(cache.SourceURL))
+		if hostErr != nil {
+			return gpmBootstrapManifest{}, false, fmt.Errorf("cached manifest source url is invalid for pinned gpm main domain host %q: %w", pinnedHost, hostErr)
+		}
+		if cacheSourceHost != pinnedHost {
+			return gpmBootstrapManifest{}, false, fmt.Errorf("cached manifest source host mismatch: got %q, pinned gpm main domain host %q; clear the cache or refresh it from the pinned domain", cacheSourceHost, pinnedHost)
+		}
+	}
 	if strings.TrimSpace(s.gpmManifestHMACKey) != "" && !cache.SignatureVerified {
 		return gpmBootstrapManifest{}, false, errors.New("cached manifest is not signature-verified")
 	}
 	return normalizeBootstrapManifest(cache.Manifest), cache.SignatureVerified, nil
+}
+
+func (s *Service) pinnedGPMMainDomainHost() (string, error) {
+	mainDomain := strings.TrimSpace(s.gpmMainDomain)
+	if mainDomain == "" {
+		return "", nil
+	}
+	return normalizeHTTPHost(mainDomain)
+}
+
+func normalizeHTTPHost(raw string) (string, error) {
+	parsed, err := parseAbsoluteHTTPURL(raw)
+	if err != nil {
+		return "", err
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return "", errors.New("url host is empty")
+	}
+	port := strings.TrimSpace(parsed.Port())
+	if port == "" {
+		switch strings.ToLower(parsed.Scheme) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 func parseAbsoluteHTTPURL(raw string) (*urlpkg.URL, error) {

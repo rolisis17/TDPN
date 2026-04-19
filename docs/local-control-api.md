@@ -32,6 +32,11 @@ Defaults:
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
   - default remains legacy-compatible unless this flag is explicitly enabled
+- main-domain pinning for manifest trust:
+  - when `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host
+  - cache fallback uses the same host check against the cached manifest source URL
+  - this complements existing signature verification and expiry checks
+  - if the main domain is unset, this hardening is skipped for dev compatibility
 
 Runner behavior:
 - Linux/macOS default: execute `LOCAL_CONTROL_API_SCRIPT` directly.
