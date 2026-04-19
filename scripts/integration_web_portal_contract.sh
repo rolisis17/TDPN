@@ -22,6 +22,16 @@ PORTAL_HTML="apps/web/portal.html"
 PORTAL_JS="apps/web/assets/portal.js"
 README_FILE="apps/web/README.md"
 
+require_regex_marker() {
+  local file="$1"
+  local pattern="$2"
+  local description="$3"
+  if ! grep -qE "$pattern" "$file"; then
+    echo "web portal contract failed: missing ${description} marker /${pattern}/ in $file"
+    exit 1
+  fi
+}
+
 # Client-readiness UI markers in portal scaffold.
 if ! grep -qF 'id="status_banner"' "$PORTAL_HTML"; then
   echo "web portal contract failed: missing readiness banner marker id=status_banner in $PORTAL_HTML"
@@ -99,6 +109,34 @@ for marker in "${JS_MARKERS[@]}"; do
 done
 echo "[web-portal] portal JS readiness compute/render/gating markers are present"
 
+# Wallet-extension assisted signing markers.
+WALLET_UI_MARKERS=(
+  'id="wallet_chain_id"'
+  'id="challenge_message"'
+  'id="wallet_sign_btn"'
+  'id="wallet_signin_btn"'
+  'id="signature"'
+)
+for pattern in "${WALLET_UI_MARKERS[@]}"; do
+  require_regex_marker "$PORTAL_HTML" "$pattern" "wallet-assist UI"
+done
+
+WALLET_JS_MARKERS=(
+  'function[[:space:]]+normalizeWalletProviderValue[[:space:]]*\('
+  'function[[:space:]]+resolveWalletExtensionClient[[:space:]]*\('
+  'async[[:space:]]+function[[:space:]]+signChallengeWithWalletExtension[[:space:]]*\('
+  'async[[:space:]]+function[[:space:]]+requestWalletSignIn[[:space:]]*\('
+  'signArbitrary[[:space:]]*\('
+  'byId\("wallet_sign_btn"\)[[:space:]]*\.addEventListener\("click"'
+  'byId\("wallet_signin_btn"\)[[:space:]]*\.addEventListener\("click"'
+  'byId\("signature"\)[[:space:]]*\.value[[:space:]]*=[[:space:]]*signature'
+  'byId\("signature"\)[[:space:]]*\.value[[:space:]]*\.trim\(\)'
+)
+for pattern in "${WALLET_JS_MARKERS[@]}"; do
+  require_regex_marker "$PORTAL_JS" "$pattern" "wallet-assist JS"
+done
+echo "[web-portal] wallet-extension assisted signing markers are present"
+
 if ! grep -qF 'client_tab_visible' "$README_FILE"; then
   echo "web portal contract failed: README must mention readiness.client_tab_visible"
   exit 1
@@ -111,6 +149,18 @@ if ! grep -qiE 'register(ing|ed)? client|client registration|register-client' "$
   echo "web portal contract failed: README must describe client registration lock/readiness behavior"
   exit 1
 fi
-echo "[web-portal] README readiness-field notes are present"
+if ! grep -qiE 'wallet-?extension.*(keplr|leap)|(keplr|leap).*wallet-?extension' "$README_FILE"; then
+  echo "web portal contract failed: README must mention wallet-extension assisted signing for Keplr/Leap"
+  exit 1
+fi
+if ! grep -qF 'signArbitrary' "$README_FILE"; then
+  echo "web portal contract failed: README must mention signArbitrary-assisted signing flow"
+  exit 1
+fi
+if ! grep -qiE 'manual (signature|signing).*(fallback|retained)|fallback.*manual (signature|signing)' "$README_FILE"; then
+  echo "web portal contract failed: README must mention retained manual signature fallback"
+  exit 1
+fi
+echo "[web-portal] README readiness + wallet-signing notes are present"
 
 echo "web portal contract integration check ok"

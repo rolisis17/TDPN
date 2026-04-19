@@ -99,12 +99,26 @@
             </select>
           </label>
           <label>
+            Wallet chain ID
+            <input id="wallet_chain_id" placeholder="cosmoshub-4" spellcheck="false" autocomplete="off" />
+          </label>
+          <label>
             Wallet address
             <input id="wallet_address" placeholder="cosmos1..." />
           </label>
           <label>
             Challenge ID
             <input id="challenge_id" placeholder="gpm-chal-..." />
+          </label>
+          <label>
+            Challenge message
+            <input
+              id="challenge_message"
+              placeholder="request challenge to populate message"
+              readonly
+              spellcheck="false"
+              autocomplete="off"
+            />
           </label>
           <label>
             Signature
@@ -138,6 +152,8 @@
         </div>
         <div class="actions">
           <button class="btn secondary" id="challenge_btn">Request Challenge</button>
+          <button class="btn secondary" id="wallet_sign_btn">Sign Challenge (Wallet)</button>
+          <button class="btn secondary" id="wallet_signin_btn">Sign + Verify (Wallet)</button>
           <button class="btn primary" id="signin_btn">Verify + Create Session</button>
           <button class="btn secondary" id="session_btn">Refresh Session</button>
           <button class="btn secondary" id="session_rotate_btn">Rotate Session</button>
