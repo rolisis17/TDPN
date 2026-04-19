@@ -176,18 +176,20 @@
               <option value="3hop">3hop (private)</option>
             </select>
           </label>
-          <label>
-            <input id="compat_override" type="checkbox" />
-            Enable compatibility override (manual bootstrap/invite)
-          </label>
-          <label>
-            Bootstrap directory (optional)
-            <input id="bootstrap_directory" placeholder="from manifest or leave blank" />
-          </label>
-          <label>
-            Invite/subject (optional)
-            <input id="invite_key" placeholder="optional compatibility invite" />
-          </label>
+          <div id="compat_override_section" hidden>
+            <label>
+              <input id="compat_override" type="checkbox" />
+              Enable compatibility override (manual bootstrap/invite)
+            </label>
+            <label>
+              Bootstrap directory (optional)
+              <input id="bootstrap_directory" placeholder="from manifest or leave blank" />
+            </label>
+            <label>
+              Invite/subject (optional)
+              <input id="invite_key" placeholder="optional compatibility invite" />
+            </label>
+          </div>
         </div>
         <p id="compat_override_hint" class="helper-copy">
           Compatibility override is off by default. Keep it off for standard session-based registration.

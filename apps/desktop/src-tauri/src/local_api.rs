@@ -18,6 +18,7 @@ pub struct LocalApiConfig {
     pub allow_update_mutations: bool,
     pub allow_service_mutations: bool,
     pub connect_require_session: bool,
+    pub allow_legacy_connect_override: bool,
 }
 
 impl LocalApiConfig {
@@ -48,6 +49,11 @@ impl LocalApiConfig {
         let connect_require_session = parse_optional_bool_env_any(&[
             "GPM_LOCAL_API_CONNECT_REQUIRE_SESSION",
             "TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION",
+        ])?
+        .unwrap_or(false);
+        let allow_legacy_connect_override = parse_optional_bool_env_any(&[
+            "GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
+            "TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
         ])?
         .unwrap_or(false);
 
@@ -124,6 +130,7 @@ impl LocalApiConfig {
             allow_update_mutations,
             allow_service_mutations,
             connect_require_session,
+            allow_legacy_connect_override,
         })
     }
 
@@ -150,6 +157,8 @@ pub struct LocalApiClient {
 pub struct RuntimePolicyConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connect_require_session: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_legacy_connect_override: Option<bool>,
 }
 
 impl RuntimePolicyConfig {
@@ -164,8 +173,21 @@ impl RuntimePolicyConfig {
             .or_else(|| parse_bool_like_json(payload.get("connectRequireSession")))
             .or_else(|| parse_bool_like_json(data_config.and_then(|value| value.get("connect_require_session"))))
             .or_else(|| parse_bool_like_json(data_config.and_then(|value| value.get("connectRequireSession"))));
+        let allow_legacy_connect_override = parse_bool_like_json(
+            config.and_then(|value| value.get("allow_legacy_connect_override")),
+        )
+        .or_else(|| parse_bool_like_json(config.and_then(|value| value.get("allowLegacyConnectOverride"))))
+        .or_else(|| parse_bool_like_json(payload.get("allow_legacy_connect_override")))
+        .or_else(|| parse_bool_like_json(payload.get("allowLegacyConnectOverride")))
+        .or_else(|| parse_bool_like_json(
+            data_config.and_then(|value| value.get("allow_legacy_connect_override")),
+        ))
+        .or_else(|| parse_bool_like_json(
+            data_config.and_then(|value| value.get("allowLegacyConnectOverride")),
+        ));
         Self {
             connect_require_session,
+            allow_legacy_connect_override,
         }
     }
 }
@@ -787,6 +809,8 @@ mod tests {
                 ("TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS", None),
                 ("TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION", None),
                 ("GPM_LOCAL_API_CONNECT_REQUIRE_SESSION", None),
+                ("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", None),
+                ("GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", None),
             ],
             || {
                 let cfg = LocalApiConfig::from_env().expect("from_env");
@@ -797,6 +821,7 @@ mod tests {
                 assert!(!cfg.allow_update_mutations);
                 assert!(!cfg.allow_service_mutations);
                 assert!(!cfg.connect_require_session);
+                assert!(!cfg.allow_legacy_connect_override);
             },
         );
     }
@@ -891,6 +916,7 @@ mod tests {
             allow_update_mutations: false,
             allow_service_mutations: false,
             connect_require_session: false,
+            allow_legacy_connect_override: false,
         };
         assert_eq!(cfg.redacted_base_url(), "https://example.com:8443");
     }
@@ -1163,6 +1189,40 @@ mod tests {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
                 assert!(
                     err.contains("invalid TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION value"),
+                    "{err}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_parses_allow_legacy_connect_override_flags() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("http://127.0.0.1:8095")),
+                ("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", Some("0")),
+                ("GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", Some("1")),
+            ],
+            || {
+                let cfg = LocalApiConfig::from_env().expect("from_env");
+                assert!(cfg.allow_legacy_connect_override);
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_allow_legacy_connect_override_flag_value() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("TDPN_LOCAL_API_BASE_URL", Some("http://127.0.0.1:8095")),
+                ("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", Some("maybe")),
+            ],
+            || {
+                let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
+                assert!(
+                    err.contains("invalid TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE value"),
                     "{err}"
                 );
             },

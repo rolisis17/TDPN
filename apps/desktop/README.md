@@ -40,7 +40,7 @@ Defaults expected by this app:
 - optional daemon production-hardening mode for connect:
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` rejects manual `bootstrap_directory`/`invite_key` overrides and requires a registered `session_token`
-  - default remains legacy-compatible unless explicitly enabled
+  - desktop UI now defaults to hiding legacy bootstrap/invite controls unless explicitly allowed
 
 Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatibility):
 - `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`)
@@ -49,6 +49,7 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`; required when remote mode targets non-loopback URLs)
 - `GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1`; opt-in for desktop `control_update` action)
 - `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`; opt-in for desktop service start/stop/restart actions)
+- `GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE=1`; re-enables manual bootstrap/invite compatibility controls in desktop UI for support/dev flows)
 - desktop startup now best-effort probes daemon runtime config (`GET /v1/config` via `control_runtime_config`) and uses runtime `connect_require_session` as the connect-lock authority when present; otherwise it keeps env default behavior
 - GPM server lifecycle actions (`POST /v1/gpm/service/start|stop|restart`) require an approved `operator` or `admin` session from `POST /v1/gpm/session`; `client` sessions cannot run server lifecycle mutations.
 - Desktop onboarding progress tracking uses `POST /v1/gpm/onboarding/client/status` to confirm whether the active session is truly registered (`registered|not_registered`).

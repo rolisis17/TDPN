@@ -369,6 +369,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv(allowInsecureHTTPEnv, "")
 		t.Setenv(maxCommandsEnv, "")
 		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
+		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 
 		s := New()
 		if s.addr != defaultAddr {
@@ -401,6 +403,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.authToken != "" {
 			t.Fatalf("authToken=%q want empty", s.authToken)
 		}
+		if s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
 	})
 
 	t.Run("overrides and timeout validation", func(t *testing.T) {
@@ -419,6 +424,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv(allowInsecureHTTPEnv, "1")
 		t.Setenv(maxCommandsEnv, "9")
 		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", " local-secret ")
+		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
 
 		s := New()
 		if s.addr != "0.0.0.0:9999" {
@@ -447,6 +453,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.authToken != "local-secret" {
 			t.Fatalf("authToken=%q want=%q", s.authToken, "local-secret")
+		}
+		if !s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=true", s.gpmAllowLegacyConnectOverride)
 		}
 
 		t.Setenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC", "4")
@@ -1264,6 +1273,7 @@ func TestHandleConfig(t *testing.T) {
 		svc.addr = "0.0.0.0:8095"
 		svc.authToken = "cfg-secret"
 		svc.gpmConnectRequireSession = true
+		svc.gpmAllowLegacyConnectOverride = true
 		svc.gpmMainDomain = "https://gpm.example"
 		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
 		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
@@ -1282,6 +1292,9 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["connect_require_session"].(bool); !got {
 			t.Fatalf("connect_require_session=%v want=true", configMap["connect_require_session"])
+		}
+		if got, _ := configMap["allow_legacy_connect_override"].(bool); !got {
+			t.Fatalf("allow_legacy_connect_override=%v want=true", configMap["allow_legacy_connect_override"])
 		}
 		if got, _ := configMap["gpm_main_domain"].(string); got != "https://gpm.example" {
 			t.Fatalf("gpm_main_domain=%q want=%q", got, "https://gpm.example")

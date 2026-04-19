@@ -29,6 +29,7 @@ struct ControlConfig {
     allow_update_mutations: bool,
     allow_service_mutations: bool,
     connect_require_session: bool,
+    allow_legacy_connect_override: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     update_channel: Option<String>,
     update_feed_configured: bool,
@@ -44,6 +45,8 @@ struct RuntimePolicyView {
     #[serde(skip_serializing_if = "Option::is_none")]
     connect_require_session: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    allow_legacy_connect_override: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     note: Option<String>,
 }
 
@@ -58,6 +61,7 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
         allow_update_mutations: cfg.allow_update_mutations,
         allow_service_mutations: cfg.allow_service_mutations,
         connect_require_session: cfg.connect_require_session,
+        allow_legacy_connect_override: cfg.allow_legacy_connect_override,
         update_channel: optional_env_any(&["GPM_DESKTOP_UPDATE_CHANNEL", "TDPN_DESKTOP_UPDATE_CHANNEL"]),
         update_feed_configured: optional_env_any(&[
             "GPM_DESKTOP_UPDATE_FEED_CONFIGURED",
@@ -79,8 +83,10 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
     let view = match state.local_api.get_runtime_policy_config().await {
         Ok(RuntimePolicyConfig {
             connect_require_session,
+            allow_legacy_connect_override,
         }) => {
-            let has_runtime_policy = connect_require_session.is_some();
+            let has_runtime_policy =
+                connect_require_session.is_some() || allow_legacy_connect_override.is_some();
             RuntimePolicyView {
                 available: true,
                 policy_source: if has_runtime_policy {
@@ -89,10 +95,14 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
                     "env_default".to_string()
                 },
                 connect_require_session,
+                allow_legacy_connect_override,
                 note: if has_runtime_policy {
                     None
                 } else {
-                    Some("runtime config missing connect_require_session; using env default".to_string())
+                    Some(
+                        "runtime config missing policy flags (connect_require_session/allow_legacy_connect_override); using env default"
+                            .to_string(),
+                    )
                 },
             }
         }
@@ -100,6 +110,7 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
             available: false,
             policy_source: "env_default".to_string(),
             connect_require_session: None,
+            allow_legacy_connect_override: None,
             note: Some("runtime config unavailable; using env default".to_string()),
         },
     };

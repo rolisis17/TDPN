@@ -32,6 +32,9 @@ Defaults:
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
   - default remains legacy-compatible unless this flag is explicitly enabled
+  - optional desktop/web compatibility-control gate:
+    - `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=1` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE=1`)
+    - when disabled (default), UI compatibility controls for manual bootstrap/invite overrides are hidden by policy
 - main-domain pinning for manifest trust:
   - when `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host
   - cache fallback uses the same host check against the cached manifest source URL
@@ -144,6 +147,7 @@ If auth is required and missing/invalid, the API returns `401`.
   "ok": true,
   "config": {
     "connect_require_session": true,
+    "allow_legacy_connect_override": false,
     "gpm_main_domain": "https://globalprivatemesh.net",
     "gpm_manifest_url": "https://globalprivatemesh.net/v1/bootstrap/manifest",
     "gpm_manifest_cache_path": ".easy-node-logs/gpm_bootstrap_manifest_cache.json",
@@ -177,6 +181,7 @@ Notes:
 - loopback-only developer bootstrap may use `http://127.0.0.1:...` or `http://[::1]:...` when explicitly intended.
 - `http://localhost:...` is intentionally rejected by desktop validation; use literal loopback IPs to avoid hostname/DNS ambiguity.
 - production hardening mode (`GPM_CONNECT_REQUIRE_SESSION=1`, legacy `TDPN_CONNECT_REQUIRE_SESSION=1`) requires `session_token` and rejects manual `bootstrap_directory`/`invite_key` request overrides.
+- UI compatibility controls for manual `bootstrap_directory`/`invite_key` overrides are policy-gated by `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE`); default is hidden/disabled.
 - when hardening mode is not enabled (default), legacy `bootstrap_directory` + `invite_key` behavior remains available.
 
 Behavior:

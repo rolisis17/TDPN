@@ -30,6 +30,7 @@ const auditOffsetEl = byId("audit_offset");
 const auditEventEl = byId("audit_event");
 const auditWalletAddressEl = byId("audit_wallet_address");
 const auditOrderEl = byId("audit_order");
+const compatOverrideSectionEl = document.getElementById("compat_override_section");
 const compatOverrideEl = byId("compat_override");
 const compatOverrideHintEl = byId("compat_override_hint");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
@@ -77,6 +78,7 @@ let selectedApplicationUpdatedAtUtc = "";
 let serverReadiness = null;
 let clientRegistered = false;
 let connectRequireSession = false;
+let allowLegacyConnectOverride = false;
 let operatorListActiveFilters = {
   status: "",
   search: "",
@@ -174,24 +176,50 @@ function parseConnectRequireSessionConfig(payload) {
   return parsed === true;
 }
 
+function parseAllowLegacyConnectOverrideConfig(payload) {
+  const parsed = parseBooleanLike(
+    firstDefined(
+      payload?.config?.allow_legacy_connect_override,
+      payload?.allow_legacy_connect_override,
+      payload?.config?.allowLegacyConnectOverride,
+      payload?.allowLegacyConnectOverride
+    )
+  );
+  return parsed === true;
+}
+
 function compatibilityOverrideEnabled() {
-  return compatOverrideEl.checked === true && connectRequireSession !== true;
+  return allowLegacyConnectOverride === true && compatOverrideEl.checked === true && connectRequireSession !== true;
 }
 
 function refreshCompatibilityOverrideControls() {
+  if (!allowLegacyConnectOverride && compatOverrideEl.checked) {
+    compatOverrideEl.checked = false;
+  }
   if (connectRequireSession && compatOverrideEl.checked) {
     compatOverrideEl.checked = false;
   }
   const policyLocked = connectRequireSession === true;
   const overrideEnabled = compatibilityOverrideEnabled();
 
-  compatOverrideEl.disabled = policyLocked;
-  compatOverrideEl.setAttribute("aria-disabled", String(policyLocked));
+  const compatDisabled = !allowLegacyConnectOverride || policyLocked;
+  compatOverrideEl.disabled = compatDisabled;
+  compatOverrideEl.setAttribute("aria-disabled", String(compatDisabled));
 
-  bootstrapDirectoryEl.disabled = !overrideEnabled;
+  bootstrapDirectoryEl.disabled = !allowLegacyConnectOverride || !overrideEnabled;
   bootstrapDirectoryEl.setAttribute("aria-disabled", String(!overrideEnabled));
-  inviteKeyEl.disabled = !overrideEnabled;
+  inviteKeyEl.disabled = !allowLegacyConnectOverride || !overrideEnabled;
   inviteKeyEl.setAttribute("aria-disabled", String(!overrideEnabled));
+
+  if (compatOverrideSectionEl) {
+    compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;
+  }
+
+  if (!allowLegacyConnectOverride) {
+    compatOverrideHintEl.textContent =
+      "Compatibility override controls are disabled by policy. Use session-based registration.";
+    return;
+  }
 
   if (policyLocked) {
     compatOverrideHintEl.textContent =
@@ -212,11 +240,13 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
   try {
     const config = await get("/v1/config");
     connectRequireSession = parseConnectRequireSessionConfig(config);
+    allowLegacyConnectOverride = parseAllowLegacyConnectOverrideConfig(config);
     refreshCompatibilityOverrideControls();
     persistPortalState();
     return config;
   } catch (err) {
     connectRequireSession = false;
+    allowLegacyConnectOverride = false;
     refreshCompatibilityOverrideControls();
     persistPortalState();
     if (!quiet) {

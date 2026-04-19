@@ -43,6 +43,7 @@ const tabClientEl = byId("tab_client");
 const tabServerEl = byId("tab_server");
 const panelClientEl = byId("panel_client");
 const panelServerEl = byId("panel_server");
+const compatAdvancedSectionEl = document.getElementById("legacy_compat_section");
 const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
@@ -64,6 +65,8 @@ const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "appr
 const COMPAT_ADVANCED_DEFAULT_HINT = "Optional legacy fields for support-only compatibility flows.";
 const COMPAT_ADVANCED_LOCKED_HINT =
   "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
+const COMPAT_ADVANCED_DISABLED_HINT =
+  "Legacy bootstrap/invite overrides are disabled by policy in this build.";
 const STORAGE_KEYS = Object.freeze({
   sessionToken: "gpm.desktop.session_token",
   role: "gpm.desktop.role",
@@ -82,6 +85,7 @@ const state = {
   serverReadiness: null,
   clientRegistered: false,
   serviceMutationsAllowed: false,
+  allowLegacyConnectOverride: false,
   connectRequireSession: false,
   connectPolicySource: "env_default",
   manifest: null,
@@ -495,6 +499,10 @@ function formatConfigMeta(cfg) {
     "connect_require_session",
     "connectRequireSession"
   ]);
+  const allowLegacyConnectOverride = readConfigBoolean(cfg, [
+    "allow_legacy_connect_override",
+    "allowLegacyConnectOverride"
+  ]);
 
   const hints = [`contract: ${contract}`];
   if (authConfigured !== undefined) {
@@ -518,13 +526,17 @@ function formatConfigMeta(cfg) {
   if (connectRequireSession !== undefined) {
     hints.push(connectRequireSession ? "session-required connect mode" : "compat connect mode allowed");
   }
+  if (allowLegacyConnectOverride !== undefined) {
+    hints.push(allowLegacyConnectOverride ? "legacy compat controls enabled" : "legacy compat controls locked");
+  }
 
   return {
     apiLine: timeout ? `${product} API: ${baseUrl} (timeout: ${timeout}s)` : `${product} API: ${baseUrl}`,
     hintLine: hints.join(" | "),
     updateMutationsEnabled: updateMutationsEnabled === true,
     serviceMutationsEnabled: serviceMutationsEnabled === true,
-    connectRequireSession: connectRequireSession === true
+    connectRequireSession: connectRequireSession === true,
+    allowLegacyConnectOverride: allowLegacyConnectOverride === true
   };
 }
 
@@ -1376,15 +1388,30 @@ function serviceLifecycleRequest() {
 }
 
 function setCompatOverrideEnabled(enabled) {
-  const allow = !!enabled && !state.connectRequireSession;
+  const allow = !!enabled && state.allowLegacyConnectOverride && !state.connectRequireSession;
   compatEnableEl.checked = allow;
-  compatEnableEl.disabled = state.connectRequireSession;
-  bootstrapDirectoryEl.disabled = state.connectRequireSession || !allow;
-  inviteKeyEl.disabled = state.connectRequireSession || !allow;
+  compatEnableEl.disabled = !state.allowLegacyConnectOverride || state.connectRequireSession;
+  bootstrapDirectoryEl.disabled = !state.allowLegacyConnectOverride || state.connectRequireSession || !allow;
+  inviteKeyEl.disabled = !state.allowLegacyConnectOverride || state.connectRequireSession || !allow;
+}
+
+function syncCompatAdvancedVisibility() {
+  if (!compatAdvancedSectionEl) {
+    return;
+  }
+  const visible = state.allowLegacyConnectOverride;
+  compatAdvancedSectionEl.hidden = !visible;
+  if (!visible) {
+    compatAdvancedSectionEl.open = false;
+  }
 }
 
 function updateCompatOverrideHint() {
   if (!compatAdvancedHintEl) {
+    return;
+  }
+  if (!state.allowLegacyConnectOverride) {
+    compatAdvancedHintEl.textContent = COMPAT_ADVANCED_DISABLED_HINT;
     return;
   }
   compatAdvancedHintEl.textContent = state.connectRequireSession
@@ -1394,6 +1421,7 @@ function updateCompatOverrideHint() {
 
 function applyConnectModePolicy(enabled) {
   state.connectRequireSession = !!enabled;
+  syncCompatAdvancedVisibility();
   if (state.connectRequireSession) {
     bootstrapDirectoryEl.value = "";
     inviteKeyEl.value = "";
@@ -1460,7 +1488,7 @@ function connectPayload() {
     install_route: byId("install_route").checked
   };
 
-  if (!state.connectRequireSession && compatEnableEl.checked) {
+  if (state.allowLegacyConnectOverride && !state.connectRequireSession && compatEnableEl.checked) {
     const bootstrap = bootstrapDirectoryEl.value.trim();
     const invite = inviteKeyEl.value.trim();
     if (bootstrap) {
@@ -1794,7 +1822,7 @@ byId("register_client_btn").addEventListener("click", async () => {
     session_token: state.sessionToken,
     path_profile: pathProfileEl.value
   };
-  if (!state.connectRequireSession && compatEnableEl.checked) {
+  if (state.allowLegacyConnectOverride && !state.connectRequireSession && compatEnableEl.checked) {
     const bootstrap = bootstrapDirectoryEl.value.trim();
     const invite = inviteKeyEl.value.trim();
     if (bootstrap) {
@@ -1935,7 +1963,9 @@ byId("connect_btn").addEventListener("click", async () => {
   if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
     const hint = state.connectRequireSession
       ? "session_token is required in session-required connect mode; sign in first"
-      : "sign in + register client, or provide compatibility bootstrap_directory + invite";
+      : state.allowLegacyConnectOverride
+        ? "sign in + register client, or provide compatibility bootstrap_directory + invite"
+        : "sign in and register the client profile before connecting";
     print("validation", hint);
     return;
   }
@@ -2023,6 +2053,7 @@ async function init() {
     const cfg = await invoke("control_config");
     const meta = formatConfigMeta(cfg || {});
     let connectRequireSession = meta.connectRequireSession;
+    let allowLegacyConnectOverride = meta.allowLegacyConnectOverride;
     let connectPolicySource = "env_default";
     try {
       const runtimeCfg = await invoke("control_runtime_config");
@@ -2030,8 +2061,15 @@ async function init() {
         "connect_require_session",
         "connectRequireSession"
       ]);
+      const runtimeAllowLegacyConnectOverride = readConfigBoolean(runtimeCfg || {}, [
+        "allow_legacy_connect_override",
+        "allowLegacyConnectOverride"
+      ]);
       if (runtimeConnectRequireSession !== undefined) {
         connectRequireSession = runtimeConnectRequireSession;
+      }
+      if (runtimeAllowLegacyConnectOverride !== undefined) {
+        allowLegacyConnectOverride = runtimeAllowLegacyConnectOverride;
       }
       const runtimeSource = nonEmptyStringOrUndefined(runtimeCfg?.policy_source);
       if (runtimeSource === "runtime_config" || runtimeSource === "env_default") {
@@ -2043,6 +2081,7 @@ async function init() {
       connectPolicySource = "env_default";
     }
     state.connectPolicySource = connectPolicySource;
+    state.allowLegacyConnectOverride = !!allowLegacyConnectOverride;
     apiBaseEl.textContent = meta.apiLine;
     apiHintsEl.textContent = [meta.hintLine, formatConnectPolicySourceHint(connectPolicySource)]
       .filter((value) => typeof value === "string" && value.trim().length > 0)
@@ -2057,6 +2096,7 @@ async function init() {
     updateBtnEl.disabled = true;
     state.serviceMutationsAllowed = false;
     state.connectPolicySource = "env_default";
+    state.allowLegacyConnectOverride = false;
     applyConnectModePolicy(false);
     syncServerRoleLockState();
     print("init (error)", err);
