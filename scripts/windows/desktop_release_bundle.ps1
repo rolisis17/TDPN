@@ -94,6 +94,42 @@ function Validate-SigningPlaceholders {
   }
 }
 
+function Get-DesktopBuildMissingTools {
+  $missing = @()
+
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    $missing += "Node.js LTS / node"
+  }
+  if (-not (Get-Command npm -ErrorAction SilentlyContinue) -and -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+    $missing += "npm"
+  }
+  if (-not (Get-Command rustc -ErrorAction SilentlyContinue) -or -not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    $missing += "Rust toolchain (rustc + cargo)"
+  }
+
+  return @($missing)
+}
+
+function Assert-DesktopBuildTools {
+  $missing = Get-DesktopBuildMissingTools
+  if ($missing.Count -eq 0) {
+    return
+  }
+
+  $lines = @("desktop release bundle prerequisites are missing:")
+  foreach ($item in $missing) {
+    switch ($item) {
+      "Node.js LTS / node" { $lines += "- Node.js LTS / npm: install with winget install --id OpenJS.NodeJS.LTS --exact" }
+      "npm" { $lines += "- npm: reinstall or repair Node.js LTS so npm is on PATH" }
+      "Rust toolchain (rustc + cargo)" { $lines += "- Rust toolchain: install with winget install --id Rustlang.Rustup --exact" }
+      default { $lines += "- $item" }
+    }
+  }
+  $lines += "- rerun the script after the missing tools are installed"
+
+  throw ($lines -join [Environment]::NewLine)
+}
+
 function Save-ScopedEnvironment {
   param(
     [string[]]$VariableNames
@@ -207,8 +243,13 @@ try {
     return
   }
 
-  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    throw "npm was not found in PATH. Install Node.js/npm first."
+  Assert-DesktopBuildTools
+  $npmPath = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if ($null -eq $npmPath) {
+    $npmPath = Get-Command npm -ErrorAction SilentlyContinue
+  }
+  if ($null -eq $npmPath) {
+    throw "npm was not found in PATH after preflight. Install Node.js LTS / npm and rerun the script."
   }
 
   Push-Location $desktopDir
@@ -219,7 +260,7 @@ try {
     }
 
     Write-Host "[desktop-release-bundle] running: npm $($npmArgs -join ' ')"
-    & npm @npmArgs
+    & $npmPath.Source @npmArgs
     $rc = $LASTEXITCODE
     if ($rc -ne 0) {
       throw "tauri build failed with exit code $rc"

@@ -256,6 +256,11 @@ func (s *Service) handleGPMAuthChallenge(w http.ResponseWriter, r *http.Request)
 		ExpiresAt:      expires,
 	}
 	s.gpmState.putChallenge(challenge)
+	s.appendGPMAudit("auth_challenge_issued", map[string]any{
+		"wallet_address":  challenge.WalletAddress,
+		"wallet_provider": challenge.WalletProvider,
+		"challenge_id":    challenge.ChallengeID,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,
 		"challenge_id":    challenge.ChallengeID,
@@ -321,6 +326,12 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 		session.ChainOperatorID = app.ChainOperatorID
 	}
 	s.gpmState.putSession(session)
+	s.persistGPMStateBestEffort("auth_verify")
+	s.appendGPMAudit("auth_verified", map[string]any{
+		"wallet_address":  session.WalletAddress,
+		"wallet_provider": session.WalletProvider,
+		"role":            session.Role,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
 		"session_token": session.Token,
@@ -408,6 +419,13 @@ func (s *Service) handleGPMClientRegister(w http.ResponseWriter, r *http.Request
 	session.BootstrapDirectory = bootstrapDirectory
 	session.InviteKey = inviteKey
 	s.gpmState.putSession(session)
+	s.persistGPMStateBestEffort("client_register")
+	s.appendGPMAudit("client_registered", map[string]any{
+		"wallet_address":      session.WalletAddress,
+		"wallet_provider":     session.WalletProvider,
+		"bootstrap_directory": bootstrapDirectory,
+		"path_profile":        normalizeGPMPathProfile(in.PathProfile),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":                 true,
 		"source":             source,
@@ -454,6 +472,12 @@ func (s *Service) handleGPMOperatorApply(w http.ResponseWriter, r *http.Request)
 		UpdatedAt:       time.Now().UTC(),
 	}
 	s.gpmState.upsertOperator(app)
+	s.persistGPMStateBestEffort("operator_apply")
+	s.appendGPMAudit("operator_application_submitted", map[string]any{
+		"wallet_address":    app.WalletAddress,
+		"chain_operator_id": app.ChainOperatorID,
+		"status":            app.Status,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
 }
 
@@ -544,6 +568,14 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	s.gpmState.mu.Unlock()
+	s.persistGPMStateBestEffort("operator_approve")
+	s.appendGPMAudit("operator_application_decided", map[string]any{
+		"wallet_address":    app.WalletAddress,
+		"chain_operator_id": app.ChainOperatorID,
+		"approved":          in.Approved,
+		"status":            app.Status,
+		"reason":            app.Reason,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": serializeGPMOperator(app)})
 }

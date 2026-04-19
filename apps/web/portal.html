@@ -23,18 +23,24 @@
         <div class="fields">
           <label>
             API base URL
-            <input id="api_base" value="http://127.0.0.1:8095" />
+            <input id="api_base" value="http://127.0.0.1:8095" spellcheck="false" autocomplete="off" />
           </label>
           <label>
             Session token
-            <input id="session_token" placeholder="session token after sign in" />
+            <input id="session_token" placeholder="session token after sign in" spellcheck="false" autocomplete="off" />
           </label>
           <label>
             Current role
             <input id="role" value="client" readonly />
           </label>
         </div>
-        <div id="status_line" class="status">Ready</div>
+        <div id="status_banner" class="status-banner" role="status" aria-live="polite">
+          <div class="status-banner__label">Portal status</div>
+          <div id="status_line" class="status">
+            <strong id="status_title">Ready</strong>
+            <span id="status_detail">Set an absolute API base, then request a challenge or refresh the session.</span>
+          </div>
+        </div>
       </section>
 
       <section class="card">
@@ -119,6 +125,16 @@
       <section class="card">
         <h2>Output</h2>
         <pre id="output"></pre>
+      </section>
+
+      <section class="card help-card">
+        <h2>Troubleshooting</h2>
+        <ul class="help-list">
+          <li>Use an absolute API base like <code>http://127.0.0.1:8095</code> or <code>https://api.example.com</code>.</li>
+          <li>Make sure the local GPM API is running before requesting a challenge or refreshing the session.</li>
+          <li>If sign-in stalls, request a new challenge, paste the latest signature, then retry verification.</li>
+          <li>Session token updates are applied automatically after successful sign-in and client registration.</li>
+        </ul>
       </section>
     </main>
 

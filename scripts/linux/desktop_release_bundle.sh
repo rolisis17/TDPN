@@ -24,6 +24,18 @@ Notes:
 USAGE
 }
 
+require_tool() {
+  local tool_name="$1"
+  local install_hint="$2"
+  if ! command -v "$tool_name" >/dev/null 2>&1; then
+    echo "desktop release bundle prerequisite missing: $tool_name" >&2
+    if [[ -n "$install_hint" ]]; then
+      echo "  install hint: $install_hint" >&2
+    fi
+    exit 1
+  fi
+}
+
 to_lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -217,6 +229,11 @@ if [[ ! -f "$DESKTOP_DIR/package.json" ]]; then
   echo "apps/desktop/package.json not found at expected path: $DESKTOP_DIR" >&2
   exit 1
 fi
+
+require_tool node "install Node.js LTS"
+require_tool npm "install Node.js LTS so npm is on PATH"
+require_tool rustc "install Rust with rustup"
+require_tool cargo "install Rust with rustup"
 
 validate_update_feed_url "$update_feed_url"
 validate_signing_placeholders "$signing_identity" "$signing_cert_path" "$signing_cert_password"

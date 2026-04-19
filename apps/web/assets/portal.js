@@ -7,14 +7,28 @@ function byId(id) {
 }
 
 const outputEl = byId("output");
+const statusBannerEl = byId("status_banner");
+const statusTitleEl = byId("status_title");
+const statusDetailEl = byId("status_detail");
 const statusLineEl = byId("status_line");
+const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 
-function setStatus(kind, message) {
+function setBusy(isBusy) {
+  document.body.classList.toggle("is-busy", isBusy);
+  for (const button of actionButtons) {
+    button.disabled = isBusy;
+    button.setAttribute("aria-disabled", String(isBusy));
+  }
+}
+
+function setStatus(kind, title, detail) {
+  statusBannerEl.dataset.kind = kind || "idle";
   statusLineEl.classList.remove("good", "warn", "bad");
   if (kind) {
     statusLineEl.classList.add(kind);
   }
-  statusLineEl.textContent = message;
+  statusTitleEl.textContent = title;
+  statusDetailEl.textContent = detail;
 }
 
 function print(label, payload) {
@@ -23,7 +37,21 @@ function print(label, payload) {
 }
 
 function apiBase() {
-  return byId("api_base").value.trim().replace(/\/+$/, "");
+  const raw = byId("api_base").value.trim();
+  if (!raw) {
+    throw new Error("API base URL is required.");
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error("API base URL must be an absolute http(s) URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("API base URL must start with http:// or https://.");
+  }
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  return pathname && pathname !== "/" ? `${parsed.origin}${pathname}` : parsed.origin;
 }
 
 async function post(path, body) {
@@ -90,14 +118,17 @@ function readWalletPayload() {
 }
 
 async function run(label, fn) {
-  setStatus("warn", `Running ${label}...`);
+  setBusy(true);
+  setStatus("warn", `${label} in progress`, "Please wait while the portal completes the request.");
   try {
     const result = await fn();
     print(label, result);
-    setStatus("good", `${label} completed`);
+    setStatus("good", `${label} completed`, "The request finished successfully.");
   } catch (err) {
     print(`${label} (error)`, String(err && err.message ? err.message : err));
-    setStatus("bad", `${label} failed`);
+    setStatus("bad", `${label} failed`, String(err && err.message ? err.message : err));
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -195,4 +226,4 @@ byId("approve_operator_btn").addEventListener("click", () =>
   })
 );
 
-setStatus("good", "Portal ready");
+setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");

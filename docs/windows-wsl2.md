@@ -147,11 +147,20 @@ scripts\windows\desktop_native_bootstrap.cmd -Mode run-full
 ```
 
 Desktop bootstrap notes:
-- uses process-scope execution policy bypass (no permanent policy change)
+- use the `.cmd` wrapper if PowerShell policy is locked down; it launches PowerShell with process-scope execution policy bypass (no permanent policy change)
 - refreshes PATH for current session
 - can install missing Go/Node/Rust/Git Bash dependencies with `winget`
 - uses `npm.cmd` to avoid `npm.ps1` execution policy failures
 - modes: `check`, `bootstrap`, `run-api`, `run-desktop`, `run-full`
+
+First-run remediation tips:
+- run `./scripts/windows/desktop_native_bootstrap.cmd -Mode bootstrap -InstallMissing` on a fresh machine
+- if the bootstrap report says `GoLang.Go`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, or `Git.Git` is missing, rerun with `-InstallMissing` or install that winget package manually
+- `run-api` needs Go and Git for Windows bash.exe
+- `run-desktop` needs Node.js LTS / npm and the Rust toolchain
+- `run-full` needs all of the above
+- if `winget` is missing, install App Installer first and rerun the bootstrap
+- the desktop release bundle scaffold also expects Node.js LTS / npm and Rustup before `tauri build`
 
 ## 5) 3-machine beta test
 

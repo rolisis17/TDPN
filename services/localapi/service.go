@@ -78,6 +78,8 @@ type Service struct {
 	gpmManifestHMACKey  string
 	gpmRoleDefault      string
 	gpmApprovalToken    string
+	gpmStateStorePath   string
+	gpmAuditLogPath     string
 	gpmState            *gpmRuntimeState
 }
 
@@ -219,8 +221,18 @@ func New() *Service {
 		"TDPN_OPERATOR_APPROVAL_TOKEN",
 		"",
 	)
+	gpmStateStorePath := preferredEnvValue(
+		"GPM_STATE_STORE_PATH",
+		"TDPN_STATE_STORE_PATH",
+		".easy-node-logs/gpm_state.json",
+	)
+	gpmAuditLogPath := preferredEnvValue(
+		"GPM_AUDIT_LOG_PATH",
+		"TDPN_AUDIT_LOG_PATH",
+		".easy-node-logs/gpm_audit.jsonl",
+	)
 
-	return &Service{
+	svc := &Service{
 		addr:                addr,
 		scriptPath:          scriptPath,
 		commandRunner:       commandRunner,
@@ -242,8 +254,12 @@ func New() *Service {
 		gpmManifestHMACKey:  gpmManifestHMACKey,
 		gpmRoleDefault:      gpmRoleDefault,
 		gpmApprovalToken:    gpmApprovalToken,
+		gpmStateStorePath:   strings.TrimSpace(gpmStateStorePath),
+		gpmAuditLogPath:     strings.TrimSpace(gpmAuditLogPath),
 		gpmState:            newGPMRuntimeState(),
 	}
+	svc.loadGPMStateBestEffort()
+	return svc
 }
 
 func (s *Service) Run(ctx context.Context) error {

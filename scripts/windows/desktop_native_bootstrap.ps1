@@ -139,6 +139,67 @@ function Show-ToolReport {
   Write-Host ("  winget: " + $(if ($Report.winget) { $Report.winget } else { "missing" }))
 }
 
+function Get-DependencyLabel {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  switch ($PackageId) {
+    "GoLang.Go" { return "Go" }
+    "OpenJS.NodeJS.LTS" { return "Node.js LTS / npm" }
+    "Rustlang.Rustup" { return "Rust toolchain (rustc + cargo)" }
+    "Git.Git" { return "Git for Windows bash.exe" }
+    default { return $PackageId }
+  }
+}
+
+function Get-DependencyInstallHint {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  switch ($PackageId) {
+    "GoLang.Go" { return "winget install --id GoLang.Go --exact" }
+    "OpenJS.NodeJS.LTS" { return "winget install --id OpenJS.NodeJS.LTS --exact" }
+    "Rustlang.Rustup" { return "winget install --id Rustlang.Rustup --exact" }
+    "Git.Git" { return "winget install --id Git.Git --exact" }
+    default { return "winget install --id $PackageId --exact" }
+  }
+}
+
+function Format-MissingDependencyMessage {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$PackageIds,
+    [string]$SelectedMode = ""
+  )
+
+  $lines = @()
+  if (-not [string]::IsNullOrWhiteSpace($SelectedMode)) {
+    $lines += "required dependencies missing for mode '$SelectedMode':"
+  } else {
+    $lines += "missing prerequisites detected:"
+  }
+
+  foreach ($packageId in $PackageIds) {
+    $label = Get-DependencyLabel -PackageId $packageId
+    $hint = Get-DependencyInstallHint -PackageId $packageId
+    $lines += ("- {0}: install with {1}" -f $label, $hint)
+  }
+
+  if ($PackageIds -contains "GoLang.Go" -or $PackageIds -contains "OpenJS.NodeJS.LTS" -or $PackageIds -contains "Rustlang.Rustup") {
+    $lines += "- rerun with -InstallMissing to let winget install what it can after App Installer is available"
+  }
+
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    $lines += "- winget was not found; install App Installer first, then rerun with -InstallMissing"
+  }
+
+  return ($lines -join [Environment]::NewLine)
+}
+
 function Get-MissingIds {
   param(
     [Parameter(Mandatory = $true)]
@@ -189,7 +250,7 @@ function Install-MissingDependencies {
     return
   }
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    throw "winget is not available. Install App Installer or install dependencies manually."
+    throw "winget is not available. Install App Installer first, then rerun with -InstallMissing or install prerequisites manually."
   }
 
   foreach ($id in $PackageIds) {
@@ -217,31 +278,35 @@ function Assert-ToolsForMode {
     [string]$SelectedMode
   )
 
-  $missing = @()
+  $missingPackageIds = @()
   switch ($SelectedMode) {
     "run-api" {
-      if (-not $Report.go) { $missing += "go" }
-      if (-not $Report.git_bash) { $missing += "git bash" }
+      if (-not $Report.go) { $missingPackageIds += "GoLang.Go" }
+      if (-not $Report.git_bash) { $missingPackageIds += "Git.Git" }
     }
     "run-desktop" {
-      if (-not $Report.node) { $missing += "node" }
-      if (-not $Report.npm) { $missing += "npm" }
-      if (-not $Report.rustc) { $missing += "rustc" }
-      if (-not $Report.cargo) { $missing += "cargo" }
+      if (-not $Report.node -or -not $Report.npm) { $missingPackageIds += "OpenJS.NodeJS.LTS" }
+      if (-not $Report.rustc -or -not $Report.cargo) { $missingPackageIds += "Rustlang.Rustup" }
     }
     "run-full" {
-      if (-not $Report.go) { $missing += "go" }
-      if (-not $Report.node) { $missing += "node" }
-      if (-not $Report.npm) { $missing += "npm" }
-      if (-not $Report.rustc) { $missing += "rustc" }
-      if (-not $Report.cargo) { $missing += "cargo" }
-      if (-not $Report.git_bash) { $missing += "git bash" }
+      if (-not $Report.go) { $missingPackageIds += "GoLang.Go" }
+      if (-not $Report.node -or -not $Report.npm) { $missingPackageIds += "OpenJS.NodeJS.LTS" }
+      if (-not $Report.rustc -or -not $Report.cargo) { $missingPackageIds += "Rustlang.Rustup" }
+      if (-not $Report.git_bash) { $missingPackageIds += "Git.Git" }
     }
   }
 
-  if ($missing.Count -gt 0) {
-    $joined = ($missing -join ", ")
-    throw "required dependencies missing for mode '$SelectedMode': $joined"
+  if ($missingPackageIds.Count -gt 0) {
+    $uniquePackageIds = @()
+    $seen = @{}
+    foreach ($packageId in $missingPackageIds) {
+      if ($seen.ContainsKey($packageId)) {
+        continue
+      }
+      $seen[$packageId] = $true
+      $uniquePackageIds += $packageId
+    }
+    throw (Format-MissingDependencyMessage -PackageIds $uniquePackageIds -SelectedMode $SelectedMode)
   }
 }
 

@@ -2435,3 +2435,91 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 		t.Fatalf("session invite_key=%q want wallet:* fallback", session.InviteKey)
 	}
 }
+
+func TestGPMStateStorePersistAndLoadRoundTrip(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+	now := time.Now().UTC()
+	expiresAt := now.Add(2 * time.Hour)
+
+	svc := &Service{
+		gpmStateStorePath: statePath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	svc.gpmState.putSession(gpmSession{
+		Token:              "persist-token",
+		WalletAddress:      "cosmos1persist",
+		WalletProvider:     "keplr",
+		Role:               "operator",
+		CreatedAt:          now,
+		ExpiresAt:          expiresAt,
+		BootstrapDirectory: "https://directory.gpm.example:8081",
+		InviteKey:          "wallet:cosmos1persist",
+		ChainOperatorID:    "operator-persist-1",
+	})
+	svc.gpmState.upsertOperator(gpmOperatorApplication{
+		WalletAddress:   "cosmos1persist",
+		ChainOperatorID: "operator-persist-1",
+		ServerLabel:     "persist-node",
+		Status:          "approved",
+		UpdatedAt:       now,
+	})
+	svc.persistGPMStateBestEffort("test_roundtrip")
+
+	loaded := &Service{
+		gpmStateStorePath: statePath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	loaded.loadGPMStateBestEffort()
+
+	session, ok := loaded.gpmState.getSession("persist-token", now)
+	if !ok {
+		t.Fatal("expected persisted session to be loaded")
+	}
+	if session.Role != "operator" {
+		t.Fatalf("loaded role=%q want=operator", session.Role)
+	}
+	if session.ChainOperatorID != "operator-persist-1" {
+		t.Fatalf("loaded chain_operator_id=%q want=operator-persist-1", session.ChainOperatorID)
+	}
+
+	operator, ok := loaded.gpmState.getOperator("cosmos1persist")
+	if !ok {
+		t.Fatal("expected persisted operator application to be loaded")
+	}
+	if operator.Status != "approved" {
+		t.Fatalf("loaded operator status=%q want=approved", operator.Status)
+	}
+}
+
+func TestGPMAuditAppendWritesJSONLine(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		gpmAuditLogPath: auditPath,
+	}
+
+	svc.appendGPMAudit("auth_verified", map[string]any{
+		"wallet_address": "cosmos1audit",
+		"role":           "client",
+	})
+
+	body, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("audit lines=%d want=1 body=%q", len(lines), string(body))
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatalf("decode audit line: %v", err)
+	}
+	if record["event"] != "auth_verified" {
+		t.Fatalf("event=%v want=auth_verified", record["event"])
+	}
+	fields, _ := record["fields"].(map[string]any)
+	if fields["wallet_address"] != "cosmos1audit" {
+		t.Fatalf("wallet_address=%v want=cosmos1audit", fields["wallet_address"])
+	}
+}
