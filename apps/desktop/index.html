@@ -86,6 +86,50 @@
               <input id="wallet_signature" placeholder="wallet signature" />
             </label>
           </div>
+          <details id="auth_signature_context_section" class="advanced">
+            <summary>Advanced (Signature metadata)</summary>
+            <p>Optional wallet-signature context fields for extended verify requests.</p>
+            <div class="grid grid-2">
+              <label>
+                signature_kind
+                <input id="signature_kind" placeholder="sign_arbitrary" spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                signature_source
+                <input id="signature_source" placeholder="wallet_extension" spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                signature_public_key
+                <input id="signature_public_key" placeholder="base64 or hex public key" spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                signature_public_key_type
+                <input
+                  id="signature_public_key_type"
+                  placeholder="tendermint/PubKeySecp256k1"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                chain_id
+                <input id="chain_id" placeholder="cosmoshub-4" spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                signed_message
+                <input id="signed_message" placeholder="challenge message text" spellcheck="false" autocomplete="off" />
+              </label>
+              <label class="span-2">
+                signature_envelope
+                <textarea
+                  id="signature_envelope"
+                  rows="4"
+                  placeholder='{"pub_key":{"type":"...","value":"..."},"signature":"..."}'
+                  spellcheck="false"
+                ></textarea>
+              </label>
+            </div>
+          </details>
 
           <div class="actions">
             <button id="challenge_btn">Request Challenge</button>

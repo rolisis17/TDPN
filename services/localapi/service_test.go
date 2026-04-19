@@ -3003,12 +3003,10 @@ func TestGPMAuthVerifyConfiguredVerifierCommandPropagatesSignatureMetadata(t *te
 		SignatureKind:          "eip191",
 		SignaturePublicKey:     "04abc123",
 		SignaturePublicKeyType: "secp256k1",
-		SignatureSource:        "wallet-extension",
+		SignatureSource:        "wallet_extension",
 		ChainID:                "evm-11155111",
-		SignedMessage:          "PleaseSignAuthProof",
 		SignatureEnvelope:      "envelope-v1",
 	}
-	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata("signed-proof-value", expectedMetadata, "bad-signature-metadata", 13)
 
 	challengeBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
@@ -3019,14 +3017,157 @@ func TestGPMAuthVerifyConfiguredVerifierCommandPropagatesSignatureMetadata(t *te
 	if strings.TrimSpace(challengeID) == "" {
 		t.Fatalf("challenge_id missing: %v", payload)
 	}
+	challengeMessage, _ := payload["message"].(string)
+	if strings.TrimSpace(challengeMessage) == "" {
+		t.Fatalf("message missing: %v", payload)
+	}
+	expectedMetadata.SignedMessage = challengeMessage
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata("signed-proof-value", expectedMetadata, "bad-signature-metadata", 13)
 
-	verifyBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value","signature_kind":"eip191","signature_public_key":"04abc123","signature_public_key_type":"secp256k1","signature_source":"wallet-extension","chain_id":"evm-11155111","signed_message":"PleaseSignAuthProof","signature_envelope":"envelope-v1"}`
+	verifyBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value","signature_kind":"eip191","signature_public_key":"04abc123","signature_public_key_type":"secp256k1","signature_source":"wallet_extension","chain_id":"evm-11155111","signed_message":"` + challengeMessage + `","signature_envelope":"envelope-v1"}`
 	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
 	if code != http.StatusOK {
 		t.Fatalf("verify status=%d body=%v", code, payload)
 	}
 	if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
 		t.Fatalf("session_token missing payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyAcceptsKnownOptionalSignatureMetadataValues(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+
+	challengeBody := `{"wallet_address":"cosmos1metaallow","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+	challengeMessage, _ := payload["message"].(string)
+	if strings.TrimSpace(challengeMessage) == "" {
+		t.Fatalf("message missing: %v", payload)
+	}
+
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1metaallow",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 "signed-proof-value",
+		"signature_kind":            "sign_arbitrary",
+		"signature_public_key":      "edpk12345",
+		"signature_public_key_type": "ed25519",
+		"signature_source":          "manual",
+		"chain_id":                  "mesh-mainnet-1",
+		"signed_message":            challengeMessage,
+		"signature_envelope": map[string]any{
+			"pub_key": map[string]any{
+				"type":  "secp256k1",
+				"value": "base64-key",
+			},
+			"signature": "base64-sig",
+		},
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+		t.Fatalf("session_token missing payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyRejectsInvalidOptionalSignatureMetadata(t *testing.T) {
+	testCases := []struct {
+		name          string
+		metadata      map[string]any
+		wantErrorText string
+	}{
+		{
+			name: "signed_message mismatch",
+			metadata: map[string]any{
+				"signed_message": "not-the-issued-message",
+			},
+			wantErrorText: "signed_message does not match issued challenge message",
+		},
+		{
+			name: "unknown signature_kind",
+			metadata: map[string]any{
+				"signature_kind": "typed_data",
+			},
+			wantErrorText: "unsupported signature_kind",
+		},
+		{
+			name: "unknown signature_source",
+			metadata: map[string]any{
+				"signature_source": "hardware_wallet",
+			},
+			wantErrorText: "unsupported signature_source",
+		},
+		{
+			name: "unknown signature_public_key_type",
+			metadata: map[string]any{
+				"signature_public_key_type": "rsa",
+			},
+			wantErrorText: "unsupported signature_public_key_type",
+		},
+		{
+			name: "signature_envelope too long",
+			metadata: map[string]any{
+				"signature_envelope": strings.Repeat("A", gpmAuthSignatureEnvelopeMaxLen+1),
+			},
+			wantErrorText: "signature_envelope is too long",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			svc.gpmState = newGPMRuntimeState()
+			svc.gpmRoleDefault = "client"
+
+			challengeBody := `{"wallet_address":"cosmos1metareject","wallet_provider":"keplr"}`
+			code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+			if code != http.StatusOK {
+				t.Fatalf("challenge status=%d body=%v", code, payload)
+			}
+			challengeID, _ := payload["challenge_id"].(string)
+			if strings.TrimSpace(challengeID) == "" {
+				t.Fatalf("challenge_id missing: %v", payload)
+			}
+
+			verifyRequest := map[string]any{
+				"wallet_address":  "cosmos1metareject",
+				"wallet_provider": "keplr",
+				"challenge_id":    challengeID,
+				"signature":       "signed-proof-value",
+			}
+			for key, value := range tc.metadata {
+				verifyRequest[key] = value
+			}
+			verifyBodyBytes, err := json.Marshal(verifyRequest)
+			if err != nil {
+				t.Fatalf("json marshal verify request: %v", err)
+			}
+
+			code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+			if code != http.StatusUnauthorized {
+				t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+			}
+			errMsg, _ := payload["error"].(string)
+			if !strings.Contains(errMsg, tc.wantErrorText) {
+				t.Fatalf("error=%q want contains %q payload=%v", errMsg, tc.wantErrorText, payload)
+			}
+		})
 	}
 }
 

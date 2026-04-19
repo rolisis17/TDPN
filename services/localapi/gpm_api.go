@@ -1,6 +1,7 @@
 package localapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -27,12 +28,13 @@ import (
 )
 
 const (
-	gpmChallengeTTL            = 5 * time.Minute
-	gpmSessionTTL              = 12 * time.Hour
-	gpmManifestHTTPTimeout     = 6 * time.Second
-	gpmManifestBodyLimit       = 1 << 20
-	gpmAuthSignatureMaxLen     = 8 * 1024
-	gpmAuthVerifierOutputLimit = 8 * 1024
+	gpmChallengeTTL                = 5 * time.Minute
+	gpmSessionTTL                  = 12 * time.Hour
+	gpmManifestHTTPTimeout         = 6 * time.Second
+	gpmManifestBodyLimit           = 1 << 20
+	gpmAuthSignatureMaxLen         = 8 * 1024
+	gpmAuthSignatureEnvelopeMaxLen = 16 * 1024
+	gpmAuthVerifierOutputLimit     = 8 * 1024
 )
 
 type gpmRuntimeState struct {
@@ -94,29 +96,34 @@ type gpmAuthChallengeRequest struct {
 }
 
 type gpmAuthVerifyRequest struct {
-	WalletAddress          string `json:"wallet_address"`
-	WalletProvider         string `json:"wallet_provider"`
-	ChallengeID            string `json:"challenge_id"`
-	Signature              string `json:"signature"`
-	SignatureKind          string `json:"signature_kind,omitempty"`
-	SignaturePublicKey     string `json:"signature_public_key,omitempty"`
-	SignaturePublicKeyType string `json:"signature_public_key_type,omitempty"`
-	SignatureSource        string `json:"signature_source,omitempty"`
-	ChainID                string `json:"chain_id,omitempty"`
-	SignedMessage          string `json:"signed_message,omitempty"`
-	SignatureEnvelope      string `json:"signature_envelope,omitempty"`
+	WalletAddress          string          `json:"wallet_address"`
+	WalletProvider         string          `json:"wallet_provider"`
+	ChallengeID            string          `json:"challenge_id"`
+	Signature              string          `json:"signature"`
+	SignatureKind          *string         `json:"signature_kind,omitempty"`
+	SignaturePublicKey     string          `json:"signature_public_key,omitempty"`
+	SignaturePublicKeyType *string         `json:"signature_public_key_type,omitempty"`
+	SignatureSource        *string         `json:"signature_source,omitempty"`
+	ChainID                string          `json:"chain_id,omitempty"`
+	SignedMessage          *string         `json:"signed_message,omitempty"`
+	SignatureEnvelope      json.RawMessage `json:"signature_envelope,omitempty"`
 }
 
 type gpmAuthSignatureVerifier func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error
 
 type gpmAuthSignatureMetadata struct {
-	SignatureKind          string
-	SignaturePublicKey     string
-	SignaturePublicKeyType string
-	SignatureSource        string
-	ChainID                string
-	SignedMessage          string
-	SignatureEnvelope      string
+	SignatureKind             string
+	SignaturePublicKey        string
+	SignaturePublicKeyType    string
+	SignatureSource           string
+	ChainID                   string
+	SignedMessage             string
+	SignatureEnvelope         string
+	HasSignatureKind          bool
+	HasSignaturePublicKeyType bool
+	HasSignatureSource        bool
+	HasSignedMessage          bool
+	HasSignatureEnvelope      bool
 }
 
 type gpmSessionStatusRequest struct {
@@ -516,13 +523,28 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 	in.ChallengeID = strings.TrimSpace(in.ChallengeID)
 	signature := strings.TrimSpace(in.Signature)
 	signatureMetadata := gpmAuthSignatureMetadata{
-		SignatureKind:          strings.TrimSpace(in.SignatureKind),
-		SignaturePublicKey:     strings.TrimSpace(in.SignaturePublicKey),
-		SignaturePublicKeyType: strings.TrimSpace(in.SignaturePublicKeyType),
-		SignatureSource:        strings.TrimSpace(in.SignatureSource),
-		ChainID:                strings.TrimSpace(in.ChainID),
-		SignedMessage:          in.SignedMessage,
-		SignatureEnvelope:      in.SignatureEnvelope,
+		SignaturePublicKey: strings.TrimSpace(in.SignaturePublicKey),
+		ChainID:            strings.TrimSpace(in.ChainID),
+	}
+	if in.SignatureKind != nil {
+		signatureMetadata.SignatureKind = strings.TrimSpace(*in.SignatureKind)
+		signatureMetadata.HasSignatureKind = true
+	}
+	if in.SignaturePublicKeyType != nil {
+		signatureMetadata.SignaturePublicKeyType = strings.TrimSpace(*in.SignaturePublicKeyType)
+		signatureMetadata.HasSignaturePublicKeyType = true
+	}
+	if in.SignatureSource != nil {
+		signatureMetadata.SignatureSource = strings.TrimSpace(*in.SignatureSource)
+		signatureMetadata.HasSignatureSource = true
+	}
+	if in.SignedMessage != nil {
+		signatureMetadata.SignedMessage = *in.SignedMessage
+		signatureMetadata.HasSignedMessage = true
+	}
+	if signatureEnvelope, ok := normalizeOptionalJSONStringOrScalar(in.SignatureEnvelope); ok {
+		signatureMetadata.SignatureEnvelope = signatureEnvelope
+		signatureMetadata.HasSignatureEnvelope = true
 	}
 	if in.WalletAddress == "" || in.WalletProvider == "" || in.ChallengeID == "" || signature == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -1472,6 +1494,26 @@ func subtleEqual(a string, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
 }
 
+func normalizeOptionalJSONStringOrScalar(raw json.RawMessage) (string, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return "", false
+	}
+	var asString string
+	if err := json.Unmarshal(trimmed, &asString); err == nil {
+		return asString, true
+	}
+	var asAny any
+	if err := json.Unmarshal(trimmed, &asAny); err != nil {
+		return "", false
+	}
+	canonical, err := json.Marshal(asAny)
+	if err != nil {
+		return string(trimmed), true
+	}
+	return string(canonical), true
+}
+
 func defaultGPMAuthSignatureVerifier(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
 	signature = strings.TrimSpace(signature)
 	if signature == "" {
@@ -1497,7 +1539,41 @@ func defaultGPMAuthSignatureVerifier(challenge gpmWalletChallenge, walletAddress
 	return nil
 }
 
+func validateGPMAuthSignatureMetadata(challenge gpmWalletChallenge, signatureMetadata gpmAuthSignatureMetadata) error {
+	if signatureMetadata.HasSignedMessage && !subtleEqual(challenge.Message, signatureMetadata.SignedMessage) {
+		return errors.New("signed_message does not match issued challenge message")
+	}
+	if signatureMetadata.HasSignatureKind {
+		switch signatureMetadata.SignatureKind {
+		case "sign_arbitrary", "eip191":
+		default:
+			return errors.New("unsupported signature_kind")
+		}
+	}
+	if signatureMetadata.HasSignatureSource {
+		switch signatureMetadata.SignatureSource {
+		case "wallet_extension", "manual":
+		default:
+			return errors.New("unsupported signature_source")
+		}
+	}
+	if signatureMetadata.HasSignaturePublicKeyType {
+		switch signatureMetadata.SignaturePublicKeyType {
+		case "secp256k1", "ed25519":
+		default:
+			return errors.New("unsupported signature_public_key_type")
+		}
+	}
+	if signatureMetadata.HasSignatureEnvelope && len(signatureMetadata.SignatureEnvelope) > gpmAuthSignatureEnvelopeMaxLen {
+		return fmt.Errorf("signature_envelope is too long (max=%d)", gpmAuthSignatureEnvelopeMaxLen)
+	}
+	return nil
+}
+
 func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string, signatureMetadata gpmAuthSignatureMetadata) error {
+	if err := validateGPMAuthSignatureMetadata(challenge, signatureMetadata); err != nil {
+		return err
+	}
 	verifier := s.gpmAuthSignatureVerifier
 	if verifier == nil {
 		verifier = defaultGPMAuthSignatureVerifier

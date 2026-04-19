@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+GPM_API_FILE="services/localapi/gpm_api.go"
 
 for cmd in go curl jq mktemp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -17,6 +18,7 @@ CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
 LOCAL_API_BASE=""
 SERVER_PID=""
+LOCAL_API_AUTH_TOKEN="local-api-contract-token"
 
 cleanup() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
@@ -109,6 +111,8 @@ start_local_api() {
     LOCAL_CONTROL_API_ADDR="127.0.0.1:${port}" \
     LOCAL_CONTROL_API_SCRIPT="$FAKE_SCRIPT" \
     LOCAL_CONTROL_API_ALLOW_UPDATE="$allow_update" \
+    LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK="1" \
+    LOCAL_CONTROL_API_AUTH_TOKEN="$LOCAL_API_AUTH_TOKEN" \
     LOCAL_API_CONTRACT_CALLS_FILE="$CALLS_FILE" \
       go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
@@ -179,16 +183,84 @@ require_last_call() {
   printf '%s\n' "$line"
 }
 
+require_gpm_api_marker() {
+  local pattern="$1"
+  local description="$2"
+  if ! grep -qE "$pattern" "$GPM_API_FILE"; then
+    echo "local control API contract failed: missing ${description} marker /${pattern}/ in $GPM_API_FILE"
+    exit 1
+  fi
+}
+
 api_get() {
   local path="$1"
-  curl -fsS "${LOCAL_API_BASE}${path}"
+  curl -fsS -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" "${LOCAL_API_BASE}${path}"
 }
 
 api_post_json() {
   local path="$1"
   local payload="$2"
-  curl -fsS -X POST -H 'Content-Type: application/json' --data "$payload" "${LOCAL_API_BASE}${path}"
+  curl -fsS -X POST -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" -H 'Content-Type: application/json' --data "$payload" "${LOCAL_API_BASE}${path}"
 }
+
+if [[ ! -f "$GPM_API_FILE" ]]; then
+  echo "local control API contract failed: missing source file: $GPM_API_FILE"
+  exit 1
+fi
+
+# Verify-request metadata fields remain optional and presence-aware.
+VERIFY_REQUEST_METADATA_MARKERS=(
+  'SignatureKind[[:space:]]+\*string[[:space:]]+`json:"signature_kind,omitempty"`'
+  'SignaturePublicKey[[:space:]]+string[[:space:]]+`json:"signature_public_key,omitempty"`'
+  'SignaturePublicKeyType[[:space:]]+\*string[[:space:]]+`json:"signature_public_key_type,omitempty"`'
+  'SignatureSource[[:space:]]+\*string[[:space:]]+`json:"signature_source,omitempty"`'
+  'ChainID[[:space:]]+string[[:space:]]+`json:"chain_id,omitempty"`'
+  'SignedMessage[[:space:]]+\*string[[:space:]]+`json:"signed_message,omitempty"`'
+  'SignatureEnvelope[[:space:]]+json\.RawMessage[[:space:]]+`json:"signature_envelope,omitempty"`'
+  'if[[:space:]]+in\.SignedMessage[[:space:]]*!=[[:space:]]*nil[[:space:]]*\{'
+  'normalizeOptionalJSONStringOrScalar\(in\.SignatureEnvelope\)'
+  'HasSignedMessage[[:space:]]*=[[:space:]]*true'
+  'HasSignatureEnvelope[[:space:]]*=[[:space:]]*true'
+)
+for marker in "${VERIFY_REQUEST_METADATA_MARKERS[@]}"; do
+  require_gpm_api_marker "$marker" "verify-request optional metadata"
+done
+
+# Validation paths: signed_message challenge binding, enum allow-lists, and envelope length bound.
+VERIFY_METADATA_VALIDATION_MARKERS=(
+  'func[[:space:]]+validateGPMAuthSignatureMetadata\('
+  'if[[:space:]]+signatureMetadata\.HasSignedMessage[[:space:]]+&&[[:space:]]+!subtleEqual\(challenge\.Message,[[:space:]]*signatureMetadata\.SignedMessage\)'
+  'signed_message does not match issued challenge message'
+  'case[[:space:]]+"sign_arbitrary",[[:space:]]*"eip191"'
+  'unsupported signature_kind'
+  'case[[:space:]]+"wallet_extension",[[:space:]]*"manual"'
+  'unsupported signature_source'
+  'case[[:space:]]+"secp256k1",[[:space:]]*"ed25519"'
+  'unsupported signature_public_key_type'
+  'gpmAuthSignatureEnvelopeMaxLen'
+  'if[[:space:]]+signatureMetadata\.HasSignatureEnvelope[[:space:]]+&&[[:space:]]+len\(signatureMetadata\.SignatureEnvelope\)[[:space:]]*>[[:space:]]*gpmAuthSignatureEnvelopeMaxLen'
+  'signature_envelope is too long'
+  'if[[:space:]]+err[[:space:]]*:=[[:space:]]+validateGPMAuthSignatureMetadata\(challenge,[[:space:]]*signatureMetadata\);[[:space:]]+err[[:space:]]*!=[[:space:]]*nil'
+)
+for marker in "${VERIFY_METADATA_VALIDATION_MARKERS[@]}"; do
+  require_gpm_api_marker "$marker" "verify metadata validation"
+done
+
+# Auth verifier command must receive metadata in environment for external verifier hooks.
+VERIFY_METADATA_ENV_MARKERS=(
+  'func[[:space:]]+\(s[[:space:]]+\*Service\)[[:space:]]+runGPMAuthVerifierCommand\([^)]*signatureMetadata[[:space:]]+gpmAuthSignatureMetadata\)'
+  'GPM_AUTH_VERIFY_SIGNATURE_KIND='
+  'GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY='
+  'GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE='
+  'GPM_AUTH_VERIFY_SIGNATURE_SOURCE='
+  'GPM_AUTH_VERIFY_CHAIN_ID='
+  'GPM_AUTH_VERIFY_SIGNED_MESSAGE='
+  'GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE='
+)
+for marker in "${VERIFY_METADATA_ENV_MARKERS[@]}"; do
+  require_gpm_api_marker "$marker" "verifier metadata env propagation"
+done
+echo "[local-control-api-contract] gpm auth verify metadata markers in source are present"
 
 echo "[local-control-api-contract] start local API (update disabled)"
 start_local_api 0
@@ -236,7 +308,14 @@ assert_line_has "$preflight_2hop_call" $'\t--discovery-wait-sec\t17' "connect pr
 assert_line_has "$preflight_2hop_call" $'\t--operator-floor-check\t1' "connect preflight missing operator floor check default"
 assert_line_has "$preflight_2hop_call" $'\t--issuer-quorum-check\t1' "connect preflight missing issuer quorum check default"
 up_2hop_call="$(require_last_call "client-vpn-up")"
-assert_line_has "$up_2hop_call" $'\t--subject\tinv-contract-2hop' "connect up missing invite subject"
+if ! printf '%s\n' "$up_2hop_call" | grep -F -- $'\t--subject\tinv-contract-2hop' >/dev/null 2>&1 && \
+   ! printf '%s\n' "$up_2hop_call" | grep -F -- $'\t--subject-file\t' >/dev/null 2>&1; then
+  echo "connect up missing invite subject forwarding (--subject or --subject-file)"
+  echo "line: $up_2hop_call"
+  echo "calls:"
+  cat "$CALLS_FILE"
+  exit 1
+fi
 assert_line_has "$up_2hop_call" $'\t--path-profile\t2hop' "connect up missing --path-profile 2hop"
 assert_line_has "$up_2hop_call" $'\t--session-reuse\t1' "connect up missing deterministic --session-reuse 1"
 assert_line_has "$up_2hop_call" $'\t--allow-session-churn\t0' "connect up missing deterministic --allow-session-churn 0"
@@ -277,7 +356,7 @@ assert_line_has "$disconnect_call" $'\t--force-iface-cleanup\t1' "disconnect for
 echo "[local-control-api-contract] update endpoint is fail-closed by default"
 : >"$CALLS_FILE"
 update_disabled_body="$TMP_DIR/update_disabled.json"
-update_disabled_code="$(curl -sS -o "$update_disabled_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{"remote":"origin","branch":"main","allow_dirty":true}' "${LOCAL_API_BASE}/v1/update")"
+update_disabled_code="$(curl -sS -o "$update_disabled_body" -w '%{http_code}' -X POST -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" -H 'Content-Type: application/json' --data '{"remote":"origin","branch":"main","allow_dirty":true}' "${LOCAL_API_BASE}/v1/update")"
 if [[ "$update_disabled_code" != "403" ]]; then
   echo "expected /v1/update to return 403 when LOCAL_CONTROL_API_ALLOW_UPDATE=0, got $update_disabled_code"
   cat "$update_disabled_body"

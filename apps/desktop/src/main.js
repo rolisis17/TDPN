@@ -16,6 +16,13 @@ const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
 const walletProviderEl = byId("wallet_provider");
 const walletAddressEl = byId("wallet_address");
+const signatureKindEl = byId("signature_kind");
+const signaturePublicKeyEl = byId("signature_public_key");
+const signaturePublicKeyTypeEl = byId("signature_public_key_type");
+const signatureSourceEl = byId("signature_source");
+const signatureChainIdEl = byId("chain_id");
+const signedMessageEl = byId("signed_message");
+const signatureEnvelopeEl = byId("signature_envelope");
 const chainOperatorIdEl = byId("chain_operator_id");
 const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
 const operatorReasonEl = byId("operator_reason");
@@ -162,6 +169,31 @@ function nonEmptyStringOrUndefined(value) {
   }
   const normalized = value.trim();
   return normalized || undefined;
+}
+
+function parseJSONOrRawString(value) {
+  const normalized = nonEmptyStringOrUndefined(value);
+  if (!normalized) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    return normalized;
+  }
+}
+
+function readAuthVerifySignatureMetadata() {
+  const signatureEnvelope = parseJSONOrRawString(signatureEnvelopeEl.value);
+  return compactObject({
+    signature_kind: nonEmptyStringOrUndefined(signatureKindEl.value),
+    signature_public_key: nonEmptyStringOrUndefined(signaturePublicKeyEl.value),
+    signature_public_key_type: nonEmptyStringOrUndefined(signaturePublicKeyTypeEl.value),
+    signature_source: nonEmptyStringOrUndefined(signatureSourceEl.value),
+    chain_id: nonEmptyStringOrUndefined(signatureChainIdEl.value),
+    signed_message: nonEmptyStringOrUndefined(signedMessageEl.value),
+    signature_envelope: signatureEnvelope
+  });
 }
 
 function compactObject(value) {
@@ -1774,6 +1806,8 @@ byId("signin_btn").addEventListener("click", async () => {
     challenge_id: byId("challenge_id").value.trim(),
     signature: byId("wallet_signature").value.trim()
   };
+  const signatureMetadata = readAuthVerifySignatureMetadata();
+  Object.assign(request, signatureMetadata);
   const result = await call("gpm_auth_verify", "control_gpm_auth_verify", { request });
   setSessionToken(result?.session_token || "");
   state.clientRegistered = inferClientRegistrationFromPayload(result);

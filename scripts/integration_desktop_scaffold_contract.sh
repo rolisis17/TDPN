@@ -370,6 +370,65 @@ if [[ "$client_hint_marker_present" != "1" ]]; then
 fi
 echo "[desktop-scaffold] client/server lock hint elements are present"
 
+OPTIONAL_AUTH_METADATA_HTML_ID_PATTERNS=(
+  'id="(auth_)?signature_kind"'
+  'id="(auth_)?signature_public_key"'
+  'id="(auth_)?signature_public_key_type"'
+  'id="(auth_)?signature_source"'
+  'id="(auth_)?signature_envelope"'
+)
+for pattern in "${OPTIONAL_AUTH_METADATA_HTML_ID_PATTERNS[@]}"; do
+  if ! grep -Eq "$pattern" "$DESKTOP_HTML_FILE"; then
+    echo "desktop scaffold contract failed: missing optional auth metadata input marker ($pattern) in $DESKTOP_HTML_FILE"
+    exit 1
+  fi
+done
+if ! grep -Eq 'id="(auth_)?(chain_id|wallet_chain_id)"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing optional auth chain-id input marker (expected chain_id or wallet_chain_id) in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -Eq 'id="(auth_)?(signed_message|challenge_message)"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing optional signed-message input marker (expected signed_message or challenge_message) in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+echo "[desktop-scaffold] optional auth metadata input markers are present"
+
+assert_auth_verify_request_marker() {
+  local field_label="$1"
+  local marker_pattern="$2"
+  if ! rg -q -- "$marker_pattern" "$JS_FILE"; then
+    echo "desktop scaffold contract failed: missing auth verify request wiring marker for $field_label in $JS_FILE"
+    exit 1
+  fi
+}
+
+assert_auth_verify_request_marker \
+  "signature_kind" \
+  'request\.[[:space:]]*signature_kind\b|\bsignature_kind\b[[:space:]]*:'
+assert_auth_verify_request_marker \
+  "signature_public_key" \
+  'request\.[[:space:]]*signature_public_key\b|\bsignature_public_key\b[[:space:]]*:'
+assert_auth_verify_request_marker \
+  "signature_public_key_type" \
+  'request\.[[:space:]]*signature_public_key_type\b|\bsignature_public_key_type\b[[:space:]]*:'
+assert_auth_verify_request_marker \
+  "signature_source" \
+  'request\.[[:space:]]*signature_source\b|\bsignature_source\b[[:space:]]*:'
+assert_auth_verify_request_marker \
+  "chain_id" \
+  'request\.[[:space:]]*chain_id\b|\bchain_id\b[[:space:]]*:'
+assert_auth_verify_request_marker \
+  "signed_message" \
+  'request\.[[:space:]]*signed_message\b|\bsigned_message\b[[:space:]]*:'
+assert_auth_verify_request_marker \
+  "signature_envelope" \
+  'request\.[[:space:]]*signature_envelope\b|\bsignature_envelope\b[[:space:]]*:'
+if ! rg -q -- 'control_gpm_auth_verify' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing auth verify bridge marker in $JS_FILE"
+  exit 1
+fi
+echo "[desktop-scaffold] auth verify metadata request wiring markers are present"
+
 if ! grep -qF 'function syncServerRoleLockState()' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing server role lock sync function in $JS_FILE"
   exit 1
