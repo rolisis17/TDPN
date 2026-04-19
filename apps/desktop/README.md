@@ -53,6 +53,7 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - GPM server lifecycle actions (`POST /v1/gpm/service/start|stop|restart`) require an approved `operator` or `admin` session from `POST /v1/gpm/session`; `client` sessions cannot run server lifecycle mutations.
 - Desktop onboarding progress tracking uses `POST /v1/gpm/onboarding/client/status` to confirm whether the active session is truly registered (`registered|not_registered`).
 - Desktop server tab lock/unlock guidance now prioritizes `POST /v1/gpm/onboarding/server/status` (`readiness.tab_visible`, `readiness.lifecycle_actions_unlocked`, `readiness.lock_reason`, `readiness.unlock_actions`) with local-role fallback if the endpoint is unavailable.
+- Desktop readiness parsing is API-contract compatible with both snake_case and camelCase readiness fields (while preserving legacy aliases such as `client_tab_enabled` and `client_lock_hint`).
 - Operator approval (`POST /v1/gpm/onboarding/operator/approve`) now expects an admin session token (`session_token`) by default; legacy `admin_token` fallback remains supported when `GPM_APPROVAL_ADMIN_TOKEN` is configured.
 - Operator queue listing is available via `POST /v1/gpm/onboarding/operator/list`; desktop provides a “List Pending Operators” action that sends the active `session_token` with `status=pending` and a bounded `limit`.
  

@@ -1027,21 +1027,32 @@ function parseServerReadiness(payload) {
   if (!readiness || typeof readiness !== "object") {
     return null;
   }
-  const unlockActions = Array.isArray(readiness.unlock_actions)
-    ? readiness.unlock_actions
+  const unlockActionsRaw = firstDefined(readiness.unlock_actions, readiness.unlockActions);
+  const unlockActions = Array.isArray(unlockActionsRaw)
+    ? unlockActionsRaw
         .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
         .filter((entry) => entry.length > 0)
     : [];
   const normalizedRole = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
   return {
     role: normalizedRole || undefined,
-    tabVisible: toBooleanLike(readiness.tab_visible),
-    clientTabVisible: toBooleanLike(firstDefined(readiness.client_tab_visible, readiness.client_tab_enabled)),
-    lifecycleActionsUnlocked: toBooleanLike(readiness.lifecycle_actions_unlocked),
-    serviceMutationsConfigured: toBooleanLike(readiness.service_mutations_configured),
-    operatorApplicationStatus: normalizeOperatorApplicationStatus(readiness.operator_application_status),
-    lockReason: toDetailText(readiness.lock_reason),
-    clientLockReason: toDetailText(firstDefined(readiness.client_lock_reason, readiness.client_lock_hint)),
+    tabVisible: toBooleanLike(firstDefined(readiness.tab_visible, readiness.tabVisible)),
+    clientTabVisible: toBooleanLike(
+      firstDefined(readiness.client_tab_visible, readiness.clientTabVisible, readiness.client_tab_enabled)
+    ),
+    lifecycleActionsUnlocked: toBooleanLike(
+      firstDefined(readiness.lifecycle_actions_unlocked, readiness.lifecycleActionsUnlocked)
+    ),
+    serviceMutationsConfigured: toBooleanLike(
+      firstDefined(readiness.service_mutations_configured, readiness.serviceMutationsConfigured)
+    ),
+    operatorApplicationStatus: normalizeOperatorApplicationStatus(
+      firstDefined(readiness.operator_application_status, readiness.operatorApplicationStatus)
+    ),
+    lockReason: toDetailText(firstDefined(readiness.lock_reason, readiness.lockReason)),
+    clientLockReason: toDetailText(
+      firstDefined(readiness.client_lock_reason, readiness.clientLockReason, readiness.client_lock_hint)
+    ),
     unlockActions
   };
 }

@@ -345,6 +345,61 @@ else
 fi
 echo "[desktop-scaffold] role-lock logic markers are present (client+server hints, disabled-tab handling)"
 
+PARSE_SERVER_READINESS_SNIPPET="$(sed -n '/function parseServerReadiness(/,/^}/p' "$JS_FILE")"
+if [[ -z "$PARSE_SERVER_READINESS_SNIPPET" ]]; then
+  echo "desktop scaffold contract failed: missing parseServerReadiness function block in $JS_FILE"
+  exit 1
+fi
+
+assert_parse_readiness_fallback_pair() {
+  local field_name="$1"
+  local snake_pattern="$2"
+  local camel_pattern="$3"
+
+  if ! printf '%s\n' "$PARSE_SERVER_READINESS_SNIPPET" | grep -Eq "$snake_pattern"; then
+    echo "desktop scaffold contract failed: parseServerReadiness missing snake_case readiness marker for $field_name in $JS_FILE"
+    exit 1
+  fi
+  if ! printf '%s\n' "$PARSE_SERVER_READINESS_SNIPPET" | grep -Eq "$camel_pattern"; then
+    echo "desktop scaffold contract failed: parseServerReadiness missing camelCase readiness marker for $field_name in $JS_FILE"
+    exit 1
+  fi
+}
+
+assert_parse_readiness_fallback_pair \
+  "tabVisible" \
+  'readiness[[:space:]]*\.[[:space:]]*tab_visible|readiness\[[^]]*tab_visible[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*tabVisible|readiness\[[^]]*tabVisible[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "clientTabVisible" \
+  'readiness[[:space:]]*\.[[:space:]]*(client_tab_visible|client_tab_enabled)|readiness\[[^]]*(client_tab_visible|client_tab_enabled)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(clientTabVisible|clientTabEnabled)|readiness\[[^]]*(clientTabVisible|clientTabEnabled)[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "lifecycleActionsUnlocked" \
+  'readiness[[:space:]]*\.[[:space:]]*lifecycle_actions_unlocked|readiness\[[^]]*lifecycle_actions_unlocked[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*lifecycleActionsUnlocked|readiness\[[^]]*lifecycleActionsUnlocked[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "serviceMutationsConfigured" \
+  'readiness[[:space:]]*\.[[:space:]]*service_mutations_configured|readiness\[[^]]*service_mutations_configured[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*serviceMutationsConfigured|readiness\[[^]]*serviceMutationsConfigured[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "operatorApplicationStatus" \
+  'readiness[[:space:]]*\.[[:space:]]*operator_application_status|readiness\[[^]]*operator_application_status[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*operatorApplicationStatus|readiness\[[^]]*operatorApplicationStatus[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "lockReason" \
+  'readiness[[:space:]]*\.[[:space:]]*lock_reason|readiness\[[^]]*lock_reason[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*lockReason|readiness\[[^]]*lockReason[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "clientLockReason" \
+  'readiness[[:space:]]*\.[[:space:]]*(client_lock_reason|client_lock_hint)|readiness\[[^]]*(client_lock_reason|client_lock_hint)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(clientLockReason|clientLockHint)|readiness\[[^]]*(clientLockReason|clientLockHint)[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "unlockActions" \
+  'readiness[[:space:]]*\.[[:space:]]*unlock_actions|readiness\[[^]]*unlock_actions[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*unlockActions|readiness\[[^]]*unlockActions[^]]*\]'
+echo "[desktop-scaffold] parseServerReadiness fallback markers are present for snake_case and camelCase readiness fields"
+
 JSON_FILES=(
   "apps/desktop/package.json"
   "apps/desktop/src-tauri/tauri.conf.json"
