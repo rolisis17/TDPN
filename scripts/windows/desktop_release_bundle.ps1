@@ -296,6 +296,37 @@ function Restore-ScopedEnvironment {
   }
 }
 
+function Ensure-TauriIconScaffold {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopDir
+  )
+
+  $iconPath = Join-Path $DesktopDir "src-tauri\icons\icon.ico"
+  if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+    return
+  }
+
+  $iconDir = Split-Path -Parent $iconPath
+  if (-not (Test-Path -LiteralPath $iconDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
+  }
+
+  # Minimal valid 1x1 ICO payload (single 32-bit image + empty AND mask).
+  [byte[]]$icoBytes = @(
+    0x00,0x00, 0x01,0x00, 0x01,0x00,
+    0x01, 0x01, 0x00, 0x00, 0x01,0x00, 0x20,0x00, 0x30,0x00,0x00,0x00, 0x16,0x00,0x00,0x00,
+    0x28,0x00,0x00,0x00, 0x01,0x00,0x00,0x00, 0x02,0x00,0x00,0x00, 0x01,0x00, 0x20,0x00,
+    0x00,0x00,0x00,0x00, 0x04,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0xFF,0xFF,0xFF,0xFF,
+    0x00,0x00,0x00,0x00
+  )
+
+  [System.IO.File]::WriteAllBytes($iconPath, $icoBytes)
+  Write-Host "[desktop-release-bundle] icon_scaffold=created ($iconPath)"
+}
+
 if ($Help -or $TauriArgs -contains "-h" -or $TauriArgs -contains "--help" -or $TauriArgs -contains "/?") {
   Show-Usage
   exit 0
@@ -390,6 +421,8 @@ try {
       "If you want the script to attempt remediation, rerun with -InstallMissing."
     ))
   }
+
+  Ensure-TauriIconScaffold -DesktopDir $desktopDir
 
   Push-Location $desktopDir
   try {

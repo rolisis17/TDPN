@@ -112,6 +112,24 @@ validate_signing_placeholders() {
   fi
 }
 
+ensure_tauri_icon_scaffold() {
+  local icon_path="$DESKTOP_DIR/src-tauri/icons/icon.ico"
+  if [[ -f "$icon_path" ]]; then
+    return 0
+  fi
+  if [[ -e "$icon_path" ]]; then
+    echo "desktop release bundle icon scaffold failed: path exists but is not a regular file: $icon_path" >&2
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$icon_path")"
+
+  # Minimal valid 1x1 32-bit ICO (ICONDIR + ICONDIRENTRY + BMP payload).
+  printf '\x00\x00\x01\x00\x01\x00\x01\x01\x00\x00\x01\x00\x20\x00\x30\x00\x00\x00\x16\x00\x00\x00\x28\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x01\x00\x20\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xFF\x00\x00\x00\x00' >"$icon_path"
+
+  echo "[desktop-release-bundle] icon_scaffold=created path=$icon_path"
+}
+
 declare -A SAVED_ENV_PRESENT=()
 declare -A SAVED_ENV_VALUE=()
 SCOPED_ENV_NAMES=(
@@ -297,6 +315,8 @@ require_tool node "install Node.js LTS"
 require_tool npm "install Node.js LTS so npm is on PATH"
 require_tool rustc "install Rust with rustup"
 require_tool cargo "install Rust with rustup"
+
+ensure_tauri_icon_scaffold
 
 pushd "$DESKTOP_DIR" >/dev/null
 npm_args=("run" "tauri" "--" "build")

@@ -68,6 +68,39 @@ run_expect_fail() {
   fi
 }
 
+run_static_marker_check() {
+  local name="$1"
+  local pattern="$2"
+  if grep -F -- "$pattern" "$SCRIPT_UNDER_TEST" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "desktop linux release bundle guardrails failed: missing static marker for $name"
+  echo "expected pattern: $pattern"
+  exit 1
+}
+
+echo "[desktop-linux-release-bundle-guardrails] static marker: icon scaffold helper exists"
+run_static_marker_check \
+  "icon scaffold helper function" \
+  "ensure_tauri_icon_scaffold()"
+
+echo "[desktop-linux-release-bundle-guardrails] static marker: icon scaffold path constant exists"
+run_static_marker_check \
+  "icon scaffold path" \
+  "src-tauri/icons/icon.ico"
+
+echo "[desktop-linux-release-bundle-guardrails] static marker: icon scaffold helper writes placeholder"
+run_static_marker_check \
+  "icon scaffold placeholder write" \
+  "printf '\\x00\\x00\\x01\\x00\\x01\\x00"
+
+echo "[desktop-linux-release-bundle-guardrails] static marker: icon scaffold helper is wired in"
+ICON_HELPER_REFERENCE_COUNT="$(grep -F -c -- "ensure_tauri_icon_scaffold" "$SCRIPT_UNDER_TEST" || true)"
+if [[ "$ICON_HELPER_REFERENCE_COUNT" -lt 2 ]]; then
+  echo "desktop linux release bundle guardrails failed: expected icon scaffold helper definition and invocation"
+  exit 1
+fi
+
 echo "[desktop-linux-release-bundle-guardrails] https update feed passes"
 run_expect_pass \
   "https_feed_pass" \

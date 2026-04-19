@@ -10,6 +10,20 @@ if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
   exit 1
 fi
 
+assert_marker_present() {
+  local marker="$1"
+  local file_path="$2"
+  if ! grep -Fq -- "$marker" "$file_path"; then
+    echo "desktop release bundle guardrails failed: missing marker '$marker' in $file_path"
+    exit 1
+  fi
+}
+
+assert_marker_present "function Ensure-TauriIconScaffold" "$SCRIPT_UNDER_TEST"
+assert_marker_present "src-tauri\\icons\\icon.ico" "$SCRIPT_UNDER_TEST"
+assert_marker_present "[System.IO.File]::WriteAllBytes" "$SCRIPT_UNDER_TEST"
+assert_marker_present 'Ensure-TauriIconScaffold -DesktopDir $desktopDir' "$SCRIPT_UNDER_TEST"
+
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
 elif command -v pwsh >/dev/null 2>&1; then
