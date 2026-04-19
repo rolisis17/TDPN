@@ -121,6 +121,7 @@ run_step "easy-node server federation wait" ./scripts/integration_easy_node_serv
 run_step "easy-node self-update" ./scripts/integration_easy_node_self_update.sh
 run_step "phase-0 gate" ./scripts/ci_phase0.sh
 run_step "local API config-v1 defaults" ./scripts/integration_local_api_config_defaults.sh
+run_step "local API gpm bootstrap trust" ./scripts/integration_local_control_api_gpm_manifest_trust.sh
 run_step "desktop scaffold contract" ./scripts/integration_desktop_scaffold_contract.sh
 run_step "web portal contract" ./scripts/integration_web_portal_contract.sh
 run_step "easy-node role guard" ./scripts/integration_easy_node_role_guard.sh

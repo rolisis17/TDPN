@@ -4191,6 +4191,79 @@ func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 	}
 }
 
+func TestGPMClientRegisterUsesPinnedCacheFallbackWhenRemoteFetchFails(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+
+	var manifestHits int
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	const bootstrapDirectory = "https://directory.cache.globalprivatemesh.example:8081"
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{bootstrapDirectory},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	const token = "gpm-session-token-cache-fallback"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1cachefallback",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusOK {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected remote manifest fetch attempt before cache fallback")
+	}
+
+	source, _ := payload["source"].(string)
+	if source != "cache" {
+		t.Fatalf("source=%q want=cache payload=%v", source, payload)
+	}
+	signatureVerified, _ := payload["signature_verified"].(bool)
+	if !signatureVerified {
+		t.Fatalf("signature_verified=%v want=true payload=%v", signatureVerified, payload)
+	}
+	profile, _ := payload["profile"].(map[string]any)
+	gotBootstrap, _ := profile["bootstrap_directory"].(string)
+	if gotBootstrap != bootstrapDirectory {
+		t.Fatalf("profile.bootstrap_directory=%q want=%q payload=%v", gotBootstrap, bootstrapDirectory, payload)
+	}
+}
+
 func TestGPMClientRegisterRejectsPinnedCacheFallbackSourceHostMismatch(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

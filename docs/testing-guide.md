@@ -66,6 +66,7 @@ What this does:
    - easy-node config v1 contract (`integration_easy_node_config_v1.sh`)
    - local API config defaults contract (`integration_local_api_config_defaults.sh`)
    - local control API forwarding contract (`integration_local_control_api_contract.sh`)
+   - local control API GPM bootstrap trust contract (`integration_local_control_api_gpm_manifest_trust.sh`)
    - desktop scaffold contract (`integration_desktop_scaffold_contract.sh`)
    - windows desktop native bootstrap guardrails (`integration_windows_desktop_native_bootstrap_guardrails.sh`)
 

@@ -442,6 +442,9 @@ echo "[ci] phase-0 gate"
 echo "[ci] local API config-v1 defaults integration"
 ./scripts/integration_local_api_config_defaults.sh
 
+echo "[ci] local API gpm bootstrap trust integration"
+./scripts/integration_local_control_api_gpm_manifest_trust.sh
+
 echo "[ci] desktop scaffold contract integration"
 ./scripts/integration_desktop_scaffold_contract.sh
 
