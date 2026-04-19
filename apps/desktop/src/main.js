@@ -35,6 +35,9 @@ const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
 const compatAdvancedHintEl = document.querySelector("details.advanced > p");
+const desktopStepSessionEl = document.getElementById("desktop_step_session");
+const desktopStepClientEl = document.getElementById("desktop_step_client");
+const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
@@ -55,6 +58,7 @@ const state = {
   sessionToken: "",
   role: "client",
   operatorApplicationStatus: undefined,
+  clientRegistered: false,
   serviceMutationsAllowed: false,
   connectRequireSession: false,
   manifest: null,
@@ -437,6 +441,52 @@ function isServerMutationRoleEligible(role = state.role, operatorApplicationStat
   return false;
 }
 
+function setDesktopStepState(el, value) {
+  if (!el) {
+    return;
+  }
+  el.dataset.state = value;
+}
+
+function inferClientRegistrationFromPayload(payload) {
+  const sessionBootstrap = payload?.session?.bootstrap_directory;
+  const profileBootstrap = payload?.profile?.bootstrap_directory;
+  const sessionValue = typeof sessionBootstrap === "string" ? sessionBootstrap.trim() : "";
+  const profileValue = typeof profileBootstrap === "string" ? profileBootstrap.trim() : "";
+  return sessionValue.length > 0 || profileValue.length > 0;
+}
+
+function syncDesktopOnboardingSteps() {
+  const hasSession = !!state.sessionToken;
+  const role = (state.role || "client").toLowerCase();
+  const operatorReady = role === "admin" || (role === "operator" && state.operatorApplicationStatus === "approved");
+
+  if (!hasSession) {
+    setDesktopStepState(desktopStepSessionEl, "active");
+    setDesktopStepState(desktopStepClientEl, "blocked");
+    setDesktopStepState(desktopStepOperatorEl, "blocked");
+    return;
+  }
+
+  setDesktopStepState(desktopStepSessionEl, "done");
+  if (!state.clientRegistered) {
+    setDesktopStepState(desktopStepClientEl, "active");
+    setDesktopStepState(desktopStepOperatorEl, "blocked");
+    return;
+  }
+
+  setDesktopStepState(desktopStepClientEl, "done");
+  if (operatorReady) {
+    setDesktopStepState(desktopStepOperatorEl, "done");
+    return;
+  }
+  if (state.operatorApplicationStatus === "rejected") {
+    setDesktopStepState(desktopStepOperatorEl, "blocked");
+    return;
+  }
+  setDesktopStepState(desktopStepOperatorEl, "active");
+}
+
 function syncServerMutationControls() {
   const mutationsEnabled = state.serviceMutationsAllowed && isServerMutationRoleEligible();
   setProfileBtnEl.disabled = !mutationsEnabled;
@@ -487,6 +537,7 @@ function syncServerRoleLockState() {
   }
   syncServerMutationControls();
   serverLockHintEl.textContent = computeServerLockHintText();
+  syncDesktopOnboardingSteps();
 }
 
 function setRole(role, options = {}) {
@@ -505,6 +556,7 @@ function setSessionToken(value, options = {}) {
   const nextValue = (value || "").trim();
   if (state.sessionToken !== nextValue) {
     state.operatorApplicationStatus = undefined;
+    state.clientRegistered = false;
   }
   state.sessionToken = nextValue;
   sessionTokenEl.value = state.sessionToken;
@@ -676,12 +728,16 @@ async function refreshSession(action = "status") {
   });
   if (sessionAction === "refresh") {
     setSessionToken(result?.session_token || state.sessionToken);
+    state.clientRegistered = inferClientRegistrationFromPayload(result);
   }
   if (sessionAction === "revoke") {
     setSessionToken("");
     setRole("client");
     setOperatorApplicationStatus(undefined);
     return result;
+  }
+  if (sessionAction !== "refresh") {
+    state.clientRegistered = inferClientRegistrationFromPayload(result);
   }
   setRole(parseSessionRole(result));
   await refreshOperatorApplicationStatus({ quiet: true });
@@ -696,6 +752,7 @@ async function refreshSessionOnInit() {
     const result = await invoke("control_gpm_session", {
       request: { session_token: state.sessionToken, action: "status" }
     });
+    state.clientRegistered = inferClientRegistrationFromPayload(result);
     setRole(parseSessionRole(result));
   } catch {
     // Startup status refresh is best-effort and should not block the scaffold.
@@ -745,6 +802,7 @@ byId("signin_btn").addEventListener("click", async () => {
   };
   const result = await call("gpm_auth_verify", "control_gpm_auth_verify", { request });
   setSessionToken(result?.session_token || "");
+  state.clientRegistered = inferClientRegistrationFromPayload(result);
   setRole(parseSessionRole(result));
   await refreshOperatorApplicationStatus({ quiet: true });
 });
@@ -795,6 +853,7 @@ byId("register_client_btn").addEventListener("click", async () => {
     }
   }
   const result = await call("gpm_client_register", "control_gpm_client_register", { request });
+  state.clientRegistered = inferClientRegistrationFromPayload(result) || true;
   setRole(parseSessionRole(result));
 });
 
