@@ -146,6 +146,30 @@ pub struct LocalApiClient {
     client: reqwest::Client,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RuntimePolicyConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_require_session: Option<bool>,
+}
+
+impl RuntimePolicyConfig {
+    pub fn from_config_payload(payload: &Value) -> Self {
+        let config = payload.get("config");
+        let data_config = payload
+            .get("data")
+            .and_then(|value| value.get("config"));
+        let connect_require_session = parse_bool_like_json(config.and_then(|value| value.get("connect_require_session")))
+            .or_else(|| parse_bool_like_json(config.and_then(|value| value.get("connectRequireSession"))))
+            .or_else(|| parse_bool_like_json(payload.get("connect_require_session")))
+            .or_else(|| parse_bool_like_json(payload.get("connectRequireSession")))
+            .or_else(|| parse_bool_like_json(data_config.and_then(|value| value.get("connect_require_session"))))
+            .or_else(|| parse_bool_like_json(data_config.and_then(|value| value.get("connectRequireSession"))));
+        Self {
+            connect_require_session,
+        }
+    }
+}
+
 impl LocalApiClient {
     pub fn new(config: LocalApiConfig) -> Result<Self, String> {
         let client = reqwest::Client::builder()
@@ -183,6 +207,11 @@ impl LocalApiClient {
             .await
             .map_err(|e| format!("GET {path} failed: {e}"))?;
         self.parse_response(path, response).await
+    }
+
+    pub async fn get_runtime_policy_config(&self) -> Result<RuntimePolicyConfig, String> {
+        let payload = self.get_json("/v1/config").await?;
+        Ok(RuntimePolicyConfig::from_config_payload(&payload))
     }
 
     pub async fn post_json<T: Serialize + ?Sized>(&self, path: &str, payload: &T) -> Result<Value, String> {
@@ -260,6 +289,22 @@ fn extract_json_error_detail(body: &str) -> Option<String> {
         return None;
     }
     Some(truncate_error_detail(&raw))
+}
+
+fn parse_bool_like_json(value: Option<&Value>) -> Option<bool> {
+    match value {
+        Some(Value::Bool(value)) => Some(*value),
+        Some(Value::Number(value)) => value.as_i64().map(|n| n != 0),
+        Some(Value::String(value)) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => Some(true),
+                "0" | "false" | "no" | "off" => Some(false),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 fn is_literal_loopback_host(url: &reqwest::Url) -> bool {

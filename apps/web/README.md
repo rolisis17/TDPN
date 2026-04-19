@@ -32,6 +32,9 @@ Then open:
 - Operator approval (`POST /v1/gpm/onboarding/operator/approve`) now expects an admin `session_token` by default; legacy `admin_token` fallback remains supported when `GPM_APPROVAL_ADMIN_TOKEN` is configured.
 - Operator queue listing is available via `POST /v1/gpm/onboarding/operator/list`; portal includes queue filters (`status/search/limit`) and sends optional `search` and `cursor` when provided.
 - Optional production hardening for `/v1/connect`: set `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`) to require registered `session_token` and reject manual `bootstrap_directory`/`invite_key` request overrides; legacy connect behavior remains default unless enabled.
+- Portal now fetches `GET /v1/config` on startup and reads `config.connect_require_session` to lock compatibility behavior when required by policy.
+- Client registration now includes a compatibility override toggle (default OFF): manual `bootstrap_directory`/`invite_key` are disabled and not sent unless explicitly enabled; when `connect_require_session=true`, the override is forced OFF/disabled with policy guidance.
+- If `/v1/config` is unavailable, portal continues without hard failure and keeps compatibility override behavior available.
 - If `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host, including cache fallback source URLs. This hardening is skipped when the main domain is unset for dev compatibility, and it sits alongside existing signature verification and expiry checks.
 - Portal onboarding fields are persisted in browser `localStorage` and restored on reload; session refresh/revoke keeps stored token/role in sync.
 - Wallet verification is currently challenge+signature contract wiring; production wallet extension integration is a follow-on milestone.

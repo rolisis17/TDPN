@@ -48,6 +48,7 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`; required when remote mode targets non-loopback URLs)
 - `GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1`; opt-in for desktop `control_update` action)
 - `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`; opt-in for desktop service start/stop/restart actions)
+- desktop startup now best-effort probes daemon runtime config (`GET /v1/config` via `control_runtime_config`) and uses runtime `connect_require_session` as the connect-lock authority when present; otherwise it keeps env default behavior
 - GPM server lifecycle actions (`POST /v1/gpm/service/start|stop|restart`) require an approved `operator` or `admin` session from `POST /v1/gpm/session`; `client` sessions cannot run server lifecycle mutations.
 - Desktop onboarding progress tracking uses `POST /v1/gpm/onboarding/client/status` to confirm whether the active session is truly registered (`registered|not_registered`).
 - Desktop server tab lock/unlock guidance now prioritizes `POST /v1/gpm/onboarding/server/status` (`readiness.tab_visible`, `readiness.lifecycle_actions_unlocked`, `readiness.lock_reason`, `readiness.unlock_actions`) with local-role fallback if the endpoint is unavailable.

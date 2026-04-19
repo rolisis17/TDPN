@@ -167,6 +167,10 @@
             </select>
           </label>
           <label>
+            <input id="compat_override" type="checkbox" />
+            Enable compatibility override (manual bootstrap/invite)
+          </label>
+          <label>
             Bootstrap directory (optional)
             <input id="bootstrap_directory" placeholder="from manifest or leave blank" />
           </label>
@@ -175,6 +179,9 @@
             <input id="invite_key" placeholder="optional compatibility invite" />
           </label>
         </div>
+        <p id="compat_override_hint" class="helper-copy">
+          Compatibility override is off by default. Keep it off for standard session-based registration.
+        </p>
         <div class="actions">
           <button class="btn primary" id="register_client_btn">Register Client</button>
         </div>

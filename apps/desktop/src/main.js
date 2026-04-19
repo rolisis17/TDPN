@@ -82,6 +82,7 @@ const state = {
   clientRegistered: false,
   serviceMutationsAllowed: false,
   connectRequireSession: false,
+  connectPolicySource: "env_default",
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
@@ -524,6 +525,10 @@ function formatConfigMeta(cfg) {
     serviceMutationsEnabled: serviceMutationsEnabled === true,
     connectRequireSession: connectRequireSession === true
   };
+}
+
+function formatConnectPolicySourceHint(source) {
+  return source === "runtime_config" ? "connect policy: runtime config" : "connect policy: env default";
 }
 
 function normalizeOperatorApplicationStatus(value) {
@@ -1916,17 +1921,41 @@ async function init() {
   try {
     const cfg = await invoke("control_config");
     const meta = formatConfigMeta(cfg || {});
+    let connectRequireSession = meta.connectRequireSession;
+    let connectPolicySource = "env_default";
+    try {
+      const runtimeCfg = await invoke("control_runtime_config");
+      const runtimeConnectRequireSession = readConfigBoolean(runtimeCfg || {}, [
+        "connect_require_session",
+        "connectRequireSession"
+      ]);
+      if (runtimeConnectRequireSession !== undefined) {
+        connectRequireSession = runtimeConnectRequireSession;
+      }
+      const runtimeSource = nonEmptyStringOrUndefined(runtimeCfg?.policy_source);
+      if (runtimeSource === "runtime_config" || runtimeSource === "env_default") {
+        connectPolicySource = runtimeSource;
+      } else if (runtimeConnectRequireSession !== undefined) {
+        connectPolicySource = "runtime_config";
+      }
+    } catch {
+      connectPolicySource = "env_default";
+    }
+    state.connectPolicySource = connectPolicySource;
     apiBaseEl.textContent = meta.apiLine;
-    apiHintsEl.textContent = meta.hintLine;
+    apiHintsEl.textContent = [meta.hintLine, formatConnectPolicySourceHint(connectPolicySource)]
+      .filter((value) => typeof value === "string" && value.trim().length > 0)
+      .join(" | ");
     updateBtnEl.disabled = !meta.updateMutationsEnabled;
     state.serviceMutationsAllowed = meta.serviceMutationsEnabled;
-    applyConnectModePolicy(meta.connectRequireSession);
+    applyConnectModePolicy(connectRequireSession);
     syncServerRoleLockState();
   } catch (err) {
     apiBaseEl.textContent = "API: unavailable";
     apiHintsEl.textContent = "";
     updateBtnEl.disabled = true;
     state.serviceMutationsAllowed = false;
+    state.connectPolicySource = "env_default";
     applyConnectModePolicy(false);
     syncServerRoleLockState();
     print("init (error)", err);

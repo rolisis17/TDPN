@@ -4,7 +4,7 @@ use local_api::{
     ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMOperatorApplyRequest,
     GPMAuditRecentRequest, GPMOperatorApproveRequest, GPMOperatorListRequest, GPMOperatorStatusRequest,
     GPMServerStatusRequest, GPMSessionStatusRequest, GPMWalletChallengeRequest,
-    GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig, ProfileRequest,
+    GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig, ProfileRequest, RuntimePolicyConfig,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -37,6 +37,16 @@ struct ControlConfig {
     api_contract: String,
 }
 
+#[derive(Serialize)]
+struct RuntimePolicyView {
+    available: bool,
+    policy_source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connect_require_session: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+}
+
 #[tauri::command]
 fn control_config(state: State<'_, AppState>) -> ControlConfig {
     let cfg = state.local_api.config();
@@ -62,6 +72,38 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
         product_short_name: "GPM".to_string(),
         api_contract: "gpm-v1-with-tdpn-compat".to_string(),
     }
+}
+
+#[tauri::command]
+async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePolicyView, String> {
+    let view = match state.local_api.get_runtime_policy_config().await {
+        Ok(RuntimePolicyConfig {
+            connect_require_session,
+        }) => {
+            let has_runtime_policy = connect_require_session.is_some();
+            RuntimePolicyView {
+                available: true,
+                policy_source: if has_runtime_policy {
+                    "runtime_config".to_string()
+                } else {
+                    "env_default".to_string()
+                },
+                connect_require_session,
+                note: if has_runtime_policy {
+                    None
+                } else {
+                    Some("runtime config missing connect_require_session; using env default".to_string())
+                },
+            }
+        }
+        Err(_) => RuntimePolicyView {
+            available: false,
+            policy_source: "env_default".to_string(),
+            connect_require_session: None,
+            note: Some("runtime config unavailable; using env default".to_string()),
+        },
+    };
+    Ok(view)
 }
 
 fn optional_env(name: &str) -> Option<String> {
@@ -589,6 +631,7 @@ fn main() {
         .manage(AppState { local_api })
         .invoke_handler(tauri::generate_handler![
             control_config,
+            control_runtime_config,
             control_health,
             control_status,
             control_get_diagnostics,

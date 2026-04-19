@@ -1258,6 +1258,96 @@ func TestHandleStatusVariants(t *testing.T) {
 	})
 }
 
+func TestHandleConfig(t *testing.T) {
+	t.Run("success payload includes expected config hints", func(t *testing.T) {
+		svc, _ := newFakeService(t, true)
+		svc.addr = "0.0.0.0:8095"
+		svc.authToken = "cfg-secret"
+		svc.gpmConnectRequireSession = true
+		svc.gpmMainDomain = "https://gpm.example"
+		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
+		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
+		svc.gpmManifestMaxAge = 2 * time.Hour
+		svc.commandTimeout = 150 * time.Second
+
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
+			"Authorization": "Bearer cfg-secret",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		configMap, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("config payload missing map: %v", payload)
+		}
+		if got, _ := configMap["connect_require_session"].(bool); !got {
+			t.Fatalf("connect_require_session=%v want=true", configMap["connect_require_session"])
+		}
+		if got, _ := configMap["gpm_main_domain"].(string); got != "https://gpm.example" {
+			t.Fatalf("gpm_main_domain=%q want=%q", got, "https://gpm.example")
+		}
+		if got, _ := configMap["gpm_manifest_url"].(string); got != "https://gpm.example/v1/bootstrap/manifest" {
+			t.Fatalf("gpm_manifest_url=%q want=%q", got, "https://gpm.example/v1/bootstrap/manifest")
+		}
+		if got, _ := configMap["gpm_manifest_cache_path"].(string); got != ".easy-node-logs/gpm_manifest_cache.json" {
+			t.Fatalf("gpm_manifest_cache_path=%q want=%q", got, ".easy-node-logs/gpm_manifest_cache.json")
+		}
+		if got, _ := configMap["gpm_manifest_cache_max_age_sec"].(float64); int(got) != 7200 {
+			t.Fatalf("gpm_manifest_cache_max_age_sec=%v want=7200", configMap["gpm_manifest_cache_max_age_sec"])
+		}
+		if got, _ := configMap["command_timeout_sec"].(float64); int(got) != 150 {
+			t.Fatalf("command_timeout_sec=%v want=150", configMap["command_timeout_sec"])
+		}
+		if got, _ := configMap["allow_update"].(bool); !got {
+			t.Fatalf("allow_update=%v want=true", configMap["allow_update"])
+		}
+		if got, _ := configMap["allow_remote"].(bool); !got {
+			t.Fatalf("allow_remote=%v want=true", configMap["allow_remote"])
+		}
+		if _, exists := configMap["auth_token"]; exists {
+			t.Fatalf("auth_token must not be exposed: %v", configMap)
+		}
+		if _, exists := configMap["gpm_approval_token"]; exists {
+			t.Fatalf("gpm_approval_token must not be exposed: %v", configMap)
+		}
+		if _, exists := configMap["gpm_manifest_hmac_key"]; exists {
+			t.Fatalf("gpm_manifest_hmac_key must not be exposed: %v", configMap)
+		}
+	})
+
+	t.Run("method not allowed for non-get", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		code, payload := callJSONHandler(t, svc.handleConfig, http.MethodPost, "/v1/config", "")
+		if code != http.StatusMethodNotAllowed {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "method not allowed" {
+			t.Fatalf("error=%q want=method not allowed", got)
+		}
+	})
+
+	t.Run("auth required semantics match command-read policy", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.addr = "0.0.0.0:8095"
+		svc.authToken = "read-secret"
+
+		code, payload := callJSONHandler(t, svc.handleConfig, http.MethodGet, "/v1/config", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("missing token status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "unauthorized" {
+			t.Fatalf("error=%q want=unauthorized", got)
+		}
+
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
+			"Authorization": "Bearer read-secret",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+	})
+}
+
 func TestDiagnosticsAndDisconnectBasicCoverage(t *testing.T) {
 	t.Run("diagnostics raw fallback", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)

@@ -117,7 +117,7 @@ Secret handling guidance:
 - avoid persisting tokens in shared shell profiles/history; prefer short-lived shell/session scope
 - never include invite keys or bearer tokens in logs, screenshots, or support tickets
 
-Command-backed read endpoints (`GET /v1/status`, `GET /v1/get_diagnostics`, `GET /v1/service/status`, `GET /v1/gpm/audit/recent`) follow the same auth policy.
+Command-backed read endpoints (`GET /v1/status`, `GET /v1/config`, `GET /v1/get_diagnostics`, `GET /v1/service/status`, `GET /v1/gpm/audit/recent`) follow the same auth policy.
 
 Header format:
 
@@ -134,6 +134,26 @@ If auth is required and missing/invalid, the API returns `401`.
 
 ### `GET /v1/status`
 - Returns `client-vpn-status --show-json 1`.
+
+### `GET /v1/config`
+- Returns non-secret local API policy/config hints for desktop/portal UX.
+- Response shape:
+
+```json
+{
+  "ok": true,
+  "config": {
+    "connect_require_session": true,
+    "gpm_main_domain": "https://globalprivatemesh.net",
+    "gpm_manifest_url": "https://globalprivatemesh.net/v1/bootstrap/manifest",
+    "gpm_manifest_cache_path": ".easy-node-logs/gpm_bootstrap_manifest_cache.json",
+    "gpm_manifest_cache_max_age_sec": 86400,
+    "command_timeout_sec": 120,
+    "allow_update": false,
+    "allow_remote": false
+  }
+}
+```
 
 ### `POST /v1/connect`
 Body:
@@ -287,6 +307,7 @@ Command names exposed to the UI:
 
 - `control_health` -> `GET /v1/health`
 - `control_status` -> `GET /v1/status`
+- `control_runtime_config` -> `GET /v1/config` (best-effort runtime policy hints)
 - `control_get_diagnostics` -> `GET /v1/get_diagnostics`
 - `control_connect` -> `POST /v1/connect`
 - `control_disconnect` -> `POST /v1/disconnect`

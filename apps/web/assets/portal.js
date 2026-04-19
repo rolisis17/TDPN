@@ -26,6 +26,10 @@ const auditOffsetEl = byId("audit_offset");
 const auditEventEl = byId("audit_event");
 const auditWalletAddressEl = byId("audit_wallet_address");
 const auditOrderEl = byId("audit_order");
+const compatOverrideEl = byId("compat_override");
+const compatOverrideHintEl = byId("compat_override_hint");
+const bootstrapDirectoryEl = byId("bootstrap_directory");
+const inviteKeyEl = byId("invite_key");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
@@ -66,6 +70,7 @@ let operatorApplicationStatus = undefined;
 let selectedApplicationUpdatedAtUtc = "";
 let serverReadiness = null;
 let clientRegistered = false;
+let connectRequireSession = false;
 let operatorListActiveFilters = {
   status: "",
   search: "",
@@ -148,6 +153,70 @@ function bindPersistenceListeners() {
     }
     el.addEventListener("input", persist);
     el.addEventListener("change", persist);
+  }
+}
+
+function parseConnectRequireSessionConfig(payload) {
+  const parsed = parseBooleanLike(
+    firstDefined(
+      payload?.config?.connect_require_session,
+      payload?.connect_require_session,
+      payload?.config?.connectRequireSession,
+      payload?.connectRequireSession
+    )
+  );
+  return parsed === true;
+}
+
+function compatibilityOverrideEnabled() {
+  return compatOverrideEl.checked === true && connectRequireSession !== true;
+}
+
+function refreshCompatibilityOverrideControls() {
+  if (connectRequireSession && compatOverrideEl.checked) {
+    compatOverrideEl.checked = false;
+  }
+  const policyLocked = connectRequireSession === true;
+  const overrideEnabled = compatibilityOverrideEnabled();
+
+  compatOverrideEl.disabled = policyLocked;
+  compatOverrideEl.setAttribute("aria-disabled", String(policyLocked));
+
+  bootstrapDirectoryEl.disabled = !overrideEnabled;
+  bootstrapDirectoryEl.setAttribute("aria-disabled", String(!overrideEnabled));
+  inviteKeyEl.disabled = !overrideEnabled;
+  inviteKeyEl.setAttribute("aria-disabled", String(!overrideEnabled));
+
+  if (policyLocked) {
+    compatOverrideHintEl.textContent =
+      "Manual bootstrap/invite overrides are locked by policy. Session-based registration is required.";
+    return;
+  }
+  if (overrideEnabled) {
+    compatOverrideHintEl.textContent =
+      "Compatibility override is on. Manual bootstrap/invite values will be sent when provided.";
+    return;
+  }
+  compatOverrideHintEl.textContent =
+    "Compatibility override is off by default. Keep it off for standard session-based registration.";
+}
+
+async function refreshConnectPolicyConfigBestEffort(options = {}) {
+  const { quiet = true } = options;
+  try {
+    const config = await get("/v1/config");
+    connectRequireSession = parseConnectRequireSessionConfig(config);
+    refreshCompatibilityOverrideControls();
+    persistPortalState();
+    return config;
+  } catch (err) {
+    connectRequireSession = false;
+    refreshCompatibilityOverrideControls();
+    persistPortalState();
+    if (!quiet) {
+      throw err;
+    }
+    return undefined;
   }
 }
 
@@ -1152,6 +1221,15 @@ function bindReadinessListeners() {
   });
 }
 
+function bindCompatibilityOverrideListeners() {
+  compatOverrideEl.addEventListener("change", () => {
+    refreshCompatibilityOverrideControls();
+  });
+  byId("api_base").addEventListener("change", () => {
+    void refreshConnectPolicyConfigBestEffort({ quiet: true });
+  });
+}
+
 function bindOperatorListFilterListeners() {
   const clearPaginationCursor = () => {
     operatorListActiveFilters = readOperatorListFilters();
@@ -1651,13 +1729,15 @@ byId("register_client_btn").addEventListener("click", () =>
       session_token: byId("session_token").value.trim(),
       path_profile: byId("path_profile").value
     };
-    const bootstrap = byId("bootstrap_directory").value.trim();
-    const invite = byId("invite_key").value.trim();
-    if (bootstrap) {
-      request.bootstrap_directory = bootstrap;
-    }
-    if (invite) {
-      request.invite_key = invite;
+    if (compatibilityOverrideEnabled()) {
+      const bootstrap = bootstrapDirectoryEl.value.trim();
+      const invite = inviteKeyEl.value.trim();
+      if (bootstrap) {
+        request.bootstrap_directory = bootstrap;
+      }
+      if (invite) {
+        request.invite_key = invite;
+      }
     }
     const result = await post("/v1/gpm/onboarding/client/register", request);
     applySession(result);
@@ -1904,16 +1984,19 @@ async function restoreSessionStatusBestEffort() {
 
 function initializePortal() {
   restorePortalState();
+  refreshCompatibilityOverrideControls();
   setSelectedApplicationUpdatedAt(selectedApplicationUpdatedAtEl.value, { persist: false });
   operatorListActiveFilters = readOperatorListFilters({ fallbackLimit: OPERATOR_LIST_ALL_LIMIT });
   writeOperatorListFilters(operatorListActiveFilters);
   setOperatorListNextCursor("");
   bindPersistenceListeners();
+  bindCompatibilityOverrideListeners();
   bindReadinessListeners();
   bindOperatorListFilterListeners();
   persistPortalState();
   refreshOperatorReadiness();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
+  void refreshConnectPolicyConfigBestEffort({ quiet: true });
   void restoreSessionStatusBestEffort();
 }
 

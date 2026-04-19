@@ -277,6 +277,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/status", s.handleStatus)
+	mux.HandleFunc("/v1/config", s.handleConfig)
 	mux.HandleFunc("/v1/connect", s.handleConnect)
 	mux.HandleFunc("/v1/disconnect", s.handleDisconnect)
 	mux.HandleFunc("/v1/set_profile", s.handleSetProfile)
@@ -373,6 +374,39 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 		payload = map[string]any{"raw": out}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": payload})
+}
+
+func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+
+	commandTimeoutSec := int(s.commandTimeout / time.Second)
+	if commandTimeoutSec < 0 {
+		commandTimeoutSec = 0
+	}
+	manifestCacheMaxAgeSec := int(s.gpmManifestMaxAge / time.Second)
+	if manifestCacheMaxAgeSec < 0 {
+		manifestCacheMaxAgeSec = 0
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"config": map[string]any{
+			"connect_require_session":        s.gpmConnectRequireSession,
+			"gpm_main_domain":                strings.TrimSpace(s.gpmMainDomain),
+			"gpm_manifest_url":               strings.TrimSpace(s.gpmManifestURL),
+			"gpm_manifest_cache_path":        strings.TrimSpace(s.gpmManifestCache),
+			"gpm_manifest_cache_max_age_sec": manifestCacheMaxAgeSec,
+			"command_timeout_sec":            commandTimeoutSec,
+			"allow_update":                   s.allowUpdate,
+			"allow_remote":                   !isLoopbackBindAddr(s.addr),
+		},
+	})
 }
 
 func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
