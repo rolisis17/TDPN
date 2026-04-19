@@ -58,6 +58,7 @@ const state = {
   sessionToken: "",
   role: "client",
   operatorApplicationStatus: undefined,
+  serverReadiness: null,
   clientRegistered: false,
   serviceMutationsAllowed: false,
   connectRequireSession: false,
@@ -425,18 +426,55 @@ function parseOperatorApplicationStatus(payload) {
   return normalizeOperatorApplicationStatus(payload?.application?.status);
 }
 
+function parseServerReadiness(payload) {
+  const readiness = payload?.readiness;
+  if (!readiness || typeof readiness !== "object") {
+    return null;
+  }
+  const unlockActions = Array.isArray(readiness.unlock_actions)
+    ? readiness.unlock_actions
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter((entry) => entry.length > 0)
+    : [];
+  const normalizedRole = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
+  return {
+    role: normalizedRole || undefined,
+    tabVisible: toBooleanLike(readiness.tab_visible),
+    lifecycleActionsUnlocked: toBooleanLike(readiness.lifecycle_actions_unlocked),
+    serviceMutationsConfigured: toBooleanLike(readiness.service_mutations_configured),
+    operatorApplicationStatus: normalizeOperatorApplicationStatus(readiness.operator_application_status),
+    lockReason: toDetailText(readiness.lock_reason),
+    unlockActions
+  };
+}
+
+function setServerReadiness(readiness) {
+  state.serverReadiness = readiness || null;
+  if (readiness?.operatorApplicationStatus !== undefined) {
+    state.operatorApplicationStatus = readiness.operatorApplicationStatus;
+  }
+  syncServerRoleLockState();
+}
+
 function isServerTabVisibleRole(role = state.role) {
-  const normalized = (role || "client").toLowerCase();
+  if (state.serverReadiness && typeof state.serverReadiness.tabVisible === "boolean") {
+    return state.serverReadiness.tabVisible;
+  }
+  const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
   return normalized === "operator" || normalized === "admin";
 }
 
 function isServerMutationRoleEligible(role = state.role, operatorApplicationStatus = state.operatorApplicationStatus) {
-  const normalized = (role || "client").toLowerCase();
+  if (state.serverReadiness && typeof state.serverReadiness.lifecycleActionsUnlocked === "boolean") {
+    return state.serverReadiness.lifecycleActionsUnlocked;
+  }
+  const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
+  const effectiveOperatorStatus = state.serverReadiness?.operatorApplicationStatus || operatorApplicationStatus;
   if (normalized === "admin") {
     return true;
   }
   if (normalized === "operator") {
-    return operatorApplicationStatus === "approved";
+    return effectiveOperatorStatus === "approved";
   }
   return false;
 }
@@ -473,8 +511,13 @@ function parseClientRegistrationStatus(payload) {
 
 function syncDesktopOnboardingSteps() {
   const hasSession = !!state.sessionToken;
-  const role = (state.role || "client").toLowerCase();
-  const operatorReady = role === "admin" || (role === "operator" && state.operatorApplicationStatus === "approved");
+  const backendReadiness = state.serverReadiness;
+  const role = (backendReadiness?.role || state.role || "client").toLowerCase();
+  const operatorStatus = backendReadiness?.operatorApplicationStatus || state.operatorApplicationStatus;
+  const operatorReady =
+    typeof backendReadiness?.lifecycleActionsUnlocked === "boolean"
+      ? backendReadiness.lifecycleActionsUnlocked
+      : role === "admin" || (role === "operator" && operatorStatus === "approved");
 
   if (!hasSession) {
     setDesktopStepState(desktopStepSessionEl, "active");
@@ -495,7 +538,10 @@ function syncDesktopOnboardingSteps() {
     setDesktopStepState(desktopStepOperatorEl, "done");
     return;
   }
-  if (state.operatorApplicationStatus === "rejected") {
+  if (
+    operatorStatus === "rejected" ||
+    (backendReadiness && backendReadiness.tabVisible === false)
+  ) {
     setDesktopStepState(desktopStepOperatorEl, "blocked");
     return;
   }
@@ -511,6 +557,23 @@ function syncServerMutationControls() {
 }
 
 function computeServerLockHintText() {
+  if (state.serverReadiness) {
+    const readiness = state.serverReadiness;
+    if (readiness.lifecycleActionsUnlocked === true) {
+      if (!state.serviceMutationsAllowed) {
+        return "Server role is unlocked by backend readiness, but service lifecycle actions are disabled by environment policy.";
+      }
+      if (readiness.serviceMutationsConfigured === false) {
+        return "Server role is unlocked, but service lifecycle commands are not configured in the daemon.";
+      }
+      return "Server controls are unlocked by backend readiness policy.";
+    }
+    const reason = readiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
+    if (readiness.unlockActions.length > 0) {
+      return `${reason} Next: ${readiness.unlockActions.join("; ")}`;
+    }
+    return reason;
+  }
   if (!state.sessionToken) {
     return "Sign in first to unlock server onboarding.";
   }
@@ -571,6 +634,7 @@ function setSessionToken(value, options = {}) {
   const nextValue = (value || "").trim();
   if (state.sessionToken !== nextValue) {
     state.operatorApplicationStatus = undefined;
+    state.serverReadiness = null;
     state.clientRegistered = false;
   }
   state.sessionToken = nextValue;
@@ -726,6 +790,33 @@ async function refreshOperatorApplicationStatus(options = {}) {
   }
 }
 
+async function refreshServerReadinessStatus(options = {}) {
+  const { quiet = true } = options;
+  const sessionToken = state.sessionToken || undefined;
+  const walletAddress = walletAddressEl.value.trim() || undefined;
+  if (!sessionToken && !walletAddress) {
+    setServerReadiness(null);
+    return undefined;
+  }
+  const request = {
+    session_token: sessionToken,
+    wallet_address: walletAddress
+  };
+  try {
+    const result = quiet
+      ? await invoke("control_gpm_server_status", { request })
+      : await call("gpm_server_status", "control_gpm_server_status", { request });
+    setServerReadiness(parseServerReadiness(result));
+    return result;
+  } catch (err) {
+    setServerReadiness(null);
+    if (quiet) {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
 async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
   if (!state.sessionToken) {
@@ -758,6 +849,7 @@ async function refreshClientRegistrationStatus(options = {}) {
 async function refreshSession(action = "status") {
   if (!state.sessionToken) {
     setOperatorApplicationStatus(undefined);
+    setServerReadiness(null);
     return;
   }
   const sessionAction = action || "status";
@@ -777,17 +869,20 @@ async function refreshSession(action = "status") {
     setSessionToken("");
     setRole("client");
     setOperatorApplicationStatus(undefined);
+    setServerReadiness(null);
     return result;
   }
   state.clientRegistered = inferClientRegistrationFromPayload(result);
   setRole(parseSessionRole(result));
   await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
   return result;
 }
 
 async function refreshSessionOnInit() {
   if (!state.sessionToken) {
+    setServerReadiness(null);
     return;
   }
   try {
@@ -801,6 +896,7 @@ async function refreshSessionOnInit() {
   }
   await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
 }
 
 tabClientEl.addEventListener("click", () => activateTab("client"));
@@ -849,6 +945,7 @@ byId("signin_btn").addEventListener("click", async () => {
   setRole(parseSessionRole(result));
   await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
 });
 
 byId("session_btn").addEventListener("click", async () => {
@@ -914,10 +1011,12 @@ byId("apply_operator_btn").addEventListener("click", async () => {
   };
   await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
   await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
 });
 
 byId("operator_status_btn").addEventListener("click", async () => {
   await refreshOperatorApplicationStatus({ quiet: false });
+  await refreshServerReadinessStatus({ quiet: true });
 });
 
 byId("approve_operator_btn").addEventListener("click", async () => {

@@ -2,8 +2,9 @@ mod local_api;
 
 use local_api::{
     ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMOperatorApplyRequest,
-    GPMOperatorApproveRequest, GPMOperatorStatusRequest, GPMSessionStatusRequest, GPMWalletChallengeRequest,
-    GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig, ProfileRequest,
+    GPMOperatorApproveRequest, GPMOperatorStatusRequest, GPMServerStatusRequest,
+    GPMSessionStatusRequest, GPMWalletChallengeRequest, GPMWalletVerifyRequest, LocalApiClient,
+    LocalApiConfig, ProfileRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -455,6 +456,18 @@ async fn control_gpm_client_status(
 }
 
 #[tauri::command]
+async fn control_gpm_server_status(
+    state: State<'_, AppState>,
+    request: GPMServerStatusRequest,
+) -> Result<Value, String> {
+    state
+        .local_api
+        .post_json("/v1/gpm/onboarding/server/status", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
 async fn control_gpm_operator_apply(
     state: State<'_, AppState>,
     request: GPMOperatorApplyRequest,
@@ -571,6 +584,7 @@ fn main() {
             control_gpm_audit_recent,
             control_gpm_client_register,
             control_gpm_client_status,
+            control_gpm_server_status,
             control_gpm_operator_apply,
             control_gpm_operator_status,
             control_gpm_operator_approve
