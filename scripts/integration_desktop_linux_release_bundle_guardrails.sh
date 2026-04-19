@@ -123,6 +123,7 @@ run_expect_fail \
 
 DUMMY_CERT_PATH="$TMP_DIR/dummy-signing.pfx"
 printf '%s\n' "dummy" >"$DUMMY_CERT_PATH"
+DUMMY_CERT_PATH_Q="$(printf '%q' "$DUMMY_CERT_PATH")"
 
 echo "[desktop-linux-release-bundle-guardrails] existing signing cert placeholder path passes"
 run_expect_pass \
@@ -145,6 +146,6 @@ run_expect_pass \
 echo "[desktop-linux-release-bundle-guardrails] scoped environment restore is preserved in-process"
 run_expect_pass \
   "scoped_env_restore_pass" \
-  bash -lc "set -euo pipefail; export TDPN_DESKTOP_UPDATE_CHANNEL='orig-channel'; $SCRIPT_UNDER_TEST_Q --channel canary --skip-build >/dev/null; [[ \"\${TDPN_DESKTOP_UPDATE_CHANNEL}\" == 'orig-channel' ]]"
+  bash -lc "set -euo pipefail; export TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; export GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; export TDPN_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-tdpn.json'; export GPM_DESKTOP_UPDATE_FEED_URL='https://updates.example.invalid/orig-gpm.json'; export TDPN_DESKTOP_SIGNING_IDENTITY='orig-tdpn-signing-identity'; export GPM_DESKTOP_SIGNING_IDENTITY='orig-gpm-signing-identity'; export TDPN_DESKTOP_SIGNING_CERT_PATH='orig-tdpn-cert-path'; export GPM_DESKTOP_SIGNING_CERT_PATH='orig-gpm-cert-path'; export TDPN_DESKTOP_SIGNING_CERT_PASSWORD='orig-tdpn-cert-password'; export GPM_DESKTOP_SIGNING_CERT_PASSWORD='orig-gpm-cert-password'; $SCRIPT_UNDER_TEST_Q --channel canary --update-feed-url 'https://updates.example.invalid/tdpn/canary.json' --signing-identity 'scaffold-signing-identity' --signing-cert-path $DUMMY_CERT_PATH_Q --signing-cert-password 'placeholder' --skip-build >/dev/null; [[ \"\${TDPN_DESKTOP_UPDATE_CHANNEL}\" == 'orig-tdpn-channel' ]]; [[ \"\${GPM_DESKTOP_UPDATE_CHANNEL}\" == 'orig-gpm-channel' ]]; [[ \"\${TDPN_DESKTOP_UPDATE_FEED_URL}\" == 'https://updates.example.invalid/orig-tdpn.json' ]]; [[ \"\${GPM_DESKTOP_UPDATE_FEED_URL}\" == 'https://updates.example.invalid/orig-gpm.json' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_IDENTITY}\" == 'orig-tdpn-signing-identity' ]]; [[ \"\${GPM_DESKTOP_SIGNING_IDENTITY}\" == 'orig-gpm-signing-identity' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_CERT_PATH}\" == 'orig-tdpn-cert-path' ]]; [[ \"\${GPM_DESKTOP_SIGNING_CERT_PATH}\" == 'orig-gpm-cert-path' ]]; [[ \"\${TDPN_DESKTOP_SIGNING_CERT_PASSWORD}\" == 'orig-tdpn-cert-password' ]]; [[ \"\${GPM_DESKTOP_SIGNING_CERT_PASSWORD}\" == 'orig-gpm-cert-password' ]]"
 
 echo "desktop linux release bundle guardrails integration check ok"

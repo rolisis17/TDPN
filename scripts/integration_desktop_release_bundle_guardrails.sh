@@ -186,6 +186,6 @@ echo "[desktop-release-bundle-guardrails] scoped environment restore is preserve
 run_expect_pass \
   "scoped_env_restore_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-channel'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }"
+    "\$ErrorActionPreference='Stop'; \$env:TDPN_DESKTOP_UPDATE_CHANNEL='orig-tdpn-channel'; \$env:GPM_DESKTOP_UPDATE_CHANNEL='orig-gpm-channel'; \$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED='orig-tdpn-feed-configured'; \$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED='orig-gpm-feed-configured'; & '$SCRIPT_UNDER_TEST_PS' -Channel canary -UpdateFeedUrl 'https://updates.example.invalid/tdpn/canary.json' -SkipBuild; if (\$env:TDPN_DESKTOP_UPDATE_CHANNEL -ne 'orig-tdpn-channel') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_CHANNEL' }; if (\$env:GPM_DESKTOP_UPDATE_CHANNEL -ne 'orig-gpm-channel') { throw 'env restore failed for GPM_DESKTOP_UPDATE_CHANNEL' }; if (\$env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-tdpn-feed-configured') { throw 'env restore failed for TDPN_DESKTOP_UPDATE_FEED_CONFIGURED' }; if (\$env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED -ne 'orig-gpm-feed-configured') { throw 'env restore failed for GPM_DESKTOP_UPDATE_FEED_CONFIGURED' }"
 
 echo "desktop release bundle guardrails integration check ok"

@@ -29,7 +29,7 @@ function Show-Usage {
   Write-Host "  - This is scaffold-only and does not implement production signing/secret handling."
   Write-Host "  - Tauri build runs from apps/desktop via: npm run tauri -- build ..."
   Write-Host "  - -InstallMissing may use winget to install missing Node.js, Rust, and Git prerequisites non-interactively."
-  Write-Host "  - Sets TDPN_DESKTOP_UPDATE_CHANNEL and TDPN_DESKTOP_UPDATE_FEED_CONFIGURED for this process."
+  Write-Host "  - Sets GPM_DESKTOP_* vars and mirrors TDPN_DESKTOP_* compatibility vars for this process."
   Write-Host "  - Validates update feed URL and signing placeholder input consistency before invoking build."
   Write-Host "  - -SigningCertPassword is intentionally rejected; pass signing secrets through a secure path instead."
 }
@@ -324,6 +324,10 @@ if (-not (Test-Path (Join-Path $desktopDir "package.json"))) {
 }
 
 $scopedEnvNames = @(
+  "GPM_DESKTOP_UPDATE_CHANNEL",
+  "GPM_DESKTOP_UPDATE_FEED_CONFIGURED",
+  "GPM_DESKTOP_SIGNING_IDENTITY",
+  "GPM_DESKTOP_SIGNING_CERT_PATH",
   "TDPN_DESKTOP_UPDATE_CHANNEL",
   "TDPN_DESKTOP_UPDATE_FEED_CONFIGURED",
   "TDPN_DESKTOP_SIGNING_IDENTITY",
@@ -332,33 +336,39 @@ $scopedEnvNames = @(
 $scopedEnvSnapshot = Save-ScopedEnvironment -VariableNames $scopedEnvNames
 
 try {
-  $env:TDPN_DESKTOP_UPDATE_CHANNEL = $Channel
+  $env:GPM_DESKTOP_UPDATE_CHANNEL = $Channel
+  $env:TDPN_DESKTOP_UPDATE_CHANNEL = $env:GPM_DESKTOP_UPDATE_CHANNEL
   if ([string]::IsNullOrWhiteSpace($UpdateFeedUrl)) {
-    $env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED = "0"
+    $env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED = "0"
   } else {
-    $env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED = "1"
+    $env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED = "1"
   }
+  $env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED = $env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED
 
   # Scaffold placeholders only. These are not wired to any production signing flow.
   if ([string]::IsNullOrWhiteSpace($SigningIdentity)) {
+    Remove-Item Env:GPM_DESKTOP_SIGNING_IDENTITY -ErrorAction SilentlyContinue
     Remove-Item Env:TDPN_DESKTOP_SIGNING_IDENTITY -ErrorAction SilentlyContinue
   } else {
-    $env:TDPN_DESKTOP_SIGNING_IDENTITY = $SigningIdentity
+    $env:GPM_DESKTOP_SIGNING_IDENTITY = $SigningIdentity
+    $env:TDPN_DESKTOP_SIGNING_IDENTITY = $env:GPM_DESKTOP_SIGNING_IDENTITY
   }
   if ([string]::IsNullOrWhiteSpace($SigningCertPath)) {
+    Remove-Item Env:GPM_DESKTOP_SIGNING_CERT_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:TDPN_DESKTOP_SIGNING_CERT_PATH -ErrorAction SilentlyContinue
   } else {
-    $env:TDPN_DESKTOP_SIGNING_CERT_PATH = $SigningCertPath
+    $env:GPM_DESKTOP_SIGNING_CERT_PATH = $SigningCertPath
+    $env:TDPN_DESKTOP_SIGNING_CERT_PATH = $env:GPM_DESKTOP_SIGNING_CERT_PATH
   }
 
   Write-Host "[desktop-release-bundle] mode=scaffold-non-production"
-  Write-Host "[desktop-release-bundle] channel=$($env:TDPN_DESKTOP_UPDATE_CHANNEL)"
-  if ($env:TDPN_DESKTOP_UPDATE_FEED_CONFIGURED -eq "1") {
+  Write-Host "[desktop-release-bundle] channel=$($env:GPM_DESKTOP_UPDATE_CHANNEL)"
+  if ($env:GPM_DESKTOP_UPDATE_FEED_CONFIGURED -eq "1") {
     Write-Host "[desktop-release-bundle] update_feed=configured"
   } else {
     Write-Host "[desktop-release-bundle] update_feed=(not set)"
   }
-  if ($env:TDPN_DESKTOP_SIGNING_IDENTITY -or $env:TDPN_DESKTOP_SIGNING_CERT_PATH) {
+  if ($env:GPM_DESKTOP_SIGNING_IDENTITY -or $env:GPM_DESKTOP_SIGNING_CERT_PATH) {
     Write-Host "[desktop-release-bundle] signing_placeholders=provided (scaffold-only)"
   } else {
     Write-Host "[desktop-release-bundle] signing_placeholders=not provided"

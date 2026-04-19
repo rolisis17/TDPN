@@ -19,7 +19,7 @@ Examples:
 Notes:
   - This is scaffold-only and does not implement production signing/secret handling.
   - Tauri build runs from apps/desktop via: npm run tauri -- build ...
-  - Sets TDPN_DESKTOP_UPDATE_CHANNEL and optional TDPN_DESKTOP_UPDATE_FEED_URL for this process.
+  - Sets GPM_DESKTOP_* vars (and TDPN_DESKTOP_* compatibility vars) for this process.
   - Validates update feed URL and signing placeholder input consistency before invoking build.
 USAGE
 }
@@ -115,10 +115,15 @@ validate_signing_placeholders() {
 declare -A SAVED_ENV_PRESENT=()
 declare -A SAVED_ENV_VALUE=()
 SCOPED_ENV_NAMES=(
+  "GPM_DESKTOP_UPDATE_CHANNEL"
   "TDPN_DESKTOP_UPDATE_CHANNEL"
+  "GPM_DESKTOP_UPDATE_FEED_URL"
   "TDPN_DESKTOP_UPDATE_FEED_URL"
+  "GPM_DESKTOP_SIGNING_IDENTITY"
   "TDPN_DESKTOP_SIGNING_IDENTITY"
+  "GPM_DESKTOP_SIGNING_CERT_PATH"
   "TDPN_DESKTOP_SIGNING_CERT_PATH"
+  "GPM_DESKTOP_SIGNING_CERT_PASSWORD"
   "TDPN_DESKTOP_SIGNING_CERT_PASSWORD"
 )
 
@@ -236,28 +241,37 @@ validate_signing_placeholders "$signing_identity" "$signing_cert_path" "$signing
 save_scoped_env
 trap restore_scoped_env EXIT
 
+export GPM_DESKTOP_UPDATE_CHANNEL="$channel"
 export TDPN_DESKTOP_UPDATE_CHANNEL="$channel"
 if [[ -n "$update_feed_url" ]]; then
+  export GPM_DESKTOP_UPDATE_FEED_URL="$update_feed_url"
   export TDPN_DESKTOP_UPDATE_FEED_URL="$update_feed_url"
 else
+  unset GPM_DESKTOP_UPDATE_FEED_URL
   unset TDPN_DESKTOP_UPDATE_FEED_URL
 fi
 
 if [[ -n "$signing_identity" ]]; then
+  export GPM_DESKTOP_SIGNING_IDENTITY="$signing_identity"
   export TDPN_DESKTOP_SIGNING_IDENTITY="$signing_identity"
 else
+  unset GPM_DESKTOP_SIGNING_IDENTITY
   unset TDPN_DESKTOP_SIGNING_IDENTITY
 fi
 
 if [[ -n "$signing_cert_path" ]]; then
+  export GPM_DESKTOP_SIGNING_CERT_PATH="$signing_cert_path"
   export TDPN_DESKTOP_SIGNING_CERT_PATH="$signing_cert_path"
 else
+  unset GPM_DESKTOP_SIGNING_CERT_PATH
   unset TDPN_DESKTOP_SIGNING_CERT_PATH
 fi
 
 if [[ -n "$signing_cert_password" ]]; then
+  export GPM_DESKTOP_SIGNING_CERT_PASSWORD="$signing_cert_password"
   export TDPN_DESKTOP_SIGNING_CERT_PASSWORD="$signing_cert_password"
 else
+  unset GPM_DESKTOP_SIGNING_CERT_PASSWORD
   unset TDPN_DESKTOP_SIGNING_CERT_PASSWORD
 fi
 
