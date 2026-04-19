@@ -297,7 +297,7 @@ bash ./scripts/linux/desktop_native_bootstrap.sh --mode run-full --desktop-launc
 bash ./scripts/linux/desktop_one_click.sh --install-missing
 ```
 
-Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
+Equivalent `easy_node.sh` wrapper usage on Linux (scaffold/non-production):
 
 ```bash
 ./scripts/easy_node.sh desktop-linux-doctor --mode check
@@ -309,7 +309,23 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-packaged-run
 ```
 
-If your branch does not yet expose these wrapper commands, keep using the direct Linux script commands above.
+Equivalent `easy_node.sh` wrapper usage on Windows (scaffold/non-production):
+
+```powershell
+.\scripts\easy_node.sh desktop-windows-doctor --mode check
+.\scripts\easy_node.sh desktop-windows-doctor --mode fix --install-missing
+.\scripts\easy_node.sh desktop-windows-native-bootstrap --mode bootstrap --install-missing
+.\scripts\easy_node.sh desktop-windows-native-bootstrap --mode run-full --desktop-launch-strategy auto
+.\scripts\easy_node.sh desktop-windows-one-click --install-missing
+.\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
+.\scripts\easy_node.sh desktop-windows-packaged-run
+.\scripts\easy_node.sh desktop-windows-release-bundle --bundle-dir .easy-node-logs/windows_release_bundle
+.\scripts\easy_node.sh desktop-windows-local-api-session -DryRun
+```
+
+The Windows wrapper commands call PowerShell with `-ExecutionPolicy Bypass` automatically for the target `.ps1` scripts.
+
+If your branch does not yet expose these wrapper commands, keep using the direct Linux/Windows script commands above.
 
 Linux native bootstrap mode quick reference:
 - `check`: doctor readiness only

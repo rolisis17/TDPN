@@ -299,7 +299,7 @@ async fn control_set_profile(state: State<'_, AppState>, request: ProfileRequest
 async fn control_update(state: State<'_, AppState>) -> Result<Value, String> {
     if !state.local_api.config().allow_update_mutations {
         return Err(
-            "desktop update action disabled (set TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1 to enable)"
+            "desktop update action disabled (set GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1; legacy alias: TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1)"
                 .to_string(),
         );
     }
@@ -334,7 +334,7 @@ async fn control_service_lifecycle(
 ) -> Result<Value, String> {
     if !state.local_api.config().allow_service_mutations {
         return Err(
-            "service lifecycle actions disabled (set TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1 to enable)"
+            "service lifecycle actions disabled (set GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1; legacy alias: TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1)"
                 .to_string(),
         );
     }
@@ -560,5 +560,5 @@ fn main() {
             control_gpm_operator_approve
         ])
         .run(tauri::generate_context!())
-        .expect("error while running TDPN desktop scaffold");
+        .expect("error while running Global Private Mesh (GPM) desktop scaffold");
 }

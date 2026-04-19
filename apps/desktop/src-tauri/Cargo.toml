@@ -2,7 +2,7 @@
 name = "tdpn-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "TDPN desktop scaffold using local daemon control API"
+description = "Global Private Mesh (GPM) desktop scaffold using local daemon control API (TDPN compatibility aliases supported)"
 
 [package.metadata]
 # Scaffold placeholder to satisfy tauri-build metadata probing on Windows.

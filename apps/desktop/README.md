@@ -1,4 +1,4 @@
-# TDPN Desktop App Track (Tauri Scaffold)
+# Global Private Mesh (GPM) Desktop App Track (Tauri Scaffold)
 
 This folder contains a practical scaffold for the Windows-native desktop track.
 It is intentionally lightweight and not production-ready yet.
@@ -37,13 +37,13 @@ Defaults expected by this app:
 - local API base URL: `http://127.0.0.1:8095`
 - local API timeout: `20s`
 
-Desktop env overrides:
-- `TDPN_LOCAL_API_BASE_URL`
-- `TDPN_LOCAL_API_TIMEOUT_SEC`
-- `TDPN_LOCAL_API_ALLOW_REMOTE=1` (opt-in for non-loopback daemon URLs)
-- `TDPN_LOCAL_API_AUTH_BEARER` (required when `TDPN_LOCAL_API_ALLOW_REMOTE=1` targets non-loopback URLs)
-- `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` (opt-in for desktop `control_update` action)
-- `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` (opt-in for desktop service start/stop/restart actions)
+Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatibility):
+- `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`)
+- `GPM_LOCAL_API_TIMEOUT_SEC` (legacy alias: `TDPN_LOCAL_API_TIMEOUT_SEC`)
+- `GPM_LOCAL_API_ALLOW_REMOTE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_REMOTE=1`; opt-in for non-loopback daemon URLs)
+- `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`; required when remote mode targets non-loopback URLs)
+- `GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1`; opt-in for desktop `control_update` action)
+- `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`; opt-in for desktop service start/stop/restart actions)
 
 Remote hardening guardrails:
 - non-loopback `TDPN_LOCAL_API_BASE_URL` requires `TDPN_LOCAL_API_ALLOW_REMOTE=1`
@@ -185,7 +185,7 @@ What this path does:
 Env override example (PowerShell):
 
 ```powershell
-$env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\TDPN\TDPN Desktop\TDPN Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
+$env:GPM_DESKTOP_PACKAGED_EXE="C:\Program Files\GPM\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
 ```
 
 Recommended sequence for installer testing:
@@ -226,7 +226,7 @@ Dry-run guidance:
 Executable override and env hints:
 - primary packaged executable override: `GPM_DESKTOP_PACKAGED_EXE`
 - legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
-- local API behavior can still be tuned with `TDPN_LOCAL_API_BASE_URL` and `TDPN_LOCAL_API_TIMEOUT_SEC`
+- local API behavior can still be tuned with `GPM_LOCAL_API_BASE_URL` and `GPM_LOCAL_API_TIMEOUT_SEC` (legacy aliases: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`)
 - keep manual executable overrides as support/lab usage in scaffold mode, not production defaults
 
 Linux native bootstrap and one-click launchers:
@@ -281,10 +281,10 @@ Use this only as scaffolding while we build the real signing/release pipeline.
 It does not implement production secret handling or production signing.
 
 Update channel env:
-- `TDPN_DESKTOP_UPDATE_CHANNEL` = `stable|beta|canary` (default: `stable`)
+- `GPM_DESKTOP_UPDATE_CHANNEL` = `stable|beta|canary` (default: `stable`, legacy alias: `TDPN_DESKTOP_UPDATE_CHANNEL`)
 
 Optional update feed env:
-- `TDPN_DESKTOP_UPDATE_FEED_URL` (example: `https://updates.example.invalid/tdpn/beta.json`)
+- `GPM_DESKTOP_UPDATE_FEED_URL` (legacy alias: `TDPN_DESKTOP_UPDATE_FEED_URL`, example: `https://updates.example.invalid/gpm/beta.json`)
 
 Run from repository root (PowerShell):
 

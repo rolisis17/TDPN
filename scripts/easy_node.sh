@@ -239,6 +239,12 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
+  ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
+  ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
+  ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
@@ -375,6 +381,12 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
+  ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
+  ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
+  ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-session [client-vpn-up args...] [--cleanup-all [0|1]]
   ./scripts/easy_node.sh simple-client-vpn-session [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]] [--interface IFACE] [--ready-timeout-sec N]
@@ -8467,24 +8479,77 @@ single_machine_prod_readiness() {
   "$readiness_script" "$@"
 }
 
+run_desktop_wrapper_script() {
+  local script="$1"
+  shift || true
+  if [[ "$script" == *.ps1 ]]; then
+    local runtime=""
+    local candidate=""
+    for candidate in powershell.exe pwsh powershell; do
+      if command -v "$candidate" >/dev/null 2>&1; then
+        runtime="$candidate"
+        break
+      fi
+    done
+    if [[ -z "$runtime" ]]; then
+      echo "missing PowerShell runtime for wrapper: $script"
+      echo "tried: powershell.exe, pwsh, powershell"
+      exit 2
+    fi
+    "$runtime" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$script" "$@"
+    return
+  fi
+  "$script" "$@"
+}
+
 desktop_linux_doctor() {
   local script="${DESKTOP_LINUX_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_doctor.sh}"
-  "$script" "$@"
+  run_desktop_wrapper_script "$script" "$@"
 }
 
 desktop_linux_native_bootstrap() {
   local script="${DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_native_bootstrap.sh}"
-  "$script" "$@"
+  run_desktop_wrapper_script "$script" "$@"
 }
 
 desktop_linux_one_click() {
   local script="${DESKTOP_LINUX_ONE_CLICK_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_one_click.sh}"
-  "$script" "$@"
+  run_desktop_wrapper_script "$script" "$@"
 }
 
 desktop_linux_packaged_run() {
   local script="${DESKTOP_LINUX_PACKAGED_RUN_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_packaged_run.sh}"
-  "$script" "$@"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_doctor() {
+  local script="${DESKTOP_WINDOWS_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_doctor.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_native_bootstrap() {
+  local script="${DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_native_bootstrap.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_one_click() {
+  local script="${DESKTOP_WINDOWS_ONE_CLICK_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_one_click.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_packaged_run() {
+  local script="${DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_packaged_run.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_release_bundle() {
+  local script="${DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_release_bundle.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_local_api_session() {
+  local script="${DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT:-$ROOT_DIR/scripts/windows/local_api_session.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
 }
 
 vpn_rc_standard_path() {
@@ -15475,6 +15540,30 @@ main() {
     desktop-linux-packaged-run)
       shift
       desktop_linux_packaged_run "$@"
+      ;;
+    desktop-windows-doctor)
+      shift
+      desktop_windows_doctor "$@"
+      ;;
+    desktop-windows-native-bootstrap)
+      shift
+      desktop_windows_native_bootstrap "$@"
+      ;;
+    desktop-windows-one-click)
+      shift
+      desktop_windows_one_click "$@"
+      ;;
+    desktop-windows-packaged-run)
+      shift
+      desktop_windows_packaged_run "$@"
+      ;;
+    desktop-windows-release-bundle)
+      shift
+      desktop_windows_release_bundle "$@"
+      ;;
+    desktop-windows-local-api-session)
+      shift
+      desktop_windows_local_api_session "$@"
       ;;
     server-preflight)
       shift

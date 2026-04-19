@@ -201,6 +201,9 @@ echo "[ci] phase-4 windows full parity handoff run integration"
 echo "[ci] easy-node windows gate-wrapper integration"
 ./scripts/integration_easy_node_windows_gate_wrappers.sh
 
+echo "[ci] easy-node windows desktop wrappers integration"
+./scripts/integration_easy_node_windows_desktop_wrappers.sh
+
 echo "[ci] phase-5 settlement layer gate integration"
 ./scripts/integration_ci_phase5_settlement_layer.sh
 
