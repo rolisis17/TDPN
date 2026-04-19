@@ -133,8 +133,8 @@ WALLET_JS_MARKERS=(
   'signature_kind:[[:space:]]*"sign_arbitrary"'
   'signature_source:[[:space:]]*"wallet_extension"'
   'signed_message:[[:space:]]*normalizedChallengeMessage'
-  'metadata\.public_key[[:space:]]*=[[:space:]]*publicKey'
-  'metadata\.public_key_type[[:space:]]*=[[:space:]]*publicKeyType'
+  'metadata\.signature_public_key[[:space:]]*=[[:space:]]*publicKey'
+  'metadata\.signature_public_key_type[[:space:]]*=[[:space:]]*publicKeyType'
   'metadata\.signature_envelope[[:space:]]*=[[:space:]]*signatureEnvelope'
   'requestChallengeId[[:space:]]*!==[[:space:]]*\(nonEmptyString\(context\.challenge_id\)[[:space:]]*\|\|[[:space:]]*""\)'
   'requestSignature[[:space:]]*!==[[:space:]]*\(nonEmptyString\(context\.signature\)[[:space:]]*\|\|[[:space:]]*""\)'
@@ -169,6 +169,14 @@ if ! grep -qiE 'wallet-?extension.*(keplr|leap)|(keplr|leap).*wallet-?extension'
 fi
 if ! grep -qF 'signArbitrary' "$README_FILE"; then
   echo "web portal contract failed: README must mention signArbitrary-assisted signing flow"
+  exit 1
+fi
+if ! grep -qF 'signature_public_key' "$README_FILE"; then
+  echo "web portal contract failed: README must mention signature_public_key"
+  exit 1
+fi
+if ! grep -qF 'signature_public_key_type' "$README_FILE"; then
+  echo "web portal contract failed: README must mention signature_public_key_type"
   exit 1
 fi
 if ! grep -qiE 'manual (signature|signing).*(fallback|retained)|fallback.*manual (signature|signing)' "$README_FILE"; then

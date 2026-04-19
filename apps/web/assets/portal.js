@@ -1659,10 +1659,10 @@ function buildWalletSignatureContext({
   };
   const { publicKey, publicKeyType } = extractSignArbitraryPublicKey(signaturePayload);
   if (publicKey) {
-    metadata.public_key = publicKey;
+    metadata.signature_public_key = publicKey;
   }
   if (publicKeyType) {
-    metadata.public_key_type = publicKeyType;
+    metadata.signature_public_key_type = publicKeyType;
   }
   const signatureEnvelope = cloneJSONSerializable(signaturePayload);
   if (signatureEnvelope !== undefined) {

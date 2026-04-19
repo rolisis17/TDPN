@@ -103,6 +103,8 @@ type gpmAuthVerifyRequest struct {
 	SignatureKind          *string         `json:"signature_kind,omitempty"`
 	SignaturePublicKey     string          `json:"signature_public_key,omitempty"`
 	SignaturePublicKeyType *string         `json:"signature_public_key_type,omitempty"`
+	PublicKey              string          `json:"public_key,omitempty"`
+	PublicKeyType          *string         `json:"public_key_type,omitempty"`
 	SignatureSource        *string         `json:"signature_source,omitempty"`
 	ChainID                string          `json:"chain_id,omitempty"`
 	SignedMessage          *string         `json:"signed_message,omitempty"`
@@ -522,16 +524,38 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 	in.WalletProvider = normalizeWalletProvider(in.WalletProvider)
 	in.ChallengeID = strings.TrimSpace(in.ChallengeID)
 	signature := strings.TrimSpace(in.Signature)
+	signaturePublicKey := strings.TrimSpace(in.SignaturePublicKey)
+	if signaturePublicKey == "" {
+		signaturePublicKey = strings.TrimSpace(in.PublicKey)
+	}
 	signatureMetadata := gpmAuthSignatureMetadata{
-		SignaturePublicKey: strings.TrimSpace(in.SignaturePublicKey),
+		SignaturePublicKey: signaturePublicKey,
 		ChainID:            strings.TrimSpace(in.ChainID),
 	}
 	if in.SignatureKind != nil {
 		signatureMetadata.SignatureKind = strings.TrimSpace(*in.SignatureKind)
 		signatureMetadata.HasSignatureKind = true
 	}
+	canonicalPublicKeyType := ""
 	if in.SignaturePublicKeyType != nil {
-		signatureMetadata.SignaturePublicKeyType = strings.TrimSpace(*in.SignaturePublicKeyType)
+		canonicalPublicKeyType = strings.TrimSpace(*in.SignaturePublicKeyType)
+	}
+	legacyPublicKeyType := ""
+	if in.PublicKeyType != nil {
+		legacyPublicKeyType = strings.TrimSpace(*in.PublicKeyType)
+	}
+	switch {
+	case canonicalPublicKeyType != "":
+		signatureMetadata.SignaturePublicKeyType = canonicalPublicKeyType
+		signatureMetadata.HasSignaturePublicKeyType = true
+	case legacyPublicKeyType != "":
+		signatureMetadata.SignaturePublicKeyType = legacyPublicKeyType
+		signatureMetadata.HasSignaturePublicKeyType = true
+	case in.SignaturePublicKeyType != nil:
+		signatureMetadata.SignaturePublicKeyType = canonicalPublicKeyType
+		signatureMetadata.HasSignaturePublicKeyType = true
+	case in.PublicKeyType != nil:
+		signatureMetadata.SignaturePublicKeyType = legacyPublicKeyType
 		signatureMetadata.HasSignaturePublicKeyType = true
 	}
 	if in.SignatureSource != nil {
