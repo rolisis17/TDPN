@@ -295,6 +295,31 @@ func mustNotContainToken(t *testing.T, parts []string, token string) {
 	}
 }
 
+func lifecycleSuccessCommand(output string) string {
+	output = strings.TrimSpace(output)
+	if runtime.GOOS == "windows" {
+		escaped := strings.ReplaceAll(output, "'", "''")
+		return fmt.Sprintf("powershell -NoProfile -Command \"Write-Output '%s'\"", escaped)
+	}
+	return fmt.Sprintf("printf %s", output)
+}
+
+func lifecycleFailureCommand(output string, exitCode int) string {
+	output = strings.TrimSpace(output)
+	if runtime.GOOS == "windows" {
+		escaped := strings.ReplaceAll(output, "'", "''")
+		return fmt.Sprintf("powershell -NoProfile -Command \"Write-Output '%s'; exit %d\"", escaped, exitCode)
+	}
+	return fmt.Sprintf("sh -c \"printf %s; exit %d\"", output, exitCode)
+}
+
+func lifecycleOversizedOutputCommand() string {
+	if runtime.GOOS == "windows" {
+		return "powershell -NoProfile -Command \"$chunk = 'B' * 1024; 1..2048 | ForEach-Object { Write-Host -NoNewline $chunk }\""
+	}
+	return "sh -c \"head -c 2097152 < /dev/zero | tr '\\000' 'B'\""
+}
+
 func TestNormalizePathProfile(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -528,6 +553,10 @@ func TestResolveControlScriptPathWithLookup(t *testing.T) {
 		evalSymlinksPath = func(path string) (string, error) { return path, nil }
 		execPath := "/opt/tdpn/bin/localapi"
 		want := "/opt/tdpn/bin/scripts/easy_node.sh"
+		if runtime.GOOS == "windows" {
+			execPath = `C:\opt\tdpn\bin\localapi`
+			want = `C:\opt\tdpn\bin\scripts\easy_node.sh`
+		}
 		got, err := resolveControlScriptPathWithLookup(
 			"",
 			func() (string, error) { return execPath, nil },
@@ -548,9 +577,13 @@ func TestResolveControlScriptPathWithLookup(t *testing.T) {
 
 	t.Run("rejects relative path escaping executable directory", func(t *testing.T) {
 		evalSymlinksPath = func(path string) (string, error) { return path, nil }
+		execPath := "/opt/tdpn/bin/localapi"
+		if runtime.GOOS == "windows" {
+			execPath = `C:\opt\tdpn\bin\localapi`
+		}
 		_, err := resolveControlScriptPathWithLookup(
 			"../outside.sh",
-			func() (string, error) { return "/opt/tdpn/bin/localapi", nil },
+			func() (string, error) { return execPath, nil },
 			func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
 		)
 		if err == nil {
@@ -560,8 +593,14 @@ func TestResolveControlScriptPathWithLookup(t *testing.T) {
 
 	t.Run("requires an existing non-directory target", func(t *testing.T) {
 		evalSymlinksPath = func(path string) (string, error) { return path, nil }
+		scriptPath := "/opt/tdpn/scripts/easy_node.sh"
+		scriptDirPath := "/opt/tdpn/scripts"
+		if runtime.GOOS == "windows" {
+			scriptPath = `C:\opt\tdpn\scripts\easy_node.sh`
+			scriptDirPath = `C:\opt\tdpn\scripts`
+		}
 		_, err := resolveControlScriptPathWithLookup(
-			"/opt/tdpn/scripts/easy_node.sh",
+			scriptPath,
 			nil,
 			func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
 		)
@@ -570,7 +609,7 @@ func TestResolveControlScriptPathWithLookup(t *testing.T) {
 		}
 
 		_, err = resolveControlScriptPathWithLookup(
-			"/opt/tdpn/scripts",
+			scriptDirPath,
 			nil,
 			func(string) (os.FileInfo, error) {
 				return fakeFileInfo{name: "scripts", mode: os.ModeDir | 0o755}, nil
@@ -1419,9 +1458,9 @@ func TestServiceLifecycleMethodGuards(t *testing.T) {
 
 func TestHandleServiceStatusContract(t *testing.T) {
 	svc, _ := newFakeService(t, false)
-	svc.serviceStatus = "echo service-running"
-	svc.serviceStart = "echo service-start"
-	svc.serviceRestart = "echo service-restart"
+	svc.serviceStatus = lifecycleSuccessCommand("service-running")
+	svc.serviceStart = lifecycleSuccessCommand("service-start")
+	svc.serviceRestart = lifecycleSuccessCommand("service-restart")
 
 	code, payload := callJSONHandler(t, svc.handleServiceStatus, http.MethodGet, "/v1/service/status", "")
 	if code != http.StatusOK {
@@ -1460,8 +1499,8 @@ func TestHandleServiceStatusContract(t *testing.T) {
 	if got, _ := statusMap["ok"].(bool); !got {
 		t.Fatalf("service.status.ok=%v want=true", statusMap["ok"])
 	}
-	if got, _ := statusMap["output"].(string); got != "service-running" {
-		t.Fatalf("service.status.output=%q want=service-running", got)
+	if got, _ := statusMap["output"].(string); strings.TrimSpace(got) != "service-running" {
+		t.Fatalf("service.status.output=%q want~service-running", got)
 	}
 	if got, _ := statusMap["rc"].(float64); int(got) != 0 {
 		t.Fatalf("service.status.rc=%v want=0", statusMap["rc"])
@@ -1525,21 +1564,21 @@ func TestServiceLifecycleMutationSuccess(t *testing.T) {
 			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStart },
 			target:    "/v1/service/start",
 			action:    "start",
-			command:   "echo service-started",
+			command:   "service-started",
 		},
 		{
 			name:      "stop_success",
 			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStop },
 			target:    "/v1/service/stop",
 			action:    "stop",
-			command:   "echo service-stopped",
+			command:   "service-stopped",
 		},
 		{
 			name:      "restart_success",
 			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceRestart },
 			target:    "/v1/service/restart",
 			action:    "restart",
-			command:   "echo service-restarted",
+			command:   "service-restarted",
 		},
 	}
 
@@ -1548,11 +1587,11 @@ func TestServiceLifecycleMutationSuccess(t *testing.T) {
 			svc, _ := newFakeService(t, false)
 			switch tc.action {
 			case "start":
-				svc.serviceStart = tc.command
+				svc.serviceStart = lifecycleSuccessCommand(tc.command)
 			case "stop":
-				svc.serviceStop = tc.command
+				svc.serviceStop = lifecycleSuccessCommand(tc.command)
 			case "restart":
-				svc.serviceRestart = tc.command
+				svc.serviceRestart = lifecycleSuccessCommand(tc.command)
 			default:
 				t.Fatalf("unknown action %q", tc.action)
 			}
@@ -1583,28 +1622,32 @@ func TestServiceLifecycleMutationFailureReturnsBadGateway(t *testing.T) {
 		handlerFn func(*Service) http.HandlerFunc
 		target    string
 		action    string
-		command   string
+		output    string
+		exitCode  int
 	}{
 		{
 			name:      "start_failure",
 			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStart },
 			target:    "/v1/service/start",
 			action:    "start",
-			command:   `bash -lc "echo start-failed && exit 23"`,
+			output:    "start-failed",
+			exitCode:  23,
 		},
 		{
 			name:      "stop_failure",
 			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceStop },
 			target:    "/v1/service/stop",
 			action:    "stop",
-			command:   `bash -lc "echo stop-failed && exit 24"`,
+			output:    "stop-failed",
+			exitCode:  24,
 		},
 		{
 			name:      "restart_failure",
 			handlerFn: func(s *Service) http.HandlerFunc { return s.handleServiceRestart },
 			target:    "/v1/service/restart",
 			action:    "restart",
-			command:   `bash -lc "echo restart-failed && exit 25"`,
+			output:    "restart-failed",
+			exitCode:  25,
 		},
 	}
 
@@ -1613,11 +1656,11 @@ func TestServiceLifecycleMutationFailureReturnsBadGateway(t *testing.T) {
 			svc, _ := newFakeService(t, false)
 			switch tc.action {
 			case "start":
-				svc.serviceStart = tc.command
+				svc.serviceStart = lifecycleFailureCommand(tc.output, tc.exitCode)
 			case "stop":
-				svc.serviceStop = tc.command
+				svc.serviceStop = lifecycleFailureCommand(tc.output, tc.exitCode)
 			case "restart":
-				svc.serviceRestart = tc.command
+				svc.serviceRestart = lifecycleFailureCommand(tc.output, tc.exitCode)
 			default:
 				t.Fatalf("unknown action %q", tc.action)
 			}
@@ -1635,7 +1678,7 @@ func TestServiceLifecycleMutationFailureReturnsBadGateway(t *testing.T) {
 			if got, _ := payload["rc"].(float64); int(got) <= 0 {
 				t.Fatalf("rc=%v want positive exit code", payload["rc"])
 			}
-			if got, _ := payload["output"].(string); !strings.Contains(got, tc.action+"-failed") {
+			if got, _ := payload["output"].(string); !strings.Contains(got, tc.output) {
 				t.Fatalf("output=%q want action failure marker", got)
 			}
 		})
@@ -1646,9 +1689,9 @@ func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
 	t.Run("non-loopback requires configured token for lifecycle handlers", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.addr = "0.0.0.0:8095"
-		svc.serviceStart = "echo start-ok"
-		svc.serviceStop = "echo stop-ok"
-		svc.serviceRestart = "echo restart-ok"
+		svc.serviceStart = lifecycleSuccessCommand("start-ok")
+		svc.serviceStop = lifecycleSuccessCommand("stop-ok")
+		svc.serviceRestart = lifecycleSuccessCommand("restart-ok")
 
 		tests := []struct {
 			name    string
@@ -1676,9 +1719,9 @@ func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.addr = "0.0.0.0:8095"
 		svc.authToken = "service-secret"
-		svc.serviceStart = "echo start-ok"
-		svc.serviceStop = "echo stop-ok"
-		svc.serviceRestart = "echo restart-ok"
+		svc.serviceStart = lifecycleSuccessCommand("start-ok")
+		svc.serviceStop = lifecycleSuccessCommand("stop-ok")
+		svc.serviceRestart = lifecycleSuccessCommand("restart-ok")
 
 		tests := []struct {
 			name    string
@@ -2619,19 +2662,12 @@ func TestRunEasyNodeTruncatesOversizedOutput(t *testing.T) {
 }
 
 func TestRunLifecycleCommandTruncatesOversizedOutput(t *testing.T) {
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "lifecycle_oversized.sh")
-	script := "#!/usr/bin/env bash\nset -euo pipefail\nhead -c $((2*1024*1024)) < /dev/zero | tr '\\0' 'B'\n"
-	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write lifecycle script: %v", err)
-	}
-
 	svc := &Service{
 		commandTimeout:    2 * time.Second,
 		maxConcurrentCmds: 1,
 		commandSlots:      make(chan struct{}, 1),
 	}
-	out, rc, err := svc.runLifecycleCommand(context.Background(), scriptPath)
+	out, rc, err := svc.runLifecycleCommand(context.Background(), lifecycleOversizedOutputCommand())
 	if err != nil {
 		t.Fatalf("runLifecycleCommand returned error: %v", err)
 	}
@@ -3261,9 +3297,9 @@ func TestGPMServerStatus(t *testing.T) {
 		t.Helper()
 		svc, _ := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
-		svc.serviceStart = "echo start"
-		svc.serviceStop = "echo stop"
-		svc.serviceRestart = "echo restart"
+		svc.serviceStart = lifecycleSuccessCommand("start")
+		svc.serviceStop = lifecycleSuccessCommand("stop")
+		svc.serviceRestart = lifecycleSuccessCommand("restart")
 		return svc
 	}
 	getReadiness := func(t *testing.T, payload map[string]any) map[string]any {
