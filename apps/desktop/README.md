@@ -193,6 +193,57 @@ Recommended sequence for installer testing:
 2. Run `desktop_packaged_run` in `-DryRun` first.
 3. Run `desktop_packaged_run` for a real launch.
 
+Linux doctor remediation flow (`scripts/linux/desktop_doctor.sh`):
+
+This is scaffold-only, non-production setup guidance for Linux parity with the Windows flow.
+
+```bash
+bash ./scripts/linux/desktop_doctor.sh --mode check
+bash ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
+```
+
+Modes:
+- `check` prints readiness and missing prerequisites.
+- `fix` applies first-run remediation and can install missing dependencies.
+
+Recommended first-run sequence on Linux:
+1. Run `desktop_doctor` with `--mode fix --install-missing`.
+2. Re-run `desktop_doctor` with `--mode check` and confirm readiness.
+3. Start desktop dev (`npm run tauri dev`) or run the packaged launcher flow below.
+
+Linux installer-style packaged launcher flow (`scripts/linux/desktop_packaged_run.sh`):
+
+This is scaffold-only, non-production installer-style validation guidance.
+
+```bash
+bash ./scripts/linux/desktop_packaged_run.sh --dry-run
+bash ./scripts/linux/desktop_packaged_run.sh
+```
+
+Dry-run guidance:
+- always run `--dry-run` first to verify executable discovery and local API preflight before real launch.
+
+Executable override and env hints:
+- primary packaged executable override: `GPM_DESKTOP_PACKAGED_EXE`
+- legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
+- local API behavior can still be tuned with `TDPN_LOCAL_API_BASE_URL` and `TDPN_LOCAL_API_TIMEOUT_SEC`
+- keep manual executable overrides as support/lab usage in scaffold mode, not production defaults
+
+Linux native bootstrap and one-click launchers:
+
+```bash
+bash ./scripts/linux/desktop_native_bootstrap.sh --mode bootstrap --install-missing
+bash ./scripts/linux/desktop_native_bootstrap.sh --mode run-full --desktop-launch-strategy auto
+bash ./scripts/linux/desktop_one_click.sh --install-missing
+```
+
+Linux native bootstrap modes:
+- `check` validates prerequisites through doctor.
+- `bootstrap` runs doctor readiness/remediation only.
+- `run-api` runs `go run ./cmd/node --local-api`.
+- `run-desktop` launches desktop only (dev/packaged/auto).
+- `run-full` starts local API + desktop in one scaffold flow.
+
 Launch strategy behavior for `desktop_native_bootstrap`:
 - `dev` keeps the backward-compatible development flow.
 - `auto` prefers packaged artifacts when they exist, then falls back to dev.

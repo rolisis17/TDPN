@@ -72,6 +72,25 @@ if ! grep -qF 'desktop_doctor.ps1' "$DOCTOR_CMD_SCRIPT"; then
 fi
 echo "[desktop-scaffold] doctor scaffold script markers are present"
 
+DOCTOR_LINUX_SCRIPT="scripts/linux/desktop_doctor.sh"
+if [[ ! -f "$DOCTOR_LINUX_SCRIPT" ]]; then
+  echo "desktop scaffold contract failed: missing linux doctor scaffold script: $DOCTOR_LINUX_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'check|fix' "$DOCTOR_LINUX_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected check/fix mode marker in $DOCTOR_LINUX_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--install-missing' "$DOCTOR_LINUX_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --install-missing marker in $DOCTOR_LINUX_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'scaffold|non-production' "$DOCTOR_LINUX_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected scaffold/non-production marker in $DOCTOR_LINUX_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] linux doctor scaffold script markers are present"
+
 PACKAGED_RUN_SCAFFOLD_FILES=(
   "scripts/windows/desktop_packaged_run.ps1"
   "scripts/windows/desktop_packaged_run.cmd"
@@ -101,6 +120,29 @@ if ! grep -qF 'desktop_packaged_run.ps1' "$PACKAGED_RUN_CMD_SCRIPT"; then
 fi
 echo "[desktop-scaffold] packaged-run scaffold script markers are present"
 
+LINUX_PACKAGED_RUN_SCRIPT="scripts/linux/desktop_packaged_run.sh"
+if [[ ! -f "$LINUX_PACKAGED_RUN_SCRIPT" ]]; then
+  echo "desktop scaffold contract failed: missing linux packaged-run scaffold script: $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_doctor.sh' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected doctor launcher reference in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_native_bootstrap.sh' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected native bootstrap reference in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--desktop-executable-path' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --desktop-executable-path marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'scaffold|non-production' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected scaffold/non-production marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] linux packaged-run scaffold script markers are present"
+
 WINDOWS_NATIVE_BOOTSTRAP_FILES=(
   "scripts/windows/desktop_native_bootstrap.ps1"
   "scripts/windows/desktop_native_bootstrap.cmd"
@@ -123,6 +165,25 @@ if ! grep -qF 'local_api_session.ps1' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
   echo "desktop scaffold contract failed: expected Windows-native local API session usage in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
 fi
+
+LINUX_NATIVE_BOOTSTRAP_SCRIPT="scripts/linux/desktop_native_bootstrap.sh"
+if [[ ! -f "$LINUX_NATIVE_BOOTSTRAP_SCRIPT" ]]; then
+  echo "desktop scaffold contract failed: missing linux native bootstrap script: $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'check|bootstrap|run-api|run-desktop|run-full' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected mode markers in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'go run ./cmd/node --local-api' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected local API launcher command in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'scaffold|non-production' "$LINUX_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected scaffold/non-production marker in $LINUX_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] linux native bootstrap script markers are present"
 
 README_FILE="apps/desktop/README.md"
 
@@ -168,6 +229,29 @@ if [[ "$ONE_CLICK_LAUNCHER_PRESENT" == "1" ]]; then
   fi
   echo "[desktop-scaffold] one-click launcher scripts and markers are present"
 fi
+
+LINUX_ONE_CLICK_SCRIPT="scripts/linux/desktop_one_click.sh"
+if [[ ! -f "$LINUX_ONE_CLICK_SCRIPT" ]]; then
+  echo "desktop scaffold contract failed: missing linux one-click launcher script: $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_native_bootstrap.sh' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected bootstrap launcher reference in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'run-full|bootstrap' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected launch-mode marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'scripts/linux/desktop_doctor.sh' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must reference linux desktop doctor script"
+  exit 1
+fi
+if ! grep -qF 'scripts/linux/desktop_packaged_run.sh' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must reference linux packaged-run script"
+  exit 1
+fi
+echo "[desktop-scaffold] linux one-click launcher and README references are present"
 
 LOCAL_API_SESSION_SCRIPT="scripts/windows/local_api_session.ps1"
 if ! grep -qF 'windows-native' "$LOCAL_API_SESSION_SCRIPT"; then

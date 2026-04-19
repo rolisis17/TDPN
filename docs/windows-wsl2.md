@@ -256,6 +256,54 @@ Examples:
 ./scripts/windows/desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy packaged
 ```
 
+## Linux desktop scaffold parity (doctor + packaged-run, non-production)
+
+Use this when validating Linux desktop first-run behavior with the same scaffold posture as Windows.
+
+Linux doctor (`scripts/linux/desktop_doctor.sh`) usage:
+
+```bash
+bash ./scripts/linux/desktop_doctor.sh --mode check
+bash ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
+```
+
+Modes and first-run guidance:
+- `check`: report readiness and missing prerequisites.
+- `fix`: apply remediation and optionally install missing prerequisites.
+- recommended first run:
+1. run `--mode fix --install-missing`
+2. run `--mode check`
+3. proceed to desktop dev or packaged-run
+
+Linux packaged-run (`scripts/linux/desktop_packaged_run.sh`) usage:
+
+```bash
+bash ./scripts/linux/desktop_packaged_run.sh --dry-run
+bash ./scripts/linux/desktop_packaged_run.sh
+```
+
+Dry-run and override guidance:
+- run `--dry-run` first to confirm executable discovery and local API preflight
+- executable override env (preferred): `GPM_DESKTOP_PACKAGED_EXE`
+- legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
+- optional local API tuning: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`
+- keep manual override usage support/lab-focused while this remains scaffold/non-production
+
+Linux native bootstrap and one-click usage:
+
+```bash
+bash ./scripts/linux/desktop_native_bootstrap.sh --mode bootstrap --install-missing
+bash ./scripts/linux/desktop_native_bootstrap.sh --mode run-full --desktop-launch-strategy auto
+bash ./scripts/linux/desktop_one_click.sh --install-missing
+```
+
+Linux native bootstrap mode quick reference:
+- `check`: doctor readiness only
+- `bootstrap`: doctor check/fix stage only
+- `run-api`: local API only (`go run ./cmd/node --local-api`)
+- `run-desktop`: desktop only (dev/packaged/auto)
+- `run-full`: local API + desktop in one flow
+
 ## 5) 3-machine beta test
 
 Use the same flow documented in `docs/easy-3-machine-test.md`.
