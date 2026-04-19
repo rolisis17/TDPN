@@ -237,6 +237,7 @@ bash ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
 Modes:
 - `check` prints readiness and missing prerequisites.
 - `fix` applies first-run remediation and can install missing dependencies.
+- Linux desktop doctor now prints exact copy/paste remediation commands and mirrors them in summary JSON `recommended_commands` (apt install hints, doctor rerun, and one-click rerun).
 
 Recommended first-run sequence on Linux:
 1. Run `desktop_doctor` with `--mode fix --install-missing`.

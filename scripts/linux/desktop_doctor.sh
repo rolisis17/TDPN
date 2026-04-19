@@ -147,6 +147,23 @@ build_apt_packages() {
   fi
 }
 
+build_recommended_commands() {
+  RECOMMENDED_COMMANDS=()
+
+  local apt_prefix=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    apt_prefix="sudo "
+  fi
+
+  if [[ "${#APT_PACKAGES[@]}" -gt 0 ]]; then
+    RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get update")
+    RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get install -y ${APT_PACKAGES[*]}")
+  fi
+
+  RECOMMENDED_COMMANDS+=("./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
+  RECOMMENDED_COMMANDS+=("./scripts/linux/desktop_one_click.sh")
+}
+
 mode="check"
 install_missing="0"
 dry_run="0"
@@ -224,6 +241,7 @@ TOOLS=(go node npm rustc cargo git bash)
 declare -A TOOL_PATHS=()
 MISSING_TOOLS=()
 APT_PACKAGES=()
+RECOMMENDED_COMMANDS=()
 
 install_attempted="0"
 install_completed="0"
@@ -241,6 +259,7 @@ log "scaffold-only, non-production remediation helper for Linux desktop prerequi
 
 collect_tool_report
 build_apt_packages
+build_recommended_commands
 
 log "tool report:"
 for tool in "${TOOLS[@]}"; do
@@ -294,6 +313,7 @@ if [[ "$mode" == "fix" && "$install_missing" == "1" ]]; then
             log "apt remediation completed"
             collect_tool_report
             build_apt_packages
+            build_recommended_commands
           else
             error_message="apt-get install failed during remediation"
             exit_code="1"
@@ -346,6 +366,7 @@ tool_report_json+=$'\n'"  }"
 
 missing_tools_json="$(json_array_from_values "${MISSING_TOOLS[@]}")"
 apt_packages_json="$(json_array_from_values "${APT_PACKAGES[@]}")"
+recommended_commands_json="$(json_array_from_values "${RECOMMENDED_COMMANDS[@]}")"
 
 summary_json_payload=$(
   cat <<EOF
@@ -364,6 +385,7 @@ summary_json_payload=$(
   "notes": "Linux desktop doctor is scaffold-only and non-production.",
   "missing_tools": $missing_tools_json,
   "apt_packages": $apt_packages_json,
+  "recommended_commands": $recommended_commands_json,
   "tool_report": $tool_report_json
 }
 EOF
@@ -378,6 +400,10 @@ if [[ "$print_summary_json" == "1" ]]; then
 fi
 
 log "status=$status"
+log "recommended remediation commands:"
+for cmd in "${RECOMMENDED_COMMANDS[@]}"; do
+  echo "  - $cmd"
+done
 log "next step: run Linux desktop bootstrap/packaged flow after prerequisites are ready"
 
 exit "$exit_code"
