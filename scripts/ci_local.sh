@@ -204,6 +204,9 @@ echo "[ci] easy-node windows gate-wrapper integration"
 echo "[ci] easy-node windows desktop wrappers integration"
 ./scripts/integration_easy_node_windows_desktop_wrappers.sh
 
+echo "[ci] easy-node desktop wrappers integration"
+./scripts/integration_easy_node_desktop_wrappers.sh
+
 echo "[ci] windows desktop native bootstrap guardrails integration"
 ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
 

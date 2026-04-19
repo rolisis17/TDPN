@@ -278,6 +278,21 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-packaged-run
 ```
 
+Generic desktop `easy_node.sh` wrapper usage (scaffold/non-production):
+
+```bash
+./scripts/easy_node.sh desktop-doctor [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
+```
+
+Platform routing notes:
+- `--platform auto` is the default and picks the current host platform for the scaffold command.
+- Use `--platform linux` or `--platform windows` when you want explicit routing.
+- Set `EASY_NODE_DESKTOP_PLATFORM` for deterministic automation when you do not want host-detected behavior.
+
 If your branch does not yet expose these wrapper commands, use the direct `scripts/linux/*.sh` commands above.
 
 Linux native bootstrap modes:

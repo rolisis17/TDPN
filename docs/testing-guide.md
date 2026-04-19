@@ -82,6 +82,21 @@ Windows desktop native bootstrap guardrails:
 ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails
 ```
 
+Desktop launcher wrappers:
+
+```bash
+./scripts/easy_node.sh desktop-doctor [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
+```
+
+- `--platform auto` is the default and routes to the current host platform.
+- Use `--platform linux` or `--platform windows` for an explicit path.
+- `EASY_NODE_DESKTOP_PLATFORM` overrides host detection for deterministic automation.
+- Existing platform-specific desktop commands remain available and documented below.
+
 ## 3a) Phase 0/1 targeted gates
 
 `ci_phase0` (fast Phase-0 product-surface gate):

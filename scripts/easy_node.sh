@@ -235,6 +235,11 @@ Usage:
   ./scripts/easy_node.sh config-v1-show [--path PATH]
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
   ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--dry-run [0|1]]
+  ./scripts/easy_node.sh desktop-doctor [--platform auto|linux|windows] [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
+  ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
   ./scripts/easy_node.sh desktop-linux-doctor [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
@@ -378,6 +383,11 @@ Usage:
   ./scripts/easy_node.sh config-v1-init [--path PATH] [--force [0|1]]
   ./scripts/easy_node.sh config-v1-set-profile --path-profile 1hop|2hop|3hop [--path PATH]
   ./scripts/easy_node.sh local-api-session [--api-addr HOST:PORT] [--config PATH] [--config-v1-path PATH] [--script-path PATH] [--allow-update [0|1]] [--command-timeout-sec N] [--service-status-command CMD] [--service-start-command CMD] [--service-stop-command CMD] [--service-restart-command CMD] [--connect-path-profile-default 1hop|2hop|3hop] [--connect-interface-default IFACE] [--connect-run-preflight-default [0|1]] [--connect-prod-profile-default auto|0|1] [--dry-run [0|1]]
+  ./scripts/easy_node.sh desktop-doctor [--platform auto|linux|windows] [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]
+  ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
+  ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
   ./scripts/easy_node.sh desktop-linux-doctor [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
@@ -8560,6 +8570,111 @@ desktop_windows_local_api_session() {
   run_desktop_wrapper_script "$script" "$@"
 }
 
+desktop_generic_platform_detect() {
+  local probe=""
+  probe="$(printf '%s %s' "${OSTYPE:-}" "$(uname -s 2>/dev/null || true)" | tr '[:upper:]' '[:lower:]')"
+  case "$probe" in
+    *mingw*|*msys*|*cygwin*|*windows*)
+      printf '%s\n' windows
+      ;;
+    *)
+      printf '%s\n' linux
+      ;;
+  esac
+}
+
+desktop_generic_platform_normalize() {
+  local platform="${1:-}"
+  platform="$(printf '%s' "$platform" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$platform" in
+    auto|linux|windows)
+      printf '%s\n' "$platform"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+desktop_generic_platform_resolve() {
+  local platform="${1:-auto}"
+  local env_platform=""
+
+  if ! platform="$(desktop_generic_platform_normalize "$platform")"; then
+    echo "invalid --platform value: ${1:-<empty>}; expected auto, linux, or windows" >&2
+    return 1
+  fi
+  if [[ "$platform" == auto ]]; then
+    env_platform="${EASY_NODE_DESKTOP_PLATFORM:-}"
+    if [[ -n "$env_platform" ]]; then
+      if ! env_platform="$(desktop_generic_platform_normalize "$env_platform")"; then
+        echo "invalid EASY_NODE_DESKTOP_PLATFORM: ${EASY_NODE_DESKTOP_PLATFORM:-<empty>}" >&2
+        return 1
+      fi
+      if [[ "$env_platform" == auto ]]; then
+        echo "invalid EASY_NODE_DESKTOP_PLATFORM: auto" >&2
+        return 1
+      fi
+      platform="$env_platform"
+    else
+      platform="$(desktop_generic_platform_detect)"
+    fi
+  fi
+
+  printf '%s\n' "$platform"
+}
+
+desktop_generic_dispatch() {
+  local command_name="$1"
+  local linux_target="$2"
+  local windows_target="$3"
+  shift 3
+
+  local platform="auto"
+  local -a forwarded=()
+  local arg=""
+
+  while (($#)); do
+    arg="$1"
+    case "$arg" in
+      --platform)
+        shift
+        if (($# == 0)); then
+          echo "$command_name requires --platform auto|linux|windows" >&2
+          return 2
+        fi
+        platform="$1"
+        ;;
+      --platform=*)
+        platform="${arg#--platform=}"
+        if [[ -z "$platform" ]]; then
+          echo "$command_name requires --platform auto|linux|windows" >&2
+          return 2
+        fi
+        ;;
+      *)
+        forwarded+=("$arg")
+        ;;
+    esac
+    shift
+  done
+
+  platform="$(desktop_generic_platform_resolve "$platform")" || return 2
+
+  case "$platform" in
+    linux)
+      "$linux_target" "${forwarded[@]}"
+      ;;
+    windows)
+      "$windows_target" "${forwarded[@]}"
+      ;;
+    *)
+      echo "internal error: unsupported desktop platform '$platform'" >&2
+      return 2
+      ;;
+  esac
+}
+
 vpn_rc_standard_path() {
   local rc_script="${VPN_RC_STANDARD_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_standard_path.sh}"
   "$rc_script" "$@"
@@ -15532,6 +15647,26 @@ main() {
     local-api-session)
       shift
       local_api_session "$@"
+      ;;
+    desktop-doctor)
+      shift
+      desktop_generic_dispatch desktop-doctor desktop_linux_doctor desktop_windows_doctor "$@"
+      ;;
+    desktop-native-bootstrap)
+      shift
+      desktop_generic_dispatch desktop-native-bootstrap desktop_linux_native_bootstrap desktop_windows_native_bootstrap "$@"
+      ;;
+    desktop-one-click)
+      shift
+      desktop_generic_dispatch desktop-one-click desktop_linux_one_click desktop_windows_one_click "$@"
+      ;;
+    desktop-packaged-run)
+      shift
+      desktop_generic_dispatch desktop-packaged-run desktop_linux_packaged_run desktop_windows_packaged_run "$@"
+      ;;
+    desktop-local-api-session)
+      shift
+      desktop_generic_dispatch desktop-local-api-session local_api_session desktop_windows_local_api_session "$@"
       ;;
     desktop-linux-doctor)
       shift
