@@ -424,6 +424,9 @@ echo "[ci] local API config-v1 defaults integration"
 echo "[ci] desktop scaffold contract integration"
 ./scripts/integration_desktop_scaffold_contract.sh
 
+echo "[ci] web portal contract integration"
+./scripts/integration_web_portal_contract.sh
+
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 

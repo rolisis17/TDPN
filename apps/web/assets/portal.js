@@ -15,6 +15,10 @@ const operatorReadinessEl = byId("operator_readiness");
 const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
 const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
+const clientReadinessEl = byId("client_readiness");
+const clientReadinessLineEl = byId("client_readiness_line");
+const clientReadinessStatusEl = byId("client_readiness_status");
+const clientReadinessGuidanceEl = byId("client_readiness_guidance");
 const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
 const operatorListStatusEl = byId("operator_list_status");
 const operatorListSearchEl = byId("operator_list_search");
@@ -30,11 +34,13 @@ const compatOverrideEl = byId("compat_override");
 const compatOverrideHintEl = byId("compat_override_hint");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
+const registerClientBtnEl = byId("register_client_btn");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
+const SERVER_ONLY_ROLES = new Set(["server", "server_only"]);
 const OPERATOR_LIST_STATUS_FILTERS = new Set(["pending", "approved", "rejected"]);
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
@@ -954,14 +960,17 @@ function parseServerReadiness(payload) {
         .filter((entry) => entry.length > 0)
     : [];
   const role = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
-  const lockReason = typeof readiness.lock_reason === "string" ? readiness.lock_reason.trim() : "";
+  const lockReason = nonEmptyString(firstDefined(readiness.lock_reason, readiness.lockReason));
+  const clientLockReason = nonEmptyString(firstDefined(readiness.client_lock_reason, readiness.clientLockReason));
   return {
     role: role || undefined,
     tabVisible: parseBooleanLike(readiness.tab_visible),
+    clientTabVisible: parseBooleanLike(firstDefined(readiness.client_tab_visible, readiness.clientTabVisible)),
     lifecycleActionsUnlocked: parseBooleanLike(readiness.lifecycle_actions_unlocked),
     serviceMutationsConfigured: parseBooleanLike(readiness.service_mutations_configured),
     operatorApplicationStatus: normalizeOperatorApplicationStatus(readiness.operator_application_status),
     lockReason: lockReason || undefined,
+    clientLockReason: clientLockReason || undefined,
     unlockActions
   };
 }
@@ -977,6 +986,11 @@ function setServerReadiness(value) {
 function isServerRoleUnlocked(roleValue) {
   const role = String(roleValue || "").trim().toLowerCase();
   return role === "operator" || role === "admin";
+}
+
+function isServerOnlyRole(roleValue) {
+  const role = String(roleValue || "").trim().toLowerCase();
+  return SERVER_ONLY_ROLES.has(role);
 }
 
 function formatOperatorApplicationStatusLabel(status) {
@@ -1002,10 +1016,10 @@ function setStepState(el, state) {
 }
 
 function refreshOnboardingSteps() {
-  const token = byId("session_token").value.trim();
+  const clientReadiness = computeClientReadiness();
+  const hasSession = clientReadiness.state !== "not_signed_in";
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase();
   const backendOperatorStatus = serverReadiness?.operatorApplicationStatus || operatorApplicationStatus;
-  const hasSession = token.length > 0;
   const step3Done =
     typeof serverReadiness?.lifecycleActionsUnlocked === "boolean"
       ? serverReadiness.lifecycleActionsUnlocked
@@ -1019,13 +1033,20 @@ function refreshOnboardingSteps() {
   }
 
   setStepState(onboardingStepSigninEl, "done");
-  if (!clientRegistered) {
+  const clientLaneRoleLocked = clientReadiness.state === "role_locked";
+  if (!clientRegistered && !clientLaneRoleLocked) {
     setStepState(onboardingStepClientEl, "active");
     setStepState(onboardingStepOperatorEl, "blocked");
     return;
   }
 
-  setStepState(onboardingStepClientEl, "done");
+  if (clientReadiness.state === "registered") {
+    setStepState(onboardingStepClientEl, "done");
+  } else if (clientLaneRoleLocked) {
+    setStepState(onboardingStepClientEl, "blocked");
+  } else {
+    setStepState(onboardingStepClientEl, "active");
+  }
   if (step3Done) {
     setStepState(onboardingStepOperatorEl, "done");
     return;
@@ -1073,6 +1094,89 @@ function setOperatorReadiness(kind, statusText, guidanceText) {
   }
   operatorReadinessStatusEl.textContent = statusText;
   operatorReadinessGuidanceEl.textContent = guidanceText;
+}
+
+function setClientReadiness(kind, statusText, guidanceText, state) {
+  clientReadinessEl.dataset.kind = kind || "warn";
+  clientReadinessEl.dataset.state = state || "unknown";
+  clientReadinessLineEl.classList.remove("good", "warn", "bad");
+  if (kind) {
+    clientReadinessLineEl.classList.add(kind);
+  }
+  clientReadinessStatusEl.textContent = statusText;
+  clientReadinessGuidanceEl.textContent = guidanceText;
+}
+
+function syncClientRegistrationAction(readiness) {
+  if (!registerClientBtnEl) {
+    return;
+  }
+  const isBusy = document.body.classList.contains("is-busy");
+  const lockByState = readiness.state === "role_locked" || readiness.state === "not_signed_in";
+  const disabled = isBusy || lockByState;
+  registerClientBtnEl.disabled = disabled;
+  registerClientBtnEl.setAttribute("aria-disabled", String(disabled));
+  if (lockByState) {
+    registerClientBtnEl.title = readiness.guidanceText;
+    return;
+  }
+  registerClientBtnEl.removeAttribute("title");
+}
+
+function computeClientReadiness() {
+  const token = byId("session_token").value.trim();
+  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
+  const clientTabVisible = serverReadiness?.clientTabVisible;
+  const clientLockReason = serverReadiness?.clientLockReason;
+
+  if (!token) {
+    return {
+      state: "not_signed_in",
+      kind: "warn",
+      statusText: "Not signed in",
+      guidanceText: "Sign in first to unlock client registration."
+    };
+  }
+
+  if (isServerOnlyRole(role) || (clientTabVisible === false && !isServerRoleUnlocked(role))) {
+    return {
+      state: "role_locked",
+      kind: "bad",
+      statusText: "Role-locked",
+      guidanceText:
+        clientLockReason ||
+        (isServerOnlyRole(role)
+          ? "This session is server-only, so the client lane is locked. Continue in Step 3 for server workflow actions."
+          : "Client lane is locked for this role.")
+    };
+  }
+
+  if (clientRegistered) {
+    return {
+      state: "registered",
+      kind: "good",
+      statusText: "Registered",
+      guidanceText: "Client profile is registered for this session and ready for client lane actions."
+    };
+  }
+
+  if (isServerRoleUnlocked(role) && clientTabVisible === false) {
+    return {
+      state: "ready_to_register",
+      kind: "warn",
+      statusText: "Ready to register",
+      guidanceText:
+        `${clientLockReason || "Client registration is required before this operator/admin session can use the client lane."} ` +
+        "Use Register Client to continue."
+    };
+  }
+
+  return {
+    state: "ready_to_register",
+    kind: "warn",
+    statusText: "Ready to register",
+    guidanceText: "Use Register Client to finish Step 2 and unlock client lane actions."
+  };
 }
 
 function computeOperatorReadiness() {
@@ -1197,6 +1301,13 @@ function computeOperatorReadiness() {
 function refreshOperatorReadiness() {
   const readiness = computeOperatorReadiness();
   setOperatorReadiness(readiness.kind, readiness.statusText, readiness.guidanceText);
+  refreshClientReadiness();
+}
+
+function refreshClientReadiness() {
+  const readiness = computeClientReadiness();
+  setClientReadiness(readiness.kind, readiness.statusText, readiness.guidanceText, readiness.state);
+  syncClientRegistrationAction(readiness);
   refreshOnboardingSteps();
 }
 
@@ -1247,6 +1358,9 @@ function setBusy(isBusy) {
     button.setAttribute("aria-disabled", String(isBusy));
   }
   syncOperatorListNextPageAction();
+  if (!isBusy) {
+    refreshClientReadiness();
+  }
 }
 
 function setStatus(kind, title, detail) {
@@ -1554,7 +1668,7 @@ async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
   if (!byId("session_token").value.trim()) {
     clientRegistered = false;
-    refreshOnboardingSteps();
+    refreshClientReadiness();
     return undefined;
   }
   try {
@@ -1563,7 +1677,7 @@ async function refreshClientRegistrationStatus(options = {}) {
     if (status !== undefined) {
       clientRegistered = status;
     }
-    refreshOnboardingSteps();
+    refreshClientReadiness();
     return result;
   } catch (err) {
     if (!quiet) {

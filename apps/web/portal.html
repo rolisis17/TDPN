@@ -157,6 +157,16 @@
             Register the signed-in client against the selected path profile. Bootstrap directory and invite values stay optional for compatibility.
           </p>
         </div>
+        <div id="client_readiness" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Step 2 readiness</div>
+          <div id="client_readiness_line" class="status warn">
+            <strong>Client status: <span id="client_readiness_status">Not signed in</span></strong>
+            <span id="client_readiness_guidance">Sign in first, then register the client profile.</span>
+          </div>
+        </div>
+        <p class="helper-copy">
+          The client lane stays visible for every role. If your role is server-only, this banner explains the lock reason and next path.
+        </p>
         <div class="fields">
           <label>
             Path profile

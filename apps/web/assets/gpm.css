@@ -322,6 +322,10 @@ a {
   margin: 4px 0 12px;
 }
 
+.client-readiness {
+  margin: 4px 0 12px;
+}
+
 .helper-copy {
   margin: 0 0 10px;
   color: var(--muted);
