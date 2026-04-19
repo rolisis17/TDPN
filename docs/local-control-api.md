@@ -69,14 +69,14 @@ Desktop scaffold defaults (`apps/desktop`):
 GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/auth/challenge`
 - `POST /v1/gpm/auth/verify`
-- `POST /v1/gpm/session` (`action=status|refresh|revoke`)
+- `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
 - `POST /v1/gpm/onboarding/client/register`
 - `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, `bootstrap_directory`, and persisted `path_profile` when available)
 - `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and chain-id sync hints)
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`) and optional `limit` (default `100`, clamped `1..500`))
-- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata)
+- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
 
 ## Authentication
 
@@ -93,6 +93,9 @@ GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/serv
 - decision contract hardening:
   - when `approved=false`, `reason` must be non-empty (`400` when missing).
   - when `approved=true`, the existing operator application must have non-empty `chain_operator_id` (`409` when missing).
+  - matching wallet sessions are synchronized with the decision:
+    - `approved=true` -> role becomes `operator` and `chain_operator_id` is set from the approved application.
+    - `approved=false` -> role becomes `client` and `chain_operator_id` is cleared.
 
 Auth can be bypassed only in explicit developer mode when all of the following are true:
 - bind address is loopback-only, and
@@ -217,6 +220,28 @@ Success payload:
 - `readiness.service_mutations_configured`: `true` when all legacy service lifecycle commands are configured (`LOCAL_CONTROL_API_SERVICE_START_COMMAND`, `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`, `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`)
 - `readiness.lock_reason`: non-empty reason when lifecycle actions are locked
 - `readiness.unlock_actions`: guidance steps to unlock lifecycle actions
+
+### `POST /v1/gpm/session`
+Body:
+
+```json
+{
+  "session_token": "required session token",
+  "action": "status|refresh|revoke"
+}
+```
+
+Behavior:
+- `action` defaults to `status` when omitted.
+- `status` and `refresh` reconcile non-admin sessions against current operator application state before returning:
+  - `admin` role remains unchanged.
+  - approved operator application for the session wallet -> role becomes `operator` and `chain_operator_id` is aligned with the approved application.
+  - missing or non-approved operator application -> role becomes `client` and `chain_operator_id` is cleared.
+- `status` and `refresh` responses include additive `session_reconciled`:
+  - `true` only when reconciliation changed the stored session role and/or `chain_operator_id` in that request.
+  - `false` when no reconciliation change was needed.
+- `refresh` rotates `session_token` and extends session TTL.
+- `revoke` deletes the session and does not include `session_reconciled`.
 
 ## Desktop Command Bridge (Scaffold)
 

@@ -2651,6 +2651,13 @@ func TestGPMAuthChallengeVerifyAndSessionStatus(t *testing.T) {
 	if statusRole != "client" {
 		t.Fatalf("session status role=%q want=client", statusRole)
 	}
+	sessionReconciled, ok := payload["session_reconciled"].(bool)
+	if !ok {
+		t.Fatalf("session_reconciled missing in payload=%v", payload)
+	}
+	if sessionReconciled {
+		t.Fatalf("session_reconciled=%v want=false payload=%v", sessionReconciled, payload)
+	}
 }
 
 func TestGPMSessionRefreshAndRevoke(t *testing.T) {
@@ -2683,6 +2690,13 @@ func TestGPMSessionRefreshAndRevoke(t *testing.T) {
 	if refreshedToken == originalToken {
 		t.Fatalf("session_token was not rotated old=%q new=%q", originalToken, refreshedToken)
 	}
+	sessionReconciled, ok := payload["session_reconciled"].(bool)
+	if !ok {
+		t.Fatalf("session_reconciled missing in payload=%v", payload)
+	}
+	if sessionReconciled {
+		t.Fatalf("session_reconciled=%v want=false payload=%v", sessionReconciled, payload)
+	}
 	if _, ok := svc.gpmState.getSession(originalToken, time.Now().UTC()); ok {
 		t.Fatalf("expected original token to be removed after refresh")
 	}
@@ -2711,6 +2725,137 @@ func TestGPMSessionRefreshAndRevoke(t *testing.T) {
 	code, payload = callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", statusBody)
 	if code != http.StatusNotFound {
 		t.Fatalf("expected revoked token status 404 got=%d payload=%v", code, payload)
+	}
+}
+
+func TestGPMSessionStatusReconcilesStaleOperatorSessionToClient(t *testing.T) {
+	testCases := []struct {
+		name string
+		app  *gpmOperatorApplication
+	}{
+		{
+			name: "when operator application is missing",
+			app:  nil,
+		},
+		{
+			name: "when operator application is rejected",
+			app: &gpmOperatorApplication{
+				WalletAddress:   "cosmos1staleoperator",
+				ChainOperatorID: "operator-stale-1",
+				Status:          "rejected",
+				UpdatedAt:       time.Now().UTC(),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			svc.gpmState = newGPMRuntimeState()
+
+			const sessionToken = "gpm-session-stale-operator"
+			now := time.Now().UTC()
+			svc.gpmState.putSession(gpmSession{
+				Token:           sessionToken,
+				WalletAddress:   "cosmos1staleoperator",
+				WalletProvider:  "keplr",
+				Role:            "operator",
+				ChainOperatorID: "operator-stale-1",
+				CreatedAt:       now,
+				ExpiresAt:       now.Add(time.Hour),
+			})
+			if tc.app != nil {
+				svc.gpmState.upsertOperator(*tc.app)
+			}
+
+			statusBody := `{"session_token":"` + sessionToken + `","action":"status"}`
+			code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", statusBody)
+			if code != http.StatusOK {
+				t.Fatalf("session status=%d payload=%v", code, payload)
+			}
+
+			sessionReconciled, ok := payload["session_reconciled"].(bool)
+			if !ok {
+				t.Fatalf("session_reconciled missing payload=%v", payload)
+			}
+			if !sessionReconciled {
+				t.Fatalf("session_reconciled=%v want=true payload=%v", sessionReconciled, payload)
+			}
+
+			sessionPayload, _ := payload["session"].(map[string]any)
+			if role, _ := sessionPayload["role"].(string); role != "client" {
+				t.Fatalf("session.role=%q want=client payload=%v", role, payload)
+			}
+			if chainOperatorID, _ := sessionPayload["chain_operator_id"].(string); strings.TrimSpace(chainOperatorID) != "" {
+				t.Fatalf("session.chain_operator_id=%q want empty payload=%v", chainOperatorID, payload)
+			}
+
+			storedSession, ok := svc.gpmState.getSession(sessionToken, time.Now().UTC())
+			if !ok {
+				t.Fatalf("expected session to remain present after reconciliation")
+			}
+			if storedSession.Role != "client" {
+				t.Fatalf("stored session role=%q want=client", storedSession.Role)
+			}
+			if strings.TrimSpace(storedSession.ChainOperatorID) != "" {
+				t.Fatalf("stored session chain_operator_id=%q want empty", storedSession.ChainOperatorID)
+			}
+		})
+	}
+}
+
+func TestGPMSessionStatusUpgradesClientSessionToOperatorWhenApproved(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+
+	const sessionToken = "gpm-session-upgrade-operator"
+	now := time.Now().UTC()
+	svc.gpmState.putSession(gpmSession{
+		Token:          sessionToken,
+		WalletAddress:  "cosmos1upgradeoperator",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+	svc.gpmState.upsertOperator(gpmOperatorApplication{
+		WalletAddress:   "cosmos1upgradeoperator",
+		ChainOperatorID: "operator-approved-123",
+		Status:          "approved",
+		UpdatedAt:       now,
+	})
+
+	statusBody := `{"session_token":"` + sessionToken + `","action":"status"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", statusBody)
+	if code != http.StatusOK {
+		t.Fatalf("session status=%d payload=%v", code, payload)
+	}
+
+	sessionReconciled, ok := payload["session_reconciled"].(bool)
+	if !ok {
+		t.Fatalf("session_reconciled missing payload=%v", payload)
+	}
+	if !sessionReconciled {
+		t.Fatalf("session_reconciled=%v want=true payload=%v", sessionReconciled, payload)
+	}
+
+	sessionPayload, _ := payload["session"].(map[string]any)
+	if role, _ := sessionPayload["role"].(string); role != "operator" {
+		t.Fatalf("session.role=%q want=operator payload=%v", role, payload)
+	}
+	if chainOperatorID, _ := sessionPayload["chain_operator_id"].(string); chainOperatorID != "operator-approved-123" {
+		t.Fatalf("session.chain_operator_id=%q want=operator-approved-123 payload=%v", chainOperatorID, payload)
+	}
+
+	storedSession, ok := svc.gpmState.getSession(sessionToken, time.Now().UTC())
+	if !ok {
+		t.Fatalf("expected session to remain present after reconciliation")
+	}
+	if storedSession.Role != "operator" {
+		t.Fatalf("stored session role=%q want=operator", storedSession.Role)
+	}
+	if storedSession.ChainOperatorID != "operator-approved-123" {
+		t.Fatalf("stored session chain_operator_id=%q want=operator-approved-123", storedSession.ChainOperatorID)
 	}
 }
 
@@ -3523,6 +3668,40 @@ func TestGPMOperatorApproveDecisionContract(t *testing.T) {
 		application, _ := payload["application"].(map[string]any)
 		if got, _ := application["status"].(string); got != "rejected" {
 			t.Fatalf("application.status=%q want=rejected payload=%v", got, payload)
+		}
+	})
+
+	t.Run("rejection demotes matching operator session to client", func(t *testing.T) {
+		svc := newOperatorApproveDecisionService(t, "operator-decision-demote")
+		putAdminSession(svc, "gpm-admin-decision-reject-demote")
+		svc.gpmState.putSession(gpmSession{
+			Token:           "gpm-operator-decision-session",
+			WalletAddress:   "cosmos1approvaldecision",
+			WalletProvider:  "keplr",
+			Role:            "operator",
+			ChainOperatorID: "operator-decision-demote",
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       time.Now().UTC().Add(time.Hour),
+		})
+
+		body := `{"wallet_address":"cosmos1approvaldecision","approved":false,"reason":"no longer eligible","session_token":"gpm-admin-decision-reject-demote"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "rejected" {
+			t.Fatalf("decision=%q want=rejected payload=%v", got, payload)
+		}
+
+		session, ok := svc.gpmState.getSession("gpm-operator-decision-session", time.Now().UTC())
+		if !ok {
+			t.Fatalf("expected session to remain present")
+		}
+		if session.Role != "client" {
+			t.Fatalf("session role=%q want=client", session.Role)
+		}
+		if strings.TrimSpace(session.ChainOperatorID) != "" {
+			t.Fatalf("session chain_operator_id=%q want empty", session.ChainOperatorID)
 		}
 	})
 

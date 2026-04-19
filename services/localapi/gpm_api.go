@@ -235,11 +235,88 @@ func (st *gpmRuntimeState) listOperators() []gpmOperatorApplication {
 	return applications
 }
 
+func (st *gpmRuntimeState) reconcileSessionRole(token string) (gpmSession, bool, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	session, ok := st.sessions[token]
+	if !ok {
+		return gpmSession{}, false, false
+	}
+	if strings.EqualFold(strings.TrimSpace(session.Role), "admin") {
+		return session, false, true
+	}
+
+	nextRole := "client"
+	nextChainOperatorID := ""
+	walletAddress := normalizeWalletAddress(session.WalletAddress)
+	if walletAddress != "" {
+		if app, appOK := st.operators[walletAddress]; appOK && strings.EqualFold(strings.TrimSpace(app.Status), "approved") {
+			nextRole = "operator"
+			nextChainOperatorID = strings.TrimSpace(app.ChainOperatorID)
+		}
+	}
+
+	roleChanged := !strings.EqualFold(strings.TrimSpace(session.Role), nextRole)
+	chainChanged := strings.TrimSpace(session.ChainOperatorID) != nextChainOperatorID
+	if !roleChanged && !chainChanged {
+		return session, false, true
+	}
+
+	session.Role = nextRole
+	session.ChainOperatorID = nextChainOperatorID
+	st.sessions[token] = session
+	return session, true, true
+}
+
+func (st *gpmRuntimeState) applyOperatorDecisionToSessions(walletAddress string, approved bool, chainOperatorID string) bool {
+	normalizedWalletAddress := normalizeWalletAddress(walletAddress)
+	nextRole := "client"
+	nextChainOperatorID := ""
+	if approved {
+		nextRole = "operator"
+		nextChainOperatorID = strings.TrimSpace(chainOperatorID)
+	}
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	changed := false
+	for token, session := range st.sessions {
+		if normalizeWalletAddress(session.WalletAddress) != normalizedWalletAddress {
+			continue
+		}
+		roleChanged := !strings.EqualFold(strings.TrimSpace(session.Role), nextRole)
+		chainChanged := strings.TrimSpace(session.ChainOperatorID) != nextChainOperatorID
+		if !roleChanged && !chainChanged {
+			continue
+		}
+		session.Role = nextRole
+		session.ChainOperatorID = nextChainOperatorID
+		st.sessions[token] = session
+		changed = true
+	}
+	return changed
+}
+
 func (s *Service) getGPMSession(token string, now time.Time) (gpmSession, bool) {
 	if s == nil || s.gpmState == nil {
 		return gpmSession{}, false
 	}
 	return s.gpmState.getSession(token, now)
+}
+
+func (s *Service) reconcileGPMSessionRole(token string, session gpmSession, reason string) (gpmSession, bool) {
+	if s == nil || s.gpmState == nil {
+		return session, false
+	}
+	reconciled, changed, ok := s.gpmState.reconcileSessionRole(token)
+	if !ok {
+		return session, false
+	}
+	if changed {
+		s.persistGPMStateBestEffort(reason)
+	}
+	return reconciled, changed
 }
 
 func (s *Service) resolveGPMServiceMutationToken(r *http.Request) (string, error) {
@@ -504,13 +581,16 @@ func (s *Service) handleGPMSessionStatus(w http.ResponseWriter, r *http.Request)
 	now := time.Now().UTC()
 	switch action {
 	case "status":
+		session, sessionReconciled := s.reconcileGPMSessionRole(token, session, "session_status_reconcile")
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":      true,
-			"action":  "status",
-			"session": serializeGPMSession(session),
+			"ok":                 true,
+			"action":             "status",
+			"session":            serializeGPMSession(session),
+			"session_reconciled": sessionReconciled,
 		})
 		return
 	case "refresh":
+		session, sessionReconciled := s.reconcileGPMSessionRole(token, session, "session_refresh_reconcile")
 		newToken, err := randomBase64URL(32)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "failed to refresh session"})
@@ -528,10 +608,11 @@ func (s *Service) handleGPMSessionStatus(w http.ResponseWriter, r *http.Request)
 			"role":            refreshed.Role,
 		})
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":            true,
-			"action":        "refresh",
-			"session_token": refreshed.Token,
-			"session":       serializeGPMSession(refreshed),
+			"ok":                 true,
+			"action":             "refresh",
+			"session_token":      refreshed.Token,
+			"session":            serializeGPMSession(refreshed),
+			"session_reconciled": sessionReconciled,
 		})
 		return
 	case "revoke":
@@ -1062,18 +1143,8 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 	app.UpdatedAt = time.Now().UTC()
 	s.gpmState.upsertOperator(app)
 
-	// Lift session role to operator when approved.
-	s.gpmState.mu.Lock()
-	for token, session := range s.gpmState.sessions {
-		if subtleEqual(session.WalletAddress, walletAddress) {
-			if in.Approved {
-				session.Role = "operator"
-				session.ChainOperatorID = app.ChainOperatorID
-			}
-			s.gpmState.sessions[token] = session
-		}
-	}
-	s.gpmState.mu.Unlock()
+	// Keep wallet sessions synchronized with the operator decision.
+	s.gpmState.applyOperatorDecisionToSessions(walletAddress, in.Approved, app.ChainOperatorID)
 	s.persistGPMStateBestEffort("operator_approve")
 	s.appendGPMAudit("operator_application_decided", map[string]any{
 		"wallet_address":    app.WalletAddress,
