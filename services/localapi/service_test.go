@@ -3769,6 +3769,131 @@ func TestGPMOperatorApproveDecisionContract(t *testing.T) {
 	})
 }
 
+func TestGPMOperatorApproveConcurrencyGuard(t *testing.T) {
+	newOperatorApproveService := func(t *testing.T, updatedAt time.Time, chainOperatorID string) *Service {
+		t.Helper()
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1approvalconcurrency",
+			ChainOperatorID: chainOperatorID,
+			Status:          "pending",
+			UpdatedAt:       updatedAt,
+		})
+		return svc
+	}
+	putAdminSession := func(svc *Service, token string) {
+		now := time.Now().UTC()
+		svc.gpmState.putSession(gpmSession{
+			Token:          token,
+			WalletAddress:  "cosmos1concurrencyadmin",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+	}
+
+	t.Run("invalid if_updated_at_utc returns bad request", func(t *testing.T) {
+		updatedAt := time.Date(2026, time.January, 15, 4, 5, 6, 0, time.UTC)
+		svc := newOperatorApproveService(t, updatedAt, "operator-concurrency-1")
+		putAdminSession(svc, "gpm-admin-concurrency-invalid")
+
+		body := `{"wallet_address":"cosmos1approvalconcurrency","approved":true,"if_updated_at_utc":"not-a-timestamp","session_token":"gpm-admin-concurrency-invalid"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "if_updated_at_utc") || !strings.Contains(errMsg, "RFC3339") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("stale if_updated_at_utc mismatch returns conflict", func(t *testing.T) {
+		updatedAt := time.Date(2026, time.January, 15, 4, 5, 6, 0, time.UTC)
+		svc := newOperatorApproveService(t, updatedAt, "operator-concurrency-2")
+		putAdminSession(svc, "gpm-admin-concurrency-stale")
+		stale := updatedAt.Add(-time.Minute).Format(time.RFC3339)
+
+		body := `{"wallet_address":"cosmos1approvalconcurrency","approved":true,"if_updated_at_utc":"` + stale + `","session_token":"gpm-admin-concurrency-stale"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusConflict {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["ok"].(bool); got {
+			t.Fatalf("ok=%v want=false payload=%v", got, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "stale") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+		if got, _ := payload["wallet_address"].(string); got != "cosmos1approvalconcurrency" {
+			t.Fatalf("wallet_address=%q want=cosmos1approvalconcurrency payload=%v", got, payload)
+		}
+		if got, _ := payload["current_updated_at_utc"].(string); got != updatedAt.Format(time.RFC3339) {
+			t.Fatalf("current_updated_at_utc=%q want=%q payload=%v", got, updatedAt.Format(time.RFC3339), payload)
+		}
+	})
+
+	t.Run("matching if_updated_at_utc allows approval and rejection", func(t *testing.T) {
+		cases := []struct {
+			name         string
+			approved     bool
+			reason       string
+			wantDecision string
+		}{
+			{
+				name:         "approval",
+				approved:     true,
+				wantDecision: "approved",
+			},
+			{
+				name:         "rejection",
+				approved:     false,
+				reason:       "policy mismatch",
+				wantDecision: "rejected",
+			},
+		}
+
+		for _, tc := range cases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				updatedAt := time.Date(2026, time.January, 15, 4, 5, 6, 0, time.UTC)
+				svc := newOperatorApproveService(t, updatedAt, "operator-concurrency-3")
+				token := "gpm-admin-concurrency-match-" + tc.name
+				putAdminSession(svc, token)
+
+				payload := map[string]any{
+					"wallet_address":    "cosmos1approvalconcurrency",
+					"approved":          tc.approved,
+					"if_updated_at_utc": updatedAt.Format(time.RFC3339),
+					"session_token":     token,
+				}
+				if tc.reason != "" {
+					payload["reason"] = tc.reason
+				}
+				bodyBytes, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatalf("marshal body: %v", err)
+				}
+
+				code, out := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", string(bodyBytes))
+				if code != http.StatusOK {
+					t.Fatalf("status=%d payload=%v", code, out)
+				}
+				if got, _ := out["decision"].(string); got != tc.wantDecision {
+					t.Fatalf("decision=%q want=%q payload=%v", got, tc.wantDecision, out)
+				}
+				application, _ := out["application"].(map[string]any)
+				if got, _ := application["status"].(string); got != tc.wantDecision {
+					t.Fatalf("application.status=%q want=%q payload=%v", got, tc.wantDecision, out)
+				}
+			})
+		}
+	})
+}
+
 func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

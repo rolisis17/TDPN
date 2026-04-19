@@ -76,7 +76,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`) and optional `limit` (default `100`, clamped `1..500`))
-- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
+- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
 
 ## Authentication
 
@@ -91,8 +91,14 @@ GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/serv
 - compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (or legacy alias) when configured.
 - if `GPM_APPROVAL_ADMIN_TOKEN` is unset and no admin session token is provided, approval is rejected.
 - decision contract hardening:
+  - request body fields:
+    - `wallet_address` (required)
+    - `approved` (required)
+    - `reason` (required when `approved=false`)
+    - `if_updated_at_utc` (optional RFC3339 precondition; when present, must match current application `updated_at_utc`)
   - when `approved=false`, `reason` must be non-empty (`400` when missing).
   - when `approved=true`, the existing operator application must have non-empty `chain_operator_id` (`409` when missing).
+  - when `if_updated_at_utc` is present but stale/mismatched, response is `409` with `ok=false`, a conflict `error`, `current_updated_at_utc` (latest application timestamp, RFC3339), and `wallet_address`.
   - matching wallet sessions are synchronized with the decision:
     - `approved=true` -> role becomes `operator` and `chain_operator_id` is set from the approved application.
     - `approved=false` -> role becomes `client` and `chain_operator_id` is cleared.

@@ -134,11 +134,12 @@ type gpmOperatorListRequest struct {
 }
 
 type gpmOperatorApproveRequest struct {
-	WalletAddress string `json:"wallet_address"`
-	Approved      bool   `json:"approved"`
-	Reason        string `json:"reason,omitempty"`
-	SessionToken  string `json:"session_token,omitempty"`
-	AdminToken    string `json:"admin_token,omitempty"`
+	WalletAddress  string `json:"wallet_address"`
+	Approved       bool   `json:"approved"`
+	Reason         string `json:"reason,omitempty"`
+	IfUpdatedAtUTC string `json:"if_updated_at_utc,omitempty"`
+	SessionToken   string `json:"session_token,omitempty"`
+	AdminToken     string `json:"admin_token,omitempty"`
 }
 
 type gpmServiceMutationRequest struct {
@@ -1124,6 +1125,27 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "operator application not found"})
 		return
+	}
+	ifUpdatedAtRaw := strings.TrimSpace(in.IfUpdatedAtUTC)
+	if ifUpdatedAtRaw != "" {
+		ifUpdatedAtUTC, err := time.Parse(time.RFC3339, ifUpdatedAtRaw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "if_updated_at_utc must be a valid RFC3339 timestamp",
+			})
+			return
+		}
+		currentUpdatedAtUTC := app.UpdatedAt.UTC()
+		if !ifUpdatedAtUTC.Equal(currentUpdatedAtUTC) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok":                     false,
+				"error":                  "operator application is stale; refresh and retry with latest updated_at_utc",
+				"current_updated_at_utc": currentUpdatedAtUTC.Format(time.RFC3339),
+				"wallet_address":         app.WalletAddress,
+			})
+			return
+		}
 	}
 	decision := "approved"
 	if !in.Approved {
