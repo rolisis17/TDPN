@@ -1,6 +1,10 @@
 param(
   [ValidateSet("check", "bootstrap", "run-api", "run-desktop", "run-full")]
   [string]$Mode = "bootstrap",
+  [Alias("LaunchStrategy")]
+  [ValidateSet("dev", "packaged", "auto")]
+  [string]$DesktopLaunchStrategy = "auto",
+  [string]$DesktopExecutableOverridePath = "",
   [switch]$InstallMissing,
   [switch]$SkipPathRefresh,
   [switch]$EnablePolicyBypass,
@@ -254,6 +258,12 @@ function Ensure-PolicyBypassProcess {
     Write-Step "execution policy left unchanged (pass -EnablePolicyBypass to opt in)"
     $scriptPath = Quote-PowerShellSingleQuotedString -Value $PSCommandPath
     $modeArg = " -Mode " + (Quote-PowerShellSingleQuotedString -Value $Mode)
+    $desktopLaunchStrategyArg = " -DesktopLaunchStrategy " + (Quote-PowerShellSingleQuotedString -Value $DesktopLaunchStrategy)
+    $desktopExecutableOverrideArg = if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
+      " -DesktopExecutableOverridePath " + (Quote-PowerShellSingleQuotedString -Value $DesktopExecutableOverridePath)
+    } else {
+      ""
+    }
     $installMissingArg = if ($InstallMissing) { " -InstallMissing" } else { "" }
     $skipPathRefreshArg = if ($SkipPathRefresh) { " -SkipPathRefresh" } else { "" }
     $dryRunArg = if ($DryRun) { " -DryRun" } else { "" }
@@ -264,7 +274,7 @@ function Ensure-PolicyBypassProcess {
     } else {
       ""
     }
-    Write-Step ("rerun with process-scope bypass: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}" -f $scriptPath, $modeArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg)
+    Write-Step ("rerun with process-scope bypass: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg)
     return
   }
   try {
@@ -291,6 +301,119 @@ function Resolve-GitBashPath {
     return $resolved
   }
   return ""
+}
+
+function New-DesktopLaunchError {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Headline,
+    [string[]]$Hints = @()
+  )
+
+  $lines = @($Headline)
+  foreach ($hint in $Hints) {
+    $lines += "- $hint"
+  }
+  return ($lines -join [Environment]::NewLine)
+}
+
+function Get-DesktopPackagedExecutableCandidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath
+  )
+
+  $desktopDir = Join-Path $RepoRootPath "apps\desktop"
+  $roots = @(
+    (Join-Path $desktopDir "src-tauri\target\release"),
+    (Join-Path $desktopDir "target\release")
+  )
+
+  $candidates = @()
+  foreach ($root in $roots) {
+    $candidates += (Join-Path $root "tdpn-desktop.exe")
+    $candidates += (Join-Path $root "bundle\nsis\tdpn-desktop.exe")
+    $candidates += (Join-Path $root "bundle\nsis\tdpn-desktop\tdpn-desktop.exe")
+    $candidates += (Join-Path $root "bundle\msi\tdpn-desktop.exe")
+    $candidates += (Join-Path $root "bundle\msi\tdpn-desktop\tdpn-desktop.exe")
+  }
+
+  return $candidates
+}
+
+function Resolve-DesktopExecutablePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath,
+    [string]$DesktopExecutableOverridePath
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
+    $candidateOverride = $DesktopExecutableOverridePath.Trim()
+    if (-not (Test-Path -LiteralPath $candidateOverride -PathType Leaf)) {
+      throw (New-DesktopLaunchError -Headline "desktop executable override was not found: $candidateOverride" -Hints @(
+        "Pass -DesktopExecutableOverridePath with the full path to a packaged TDPN Desktop executable.",
+        "For a local build, try the packaged output under apps\desktop\src-tauri\target\release after building the desktop app."
+      ))
+    }
+    return (Resolve-Path -LiteralPath $candidateOverride).Path
+  }
+
+  foreach ($candidate in (Get-DesktopPackagedExecutableCandidates -RepoRootPath $RepoRootPath)) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+
+  return ""
+}
+
+function Resolve-DesktopLaunchPlan {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath,
+    [ValidateSet("dev", "packaged", "auto")]
+    [string]$DesktopLaunchStrategy = "auto",
+    [string]$DesktopExecutableOverridePath = ""
+  )
+
+  $normalizedStrategy = $DesktopLaunchStrategy.Trim().ToLowerInvariant()
+  if ($normalizedStrategy -eq "dev") {
+    return [PSCustomObject]@{
+      Strategy = "dev"
+      DesktopExecutablePath = ""
+      DesktopExecutableSource = "dev"
+      RequiresDesktopBuildTools = $true
+    }
+  }
+
+  $packagedExecutablePath = Resolve-DesktopExecutablePath -RepoRootPath $RepoRootPath -DesktopExecutableOverridePath $DesktopExecutableOverridePath
+  if (-not [string]::IsNullOrWhiteSpace($packagedExecutablePath)) {
+    return [PSCustomObject]@{
+      Strategy = "packaged"
+      DesktopExecutablePath = $packagedExecutablePath
+      DesktopExecutableSource = if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) { "override" } else { "packaged-default" }
+      RequiresDesktopBuildTools = $false
+    }
+  }
+
+  if ($normalizedStrategy -eq "packaged") {
+    throw (New-DesktopLaunchError -Headline "packaged desktop launch was requested, but no packaged executable was found." -Hints @(
+      "Build the desktop app first, then rerun with -DesktopLaunchStrategy packaged.",
+      "Or pass -DesktopExecutableOverridePath to point at the packaged executable directly.",
+      "For one-click startup, use -DesktopLaunchStrategy auto and let the script fall back to dev mode when no packaged executable exists."
+    ))
+  }
+
+  return [PSCustomObject]@{
+    Strategy = "dev"
+    DesktopExecutablePath = ""
+    DesktopExecutableSource = "auto-fallback-dev"
+    RequiresDesktopBuildTools = $true
+  }
 }
 
 function Get-ToolReport {
@@ -399,21 +522,67 @@ function Format-MissingDependencyMessage {
 function Get-MissingIds {
   param(
     [Parameter(Mandatory = $true)]
-    [pscustomobject]$Report
+    [pscustomobject]$Report,
+    [Parameter(Mandatory = $true)]
+    [string]$SelectedMode,
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$DesktopLaunchPlan
   )
 
   $ids = @{}
-  if (-not $Report.go) {
-    $ids["GoLang.Go"] = $true
-  }
-  if (-not $Report.node -or -not $Report.npm) {
-    $ids["OpenJS.NodeJS.LTS"] = $true
-  }
-  if (-not $Report.rustc -or -not $Report.cargo) {
-    $ids["Rustlang.Rustup"] = $true
-  }
-  if (-not $Report.git_bash) {
-    $ids["Git.Git"] = $true
+  $needsDesktopBuildTools = $DesktopLaunchPlan.RequiresDesktopBuildTools
+
+  switch ($SelectedMode) {
+    "run-api" {
+      if (-not $Report.go) {
+        $ids["GoLang.Go"] = $true
+      }
+      if (-not $Report.git_bash) {
+        $ids["Git.Git"] = $true
+      }
+    }
+    "run-desktop" {
+      if ($needsDesktopBuildTools) {
+        if (-not $Report.node -or -not $Report.npm) {
+          $ids["OpenJS.NodeJS.LTS"] = $true
+        }
+        if (-not $Report.rustc -or -not $Report.cargo) {
+          $ids["Rustlang.Rustup"] = $true
+        }
+      }
+    }
+    "run-full" {
+      if (-not $Report.go) {
+        $ids["GoLang.Go"] = $true
+      }
+      if (-not $Report.git_bash) {
+        $ids["Git.Git"] = $true
+      }
+      if ($needsDesktopBuildTools) {
+        if (-not $Report.node -or -not $Report.npm) {
+          $ids["OpenJS.NodeJS.LTS"] = $true
+        }
+        if (-not $Report.rustc -or -not $Report.cargo) {
+          $ids["Rustlang.Rustup"] = $true
+        }
+      }
+    }
+    default {
+      if (-not $Report.go) {
+        $ids["GoLang.Go"] = $true
+      }
+      if (-not $Report.git_bash) {
+        $ids["Git.Git"] = $true
+      }
+      if ($needsDesktopBuildTools) {
+        if (-not $Report.node -or -not $Report.npm) {
+          $ids["OpenJS.NodeJS.LTS"] = $true
+        }
+        if (-not $Report.rustc -or -not $Report.cargo) {
+          $ids["Rustlang.Rustup"] = $true
+        }
+      }
+    }
   }
   return @($ids.Keys)
 }
@@ -471,27 +640,12 @@ function Assert-ToolsForMode {
     [Parameter(Mandatory = $true)]
     [pscustomobject]$Report,
     [Parameter(Mandatory = $true)]
-    [string]$SelectedMode
+    [string]$SelectedMode,
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$DesktopLaunchPlan
   )
 
-  $missingPackageIds = @()
-  switch ($SelectedMode) {
-    "run-api" {
-      if (-not $Report.go) { $missingPackageIds += "GoLang.Go" }
-      if (-not $Report.git_bash) { $missingPackageIds += "Git.Git" }
-    }
-    "run-desktop" {
-      if (-not $Report.node -or -not $Report.npm) { $missingPackageIds += "OpenJS.NodeJS.LTS" }
-      if (-not $Report.rustc -or -not $Report.cargo) { $missingPackageIds += "Rustlang.Rustup" }
-    }
-    "run-full" {
-      if (-not $Report.go) { $missingPackageIds += "GoLang.Go" }
-      if (-not $Report.node -or -not $Report.npm) { $missingPackageIds += "OpenJS.NodeJS.LTS" }
-      if (-not $Report.rustc -or -not $Report.cargo) { $missingPackageIds += "Rustlang.Rustup" }
-      if (-not $Report.git_bash) { $missingPackageIds += "Git.Git" }
-    }
-  }
-
+  $missingPackageIds = Get-MissingIds -Report $Report -SelectedMode $SelectedMode -DesktopLaunchPlan $DesktopLaunchPlan
   if ($missingPackageIds.Count -gt 0) {
     $uniquePackageIds = @()
     $seen = @{}
@@ -689,6 +843,24 @@ function Invoke-DesktopDev {
   }
 }
 
+function Invoke-DesktopPackaged {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopExecutablePath
+  )
+
+  if ($DryRun) {
+    Write-Step "dry-run packaged desktop: $DesktopExecutablePath"
+    return
+  }
+
+  Write-Step "running packaged desktop: $DesktopExecutablePath"
+  & $DesktopExecutablePath
+  if ($LASTEXITCODE -ne 0) {
+    throw "packaged desktop executable exited with code $LASTEXITCODE"
+  }
+}
+
 function Ensure-DesktopIconAsset {
   param(
     [Parameter(Mandatory = $true)]
@@ -729,6 +901,10 @@ function Ensure-DesktopIconAsset {
 $repoRoot = Resolve-RepoRoot
 
 Write-Step "mode=$Mode"
+Write-Step "desktop_launch_strategy=$DesktopLaunchStrategy"
+if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
+  Write-Step "desktop_executable_override=$DesktopExecutableOverridePath"
+}
 Write-Step "repo_root=$repoRoot"
 
 Ensure-PolicyBypassProcess
@@ -749,7 +925,10 @@ if ($commonToolDirs.Count -gt 0) {
 $report = Get-ToolReport
 Show-ToolReport -Report $report
 
-$missingPackageIds = Get-MissingIds -Report $report
+$desktopLaunchPlan = Resolve-DesktopLaunchPlan -RepoRootPath $repoRoot -DesktopLaunchStrategy $DesktopLaunchStrategy -DesktopExecutableOverridePath $DesktopExecutableOverridePath
+Write-Step ("desktop launch resolved: strategy={0}, source={1}{2}" -f $desktopLaunchPlan.Strategy, $desktopLaunchPlan.DesktopExecutableSource, $(if (-not [string]::IsNullOrWhiteSpace($desktopLaunchPlan.DesktopExecutablePath)) { ", path=$($desktopLaunchPlan.DesktopExecutablePath)" } else { "" }))
+
+$missingPackageIds = Get-MissingIds -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan
 if ($missingPackageIds.Count -gt 0) {
   Write-Step ("missing dependency package ids: " + ($missingPackageIds -join ", "))
   if ($InstallMissing) {
@@ -780,7 +959,7 @@ if ($Mode -eq "bootstrap") {
   exit 0
 }
 
-Assert-ToolsForMode -Report $report -SelectedMode $Mode
+Assert-ToolsForMode -Report $report -SelectedMode $Mode -DesktopLaunchPlan $desktopLaunchPlan
 
 if ($Mode -eq "run-api") {
   Invoke-LocalApiForeground -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
@@ -788,12 +967,25 @@ if ($Mode -eq "run-api") {
 }
 
 if ($Mode -eq "run-desktop") {
-  Invoke-DesktopDev -RepoRootPath $repoRoot
+  if ($desktopLaunchPlan.Strategy -eq "packaged") {
+    Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+  } else {
+    Invoke-DesktopDev -RepoRootPath $repoRoot
+  }
   exit 0
 }
 
 if ($Mode -eq "run-full") {
   Validate-LocalApiAddr -Addr $ApiAddr
+  if ($DryRun) {
+    Write-Step "dry-run run-full: would start local api on $ApiAddr"
+    if ($desktopLaunchPlan.Strategy -eq "packaged") {
+      Write-Step "dry-run run-full: would launch packaged desktop: $($desktopLaunchPlan.DesktopExecutablePath)"
+    } else {
+      Write-Step "dry-run run-full: would launch desktop dev with npm.cmd run tauri -- dev"
+    }
+    exit 0
+  }
   $apiProc = Start-LocalApiBackgroundWindow -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
   $apiHealthy = $false
   try {
@@ -801,7 +993,11 @@ if ($Mode -eq "run-full") {
     if (-not $apiHealthy) {
       throw "local api health check did not pass"
     }
-    Invoke-DesktopDev -RepoRootPath $repoRoot
+    if ($desktopLaunchPlan.Strategy -eq "packaged") {
+      Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+    } else {
+      Invoke-DesktopDev -RepoRootPath $repoRoot
+    }
   } finally {
     if (-not $apiHealthy -and $null -ne $apiProc) {
       try {

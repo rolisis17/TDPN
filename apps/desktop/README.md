@@ -115,6 +115,33 @@ Other modes:
 - `-Mode run-api` (local API only)
 - `-Mode run-desktop` (desktop only)
 
+One-click desktop launcher for scaffold/client onboarding:
+
+```powershell
+scripts\windows\desktop_one_click.ps1
+```
+
+From `cmd.exe`:
+
+```cmd
+scripts\windows\desktop_one_click.cmd
+```
+
+This wrapper keeps the same scaffold-only, non-production posture as the rest of the desktop track and is meant for the common "bootstrap then launch" path.
+
+Launch strategy behavior for `desktop_native_bootstrap`:
+- `dev` keeps the backward-compatible development flow.
+- `auto` prefers packaged artifacts when they exist, then falls back to dev.
+- `packaged` forces the packaged app path for release-style smoke checks.
+
+Example commands:
+
+```powershell
+scripts\windows\desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy dev
+scripts\windows\desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy auto
+scripts\windows\desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy packaged
+```
+
 References:
 - `docs/local-control-api.md`
 - `docs/full-execution-plan-2026-2027.md`

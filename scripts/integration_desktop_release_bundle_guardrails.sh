@@ -110,7 +110,7 @@ run_expect_fail \
 echo "[desktop-release-bundle-guardrails] signing password without cert path fails"
 run_expect_fail \
   "password_without_cert_fail" \
-  "-SigningCertPassword requires -SigningCertPath." \
+  "-SigningCertPassword is not supported in this scaffold." \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
     -SigningCertPassword "placeholder" \
@@ -135,6 +135,15 @@ DUMMY_CERT_PATH_PS="$(to_powershell_path "$DUMMY_CERT_PATH")"
 echo "[desktop-release-bundle-guardrails] existing signing cert placeholder path passes"
 run_expect_pass \
   "existing_cert_path_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -SigningCertPath "$DUMMY_CERT_PATH_PS" \
+    -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] signing cert password with cert path fails"
+run_expect_fail \
+  "password_with_cert_fail" \
+  "-SigningCertPassword is not supported in this scaffold." \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -Channel beta \
     -SigningCertPath "$DUMMY_CERT_PATH_PS" \

@@ -66,6 +66,51 @@ if ! grep -qF 'local_api_session.ps1' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
   exit 1
 fi
 
+README_FILE="apps/desktop/README.md"
+
+ONE_CLICK_LAUNCHER_FILES=(
+  "scripts/windows/desktop_one_click.ps1"
+  "scripts/windows/desktop_one_click.cmd"
+)
+ONE_CLICK_LAUNCHER_PRESENT="0"
+for path in "${ONE_CLICK_LAUNCHER_FILES[@]}"; do
+  if [[ -e "$path" ]]; then
+    ONE_CLICK_LAUNCHER_PRESENT="1"
+    break
+  fi
+done
+
+if [[ "$ONE_CLICK_LAUNCHER_PRESENT" == "1" ]]; then
+  for path in "${ONE_CLICK_LAUNCHER_FILES[@]}"; do
+    if [[ ! -f "$path" ]]; then
+      echo "desktop scaffold contract failed: missing one-click launcher script: $path"
+      exit 1
+    fi
+  done
+
+  ONE_CLICK_POWERSHELL_SCRIPT="scripts/windows/desktop_one_click.ps1"
+  ONE_CLICK_CMD_SCRIPT="scripts/windows/desktop_one_click.cmd"
+
+  if ! grep -qF 'desktop_native_bootstrap' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected bootstrap launcher reference in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
+  if ! grep -qiE 'run-full|bootstrap' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected launch-mode marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
+  if ! grep -qF 'desktop_one_click.ps1' "$ONE_CLICK_CMD_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected PowerShell launcher reference in $ONE_CLICK_CMD_SCRIPT"
+    exit 1
+  fi
+
+  if ! grep -qF 'desktop_one_click.ps1' "$README_FILE"; then
+    echo "desktop scaffold contract failed: README must reference the one-click launcher scripts when they exist"
+    exit 1
+  fi
+  echo "[desktop-scaffold] one-click launcher scripts and markers are present"
+fi
+
 LOCAL_API_SESSION_SCRIPT="scripts/windows/local_api_session.ps1"
 if ! grep -qF 'windows-native' "$LOCAL_API_SESSION_SCRIPT"; then
   echo "desktop scaffold contract failed: expected Windows-native local API marker in $LOCAL_API_SESSION_SCRIPT"
@@ -216,7 +261,6 @@ if [[ -n "$missing_js_rust_handler" ]]; then
 fi
 echo "[desktop-scaffold] JS-invoked control_* command names are present in Rust bridge and handler registration"
 
-README_FILE="apps/desktop/README.md"
 if ! rg -qi -- 'scaffold' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must clearly mention scaffold status"
   exit 1

@@ -165,6 +165,33 @@ First-run remediation tips:
 - if `winget` is missing, install App Installer first and rerun the bootstrap
 - the desktop release bundle scaffold also expects Node.js LTS / npm and Rustup before `tauri build`
 
+One-click desktop launcher for scaffold/client onboarding:
+
+```powershell
+./scripts/windows/desktop_one_click.ps1
+```
+
+From `cmd.exe`:
+
+```cmd
+scripts\windows\desktop_one_click.cmd
+```
+
+This wrapper is meant for the common "bootstrap then launch" path on Windows and keeps the same scaffold-only, non-production posture as the rest of the desktop track.
+
+Launch strategy behavior for `desktop_native_bootstrap`:
+- `dev` keeps the backward-compatible development flow. Use this when you want the same local development path the bootstrap has always used.
+- `auto` prefers a packaged desktop when one is available, then falls back to the dev launch path. Use this when you want one command to work across fresh machines and machines that already have packaged artifacts.
+- `packaged` forces the packaged app path. Use this for release-style smoke checks or when you specifically want to validate the packaged launcher path.
+
+Examples:
+
+```powershell
+./scripts/windows/desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy dev
+./scripts/windows/desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy auto
+./scripts/windows/desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy packaged
+```
+
 ## 5) 3-machine beta test
 
 Use the same flow documented in `docs/easy-3-machine-test.md`.
