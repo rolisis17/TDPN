@@ -399,6 +399,19 @@ async fn control_gpm_session(
 }
 
 #[tauri::command]
+async fn control_gpm_audit_recent(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let limit = limit.unwrap_or(25).clamp(1, 200);
+    state
+        .local_api
+        .get_json(&format!("/v1/gpm/audit/recent?limit={limit}"))
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
 async fn control_gpm_client_register(
     state: State<'_, AppState>,
     request: GPMClientRegisterRequest,
@@ -524,6 +537,7 @@ fn main() {
             control_gpm_auth_challenge,
             control_gpm_auth_verify,
             control_gpm_session,
+            control_gpm_audit_recent,
             control_gpm_client_register,
             control_gpm_operator_apply,
             control_gpm_operator_status,

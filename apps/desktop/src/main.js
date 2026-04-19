@@ -284,6 +284,10 @@ byId("manifest_btn").addEventListener("click", async () => {
   await loadManifest();
 });
 
+byId("audit_recent_btn").addEventListener("click", async () => {
+  await call("gpm_audit_recent", "control_gpm_audit_recent", { limit: 25 });
+});
+
 byId("register_client_btn").addEventListener("click", async () => {
   if (!state.sessionToken) {
     print("validation", "session_token is required; sign in first");
