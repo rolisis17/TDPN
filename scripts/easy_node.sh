@@ -249,6 +249,7 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-linux-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]
+  ./scripts/easy_node.sh desktop-linux-installer-guardrails [args...]
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-linux-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
@@ -258,6 +259,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
   ./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]
+  ./scripts/easy_node.sh desktop-windows-installer-guardrails [args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -407,6 +409,7 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-linux-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]
+  ./scripts/easy_node.sh desktop-linux-installer-guardrails [args...]
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-linux-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
@@ -416,6 +419,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
   ./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]
+  ./scripts/easy_node.sh desktop-windows-installer-guardrails [args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -672,6 +676,8 @@ Notes:
   - manual-validation-backlog prints the deferred real-host validation list so we can resume manual testing cleanly later.
   - local-api-session launches `go run ./cmd/node --local-api`, wires config-v1 simple client defaults into local control API connect defaults, supports optional service lifecycle command overrides, and supports deterministic dry-run output.
   - desktop-windows-native-bootstrap-guardrails runs the Windows-native bootstrap guardrail integration contract to verify dry-run mode handling, invalid-mode fail-close behavior, and summary-json output markers before operator-facing runs.
+  - desktop-windows-installer-guardrails runs the Windows desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
+  - desktop-linux-installer-guardrails runs the Linux desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
   - manual-validation-report turns that readiness state into one shareable markdown + JSON handoff artifact, includes the same staged roadmap signal for single-machine operators, and can fail-close with --fail-on-not-ready=1.
@@ -8765,6 +8771,11 @@ desktop_linux_installer() {
   run_desktop_wrapper_script "$script" "$@"
 }
 
+desktop_linux_installer_guardrails() {
+  local script="${DESKTOP_LINUX_INSTALLER_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_linux_desktop_installer_guardrails.sh}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
 desktop_windows_doctor() {
   local script="${DESKTOP_WINDOWS_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_doctor.ps1}"
   run_desktop_wrapper_script "$script" "$@"
@@ -8777,6 +8788,11 @@ desktop_windows_native_bootstrap() {
 
 desktop_windows_native_bootstrap_guardrails() {
   local script="${DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_windows_desktop_native_bootstrap_guardrails.sh}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_installer_guardrails() {
+  local script="${DESKTOP_WINDOWS_INSTALLER_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_windows_desktop_installer_guardrails.sh}"
   run_desktop_wrapper_script "$script" "$@"
 }
 
@@ -15986,6 +16002,10 @@ main() {
       shift
       desktop_linux_installer "$@"
       ;;
+    desktop-linux-installer-guardrails)
+      shift
+      desktop_linux_installer_guardrails "$@"
+      ;;
     desktop-linux-packaged-run)
       shift
       desktop_linux_packaged_run "$@"
@@ -16021,6 +16041,10 @@ main() {
     desktop-windows-installer)
       shift
       desktop_windows_installer "$@"
+      ;;
+    desktop-windows-installer-guardrails)
+      shift
+      desktop_windows_installer_guardrails "$@"
       ;;
     desktop-windows-packaged-run)
       shift

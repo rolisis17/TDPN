@@ -443,6 +443,7 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-one-click --install-missing
 ./scripts/easy_node.sh desktop-linux-dev
 ./scripts/easy_node.sh desktop-linux-installer --dry-run
+./scripts/easy_node.sh desktop-linux-installer-guardrails
 ./scripts/easy_node.sh desktop-linux-packaged-run --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run
 ```
@@ -466,6 +467,7 @@ scripts\windows\desktop_installer.cmd -DryRun
 .\scripts\easy_node.sh desktop-windows-doctor --mode check
 .\scripts\easy_node.sh desktop-windows-dev
 .\scripts\easy_node.sh desktop-windows-installer -DryRun
+.\scripts\easy_node.sh desktop-windows-installer-guardrails
 .\scripts\easy_node.sh desktop-installer --platform windows -DryRun
 .\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
 ```
@@ -608,4 +610,6 @@ Run these from repository root to validate scaffold guardrails without building 
 bash ./scripts/integration_desktop_scaffold_contract.sh
 bash ./scripts/integration_desktop_release_bundle_guardrails.sh
 bash ./scripts/integration_desktop_linux_release_bundle_guardrails.sh
+bash ./scripts/integration_windows_desktop_installer_guardrails.sh
+bash ./scripts/integration_linux_desktop_installer_guardrails.sh
 ```

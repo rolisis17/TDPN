@@ -229,6 +229,9 @@ echo "[ci] windows desktop packaged-run guardrails integration"
 echo "[ci] windows desktop one-click guardrails integration"
 ./scripts/integration_windows_desktop_one_click_guardrails.sh
 
+echo "[ci] windows desktop installer guardrails integration"
+./scripts/integration_windows_desktop_installer_guardrails.sh
+
 echo "[ci] linux desktop doctor guardrails integration"
 ./scripts/integration_linux_desktop_doctor_guardrails.sh
 
@@ -243,6 +246,9 @@ echo "[ci] linux desktop packaged-run guardrails integration"
 
 echo "[ci] linux desktop one-click guardrails integration"
 ./scripts/integration_linux_desktop_one_click_guardrails.sh
+
+echo "[ci] linux desktop installer guardrails integration"
+./scripts/integration_linux_desktop_installer_guardrails.sh
 
 echo "[ci] desktop release bundle guardrails integration"
 ./scripts/integration_desktop_release_bundle_guardrails.sh
