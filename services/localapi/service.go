@@ -713,14 +713,15 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	in.BootstrapDirectory = strings.TrimSpace(in.BootstrapDirectory)
 	in.InviteKey = strings.TrimSpace(in.InviteKey)
 	in.SessionToken = strings.TrimSpace(in.SessionToken)
+	manualOverridesProvided := in.BootstrapDirectory != "" || in.InviteKey != ""
+	if manualOverridesProvided && (s.gpmConnectRequireSession || !s.gpmAllowLegacyConnectOverride) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "manual bootstrap_directory/invite_key overrides are disabled; connect requires a registered session_token",
+		})
+		return
+	}
 	if s.gpmConnectRequireSession {
-		if in.BootstrapDirectory != "" || in.InviteKey != "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"ok":    false,
-				"error": "manual bootstrap_directory/invite_key overrides are disabled; connect requires a registered session_token",
-			})
-			return
-		}
 		if in.SessionToken == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"ok":    false,

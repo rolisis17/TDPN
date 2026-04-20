@@ -209,6 +209,9 @@ esac
 		commandSlots:        make(chan struct{}, defaultMaxCommands),
 		allowUpdate:         allowUpdate,
 		allowUnauthLoopback: true,
+		// Keep default connect fixtures aligned with legacy-manual flow unless a test
+		// explicitly exercises fail-closed override policy behavior.
+		gpmAllowLegacyConnectOverride: true,
 	}
 	return svc, logPath
 }
@@ -1511,6 +1514,51 @@ func TestHandleConnectFailuresAndValidation(t *testing.T) {
 }
 
 func TestHandleConnectSessionRequiredMode(t *testing.T) {
+	t.Run("manual overrides are rejected when legacy override policy is disabled", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = false
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir.example:8081",
+			"invite_key":"inv-manual-disabled-by-policy"
+		}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "manual bootstrap_directory/invite_key overrides are disabled") || !strings.Contains(got, "registered session_token") {
+			t.Fatalf("error=%q want manual-overrides-disabled + registered session_token guidance", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("manual override rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("manual overrides remain allowed when legacy override policy is enabled", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir.example:8081",
+			"invite_key":"inv-manual-enabled-by-policy",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir.example:8081")
+		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
+	})
+
 	t.Run("manual overrides are rejected", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true

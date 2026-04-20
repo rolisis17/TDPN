@@ -94,6 +94,8 @@ start_local_api() {
   local production_mode="${8-0}"
   local manifest_require_https="${9-}"
   local manifest_require_signature="${10-}"
+  local connect_require_session="${11-}"
+  local allow_legacy_connect_override="${12-}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -103,23 +105,31 @@ start_local_api() {
     : >"$SERVER_LOG"
 
     LOCAL_API_BASE="http://127.0.0.1:${port}"
-    LOCAL_CONTROL_API_ADDR="127.0.0.1:${port}" \
-    LOCAL_CONTROL_API_SCRIPT="$FAKE_SCRIPT" \
-    LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK="1" \
-    GPM_MAIN_DOMAIN="$main_domain" \
-    GPM_BOOTSTRAP_MANIFEST_URL="$manifest_url" \
-    GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$cache_path" \
-    GPM_BOOTSTRAP_MANIFEST_HMAC_KEY="$manifest_hmac_key" \
-    GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS="$manifest_require_https" \
-    GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE="$manifest_require_signature" \
-    GPM_PRODUCTION_MODE="$production_mode" \
-    GPM_AUTH_VERIFY_REQUIRE_COMMAND="$require_verify_command" \
-    GPM_AUTH_VERIFY_REQUIRE_METADATA="$require_metadata" \
-    GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE="$require_wallet_extension_source" \
-    LOCAL_API_GPM_MANIFEST_TRUST_CALLS_FILE="$CALLS_FILE" \
-    GPM_STATE_STORE_PATH="$TMP_DIR/gpm_state.json" \
-    GPM_AUDIT_LOG_PATH="$TMP_DIR/gpm_audit.jsonl" \
-      go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
+    local api_env=(
+      "LOCAL_CONTROL_API_ADDR=127.0.0.1:${port}"
+      "LOCAL_CONTROL_API_SCRIPT=$FAKE_SCRIPT"
+      "LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK=1"
+      "GPM_MAIN_DOMAIN=$main_domain"
+      "GPM_BOOTSTRAP_MANIFEST_URL=$manifest_url"
+      "GPM_BOOTSTRAP_MANIFEST_CACHE_PATH=$cache_path"
+      "GPM_BOOTSTRAP_MANIFEST_HMAC_KEY=$manifest_hmac_key"
+      "GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=$manifest_require_https"
+      "GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=$manifest_require_signature"
+      "GPM_PRODUCTION_MODE=$production_mode"
+      "GPM_AUTH_VERIFY_REQUIRE_COMMAND=$require_verify_command"
+      "GPM_AUTH_VERIFY_REQUIRE_METADATA=$require_metadata"
+      "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=$require_wallet_extension_source"
+      "LOCAL_API_GPM_MANIFEST_TRUST_CALLS_FILE=$CALLS_FILE"
+      "GPM_STATE_STORE_PATH=$TMP_DIR/gpm_state.json"
+      "GPM_AUDIT_LOG_PATH=$TMP_DIR/gpm_audit.jsonl"
+    )
+    if [[ -n "$connect_require_session" ]]; then
+      api_env+=("GPM_CONNECT_REQUIRE_SESSION=$connect_require_session")
+    fi
+    if [[ -n "$allow_legacy_connect_override" ]]; then
+      api_env+=("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=$allow_legacy_connect_override")
+    fi
+    env "${api_env[@]}" go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
 
     if wait_for_local_api "$LOCAL_API_BASE"; then
@@ -273,6 +283,52 @@ assert_json_expr \
   "$strict_verify_missing_metadata_body" \
   '.ok == false and ((.error // "") | type == "string") and ((((.error // "") | ascii_downcase) | contains("metadata")) or (((.error // "") | ascii_downcase) | contains("wallet_extension_source")) or (((.error // "") | ascii_downcase) | contains("wallet extension source")) or (((.error // "") | ascii_downcase) | contains("signature_source")) or (((.error // "") | ascii_downcase) | contains("policy")))' \
   "expected strict auth verify error to reference metadata/wallet-extension-source policy"
+stop_local_api
+
+echo "[local-control-api-gpm-manifest-trust] connect policy rejects manual overrides when legacy override is disabled even if session is not globally required"
+connect_policy_manifest_url="http://127.0.0.1:1/v1/bootstrap/manifest"
+connect_policy_bootstrap_directory="https://directory.connect-policy.globalprivatemesh.example:8081"
+connect_policy_cache_path="$TMP_DIR/connect_policy_cache.json"
+write_manifest_cache "$connect_policy_cache_path" "$connect_policy_manifest_url" "$connect_policy_bootstrap_directory" true
+start_local_api \
+  "http://127.0.0.1:1" \
+  "$connect_policy_manifest_url" \
+  "$connect_policy_cache_path" \
+  0 \
+  0 \
+  0 \
+  "" \
+  0 \
+  "" \
+  "" \
+  0 \
+  0
+
+connect_policy_config_json="$(api_get_json "/v1/config")"
+if ! jq -e '.ok == true and .config.connect_require_session == false and .config.allow_legacy_connect_override == false' <<<"$connect_policy_config_json" >/dev/null; then
+  echo "expected explicit connect policy override to surface connect_require_session=false and allow_legacy_connect_override=false"
+  echo "$connect_policy_config_json"
+  exit 1
+fi
+
+: >"$CALLS_FILE"
+connect_policy_manual_body="$TMP_DIR/connect_policy_manual_override.json"
+connect_policy_manual_code="$(curl -sS -o "$connect_policy_manual_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"bootstrap_directory\":\"https://directory.manual-override.globalprivatemesh.example:8081\",\"invite_key\":\"inv-manual-override-disabled\"}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_policy_manual_code" != "400" ]]; then
+  echo "expected manual connect override without session_token to fail with 400 when legacy overrides are disabled, got $connect_policy_manual_code"
+  cat "$connect_policy_manual_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_policy_manual_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("manual")) and ((((.error // "") | ascii_downcase) | contains("override")) or (((.error // "") | ascii_downcase) | contains("bootstrap_directory"))) and (((.error // "") | contains("session_token")) or (((.error // "") | ascii_downcase) | contains("session token")))' \
+  "expected connect policy override error to indicate manual overrides are disabled and session token is required"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected connect policy rejection to fail closed without invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_policy_manual_body"
+  exit 1
+fi
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] production mode fails closed when external auth verifier command is not configured"
