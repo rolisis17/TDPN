@@ -395,6 +395,7 @@ Success payload:
 - `readiness.endpoint_posture`: additive endpoint posture snapshot used for server-tab diagnostics (for example, provider/authority and HTTP/HTTPS posture hints)
 - `readiness.endpoint_warnings`: additive list of actionable warning strings derived from endpoint posture checks
 - endpoint diagnostics are advisory and non-blocking; they do not lock lifecycle actions by themselves
+- the web portal Step-3 operator view surfaces `endpoint_posture` and `endpoint_warnings` in the endpoint trust posture banner for operator-facing diagnostics
 
 ### `POST /v1/gpm/onboarding/overview`
 Body:

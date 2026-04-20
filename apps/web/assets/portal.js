@@ -23,6 +23,10 @@ const operatorReadinessEl = byId("operator_readiness");
 const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
 const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
+const endpointPostureEl = byId("endpoint_posture");
+const endpointPostureLineEl = byId("endpoint_posture_line");
+const endpointPostureStatusEl = byId("endpoint_posture_status");
+const endpointPostureGuidanceEl = byId("endpoint_posture_guidance");
 const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
 const clientReadinessStatusEl = byId("client_readiness_status");
@@ -1066,6 +1070,31 @@ function nonEmptyString(value) {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function parseNonEmptyStringList(value) {
+  const values = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      pushUniqueNonEmptyString(values, entry);
+    }
+    return values;
+  }
+
+  const text = nonEmptyString(value);
+  if (!text) {
+    return values;
+  }
+
+  if (text.includes("\n") || text.includes(";")) {
+    for (const entry of text.split(/[\n;]+/)) {
+      pushUniqueNonEmptyString(values, entry);
+    }
+    return values;
+  }
+
+  pushUniqueNonEmptyString(values, text);
+  return values;
 }
 
 function pushUniqueNonEmptyString(target, value) {
@@ -2123,6 +2152,12 @@ function parseServerReadiness(payload) {
   const role = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
   const lockReason = nonEmptyString(firstDefined(readiness.lock_reason, readiness.lockReason));
   const clientLockReason = nonEmptyString(firstDefined(readiness.client_lock_reason, readiness.clientLockReason));
+  const endpointPosture = nonEmptyString(
+    firstDefined(readiness.endpoint_posture, readiness.endpointPosture)
+  );
+  const endpointWarnings = parseNonEmptyStringList(
+    firstDefined(readiness.endpoint_warnings, readiness.endpointWarnings)
+  );
   return {
     role: role || undefined,
     tabVisible: parseBooleanLike(readiness.tab_visible),
@@ -2135,6 +2170,8 @@ function parseServerReadiness(payload) {
     chainBindingStatus: nonEmptyString(firstDefined(readiness.chain_binding_status, readiness.chainBindingStatus)),
     chainBindingOk: parseBooleanLike(firstDefined(readiness.chain_binding_ok, readiness.chainBindingOk)),
     chainBindingReason: nonEmptyString(firstDefined(readiness.chain_binding_reason, readiness.chainBindingReason)),
+    endpointPosture: endpointPosture || undefined,
+    endpointWarnings,
     unlockActions
   };
 }
@@ -2409,11 +2446,7 @@ function refreshOnboardingSteps() {
   const clientLaneRoleLocked = clientReadiness.state === "role_locked";
   if (!clientRegistered && !clientLaneRoleLocked) {
     setStepState(onboardingStepClientEl, "active");
-    setStepState(onboardingStepOperatorEl, "blocked");
-    return;
-  }
-
-  if (clientReadiness.state === "registered") {
+  } else if (clientReadiness.state === "registered") {
     setStepState(onboardingStepClientEl, "done");
   } else if (clientLaneRoleLocked) {
     setStepState(onboardingStepClientEl, "blocked");
@@ -2667,6 +2700,93 @@ function setOperatorReadiness(kind, statusText, guidanceText) {
   operatorReadinessGuidanceEl.textContent = guidanceText;
 }
 
+function formatEndpointPostureLabel(posture) {
+  const normalized = nonEmptyString(posture);
+  if (!normalized) {
+    return "Unknown";
+  }
+  const compact = normalized.replace(/[_-]+/g, " ").trim();
+  return compact.charAt(0).toUpperCase() + compact.slice(1);
+}
+
+function endpointPostureKind(posture) {
+  const normalized = nonEmptyString(posture)?.toLowerCase().replace(/[\s-]+/g, "_");
+  if (!normalized) {
+    return "warn";
+  }
+  if (
+    normalized.includes("untrusted") ||
+    normalized.includes("invalid") ||
+    normalized.includes("revoked") ||
+    normalized.includes("failed") ||
+    normalized.includes("blocked")
+  ) {
+    return "bad";
+  }
+  if (
+    normalized.includes("trusted") ||
+    normalized.includes("strict") ||
+    normalized.includes("pinned") ||
+    normalized.includes("healthy") ||
+    normalized === "ok" ||
+    normalized === "pass"
+  ) {
+    return "good";
+  }
+  return "warn";
+}
+
+function setEndpointPosture(kind, statusText, guidanceText) {
+  endpointPostureEl.dataset.kind = kind || "warn";
+  endpointPostureLineEl.classList.remove("good", "warn", "bad");
+  if (kind) {
+    endpointPostureLineEl.classList.add(kind);
+  }
+  endpointPostureStatusEl.textContent = statusText;
+  endpointPostureGuidanceEl.textContent = guidanceText;
+}
+
+function refreshEndpointPosture() {
+  const sessionToken = byId("session_token").value.trim();
+  if (!sessionToken && !serverReadiness) {
+    setEndpointPosture(
+      "warn",
+      "Not signed in",
+      "Sign in and refresh server readiness to load endpoint trust posture."
+    );
+    return;
+  }
+
+  if (!serverReadiness) {
+    setEndpointPosture(
+      "warn",
+      "Unknown",
+      "Refresh server readiness to load endpoint trust posture and warnings."
+    );
+    return;
+  }
+
+  const posture = nonEmptyString(serverReadiness.endpointPosture);
+  const warnings = Array.isArray(serverReadiness.endpointWarnings)
+    ? serverReadiness.endpointWarnings
+    : [];
+  if (posture) {
+    const guidance =
+      warnings.length > 0
+        ? warnings.join(" ")
+        : "No endpoint warnings reported by readiness.";
+    setEndpointPosture(endpointPostureKind(posture), formatEndpointPostureLabel(posture), guidance);
+    return;
+  }
+
+  if (warnings.length > 0) {
+    setEndpointPosture("warn", "Warnings reported", warnings.join(" "));
+    return;
+  }
+
+  setEndpointPosture("warn", "Unavailable", "Endpoint posture not provided by readiness payload.");
+}
+
 function setClientReadiness(kind, statusText, guidanceText, state) {
   clientReadinessEl.dataset.kind = kind || "warn";
   clientReadinessEl.dataset.state = state || "unknown";
@@ -2902,6 +3022,7 @@ function computeOperatorReadiness() {
 function refreshOperatorReadiness() {
   const readiness = computeOperatorReadiness();
   setOperatorReadiness(readiness.kind, readiness.statusText, readiness.guidanceText);
+  refreshEndpointPosture();
   refreshClientReadiness();
 }
 
@@ -4161,8 +4282,9 @@ byId("reject_operator_btn").addEventListener("click", () =>
     "operator_reject",
     async () => {
       const sessionToken = byId("session_token").value.trim();
-      if (!sessionToken) {
-        throw new Error("session_token is required to reject an operator. Sign in first.");
+      const adminToken = byId("admin_token").value.trim();
+      if (!sessionToken && !adminToken) {
+        throw new Error("session_token or admin_token is required to reject an operator.");
       }
       const reason = operatorModerationReason();
       if (!reason) {
@@ -4171,16 +4293,17 @@ byId("reject_operator_btn").addEventListener("click", () =>
       const request = {
         wallet_address: byId("wallet_address").value.trim(),
         approved: false,
-        reason,
-        session_token: sessionToken
+        reason
       };
+      if (sessionToken) {
+        request.session_token = sessionToken;
+      }
+      if (adminToken) {
+        request.admin_token = adminToken;
+      }
       const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
       if (ifUpdatedAtUtc) {
         request.if_updated_at_utc = ifUpdatedAtUtc;
-      }
-      const adminToken = byId("admin_token").value.trim();
-      if (adminToken) {
-        request.admin_token = adminToken;
       }
       let moderationResult = null;
       try {

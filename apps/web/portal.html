@@ -87,10 +87,10 @@
         <div class="section-head">
           <div>
             <p class="eyebrow">Onboarding steps</p>
-            <h2>Follow the console in order</h2>
+            <h2>Sign in, then choose your lane</h2>
           </div>
           <p class="section-lead">
-            Each step is visible on its own, but the flow is designed to stay linear: sign in, register the client, then complete the operator workflow if your role requires it.
+            Start with wallet sign-in, then continue in the client lane, operator lane, or both based on your role.
           </p>
         </div>
         <div class="steps-grid portal-steps">
@@ -119,7 +119,7 @@
             <h2>Wallet sign-in</h2>
           </div>
           <p class="section-lead">
-            Start here to generate a challenge, capture the wallet signature, and establish a session the rest of the portal can use.
+            Start here to generate a challenge, capture the wallet signature, and establish a session both lanes can reuse.
           </p>
         </div>
         <div class="fields">
@@ -273,6 +273,13 @@
             <span id="operator_readiness_guidance">Sign in first to unlock operator onboarding.</span>
           </div>
         </div>
+        <div id="endpoint_posture" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Endpoint trust posture</div>
+          <div id="endpoint_posture_line" class="status warn">
+            <strong>Endpoint posture: <span id="endpoint_posture_status">Unknown</span></strong>
+            <span id="endpoint_posture_guidance">Refresh server status to load endpoint posture and warnings.</span>
+          </div>
+        </div>
         <p class="helper-copy">
           Use the readiness banner to confirm whether the current session can proceed as an operator or needs another sign-in or approval cycle.
         </p>
@@ -325,6 +332,9 @@
             <input id="operator_list_next_cursor" placeholder="set after queue listing" readonly />
           </label>
         </div>
+        <p class="helper-copy">
+          Approval actions use session token auth by default; admin token is a compatibility fallback. Rejection always requires a moderation reason.
+        </p>
         <div class="actions">
           <button class="btn secondary" id="apply_operator_btn">Apply Operator Role</button>
           <button class="btn secondary" id="operator_status_btn">Check Operator Status</button>
