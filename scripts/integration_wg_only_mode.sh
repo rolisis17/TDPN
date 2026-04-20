@@ -4,12 +4,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+TMP_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
 run_expect_fail() {
   local name="$1"
   local expected_pattern="$2"
   shift 2
 
-  local log_file="/tmp/integration_wg_only_${name}.log"
+  local log_file="$TMP_DIR/integration_wg_only_${name}.log"
   if "$@" >"$log_file" 2>&1; then
     echo "expected ${name} to fail under WG-only guardrails"
     cat "$log_file"

@@ -31,6 +31,7 @@ import (
 const (
 	gpmChallengeTTL                = 5 * time.Minute
 	gpmSessionTTL                  = 12 * time.Hour
+	gpmChallengeMaxEntries         = 4096
 	gpmManifestHTTPTimeout         = 6 * time.Second
 	gpmManifestBodyLimit           = 1 << 20
 	gpmManifestCacheBodyLimit      = 2 << 20
@@ -198,15 +199,29 @@ func newGPMRuntimeState() *gpmRuntimeState {
 	}
 }
 
-func (st *gpmRuntimeState) putChallenge(challenge gpmWalletChallenge) {
+func (st *gpmRuntimeState) putChallenge(challenge gpmWalletChallenge, now time.Time) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	st.pruneExpiredChallengesLocked(now)
+	if gpmChallengeMaxEntries > 0 && len(st.challenges) >= gpmChallengeMaxEntries {
+		return false
+	}
 	st.challenges[challenge.ChallengeID] = challenge
+	return true
+}
+
+func (st *gpmRuntimeState) pruneExpiredChallengesLocked(now time.Time) {
+	for challengeID, challenge := range st.challenges {
+		if now.After(challenge.ExpiresAt) {
+			delete(st.challenges, challengeID)
+		}
+	}
 }
 
 func (st *gpmRuntimeState) popValidChallenge(challengeID string, now time.Time) (gpmWalletChallenge, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	st.pruneExpiredChallengesLocked(now)
 	challenge, ok := st.challenges[challengeID]
 	if !ok {
 		return gpmWalletChallenge{}, false
@@ -499,7 +514,8 @@ func (s *Service) handleGPMAuthChallenge(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "failed to create challenge"})
 		return
 	}
-	expires := time.Now().UTC().Add(gpmChallengeTTL)
+	now := time.Now().UTC()
+	expires := now.Add(gpmChallengeTTL)
 	challenge := gpmWalletChallenge{
 		ChallengeID:    "gpm-chal-" + challengeID,
 		WalletAddress:  in.WalletAddress,
@@ -507,7 +523,13 @@ func (s *Service) handleGPMAuthChallenge(w http.ResponseWriter, r *http.Request)
 		Message:        "Global Private Mesh authentication challenge: " + challengeID,
 		ExpiresAt:      expires,
 	}
-	s.gpmState.putChallenge(challenge)
+	if !s.gpmState.putChallenge(challenge, now) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "authentication challenge queue is temporarily saturated; retry shortly",
+		})
+		return
+	}
 	s.appendGPMAudit("auth_challenge_issued", map[string]any{
 		"wallet_address":  challenge.WalletAddress,
 		"wallet_provider": challenge.WalletProvider,

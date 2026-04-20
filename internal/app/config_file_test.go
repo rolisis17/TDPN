@@ -125,6 +125,57 @@ func TestApplyConfigFileGenericEnv(t *testing.T) {
 	}
 }
 
+func TestApplyConfigFileRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.env")
+	if err := os.WriteFile(target, []byte("FOO=bar\n"), 0o644); err != nil {
+		t.Fatalf("write target config: %v", err)
+	}
+	link := filepath.Join(dir, "config.env")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not supported in test environment: %v", err)
+	}
+	err := applyConfigFile(link)
+	if err == nil {
+		t.Fatalf("expected symlink config file to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("expected symlink rejection, got %v", err)
+	}
+}
+
+func TestApplyConfigFileRejectsOversizeFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "large.env")
+	payload := strings.Repeat("A", int(configFileMaxBytes)+1)
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	err := applyConfigFile(path)
+	if err == nil {
+		t.Fatalf("expected oversize config file to be rejected")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected max-size error, got %v", err)
+	}
+}
+
+func TestApplyConfigFileRejectsOverlongLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "longline.env")
+	content := "FOO=" + strings.Repeat("x", configFileLineMaxBytes+1) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	err := applyConfigFile(path)
+	if err == nil {
+		t.Fatalf("expected overlong config line to be rejected")
+	}
+	if !strings.Contains(err.Error(), "line exceeds") {
+		t.Fatalf("expected line-length error, got %v", err)
+	}
+}
+
 func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "generic.env")

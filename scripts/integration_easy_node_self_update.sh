@@ -35,6 +35,34 @@ DIRTY=$dirty
 EOF_STATE
 }
 
+load_state_or_die() {
+  LOCAL_SHA=""
+  REMOTE_SHA=""
+  BRANCH=""
+  DIRTY=""
+
+  local key value
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    value="${value%$'\r'}"
+    case "$key" in
+      LOCAL_SHA) LOCAL_SHA="$value" ;;
+      REMOTE_SHA) REMOTE_SHA="$value" ;;
+      BRANCH) BRANCH="$value" ;;
+      DIRTY) DIRTY="$value" ;;
+      ""|\#*) ;;
+      *)
+        echo "invalid key in state file: $key"
+        return 1
+        ;;
+    esac
+  done <"$STATE_FILE"
+
+  if [[ -z "$LOCAL_SHA" || -z "$REMOTE_SHA" || -z "$BRANCH" || -z "$DIRTY" ]]; then
+    echo "state file is missing required keys"
+    return 1
+  fi
+}
+
 write_state \
   "1111111111111111111111111111111111111111" \
   "2222222222222222222222222222222222222222" \
@@ -55,8 +83,35 @@ if [[ "${args[0]:-}" == "-C" ]]; then
 fi
 printf '%s\n' "${args[*]}" >>"$CAPTURE_FILE"
 
-# shellcheck source=/dev/null
-source "$STATE_FILE"
+load_state_or_die() {
+  LOCAL_SHA=""
+  REMOTE_SHA=""
+  BRANCH=""
+  DIRTY=""
+
+  local key value
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    value="${value%$'\r'}"
+    case "$key" in
+      LOCAL_SHA) LOCAL_SHA="$value" ;;
+      REMOTE_SHA) REMOTE_SHA="$value" ;;
+      BRANCH) BRANCH="$value" ;;
+      DIRTY) DIRTY="$value" ;;
+      ""|\#*) ;;
+      *)
+        echo "invalid key in state file: $key" >&2
+        exit 1
+        ;;
+    esac
+  done <"$STATE_FILE"
+
+  if [[ -z "$LOCAL_SHA" || -z "$REMOTE_SHA" || -z "$BRANCH" || -z "$DIRTY" ]]; then
+    echo "state file is missing required keys" >&2
+    exit 1
+  fi
+}
+
+load_state_or_die
 
 save_state() {
   cat >"$STATE_FILE" <<EOF_STATE
@@ -135,8 +190,7 @@ if ! rg -q 'self-update: updated' "$MANUAL_LOG"; then
   exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$STATE_FILE"
+load_state_or_die
 if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
   echo "expected manual self-update to fast-forward local sha to remote sha"
   cat "$STATE_FILE"
@@ -177,8 +231,7 @@ if [[ "$(rg -c '^fetch ' "$CAPTURE_FILE" || true)" != "1" ]]; then
   exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$STATE_FILE"
+load_state_or_die
 if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
   echo "expected auto-update reexec path to fast-forward local sha to remote sha"
   cat "$STATE_FILE"
@@ -227,8 +280,7 @@ if [[ "$(rg -c '^fetch ' "$CAPTURE_FILE" || true)" != "1" ]]; then
   exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$STATE_FILE"
+load_state_or_die
 if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
   echo "expected config-v1 auto-update reexec path to fast-forward local sha to remote sha"
   cat "$STATE_FILE"
@@ -254,8 +306,7 @@ if ! rg -q 'self-update skipped: working tree has local tracked changes' "$DIRTY
   exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$STATE_FILE"
+load_state_or_die
 if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
   echo "expected dirty working tree skip path to keep local sha unchanged"
   cat "$STATE_FILE"

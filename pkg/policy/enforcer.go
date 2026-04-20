@@ -21,10 +21,16 @@ func NewEnforcer() *Enforcer {
 }
 
 func (e *Enforcer) Allow(claims crypto.CapabilityClaims, flow FlowContext) error {
+	if !isValidPort(flow.DestinationPort) {
+		return ErrDenied
+	}
 	if flow.Now.Unix() >= claims.ExpiryUnix {
 		return ErrDenied
 	}
 	for _, p := range claims.DenyPorts {
+		if !isValidPort(p) {
+			return ErrDenied
+		}
 		if flow.DestinationPort == p {
 			return ErrDenied
 		}
@@ -37,9 +43,11 @@ func (e *Enforcer) Allow(claims crypto.CapabilityClaims, flow FlowContext) error
 	if len(claims.AllowPorts) > 0 {
 		allowed := false
 		for _, p := range claims.AllowPorts {
+			if !isValidPort(p) {
+				return ErrDenied
+			}
 			if flow.DestinationPort == p {
 				allowed = true
-				break
 			}
 		}
 		if !allowed {
@@ -47,4 +55,8 @@ func (e *Enforcer) Allow(claims crypto.CapabilityClaims, flow FlowContext) error
 		}
 	}
 	return nil
+}
+
+func isValidPort(port int) bool {
+	return port >= 1 && port <= 65535
 }

@@ -3235,6 +3235,39 @@ func TestGPMAuthChallengeVerifyAndSessionStatus(t *testing.T) {
 	}
 }
 
+func TestGPMAuthChallengeFailsClosedWhenChallengeStateSaturated(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	now := time.Now().UTC()
+	for i := 0; i < gpmChallengeMaxEntries; i++ {
+		ok := svc.gpmState.putChallenge(gpmWalletChallenge{
+			ChallengeID:    fmt.Sprintf("gpm-chal-seed-%d", i),
+			WalletAddress:  "cosmos1challengefill",
+			WalletProvider: "keplr",
+			Message:        "seed-challenge",
+			ExpiresAt:      now.Add(gpmChallengeTTL),
+		}, now)
+		if !ok {
+			t.Fatalf("seed challenge insert failed at i=%d", i)
+		}
+	}
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMAuthChallenge,
+		http.MethodPost,
+		"/v1/gpm/auth/challenge",
+		`{"wallet_address":"cosmos1challengefill","wallet_provider":"keplr"}`,
+	)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "temporarily saturated") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
 func TestGPMAuthVerifyRejectsSignatureWithWhitespaceControlCharacters(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
@@ -6622,6 +6655,29 @@ func TestGPMAuditRecentHandlerRejectsInvalidWalletFilter(t *testing.T) {
 	}
 	errMsg, _ := payload["error"].(string)
 	if !strings.Contains(errMsg, "wallet_address") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMAuditRecentHandlerRejectsOversizedAuditFile(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	oversized := strings.Repeat("A", gpmAuditReadMaxBytes+1)
+	if err := os.WriteFile(auditPath, []byte(oversized), 0o600); err != nil {
+		t.Fatalf("write audit file: %v", err)
+	}
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "")
+	if code != http.StatusInternalServerError {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "maximum readable size") {
 		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 }

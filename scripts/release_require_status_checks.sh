@@ -25,6 +25,13 @@ require_cmds() {
   done
 }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
 repo=""
 sha=""
 workflows="ci.yml,security.yml"
@@ -83,10 +90,19 @@ fi
 
 api_root="https://api.github.com/repos/${repo}"
 fail=0
+checked=0
 
 for workflow in "${required_workflows[@]}"; do
-  workflow="$(echo "$workflow" | xargs)"
-  [[ -z "$workflow" ]] && continue
+  workflow="$(trim "$workflow")"
+  if [[ -z "$workflow" ]]; then
+    continue
+  fi
+  if [[ ! "$workflow" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "[release-status-checks] invalid workflow identifier: ${workflow}"
+    fail=1
+    continue
+  fi
+  checked=$((checked + 1))
 
   url="${api_root}/actions/workflows/${workflow}/runs?head_sha=${sha}&per_page=30"
   response="$(curl -fsSL \
@@ -107,6 +123,11 @@ for workflow in "${required_workflows[@]}"; do
   run_url="$(jq -r '.workflow_runs[] | select(.status=="completed" and .conclusion=="success") | .html_url' <<<"$response" | head -n 1)"
   echo "[release-status-checks] ok workflow=${workflow} sha=${sha} run=${run_url}"
 done
+
+if [[ "$checked" -eq 0 ]]; then
+  echo "[release-status-checks] no valid workflow identifiers were provided"
+  exit 1
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "[release-status-checks] FAIL"

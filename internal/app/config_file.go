@@ -2,9 +2,16 @@ package app
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+)
+
+const (
+	configFileMaxBytes     int64 = 1 << 20
+	configFileLineMaxBytes       = 16 << 10
 )
 
 var blockedGenericConfigFileEnvKeys = map[string]struct{}{
@@ -31,14 +38,14 @@ func applyConfigFile(path string) error {
 	if path == "" {
 		return nil
 	}
-	f, err := os.Open(path)
+	raw, err := readAppFileBounded(path, configFileMaxBytes)
 	if err != nil {
-		return fmt.Errorf("open config file: %w", err)
+		return fmt.Errorf("read config file: %w", err)
 	}
-	defer f.Close()
 
 	values := map[string]string{}
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 4096), configFileLineMaxBytes)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -56,6 +63,9 @@ func applyConfigFile(path string) error {
 		values[key] = val
 	}
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return fmt.Errorf("read config file: line exceeds %d bytes", configFileLineMaxBytes)
+		}
 		return fmt.Errorf("read config file: %w", err)
 	}
 	if len(values) == 0 {

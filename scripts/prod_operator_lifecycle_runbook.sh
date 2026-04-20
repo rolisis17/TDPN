@@ -1315,8 +1315,6 @@ if [[ "$action" == "onboard" ]]; then
 
   if [[ "$status" == "ok" ]]; then
     server_up_cmd=("$EASY_NODE_SH" "server-up" "--mode" "$resolved_mode")
-    server_up_secret_env_file=""
-    server_up_secret_env_file="$(build_server_up_secret_env_file "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret")"
     if [[ -n "$public_host" ]]; then
       server_up_cmd+=("--public-host" "$public_host")
     fi
@@ -1357,14 +1355,12 @@ if [[ "$action" == "onboard" ]]; then
       server_up_cmd+=("--show-admin-token" "$show_admin_token")
     fi
     set +e
-    if [[ -n "$server_up_secret_env_file" ]]; then
-      (
-        set -a
-        # shellcheck disable=SC1090
-        source "$server_up_secret_env_file"
-        set +a
-        "${server_up_cmd[@]}"
-      )
+    if [[ -n "$issuer_admin_token" || -n "$directory_admin_token" || -n "$entry_puzzle_secret" ]]; then
+      EASY_NODE_DIRECTORY_ADMIN_TOKEN="$directory_admin_token" \
+      EASY_NODE_ENTRY_PUZZLE_SECRET="$entry_puzzle_secret" \
+      EASY_NODE_ISSUER_ADMIN_TOKEN="$issuer_admin_token" \
+      ISSUER_ADMIN_TOKEN="$issuer_admin_token" \
+      "${server_up_cmd[@]}"
     else
       "${server_up_cmd[@]}"
     fi

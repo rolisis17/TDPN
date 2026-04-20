@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,6 +15,12 @@ import (
 
 var gpmStateStoreWriteMu sync.Mutex
 var gpmAuditWriteMu sync.Mutex
+
+const (
+	gpmStateStoreLoadMaxBytes = 4 << 20
+	gpmAuditReadMaxBytes      = 8 << 20
+	gpmAuditRecentMaxEntries  = 50000
+)
 
 type gpmStateStoreFile struct {
 	Version        int                      `json:"version"`
@@ -71,7 +78,7 @@ func (s *Service) loadGPMStateBestEffort() {
 	if path == "" {
 		return
 	}
-	body, err := os.ReadFile(path)
+	body, err := readFileWithLimit(path, gpmStateStoreLoadMaxBytes)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("gpm state load skipped: %v", err)
@@ -92,6 +99,23 @@ func (s *Service) loadGPMStateBestEffort() {
 	now := time.Now().UTC()
 	s.gpmState.restorePersistent(now, store.Sessions, store.Operators)
 	log.Printf("gpm state loaded: sessions=%d operators=%d path=%s", len(store.Sessions), len(store.Operators), path)
+}
+
+func readFileWithLimit(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	body, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("file %q exceeds max size %d bytes", path, maxBytes)
+	}
+	return body, nil
 }
 
 func (s *Service) persistGPMStateBestEffort(reason string) {
@@ -189,6 +213,11 @@ func (s *Service) readGPMAuditRecent(query gpmAuditRecentQuery) (gpmAuditRecentR
 		return gpmAuditRecentResult{}, err
 	}
 	defer f.Close()
+	if info, err := f.Stat(); err == nil {
+		if info.Size() > gpmAuditReadMaxBytes {
+			return gpmAuditRecentResult{}, fmt.Errorf("audit log exceeds maximum readable size (%d bytes)", gpmAuditReadMaxBytes)
+		}
+	}
 
 	limit := query.Limit
 	if limit < 1 {
@@ -235,6 +264,9 @@ func (s *Service) readGPMAuditRecent(query gpmAuditRecentQuery) (gpmAuditRecentR
 			if normalizeWalletAddress(walletAddress) != walletFilter {
 				continue
 			}
+		}
+		if len(entries) >= gpmAuditRecentMaxEntries {
+			return gpmAuditRecentResult{}, fmt.Errorf("audit query exceeds maximum entries (%d)", gpmAuditRecentMaxEntries)
 		}
 		entries = append(entries, record)
 	}
