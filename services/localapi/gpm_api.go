@@ -3,6 +3,7 @@ package localapi
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -2039,6 +2040,95 @@ func (s *Service) validateGPMAuthSignaturePolicy(signatureMetadata gpmAuthSignat
 	return nil
 }
 
+func decodeGPMAuthProofMaterial(raw string, expectedLen int, fieldName string) ([]byte, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, fmt.Errorf("%s is required", fieldName)
+	}
+	hexCandidates := []string{value}
+	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
+		hexCandidates = append(hexCandidates, value[2:])
+	}
+	for _, candidate := range hexCandidates {
+		if candidate == "" {
+			continue
+		}
+		decoded, err := hex.DecodeString(candidate)
+		if err == nil && len(decoded) == expectedLen {
+			return decoded, nil
+		}
+	}
+	base64Encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+	for _, encoding := range base64Encodings {
+		decoded, err := encoding.DecodeString(value)
+		if err == nil && len(decoded) == expectedLen {
+			return decoded, nil
+		}
+	}
+	return nil, fmt.Errorf("%s must decode to %d bytes (hex or base64)", fieldName, expectedLen)
+}
+
+func verifyGPMAuthSignatureEd25519(publicKeyRaw string, signatureRaw string, message string) error {
+	publicKey, err := decodeGPMAuthProofMaterial(publicKeyRaw, ed25519.PublicKeySize, "signature_public_key")
+	if err != nil {
+		return err
+	}
+	signature, err := decodeGPMAuthProofMaterial(signatureRaw, ed25519.SignatureSize, "signature")
+	if err != nil {
+		return err
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), []byte(message), signature) {
+		return errors.New("ed25519 signature verification failed")
+	}
+	return nil
+}
+
+func (s *Service) verifyGPMAuthSignatureCryptographicProof(signature string, signatureMetadata gpmAuthSignatureMetadata) error {
+	hasPublicKey := strings.TrimSpace(signatureMetadata.SignaturePublicKey) != ""
+	hasPublicKeyType := strings.TrimSpace(signatureMetadata.SignaturePublicKeyType) != ""
+	hasSignedMessage := signatureMetadata.HasSignedMessage && signatureMetadata.SignedMessage != ""
+	requireCryptoProof := s.gpmAuthVerifyRequireCryptoProof
+	if !hasPublicKey && !hasPublicKeyType && !hasSignedMessage {
+		if requireCryptoProof {
+			return errors.New("cryptographic proof metadata is required by policy: signature_public_key, signature_public_key_type, signed_message")
+		}
+		return nil
+	}
+	if !hasPublicKey || !hasPublicKeyType || !hasSignedMessage {
+		if requireCryptoProof {
+			missing := make([]string, 0, 3)
+			if !hasPublicKey {
+				missing = append(missing, "signature_public_key")
+			}
+			if !hasPublicKeyType {
+				missing = append(missing, "signature_public_key_type")
+			}
+			if !hasSignedMessage {
+				missing = append(missing, "signed_message")
+			}
+			return fmt.Errorf("cryptographic proof metadata is required by policy: %s", strings.Join(missing, ", "))
+		}
+		return nil
+	}
+	switch signatureMetadata.SignaturePublicKeyType {
+	case "ed25519":
+		return verifyGPMAuthSignatureEd25519(signatureMetadata.SignaturePublicKey, signature, signatureMetadata.SignedMessage)
+	default:
+		if requireCryptoProof {
+			return fmt.Errorf(
+				"signature_public_key_type %q is not supported for strict cryptographic proof policy",
+				signatureMetadata.SignaturePublicKeyType,
+			)
+		}
+		return nil
+	}
+}
+
 func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string, signatureMetadata gpmAuthSignatureMetadata) error {
 	if err := s.validateGPMAuthSignaturePolicy(signatureMetadata); err != nil {
 		return err
@@ -2051,6 +2141,9 @@ func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalle
 		verifier = defaultGPMAuthSignatureVerifier
 	}
 	if err := verifier(challenge, walletAddress, walletProvider, signature); err != nil {
+		return err
+	}
+	if err := s.verifyGPMAuthSignatureCryptographicProof(signature, signatureMetadata); err != nil {
 		return err
 	}
 	if s.gpmAuthVerifyRequireCommand && strings.TrimSpace(s.gpmAuthVerifyCommand) == "" {

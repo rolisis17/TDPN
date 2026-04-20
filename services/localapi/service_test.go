@@ -2,6 +2,7 @@ package localapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -446,6 +447,17 @@ func authVerifierCommandExpectSignatureMetadata(expectedSignature string, expect
 	)
 }
 
+func deterministicEd25519Proof(message string) (signatureBase64 string, publicKeyBase64 string) {
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	privateKey := ed25519.NewKeyFromSeed(seed)
+	signature := ed25519.Sign(privateKey, []byte(message))
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	return base64.StdEncoding.EncodeToString(signature), base64.StdEncoding.EncodeToString(publicKey)
+}
+
 func TestNormalizePathProfile(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -540,6 +552,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
 
 		s := New()
 		if s.addr != defaultAddr {
@@ -640,6 +654,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAuthVerifyWalletExtSource != "default" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=default", s.gpmAuthVerifyWalletExtSource)
+		}
+		if s.gpmAuthVerifyRequireCryptoProof {
+			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=false", s.gpmAuthVerifyRequireCryptoProof)
+		}
+		if s.gpmAuthVerifyCryptoSource != "default" {
+			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=default", s.gpmAuthVerifyCryptoSource)
 		}
 		if got := len(s.gpmLegacyEnvAliasesActive); got != 0 {
 			t.Fatalf("gpmLegacyEnvAliasesActive len=%d want=0", got)
@@ -773,6 +793,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "1")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "1")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "1")
 
 		s := New()
 		if !s.gpmAuthVerifyRequireMetadata {
@@ -787,6 +809,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmAuthVerifyWalletExtSource != "TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", s.gpmAuthVerifyWalletExtSource)
 		}
+		if !s.gpmAuthVerifyRequireCryptoProof {
+			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=true", s.gpmAuthVerifyRequireCryptoProof)
+		}
+		if s.gpmAuthVerifyCryptoSource != "TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF" {
+			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", s.gpmAuthVerifyCryptoSource)
+		}
 	})
 
 	t.Run("tdpn aliases are tracked for runtime telemetry", func(t *testing.T) {
@@ -798,6 +826,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "1")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "1")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "1")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "61")
 
@@ -808,6 +838,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 			"TDPN_PRODUCTION_MODE":                                {},
 			"TDPN_CONNECT_REQUIRE_SESSION":                        {},
 			"TDPN_AUTH_VERIFY_REQUIRE_METADATA":                   {},
+			"TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF":               {},
 			"TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC": {},
 		}
 		if got, want := len(s.gpmLegacyEnvAliasesActive), len(wantAliases); got != want {
@@ -822,7 +853,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if len(wantAliases) != 0 {
 			t.Fatalf("missing expected legacy aliases: %v all=%v", wantAliases, s.gpmLegacyEnvAliasesActive)
 		}
-		if got, want := len(s.gpmLegacyEnvAliasWarnings), 5; got != want {
+		if got, want := len(s.gpmLegacyEnvAliasWarnings), 6; got != want {
 			t.Fatalf("gpmLegacyEnvAliasWarnings len=%d want=%d warnings=%v", got, want, s.gpmLegacyEnvAliasWarnings)
 		}
 		for _, warning := range s.gpmLegacyEnvAliasWarnings {
@@ -851,6 +882,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
 
 		s := New()
 		if !s.gpmConnectRequireSession {
@@ -916,6 +949,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmAuthVerifyWalletExtSource != "production-default" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=production-default", s.gpmAuthVerifyWalletExtSource)
 		}
+		if s.gpmAuthVerifyRequireCryptoProof {
+			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=false", s.gpmAuthVerifyRequireCryptoProof)
+		}
+		if s.gpmAuthVerifyCryptoSource != "default" {
+			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=default", s.gpmAuthVerifyCryptoSource)
+		}
 	})
 
 	t.Run("explicit connect and auth policy flags override production defaults", func(t *testing.T) {
@@ -936,6 +975,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "0")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "1")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
 
 		s := New()
 		if s.gpmConnectRequireSession {
@@ -1000,6 +1041,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAuthVerifyWalletExtSource != "TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", s.gpmAuthVerifyWalletExtSource)
+		}
+		if !s.gpmAuthVerifyRequireCryptoProof {
+			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=true", s.gpmAuthVerifyRequireCryptoProof)
+		}
+		if s.gpmAuthVerifyCryptoSource != "GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF" {
+			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", s.gpmAuthVerifyCryptoSource)
 		}
 	})
 
@@ -2434,6 +2481,7 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyRequireCommand = true
 		svc.gpmAuthVerifyRequireMetadata = true
 		svc.gpmAuthVerifyRequireWalletExt = true
+		svc.gpmAuthVerifyRequireCryptoProof = true
 		svc.gpmAuthVerifyCommand = lifecycleSuccessCommand("verify-ok")
 		svc.gpmConnectPolicyMode = "production"
 		svc.gpmConnectPolicySource = "GPM_PRODUCTION_MODE"
@@ -2448,6 +2496,7 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyRequireCmdSource = "production-default"
 		svc.gpmAuthVerifyMetadataSource = "production-default"
 		svc.gpmAuthVerifyWalletExtSource = "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE"
+		svc.gpmAuthVerifyCryptoSource = "GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF"
 		svc.gpmLegacyEnvAliasesActive = []string{
 			"TDPN_PRODUCTION_MODE",
 			"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
@@ -2540,6 +2589,12 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["gpm_auth_verify_require_wallet_extension_policy_source"].(string); got != "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
 			t.Fatalf("gpm_auth_verify_require_wallet_extension_policy_source=%q want=%q", got, "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE")
+		}
+		if got, _ := configMap["gpm_auth_verify_require_crypto_proof"].(bool); !got {
+			t.Fatalf("gpm_auth_verify_require_crypto_proof=%v want=true", configMap["gpm_auth_verify_require_crypto_proof"])
+		}
+		if got, _ := configMap["gpm_auth_verify_require_crypto_proof_policy_source"].(string); got != "GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF" {
+			t.Fatalf("gpm_auth_verify_require_crypto_proof_policy_source=%q want=%q", got, "GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF")
 		}
 		if got, _ := configMap["gpm_auth_verify_command_configured"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_command_configured=%v want=true", configMap["gpm_auth_verify_command_configured"])
@@ -4531,7 +4586,7 @@ func TestGPMAuthVerifyConfiguredVerifierCommandCanonicalPublicKeyMetadataTakesPr
 	expectedMetadata := gpmAuthSignatureMetadata{
 		SignatureKind:          "eip191",
 		SignaturePublicKey:     "04canonicalabc",
-		SignaturePublicKeyType: "ed25519",
+		SignaturePublicKeyType: "secp256k1",
 		SignatureSource:        "wallet_extension",
 		ChainID:                "evm-11155111",
 		SignatureEnvelope:      "envelope-v1",
@@ -4561,8 +4616,8 @@ func TestGPMAuthVerifyConfiguredVerifierCommandCanonicalPublicKeyMetadataTakesPr
 		"signature_kind":            "eip191",
 		"signature_public_key":      "04canonicalabc",
 		"public_key":                "04legacyignored",
-		"signature_public_key_type": "ed25519",
-		"public_key_type":           "secp256k1",
+		"signature_public_key_type": "secp256k1",
+		"public_key_type":           "ed25519",
 		"signature_source":          "wallet_extension",
 		"chain_id":                  "evm-11155111",
 		"signed_message":            challengeMessage,
@@ -4607,8 +4662,8 @@ func TestGPMAuthVerifyAcceptsKnownOptionalSignatureMetadataValues(t *testing.T) 
 		"challenge_id":              challengeID,
 		"signature":                 "signed-proof-value",
 		"signature_kind":            "sign_arbitrary",
-		"signature_public_key":      "edpk12345",
-		"signature_public_key_type": "ed25519",
+		"signature_public_key":      "02abc123",
+		"signature_public_key_type": "secp256k1",
 		"signature_source":          "manual",
 		"chain_id":                  "mesh-mainnet-1",
 		"signed_message":            challengeMessage,
@@ -4717,6 +4772,257 @@ func TestGPMAuthVerifyRejectsInvalidOptionalSignatureMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGPMAuthVerifyCryptographicProofWithOptionalMetadata(t *testing.T) {
+	t.Run("accepts valid ed25519 proof when metadata is provided", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+
+		challengeBody := `{"wallet_address":"cosmos1ed25519pass","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+
+		signature, publicKey := deterministicEd25519Proof(challengeMessage)
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1ed25519pass",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "ed25519",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusOK {
+			t.Fatalf("verify status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+			t.Fatalf("session_token missing payload=%v", payload)
+		}
+	})
+
+	t.Run("rejects invalid ed25519 proof when metadata is provided", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+
+		challengeBody := `{"wallet_address":"cosmos1ed25519fail","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+
+		signature, publicKey := deterministicEd25519Proof("different-message")
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1ed25519fail",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "ed25519",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusUnauthorized {
+			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "ed25519 signature verification failed") {
+			t.Fatalf("error=%q want ed25519 verification failure payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("allows unsupported signature_public_key_type when strict crypto policy is disabled", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+
+		challengeBody := `{"wallet_address":"cosmos1compatsecp","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1compatsecp",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 "signed-proof-value",
+			"signature_public_key":      "04abcdef",
+			"signature_public_key_type": "secp256k1",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusOK {
+			t.Fatalf("verify status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+			t.Fatalf("session_token missing payload=%v", payload)
+		}
+	})
+}
+
+func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
+	t.Run("rejects requests missing cryptographic proof metadata", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+		svc.gpmAuthVerifyRequireCryptoProof = true
+
+		challengeBody := `{"wallet_address":"cosmos1strictcryptomissing","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+
+		verifyBody := `{"wallet_address":"cosmos1strictcryptomissing","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "cryptographic proof metadata is required by policy") {
+			t.Fatalf("error=%q want strict-crypto metadata message payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("rejects unsupported signature_public_key_type when strict crypto policy enabled", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+		svc.gpmAuthVerifyRequireCryptoProof = true
+
+		challengeBody := `{"wallet_address":"cosmos1strictcryptosecp","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1strictcryptosecp",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 "signed-proof-value",
+			"signature_public_key":      "04abcdef",
+			"signature_public_key_type": "secp256k1",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusUnauthorized {
+			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "not supported for strict cryptographic proof policy") {
+			t.Fatalf("error=%q want strict unsupported-type message payload=%v", errMsg, payload)
+		}
+		if !strings.Contains(errMsg, "secp256k1") {
+			t.Fatalf("error=%q want secp256k1 in message payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("accepts valid ed25519 proofs when strict crypto policy is enabled", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+		svc.gpmAuthVerifyRequireCryptoProof = true
+
+		challengeBody := `{"wallet_address":"cosmos1strictcryptoed","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+
+		signature, publicKey := deterministicEd25519Proof(challengeMessage)
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1strictcryptoed",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "ed25519",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusOK {
+			t.Fatalf("verify status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+			t.Fatalf("session_token missing payload=%v", payload)
+		}
+	})
 }
 
 func TestGPMAuthVerifyRequireMetadataPolicy(t *testing.T) {

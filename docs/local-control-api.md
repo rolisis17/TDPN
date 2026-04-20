@@ -38,7 +38,7 @@ Defaults:
     - auth-verify external verifier command required (`gpm_auth_verify_require_command=true`)
     - auth-verify strict metadata required (`gpm_auth_verify_require_metadata=true`)
     - auth-verify strict wallet-extension-source required (`gpm_auth_verify_require_wallet_extension_source=true`)
-  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, plus legacy `TDPN_*` aliases)
+  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, `GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF`, plus legacy `TDPN_*` aliases)
 - optional `/v1/connect` hardening flags (standalone or as explicit overrides):
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
@@ -75,6 +75,11 @@ Windows local API bridge defaults (`scripts\windows\local_api_session.ps1`):
 - bridge default target script is repository `scripts\easy_node.sh` (exported as `/c/.../scripts/easy_node.sh` for Git Bash).
 - default run stays WSL-free and rejects `WindowsApps\bash.exe` (WSL shim).
 - Git Bash is still required for default `easy_node.sh` execution unless you explicitly provide an alternative `-ScriptPath` and compatible `-CommandRunner`.
+- one-shot prerequisite helper: `scripts\windows\setup_windows_native.ps1`
+  - check-only: `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow local-api`
+  - unattended remediation: add `-InstallMissing -NonInteractive` (uses `winget` when available, otherwise prints deterministic fallback commands)
+  - process-scope execution-policy opt-in: add `-EnablePolicyBypass`
+  - dry-run preview: add `-DryRun`
 - `scripts\windows\local_api_session.ps1 -InstallMissing` can auto-install Git for Windows (`Git.Git`), Go (`GoLang.Go`), and jq (`jqlang.jq`) via `winget`.
 - compatibility overrides remain supported:
   - runner env override via `LOCAL_CONTROL_API_GIT_BASH_PATH` (with `-AllowRunnerEnvOverride` on the PowerShell bridge)
@@ -83,6 +88,7 @@ Windows local API bridge defaults (`scripts\windows\local_api_session.ps1`):
 Exact Windows examples:
 
 ```powershell
+scripts\windows\setup_windows_native.ps1 -Workflow local-api -DryRun
 scripts\windows\local_api_session.cmd -DryRun
 scripts\windows\local_api_session.cmd -ScriptPath "C:\Users\dcella-d\TDPN1\scripts\easy_node.sh" -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun
 $env:LOCAL_CONTROL_API_GIT_BASH_PATH="C:\Program Files\Git\bin\bash.exe"; scripts\windows\local_api_session.ps1 -AllowRunnerEnvOverride -DryRun
@@ -108,11 +114,12 @@ Desktop scaffold defaults (`apps/desktop`):
 
 GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/auth/challenge`
-- `POST /v1/gpm/auth/verify` (uses a pluggable signature verifier hook in the daemon; default verifier enforces baseline proof-shape guardrails while full wallet-extension verification remains a follow-on milestone; request supports optional signature metadata: `signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`; backward-compatible aliases `public_key` -> `signature_public_key` and `public_key_type` -> `signature_public_key_type` are accepted, and canonical keys take precedence when both canonical and alias values are non-empty; when provided, `signed_message` must exactly match the issued challenge message, `signature_kind` must be `sign_arbitrary` or `eip191`, `signature_source` must be `wallet_extension` or `manual`, `signature_public_key_type` must be `secp256k1` or `ed25519`, and `signature_envelope` (string or JSON payload) is normalized and capped at 16384 bytes; omitting metadata preserves existing behavior)
+- `POST /v1/gpm/auth/verify` (uses a pluggable signature verifier hook in the daemon; default verifier enforces baseline proof-shape guardrails while full wallet-extension verification remains a follow-on milestone; request supports optional signature metadata: `signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`; backward-compatible aliases `public_key` -> `signature_public_key` and `public_key_type` -> `signature_public_key_type` are accepted, and canonical keys take precedence when both canonical and alias values are non-empty; when provided, `signed_message` must exactly match the issued challenge message, `signature_kind` must be `sign_arbitrary` or `eip191`, `signature_source` must be `wallet_extension` or `manual`, `signature_public_key_type` must be `secp256k1` or `ed25519`, and `signature_envelope` (string or JSON payload) is normalized and capped at 16384 bytes; if `signature_public_key`, `signature_public_key_type`, and `signed_message` are present, daemon-side cryptographic verification is attempted for supported key types (currently `ed25519`) and invalid supported proofs are rejected; omitting metadata preserves existing behavior)
 - optional external verifier hook: set `GPM_AUTH_VERIFY_COMMAND` (legacy alias: `TDPN_AUTH_VERIFY_COMMAND`) to run a local command after baseline validation; the command receives context via env vars: `GPM_AUTH_VERIFY_CHALLENGE_ID`, `GPM_AUTH_VERIFY_MESSAGE`, `GPM_AUTH_VERIFY_WALLET_ADDRESS`, `GPM_AUTH_VERIFY_WALLET_PROVIDER`, `GPM_AUTH_VERIFY_SIGNATURE`, `GPM_AUTH_VERIFY_SIGNATURE_KIND`, `GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY`, `GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE`, `GPM_AUTH_VERIFY_SIGNATURE_SOURCE`, `GPM_AUTH_VERIFY_CHAIN_ID`, `GPM_AUTH_VERIFY_SIGNED_MESSAGE`, `GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE`
 - strict external-verifier policy: set `GPM_AUTH_VERIFY_REQUIRE_COMMAND=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_COMMAND=1`) to require `GPM_AUTH_VERIFY_COMMAND` to be configured; this defaults to `false` in compatibility mode and defaults to `true` when `GPM_PRODUCTION_MODE=1` is enabled with no explicit override; when enabled and the command is unset, `POST /v1/gpm/auth/verify` fails closed with a policy error.
 - strict metadata policy: set `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`) to require `signature_kind`, `signature_source`, and `signed_message`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when required metadata is missing.
 - strict wallet-extension-source policy: set `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`) to require explicit `signature_source=wallet_extension`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when the source requirement is not met.
+- strict cryptographic proof policy: set `GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF=1`) to fail closed unless cryptographic proof metadata is present (`signature_public_key`, `signature_public_key_type`, `signed_message`) and verifiable for a supported type; default is `false` (including production mode unless explicitly enabled). When this policy is disabled, unsupported key types (for example `secp256k1` without a built-in verifier) do not fail closed and can still be validated by the optional external verifier command.
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
 - `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile`, trusted `bootstrap_directories` from the signed manifest, and preferred `bootstrap_directory`; used as authoritative connect policy for session-token connects)
 - `POST /v1/gpm/onboarding/client/status` (returns trust-aware registration state: `registered|not_registered|degraded`, preferred `bootstrap_directory`, trusted `bootstrap_directories`, persisted `path_profile` when available, and additive `status_reason` when registration is no longer trusted or trust revalidation fails)
@@ -209,6 +216,8 @@ If auth is required and missing/invalid, the API returns `401`.
     "gpm_auth_verify_require_metadata_policy_source": "production-default",
     "gpm_auth_verify_require_wallet_extension_source": false,
     "gpm_auth_verify_require_wallet_extension_policy_source": "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
+    "gpm_auth_verify_require_crypto_proof": false,
+    "gpm_auth_verify_require_crypto_proof_policy_source": "default",
     "gpm_auth_verify_command_configured": false,
     "gpm_main_domain": "https://globalprivatemesh.net",
     "gpm_manifest_url": "https://globalprivatemesh.net/v1/bootstrap/manifest",
@@ -253,6 +262,8 @@ Policy posture config hints:
 - `gpm_auth_verify_require_metadata_policy_source`: additive source for metadata strictness (`production-default` when inherited from production mode with no explicit metadata env override).
 - `gpm_auth_verify_require_wallet_extension_source`: whether strict wallet-extension-source policy is enabled (`signature_source=wallet_extension` required at verify time).
 - `gpm_auth_verify_require_wallet_extension_policy_source`: additive source for wallet-extension-source strictness (`production-default` when inherited from production mode with no explicit wallet-source env override).
+- `gpm_auth_verify_require_crypto_proof`: whether strict cryptographic proof policy is enabled (`signature_public_key`, `signature_public_key_type`, and `signed_message` required; supported proof types must verify successfully).
+- `gpm_auth_verify_require_crypto_proof_policy_source`: additive source for strict cryptographic proof policy selection (`GPM_*`, `TDPN_*`, or `default`; no production auto-default).
 - `gpm_auth_verify_command_configured`: whether `GPM_AUTH_VERIFY_COMMAND` is currently configured.
 - `gpm_legacy_env_aliases_active`: additive list of active legacy alias env keys (currently `TDPN_*`) that were actually selected as effective runtime sources.
 - `gpm_legacy_env_aliases_active_count`: additive count of `gpm_legacy_env_aliases_active` (convenience telemetry for lightweight clients).
