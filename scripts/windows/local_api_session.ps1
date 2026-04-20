@@ -320,6 +320,42 @@ function Refresh-ProcessPath {
   }
 }
 
+function Invoke-WingetInstallWithSourceRetry {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$WingetPath,
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId,
+    [Parameter(Mandatory = $true)]
+    [string[]]$InstallArgs
+  )
+
+  & $WingetPath @InstallArgs
+  if ($LASTEXITCODE -eq 0) {
+    return
+  }
+
+  $initialExitCode = $LASTEXITCODE
+  Write-Host "local-api-session: winget install failed for $PackageId (exit code $initialExitCode); attempting retry path (winget source update + one retry)..."
+
+  & $WingetPath "source" "update"
+  $sourceUpdateExitCode = $LASTEXITCODE
+  if ($sourceUpdateExitCode -eq 0) {
+    Write-Host "local-api-session: winget source update completed; retrying install..."
+  } else {
+    Write-Host "local-api-session: winget source update failed with exit code $sourceUpdateExitCode; retrying install anyway..."
+  }
+
+  & $WingetPath @InstallArgs
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "local-api-session: winget install succeeded on retry for $PackageId"
+    return
+  }
+
+  $retryExitCode = $LASTEXITCODE
+  throw "winget install for $PackageId failed with exit code $retryExitCode after retry (initial exit code $initialExitCode)"
+}
+
 function Invoke-WingetInstallPackage {
   param(
     [Parameter(Mandatory = $true)]
@@ -347,10 +383,7 @@ Install $DisplayName manually with:
     "--silent",
     "--disable-interactivity"
   )
-  & $winget.Source @installArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "winget install for $PackageId failed with exit code $LASTEXITCODE"
-  }
+  Invoke-WingetInstallWithSourceRetry -WingetPath $winget.Source -PackageId $PackageId -InstallArgs $installArgs
 }
 
 function Invoke-WingetInstallGo {

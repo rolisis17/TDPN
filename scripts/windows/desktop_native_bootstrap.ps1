@@ -268,6 +268,34 @@ function Resolve-ToolPath {
   return ""
 }
 
+function Resolve-NpmCommandPath {
+  param(
+    [switch]$LogFallbackHint
+  )
+
+  $npmCmdPath = Resolve-ToolPath "npm.cmd"
+  if (-not [string]::IsNullOrWhiteSpace($npmCmdPath)) {
+    return $npmCmdPath
+  }
+
+  $npmPath = Resolve-ToolPath "npm"
+  if ([string]::IsNullOrWhiteSpace($npmPath)) {
+    return ""
+  }
+
+  if ($npmPath -match '(?i)[\\/]npm\.ps1$') {
+    $siblingNpmCmdPath = Join-Path (Split-Path -Parent $npmPath) "npm.cmd"
+    if (Test-Path -LiteralPath $siblingNpmCmdPath -PathType Leaf) {
+      if ($LogFallbackHint) {
+        Write-Step ("npm resolver fallback: using sibling npm.cmd at {0}" -f $siblingNpmCmdPath)
+      }
+      return $siblingNpmCmdPath
+    }
+  }
+
+  return $npmPath
+}
+
 function Ensure-PolicyBypassProcess {
   if (-not $EnablePolicyBypass) {
     Write-Step "execution policy left unchanged (pass -EnablePolicyBypass to opt in)"
@@ -626,6 +654,73 @@ function Get-DesktopPackagedExecutableCandidates {
   return $candidates
 }
 
+function Get-DesktopPackagedExecutableFallbackCandidate {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath
+  )
+
+  $desktopDir = Join-Path $RepoRootPath "apps\desktop"
+  $releaseRoots = @(
+    (Join-Path $desktopDir "src-tauri\target\release"),
+    (Join-Path $desktopDir "target\release")
+  )
+
+  $scanRoots = @()
+  $seenRoots = @{}
+  foreach ($releaseRoot in $releaseRoots) {
+    foreach ($scanRoot in @($releaseRoot, (Join-Path $releaseRoot "bundle"))) {
+      if ([string]::IsNullOrWhiteSpace($scanRoot)) {
+        continue
+      }
+      if (-not (Test-Path -LiteralPath $scanRoot -PathType Container)) {
+        continue
+      }
+
+      $resolvedScanRoot = (Resolve-Path -LiteralPath $scanRoot).Path
+      $scanRootKey = $resolvedScanRoot.TrimEnd("\").ToLowerInvariant()
+      if ($seenRoots.ContainsKey($scanRootKey)) {
+        continue
+      }
+      $seenRoots[$scanRootKey] = $true
+      $scanRoots += $resolvedScanRoot
+    }
+  }
+
+  if ($scanRoots.Count -eq 0) {
+    return $null
+  }
+
+  $exeCandidates = @()
+  foreach ($scanRoot in $scanRoots) {
+    $scanResults = @(Get-ChildItem -LiteralPath $scanRoot -Filter "*.exe" -File -Recurse -ErrorAction SilentlyContinue)
+    foreach ($scanResult in $scanResults) {
+      $fileName = $scanResult.Name.ToLowerInvariant()
+      if ($fileName -like "*uninstall*.exe" -or $fileName -match "^unins\d*\.exe$") {
+        continue
+      }
+      $exeCandidates += $scanResult
+    }
+  }
+
+  if ($exeCandidates.Count -eq 0) {
+    return $null
+  }
+
+  $latestCandidate = $exeCandidates |
+    Sort-Object @{ Expression = { $_.LastWriteTimeUtc }; Descending = $true }, @{ Expression = { $_.FullName }; Descending = $false } |
+    Select-Object -First 1
+
+  if ($null -eq $latestCandidate) {
+    return $null
+  }
+
+  return [PSCustomObject]@{
+    Path = (Resolve-Path -LiteralPath $latestCandidate.FullName).Path
+    LastWriteTimeUtc = $latestCandidate.LastWriteTimeUtc
+  }
+}
+
 function Get-DesktopPackagedExecutableEnvOverrides {
   $envVarNames = @(
     "GPM_DESKTOP_PACKAGED_EXE",
@@ -698,6 +793,15 @@ function Resolve-DesktopExecutableResolution {
     }
   }
 
+  $fallbackCandidate = Get-DesktopPackagedExecutableFallbackCandidate -RepoRootPath $RepoRootPath
+  if ($null -ne $fallbackCandidate -and -not [string]::IsNullOrWhiteSpace($fallbackCandidate.Path)) {
+    Write-Step ("packaged executable fallback scan selected newest candidate: {0}" -f $fallbackCandidate.Path)
+    return [PSCustomObject]@{
+      Path = $fallbackCandidate.Path
+      Source = "packaged-fallback-latest"
+    }
+  }
+
   return [PSCustomObject]@{
     Path = ""
     Source = ""
@@ -766,10 +870,7 @@ function Get-ToolReport {
   $goPath = Resolve-ToolPath "go"
   $jqPath = Resolve-ToolPath "jq"
   $nodePath = Resolve-ToolPath "node"
-  $npmPath = Resolve-ToolPath "npm.cmd"
-  if ([string]::IsNullOrWhiteSpace($npmPath)) {
-    $npmPath = Resolve-ToolPath "npm"
-  }
+  $npmPath = Resolve-NpmCommandPath -LogFallbackHint
   $rustcPath = Resolve-ToolPath "rustc"
   $cargoPath = Resolve-ToolPath "cargo"
   $wingetPath = Resolve-ToolPath "winget"
@@ -1464,10 +1565,7 @@ function Invoke-DesktopDev {
   $iconPath = Join-Path $desktopDir "src-tauri\icons\icon.ico"
   Ensure-DesktopIconAsset -IconPath $iconPath
 
-  $npmCmd = Resolve-ToolPath "npm.cmd"
-  if ([string]::IsNullOrWhiteSpace($npmCmd)) {
-    $npmCmd = Resolve-ToolPath "npm"
-  }
+  $npmCmd = Resolve-NpmCommandPath
   if ([string]::IsNullOrWhiteSpace($npmCmd)) {
     throw "npm not found. Install Node.js LTS first."
   }

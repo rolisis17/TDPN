@@ -26,6 +26,34 @@ function Get-CommandPath {
   return [string]$cmd.Source
 }
 
+function Normalize-NpmCommandPath {
+  param(
+    [AllowEmptyString()]
+    [string]$PathValue
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return $PathValue
+  }
+
+  $leaf = [System.IO.Path]::GetFileName($PathValue)
+  if (-not $leaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $PathValue
+  }
+
+  $parent = Split-Path -Parent $PathValue
+  if ([string]::IsNullOrWhiteSpace($parent)) {
+    return $PathValue
+  }
+
+  $siblingCmd = Join-Path $parent "npm.cmd"
+  if (Test-Path -LiteralPath $siblingCmd -PathType Leaf) {
+    return $siblingCmd
+  }
+
+  return $PathValue
+}
+
 function Get-CommonToolDirectories {
   $programFiles = [Environment]::GetFolderPath("ProgramFiles")
   $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
@@ -145,8 +173,13 @@ function Resolve-ToolPath {
     [string]$Name
   )
 
+  $nameLower = $Name.ToLowerInvariant()
   $path = Get-CommandPath $Name
-  $allowWindowsAppsAlias = @("winget", "jq") -contains $Name.ToLowerInvariant()
+  if ($nameLower -in @("npm", "npm.cmd")) {
+    $path = Normalize-NpmCommandPath -PathValue $path
+  }
+
+  $allowWindowsAppsAlias = @("winget", "jq") -contains $nameLower
   if (-not [string]::IsNullOrWhiteSpace($path) -and ($allowWindowsAppsAlias -or $path -notmatch '\\WindowsApps\\')) {
     return $path
   }
@@ -157,7 +190,7 @@ function Resolve-ToolPath {
   $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
 
   $candidates = @()
-  switch ($Name.ToLowerInvariant()) {
+  switch ($nameLower) {
     "go" {
       $candidates = @(
         (Join-Path $programFiles "Go\bin\go.exe"),
@@ -850,6 +883,42 @@ function Get-InstallablePackageIds {
   return @($installable.ToArray())
 }
 
+function Invoke-WingetInstallWithSourceRetry {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$WingetPath,
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId,
+    [Parameter(Mandatory = $true)]
+    [string[]]$InstallArgs
+  )
+
+  & $WingetPath @InstallArgs
+  if ($LASTEXITCODE -eq 0) {
+    return
+  }
+
+  $initialExitCode = $LASTEXITCODE
+  Write-Step ("winget install failed for {0} (exit code {1}); attempting retry path (winget source update + one retry)" -f $PackageId, $initialExitCode)
+
+  & $WingetPath "source" "update"
+  $sourceUpdateExitCode = $LASTEXITCODE
+  if ($sourceUpdateExitCode -eq 0) {
+    Write-Step ("winget source update completed; retrying install for {0}" -f $PackageId)
+  } else {
+    Write-Step ("winget source update failed with exit code {0}; retrying install for {1} anyway" -f $sourceUpdateExitCode, $PackageId)
+  }
+
+  & $WingetPath @InstallArgs
+  if ($LASTEXITCODE -eq 0) {
+    Write-Step ("winget install succeeded on retry for {0}" -f $PackageId)
+    return
+  }
+
+  $retryExitCode = $LASTEXITCODE
+  throw "winget install retry failed for $PackageId (initial exit code $initialExitCode, retry exit code $retryExitCode)"
+}
+
 function Install-WingetPackage {
   param(
     [Parameter(Mandatory = $true)]
@@ -873,10 +942,11 @@ function Install-WingetPackage {
   }
 
   Write-Step "installing missing dependency via winget: $PackageId"
-  & $WingetPath @wingetArgs
-  if ($LASTEXITCODE -ne 0) {
+  try {
+    Invoke-WingetInstallWithSourceRetry -WingetPath $WingetPath -PackageId $PackageId -InstallArgs $wingetArgs
+  } catch {
     $fallbackHint = Get-DependencyInstallHint -PackageId $PackageId
-    throw "winget install failed for $PackageId (exit code $LASTEXITCODE). manual remediation: $fallbackHint"
+    throw "winget install failed for $PackageId. $($_.Exception.Message). manual remediation: $fallbackHint"
   }
 }
 

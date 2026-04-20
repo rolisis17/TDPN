@@ -138,6 +138,40 @@ function Write-SummaryJson {
   }
 }
 
+function Ensure-TauriIconScaffoldForBuild {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+
+  $iconPath = Join-Path $RepoRoot "apps\desktop\src-tauri\icons\icon.ico"
+  if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+    Write-Step "icon_scaffold=exists path=$iconPath"
+    return $false
+  }
+
+  $iconDir = Split-Path -Parent $iconPath
+  if (-not (Test-Path -LiteralPath $iconDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
+    Write-Step "icon_scaffold=created_parent path=$iconDir"
+  }
+
+  # Minimal valid 1x1 ICO payload (single 32-bit image + empty AND mask).
+  [byte[]]$icoBytes = @(
+    0x00,0x00,0x01,0x00,0x01,0x00,
+    0x01,0x01,0x00,0x00,0x01,0x00,0x20,0x00,0x30,0x00,0x00,0x00,0x16,0x00,0x00,0x00,
+    0x28,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x01,0x00,0x20,0x00,
+    0x00,0x00,0x00,0x00,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0xFF,0xFF,0xFF,0xFF,
+    0x00,0x00,0x00,0x00
+  )
+
+  [System.IO.File]::WriteAllBytes($iconPath, $icoBytes)
+  Write-Step "icon_scaffold=created path=$iconPath"
+  return $true
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
 $bundleRoot = Join-Path $repoRoot "apps\desktop\src-tauri\target\release\bundle"
@@ -162,6 +196,8 @@ $summary = [ordered]@{
   dry_run = [bool]$DryRun
   build_if_missing = [bool]$BuildIfMissing
   build_triggered = $false
+  icon_scaffold_created = $false
+  icon_scaffold_error = ""
   failure_stage = ""
 }
 
@@ -205,6 +241,14 @@ try {
     $summary.failure_stage = "installer_discovery"
     $found = Find-InstallerArtifact -BundleRoot $bundleRoot -RequestedType $InstallerType
     if ($null -eq $found -and $BuildIfMissing) {
+      try {
+        $summary.icon_scaffold_created = [bool](Ensure-TauriIconScaffoldForBuild -RepoRoot $repoRoot)
+      } catch {
+        $summary.icon_scaffold_created = $false
+        $summary.icon_scaffold_error = [string]$_.Exception.Message
+        Write-Step "warning=icon_scaffold_failed error=$($summary.icon_scaffold_error)"
+      }
+
       if (-not (Test-Path -LiteralPath $releaseBundleScript -PathType Leaf)) {
         throw "desktop release bundle script not found: $releaseBundleScript"
       }
