@@ -82,6 +82,8 @@ type Service struct {
 	gpmApprovalToken              string
 	gpmAuthVerifyCommand          string
 	gpmAuthVerifyRequireCommand   bool
+	gpmAuthVerifyRequireMetadata  bool
+	gpmAuthVerifyRequireWalletExt bool
 	gpmAuthSignatureVerifier      gpmAuthSignatureVerifier
 	gpmStateStorePath             string
 	gpmAuditLogPath               string
@@ -236,6 +238,16 @@ func New() *Service {
 		"TDPN_AUTH_VERIFY_REQUIRE_COMMAND",
 		"",
 	), false)
+	gpmAuthVerifyRequireMetadata := parseBoolWithDefault(preferredEnvValue(
+		"GPM_AUTH_VERIFY_REQUIRE_METADATA",
+		"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
+		"",
+	), false)
+	gpmAuthVerifyRequireWalletExt := parseBoolWithDefault(preferredEnvValue(
+		"GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
+		"TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
+		"",
+	), false)
 	gpmConnectRequireSession := parseBoolWithDefault(preferredEnvValue(
 		"GPM_CONNECT_REQUIRE_SESSION",
 		"TDPN_CONNECT_REQUIRE_SESSION",
@@ -283,6 +295,8 @@ func New() *Service {
 		gpmApprovalToken:              gpmApprovalToken,
 		gpmAuthVerifyCommand:          strings.TrimSpace(gpmAuthVerifyCommand),
 		gpmAuthVerifyRequireCommand:   gpmAuthVerifyRequireCommand,
+		gpmAuthVerifyRequireMetadata:  gpmAuthVerifyRequireMetadata,
+		gpmAuthVerifyRequireWalletExt: gpmAuthVerifyRequireWalletExt,
 		gpmAuthSignatureVerifier:      defaultGPMAuthSignatureVerifier,
 		gpmStateStorePath:             strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:               strings.TrimSpace(gpmAuditLogPath),
@@ -420,17 +434,19 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"config": map[string]any{
-			"connect_require_session":            s.gpmConnectRequireSession,
-			"allow_legacy_connect_override":      s.gpmAllowLegacyConnectOverride,
-			"gpm_auth_verify_require_command":    s.gpmAuthVerifyRequireCommand,
-			"gpm_auth_verify_command_configured": strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
-			"gpm_main_domain":                    strings.TrimSpace(s.gpmMainDomain),
-			"gpm_manifest_url":                   strings.TrimSpace(s.gpmManifestURL),
-			"gpm_manifest_cache_path":            strings.TrimSpace(s.gpmManifestCache),
-			"gpm_manifest_cache_max_age_sec":     manifestCacheMaxAgeSec,
-			"command_timeout_sec":                commandTimeoutSec,
-			"allow_update":                       s.allowUpdate,
-			"allow_remote":                       !isLoopbackBindAddr(s.addr),
+			"connect_require_session":                         s.gpmConnectRequireSession,
+			"allow_legacy_connect_override":                   s.gpmAllowLegacyConnectOverride,
+			"gpm_auth_verify_require_command":                 s.gpmAuthVerifyRequireCommand,
+			"gpm_auth_verify_require_metadata":                s.gpmAuthVerifyRequireMetadata,
+			"gpm_auth_verify_require_wallet_extension_source": s.gpmAuthVerifyRequireWalletExt,
+			"gpm_auth_verify_command_configured":              strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
+			"gpm_main_domain":                                 strings.TrimSpace(s.gpmMainDomain),
+			"gpm_manifest_url":                                strings.TrimSpace(s.gpmManifestURL),
+			"gpm_manifest_cache_path":                         strings.TrimSpace(s.gpmManifestCache),
+			"gpm_manifest_cache_max_age_sec":                  manifestCacheMaxAgeSec,
+			"command_timeout_sec":                             commandTimeoutSec,
+			"allow_update":                                    s.allowUpdate,
+			"allow_remote":                                    !isLoopbackBindAddr(s.addr),
 		},
 	})
 }

@@ -87,6 +87,9 @@ start_local_api() {
   local main_domain="$1"
   local manifest_url="$2"
   local cache_path="$3"
+  local require_verify_command="${4:-0}"
+  local require_metadata="${5:-0}"
+  local require_wallet_extension_source="${6:-0}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -102,6 +105,9 @@ start_local_api() {
     GPM_MAIN_DOMAIN="$main_domain" \
     GPM_BOOTSTRAP_MANIFEST_URL="$manifest_url" \
     GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$cache_path" \
+    GPM_AUTH_VERIFY_REQUIRE_COMMAND="$require_verify_command" \
+    GPM_AUTH_VERIFY_REQUIRE_METADATA="$require_metadata" \
+    GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE="$require_wallet_extension_source" \
     LOCAL_API_GPM_MANIFEST_TRUST_CALLS_FILE="$CALLS_FILE" \
     GPM_STATE_STORE_PATH="$TMP_DIR/gpm_state.json" \
     GPM_AUDIT_LOG_PATH="$TMP_DIR/gpm_audit.jsonl" \
@@ -148,6 +154,11 @@ api_post_json() {
   local path="$1"
   local payload="$2"
   curl -fsS -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "$payload" "${LOCAL_API_BASE}${path}"
+}
+
+api_get_json() {
+  local path="$1"
+  curl -fsS -H "Origin: ${LOCAL_API_BASE}" "${LOCAL_API_BASE}${path}"
 }
 
 mint_session_token() {
@@ -213,6 +224,48 @@ assert_json_expr() {
     exit 1
   fi
 }
+
+echo "[local-control-api-gpm-manifest-trust] /v1/config surfaces strict auth policy keys"
+strict_manifest_url="http://127.0.0.1:1/v1/bootstrap/manifest"
+strict_bootstrap_directory="https://directory.strict.globalprivatemesh.example:8081"
+strict_cache_path="$TMP_DIR/strict_policy_cache.json"
+write_manifest_cache "$strict_cache_path" "$strict_manifest_url" "$strict_bootstrap_directory" true
+start_local_api \
+  "http://127.0.0.1:1" \
+  "$strict_manifest_url" \
+  "$strict_cache_path" \
+  0 \
+  1 \
+  1
+
+strict_config_json="$(api_get_json "/v1/config")"
+if ! jq -e '.ok == true and .config.gpm_auth_verify_require_metadata == true and .config.gpm_auth_verify_require_wallet_extension_source == true' <<<"$strict_config_json" >/dev/null; then
+  echo "expected /v1/config strict auth policy keys to be surfaced as true"
+  echo "$strict_config_json"
+  exit 1
+fi
+
+echo "[local-control-api-gpm-manifest-trust] strict auth policy rejects missing verify metadata"
+strict_wallet="cosmos1strictauth"
+strict_challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "{\"wallet_address\":\"${strict_wallet}\",\"wallet_provider\":\"keplr\"}")"
+strict_challenge_id="$(jq -r '.challenge_id // ""' <<<"$strict_challenge_json")"
+if [[ -z "$strict_challenge_id" ]]; then
+  echo "failed to get strict auth challenge_id"
+  echo "$strict_challenge_json"
+  exit 1
+fi
+strict_verify_missing_metadata_body="$TMP_DIR/strict_verify_missing_metadata.json"
+strict_verify_missing_metadata_code="$(curl -sS -o "$strict_verify_missing_metadata_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"wallet_address\":\"${strict_wallet}\",\"wallet_provider\":\"keplr\",\"challenge_id\":\"${strict_challenge_id}\",\"signature\":\"sig-contract-0123456789\"}" "${LOCAL_API_BASE}/v1/gpm/auth/verify")"
+if [[ "$strict_verify_missing_metadata_code" != "401" && "$strict_verify_missing_metadata_code" != "400" ]]; then
+  echo "expected strict auth verify without metadata to fail with 401/400, got $strict_verify_missing_metadata_code"
+  cat "$strict_verify_missing_metadata_body"
+  exit 1
+fi
+assert_json_expr \
+  "$strict_verify_missing_metadata_body" \
+  '.ok == false and ((.error // "") | type == "string") and ((((.error // "") | ascii_downcase) | contains("metadata")) or (((.error // "") | ascii_downcase) | contains("wallet_extension_source")) or (((.error // "") | ascii_downcase) | contains("wallet extension source")) or (((.error // "") | ascii_downcase) | contains("signature_source")) or (((.error // "") | ascii_downcase) | contains("policy")))' \
+  "expected strict auth verify error to reference metadata/wallet-extension-source policy"
+stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] pinned host mismatch rejects onboarding manifest resolution"
 mismatch_cache="$TMP_DIR/mismatch_cache.json"

@@ -1746,7 +1746,37 @@ func validateGPMAuthSignatureMetadata(challenge gpmWalletChallenge, signatureMet
 	return nil
 }
 
+func (s *Service) validateGPMAuthSignaturePolicy(signatureMetadata gpmAuthSignatureMetadata) error {
+	if s.gpmAuthVerifyRequireMetadata {
+		missing := make([]string, 0, 3)
+		if !signatureMetadata.HasSignatureKind {
+			missing = append(missing, "signature_kind")
+		}
+		if !signatureMetadata.HasSignatureSource {
+			missing = append(missing, "signature_source")
+		}
+		if !signatureMetadata.HasSignedMessage {
+			missing = append(missing, "signed_message")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("signature metadata fields are required by policy: %s", strings.Join(missing, ", "))
+		}
+	}
+	if s.gpmAuthVerifyRequireWalletExt {
+		if !signatureMetadata.HasSignatureSource {
+			return errors.New("signature_source must be explicitly provided as wallet_extension by policy")
+		}
+		if signatureMetadata.SignatureSource != "wallet_extension" {
+			return errors.New("signature_source must be wallet_extension by policy")
+		}
+	}
+	return nil
+}
+
 func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string, signatureMetadata gpmAuthSignatureMetadata) error {
+	if err := s.validateGPMAuthSignaturePolicy(signatureMetadata); err != nil {
+		return err
+	}
 	if err := validateGPMAuthSignatureMetadata(challenge, signatureMetadata); err != nil {
 		return err
 	}
