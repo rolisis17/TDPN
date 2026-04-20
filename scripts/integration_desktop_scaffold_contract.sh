@@ -768,6 +768,14 @@ if ! grep -qF 'go run ./cmd/node --local-api' "$LOCAL_API_SESSION_SCRIPT" && \
   echo "desktop scaffold contract failed: expected local API go-run command marker in $LOCAL_API_SESSION_SCRIPT"
   exit 1
 fi
+if ! grep -qF '[switch]$InstallMissing' "$LOCAL_API_SESSION_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected InstallMissing parameter marker in $LOCAL_API_SESSION_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'install_missing:' "$LOCAL_API_SESSION_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected install-missing status banner marker in $LOCAL_API_SESSION_SCRIPT"
+  exit 1
+fi
 if ! grep -qF 'winget install --id GoLang.Go --exact' "$LOCAL_API_SESSION_SCRIPT"; then
   echo "desktop scaffold contract failed: expected Go install remediation marker in $LOCAL_API_SESSION_SCRIPT"
   exit 1

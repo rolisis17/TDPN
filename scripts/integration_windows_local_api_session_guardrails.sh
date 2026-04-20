@@ -39,10 +39,14 @@ assert_marker_present "-File \"%PS1%\"" "$LOCAL_API_SESSION_CMD"
 
 echo "[windows-local-api-session-guardrails] marker checks: powershell script go/runtime guidance"
 assert_marker_present "function Resolve-GoExecutable" "$LOCAL_API_SESSION_PS1"
+assert_marker_present '[switch]$InstallMissing' "$LOCAL_API_SESSION_PS1"
 assert_marker_present "winget install --id GoLang.Go --exact" "$LOCAL_API_SESSION_PS1"
+assert_marker_present "Invoke-WingetInstallGo" "$LOCAL_API_SESSION_PS1"
+assert_marker_present "Refresh-ProcessPath" "$LOCAL_API_SESSION_PS1"
 assert_marker_present '$goArgs = @("run", "./cmd/node")' "$LOCAL_API_SESSION_PS1"
 assert_marker_present '$goArgs += @("--local-api")' "$LOCAL_API_SESSION_PS1"
 assert_marker_present 'Write-Host "  command: go ' "$LOCAL_API_SESSION_PS1"
+assert_marker_present 'Write-Host "  install_missing: $installMissingEnabled"' "$LOCAL_API_SESSION_PS1"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -99,23 +103,35 @@ trap cleanup EXIT
 
 LOCAL_API_SESSION_PS1_PS="$(to_powershell_path "$LOCAL_API_SESSION_PS1")"
 
-echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 dry-run"
-PS1_DRY_RUN_LOG="$TMP_DIR/ps1_dry_run.log"
-if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$LOCAL_API_SESSION_PS1_PS" -DryRun >"$PS1_DRY_RUN_LOG" 2>&1; then
-  echo "windows local api session guardrails failed: expected local_api_session.ps1 -DryRun to pass"
-  cat "$PS1_DRY_RUN_LOG"
-  exit 1
-fi
-for marker in \
-  "local-api-session (windows-native):" \
-  "command: go run ./cmd/node --local-api"
-do
-  if ! grep -Fq -- "$marker" "$PS1_DRY_RUN_LOG"; then
-    echo "windows local api session guardrails failed: missing expected ps1 dry-run output marker '$marker'"
-    cat "$PS1_DRY_RUN_LOG"
+run_ps1_dry_run_check() {
+  local name="$1"
+  local expected_install_missing="$2"
+  shift 2
+  local log_path="$TMP_DIR/${name}.log"
+  if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$LOCAL_API_SESSION_PS1_PS" "$@" >"$log_path" 2>&1; then
+    echo "windows local api session guardrails failed: expected local_api_session.ps1 $name to pass"
+    cat "$log_path"
     exit 1
   fi
-done
+  for marker in \
+    "local-api-session (windows-native):" \
+    "command: go run ./cmd/node --local-api" \
+    "install_missing: $expected_install_missing" \
+    "local-api-session dry-run: command not executed"
+  do
+    if ! grep -Fq -- "$marker" "$log_path"; then
+      echo "windows local api session guardrails failed: missing expected ps1 dry-run output marker '$marker' for $name"
+      cat "$log_path"
+      exit 1
+    fi
+  done
+}
+
+echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 dry-run"
+run_ps1_dry_run_check "ps1_dry_run" "false" -DryRun
+
+echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 dry-run with auto-remediation intent"
+run_ps1_dry_run_check "ps1_dry_run_install_missing" "true" -DryRun -InstallMissing
 
 echo "[windows-local-api-session-guardrails] runtime check: cmd wrapper dry-run pass-through"
 CMD_DRY_RUN_LOG="$TMP_DIR/cmd_dry_run.log"

@@ -14,6 +14,7 @@ param(
   [string]$ConnectInterfaceDefault = "",
   [string]$ConnectRunPreflightDefault = "",
   [string]$ConnectProdProfileDefault = "",
+  [switch]$InstallMissing,
   [switch]$DryRun
 )
 
@@ -247,9 +248,52 @@ function Resolve-GoExecutable {
 go was not found in PATH (or common install paths).
 Install Go with:
   winget install --id GoLang.Go --exact
+Or rerun with auto-remediation:
+  .\scripts\windows\local_api_session.ps1 -InstallMissing
 Then open a new terminal and rerun:
   .\scripts\windows\local_api_session.ps1
 "@
+}
+
+function Refresh-ProcessPath {
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $segments = @()
+  if (-not [string]::IsNullOrWhiteSpace($machinePath)) {
+    $segments += $machinePath.Trim()
+  }
+  if (-not [string]::IsNullOrWhiteSpace($userPath)) {
+    $segments += $userPath.Trim()
+  }
+  if ($segments.Count -gt 0) {
+    $env:Path = ($segments -join ";")
+  }
+}
+
+function Invoke-WingetInstallGo {
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $winget -or [string]::IsNullOrWhiteSpace($winget.Source) -or -not (Test-Path -LiteralPath $winget.Source -PathType Leaf)) {
+    throw @"
+Go auto-remediation requested but winget was not found.
+Install Go manually with:
+  winget install --id GoLang.Go --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+"@
+  }
+
+  $installArgs = @(
+    "install",
+    "--id", "GoLang.Go",
+    "--exact",
+    "--source", "winget",
+    "--accept-package-agreements",
+    "--accept-source-agreements",
+    "--silent",
+    "--disable-interactivity"
+  )
+  & $winget.Source @installArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "winget install for GoLang.Go failed with exit code $LASTEXITCODE"
+  }
 }
 
 if ($CommandTimeoutSec -lt 5) {
@@ -324,6 +368,8 @@ Write-Host "  script_path_runner: $scriptPathForRunner"
 Write-Host "  command_runner: $resolvedRunner"
 Write-Host "  allow_update: $AllowUpdate"
 Write-Host "  command_timeout_sec: $CommandTimeoutSec"
+$installMissingEnabled = if ($InstallMissing) { "true" } else { "false" }
+Write-Host "  install_missing: $installMissingEnabled"
 if (-not [string]::IsNullOrWhiteSpace($Config)) {
   Write-Host "  node_config: $Config"
 } else {
@@ -336,7 +382,28 @@ if ($DryRun) {
   exit 0
 }
 
-$goExe = Resolve-GoExecutable
+$goExe = ""
+try {
+  $goExe = Resolve-GoExecutable
+} catch {
+  if (-not $InstallMissing) {
+    throw
+  }
+  Write-Host "local-api-session: go not found; attempting install with winget (GoLang.Go)..."
+  Invoke-WingetInstallGo
+  Refresh-ProcessPath
+  try {
+    $goExe = Resolve-GoExecutable
+  } catch {
+    throw @"
+Go installation was attempted but go is still unavailable in PATH/common locations.
+Try opening a new terminal and verify:
+  go version
+If still missing, reinstall manually:
+  winget install --id GoLang.Go --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+"@
+  }
+}
 
 Push-Location $repoRoot.Path
 try {

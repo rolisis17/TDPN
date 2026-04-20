@@ -160,10 +160,13 @@ scripts\windows\local_api_session.cmd
 ```
 
 Notes:
-- Prefer `scripts\windows\local_api_session.cmd` for normal use.
+- Default run command (recommended): `scripts\windows\local_api_session.cmd`
+- Optional remediation: `-InstallMissing` attempts `winget` install of Go (`GoLang.Go`) and then retries tool detection before launching.
 - The `.cmd` wrapper already applies process-scope `ExecutionPolicy Bypass` and is preferred to avoid local script-policy friction.
 - This launcher prefers Git for Windows `bash.exe` (not `WindowsApps\bash.exe` / WSL shim).
-- The launcher auto-detects Go; if missing, install with: `winget install --id GoLang.Go --exact`
+- Quick commands:
+  - `scripts\windows\local_api_session.cmd -InstallMissing`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun -InstallMissing`
 - Override runner explicitly when needed:
   - `scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe"`
 - `-DryRun` prints the resolved command/runner without starting the daemon.
