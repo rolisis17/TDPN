@@ -79,6 +79,7 @@ What this does:
    - local control API forwarding contract (`integration_local_control_api_contract.sh`)
    - local control API GPM bootstrap trust contract (`integration_local_control_api_gpm_manifest_trust.sh`)
    - desktop scaffold contract (`integration_desktop_scaffold_contract.sh`)
+   - web portal scaffold contract (`integration_web_portal_contract.sh`, including bootstrap trust panel + telemetry render markers)
    - windows desktop native bootstrap guardrails (`integration_windows_desktop_native_bootstrap_guardrails.sh`)
 
 Expected result:

@@ -858,6 +858,28 @@ if [[ "$client_hint_marker_present" != "1" ]]; then
   echo "desktop scaffold contract failed: missing client-side lock hint marker (expected client_lock_hint or desktop_step_client) in $DESKTOP_HTML_FILE"
   exit 1
 fi
+BOOTSTRAP_TRUST_HTML_ID_MARKERS=(
+  'id="bootstrap_trust_card"'
+  'id="bootstrap_trust_state"'
+  'id="bootstrap_trust_source"'
+  'id="bootstrap_trust_signature"'
+  'id="bootstrap_trust_expiry"'
+  'id="bootstrap_trust_guidance"'
+)
+for marker in "${BOOTSTRAP_TRUST_HTML_ID_MARKERS[@]}"; do
+  if ! grep -qF -- "$marker" "$DESKTOP_HTML_FILE"; then
+    echo "desktop scaffold contract failed: missing bootstrap trust UI marker ($marker) in $DESKTOP_HTML_FILE"
+    exit 1
+  fi
+done
+if ! grep -Eq 'Bootstrap[[:space:]]+Trust' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing bootstrap trust section heading marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'Manifest trust state' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing manifest trust state copy marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
 echo "[desktop-scaffold] client/server lock hint elements are present"
 
 OPTIONAL_AUTH_METADATA_HTML_ID_PATTERNS=(
@@ -918,6 +940,42 @@ if ! rg -q -- 'control_gpm_auth_verify' "$JS_FILE"; then
   exit 1
 fi
 echo "[desktop-scaffold] auth verify metadata request wiring markers are present"
+
+BOOTSTRAP_TRUST_JS_MARKERS=(
+  'const bootstrapTrustCardEl = document.getElementById("bootstrap_trust_card");'
+  'const bootstrapTrustStateEl = document.getElementById("bootstrap_trust_state");'
+  'const bootstrapTrustSourceEl = document.getElementById("bootstrap_trust_source");'
+  'const bootstrapTrustSignatureEl = document.getElementById("bootstrap_trust_signature");'
+  'const bootstrapTrustExpiryEl = document.getElementById("bootstrap_trust_expiry");'
+  'const bootstrapTrustGuidanceEl = document.getElementById("bootstrap_trust_guidance");'
+  'const BOOTSTRAP_MANIFEST_TRUST_DEGRADED_STATUS_FRAGMENTS = Object.freeze(['
+  'function normalizeBootstrapManifestSource(value) {'
+  'function normalizeManifestSignatureVerified(value) {'
+  'function isBootstrapManifestPayloadCandidate(value) {'
+  'function deriveBootstrapManifestTrustTelemetry(result) {'
+  'function renderBootstrapManifestTrustTelemetry(telemetry) {'
+  'function renderBootstrapManifestTrustUnavailable(detail) {'
+  'bootstrapTrustCardEl.dataset.state = trust.stateKey || "unknown";'
+)
+for marker in "${BOOTSTRAP_TRUST_JS_MARKERS[@]}"; do
+  if ! grep -qF -- "$marker" "$JS_FILE"; then
+    echo "desktop scaffold contract failed: missing bootstrap trust JS marker ($marker) in $JS_FILE"
+    exit 1
+  fi
+done
+if ! rg -q -- 'renderBootstrapManifestTrustTelemetry[[:space:]]*\([[:space:]]*deriveBootstrapManifestTrustTelemetry[[:space:]]*\([[:space:]]*result[[:space:]]*\)[[:space:]]*\)' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing bootstrap trust telemetry render wiring in loadManifest in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'await loadManifest();' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing init-time manifest load marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'renderBootstrapManifestTrustUnavailable(' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing bootstrap trust unavailable fallback marker in $JS_FILE"
+  exit 1
+fi
+echo "[desktop-scaffold] bootstrap trust UI markers are present"
 
 if ! grep -qF 'function syncServerRoleLockState()' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing server role lock sync function in $JS_FILE"

@@ -536,6 +536,28 @@ if ! jq -e --arg expected_bootstrap "$cache_bootstrap_directory" '.ok == true an
   exit 1
 fi
 
+echo "[local-control-api-gpm-manifest-trust] bootstrap manifest endpoint returns additive trust telemetry fields"
+cache_manifest_payload="$TMP_DIR/cache_manifest_payload.json"
+api_get_json "/v1/gpm/bootstrap/manifest" >"$cache_manifest_payload"
+assert_json_expr \
+  "$cache_manifest_payload" \
+  '.ok == true and
+   .source == "cache" and
+   .signature_verified == true and
+   .trust_status == "trusted_cache" and
+   (.manifest | type == "object") and
+   (.manifest_expires_at_utc | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+   (.manifest_generated_at_utc | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+   (.manifest_source_url | type == "string" and length > 0) and
+   (.manifest_source_url == $expected_source_url) and
+   (.signature_required_by_policy | type == "boolean") and
+   (.https_required_by_policy | type == "boolean") and
+   (.cache_max_age_sec | type == "number" and . >= 0) and
+   (.remote_refresh_interval_sec | type == "number" and . >= 0) and
+   (.manifest_expires_in_sec | type == "number" and . >= 0)' \
+  "expected /v1/gpm/bootstrap/manifest additive trust telemetry fields with stable shape" \
+  --arg expected_source_url "$cache_manifest_url"
+
 echo "[local-control-api-gpm-manifest-trust] session-bound path profile rejects conflicting connect override"
 : >"$CALLS_FILE"
 connect_conflict_body="$TMP_DIR/connect_conflict.json"
@@ -733,6 +755,23 @@ if ! jq -e '.ok == true and .config.gpm_manifest_remote_refresh_interval_sec == 
   echo "$cache_refresh_elapsed_config_json"
   exit 1
 fi
+
+echo "[local-control-api-gpm-manifest-trust] bootstrap manifest endpoint surfaces remote_refresh_warning during cache fallback after refresh failure"
+cache_refresh_elapsed_manifest_payload="$TMP_DIR/cache_refresh_elapsed_manifest.json"
+api_get_json "/v1/gpm/bootstrap/manifest" >"$cache_refresh_elapsed_manifest_payload"
+assert_json_expr \
+  "$cache_refresh_elapsed_manifest_payload" \
+  '.ok == true and
+   .source == "cache" and
+   .signature_verified == true and
+   .trust_status == "trusted_cache" and
+   (.remote_refresh_warning | type == "string" and (ascii_downcase | contains("periodic remote refresh failed"))) and
+   (.manifest_expires_at_utc | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+   (.manifest_generated_at_utc | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+   (.manifest_source_url | type == "string" and length > 0) and
+   (.cache_max_age_sec | type == "number" and . >= 0) and
+   (.remote_refresh_interval_sec | type == "number" and . >= 0)' \
+  "expected /v1/gpm/bootstrap/manifest cache fallback warning and telemetry fields"
 
 session_token_cache_refresh_elapsed="$(mint_session_token "cosmos1cacherefreshelapsed")"
 cache_refresh_elapsed_body="$TMP_DIR/cache_refresh_elapsed_register.json"

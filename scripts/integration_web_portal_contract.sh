@@ -85,6 +85,20 @@ if ! grep -qF 'id="client_readiness_guidance"' "$PORTAL_HTML"; then
 fi
 echo "[web-portal] portal readiness UI markers are present"
 
+# Bootstrap trust panel markers in portal scaffold.
+BOOTSTRAP_TRUST_UI_MARKERS=(
+  'id="bootstrap_trust_status"'
+  'id="bootstrap_trust_status_line"'
+  'id="bootstrap_trust_state"'
+  'id="bootstrap_trust_guidance"'
+  'id="bootstrap_trust_summary"'
+)
+for pattern in "${BOOTSTRAP_TRUST_UI_MARKERS[@]}"; do
+  require_regex_marker "$PORTAL_HTML" "$pattern" "bootstrap-trust UI"
+done
+require_regex_marker "$PORTAL_HTML" 'Bootstrap trust status' "bootstrap-trust label"
+echo "[web-portal] bootstrap trust UI markers are present"
+
 # Connection console parity markers (single-window tabs + controls).
 CONNECTION_UI_MARKERS=(
   'id="connection_console"'
@@ -187,6 +201,60 @@ for marker in "${JS_MARKERS[@]}"; do
   fi
 done
 echo "[web-portal] portal JS readiness compute/render/gating markers are present"
+
+# Bootstrap trust telemetry parse/render markers.
+BOOTSTRAP_TRUST_JS_MARKERS=(
+  'const[[:space:]]+bootstrapTrustStatusEl[[:space:]]*=[[:space:]]*byId\("bootstrap_trust_status"\)'
+  'const[[:space:]]+bootstrapTrustStatusLineEl[[:space:]]*=[[:space:]]*byId\("bootstrap_trust_status_line"\)'
+  'const[[:space:]]+bootstrapTrustStateEl[[:space:]]*=[[:space:]]*byId\("bootstrap_trust_state"\)'
+  'const[[:space:]]+bootstrapTrustGuidanceEl[[:space:]]*=[[:space:]]*byId\("bootstrap_trust_guidance"\)'
+  'const[[:space:]]+bootstrapTrustSummaryEl[[:space:]]*=[[:space:]]*byId\("bootstrap_trust_summary"\)'
+  'let[[:space:]]+bootstrapTrustTelemetry[[:space:]]*=[[:space:]]*null'
+  'function[[:space:]]+parseTimestampMs[[:space:]]*\('
+  'function[[:space:]]+formatBootstrapManifestExpiryLabel[[:space:]]*\('
+  'function[[:space:]]+normalizeBootstrapManifestSource[[:space:]]*\('
+  'function[[:space:]]+formatBootstrapManifestSourceLabel[[:space:]]*\('
+  'function[[:space:]]+extractBootstrapTrustTelemetry[[:space:]]*\('
+  'function[[:space:]]+summarizeBootstrapTrustTelemetry[[:space:]]*\('
+  'function[[:space:]]+classifyBootstrapTrustTelemetry[[:space:]]*\('
+  'function[[:space:]]+setBootstrapTrustStatus[[:space:]]*\('
+  'function[[:space:]]+applyBootstrapTrustStatusPayload[[:space:]]*\('
+  'function[[:space:]]+markBootstrapTrustStatusRefreshIssue[[:space:]]*\('
+  'async[[:space:]]+function[[:space:]]+requestBootstrapManifest[[:space:]]*\('
+  'get\("/v1/gpm/bootstrap/manifest"\)'
+  'applyBootstrapTrustStatusPayload\(result\)'
+  'async[[:space:]]+function[[:space:]]+refreshBootstrapTrustStatusBestEffort[[:space:]]*\('
+  'bootstrapTrustStatusEl\.dataset\.kind'
+  'bootstrapTrustStatusLineEl\.classList\.remove\("good",[[:space:]]*"warn",[[:space:]]*"bad"\)'
+  'bootstrapTrustStateEl\.textContent'
+  'bootstrapTrustGuidanceEl\.textContent'
+  'bootstrapTrustSummaryEl\.textContent'
+  'applyBootstrapTrustStatusPayload\(payload\)'
+  'run\("bootstrap_manifest",[[:space:]]*requestBootstrapManifest\)'
+)
+for pattern in "${BOOTSTRAP_TRUST_JS_MARKERS[@]}"; do
+  require_regex_marker "$PORTAL_JS" "$pattern" "bootstrap-trust JS"
+done
+
+BOOTSTRAP_TRUST_TELEMETRY_FIELDS=(
+  'source'
+  'manifest_source'
+  'signature_verified'
+  'expires_at_utc'
+  'generated_at_utc'
+  'cache_age_sec'
+  'resolve_policy'
+  'trust_state'
+  'trust_reason'
+  'manifest_warnings'
+)
+for field in "${BOOTSTRAP_TRUST_TELEMETRY_FIELDS[@]}"; do
+  if ! grep -qF "$field" "$PORTAL_JS"; then
+    echo "web portal contract failed: missing bootstrap trust telemetry field marker '$field' in $PORTAL_JS"
+    exit 1
+  fi
+done
+echo "[web-portal] bootstrap trust telemetry markers are present"
 
 ENDPOINT_POSTURE_OBJECT_FIELDS=(
   'server_mode'
