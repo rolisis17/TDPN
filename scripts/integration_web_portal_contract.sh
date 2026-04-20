@@ -71,6 +71,38 @@ if ! grep -qF 'id="client_readiness_guidance"' "$PORTAL_HTML"; then
 fi
 echo "[web-portal] portal readiness UI markers are present"
 
+# Connection console parity markers (single-window tabs + controls).
+CONNECTION_UI_MARKERS=(
+  'id="connection_console"'
+  'id="connection_snapshot"'
+  'id="connection_state"'
+  'id="connection_detail"'
+  'id="tab_client"'
+  'id="tab_server"'
+  'id="panel_client"'
+  'id="panel_server"'
+  'id="client_lock_hint"'
+  'id="server_lock_hint"'
+  'id="connect_policy_hint"'
+  'id="connect_interface"'
+  'id="connect_discovery_wait_sec"'
+  'id="connect_ready_timeout_sec"'
+  'id="connect_run_preflight"'
+  'id="connect_prod_profile"'
+  'id="connect_install_route"'
+  'id="connect_btn"'
+  'id="disconnect_btn"'
+  'id="status_btn"'
+  'id="status_btn_server"'
+)
+for marker in "${CONNECTION_UI_MARKERS[@]}"; do
+  if ! grep -qF "$marker" "$PORTAL_HTML"; then
+    echo "web portal contract failed: missing connection console UI marker '$marker' in $PORTAL_HTML"
+    exit 1
+  fi
+done
+echo "[web-portal] connection console UI markers are present"
+
 # Readiness field markers (new + compatibility aliases).
 if ! grep -qE 'client_tab_visible|tab_visible' "$PORTAL_JS"; then
   echo "web portal contract failed: missing readiness marker for client_tab_visible/tab_visible in $PORTAL_JS"
@@ -108,6 +140,38 @@ for marker in "${JS_MARKERS[@]}"; do
   fi
 done
 echo "[web-portal] portal JS readiness compute/render/gating markers are present"
+
+# Connection console JS contract markers.
+CONNECTION_JS_MARKERS=(
+  'const tabClientEl = byId("tab_client");'
+  'const tabServerEl = byId("tab_server");'
+  'function refreshConnectPolicyHint('
+  'function activateWorkspaceTab('
+  'function syncWorkspaceTabLockState('
+  'function buildConnectRequest('
+  'function requestConnectControl('
+  'function requestDisconnectControl('
+  'function requestConnectionStatus('
+  'function updateConnectionDashboard('
+  'function restoreWorkspaceTabPreference('
+  'function persistWorkspaceTabPreference('
+  'connectRequireSession'
+  'allowLegacyConnectOverride'
+  'compatibilityOverrideEnabled()'
+  'byId("connect_btn").addEventListener'
+  'byId("disconnect_btn").addEventListener'
+  'byId("status_btn").addEventListener'
+  'byId("status_btn_server").addEventListener'
+  'tabClientEl.addEventListener("click"'
+  'tabServerEl.addEventListener("click"'
+)
+for marker in "${CONNECTION_JS_MARKERS[@]}"; do
+  if ! grep -qF "$marker" "$PORTAL_JS"; then
+    echo "web portal contract failed: missing portal JS connection marker '$marker' in $PORTAL_JS"
+    exit 1
+  fi
+done
+echo "[web-portal] portal JS connection markers are present"
 
 # Wallet-extension assisted signing markers.
 WALLET_UI_MARKERS=(
@@ -165,6 +229,18 @@ if ! grep -qiE 'register(ing|ed)? client|client registration|register-client' "$
 fi
 if ! grep -qiE 'wallet-?extension.*(keplr|leap)|(keplr|leap).*wallet-?extension' "$README_FILE"; then
   echo "web portal contract failed: README must mention wallet-extension assisted signing for Keplr/Leap"
+  exit 1
+fi
+if ! grep -qiE 'single-window connection console|connection console' "$README_FILE"; then
+  echo "web portal contract failed: README must mention single-window connection console"
+  exit 1
+fi
+if ! grep -qiE 'client[^[:alnum:]]*/[^[:alnum:]]*server.*tabs|tabs.*client.*server' "$README_FILE"; then
+  echo "web portal contract failed: README must mention Client/Server tabs"
+  exit 1
+fi
+if ! grep -qiE 'connect.*disconnect.*status|/v1/connect.*/v1/disconnect.*/v1/status' "$README_FILE"; then
+  echo "web portal contract failed: README must mention connect/disconnect/status controls"
   exit 1
 fi
 if ! grep -qF 'signArbitrary' "$README_FILE"; then
