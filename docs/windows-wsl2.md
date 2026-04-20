@@ -155,7 +155,7 @@ Windows-native local API launcher (no WSL shim):
 Notes:
 - Default local API script path is `scripts\windows\easy_node_bridge.ps1`; that bridge targets `scripts\easy_node.sh` (exported as `/c/.../scripts/easy_node.sh` for the runner), and the run stays WSL-free.
 - Git Bash is required for default `easy_node.sh` execution.
-- `-InstallMissing` on `local_api_session` can now auto-install both Git for Windows (`Git.Git`) and Go (`GoLang.Go`) via `winget`, then retry detection.
+- `-InstallMissing` on `local_api_session` can now auto-install Git for Windows (`Git.Git`), Go (`GoLang.Go`), and jq (`jqlang.jq`) via `winget`, then retry detection.
 - Compatibility and override options:
   - explicit runner: `.\scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun`
   - explicit script path + runner: `.\scripts\windows\local_api_session.cmd -ScriptPath "C:\Users\dcella-d\TDPN1\scripts\easy_node.sh" -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun`
@@ -179,8 +179,8 @@ scripts\windows\desktop_native_bootstrap.cmd -Mode run-full
 Desktop bootstrap notes:
 - use the `.cmd` wrapper if PowerShell policy is locked down; it launches PowerShell with process-scope execution policy bypass (no permanent policy change)
 - refreshes PATH for current session
-- auto-detects Go/Node/Rust/Git Bash from common install locations before falling back to `winget`
-- can install missing Go/Node/Rust/Git Bash dependencies with `winget` when you pass `-InstallMissing`
+- auto-detects Go/Node/Rust/Git Bash/jq from common install locations before falling back to `winget`
+- can install missing Go/Node/Rust/Git Bash/jq dependencies with `winget` when you pass `-InstallMissing`
 - uses `npm.cmd` to avoid `npm.ps1` execution policy failures
 - modes: `check`, `bootstrap`, `run-api`, `run-desktop`, `run-full`
 
@@ -233,7 +233,7 @@ scripts\windows\desktop_doctor.cmd -Mode fix -InstallMissing
 What `desktop_doctor` remediates:
 - process-scope execution policy bypass when you pass `-EnablePolicyBypass`
 - current-session PATH refresh and common tool path augmentation
-- prerequisite detection for Go/Node/npm/Rust/Cargo/Git Bash
+- prerequisite detection for Go/Node/npm/Rust/Cargo/Git Bash/jq
 - optional prerequisite install via `winget` when `-InstallMissing` is passed
 - optional summary artifact output via `-SummaryJson` and `-PrintSummaryJson 1`
 
@@ -244,9 +244,9 @@ Recommended sequence on fresh machines:
 First-run remediation tips:
 - run `./scripts/windows/desktop_native_bootstrap.cmd -Mode bootstrap -InstallMissing` on a fresh machine
 - if PowerShell policy blocks a direct rerun, use the `.cmd` wrapper or call `./scripts/windows/desktop_native_bootstrap.ps1 -Mode bootstrap -InstallMissing -EnablePolicyBypass`
-- if the bootstrap report says `GoLang.Go`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, or `Git.Git` is missing, rerun with `-InstallMissing` or install that winget package manually
+- if the bootstrap report says `GoLang.Go`, `jqlang.jq`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, or `Git.Git` is missing, rerun with `-InstallMissing` or install that winget package manually
 - the desktop scaffold auto-creates the icon scaffold when it is missing, so first runs do not need a pre-existing icon asset
-- `run-api` needs Go and Git for Windows bash.exe
+- `run-api` needs Go, jq, and Git for Windows bash.exe
 - `run-desktop` needs Node.js LTS / npm and the Rust toolchain
 - `run-full` needs all of the above
 - if `winget` is missing, install App Installer first and rerun the bootstrap
