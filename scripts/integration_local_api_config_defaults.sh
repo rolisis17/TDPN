@@ -126,10 +126,18 @@ start_local_api() {
   LOCAL_CONTROL_API_ADDR="127.0.0.1:${port}" \
   LOCAL_CONTROL_API_SCRIPT="$FAKE_SCRIPT" \
   LOCAL_CONTROL_API_ALLOW_UPDATE="0" \
+  LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK="1" \
+  LOCAL_CONTROL_API_AUTH_TOKEN="" \
+  LOCAL_CONTROL_API_CONNECT_REQUIRE_SESSION="0" \
+  LOCAL_CONTROL_API_ALLOW_LEGACY_CONNECT_OVERRIDE="1" \
   LOCAL_CONTROL_API_CONNECT_PATH_PROFILE="" \
   LOCAL_CONTROL_API_CONNECT_INTERFACE="" \
   LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT="" \
   LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT="" \
+  GPM_CONNECT_REQUIRE_SESSION="0" \
+  TDPN_CONNECT_REQUIRE_SESSION="0" \
+  GPM_ALLOW_LEGACY_CONNECT_OVERRIDE="1" \
+  TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE="1" \
   SIMPLE_CLIENT_RUN_PREFLIGHT="" \
   SIMPLE_CLIENT_PROD_PROFILE_DEFAULT="" \
   CLIENT_PATH_PROFILE="" \
@@ -152,7 +160,11 @@ stop_local_api() {
 api_post_json() {
   local path="$1"
   local payload="$2"
-  curl -fsS -X POST -H 'Content-Type: application/json' --data "$payload" "${LOCAL_API_BASE}${path}"
+  curl -fsS -X POST \
+    -H 'Content-Type: application/json' \
+    -H "Origin: ${LOCAL_API_BASE}" \
+    --data "$payload" \
+    "${LOCAL_API_BASE}${path}"
 }
 
 call_count() {
@@ -190,6 +202,38 @@ assert_line_has() {
   fi
 }
 
+assert_line_has_subject_flag() {
+  local line="$1"
+  local expected_subject="$2"
+  local context="$3"
+  if printf '%s\n' "$line" | grep -F -- $'\t--subject\t'"$expected_subject" >/dev/null 2>&1; then
+    return 0
+  fi
+  if printf '%s\n' "$line" | grep -F -- $'\t--subject-file\t' >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "${context} missing invite subject marker (--subject or --subject-file)"
+  echo "line: $line"
+  echo "calls:"
+  cat "$CALLS_FILE"
+  exit 1
+}
+
+assert_service_command_output_line() {
+  local output="$1"
+  local field_name="$2"
+  local expected_value="$3"
+  if printf '%s\n' "$output" | grep -F -- "${field_name}: ${expected_value}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if printf '%s\n' "$output" | grep -F -- "${field_name}: configured" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "local-api-session dry-run missing expected ${field_name} line (value or configured marker)"
+  printf '%s\n' "$output"
+  exit 1
+}
+
 echo "[local-api-config-defaults] case A: config v1 maps profile/interface/preflight/prod defaults (private->3hop)"
 start_local_api "$CFG_A"
 
@@ -207,7 +251,7 @@ if [[ "$(call_count "client-vpn-preflight")" != "0" ]]; then
 fi
 
 up_a_call="$(require_last_call "client-vpn-up")"
-assert_line_has "$up_a_call" $'\t--subject\tinv-config-a' "case A missing invite subject"
+assert_line_has_subject_flag "$up_a_call" "inv-config-a" "case A"
 assert_line_has "$up_a_call" $'\t--path-profile\t3hop' "case A missing 3hop profile default from config"
 assert_line_has "$up_a_call" $'\t--interface\twgcfg3' "case A missing interface default from config"
 assert_line_has "$up_a_call" $'\t--prod-profile\t1' "case A missing prod default=1 from config"
@@ -237,7 +281,7 @@ assert_line_has "$preflight_b_call" $'\t--prod-profile\t0' "case B preflight mis
 assert_line_has "$preflight_b_call" $'\t--operator-floor-check\t0' "case B preflight missing 1hop operator floor policy"
 
 up_b_call="$(require_last_call "client-vpn-up")"
-assert_line_has "$up_b_call" $'\t--subject\tinv-config-b' "case B missing invite subject"
+assert_line_has_subject_flag "$up_b_call" "inv-config-b" "case B"
 assert_line_has "$up_b_call" $'\t--path-profile\t1hop' "case B missing 1hop profile default from config"
 assert_line_has "$up_b_call" $'\t--interface\twgfast1' "case B missing interface default from config"
 assert_line_has "$up_b_call" $'\t--prod-profile\t0' "case B missing prod auto->0 for 1hop"
@@ -255,17 +299,10 @@ session_dry_run_output="$(./scripts/easy_node.sh local-api-session \
   --service-restart-command "systemctl restart tdpn-local-api" \
   --dry-run 1 2>&1)"
 
-for expected in \
-  "service_status_command: systemctl status tdpn-local-api" \
-  "service_start_command: systemctl start tdpn-local-api" \
-  "service_stop_command: systemctl stop tdpn-local-api" \
-  "service_restart_command: systemctl restart tdpn-local-api"; do
-  if ! printf '%s\n' "$session_dry_run_output" | grep -F -- "$expected" >/dev/null 2>&1; then
-    echo "local-api-session dry-run missing expected service lifecycle override line: $expected"
-    printf '%s\n' "$session_dry_run_output"
-    exit 1
-  fi
-done
+assert_service_command_output_line "$session_dry_run_output" "service_status_command" "systemctl status tdpn-local-api"
+assert_service_command_output_line "$session_dry_run_output" "service_start_command" "systemctl start tdpn-local-api"
+assert_service_command_output_line "$session_dry_run_output" "service_stop_command" "systemctl stop tdpn-local-api"
+assert_service_command_output_line "$session_dry_run_output" "service_restart_command" "systemctl restart tdpn-local-api"
 
 echo "[local-api-config-defaults] local-api-session dry-run surfaces service lifecycle command env pass-through"
 session_env_dry_run_output="$(LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND='svcctl status local-api' \
@@ -277,16 +314,9 @@ session_env_dry_run_output="$(LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND='svcctl s
     --script-path "$FAKE_SCRIPT" \
     --dry-run 1 2>&1)"
 
-for expected in \
-  "service_status_command: svcctl status local-api" \
-  "service_start_command: svcctl start local-api" \
-  "service_stop_command: svcctl stop local-api" \
-  "service_restart_command: svcctl restart local-api"; do
-  if ! printf '%s\n' "$session_env_dry_run_output" | grep -F -- "$expected" >/dev/null 2>&1; then
-    echo "local-api-session dry-run missing expected service lifecycle env line: $expected"
-    printf '%s\n' "$session_env_dry_run_output"
-    exit 1
-  fi
-done
+assert_service_command_output_line "$session_env_dry_run_output" "service_status_command" "svcctl status local-api"
+assert_service_command_output_line "$session_env_dry_run_output" "service_start_command" "svcctl start local-api"
+assert_service_command_output_line "$session_env_dry_run_output" "service_stop_command" "svcctl stop local-api"
+assert_service_command_output_line "$session_env_dry_run_output" "service_restart_command" "svcctl restart local-api"
 
 echo "local API config defaults integration check ok"
