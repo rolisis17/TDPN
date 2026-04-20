@@ -829,6 +829,37 @@ else
 fi
 echo "[desktop-scaffold] role-lock logic markers are present (client+server hints, disabled-tab handling)"
 
+SYNC_SERVER_MUTATION_SNIPPET="$(sed -n '/function syncServerMutationControls(/,/^}/p' "$JS_FILE")"
+if [[ -z "$SYNC_SERVER_MUTATION_SNIPPET" ]]; then
+  echo "desktop scaffold contract failed: missing syncServerMutationControls function block in $JS_FILE"
+  exit 1
+fi
+if ! printf '%s\n' "$SYNC_SERVER_MUTATION_SNIPPET" | grep -qF 'const serviceMutationsConfigured = state.serverReadiness?.serviceMutationsConfigured !== false;'; then
+  echo "desktop scaffold contract failed: missing explicit serviceMutationsConfigured=false lifecycle disable marker in syncServerMutationControls in $JS_FILE"
+  exit 1
+fi
+if ! printf '%s\n' "$SYNC_SERVER_MUTATION_SNIPPET" | grep -qF 'state.serviceMutationsAllowed && serviceMutationsConfigured && isServerMutationRoleEligible();'; then
+  echo "desktop scaffold contract failed: missing lifecycle disable gating marker that combines policy, readiness serviceMutationsConfigured, and role eligibility in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'serviceStartBtnEl.disabled = !mutationsEnabled;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing service start disabled marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'serviceStopBtnEl.disabled = !mutationsEnabled;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing service stop disabled marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'serviceRestartBtnEl.disabled = !mutationsEnabled;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing service restart disabled marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'else if (readiness.serviceMutationsConfigured === false) {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing readiness-driven serviceMutationsConfigured=false lock hint branch in $JS_FILE"
+  exit 1
+fi
+echo "[desktop-scaffold] server lifecycle controls include explicit disable semantics for readiness serviceMutationsConfigured=false"
+
 PARSE_SERVER_READINESS_SNIPPET="$(sed -n '/function parseServerReadiness(/,/^}/p' "$JS_FILE")"
 if [[ -z "$PARSE_SERVER_READINESS_SNIPPET" ]]; then
   echo "desktop scaffold contract failed: missing parseServerReadiness function block in $JS_FILE"

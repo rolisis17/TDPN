@@ -2456,7 +2456,9 @@ function syncDesktopOnboardingSteps() {
 }
 
 function syncServerMutationControls() {
-  const mutationsEnabled = state.serviceMutationsAllowed && isServerMutationRoleEligible();
+  const serviceMutationsConfigured = state.serverReadiness?.serviceMutationsConfigured !== false;
+  const mutationsEnabled =
+    state.serviceMutationsAllowed && serviceMutationsConfigured && isServerMutationRoleEligible();
   setProfileBtnEl.disabled = !mutationsEnabled;
   serviceStartBtnEl.disabled = !mutationsEnabled;
   serviceStopBtnEl.disabled = !mutationsEnabled;
