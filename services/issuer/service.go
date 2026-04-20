@@ -122,6 +122,7 @@ const (
 	defaultSponsorMaxIDLen               = 128
 	defaultSponsorMaxCurrencyLen         = 16
 	defaultSponsorMaxReservationMicros   = int64(1000000000)
+	adminAuditQueryLimitMax              = 1000
 	issueTokenRequestMaxBytes            = int64(64 * 1024)
 	revokeTokenRequestMaxBytes           = int64(8 * 1024)
 	hostResolveTimeout                   = 2 * time.Second
@@ -1921,11 +1922,18 @@ func (s *Service) handleGetAudit(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			if n > adminAuditQueryLimitMax {
+				n = adminAuditQueryLimitMax
+			}
 			limit = n
 		}
 	}
 	s.mu.RLock()
-	out := make([]proto.AuditEvent, 0, len(s.audit))
+	capHint := limit
+	if capHint > len(s.audit) {
+		capHint = len(s.audit)
+	}
+	out := make([]proto.AuditEvent, 0, capHint)
 	for i := len(s.audit) - 1; i >= 0; i-- {
 		ev := s.audit[i]
 		if subject != "" && ev.Subject != subject {

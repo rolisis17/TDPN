@@ -102,6 +102,37 @@ func TestHandleGetAuditSuccessSubjectFilterAndLimit(t *testing.T) {
 	}
 }
 
+func TestHandleGetAuditCapsExcessiveLimit(t *testing.T) {
+	s := newAdminAuditRevokeTestService(t)
+	for i := 0; i < adminAuditQueryLimitMax+20; i++ {
+		s.audit = append(s.audit, proto.AuditEvent{
+			ID:      int64(i + 1),
+			Action:  "subject-upsert",
+			Subject: "alice",
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/audit?limit=999999", nil)
+	req.Header.Set("X-Admin-Token", "admin-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleGetAudit(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var out []proto.AuditEvent
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(out) != adminAuditQueryLimitMax {
+		t.Fatalf("events len=%d want=%d", len(out), adminAuditQueryLimitMax)
+	}
+	if out[0].ID != int64(adminAuditQueryLimitMax+20) {
+		t.Fatalf("first event id=%d want=%d", out[0].ID, adminAuditQueryLimitMax+20)
+	}
+}
+
 func TestHandleRevokeTokenMethodNotAllowed(t *testing.T) {
 	s := newAdminAuditRevokeTestService(t)
 	req := httptest.NewRequest(http.MethodGet, "/v1/admin/revoke-token", nil)

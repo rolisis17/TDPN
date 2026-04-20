@@ -104,20 +104,109 @@ std::string readEnvTrimmed(const char *name) {
   return trim(raw);
 }
 
-std::vector<std::string> splitWhitespaceArgs(const std::string &raw) {
-  std::vector<std::string> out;
-  std::istringstream in(raw);
-  std::string tok;
-  while (in >> tok) {
-    out.push_back(tok);
+bool splitShellStyleArgs(const std::string &raw, std::vector<std::string> &out) {
+  out.clear();
+  std::string token;
+  bool inSingle = false;
+  bool inDouble = false;
+  bool tokenStarted = false;
+  auto flushToken = [&]() {
+    if (tokenStarted) {
+      out.push_back(token);
+      token.clear();
+      tokenStarted = false;
+    }
+  };
+
+  for (size_t i = 0; i < raw.size(); ++i) {
+    const char c = raw[i];
+    if (c == '\n' || c == '\r') {
+      return false;
+    }
+    if (inSingle) {
+      if (c == '\'') {
+        inSingle = false;
+      } else {
+        token.push_back(c);
+      }
+      tokenStarted = true;
+      continue;
+    }
+    if (inDouble) {
+      if (c == '"') {
+        inDouble = false;
+        tokenStarted = true;
+        continue;
+      }
+      if (c == '\\') {
+        if (i + 1 < raw.size()) {
+          const char next = raw[i + 1];
+          if (next == '\n' || next == '\r') {
+            return false;
+          }
+          if (next == '"' || next == '\\' || next == '$' || next == '`') {
+            token.push_back(next);
+            tokenStarted = true;
+            ++i;
+            continue;
+          }
+        }
+      }
+      token.push_back(c);
+      tokenStarted = true;
+      continue;
+    }
+
+    if (std::isspace(static_cast<unsigned char>(c))) {
+      flushToken();
+      continue;
+    }
+    if (c == '\'') {
+      inSingle = true;
+      tokenStarted = true;
+      continue;
+    }
+    if (c == '"') {
+      inDouble = true;
+      tokenStarted = true;
+      continue;
+    }
+    if (c == '\\') {
+      if (i + 1 < raw.size()) {
+        const char next = raw[i + 1];
+        if (next == '\n' || next == '\r') {
+          return false;
+        }
+        if (std::isspace(static_cast<unsigned char>(next)) ||
+            next == '\'' || next == '"' || next == '\\') {
+          token.push_back(next);
+          tokenStarted = true;
+          ++i;
+          continue;
+        }
+      }
+      token.push_back(c);
+      tokenStarted = true;
+      continue;
+    }
+    token.push_back(c);
+    tokenStarted = true;
   }
-  return out;
+
+  if (inSingle || inDouble) {
+    return false;
+  }
+  flushToken();
+  return true;
 }
 
 bool appendUserExtraArgs(std::ostringstream &cmd,
                          const std::string &raw,
                          bool prependDoubleDash) {
-  std::vector<std::string> tokens = splitWhitespaceArgs(trim(raw));
+  std::vector<std::string> tokens;
+  if (!splitShellStyleArgs(trim(raw), tokens)) {
+    return false;
+  }
   if (tokens.empty()) {
     return true;
   }
@@ -125,9 +214,6 @@ bool appendUserExtraArgs(std::ostringstream &cmd,
     cmd << " --";
   }
   for (const std::string &token : tokens) {
-    if (token.find('\n') != std::string::npos || token.find('\r') != std::string::npos) {
-      return false;
-    }
     cmd << " " << shellEscape(token);
   }
   return true;
@@ -4084,7 +4170,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!extraArgs.empty()) {
         if (!appendUserExtraArgs(cmd, extraArgs, true)) {
-          std::cout << "invalid extra args: newline characters are not allowed\n";
+          std::cout << "invalid extra args: unmatched quotes or newline characters are not allowed\n";
           continue;
         }
       }
@@ -4235,7 +4321,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                  << " --print-summary-json " << (printRunbookSummary ? "1" : "0");
       if (!extraArgs.empty()) {
         if (!appendUserExtraArgs(runbookCmd, extraArgs, true)) {
-          std::cout << "invalid extra args: newline characters are not allowed\n";
+          std::cout << "invalid extra args: unmatched quotes or newline characters are not allowed\n";
           continue;
         }
       }
@@ -4346,7 +4432,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!extraArgs.empty()) {
         if (!appendUserExtraArgs(cmd, extraArgs, true)) {
-          std::cout << "invalid extra args: newline characters are not allowed\n";
+          std::cout << "invalid extra args: unmatched quotes or newline characters are not allowed\n";
           continue;
         }
       }
@@ -4794,7 +4880,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!extraArgs.empty()) {
         if (!appendUserExtraArgs(cmd, extraArgs, true)) {
-          std::cout << "invalid extra args: newline characters are not allowed\n";
+          std::cout << "invalid extra args: unmatched quotes or newline characters are not allowed\n";
           continue;
         }
       }
@@ -4836,7 +4922,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       }
       if (!extraArgs.empty()) {
         if (!appendUserExtraArgs(cmd, extraArgs, false)) {
-          std::cout << "invalid extra args: newline characters are not allowed\n";
+          std::cout << "invalid extra args: unmatched quotes or newline characters are not allowed\n";
           continue;
         }
       }
