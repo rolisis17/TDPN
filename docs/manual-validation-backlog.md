@@ -221,20 +221,18 @@ The CLI prints the same reminder with:
 
 Potential remaining hardening items from a read-only grep/ripgrep + manual line-by-line sweep (Go/shell/Rust/JS/docs), prioritized by impact:
 
-1. **P1 (open): client outbound dial policy allows `localhost` mixed-resolution bypass**
+1. **P1 (resolved 2026-04-21): client outbound dial policy `localhost` mixed-resolution hardening**
    - References:
      - `internal/app/client.go:4094`
      - `internal/app/client.go:4127`
      - `internal/app/client.go:4142`
-   - Why it matters:
-     - For host `localhost`, mixed DNS answers (loopback + non-loopback) can still route to non-loopback targets depending on resolver ordering.
-     - This reintroduces DNS-rebind/mixed-resolution risk on client outbound control calls.
-   - Suggested fix:
-     - Mirror the stricter service-side policy: treat `localhost` as safe only when **all** resolved addresses are loopback (unless explicit dangerous private-DNS override is enabled).
-   - Suggested tests:
-     - Add a focused test in `internal/app/outbound_dial_policy_test.go` that supplies mixed `localhost` answers and expects rejection.
+   - Status:
+     - Default mode now fail-closes `localhost` unless all resolved answers are loopback.
+     - Explicit dangerous/private-DNS override still intentionally bypasses that localhost safeguard.
+   - Validation:
+     - `internal/app/outbound_dial_policy_test.go` covers mixed-answer rejection in default mode and all-loopback acceptance.
 
-2. **P2 (open): replay guards are now persistent per instance, but still not shared across replicas**
+2. **P2 (open): replay guards are persistent per instance, but not yet shared across replicas**
    - References:
      - `services/exit/service.go:341`
      - `services/exit/service.go:597`
@@ -247,20 +245,20 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
    - Suggested fix:
      - Back replay keys with shared durable state (for example Redis/DB) keyed by `(token_id, nonce)` with TTL.
      - Keep local file/cache as fast-path only.
+   - Progress update (2026-04-21):
+     - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings that file-backed replay persistence is instance-local.
    - Suggested tests:
      - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
 
-3. **P2 (open): integration scripts still leak raw PoP private-key JSON on some parse failures**
+3. **P2 (resolved 2026-04-21): integration scripts no longer leak raw PoP private-key JSON on parse failures**
    - References:
      - `scripts/integration_lifecycle_chaos.sh:109`
      - `scripts/integration_multi_issuer.sh:40`
      - `scripts/integration_revocation.sh:23`
-   - Why it matters:
-     - On failure paths, raw `tokenpop gen` output can be printed to CI/operator logs, exposing `private_key` material.
-   - Suggested fix:
-     - Replace raw `echo "$pop_json"` paths with shared redaction helper (same pattern already used by hardened integration scripts).
-   - Suggested tests:
-     - Add grep-based guardrails in script contract tests to block unredacted `pop_json` emission and verify failure output is redacted.
+   - Status:
+     - The scripts now use redacted tokenpop error helpers and keypair parsing helpers that never print raw tokenpop payloads.
+   - Validation:
+     - Script syntax checks pass for all three updated integration scripts.
 
 4. **P2 (open): compose still supports full-privilege `entry-exit` mode via env toggle**
    - References:

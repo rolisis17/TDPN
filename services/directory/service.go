@@ -575,9 +575,16 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.loadIssuerTrustedKeys(); err != nil {
 		return err
 	}
+	replayStorePath := strings.TrimSpace(s.providerTokenProofStoreFile)
+	if replayStorePath == "" {
+		log.Printf("directory provider token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
+	} else {
+		log.Printf("directory provider token proof replay guard: using file-backed store path=%s (instance-local persistence only; use shared durable replay storage for multi-instance deployments)", replayStorePath)
+	}
 	if err := s.loadProviderTokenProofReplayStore(time.Now()); err != nil {
 		return fmt.Errorf("load provider token proof replay store: %w", err)
 	}
+	log.Printf("directory provider token proof replay guard: loaded entries=%d", s.providerTokenProofReplayCount())
 	if (s.betaStrict || s.prodStrict) && len(s.issuerTrustedKeys) == 0 {
 		return fmt.Errorf("strict mode requires at least one issuer trust anchor key in %s", strings.TrimSpace(s.issuerTrustedKeysFile))
 	}
@@ -3638,6 +3645,12 @@ func (s *Service) loadProviderTokenProofReplayStore(now time.Time) error {
 	s.providerTokenProofSeen = seen
 	s.providerMu.Unlock()
 	return nil
+}
+
+func (s *Service) providerTokenProofReplayCount() int {
+	s.providerMu.RLock()
+	defer s.providerMu.RUnlock()
+	return len(s.providerTokenProofSeen)
 }
 
 func (s *Service) persistProviderTokenProofReplayLocked(now time.Time) error {

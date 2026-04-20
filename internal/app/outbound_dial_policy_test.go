@@ -92,6 +92,24 @@ func TestResolveClientSafeDialAddressAllowsLocalhostLoopback(t *testing.T) {
 	}
 }
 
+func TestResolveClientSafeDialAddressAllowsLocalhostAllLoopbackAnswers(t *testing.T) {
+	resolver := stubClientOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"localhost": {
+				{IP: net.ParseIP("::1")},
+				{IP: net.ParseIP("127.0.0.1")},
+			},
+		},
+	}
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false)
+	if err != nil {
+		t.Fatalf("expected localhost all-loopback resolution to be allowed, got %v", err)
+	}
+	if got != "[::1]:443" && got != "127.0.0.1:443" {
+		t.Fatalf("unexpected dial address: %s", got)
+	}
+}
+
 func TestResolveClientSafeDialAddressRejectsLocalhostMixedResolution(t *testing.T) {
 	resolver := stubClientOutboundResolver{
 		ips: map[string][]net.IPAddr{
@@ -110,18 +128,21 @@ func TestResolveClientSafeDialAddressRejectsLocalhostMixedResolution(t *testing.
 	}
 }
 
-func TestResolveClientSafeDialAddressRejectsLocalhostMixedResolutionEvenWithDangerousOverride(t *testing.T) {
+func TestResolveClientSafeDialAddressAllowsLocalhostMixedResolutionWithDangerousOverride(t *testing.T) {
 	resolver := stubClientOutboundResolver{
 		ips: map[string][]net.IPAddr{
-			"localhost": {{IP: net.ParseIP("203.0.113.77")}},
+			"localhost": {
+				{IP: net.ParseIP("203.0.113.77")},
+				{IP: net.ParseIP("127.0.0.1")},
+			},
 		},
 	}
-	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", true, false)
-	if err == nil {
-		t.Fatalf("expected localhost non-loopback resolution to be rejected")
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", true, false)
+	if err != nil {
+		t.Fatalf("expected dangerous override to allow mixed localhost resolution, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "non-loopback") {
-		t.Fatalf("unexpected error: %v", err)
+	if got != "203.0.113.77:443" {
+		t.Fatalf("unexpected dial address: %s", got)
 	}
 }
 

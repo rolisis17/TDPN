@@ -616,9 +616,17 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 	if s.tokenProofReplayGuard {
+		replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
+		if replayStorePath == "" {
+			log.Printf("exit token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
+		} else {
+			log.Printf("exit token proof replay guard: using file-backed store path=%s (instance-local persistence only; use shared durable replay storage for multi-instance deployments)", replayStorePath)
+		}
 		if err := s.loadTokenProofReplayStore(time.Now().Unix()); err != nil {
 			return fmt.Errorf("load token proof replay store: %w", err)
 		}
+		bucketCount, nonceCount := s.tokenProofReplayStats()
+		log.Printf("exit token proof replay guard: loaded buckets=%d nonces=%d", bucketCount, nonceCount)
 	}
 	defer s.closeAllWGKernelSessionProxies()
 	if s.wgBackend == "command" {
@@ -2007,6 +2015,17 @@ func (s *Service) loadTokenProofReplayStore(nowUnix int64) error {
 	s.proofNonceSeen = buckets
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *Service) tokenProofReplayStats() (int, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bucketCount := len(s.proofNonceSeen)
+	nonceCount := 0
+	for _, seen := range s.proofNonceSeen {
+		nonceCount += len(seen)
+	}
+	return bucketCount, nonceCount
 }
 
 func trimReplayBucketsToCaps(in map[string]map[string]int64) map[string]map[string]int64 {

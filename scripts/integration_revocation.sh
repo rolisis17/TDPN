@@ -27,6 +27,52 @@ redact_token_json() {
     -e 's/"credential":"[^"]*"/"credential":"[redacted]"/g'
 }
 
+emit_redacted_tokenpop_error() {
+  local message="$1"
+  local rc="${2:-0}"
+  local payload="${3:-}"
+  local bytes
+  local parse_hint="unknown"
+  bytes="$(printf '%s' "$payload" | wc -c | tr -d '[:space:]')"
+  if command -v jq >/dev/null 2>&1; then
+    if printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
+      parse_hint="json_missing_required_fields"
+    else
+      parse_hint="non_json_output"
+    fi
+  fi
+  echo "${message} (tokenpop output redacted; rc=${rc}, bytes=${bytes:-0}, parse_hint=${parse_hint})"
+}
+
+read_tokenpop_keypair() {
+  local tokenpop_output=""
+  if tokenpop_output="$(go run ./cmd/tokenpop gen --show-private-key 2>&1)"; then
+    :
+  else
+    local rc=$?
+    emit_redacted_tokenpop_error "failed to generate token PoP keypair" "$rc" "$tokenpop_output"
+    return 1
+  fi
+
+  local parsed_pub=""
+  local parsed_priv=""
+  if command -v jq >/dev/null 2>&1; then
+    parsed_pub="$(printf '%s' "$tokenpop_output" | jq -er '.public_key // empty' 2>/dev/null || true)"
+    parsed_priv="$(printf '%s' "$tokenpop_output" | jq -er '.private_key // empty' 2>/dev/null || true)"
+  else
+    parsed_pub="$(printf '%s' "$tokenpop_output" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+    parsed_priv="$(printf '%s' "$tokenpop_output" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+  fi
+  if [[ -z "$parsed_pub" || -z "$parsed_priv" ]]; then
+    emit_redacted_tokenpop_error "failed to parse token PoP keypair output" 0 "$tokenpop_output"
+    return 1
+  fi
+
+  TOKENPOP_PUBLIC_KEY="$parsed_pub"
+  TOKENPOP_PRIVATE_KEY="$parsed_priv"
+  return 0
+}
+
 EXIT_REVOCATION_REFRESH_SEC="${EXIT_REVOCATION_REFRESH_SEC:-1}"
 EXIT_REVOCATION_REFRESH_SEC="$EXIT_REVOCATION_REFRESH_SEC" \
   timeout 20s go run ./cmd/node --directory --issuer --entry --exit >/tmp/revoke_node.log 2>&1 &
@@ -35,14 +81,11 @@ trap 'kill $node_pid >/dev/null 2>&1 || true' EXIT
 
 sleep 2
 
-pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
-pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
-pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
-if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
-  echo "failed to generate token PoP keypair"
-  redact_token_json "$pop_json"
+if ! read_tokenpop_keypair; then
   exit 1
 fi
+pop_pub="$TOKENPOP_PUBLIC_KEY"
+pop_priv="$TOKENPOP_PRIVATE_KEY"
 
 token_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
   --data "{\"tier\":1,\"subject\":\"client-revoke-1\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"exit-local-1\"]}")

@@ -4258,13 +4258,17 @@ func resolveClientSafeDialAddress(ctx context.Context, resolver clientOutboundIP
 			continue
 		}
 		if loopbackHostname {
-			if !ip.IsLoopback() {
-				return "", fmt.Errorf("outbound localhost host %q resolved to non-loopback address %q", host, ip.String())
+			// Default localhost hardening is fail-closed: every resolved answer must be loopback.
+			// The explicit dangerous/private-DNS override intentionally bypasses this safeguard.
+			if !allowDangerousPrivateDNS {
+				if !ip.IsLoopback() {
+					return "", fmt.Errorf("outbound localhost host %q resolved to non-loopback address %q", host, ip.String())
+				}
+				if loopbackDialAddress == "" {
+					loopbackDialAddress = net.JoinHostPort(ip.String(), port)
+				}
+				continue
 			}
-			if loopbackDialAddress == "" {
-				loopbackDialAddress = net.JoinHostPort(ip.String(), port)
-			}
-			continue
 		}
 		if localDevelopmentHostname && !allowDangerousPrivateDNS && !isClientDisallowedOutboundDialIP(ip) {
 			return "", fmt.Errorf("outbound local-development host %q resolved to non-local address %q", host, ip.String())
@@ -4280,7 +4284,7 @@ func resolveClientSafeDialAddress(ctx context.Context, resolver clientOutboundIP
 		}
 		return net.JoinHostPort(ip.String(), port), nil
 	}
-	if loopbackHostname && loopbackDialAddress != "" {
+	if loopbackHostname && !allowDangerousPrivateDNS && loopbackDialAddress != "" {
 		return loopbackDialAddress, nil
 	}
 	return "", fmt.Errorf("outbound host %q resolved only to blocked address classes", host)
