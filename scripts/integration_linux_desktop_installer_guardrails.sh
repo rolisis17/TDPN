@@ -87,6 +87,8 @@ for marker in \
   "--installer-type" \
   "--build-if-missing" \
   "--dry-run" \
+  "--launch-after-install" \
+  "--installed-executable" \
   "--summary-json" \
   "--print-summary-json"
 do
@@ -105,6 +107,8 @@ for marker in \
   "yum install -y" \
   "zypper --non-interactive install" \
   "rpm -i" \
+  "gpm-desktop" \
+  "global-private-mesh-desktop" \
   "non-root DEB install requires sudo" \
   "non-root RPM install requires sudo"
 do
@@ -133,6 +137,8 @@ run_expect_pass \
     --installer-path "$FAKE_APPIMAGE_PATH" \
     --installer-type appimage \
     --dry-run \
+    --launch-after-install 1 \
+    --installed-executable "$FAKE_APPIMAGE_PATH" \
     --summary-json "$PASS_SUMMARY_JSON" \
     --print-summary-json 0
 if [[ ! -f "$PASS_SUMMARY_JSON" ]]; then
@@ -144,6 +150,13 @@ assert_json_predicate "$PASS_SUMMARY_JSON" '.platform == "linux"' "dry-run platf
 assert_json_predicate "$PASS_SUMMARY_JSON" '.installer_type == "appimage"' "dry-run installer_type"
 assert_json_predicate "$PASS_SUMMARY_JSON" '.installer_source == "explicit"' "dry-run installer_source"
 assert_json_predicate "$PASS_SUMMARY_JSON" '.dry_run == true' "dry-run flag"
+assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_after_install == true' "dry-run launch_after_install flag"
+assert_json_predicate "$PASS_SUMMARY_JSON" '.installed_executable | type == "string" and length > 0' "dry-run installed_executable marker"
+assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_attempted == true' "dry-run launch_attempted flag"
+assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_status == "would_run"' "dry-run launch_status marker"
+assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_command | type == "string" and length > 0' "dry-run launch_command marker"
+assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_command_source == "appimage_artifact"' "dry-run launch_command_source marker"
+assert_file_contains_fixed "$TMP_DIR/dry_run_explicit_appimage_pass.log" "dry-run would run launch command:" "dry-run launch marker"
 
 MISSING_APPIMAGE_PATH="$TMP_DIR/missing-desktop.AppImage"
 MISSING_SUMMARY_JSON="$TMP_DIR/missing_explicit_installer_summary.json"

@@ -451,6 +451,7 @@ Equivalent `easy_node.sh` wrapper usage on Linux (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-one-click --install-missing
 ./scripts/easy_node.sh desktop-linux-dev
 ./scripts/easy_node.sh desktop-linux-installer --dry-run
+./scripts/easy_node.sh desktop-linux-install-launch --build-if-missing --install-missing
 ./scripts/easy_node.sh desktop-linux-installer-guardrails
 ./scripts/easy_node.sh desktop-linux-packaged-run --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run
@@ -479,6 +480,7 @@ scripts\windows\desktop_installer.cmd -DryRun
 .\scripts\easy_node.sh desktop-windows-one-click --install-missing
 .\scripts\easy_node.sh desktop-windows-dev
 .\scripts\easy_node.sh desktop-windows-installer -DryRun
+.\scripts\easy_node.sh desktop-windows-install-launch -BuildIfMissing -InstallMissing
 .\scripts\easy_node.sh desktop-windows-installer-guardrails
 .\scripts\easy_node.sh desktop-installer --platform windows -DryRun
 .\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
@@ -486,6 +488,13 @@ scripts\windows\desktop_installer.cmd -DryRun
 .\scripts\easy_node.sh desktop-windows-release-bundle --bundle-dir .easy-node-logs/windows_release_bundle
 .\scripts\easy_node.sh desktop-windows-local-api-session -DryRun
 ```
+
+One-command installer launch aliases:
+- Linux: `./scripts/easy_node.sh desktop-install-launch --platform linux --build-if-missing --install-missing`
+- Windows: `.\scripts\easy_node.sh desktop-install-launch --platform windows -BuildIfMissing -InstallMissing`
+
+Installer summary launch fields:
+- installer summaries include launch-after-install telemetry fields when supported by the installer script (requested/effective launch state and launch command/result metadata).
 
 The Windows wrapper commands call PowerShell with `-ExecutionPolicy Bypass` automatically for the target `.ps1` scripts.
 

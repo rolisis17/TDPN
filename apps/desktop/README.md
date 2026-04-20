@@ -474,6 +474,7 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-one-click --install-missing
 ./scripts/easy_node.sh desktop-linux-dev
 ./scripts/easy_node.sh desktop-linux-installer --dry-run
+./scripts/easy_node.sh desktop-linux-install-launch --build-if-missing --install-missing
 ./scripts/easy_node.sh desktop-linux-installer-guardrails
 ./scripts/easy_node.sh desktop-linux-packaged-run --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run
@@ -488,6 +489,16 @@ bash ./scripts/linux/desktop_installer.sh --dry-run
 - `.deb` installs prefer dependency-resolving package managers (`apt install ./artifact`, then `apt-get install ./artifact`) and fall back to `dpkg -i ./artifact`.
 - `.rpm` installs prefer dependency-resolving package managers (`dnf`/`yum`/`zypper install ./artifact`) and fall back to `rpm -i ./artifact`.
 - when not root, installer commands run via `sudo` when available; otherwise the script exits with actionable remediation hints.
+
+One-command installer launch alias (Linux, scaffold/non-production):
+
+```bash
+./scripts/easy_node.sh desktop-linux-install-launch --build-if-missing --install-missing
+./scripts/easy_node.sh desktop-install-launch --platform linux --build-if-missing --install-missing
+```
+
+Installer summary launch fields:
+- installer summaries include launch-after-install telemetry fields when supported by the installer script (requested/effective launch state and launch command/result metadata).
 
 Optional generic wrapper form (if your branch exposes it):
 
@@ -508,6 +519,7 @@ scripts\windows\desktop_installer.cmd -DryRun
 .\scripts\easy_node.sh desktop-windows-doctor --mode check
 .\scripts\easy_node.sh desktop-windows-dev
 .\scripts\easy_node.sh desktop-windows-installer -DryRun
+.\scripts\easy_node.sh desktop-windows-install-launch -BuildIfMissing -InstallMissing
 .\scripts\easy_node.sh desktop-windows-installer-guardrails
 .\scripts\easy_node.sh desktop-installer --platform windows -DryRun
 .\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
@@ -520,6 +532,7 @@ Generic desktop `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-install-launch [--platform auto|linux|windows] [desktop_installer args...]
 ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
 ```

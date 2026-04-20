@@ -82,6 +82,8 @@ What this does:
    - web portal scaffold contract (`integration_web_portal_contract.sh`, including bootstrap trust panel + telemetry render markers)
    - web home contract (`integration_web_home_contract.sh`, validating stable homepage HTML/CSS markers in `apps/web/index.html` + `apps/web/assets/gpm.css`)
    - windows desktop native bootstrap guardrails (`integration_windows_desktop_native_bootstrap_guardrails.sh`)
+   - windows desktop installer guardrails (`integration_windows_desktop_installer_guardrails.sh`)
+   - linux desktop installer guardrails (`integration_linux_desktop_installer_guardrails.sh`)
 
 Expected result:
 - final line: `[ci] ok`
@@ -96,12 +98,22 @@ Windows desktop native bootstrap guardrails:
 ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails
 ```
 
+Desktop installer guardrails:
+
+```bash
+./scripts/integration_windows_desktop_installer_guardrails.sh
+./scripts/integration_linux_desktop_installer_guardrails.sh
+./scripts/easy_node.sh desktop-windows-installer-guardrails
+./scripts/easy_node.sh desktop-linux-installer-guardrails
+```
+
 Desktop launcher wrappers:
 
 ```bash
 ./scripts/easy_node.sh desktop-doctor [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-install-launch [--platform auto|linux|windows] [desktop_installer args...]
 ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
 ```

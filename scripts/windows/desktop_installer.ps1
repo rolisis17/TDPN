@@ -4,6 +4,8 @@ param(
   [string]$InstallerType = "auto",
   [switch]$BuildIfMissing,
   [switch]$InstallMissing,
+  [switch]$LaunchAfterInstall = $true,
+  [string]$InstalledExecutablePath = "",
   [ValidateSet("stable", "beta", "canary")]
   [string]$Channel = "stable",
   [switch]$Silent,
@@ -115,6 +117,168 @@ function Get-CommandDisplay {
   return ($parts -join " ")
 }
 
+function Normalize-PathCandidate {
+  param([string]$Value)
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+
+  $candidate = $Value.Trim()
+  if ($candidate.Length -ge 2 -and $candidate.StartsWith('"') -and $candidate.EndsWith('"')) {
+    $candidate = $candidate.Substring(1, $candidate.Length - 2).Trim()
+  }
+
+  return $candidate
+}
+
+function Get-InstalledPackagedExecutableCandidates {
+  $localAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA", "Process")
+  if ([string]::IsNullOrWhiteSpace($localAppData)) {
+    $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+  }
+
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+
+  $rootCandidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+    $rootCandidates += $localAppData
+    $rootCandidates += (Join-Path $localAppData "Programs")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($programFiles)) {
+    $rootCandidates += $programFiles
+  }
+  if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
+    $rootCandidates += $programFilesX86
+  }
+
+  $roots = @()
+  $rootSeen = @{}
+  foreach ($rootCandidate in $rootCandidates) {
+    if ([string]::IsNullOrWhiteSpace($rootCandidate)) {
+      continue
+    }
+
+    $normalizedRoot = $rootCandidate.Trim().TrimEnd("\")
+    if ([string]::IsNullOrWhiteSpace($normalizedRoot)) {
+      continue
+    }
+
+    $rootKey = $normalizedRoot.ToLowerInvariant()
+    if ($rootSeen.ContainsKey($rootKey)) {
+      continue
+    }
+    $rootSeen[$rootKey] = $true
+    $roots += $normalizedRoot
+  }
+
+  $relativePaths = @(
+    "GPM Desktop\GPM Desktop.exe",
+    "GPM Desktop\gpm-desktop.exe",
+    "Global Private Mesh Desktop\Global Private Mesh Desktop.exe",
+    "Global Private Mesh Desktop\global-private-mesh-desktop.exe",
+    "TDPN Desktop\TDPN Desktop.exe",
+    "TDPN Desktop\tdpn-desktop.exe"
+  )
+
+  $candidates = @()
+  $candidateSeen = @{}
+  foreach ($root in $roots) {
+    foreach ($relativePath in $relativePaths) {
+      $candidate = Join-Path $root $relativePath
+      $candidateKey = $candidate.TrimEnd("\").ToLowerInvariant()
+      if ($candidateSeen.ContainsKey($candidateKey)) {
+        continue
+      }
+      $candidateSeen[$candidateKey] = $true
+      $candidates += $candidate
+    }
+  }
+
+  return $candidates
+}
+
+function Get-RepoPackagedExecutableCandidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($RepoRootPath)) {
+    return @()
+  }
+
+  $releaseRoot = Join-Path $RepoRootPath "apps\desktop\src-tauri\target\release"
+  $relativePaths = @(
+    "gpm-desktop.exe",
+    "GPM Desktop.exe",
+    "global-private-mesh-desktop.exe",
+    "Global Private Mesh Desktop.exe",
+    "tdpn-desktop.exe",
+    "TDPN Desktop.exe"
+  )
+
+  $candidates = @()
+  $seen = @{}
+  foreach ($relativePath in $relativePaths) {
+    $candidate = Join-Path $releaseRoot $relativePath
+    $candidateKey = $candidate.TrimEnd("\").ToLowerInvariant()
+    if ($seen.ContainsKey($candidateKey)) {
+      continue
+    }
+    $seen[$candidateKey] = $true
+    $candidates += $candidate
+  }
+
+  return $candidates
+}
+
+function Resolve-LaunchExecutableTarget {
+  param(
+    [AllowEmptyString()]
+    [string]$OverridePath = "",
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath
+  )
+
+  $normalizedOverride = Normalize-PathCandidate -Value $OverridePath
+  if (-not [string]::IsNullOrWhiteSpace($normalizedOverride)) {
+    $fullPath = [System.IO.Path]::GetFullPath($normalizedOverride)
+    return [pscustomobject]@{
+      path   = $fullPath
+      source = "override"
+      exists = [bool](Test-Path -LiteralPath $fullPath -PathType Leaf)
+    }
+  }
+
+  foreach ($candidate in (Get-InstalledPackagedExecutableCandidates)) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return [pscustomobject]@{
+        path   = (Resolve-Path -LiteralPath $candidate).Path
+        source = "install"
+        exists = $true
+      }
+    }
+  }
+
+  foreach ($candidate in (Get-RepoPackagedExecutableCandidates -RepoRootPath $RepoRootPath)) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return [pscustomobject]@{
+        path   = (Resolve-Path -LiteralPath $candidate).Path
+        source = "repo"
+        exists = $true
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    path   = ""
+    source = ""
+    exists = $false
+  }
+}
+
 function Write-SummaryJson {
   param(
     [Parameter(Mandatory = $true)]
@@ -196,6 +360,11 @@ $summary = [ordered]@{
   dry_run = [bool]$DryRun
   build_if_missing = [bool]$BuildIfMissing
   build_triggered = $false
+  launch_after_install = [bool]$LaunchAfterInstall
+  launch_attempted = $false
+  launch_status = if ([bool]$LaunchAfterInstall) { "not_attempted" } else { "disabled" }
+  launched_executable_path = ""
+  launch_failure_reason = ""
   icon_scaffold_created = $false
   icon_scaffold_error = ""
   failure_stage = ""
@@ -212,6 +381,8 @@ try {
   Write-Step "build_if_missing=$([bool]$BuildIfMissing)"
   Write-Step "silent=$([bool]$Silent)"
   Write-Step "dry_run=$([bool]$DryRun)"
+  Write-Step "launch_after_install=$([bool]$LaunchAfterInstall)"
+  Write-Step ("installed_executable_path_override={0}" -f (Normalize-PathCandidate -Value $InstalledExecutablePath))
 
   $selectedInstallerPath = ""
   $selectedInstallerType = ""
@@ -324,6 +495,48 @@ try {
   if ($exitCode -eq 0) {
     $summary.status = "ok"
     $summary.failure_stage = ""
+
+    if ([bool]$LaunchAfterInstall) {
+      $launchTarget = Resolve-LaunchExecutableTarget -OverridePath $InstalledExecutablePath -RepoRootPath $repoRoot
+      $launchPath = [string]$launchTarget.path
+      $summary.launched_executable_path = $launchPath
+
+      if ([string]::IsNullOrWhiteSpace($launchPath)) {
+        $summary.launch_status = "warning_missing_executable"
+        $summary.launch_failure_reason = "unable to resolve installed executable path automatically"
+        Write-Step "warning=launch_target_missing reason=$($summary.launch_failure_reason)"
+      } else {
+        $launchCommand = Get-CommandDisplay -Path $launchPath -Arguments @()
+        Write-Step "launch command: $launchCommand"
+
+        if ($DryRun) {
+          $summary.launch_status = "dry_run_would_launch"
+          $summary.launch_attempted = $false
+          $summary.launch_failure_reason = ""
+          Write-Step "dry-run enabled; launch execution skipped"
+        } elseif (-not [bool]$launchTarget.exists) {
+          $summary.launch_status = "warning_missing_executable"
+          $summary.launch_failure_reason = "launch target does not exist: $launchPath"
+          Write-Step "warning=launch_target_missing reason=$($summary.launch_failure_reason)"
+        } else {
+          try {
+            $summary.launch_attempted = $true
+            Start-Process -FilePath $launchPath | Out-Null
+            $summary.launch_status = "launched"
+            $summary.launch_failure_reason = ""
+            Write-Step "launch started"
+          } catch {
+            $summary.launch_status = "warning_launch_failed"
+            $summary.launch_failure_reason = [string]$_.Exception.Message
+            Write-Step "warning=launch_failed error=$($summary.launch_failure_reason)"
+          }
+        }
+      }
+    } else {
+      $summary.launch_status = "disabled"
+      $summary.launch_attempted = $false
+      $summary.launch_failure_reason = ""
+    }
   } else {
     $summary.status = "fail"
   }

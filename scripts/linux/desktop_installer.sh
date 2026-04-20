@@ -14,6 +14,8 @@ channel="stable"
 dry_run="0"
 summary_json="$DEFAULT_SUMMARY_JSON"
 print_summary_json="0"
+launch_after_install="1"
+installed_executable=""
 
 status="fail"
 rc="1"
@@ -21,8 +23,14 @@ failure_stage=""
 resolved_installer_path=""
 resolved_installer_type=""
 installer_source=""
+resolved_installed_executable=""
 build_triggered="0"
 summary_payload=""
+launch_attempted="0"
+launch_status="not_attempted"
+launch_command=""
+launch_command_source=""
+launch_warning=""
 
 log() {
   echo "[desktop-installer-linux] $*"
@@ -42,6 +50,8 @@ Options:
   --install-missing                     Forward to desktop_release_bundle.sh when build is triggered.
   --channel CHANNEL                     One of: stable, beta, canary (default: stable).
   --dry-run                             Print would-run installer command(s) only.
+  --launch-after-install [0|1]          Attempt post-install desktop launch (default: 1, omitted value means 1).
+  --installed-executable PATH           Optional installed desktop executable override for launch attempts.
   --summary-json PATH                   Summary output path (default: .easy-node-logs/desktop_installer_linux_summary.json).
   --print-summary-json [0|1]            Print summary JSON payload to stdout (default: 0, omitted value means 1).
   --help                                Show help.
@@ -52,9 +62,10 @@ Behavior:
     deb:      *.deb
     rpm:      *.rpm
   - Auto selection preference: appimage -> deb -> rpm
-  - AppImage install mode: chmod +x and execute artifact directly.
+  - AppImage install mode: chmod +x and execute artifact directly (existing behavior preserved).
   - DEB install mode: apt/apt-get install ./artifact (fallback: dpkg -i ./artifact; sudo when not root).
   - RPM install mode: dnf/yum/zypper install ./artifact (fallback: rpm -i ./artifact; sudo when not root).
+  - Post-install launch (deb/rpm): override path first, then gpm-desktop/global-private-mesh-desktop; missing executable is non-fatal.
   - Scaffold only; this is not a production installer/updater pipeline.
 USAGE
 }
@@ -101,6 +112,13 @@ write_summary_json() {
   "installer_type": "$(json_escape "$resolved_installer_type")",
   "installer_source": "$(json_escape "$installer_source")",
   "dry_run": $(json_bool "$dry_run"),
+  "launch_after_install": $(json_bool "$launch_after_install"),
+  "installed_executable": "$(json_escape "$resolved_installed_executable")",
+  "launch_attempted": $(json_bool "$launch_attempted"),
+  "launch_status": "$(json_escape "$launch_status")",
+  "launch_command": "$(json_escape "$launch_command")",
+  "launch_command_source": "$(json_escape "$launch_command_source")",
+  "launch_warning": "$(json_escape "$launch_warning")",
   "build_if_missing": $(json_bool "$build_if_missing"),
   "build_triggered": $(json_bool "$build_triggered"),
   "failure_stage": "$(json_escape "$failure_stage")"
@@ -281,17 +299,138 @@ maybe_build_missing_artifacts() {
   fi
 }
 
+normalize_installed_executable_override() {
+  if [[ -z "$installed_executable" ]]; then
+    resolved_installed_executable=""
+    return 0
+  fi
+
+  if [[ "$installed_executable" == */* ]]; then
+    if [[ -e "$installed_executable" ]]; then
+      resolved_installed_executable="$(resolve_absolute_path "$installed_executable")"
+      return 0
+    fi
+    if [[ "$installed_executable" == /* ]]; then
+      resolved_installed_executable="$installed_executable"
+    else
+      resolved_installed_executable="$ROOT_DIR/$installed_executable"
+    fi
+    return 0
+  fi
+
+  resolved_installed_executable="$installed_executable"
+}
+
+resolve_launch_candidate() {
+  local candidate="$1"
+  local candidate_source="$2"
+
+  if [[ -z "$candidate" ]]; then
+    return 1
+  fi
+
+  if [[ "$candidate" == */* ]]; then
+    if [[ ! -f "$candidate" ]]; then
+      return 1
+    fi
+    launch_command="$(resolve_absolute_path "$candidate")"
+    launch_command_source="$candidate_source"
+    return 0
+  fi
+
+  local command_path
+  command_path="$(command -v "$candidate" 2>/dev/null || true)"
+  if [[ -z "$command_path" ]]; then
+    return 1
+  fi
+  launch_command="$command_path"
+  launch_command_source="$candidate_source"
+  return 0
+}
+
+resolve_post_install_launch_command() {
+  launch_command=""
+  launch_command_source=""
+
+  if [[ -n "$resolved_installed_executable" ]]; then
+    if resolve_launch_candidate "$resolved_installed_executable" "installed_executable_override"; then
+      return 0
+    fi
+  fi
+
+  if resolve_launch_candidate "gpm-desktop" "command_name:gpm-desktop"; then
+    return 0
+  fi
+  if resolve_launch_candidate "global-private-mesh-desktop" "command_name:global-private-mesh-desktop"; then
+    return 0
+  fi
+
+  return 1
+}
+
+maybe_launch_after_install_for_package() {
+  local package_kind="$1"
+
+  if [[ "$launch_after_install" != "1" ]]; then
+    launch_status="disabled"
+    return 0
+  fi
+
+  if ! resolve_post_install_launch_command; then
+    launch_status="not_found"
+    launch_warning="post-install launch skipped; executable not found (checked --installed-executable, gpm-desktop, global-private-mesh-desktop)"
+    if [[ "$dry_run" == "1" ]]; then
+      log "dry-run would run launch command: <unresolved> (source=auto-discovery type=$package_kind)"
+    fi
+    log "warning: $launch_warning"
+    return 0
+  fi
+
+  launch_attempted="1"
+  if [[ "$dry_run" == "1" ]]; then
+    launch_status="would_run"
+    log "dry-run would run launch command: \"$launch_command\" (source=$launch_command_source type=$package_kind)"
+    return 0
+  fi
+
+  log "running post-install launch command: \"$launch_command\" (source=$launch_command_source type=$package_kind)"
+  if "$launch_command" >/dev/null 2>&1 & then
+    local launch_pid="$!"
+    launch_status="started"
+    log "post-install launch started pid=$launch_pid"
+    return 0
+  fi
+
+  local launch_rc="$?"
+  launch_status="failed"
+  launch_warning="post-install launch command failed (rc=$launch_rc); install succeeded but launch did not start"
+  log "warning: $launch_warning"
+  return 0
+}
+
 execute_installer() {
   case "$resolved_installer_type" in
     appimage)
+      launch_command="$resolved_installer_path"
+      launch_command_source="appimage_artifact"
+      launch_attempted="1"
       if [[ "$dry_run" == "1" ]]; then
         log "dry-run would run: chmod +x \"$resolved_installer_path\""
         log "dry-run would run: \"$resolved_installer_path\""
+        log "dry-run would run launch command: \"$resolved_installer_path\" (source=$launch_command_source type=appimage)"
+        launch_status="would_run"
         return 0
       fi
       chmod +x "$resolved_installer_path"
       log "running installer: $resolved_installer_path"
-      "$resolved_installer_path"
+      if "$resolved_installer_path"; then
+        launch_status="ok"
+      else
+        local appimage_rc="$?"
+        launch_status="failed"
+        launch_warning="appimage execution failed (rc=$appimage_rc)"
+        return 1
+      fi
       ;;
     deb)
       local artifact_dir
@@ -321,13 +460,14 @@ execute_installer() {
       fi
       if [[ "$dry_run" == "1" ]]; then
         log "dry-run would run: (cd \"$artifact_dir\" && ${deb_cmd[*]})"
-        return 0
+      else
+        log "running installer: (cd \"$artifact_dir\" && ${deb_cmd[*]})"
+        (
+          cd "$artifact_dir"
+          "${deb_cmd[@]}"
+        )
       fi
-      log "running installer: (cd \"$artifact_dir\" && ${deb_cmd[*]})"
-      (
-        cd "$artifact_dir"
-        "${deb_cmd[@]}"
-      )
+      maybe_launch_after_install_for_package "deb"
       ;;
     rpm)
       local artifact_dir
@@ -359,13 +499,14 @@ execute_installer() {
       fi
       if [[ "$dry_run" == "1" ]]; then
         log "dry-run would run: (cd \"$artifact_dir\" && ${rpm_cmd[*]})"
-        return 0
+      else
+        log "running installer: (cd \"$artifact_dir\" && ${rpm_cmd[*]})"
+        (
+          cd "$artifact_dir"
+          "${rpm_cmd[@]}"
+        )
       fi
-      log "running installer: (cd \"$artifact_dir\" && ${rpm_cmd[*]})"
-      (
-        cd "$artifact_dir"
-        "${rpm_cmd[@]}"
-      )
+      maybe_launch_after_install_for_package "rpm"
       ;;
     *)
       fail "resolve" "unsupported installer type: $resolved_installer_type"
@@ -407,6 +548,27 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       dry_run="1"
       shift
+      ;;
+    --launch-after-install)
+      if [[ $# -ge 2 && ( "$2" == "0" || "$2" == "1" ) ]]; then
+        launch_after_install="$2"
+        shift 2
+      elif [[ $# -ge 2 && "$2" != --* ]]; then
+        fail "args" "invalid --launch-after-install '$2' (allowed: 0, 1)"
+      else
+        launch_after_install="1"
+        shift
+      fi
+      ;;
+    --installed-executable)
+      if [[ $# -lt 2 ]]; then
+        fail "args" "--installed-executable requires a value"
+      fi
+      if [[ -z "$2" ]]; then
+        fail "args" "--installed-executable requires a non-empty value"
+      fi
+      installed_executable="$2"
+      shift 2
       ;;
     --summary-json)
       if [[ $# -lt 2 ]]; then
@@ -456,6 +618,15 @@ case "$print_summary_json" in
     ;;
 esac
 
+case "$launch_after_install" in
+  0|1) ;;
+  *)
+    fail "args" "invalid --launch-after-install '$launch_after_install' (allowed: 0, 1)"
+    ;;
+esac
+
+normalize_installed_executable_override
+
 if [[ -n "$installer_path" ]]; then
   if [[ ! -f "$installer_path" ]]; then
     fail "resolve" "installer path does not exist: $installer_path"
@@ -492,6 +663,10 @@ log "channel=$channel"
 log "installer_type=$resolved_installer_type"
 log "installer_path=$resolved_installer_path"
 log "installer_source=$installer_source"
+log "launch_after_install=$launch_after_install"
+if [[ -n "$resolved_installed_executable" ]]; then
+  log "installed_executable=$resolved_installed_executable"
+fi
 log "build_if_missing=$build_if_missing build_triggered=$build_triggered dry_run=$dry_run"
 
 if ! execute_installer; then

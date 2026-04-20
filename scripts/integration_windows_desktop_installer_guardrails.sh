@@ -109,6 +109,8 @@ for marker in \
   '\$InstallerPath' \
   '\$InstallerType' \
   '\$BuildIfMissing' \
+  '\$LaunchAfterInstall' \
+  '\$InstalledExecutablePath' \
   '\$Silent' \
   '\$DryRun' \
   '\$SummaryJson' \
@@ -122,11 +124,14 @@ done
 
 EXE_INSTALLER="$TMP_DIR/fake_installer.exe"
 MSI_INSTALLER="$TMP_DIR/fake_installer.msi"
+LAUNCH_EXE="$TMP_DIR/fake_installed_desktop.exe"
 printf 'fake exe payload\n' >"$EXE_INSTALLER"
 printf 'fake msi payload\n' >"$MSI_INSTALLER"
+printf 'fake launch payload\n' >"$LAUNCH_EXE"
 
 EXE_INSTALLER_PS="$(to_powershell_path "$EXE_INSTALLER")"
 MSI_INSTALLER_PS="$(to_powershell_path "$MSI_INSTALLER")"
+LAUNCH_EXE_PS="$(to_powershell_path "$LAUNCH_EXE")"
 
 echo "[windows-desktop-installer-guardrails] explicit .exe dry-run emits expected summary"
 EXE_SUMMARY_JSON="$TMP_DIR/exe_summary.json"
@@ -135,6 +140,7 @@ run_expect_pass \
   "explicit_exe_dry_run" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -InstallerPath "$EXE_INSTALLER_PS" \
+    -InstalledExecutablePath "$LAUNCH_EXE_PS" \
     -DryRun \
     -SummaryJson "$EXE_SUMMARY_JSON_PS" \
     -PrintSummaryJson 0
@@ -149,6 +155,21 @@ assert_json_expr "$EXE_SUMMARY_JSON" '.platform == "windows"' "explicit exe summ
 assert_json_expr "$EXE_SUMMARY_JSON" '.installer_type == "nsis"' "explicit exe summary must infer installer_type=nsis"
 assert_json_expr "$EXE_SUMMARY_JSON" '.installer_source == "explicit"' "explicit exe summary must have installer_source=explicit"
 assert_json_expr "$EXE_SUMMARY_JSON" '.dry_run == true' "explicit exe summary must set dry_run=true"
+assert_json_expr "$EXE_SUMMARY_JSON" '.launch_after_install == true' "explicit exe summary must set launch_after_install=true by default"
+assert_json_expr "$EXE_SUMMARY_JSON" '.launch_attempted == false' "explicit exe summary must keep launch_attempted=false in dry-run"
+assert_json_expr "$EXE_SUMMARY_JSON" '.launch_status == "dry_run_would_launch"' "explicit exe summary must set launch_status=dry_run_would_launch"
+assert_json_expr "$EXE_SUMMARY_JSON" '.launched_executable_path | strings | test("fake_installed_desktop\\.exe$")' "explicit exe summary must surface launched_executable_path"
+assert_json_expr "$EXE_SUMMARY_JSON" '.launch_failure_reason == ""' "explicit exe summary must keep empty launch_failure_reason on dry-run"
+if ! grep -Fq 'launch command:' "$TMP_DIR/explicit_exe_dry_run.log"; then
+  echo "windows desktop installer guardrails failed: missing launch command marker in explicit exe dry-run log"
+  cat "$TMP_DIR/explicit_exe_dry_run.log"
+  exit 1
+fi
+if ! grep -Fq 'dry-run enabled; launch execution skipped' "$TMP_DIR/explicit_exe_dry_run.log"; then
+  echo "windows desktop installer guardrails failed: missing launch dry-run skip marker in explicit exe dry-run log"
+  cat "$TMP_DIR/explicit_exe_dry_run.log"
+  exit 1
+fi
 
 echo "[windows-desktop-installer-guardrails] explicit .msi dry-run emits expected summary"
 MSI_SUMMARY_JSON="$TMP_DIR/msi_summary.json"
@@ -236,5 +257,18 @@ if ! grep -qE '&[[:space:]]+powershell[[:space:]]+@buildArgs' "$SCRIPT_UNDER_TES
   echo "windows desktop installer guardrails failed: missing powershell build invocation execution marker"
   exit 1
 fi
+for launch_marker in \
+  'launch_after_install' \
+  'launch_attempted' \
+  'launch_status' \
+  'launched_executable_path' \
+  'launch_failure_reason' \
+  'warning=launch_target_missing'
+do
+  if ! grep -q -- "$launch_marker" "$SCRIPT_UNDER_TEST"; then
+    echo "windows desktop installer guardrails failed: missing launch marker '$launch_marker' in $SCRIPT_UNDER_TEST"
+    exit 1
+  fi
+done
 
 echo "windows desktop installer guardrails integration check ok"
