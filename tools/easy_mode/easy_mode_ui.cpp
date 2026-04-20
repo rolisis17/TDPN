@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <sys/wait.h>
 
@@ -78,6 +81,164 @@ std::string readOptionalLine(const std::string &prompt, const std::string &sugge
   return line;
 }
 
+bool envBoolEnabled(const char *name) {
+  if (!name || !*name) {
+    return false;
+  }
+  const char *raw = std::getenv(name);
+  if (!raw || !*raw) {
+    return false;
+  }
+  const std::string v = upperCopy(trim(raw));
+  return v == "1" || v == "TRUE" || v == "YES" || v == "Y" || v == "ON";
+}
+
+std::vector<std::string> splitWhitespaceArgs(const std::string &raw) {
+  std::vector<std::string> out;
+  std::istringstream in(raw);
+  std::string tok;
+  while (in >> tok) {
+    out.push_back(tok);
+  }
+  return out;
+}
+
+bool appendUserExtraArgs(std::ostringstream &cmd,
+                         const std::string &raw,
+                         bool prependDoubleDash) {
+  std::vector<std::string> tokens = splitWhitespaceArgs(trim(raw));
+  if (tokens.empty()) {
+    return true;
+  }
+  if (prependDoubleDash) {
+    cmd << " --";
+  }
+  for (const std::string &token : tokens) {
+    if (token.find('\n') != std::string::npos || token.find('\r') != std::string::npos) {
+      return false;
+    }
+    cmd << " " << shellEscape(token);
+  }
+  return true;
+}
+
+size_t shellTokenEnd(const std::string &cmd, size_t start) {
+  if (start >= cmd.size()) {
+    return start;
+  }
+  if (cmd[start] == '\'') {
+    size_t i = start + 1;
+    while (i < cmd.size()) {
+      if (cmd[i] == '\'') {
+        if (i + 3 < cmd.size() &&
+            cmd[i + 1] == '\\' &&
+            cmd[i + 2] == '\'' &&
+            cmd[i + 3] == '\'') {
+          i += 4;
+          continue;
+        }
+        return i + 1;
+      }
+      ++i;
+    }
+    return cmd.size();
+  }
+  size_t i = start;
+  while (i < cmd.size() && !std::isspace(static_cast<unsigned char>(cmd[i]))) {
+    ++i;
+  }
+  return i;
+}
+
+std::string redactFlagValue(std::string cmd, const std::string &flag) {
+  size_t pos = 0;
+  while ((pos = cmd.find(flag, pos)) != std::string::npos) {
+    if (pos > 0 && !std::isspace(static_cast<unsigned char>(cmd[pos - 1]))) {
+      pos += flag.size();
+      continue;
+    }
+    size_t valueStart = pos + flag.size();
+    while (valueStart < cmd.size() &&
+           std::isspace(static_cast<unsigned char>(cmd[valueStart]))) {
+      ++valueStart;
+    }
+    if (valueStart >= cmd.size()) {
+      break;
+    }
+    size_t valueEnd = shellTokenEnd(cmd, valueStart);
+    cmd.replace(valueStart, valueEnd - valueStart, "<redacted>");
+    pos = valueStart + std::strlen("<redacted>");
+  }
+  return cmd;
+}
+
+std::string redactSensitiveCommandForLog(const std::string &cmd) {
+  std::string out = redactFlagValue(cmd, "--admin-token");
+  out = redactFlagValue(out, "--token");
+  out = redactFlagValue(out, "--private-key");
+  return out;
+}
+
+bool isSecureRepoRootCandidate(const std::filesystem::path &root) {
+  std::error_code ec;
+  if (!std::filesystem::exists(root, ec) || ec) {
+    return false;
+  }
+  if (!std::filesystem::is_directory(root, ec) || ec) {
+    return false;
+  }
+  const std::filesystem::path scriptsDir = root / "scripts";
+  const std::filesystem::path scriptPath = scriptsDir / "easy_node.sh";
+  const auto symlinkInfo = std::filesystem::symlink_status(scriptPath, ec);
+  if (ec || symlinkInfo.type() == std::filesystem::file_type::not_found ||
+      symlinkInfo.type() == std::filesystem::file_type::symlink) {
+    return false;
+  }
+  if (!std::filesystem::is_regular_file(scriptPath, ec) || ec) {
+    return false;
+  }
+  return true;
+}
+
+std::string canonicalPathString(const std::filesystem::path &path) {
+  std::error_code ec;
+  const auto canonical = std::filesystem::weakly_canonical(path, ec);
+  if (!ec) {
+    return canonical.string();
+  }
+  const auto absolute = std::filesystem::absolute(path, ec);
+  if (!ec) {
+    return absolute.string();
+  }
+  return path.string();
+}
+
+std::string findRepoRootFromStart(std::filesystem::path start) {
+  if (start.empty()) {
+    return "";
+  }
+  std::error_code ec;
+  start = std::filesystem::absolute(start, ec);
+  if (ec) {
+    ec.clear();
+    start = std::filesystem::path(start).lexically_normal();
+  }
+  for (int i = 0; i < 10; ++i) {
+    if (isSecureRepoRootCandidate(start)) {
+      return canonicalPathString(start);
+    }
+    if (!start.has_parent_path()) {
+      break;
+    }
+    std::filesystem::path parent = start.parent_path();
+    if (parent == start) {
+      break;
+    }
+    start = parent;
+  }
+  return "";
+}
+
 bool commandExists(const std::string &name);
 
 int normalizeProcessStatus(int rawStatus) {
@@ -119,7 +280,10 @@ std::string findExecutableOnPath(const std::string &name) {
   std::stringstream pathStream(pathEnv);
   std::string entry;
   while (std::getline(pathStream, entry, ':')) {
-    std::filesystem::path dir = entry.empty() ? std::filesystem::current_path() : std::filesystem::path(entry);
+    if (entry.empty()) {
+      continue;
+    }
+    std::filesystem::path dir = std::filesystem::path(entry);
     std::filesystem::path full = dir / name;
     if (isExecutableFile(full)) {
       return full.string();
@@ -130,6 +294,19 @@ std::string findExecutableOnPath(const std::string &name) {
 
 std::string preferredShellPath() {
   static const std::string resolved = []() -> std::string {
+    for (const char *candidate : {
+             "/bin/bash",
+             "/usr/bin/bash",
+             "/bin/sh",
+             "/usr/bin/sh",
+             "/bin/zsh",
+             "/usr/bin/zsh",
+         }) {
+      if (isExecutableFile(candidate)) {
+        return std::string(candidate);
+      }
+    }
+
     const char *overrideShell = std::getenv("PRIVACYNODE_LAUNCHER_SHELL");
     if (overrideShell && *overrideShell) {
       std::string found = findExecutableOnPath(overrideShell);
@@ -153,6 +330,18 @@ std::string preferredShellPath() {
       }
     }
     return "";
+  }();
+  return resolved;
+}
+
+std::string preferredSudoPath() {
+  static const std::string resolved = []() -> std::string {
+    for (const char *candidate : {"/usr/bin/sudo", "/bin/sudo"}) {
+      if (isExecutableFile(candidate)) {
+        return std::string(candidate);
+      }
+    }
+    return findExecutableOnPath("sudo");
   }();
   return resolved;
 }
@@ -225,8 +414,29 @@ std::string captureShellCommandOutput(const std::string &cmd) {
 }
 
 int runCommand(const std::string &cmd) {
-  std::cout << "\n$ " << cmd << "\n\n" << std::flush;
-  int rc = executeShellCommand(cmd);
+  std::string execCmd = trim(cmd);
+  size_t sudoPrefixEnd = 0;
+  if (execCmd.size() >= 5 && execCmd.rfind("sudo ", 0) == 0) {
+    sudoPrefixEnd = 5;
+  } else if (execCmd.size() >= 6 && execCmd.rfind("sudo\t", 0) == 0) {
+    sudoPrefixEnd = 5;
+  }
+  if (sudoPrefixEnd > 0) {
+    const std::string sudoPath = preferredSudoPath();
+    if (sudoPath.empty()) {
+      std::cout << "sudo is not available in this environment.\n";
+      return 127;
+    }
+    while (sudoPrefixEnd < execCmd.size() &&
+           std::isspace(static_cast<unsigned char>(execCmd[sudoPrefixEnd]))) {
+      ++sudoPrefixEnd;
+    }
+    execCmd = shellEscape(sudoPath) + " " + execCmd.substr(sudoPrefixEnd);
+  }
+
+  const std::string logCmd = redactSensitiveCommandForLog(execCmd);
+  std::cout << "\n$ " << logCmd << "\n\n" << std::flush;
+  int rc = executeShellCommand(execCmd);
   if (rc == 127 && preferredShellPath().empty()) {
     std::cout << "no usable shell found in PATH for launcher command execution\n";
   } else if (rc == -1) {
@@ -244,7 +454,7 @@ int runCommand(const std::string &cmd) {
 }
 
 bool ensureSudoAvailable(const std::string &context) {
-  if (commandExists("sudo")) {
+  if (!preferredSudoPath().empty()) {
     return true;
   }
   std::cout << "sudo is not available for " << context
@@ -431,22 +641,32 @@ std::string executableDir() {
 }
 
 std::string detectRepoRoot() {
-  const char *env = std::getenv("PRIVACYNODE_ROOT");
-  if (env && *env) {
-    return std::string(env);
-  }
-
   std::string exedir = executableDir();
   if (!exedir.empty()) {
-    std::filesystem::path p = std::filesystem::path(exedir).parent_path();
-    if (std::filesystem::exists(p / "scripts" / "easy_node.sh")) {
-      return p.string();
+    std::string fromExe = findRepoRootFromStart(exedir);
+    if (!fromExe.empty()) {
+      return fromExe;
     }
   }
 
-  std::filesystem::path cwd = std::filesystem::current_path();
-  if (std::filesystem::exists(cwd / "scripts" / "easy_node.sh")) {
-    return cwd.string();
+  const char *env = std::getenv("PRIVACYNODE_ROOT");
+  if (env && *env) {
+    if (!envBoolEnabled("PRIVACYNODE_ALLOW_ENV_ROOT")) {
+      std::cerr << "ignoring PRIVACYNODE_ROOT; set PRIVACYNODE_ALLOW_ENV_ROOT=1 to opt in\n";
+    } else {
+      std::string fromEnv = findRepoRootFromStart(std::filesystem::path(env));
+      if (!fromEnv.empty()) {
+        return fromEnv;
+      }
+      std::cerr << "PRIVACYNODE_ROOT did not resolve to a secure repo root candidate\n";
+    }
+  }
+
+  if (envBoolEnabled("PRIVACYNODE_ALLOW_CWD_ROOT")) {
+    std::string fromCwd = findRepoRootFromStart(std::filesystem::current_path());
+    if (!fromCwd.empty()) {
+      return fromCwd;
+    }
   }
 
   return "";
@@ -495,9 +715,9 @@ struct EasyModeConfigV1 {
   std::string clientReadyTimeoutSec = "35";
   bool clientRunPreflight = true;
   bool clientOpenTerminal = false;
-  bool clientPreflightUseSudo = true;
-  bool clientSessionUseSudo = true;
-  bool clientPromptRealVPNInSimple = false;
+  bool clientPreflightUseSudo = false;
+  bool clientSessionUseSudo = false;
+  bool clientPromptRealVPNInSimple = true;
 
   bool serverProdProfileDefault = true;
   bool serverRunPreflight = true;
@@ -936,13 +1156,64 @@ bool saveABHosts(const std::string &root, const ABHosts &hosts) {
   std::error_code ec;
   std::filesystem::create_directories(dataDir, ec);
 
-  std::ofstream out(hostsConfigPath(root), std::ios::trunc);
-  if (!out.is_open()) {
+  const std::filesystem::path configPath = hostsConfigPath(root);
+  const auto symlinkInfo = std::filesystem::symlink_status(configPath, ec);
+  if (!ec && symlinkInfo.type() == std::filesystem::file_type::symlink) {
     return false;
   }
-  out << "MACHINE_A_HOST=" << hosts.aHost << "\n";
-  out << "MACHINE_B_HOST=" << hosts.bHost << "\n";
-  return true;
+  if (!ec && symlinkInfo.type() != std::filesystem::file_type::not_found &&
+      symlinkInfo.type() != std::filesystem::file_type::regular) {
+    return false;
+  }
+
+  std::ostringstream content;
+  content << "MACHINE_A_HOST=" << hosts.aHost << "\n";
+  content << "MACHINE_B_HOST=" << hosts.bHost << "\n";
+
+  std::filesystem::path tmpTemplate = configPath.parent_path() / ".hosts.tmp.XXXXXX";
+  std::string tmpTemplateStr = tmpTemplate.string();
+  std::vector<char> tmpPathBuf(tmpTemplateStr.begin(), tmpTemplateStr.end());
+  tmpPathBuf.push_back('\0');
+  int fd = mkstemp(tmpPathBuf.data());
+  if (fd < 0) {
+    return false;
+  }
+  bool ok = true;
+  const std::string payload = content.str();
+  size_t written = 0;
+  while (written < payload.size()) {
+    ssize_t n = write(fd, payload.data() + written, payload.size() - written);
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      ok = false;
+      break;
+    }
+    written += static_cast<size_t>(n);
+  }
+  if (ok && fsync(fd) != 0) {
+    ok = false;
+  }
+  if (fchmod(fd, 0644) != 0) {
+    ok = false;
+  }
+  if (close(fd) != 0) {
+    ok = false;
+  }
+  const std::filesystem::path tmpPath(tmpPathBuf.data());
+  if (ok) {
+    std::error_code renameEc;
+    std::filesystem::rename(tmpPath, configPath, renameEc);
+    if (renameEc) {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    std::error_code removeEc;
+    std::filesystem::remove(tmpPath, removeEc);
+  }
+  return ok;
 }
 
 bool hasBothHosts(const ABHosts &hosts) {
@@ -3797,7 +4068,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         cmd << " --summary-json " << shellEscape(summaryJson);
       }
       if (!extraArgs.empty()) {
-        cmd << " -- " << extraArgs;
+        if (!appendUserExtraArgs(cmd, extraArgs, true)) {
+          std::cout << "invalid extra args: newline characters are not allowed\n";
+          continue;
+        }
       }
       runCommand(cmd.str());
       continue;
@@ -3945,7 +4219,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                  << " --summary-json " << shellEscape(summaryJson)
                  << " --print-summary-json " << (printRunbookSummary ? "1" : "0");
       if (!extraArgs.empty()) {
-        runbookCmd << " -- " << extraArgs;
+        if (!appendUserExtraArgs(runbookCmd, extraArgs, true)) {
+          std::cout << "invalid extra args: newline characters are not allowed\n";
+          continue;
+        }
       }
 
       int runbookRc = runCommand(runbookCmd.str());
@@ -4053,7 +4330,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         cmd << " --run-report-json " << shellEscape(runReportJson);
       }
       if (!extraArgs.empty()) {
-        cmd << " -- " << extraArgs;
+        if (!appendUserExtraArgs(cmd, extraArgs, true)) {
+          std::cout << "invalid extra args: newline characters are not allowed\n";
+          continue;
+        }
       }
       runCommand(cmd.str());
       continue;
@@ -4498,7 +4778,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         cmd << " --dashboard-md " << shellEscape(dashboardMd);
       }
       if (!extraArgs.empty()) {
-        cmd << " -- " << extraArgs;
+        if (!appendUserExtraArgs(cmd, extraArgs, true)) {
+          std::cout << "invalid extra args: newline characters are not allowed\n";
+          continue;
+        }
       }
       runCommand(cmd.str());
       continue;
@@ -4537,7 +4820,10 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         cmd << " --campaign-signoff-summary-json " << shellEscape(campaignSignoffSummaryJson);
       }
       if (!extraArgs.empty()) {
-        cmd << " " << extraArgs;
+        if (!appendUserExtraArgs(cmd, extraArgs, false)) {
+          std::cout << "invalid extra args: newline characters are not allowed\n";
+          continue;
+        }
       }
       runCommand(cmd.str());
       continue;
@@ -5397,7 +5683,9 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
 int main() {
   std::string root = detectRepoRoot();
   if (root.empty()) {
-    std::cerr << "could not detect repo root; run from repo root or set PRIVACYNODE_ROOT\n";
+    std::cerr << "could not detect repo root; rerun from a trusted launcher location.\n";
+    std::cerr << "optional overrides: PRIVACYNODE_ALLOW_ENV_ROOT=1 with PRIVACYNODE_ROOT=<repo>, "
+                 "or PRIVACYNODE_ALLOW_CWD_ROOT=1\n";
     return 1;
   }
 

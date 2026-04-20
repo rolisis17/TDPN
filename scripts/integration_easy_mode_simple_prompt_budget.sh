@@ -117,6 +117,7 @@ run_ui() {
   local prompt_trace="$3"
   EASY_MODE_RUNTIME_CAPTURE_FILE="$CAPTURE" \
   EASY_MODE_PROMPT_TRACE_FILE="$prompt_trace" \
+  PRIVACYNODE_ALLOW_ENV_ROOT=1 \
   PRIVACYNODE_ROOT="$TMP_ROOT" \
   "$BIN" <"$input_file" >"$out_file" 2>&1
 }

@@ -12,6 +12,7 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 # running ci_local.sh does not leave working-tree noise.
 CI_LOCAL_STATE_DIR="$(mktemp -d)"
 declare -a CI_LOCAL_TRACKED_STATE_FILES=()
+CI_LOCAL_DEMO_LOG=""
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   while IFS= read -r rel; do
     [[ -z "$rel" ]] && continue
@@ -36,6 +37,9 @@ ci_local_restore_tracked_state() {
         rm -f "$rel" || restore_errors=$((restore_errors + 1))
       fi
     done
+  fi
+  if [[ -n "${CI_LOCAL_DEMO_LOG:-}" ]]; then
+    rm -f "$CI_LOCAL_DEMO_LOG" || restore_errors=$((restore_errors + 1))
   fi
   rm -rf "$CI_LOCAL_STATE_DIR"
   set -e
@@ -341,20 +345,21 @@ echo "[ci] wg-only stack wiring integration"
 ./scripts/integration_wg_only_stack_wiring.sh
 
 echo "[ci] internal topology smoke"
-DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >/tmp/ci_demo.log 2>&1 || true
-if ! rg -q "exit accepted opaque packet" /tmp/ci_demo.log; then
+CI_LOCAL_DEMO_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_demo.XXXXXX.log")"
+DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >"$CI_LOCAL_DEMO_LOG" 2>&1 || true
+if ! rg -q "exit accepted opaque packet" "$CI_LOCAL_DEMO_LOG"; then
   echo "[ci] missing expected packet acceptance log"
-  cat /tmp/ci_demo.log
+  cat "$CI_LOCAL_DEMO_LOG"
   exit 1
 fi
-if ! rg -q "wgiotap packets=" /tmp/ci_demo.log; then
+if ! rg -q "wgiotap packets=" "$CI_LOCAL_DEMO_LOG"; then
   echo "[ci] missing expected tap stats log"
-  cat /tmp/ci_demo.log
+  cat "$CI_LOCAL_DEMO_LOG"
   exit 1
 fi
-if ! rg -q "(client downlink opaque packets|client forwarded opaque udp packets count=)" /tmp/ci_demo.log; then
+if ! rg -q "(client downlink opaque packets|client forwarded opaque udp packets count=)" "$CI_LOCAL_DEMO_LOG"; then
   echo "[ci] missing expected client relay/downlink log"
-  cat /tmp/ci_demo.log
+  cat "$CI_LOCAL_DEMO_LOG"
   exit 1
 fi
 

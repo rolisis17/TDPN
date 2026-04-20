@@ -235,6 +235,7 @@ run_ui() {
   local input_file="$1"
   local out_file="$2"
   EASY_MODE_RUNTIME_CAPTURE_FILE="$CAPTURE" \
+  PRIVACYNODE_ALLOW_ENV_ROOT=1 \
   PRIVACYNODE_ROOT="$TMP_ROOT" \
   "$BIN" <"$input_file" >"$out_file" 2>&1
 }

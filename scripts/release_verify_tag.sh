@@ -34,6 +34,7 @@ version=""
 require_head_match=0
 require_signature=0
 require_contained_in_ref=""
+signature_verify_log=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -126,9 +127,11 @@ if [[ -n "$require_contained_in_ref" ]]; then
 fi
 
 if [[ "$require_signature" == "1" ]]; then
-  if ! git tag -v "$version" >/tmp/release_verify_tag_signature.log 2>&1; then
+  signature_verify_log="$(mktemp "${TMPDIR:-/tmp}/release_verify_tag_signature.XXXXXX.log")"
+  trap '[[ -n "${signature_verify_log:-}" ]] && rm -f "$signature_verify_log"' EXIT
+  if ! git tag -v "$version" >"$signature_verify_log" 2>&1; then
     echo "tag signature verification failed for ${version}"
-    cat /tmp/release_verify_tag_signature.log
+    cat "$signature_verify_log"
     exit 1
   fi
 fi

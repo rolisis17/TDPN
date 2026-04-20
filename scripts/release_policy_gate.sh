@@ -38,6 +38,7 @@ release_dir=""
 require_tag_exists=0
 require_tag_notes=0
 min_binaries=1
+checksum_verify_log=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -156,15 +157,19 @@ for bin_file in "${bin_files[@]}"; do
 done
 
 if command -v sha256sum >/dev/null 2>&1; then
-  if ! sha256sum -c "$checksum_path" >/tmp/release_policy_gate_checksums.log 2>&1; then
+  checksum_verify_log="$(mktemp "${TMPDIR:-/tmp}/release_policy_gate_checksums.XXXXXX.log")"
+  trap '[[ -n "${checksum_verify_log:-}" ]] && rm -f "$checksum_verify_log"' EXIT
+  if ! sha256sum -c "$checksum_path" >"$checksum_verify_log" 2>&1; then
     echo "checksum verification failed (sha256sum -c)"
-    cat /tmp/release_policy_gate_checksums.log
+    cat "$checksum_verify_log"
     exit 1
   fi
 else
-  if ! shasum -a 256 -c "$checksum_path" >/tmp/release_policy_gate_checksums.log 2>&1; then
+  checksum_verify_log="$(mktemp "${TMPDIR:-/tmp}/release_policy_gate_checksums.XXXXXX.log")"
+  trap '[[ -n "${checksum_verify_log:-}" ]] && rm -f "$checksum_verify_log"' EXIT
+  if ! shasum -a 256 -c "$checksum_path" >"$checksum_verify_log" 2>&1; then
     echo "checksum verification failed (shasum -a 256 -c)"
-    cat /tmp/release_policy_gate_checksums.log
+    cat "$checksum_verify_log"
     exit 1
   fi
 fi
