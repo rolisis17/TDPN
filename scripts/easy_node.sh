@@ -239,6 +239,7 @@ Usage:
   ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-node [--platform windows] [desktop_node args...]
   ./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]
   ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
@@ -264,6 +265,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-windows-node [desktop_node args...]
   ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
   ./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]
   ./scripts/easy_node.sh desktop-windows-install-launch [desktop_installer args...]
@@ -409,6 +411,7 @@ Usage:
   ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-node [--platform windows] [desktop_node args...]
   ./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]
   ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
@@ -434,6 +437,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-windows-node [desktop_node args...]
   ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
   ./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]
   ./scripts/easy_node.sh desktop-windows-install-launch [desktop_installer args...]
@@ -8930,6 +8934,48 @@ desktop_windows_shell() {
   run_desktop_wrapper_script "$script" "$@"
 }
 
+desktop_windows_node() {
+  local script="${DESKTOP_WINDOWS_NODE_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_node.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_node() {
+  local platform="windows"
+  local -a forwarded=()
+  local arg=""
+
+  while (($#)); do
+    arg="$1"
+    case "$arg" in
+      --platform)
+        shift
+        if (($# == 0)); then
+          echo "desktop-node requires --platform windows" >&2
+          return 2
+        fi
+        platform="$1"
+        ;;
+      --platform=*)
+        platform="${arg#--platform=}"
+        ;;
+      *)
+        forwarded+=("$arg")
+        ;;
+    esac
+    shift
+  done
+
+  case "${platform,,}" in
+    windows)
+      desktop_windows_node "${forwarded[@]}"
+      ;;
+    *)
+      echo "invalid --platform value for desktop-node: $platform; expected windows" >&2
+      return 2
+      ;;
+  esac
+}
+
 desktop_shell() {
   local platform="windows"
   local -a forwarded=()
@@ -16080,6 +16126,10 @@ main() {
       shift
       desktop_generic_dispatch desktop-dev desktop_linux_dev desktop_windows_dev "$@"
       ;;
+    desktop-node)
+      shift
+      desktop_node "$@"
+      ;;
     desktop-shell)
       shift
       desktop_shell "$@"
@@ -16190,6 +16240,11 @@ main() {
       desktop_legacy_alias_hint desktop-windows-dev "desktop-dev --platform windows"
       shift
       desktop_windows_dev "$@"
+      ;;
+    desktop-windows-node)
+      desktop_legacy_alias_hint desktop-windows-node "desktop-node --platform windows"
+      shift
+      desktop_windows_node "$@"
       ;;
     desktop-windows-shell)
       desktop_legacy_alias_hint desktop-windows-shell "desktop-shell --platform windows"

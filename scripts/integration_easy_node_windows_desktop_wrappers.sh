@@ -33,6 +33,7 @@ NATIVE_BOOTSTRAP_GUARDRAILS_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap
 ONE_CLICK_FAKE="$TMP_DIR/fake_desktop_windows_one_click.sh"
 PACKAGED_RUN_FAKE="$TMP_DIR/fake_desktop_windows_packaged_run.sh"
 DEV_FAKE="$TMP_DIR/fake_desktop_windows_dev.sh"
+NODE_FAKE="$TMP_DIR/fake_desktop_windows_node.sh"
 SHELL_FAKE="$TMP_DIR/fake_desktop_windows_shell.sh"
 RELEASE_BUNDLE_FAKE="$TMP_DIR/fake_desktop_windows_release_bundle.sh"
 INSTALLER_FAKE="$TMP_DIR/fake_desktop_windows_installer.sh"
@@ -232,6 +233,7 @@ run_and_assert_wrapper() {
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
+    DESKTOP_WINDOWS_NODE_SCRIPT="$NODE_FAKE" \
     DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
     DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
@@ -258,6 +260,7 @@ run_and_assert_windows_platform_command() {
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
+    DESKTOP_WINDOWS_NODE_SCRIPT="$NODE_FAKE" \
     DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
     DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
@@ -274,6 +277,7 @@ create_fake_wrapper_script "$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" "desktop_windows_
 create_fake_wrapper_script "$ONE_CLICK_FAKE" "desktop_windows_one_click" "FAKE_WINDOWS_ONE_CLICK_RC"
 create_fake_wrapper_script "$PACKAGED_RUN_FAKE" "desktop_windows_packaged_run" "FAKE_WINDOWS_PACKAGED_RUN_RC"
 create_fake_wrapper_script "$DEV_FAKE" "desktop_windows_dev" "FAKE_WINDOWS_DEV_RC"
+create_fake_wrapper_script "$NODE_FAKE" "desktop_windows_node" "FAKE_WINDOWS_NODE_RC"
 create_fake_wrapper_script "$SHELL_FAKE" "desktop_windows_shell" "FAKE_WINDOWS_SHELL_RC"
 create_fake_wrapper_script "$RELEASE_BUNDLE_FAKE" "desktop_windows_release_bundle" "FAKE_WINDOWS_RELEASE_BUNDLE_RC"
 create_fake_wrapper_script "$INSTALLER_FAKE" "desktop_windows_installer" "FAKE_WINDOWS_INSTALLER_RC"
@@ -290,10 +294,12 @@ assert_help_contains "./scripts/easy_node.sh desktop-windows-native-bootstrap-gu
 assert_help_contains "./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-node [--platform windows] [desktop_node args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-windows-node [desktop_node args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]"
@@ -356,6 +362,21 @@ run_and_assert_wrapper \
   "-NoInstallMissing" \
   "--sample-flag" "desktop dev value with spaces"
 
+run_and_assert_windows_platform_command \
+  "desktop-node" \
+  "desktop_windows_node" \
+  "npm" \
+  "install" \
+  "--sample-flag" "desktop node generic value with spaces"
+
+run_and_assert_wrapper \
+  "desktop-windows-node" \
+  "desktop_windows_node" \
+  "npx" \
+  "--yes" \
+  "create-vite@latest" \
+  "--sample-flag" "desktop node value with spaces"
+
 run_and_assert_wrapper \
   "desktop-windows-shell" \
   "desktop_windows_shell" \
@@ -406,6 +427,7 @@ env \
   DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
   DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
   DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
+  DESKTOP_WINDOWS_NODE_SCRIPT="$NODE_FAKE" \
   DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
   DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
   DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
@@ -432,6 +454,7 @@ env \
   DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
   DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
   DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
+  DESKTOP_WINDOWS_NODE_SCRIPT="$NODE_FAKE" \
   DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
   DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
   DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
