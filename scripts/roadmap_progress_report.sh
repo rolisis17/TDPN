@@ -6203,7 +6203,7 @@ if [[ "$blockchain_mainnet_activation_gate_available_json" == "true" ]] \
   blockchain_mainnet_activation_refresh_evidence_available_json="true"
   blockchain_mainnet_activation_refresh_evidence_id_json="blockchain_mainnet_activation_refresh_evidence"
   blockchain_mainnet_activation_refresh_evidence_command="./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
-  blockchain_mainnet_activation_refresh_evidence_reason="stale activation evidence (age=${blockchain_mainnet_activation_gate_summary_age_sec_json:-null}s, max_age=${blockchain_mainnet_activation_gate_summary_max_age_sec_json}s); refresh before trusting the GO signal"
+  blockchain_mainnet_activation_refresh_evidence_reason="stale activation evidence (age=${blockchain_mainnet_activation_gate_summary_age_sec_json:-null}s, max_age=${blockchain_mainnet_activation_gate_summary_max_age_sec_json}s); operator action required: refresh real evidence before trusting the GO signal"
 fi
 
 blockchain_mainnet_activation_missing_metrics_action_available_json="false"
@@ -6292,6 +6292,50 @@ if [[ "$blockchain_mainnet_activation_missing_metrics_action_available_json" == 
       blockchain_mainnet_activation_missing_metrics_action_cycle_command=""
       blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=""
     blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command=""
+  fi
+fi
+
+blockchain_mainnet_activation_stale_evidence_status_json="unknown"
+case "$blockchain_mainnet_activation_gate_summary_stale_json" in
+  true)
+    blockchain_mainnet_activation_stale_evidence_status_json="stale"
+    ;;
+  false)
+    blockchain_mainnet_activation_stale_evidence_status_json="fresh"
+    ;;
+esac
+
+blockchain_mainnet_activation_stale_evidence_action_required_json="false"
+blockchain_mainnet_activation_stale_evidence_reason_json=""
+blockchain_mainnet_activation_stale_evidence_refresh_command_json=""
+if [[ "$blockchain_mainnet_activation_refresh_evidence_available_json" == "true" ]] \
+  && [[ -n "$blockchain_mainnet_activation_refresh_evidence_id_json" ]]; then
+  blockchain_mainnet_activation_stale_evidence_action_required_json="true"
+  blockchain_mainnet_activation_stale_evidence_reason_json="$blockchain_mainnet_activation_refresh_evidence_reason"
+  blockchain_mainnet_activation_stale_evidence_refresh_command_json="$blockchain_mainnet_activation_refresh_evidence_command"
+fi
+
+blockchain_recommended_gate_id=""
+blockchain_recommended_gate_reason=""
+blockchain_recommended_gate_command=""
+if [[ "$blockchain_mainnet_activation_missing_metrics_action_available_json" == "true" ]] \
+  && [[ -n "$blockchain_mainnet_activation_missing_metrics_action_id" ]]; then
+  blockchain_recommended_gate_id="$blockchain_mainnet_activation_missing_metrics_action_id"
+  blockchain_recommended_gate_reason="$blockchain_mainnet_activation_missing_metrics_action_reason"
+  if [[ -n "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" ]]; then
+    blockchain_recommended_gate_command="$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command"
+  else
+    blockchain_recommended_gate_command="$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command"
+  fi
+elif [[ "$blockchain_mainnet_activation_stale_evidence_action_required_json" == "true" ]]; then
+  blockchain_recommended_gate_id="$blockchain_mainnet_activation_refresh_evidence_id_json"
+  blockchain_recommended_gate_reason="$blockchain_mainnet_activation_stale_evidence_reason_json"
+  blockchain_recommended_gate_command="$blockchain_mainnet_activation_stale_evidence_refresh_command_json"
+  if [[ -z "$blockchain_mainnet_activation_missing_metrics_action_id" ]]; then
+    # Compatibility shim: existing blockchain actionable runners read this field
+    # for recommended-only mode. Keep missing_metrics.available=false and expose
+    # stale refresh action id here when stale evidence is the blocker.
+    blockchain_mainnet_activation_missing_metrics_action_id="$blockchain_recommended_gate_id"
   fi
 fi
 
@@ -7088,6 +7132,10 @@ summary_payload="$(jq -n \
   --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" \
   --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" \
   --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" \
+  --arg blockchain_mainnet_activation_stale_evidence_status "$blockchain_mainnet_activation_stale_evidence_status_json" \
+  --argjson blockchain_mainnet_activation_stale_evidence_action_required "$blockchain_mainnet_activation_stale_evidence_action_required_json" \
+  --arg blockchain_mainnet_activation_stale_evidence_reason "$blockchain_mainnet_activation_stale_evidence_reason_json" \
+  --arg blockchain_mainnet_activation_stale_evidence_refresh_command "$blockchain_mainnet_activation_stale_evidence_refresh_command_json" \
   --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
   --arg blockchain_mainnet_activation_missing_metrics_action_id "$blockchain_mainnet_activation_missing_metrics_action_id" \
   --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
@@ -7128,6 +7176,9 @@ summary_payload="$(jq -n \
   --arg blockchain_track_status "$blockchain_track_status" \
   --arg blockchain_track_policy "$blockchain_track_policy" \
   --arg blockchain_track_recommendation "$blockchain_track_recommendation" \
+  --arg blockchain_recommended_gate_id "$blockchain_recommended_gate_id" \
+  --arg blockchain_recommended_gate_reason "$blockchain_recommended_gate_reason" \
+  --arg blockchain_recommended_gate_command "$blockchain_recommended_gate_command" \
   --arg refresh_manual_validation_status "$manual_refresh_status" \
   --argjson refresh_manual_validation_rc "$manual_refresh_rc" \
   --argjson refresh_manual_validation_timed_out "$manual_refresh_timed_out" \
@@ -7329,6 +7380,9 @@ summary_payload="$(jq -n \
       status: $blockchain_track_status,
       policy: $blockchain_track_policy,
       recommendation: $blockchain_track_recommendation,
+      recommended_gate_id: (if $blockchain_recommended_gate_id == "" then null else $blockchain_recommended_gate_id end),
+      recommended_gate_reason: (if $blockchain_recommended_gate_reason == "" then null else $blockchain_recommended_gate_reason end),
+      recommended_gate_command: (if $blockchain_recommended_gate_command == "" then null else $blockchain_recommended_gate_command end),
       phase6_cosmos_l1_handoff: {
         available: $phase6_cosmos_l1_handoff_available,
         input_summary_json: (if $phase6_cosmos_l1_handoff_input_summary_json == "" then null else $phase6_cosmos_l1_handoff_input_summary_json end),
@@ -7431,6 +7485,12 @@ summary_payload="$(jq -n \
         id: (if $blockchain_mainnet_activation_refresh_evidence_command == "" then null else "blockchain_mainnet_activation_refresh_evidence" end),
         reason: (if $blockchain_mainnet_activation_refresh_evidence_reason == "" then null else $blockchain_mainnet_activation_refresh_evidence_reason end),
         command: (if $blockchain_mainnet_activation_refresh_evidence_command == "" then null else $blockchain_mainnet_activation_refresh_evidence_command end)
+      },
+      mainnet_activation_stale_evidence: {
+        status: (if $blockchain_mainnet_activation_stale_evidence_status == "" then "unknown" else $blockchain_mainnet_activation_stale_evidence_status end),
+        action_required: $blockchain_mainnet_activation_stale_evidence_action_required,
+        reason: (if $blockchain_mainnet_activation_stale_evidence_reason == "" then null else $blockchain_mainnet_activation_stale_evidence_reason end),
+        refresh_command: (if $blockchain_mainnet_activation_stale_evidence_refresh_command == "" then null else $blockchain_mainnet_activation_stale_evidence_refresh_command end)
       }
     },
     refresh: {
@@ -7629,6 +7689,9 @@ $pending_real_host_checks_md
 - Status: $(jq -r '.blockchain_track.status' "$summary_json")
 - Policy: $(jq -r '.blockchain_track.policy' "$summary_json")
 - Recommendation: $(jq -r '.blockchain_track.recommendation' "$summary_json")
+- Blockchain recommended actionable gate id: $(jq -r '.blockchain_track.recommended_gate_id // "none"' "$summary_json")
+- Blockchain recommended actionable gate reason: $(jq -r '.blockchain_track.recommended_gate_reason // "none"' "$summary_json")
+- Blockchain recommended actionable gate command: $(jq -r '.blockchain_track.recommended_gate_command // "none"' "$summary_json")
 - Phase-6 Cosmos L1 handoff available: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.available' "$summary_json")
 - Phase-6 Cosmos L1 handoff input: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.input_summary_json // "none"' "$summary_json")
 - Phase-6 Cosmos L1 handoff source: $(jq -r '.blockchain_track.phase6_cosmos_l1_handoff.source_summary_json // "none"' "$summary_json")
@@ -7677,6 +7740,10 @@ $pending_real_host_checks_md
 - Mainnet activation gate summary age_sec: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_age_sec // "null"' "$summary_json")
 - Mainnet activation gate summary stale: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_stale | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation gate summary max_age_sec: $(jq -r '.blockchain_track.mainnet_activation_gate.summary_max_age_sec // "null"' "$summary_json")
+- Mainnet activation stale evidence status: $(jq -r '.blockchain_track.mainnet_activation_stale_evidence.status // "unknown"' "$summary_json")
+- Mainnet activation stale evidence action required: $(jq -r '.blockchain_track.mainnet_activation_stale_evidence.action_required | if . == null then "null" else tostring end' "$summary_json")
+- Mainnet activation stale evidence reason: $(jq -r '.blockchain_track.mainnet_activation_stale_evidence.reason // "none"' "$summary_json")
+- Mainnet activation stale evidence refresh command: $(jq -r '.blockchain_track.mainnet_activation_stale_evidence.refresh_command // "none"' "$summary_json")
 - Mainnet activation refresh evidence action available: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.available | if . == null then "null" else tostring end' "$summary_json")
 - Mainnet activation refresh evidence action id: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.id // "none"' "$summary_json")
 - Mainnet activation refresh evidence action reason: $(jq -r '.blockchain_track.mainnet_activation_refresh_evidence_action.reason // "none"' "$summary_json")
@@ -7786,6 +7853,8 @@ echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json mainnet_activation_gate_go_ok_source=${phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json:-} bootstrap_governance_graduation_gate_go_ok=$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json bootstrap_governance_graduation_gate_go_ok_source=${phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json:-} tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json summary_generated_at=${blockchain_mainnet_activation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_mainnet_activation_gate_summary_age_sec_json:-} summary_stale=${blockchain_mainnet_activation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_mainnet_activation_gate_summary_max_age_sec_json:-}"
 echo "[roadmap-progress-report] mainnet_activation_refresh_evidence_available=$blockchain_mainnet_activation_refresh_evidence_available_json action_id=${blockchain_mainnet_activation_refresh_evidence_id_json:-} reason=${blockchain_mainnet_activation_refresh_evidence_reason:-} command=${blockchain_mainnet_activation_refresh_evidence_command:-}"
+echo "[roadmap-progress-report] mainnet_activation_stale_evidence_status=$blockchain_mainnet_activation_stale_evidence_status_json action_required=$blockchain_mainnet_activation_stale_evidence_action_required_json reason=${blockchain_mainnet_activation_stale_evidence_reason_json:-} refresh_command=${blockchain_mainnet_activation_stale_evidence_refresh_command_json:-}"
+echo "[roadmap-progress-report] blockchain_recommended_gate_id=${blockchain_recommended_gate_id:-} reason=${blockchain_recommended_gate_reason:-} command=${blockchain_recommended_gate_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_available=$blockchain_mainnet_activation_missing_metrics_action_available_json action_id=${blockchain_mainnet_activation_missing_metrics_action_id:-} reason=${blockchain_mainnet_activation_missing_metrics_action_reason:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-} rerun_bundle_command=${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_checklist_command=${blockchain_mainnet_activation_missing_metrics_action_checklist_command:-}"

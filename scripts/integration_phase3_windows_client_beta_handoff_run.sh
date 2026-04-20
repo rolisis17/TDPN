@@ -182,6 +182,10 @@ failure_kind="none"
 policy_decision="GO"
 actionable_count=0
 recommended_gate_id_json="null"
+effective_policy_relaxed_json="false"
+effective_strict_readiness_ok_json="true"
+effective_status="pass"
+effective_reason_json="null"
 if [[ "${FAKE_HANDOFF_FAIL:-0}" == "1" ]]; then
   status="fail"
   rc="${FAKE_HANDOFF_FAIL_RC:-19}"
@@ -189,6 +193,15 @@ if [[ "${FAKE_HANDOFF_FAIL:-0}" == "1" ]]; then
   policy_decision="NO-GO"
   actionable_count=1
   recommended_gate_id_json="\"phase3_windows_client_beta_run_pipeline_gate\""
+  effective_strict_readiness_ok_json="false"
+  effective_status="fail"
+  effective_reason_json="\"top_level_policy_no_go\""
+fi
+if [[ "${FAKE_HANDOFF_EFFECTIVE_RELAXED:-0}" == "1" ]]; then
+  effective_policy_relaxed_json="true"
+  effective_strict_readiness_ok_json="false"
+  effective_status="warn_relaxed_policy"
+  effective_reason_json="\"strict_readiness_gap_relaxed_policy\""
 fi
 
 if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
@@ -232,6 +245,12 @@ if [[ -n "$summary_json" && "${FAKE_HANDOFF_OMIT_SUMMARY:-0}" != "1" ]]; then
   "policy_outcome": {
     "decision": "$policy_decision",
     "fail_closed_no_go": $( [[ "$failure_kind" == "policy_no_go" ]] && printf '%s' "true" || printf '%s' "false" )
+  },
+  "effective": {
+    "policy_relaxed": $effective_policy_relaxed_json,
+    "strict_readiness_ok": $effective_strict_readiness_ok_json,
+    "status": "$effective_status",
+    "reason": $effective_reason_json
   }
 }
 EOF_SUMMARY
@@ -301,6 +320,10 @@ if ! jq -e --arg run_summary "$TMP_DIR/pass_run_summary.json" --arg handoff_summ
   and .steps.phase3_windows_client_beta_handoff_check.policy_outcome.decision == "GO"
   and .steps.phase3_windows_client_beta_handoff_check.actionable.count == 0
   and .steps.phase3_windows_client_beta_handoff_check.actionable.recommended_gate_id == null
+  and .steps.phase3_windows_client_beta_handoff_check.effective.policy_relaxed == false
+  and .steps.phase3_windows_client_beta_handoff_check.effective.strict_readiness_ok == true
+  and .steps.phase3_windows_client_beta_handoff_check.effective.status == "pass"
+  and .steps.phase3_windows_client_beta_handoff_check.effective.reason == null
   and .steps.phase3_windows_client_beta_handoff_check.artifacts.summary_json == $handoff_summary
 ' "$PASS_WRAPPER_SUMMARY" >/dev/null; then
   echo "pass-path combined summary mismatch"
@@ -314,6 +337,7 @@ DRY_WRAPPER_SUMMARY="$TMP_DIR/dry_wrapper.json"
 PHASE3_HANDOFF_RUN_CAPTURE_FILE="$CAPTURE" \
 PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_RUN_SCRIPT="$FAKE_RUN" \
 PHASE3_WINDOWS_CLIENT_BETA_HANDOFF_RUN_HANDOFF_CHECK_SCRIPT="$FAKE_HANDOFF" \
+FAKE_HANDOFF_EFFECTIVE_RELAXED=1 \
 bash "$RUNNER" \
   --reports-dir "$TMP_DIR/reports_dry" \
   --run-summary-json "$TMP_DIR/dry_run_summary.json" \
@@ -351,6 +375,10 @@ if ! jq -e '
   and .steps.phase3_windows_client_beta_handoff_check.failure.kind == "none"
   and .steps.phase3_windows_client_beta_handoff_check.policy_outcome.decision == "GO"
   and .steps.phase3_windows_client_beta_handoff_check.actionable.count == 0
+  and .steps.phase3_windows_client_beta_handoff_check.effective.policy_relaxed == true
+  and .steps.phase3_windows_client_beta_handoff_check.effective.strict_readiness_ok == false
+  and .steps.phase3_windows_client_beta_handoff_check.effective.status == "warn_relaxed_policy"
+  and .steps.phase3_windows_client_beta_handoff_check.effective.reason == "strict_readiness_gap_relaxed_policy"
 ' "$DRY_WRAPPER_SUMMARY" >/dev/null; then
   echo "dry-run wrapper summary mismatch"
   cat "$DRY_WRAPPER_SUMMARY"
@@ -580,6 +608,10 @@ if ! jq -e '
   and .steps.phase3_windows_client_beta_handoff_check.failure.kind == "none"
   and .steps.phase3_windows_client_beta_handoff_check.policy_outcome.decision == "GO"
   and .steps.phase3_windows_client_beta_handoff_check.actionable.count == 0
+  and .steps.phase3_windows_client_beta_handoff_check.effective.policy_relaxed == false
+  and .steps.phase3_windows_client_beta_handoff_check.effective.strict_readiness_ok == true
+  and .steps.phase3_windows_client_beta_handoff_check.effective.status == "pass"
+  and .steps.phase3_windows_client_beta_handoff_check.effective.reason == null
 ' "$FAIL_WRAPPER_SUMMARY" >/dev/null; then
   echo "run-failure summary mismatch"
   cat "$FAIL_WRAPPER_SUMMARY"

@@ -1030,10 +1030,18 @@ if ! jq -e --arg fresh_iso "$fresh_iso" '
   and (.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec | tonumber) <= 3705
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_stale == false
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_max_age_sec == 86400
+  and .blockchain_track.mainnet_activation_stale_evidence.status == "fresh"
+  and .blockchain_track.mainnet_activation_stale_evidence.action_required == false
+  and .blockchain_track.mainnet_activation_stale_evidence.reason == null
+  and .blockchain_track.mainnet_activation_stale_evidence.refresh_command == null
   and .blockchain_track.mainnet_activation_refresh_evidence_action.available == false
   and .blockchain_track.mainnet_activation_refresh_evidence_action.id == null
   and .blockchain_track.mainnet_activation_refresh_evidence_action.reason == null
   and .blockchain_track.mainnet_activation_refresh_evidence_action.command == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == null
+  and .blockchain_track.recommended_gate_id == null
+  and .blockchain_track.recommended_gate_reason == null
+  and .blockchain_track.recommended_gate_command == null
   and (((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence")) | not)
 ' "$FRESH_SUMMARY_JSON" >/dev/null; then
   echo "fresh blockchain freshness summary missing expected fields"
@@ -1072,14 +1080,48 @@ if ! jq -e --arg stale_reason "stale activation evidence" '
   and .blockchain_track.mainnet_activation_gate.summary_stale == true
   and .blockchain_track.mainnet_activation_gate.summary_max_age_sec == 86400
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_stale == false
+  and .blockchain_track.mainnet_activation_stale_evidence.status == "stale"
+  and .blockchain_track.mainnet_activation_stale_evidence.action_required == true
+  and ((.blockchain_track.mainnet_activation_stale_evidence.reason // "") | contains($stale_reason))
+  and .blockchain_track.mainnet_activation_stale_evidence.refresh_command == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
   and .blockchain_track.mainnet_activation_refresh_evidence_action.available == true
   and .blockchain_track.mainnet_activation_refresh_evidence_action.id == "blockchain_mainnet_activation_refresh_evidence"
   and ((.blockchain_track.mainnet_activation_refresh_evidence_action.reason // "") | contains($stale_reason))
   and (.blockchain_track.mainnet_activation_refresh_evidence_action.command // "") == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
-  and ((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence"))
+  and .blockchain_track.mainnet_activation_missing_metrics_action.available == false
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == "blockchain_mainnet_activation_refresh_evidence"
+  and .blockchain_track.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
+  and ((.blockchain_track.recommended_gate_reason // "") | contains($stale_reason))
+  and .blockchain_track.recommended_gate_command == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
+  and ((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence" and ((.reason // "") | contains($stale_reason))))
 ' "$STALE_SUMMARY_JSON" >/dev/null; then
   echo "stale blockchain freshness summary missing expected refresh action"
   cat "$STALE_SUMMARY_JSON"
+  exit 1
+fi
+if ! rg -q 'Blockchain recommended actionable gate id: blockchain_mainnet_activation_refresh_evidence' "$STALE_REPORT_MD"; then
+  echo "stale blockchain report missing recommended actionable gate id line"
+  cat "$STALE_REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Mainnet activation stale evidence action required: true' "$STALE_REPORT_MD"; then
+  echo "stale blockchain report missing stale evidence action-required line"
+  cat "$STALE_REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Mainnet activation stale evidence refresh command: ./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run ' "$STALE_REPORT_MD"; then
+  echo "stale blockchain report missing stale evidence refresh command line"
+  cat "$STALE_REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'mainnet_activation_stale_evidence_status=stale action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
+  echo "stale blockchain freshness log missing stale evidence operator-action line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
+  exit 1
+fi
+if ! rg -q 'blockchain_recommended_gate_id=blockchain_mainnet_activation_refresh_evidence' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
+  echo "stale blockchain freshness log missing recommended gate line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
   exit 1
 fi
 

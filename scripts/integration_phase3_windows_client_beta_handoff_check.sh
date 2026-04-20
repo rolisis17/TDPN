@@ -195,6 +195,10 @@ if ! jq -e '
   and .handoff.failure_semantics.launcher_runtime_ok.kind == "none"
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "none"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == true
+  and .effective.status == "pass"
+  and .effective.reason == null
   and .policy_outcome.decision == "GO"
   and .policy_outcome.fail_closed_no_go == false
   and .decision.actionable.count == 0
@@ -349,6 +353,10 @@ if ! jq -e '
   and .handoff.failure_semantics.launcher_runtime_ok.kind == "none"
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "none"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == true
+  and .effective.status == "pass"
+  and .effective.reason == null
   and .policy_outcome.decision == "GO"
   and .decision.actionable.count == 0
 ' "$FALLBACK_OUTPUT" >/dev/null; then
@@ -428,6 +436,10 @@ if ! jq -e '
   and .handoff.launcher_runtime_ok == null
   and .handoff.windows_native_bootstrap_guardrails_ok == null
   and .failure.kind == "none"
+  and .effective.policy_relaxed == true
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "warn_relaxed_policy"
+  and .effective.reason == "strict_readiness_gap_relaxed_policy"
   and .policy_outcome.decision == "GO"
   and .decision.actionable.count == 0
 ' "$UNRESOLVED_OUTPUT" >/dev/null; then
@@ -466,6 +478,10 @@ if ! jq -e '
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "execution_failure"
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.execution_failure == true
   and .failure.kind == "execution_failure"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "fail"
+  and .effective.reason == "top_level_execution_failure"
   and .failure.execution_failure == true
   and .policy_outcome.decision == "ERROR"
   and .policy_outcome.fail_closed_no_go == false
@@ -548,6 +564,10 @@ if ! jq -e '
   and .handoff.run_pipeline_ok == false
   and .handoff.failure_semantics.run_pipeline_ok.kind == "execution_failure"
   and .failure.kind == "execution_failure"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "fail"
+  and .effective.reason == "top_level_execution_failure"
   and .policy_outcome.decision == "ERROR"
   and .decision.actionable.count == 1
   and .decision.actionable.recommended_gate_id == "phase3_windows_client_beta_run_pipeline_gate"
@@ -580,6 +600,10 @@ if ! jq -e '
   and .handoff.run_pipeline_ok == null
   and .handoff.failure_semantics.run_pipeline_ok.kind == "execution_failure"
   and .failure.kind == "execution_failure"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "fail"
+  and .effective.reason == "top_level_execution_failure"
   and .policy_outcome.decision == "ERROR"
   and .decision.actionable.count == 1
   and .decision.actionable.recommended_gate_id == "phase3_windows_client_beta_run_pipeline_gate"

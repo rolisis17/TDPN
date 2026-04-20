@@ -9,9 +9,22 @@ export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
 redact_sensitive_json() {
   local payload="$1"
+  if command -v jq >/dev/null 2>&1 && printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$payload" | jq -c '
+      if type == "object" then
+        (if has("token") then .token = "[redacted]" else . end)
+        | (if has("private_key") then .private_key = "[redacted]" else . end)
+        | (if has("credential") then .credential = "[redacted]" else . end)
+      else
+        .
+      end
+    '
+    return
+  fi
   printf '%s\n' "$payload" | sed -E \
-    -e 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g' \
-    -e 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+    -e 's/"token":"[^"]*"/"token":"[redacted]"/g' \
+    -e 's/"private_key":"[^"]*"/"private_key":"[redacted]"/g' \
+    -e 's/"credential":"[^"]*"/"credential":"[redacted]"/g'
 }
 
 ENTRY_OPEN_RPS="${ENTRY_OPEN_RPS:-1}"

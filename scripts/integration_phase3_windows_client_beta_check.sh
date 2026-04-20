@@ -189,6 +189,10 @@ if ! jq -e '
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .handoff.failure_semantics.launcher_runtime_ok.kind == "none"
   and .failure.kind == "none"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == true
+  and .effective.status == "pass"
+  and .effective.reason == null
   and .policy_outcome.decision == "GO"
   and .policy_outcome.fail_closed_no_go == false
   and .decision.actionable.count == 0
@@ -237,6 +241,10 @@ if ! jq -e '
   and .handoff.failure_semantics.local_control_api_ok.kind == "policy_no_go"
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "policy_no_go"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "fail"
+  and .effective.reason == "top_level_policy_no_go"
   and .policy_outcome.decision == "NO-GO"
   and .policy_outcome.fail_closed_no_go == true
   and .decision.actionable.count == 1
@@ -281,6 +289,10 @@ if ! jq -e '
   and .handoff.failure_semantics.local_control_api_ok.kind == "none"
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "none"
   and .failure.kind == "none"
+  and .effective.policy_relaxed == true
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "warn_relaxed_policy"
+  and .effective.reason == "strict_readiness_gap_relaxed_policy"
   and .policy_outcome.decision == "GO"
   and .decision.actionable.count == 0
   and .decision.actionable.recommended_gate_id == null
@@ -325,6 +337,10 @@ if ! jq -e '
   and .handoff.failure_semantics.local_control_api_ok.kind == "execution_failure"
   and .handoff.failure_semantics.windows_native_bootstrap_guardrails_ok.kind == "execution_failure"
   and .failure.kind == "execution_failure"
+  and .effective.policy_relaxed == false
+  and .effective.strict_readiness_ok == false
+  and .effective.status == "fail"
+  and .effective.reason == "top_level_execution_failure"
   and .policy_outcome.decision == "ERROR"
   and .policy_outcome.fail_closed_no_go == false
   and .decision.actionable.count == 7

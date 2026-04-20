@@ -125,6 +125,10 @@ failure_kind="none"
 policy_decision="GO"
 actionable_count=0
 recommended_gate_id_json="null"
+effective_policy_relaxed="false"
+effective_strict_readiness_ok="true"
+effective_status="pass"
+effective_reason_json="null"
 if [[ "${FAKE_CHECK_FAIL:-0}" == "1" ]]; then
   status="fail"
   rc="$fail_rc"
@@ -132,6 +136,9 @@ if [[ "${FAKE_CHECK_FAIL:-0}" == "1" ]]; then
   policy_decision="NO-GO"
   actionable_count=1
   recommended_gate_id_json="\"phase3_windows_client_beta_local_control_api_gate\""
+  effective_strict_readiness_ok="false"
+  effective_status="fail"
+  effective_reason_json="\"top_level_policy_no_go\""
 fi
 
 if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
@@ -219,6 +226,12 @@ if [[ -n "$summary_json" && "${FAKE_CHECK_OMIT_SUMMARY:-0}" != "1" ]]; then
         "recommended_gate_id": $recommended_gate_id_json,
         "gates": []
       }
+    },
+    "effective": {
+      "policy_relaxed": $effective_policy_relaxed,
+      "strict_readiness_ok": $effective_strict_readiness_ok,
+      "status": "$effective_status",
+      "reason": $effective_reason_json
     }
   }
 EOF_CHECK_SUMMARY
@@ -321,6 +334,10 @@ if ! jq -e '
   and .steps.phase3_windows_client_beta_check.policy_outcome.decision == "GO"
   and .steps.phase3_windows_client_beta_check.actionable.count == 0
   and .steps.phase3_windows_client_beta_check.actionable.recommended_gate_id == null
+  and .steps.phase3_windows_client_beta_check.effective.policy_relaxed == false
+  and .steps.phase3_windows_client_beta_check.effective.strict_readiness_ok == true
+  and .steps.phase3_windows_client_beta_check.effective.status == "pass"
+  and .steps.phase3_windows_client_beta_check.effective.reason == null
   and .steps.phase3_windows_client_beta_check.artifacts.summary_exists == true
 ' "$DRY_RUN_RUN_SUMMARY" >/dev/null; then
   echo "dry-run combined summary contract mismatch"
@@ -392,6 +409,10 @@ if ! jq -e '
   and .steps.phase3_windows_client_beta_check.failure.kind == "none"
   and .steps.phase3_windows_client_beta_check.policy_outcome.decision == "GO"
   and .steps.phase3_windows_client_beta_check.actionable.count == 0
+  and .steps.phase3_windows_client_beta_check.effective.policy_relaxed == false
+  and .steps.phase3_windows_client_beta_check.effective.strict_readiness_ok == true
+  and .steps.phase3_windows_client_beta_check.effective.status == "pass"
+  and .steps.phase3_windows_client_beta_check.effective.reason == null
 ' "$CI_FAIL_RUN_SUMMARY" >/dev/null; then
   echo "ci-failure combined summary contract mismatch"
   cat "$CI_FAIL_RUN_SUMMARY"
@@ -433,6 +454,10 @@ if ! jq -e '
   and .steps.phase3_windows_client_beta_check.command_rc == 0
   and .steps.phase3_windows_client_beta_check.contract_valid == false
   and .steps.phase3_windows_client_beta_check.contract_error != null
+  and .steps.phase3_windows_client_beta_check.effective.policy_relaxed == null
+  and .steps.phase3_windows_client_beta_check.effective.strict_readiness_ok == null
+  and .steps.phase3_windows_client_beta_check.effective.status == null
+  and .steps.phase3_windows_client_beta_check.effective.reason == null
 ' "$CONTRACT_FAIL_RUN_SUMMARY" >/dev/null; then
   echo "checker-contract-fail combined summary mismatch"
   cat "$CONTRACT_FAIL_RUN_SUMMARY"

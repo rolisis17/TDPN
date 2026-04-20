@@ -410,6 +410,10 @@ declare handoff_failure_kind=""
 declare handoff_policy_outcome_decision=""
 declare handoff_actionable_recommended_gate_id=""
 declare handoff_actionable_count=-1
+declare handoff_effective_policy_relaxed=""
+declare handoff_effective_strict_readiness_ok=""
+declare handoff_effective_status=""
+declare handoff_effective_reason=""
 
 declare -a run_cmd=("$run_script" --reports-dir "$reports_dir" --summary-json "$run_summary_json")
 if [[ "$dry_run" == "1" ]]; then
@@ -522,6 +526,10 @@ if [[ "$run_phase3_windows_client_beta_handoff_check" == "1" ]]; then
       handoff_policy_outcome_decision="$(jq -r '.policy_outcome.decision // ""' "$handoff_summary_json" 2>/dev/null || true)"
       handoff_actionable_recommended_gate_id="$(jq -r '.decision.actionable.recommended_gate_id // ""' "$handoff_summary_json" 2>/dev/null || true)"
       handoff_actionable_count="$(jq -r 'if (.decision.actionable.count | type) == "number" then .decision.actionable.count else -1 end' "$handoff_summary_json" 2>/dev/null || echo -1)"
+      handoff_effective_policy_relaxed="$(jq -r 'if (.effective.policy_relaxed | type) == "boolean" then (.effective.policy_relaxed | tostring) else "" end' "$handoff_summary_json" 2>/dev/null || true)"
+      handoff_effective_strict_readiness_ok="$(jq -r 'if (.effective.strict_readiness_ok | type) == "boolean" then (.effective.strict_readiness_ok | tostring) else "" end' "$handoff_summary_json" 2>/dev/null || true)"
+      handoff_effective_status="$(jq -r '.effective.status // ""' "$handoff_summary_json" 2>/dev/null || true)"
+      handoff_effective_reason="$(jq -r 'if .effective.reason == null then "" elif (.effective.reason | type) == "string" then .effective.reason else (.effective.reason | tostring) end' "$handoff_summary_json" 2>/dev/null || true)"
       if ! [[ "$handoff_actionable_count" =~ ^-?[0-9]+$ ]]; then
         handoff_actionable_count=-1
       fi
@@ -566,6 +574,23 @@ if [[ -f "$handoff_summary_json" ]]; then
   handoff_summary_exists="true"
 fi
 
+handoff_effective_policy_relaxed_log="n/a"
+handoff_effective_strict_readiness_ok_log="n/a"
+handoff_effective_status_log="n/a"
+handoff_effective_reason_log="n/a"
+if [[ "$handoff_effective_policy_relaxed" == "true" || "$handoff_effective_policy_relaxed" == "false" ]]; then
+  handoff_effective_policy_relaxed_log="$handoff_effective_policy_relaxed"
+fi
+if [[ "$handoff_effective_strict_readiness_ok" == "true" || "$handoff_effective_strict_readiness_ok" == "false" ]]; then
+  handoff_effective_strict_readiness_ok_log="$handoff_effective_strict_readiness_ok"
+fi
+if [[ -n "$handoff_effective_status" ]]; then
+  handoff_effective_status_log="$handoff_effective_status"
+fi
+if [[ -n "$handoff_effective_reason" ]]; then
+  handoff_effective_reason_log="$handoff_effective_reason"
+fi
+
 run_passthrough_json="$(printf '%s\n' "${run_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 handoff_passthrough_json="$(printf '%s\n' "${handoff_passthrough_args[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 
@@ -605,6 +630,10 @@ jq -n \
   --arg handoff_policy_outcome_decision "$handoff_policy_outcome_decision" \
   --arg handoff_actionable_recommended_gate_id "$handoff_actionable_recommended_gate_id" \
   --argjson handoff_actionable_count "$handoff_actionable_count" \
+  --arg handoff_effective_policy_relaxed "$handoff_effective_policy_relaxed" \
+  --arg handoff_effective_strict_readiness_ok "$handoff_effective_strict_readiness_ok" \
+  --arg handoff_effective_status "$handoff_effective_status" \
+  --arg handoff_effective_reason "$handoff_effective_reason" \
   --arg handoff_summary_exists "$handoff_summary_exists" \
   --arg handoff_log "$handoff_log" \
   --arg handoff_reused_artifact "$handoff_reused_artifact" \
@@ -682,6 +711,22 @@ jq -n \
           recommended_gate_id: (if $handoff_actionable_recommended_gate_id == "" then null else $handoff_actionable_recommended_gate_id end),
           count: (if $handoff_actionable_count < 0 then null else $handoff_actionable_count end)
         },
+        effective: {
+          policy_relaxed: (
+            if $handoff_effective_policy_relaxed == "true" then true
+            elif $handoff_effective_policy_relaxed == "false" then false
+            else null
+            end
+          ),
+          strict_readiness_ok: (
+            if $handoff_effective_strict_readiness_ok == "true" then true
+            elif $handoff_effective_strict_readiness_ok == "false" then false
+            else null
+            end
+          ),
+          status: (if $handoff_effective_status == "" then null else $handoff_effective_status end),
+          reason: (if $handoff_effective_reason == "" then null else $handoff_effective_reason end)
+        },
         artifacts: {
           summary_json: $handoff_summary_json,
           summary_exists: ($handoff_summary_exists == "true"),
@@ -701,6 +746,7 @@ jq -n \
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
 
+echo "[phase3-windows-client-beta-handoff-run] effective status=$handoff_effective_status_log strict_readiness_ok=$handoff_effective_strict_readiness_ok_log policy_relaxed=$handoff_effective_policy_relaxed_log reason=$handoff_effective_reason_log"
 echo "[phase3-windows-client-beta-handoff-run] status=$final_status rc=$final_rc dry_run=$dry_run"
 echo "[phase3-windows-client-beta-handoff-run] reports_dir=$reports_dir"
 echo "[phase3-windows-client-beta-handoff-run] summary_json=$summary_json"

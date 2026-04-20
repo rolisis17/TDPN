@@ -466,6 +466,48 @@ emit_summary_json() {
         installer_update_ok: ($installer_update_ok == true),
         telemetry_stability_ok: ($telemetry_stability_ok == true)
       },
+      effective: (
+        (
+          ($desktop_scaffold_ok == true)
+          and ($local_control_api_ok == true)
+          and ($local_api_config_defaults_ok == true)
+          and ($easy_node_config_v1_ok == true)
+          and ($launcher_wiring_ok == true)
+          and ($windows_native_bootstrap_guardrails_ok == true)
+          and ($launcher_runtime_ok == true)
+        ) as $strict_readiness_ok
+        | (
+            ($require_desktop_scaffold_ok == 0)
+            or ($require_local_control_api_ok == 0)
+            or ($require_local_api_config_defaults_ok == 0)
+            or ($require_easy_node_config_v1_ok == 0)
+            or ($require_launcher_wiring_ok == 0)
+            or ($require_windows_native_bootstrap_guardrails_ok == 0)
+            or ($require_launcher_runtime_ok == 0)
+          ) as $policy_relaxed
+        | {
+            policy_relaxed: $policy_relaxed,
+            strict_readiness_ok: $strict_readiness_ok,
+            status: (
+              if $status != "pass" then "fail"
+              elif $strict_readiness_ok then "pass"
+              elif $policy_relaxed then "warn_relaxed_policy"
+              else "warn_signal_gap"
+              end
+            ),
+            reason: (
+              if $status != "pass" then
+                if $final_failure_kind == "execution_failure" then "top_level_execution_failure"
+                elif $final_failure_kind == "policy_no_go" then "top_level_policy_no_go"
+                else "top_level_fail"
+                end
+              elif $strict_readiness_ok then null
+              elif $policy_relaxed then "strict_readiness_gap_relaxed_policy"
+              else "strict_readiness_gap"
+              end
+            )
+          }
+      ),
       failure: {
         kind: $final_failure_kind,
         policy_no_go: ($final_failure_kind == "policy_no_go"),

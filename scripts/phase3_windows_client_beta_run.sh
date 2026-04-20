@@ -291,6 +291,10 @@ declare check_failure_kind=""
 declare check_policy_outcome_decision=""
 declare check_actionable_recommended_gate_id=""
 declare check_actionable_count=-1
+declare check_effective_policy_relaxed=""
+declare check_effective_strict_readiness_ok=""
+declare check_effective_status=""
+declare check_effective_reason=""
 
 ci_command_args=("$ci_script")
 if [[ "$dry_run" == "1" ]]; then
@@ -367,6 +371,10 @@ if check_summary_contract_valid "$check_summary_json"; then
   check_policy_outcome_decision="$(jq -r '.policy_outcome.decision // ""' "$check_summary_json" 2>/dev/null || true)"
   check_actionable_recommended_gate_id="$(jq -r '.decision.actionable.recommended_gate_id // ""' "$check_summary_json" 2>/dev/null || true)"
   check_actionable_count="$(jq -r 'if (.decision.actionable.count | type) == "number" then .decision.actionable.count else -1 end' "$check_summary_json" 2>/dev/null || echo -1)"
+  check_effective_policy_relaxed="$(jq -r 'if (.effective.policy_relaxed | type) == "boolean" then (.effective.policy_relaxed | tostring) else "" end' "$check_summary_json" 2>/dev/null || true)"
+  check_effective_strict_readiness_ok="$(jq -r 'if (.effective.strict_readiness_ok | type) == "boolean" then (.effective.strict_readiness_ok | tostring) else "" end' "$check_summary_json" 2>/dev/null || true)"
+  check_effective_status="$(jq -r '.effective.status // ""' "$check_summary_json" 2>/dev/null || true)"
+  check_effective_reason="$(jq -r 'if .effective.reason == null then "" elif (.effective.reason | type) == "string" then .effective.reason else (.effective.reason | tostring) end' "$check_summary_json" 2>/dev/null || true)"
   if ! [[ "$check_actionable_count" =~ ^-?[0-9]+$ ]]; then
     check_actionable_count=-1
   fi
@@ -408,6 +416,23 @@ if [[ -f "$check_summary_json" ]]; then
   check_summary_exists="1"
 fi
 
+check_effective_policy_relaxed_log="n/a"
+check_effective_strict_readiness_ok_log="n/a"
+check_effective_status_log="n/a"
+check_effective_reason_log="n/a"
+if [[ "$check_effective_policy_relaxed" == "true" || "$check_effective_policy_relaxed" == "false" ]]; then
+  check_effective_policy_relaxed_log="$check_effective_policy_relaxed"
+fi
+if [[ "$check_effective_strict_readiness_ok" == "true" || "$check_effective_strict_readiness_ok" == "false" ]]; then
+  check_effective_strict_readiness_ok_log="$check_effective_strict_readiness_ok"
+fi
+if [[ -n "$check_effective_status" ]]; then
+  check_effective_status_log="$check_effective_status"
+fi
+if [[ -n "$check_effective_reason" ]]; then
+  check_effective_reason_log="$check_effective_reason"
+fi
+
 summary_tmp="$(mktemp)"
 jq -n \
   --arg generated_at_utc "$generated_at_utc" \
@@ -435,6 +460,10 @@ jq -n \
   --arg check_policy_outcome_decision "$check_policy_outcome_decision" \
   --arg check_actionable_recommended_gate_id "$check_actionable_recommended_gate_id" \
   --argjson check_actionable_count "$check_actionable_count" \
+  --arg check_effective_policy_relaxed "$check_effective_policy_relaxed" \
+  --arg check_effective_strict_readiness_ok "$check_effective_strict_readiness_ok" \
+  --arg check_effective_status "$check_effective_status" \
+  --arg check_effective_reason "$check_effective_reason" \
   --argjson ci_summary_exists "$ci_summary_exists" \
   --argjson check_summary_exists "$check_summary_exists" \
   '{
@@ -493,6 +522,22 @@ jq -n \
           recommended_gate_id: (if $check_actionable_recommended_gate_id == "" then null else $check_actionable_recommended_gate_id end),
           count: (if $check_actionable_count < 0 then null else $check_actionable_count end)
         },
+        effective: {
+          policy_relaxed: (
+            if $check_effective_policy_relaxed == "true" then true
+            elif $check_effective_policy_relaxed == "false" then false
+            else null
+            end
+          ),
+          strict_readiness_ok: (
+            if $check_effective_strict_readiness_ok == "true" then true
+            elif $check_effective_strict_readiness_ok == "false" then false
+            else null
+            end
+          ),
+          status: (if $check_effective_status == "" then null else $check_effective_status end),
+          reason: (if $check_effective_reason == "" then null else $check_effective_reason end)
+        },
         artifacts: {
           summary_json: $check_summary_json,
           summary_exists: ($check_summary_exists == 1)
@@ -508,6 +553,7 @@ jq -n \
   }' >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
 
+echo "[phase3-windows-client-beta-run] effective status=$check_effective_status_log strict_readiness_ok=$check_effective_strict_readiness_ok_log policy_relaxed=$check_effective_policy_relaxed_log reason=$check_effective_reason_log"
 echo "[phase3-windows-client-beta-run] status=$final_status rc=$final_rc dry_run=$dry_run"
 echo "[phase3-windows-client-beta-run] reports_dir=$reports_dir"
 echo "[phase3-windows-client-beta-run] summary_json=$summary_json"
