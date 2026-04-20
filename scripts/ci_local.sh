@@ -228,6 +228,9 @@ echo "[ci] linux desktop doctor guardrails integration"
 echo "[ci] linux desktop native bootstrap guardrails integration"
 ./scripts/integration_linux_desktop_native_bootstrap_guardrails.sh
 
+echo "[ci] linux desktop dev guardrails integration"
+./scripts/integration_linux_desktop_dev_guardrails.sh
+
 echo "[ci] linux desktop packaged-run guardrails integration"
 ./scripts/integration_linux_desktop_packaged_run_guardrails.sh
 

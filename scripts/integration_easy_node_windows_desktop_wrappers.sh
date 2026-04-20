@@ -231,6 +231,30 @@ run_and_assert_wrapper() {
   assert_forwarded_exact "$CAPTURE" "$expected_marker" "${forwarded_args[@]}"
 }
 
+run_and_assert_windows_platform_command() {
+  local command_name="$1"
+  local expected_marker="$2"
+  shift 2
+  local -a forwarded_args=("$@")
+
+  : >"$CAPTURE"
+
+  env \
+    EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+    DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_FAKE" \
+    DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
+    DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT="$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" \
+    DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
+    DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+    DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
+    DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
+    DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
+    bash "$SCRIPT_UNDER_TEST" "$command_name" --platform windows "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+
+  assert_single_invocation "$CAPTURE" "$command_name --platform windows"
+  assert_forwarded_exact "$CAPTURE" "$expected_marker" "${forwarded_args[@]}"
+}
+
 create_fake_wrapper_script "$DOCTOR_FAKE" "desktop_windows_doctor" "FAKE_WINDOWS_DOCTOR_RC"
 create_fake_wrapper_script "$NATIVE_BOOTSTRAP_FAKE" "desktop_windows_native_bootstrap" "FAKE_WINDOWS_NATIVE_BOOTSTRAP_RC"
 create_fake_wrapper_script "$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" "desktop_windows_native_bootstrap_guardrails" "FAKE_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_RC"
@@ -251,6 +275,7 @@ assert_help_contains "./scripts/easy_node.sh desktop-windows-native-bootstrap-gu
 assert_help_contains "./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]"
 
@@ -297,6 +322,12 @@ run_and_assert_wrapper \
   "-InstallMissing:\$false" \
   "--dry-run" \
   "--sample-flag" "packaged run value with spaces"
+
+run_and_assert_windows_platform_command \
+  "desktop-dev" \
+  "desktop_windows_dev" \
+  "-NoInstallMissing" \
+  "--sample-flag" "desktop dev generic windows value with spaces"
 
 run_and_assert_wrapper \
   "desktop-windows-dev" \

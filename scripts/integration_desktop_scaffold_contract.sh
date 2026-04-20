@@ -262,6 +262,37 @@ if ! grep -qiE 'scaffold|non-production' "$LINUX_PACKAGED_RUN_SCRIPT"; then
 fi
 echo "[desktop-scaffold] linux packaged-run scaffold script markers are present"
 
+LINUX_DEV_SCRIPT="scripts/linux/desktop_dev.sh"
+if [[ ! -f "$LINUX_DEV_SCRIPT" ]]; then
+  echo "desktop scaffold contract failed: missing linux desktop-dev scaffold script: $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_DEV_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM shared auto-install env marker in $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_DEV_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN shared auto-install legacy env alias marker in $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--no-install-missing' "$LINUX_DEV_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --no-install-missing marker in $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'conflicting install intent: specify only one of --install-missing or --no-install-missing' "$LINUX_DEV_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected conflict intent message marker in $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--mode run-desktop' "$LINUX_DEV_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected run-desktop launch mode marker in $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--desktop-launch-strategy dev' "$LINUX_DEV_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop launch strategy dev marker in $LINUX_DEV_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] linux desktop-dev script markers are present"
+
 WINDOWS_NATIVE_BOOTSTRAP_FILES=(
   "scripts/windows/desktop_native_bootstrap.ps1"
   "scripts/windows/desktop_native_bootstrap.cmd"

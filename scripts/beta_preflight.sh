@@ -105,6 +105,7 @@ run_step "windows desktop packaged run guardrails integration" ./scripts/integra
 run_step "windows desktop one-click guardrails integration" ./scripts/integration_windows_desktop_one_click_guardrails.sh
 run_step "linux desktop doctor guardrails integration" ./scripts/integration_linux_desktop_doctor_guardrails.sh
 run_step "linux desktop native bootstrap guardrails integration" ./scripts/integration_linux_desktop_native_bootstrap_guardrails.sh
+run_step "linux desktop dev guardrails integration" ./scripts/integration_linux_desktop_dev_guardrails.sh
 run_step "linux desktop packaged run guardrails integration" ./scripts/integration_linux_desktop_packaged_run_guardrails.sh
 run_step "linux desktop one-click guardrails integration" ./scripts/integration_linux_desktop_one_click_guardrails.sh
 run_step "desktop release bundle guardrails integration" ./scripts/integration_desktop_release_bundle_guardrails.sh

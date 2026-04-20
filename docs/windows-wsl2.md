@@ -318,6 +318,20 @@ Modes and first-run guidance:
 2. run `--mode check`
 3. proceed to desktop dev or packaged-run
 
+Linux desktop dev launcher (`scripts/linux/desktop_dev.sh`) usage:
+
+This remains scaffold-only, non-production desktop dev guidance.
+
+```bash
+bash ./scripts/linux/desktop_dev.sh
+```
+
+Optional Linux desktop dev remediation toggles:
+- default remediation intent is enabled for first-run scaffold ergonomics
+- explicit disable: `--no-install-missing`
+- explicit enable: `--install-missing`
+- shared env overrides: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`
+
 Linux packaged-run (`scripts/linux/desktop_packaged_run.sh`) usage:
 
 ```bash
@@ -374,8 +388,15 @@ Equivalent `easy_node.sh` wrapper usage on Linux (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-native-bootstrap --mode bootstrap --install-missing
 ./scripts/easy_node.sh desktop-linux-native-bootstrap --mode run-full --desktop-launch-strategy auto
 ./scripts/easy_node.sh desktop-linux-one-click --install-missing
+./scripts/easy_node.sh desktop-linux-dev
 ./scripts/easy_node.sh desktop-linux-packaged-run --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run
+```
+
+Optional generic wrapper form (if your branch exposes it):
+
+```bash
+./scripts/easy_node.sh desktop-dev --platform linux [desktop_dev args...]
 ```
 
 Equivalent `easy_node.sh` wrapper usage on Windows (scaffold/non-production):

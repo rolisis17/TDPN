@@ -293,7 +293,21 @@ Modes:
 Recommended first-run sequence on Linux:
 1. Run `desktop_doctor` with `--mode fix --install-missing`.
 2. Re-run `desktop_doctor` with `--mode check` and confirm readiness.
-3. Start desktop dev (`npm run tauri dev`) or run the packaged launcher flow below.
+3. Start desktop dev (prefer `bash ./scripts/linux/desktop_dev.sh` for scaffold flow, or use `npm run tauri dev`) or run the packaged launcher flow below.
+
+Linux desktop dev launcher (`scripts/linux/desktop_dev.sh`):
+
+This remains scaffold-only, non-production desktop dev guidance.
+
+```bash
+bash ./scripts/linux/desktop_dev.sh
+```
+
+Optional Linux desktop dev remediation toggles:
+- default remediation intent is enabled for first-run scaffold ergonomics
+- explicit disable: `--no-install-missing`
+- explicit enable: `--install-missing`
+- shared env overrides: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`
 
 Linux installer-style packaged launcher flow (`scripts/linux/desktop_packaged_run.sh`):
 
@@ -361,8 +375,15 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-native-bootstrap --mode bootstrap --install-missing
 ./scripts/easy_node.sh desktop-linux-native-bootstrap --mode run-full --desktop-launch-strategy auto
 ./scripts/easy_node.sh desktop-linux-one-click --install-missing
+./scripts/easy_node.sh desktop-linux-dev
 ./scripts/easy_node.sh desktop-linux-packaged-run --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run
+```
+
+Optional generic wrapper form (if your branch exposes it):
+
+```bash
+./scripts/easy_node.sh desktop-dev --platform linux [desktop_dev args...]
 ```
 
 Equivalent `easy_node.sh` wrapper usage on Windows (scaffold/non-production):
