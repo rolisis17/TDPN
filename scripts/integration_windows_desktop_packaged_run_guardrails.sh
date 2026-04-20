@@ -129,6 +129,8 @@ FAKE_TDPN_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_TDPN_EXECUTABLE_PATH")
 
 MISSING_EXECUTABLE_PATH="$TMP_DIR/missing-desktop.exe"
 MISSING_EXECUTABLE_PATH_PS="$(to_powershell_path "$MISSING_EXECUTABLE_PATH")"
+SUMMARY_JSON_PATH="$TMP_DIR/desktop_packaged_run_windows_summary.json"
+SUMMARY_JSON_PATH_PS="$(to_powershell_path "$SUMMARY_JSON_PATH")"
 
 echo "[windows-desktop-packaged-run-guardrails] dry-run passes with existing executable override path"
 run_expect_pass \
@@ -136,6 +138,39 @@ run_expect_pass \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
     -DryRun \
     -DesktopExecutablePath "$FAKE_EXECUTABLE_PATH_PS"
+
+echo "[windows-desktop-packaged-run-guardrails] dry-run emits summary json contract"
+SUMMARY_TEST_NAME="dry_run_packaged_summary_contract"
+SUMMARY_TEST_LOG="$TMP_DIR/${SUMMARY_TEST_NAME}.log"
+if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+  -DryRun \
+  -DesktopExecutablePath "$FAKE_EXECUTABLE_PATH_PS" \
+  -SummaryJson "$SUMMARY_JSON_PATH_PS" \
+  -PrintSummaryJson 1 >"$SUMMARY_TEST_LOG" 2>&1; then
+  echo "windows desktop packaged-run guardrails failed: expected pass for $SUMMARY_TEST_NAME"
+  cat "$SUMMARY_TEST_LOG"
+  exit 1
+fi
+if ! grep -Fq "[desktop-packaged-run] summary_json=" "$SUMMARY_TEST_LOG"; then
+  echo "windows desktop packaged-run guardrails failed: missing summary_json marker for $SUMMARY_TEST_NAME"
+  cat "$SUMMARY_TEST_LOG"
+  exit 1
+fi
+if ! grep -Fq "[desktop-packaged-run] summary_json_payload:" "$SUMMARY_TEST_LOG"; then
+  echo "windows desktop packaged-run guardrails failed: missing summary_json_payload marker for $SUMMARY_TEST_NAME"
+  cat "$SUMMARY_TEST_LOG"
+  exit 1
+fi
+if [[ ! -f "$SUMMARY_JSON_PATH" ]]; then
+  echo "windows desktop packaged-run guardrails failed: summary file missing for $SUMMARY_TEST_NAME"
+  cat "$SUMMARY_TEST_LOG"
+  exit 1
+fi
+if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$s = Get-Content -LiteralPath '$SUMMARY_JSON_PATH_PS' -Raw | ConvertFrom-Json; if (\$s.version -ne 1) { throw 'missing version' }; if (\$s.status -ne 'ok') { throw 'status != ok' }; if ([int]\$s.rc -ne 0) { throw 'rc != 0' }; if (\$s.platform -ne 'windows') { throw 'platform != windows' }; if (\$s.mode -ne 'desktop_packaged_run_scaffold') { throw 'mode mismatch' }; if (\$s.dry_run -ne \$true) { throw 'dry_run != true' }; if (\$s.resolved_desktop_executable_source -ne 'override') { throw 'resolved source != override' }; if (\$s.failure_stage -ne 'none') { throw 'failure_stage != none' }; if (\$s.doctor.status -ne 'pass') { throw 'doctor.status != pass' }; if ([int]\$s.doctor.rc -ne 0) { throw 'doctor.rc != 0' }; if (\$s.bootstrap.status -ne 'pass') { throw 'bootstrap.status != pass' }; if ([int]\$s.bootstrap.rc -ne 0) { throw 'bootstrap.rc != 0' };" >/dev/null 2>&1; then
+  echo "windows desktop packaged-run guardrails failed: summary json key fields invalid for $SUMMARY_TEST_NAME"
+  cat "$SUMMARY_TEST_LOG"
+  exit 1
+fi
 
 echo "[windows-desktop-packaged-run-guardrails] default auto-install intent keeps doctor in fix mode"
 run_expect_pass_regex \

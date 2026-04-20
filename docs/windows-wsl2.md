@@ -278,6 +278,28 @@ scripts\windows\desktop_packaged_run.cmd -DryRun
 scripts\windows\desktop_packaged_run.cmd
 ```
 
+Packaged-run summary JSON output (scaffold/non-production):
+
+Windows:
+
+```powershell
+./scripts/windows/desktop_packaged_run.ps1 -DryRun -SummaryJson .easy-node-logs/desktop_packaged_run_windows_summary.json -PrintSummaryJson 1
+```
+
+Linux:
+
+```bash
+bash ./scripts/linux/desktop_packaged_run.sh --dry-run --summary-json .easy-node-logs/desktop_packaged_run_linux_summary.json --print-summary-json 1
+```
+
+Summary field quick guide:
+- `status`: high-level packaged-run result.
+- `rc`: process exit code from the packaged-run flow.
+- `mode`: effective run mode used by the packaged launcher flow.
+- `resolved_desktop_executable_path` / `resolved_desktop_executable_source`: selected packaged executable path and how it was resolved.
+- `failure_stage`: failing stage label when a run fails.
+- the summary artifact is emitted on both pass and fail paths for easier troubleshooting and reruns.
+
 Packaged-run remediation defaults (scaffold/non-production):
 - `desktop_packaged_run` now enables missing dependency remediation by default, equivalent to `-InstallMissing`, unless explicitly disabled.
 - shared env overrides: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.

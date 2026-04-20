@@ -81,6 +81,28 @@ assert_file_not_contains_fixed() {
   fi
 }
 
+assert_file_exists() {
+  local file_path="$1"
+  local context_label="$2"
+  if [[ ! -f "$file_path" ]]; then
+    echo "linux desktop packaged-run guardrails failed: expected file missing for $context_label"
+    echo "missing path: $file_path"
+    exit 1
+  fi
+}
+
+assert_file_contains_regex() {
+  local file_path="$1"
+  local expected_pattern="$2"
+  local context_label="$3"
+  if ! grep -E -- "$expected_pattern" "$file_path" >/dev/null 2>&1; then
+    echo "linux desktop packaged-run guardrails failed: missing expected regex for $context_label"
+    echo "expected regex: $expected_pattern"
+    cat "$file_path"
+    exit 1
+  fi
+}
+
 FAKE_DOCTOR_SCRIPT="$TMP_DIR/fake_desktop_doctor.sh"
 cat >"$FAKE_DOCTOR_SCRIPT" <<'EOF'
 #!/usr/bin/env bash
@@ -116,6 +138,7 @@ DOCTOR_MARKER_PATH="$TMP_DIR/doctor.marker"
 DOCTOR_ARGS_MARKER_PATH="$TMP_DIR/doctor.args"
 BOOTSTRAP_ARGS_MARKER_PATH="$TMP_DIR/bootstrap.args"
 BOOTSTRAP_MISSING_PATH="$TMP_DIR/missing_desktop_native_bootstrap.sh"
+SUMMARY_JSON_PATH="$TMP_DIR/desktop_packaged_run_summary.json"
 
 reset_markers() {
   rm -f "$DOCTOR_MARKER_PATH"
@@ -152,9 +175,31 @@ run_expect_pass \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
     "$SCRIPT_UNDER_TEST" \
       --dry-run \
-      --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
+      --desktop-executable-path "$FAKE_EXECUTABLE_PATH" \
+      --summary-json "$SUMMARY_JSON_PATH" \
+      --print-summary-json 1
 
 assert_runtime_markers_present "dry-run pass"
+assert_file_exists "$SUMMARY_JSON_PATH" "dry-run pass summary json"
+assert_file_contains_fixed "$TMP_DIR/dry_run_packaged_pass.log" '[desktop-packaged-run] summary_json='"$SUMMARY_JSON_PATH" "dry-run pass summary marker"
+assert_file_contains_fixed "$TMP_DIR/dry_run_packaged_pass.log" '[desktop-packaged-run] summary_json_payload:' "dry-run pass summary payload marker"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"version":[[:space:]]*1' "summary version"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"status":[[:space:]]*"pass"' "summary status"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"rc":[[:space:]]*0' "summary rc"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"platform":[[:space:]]*"linux"' "summary platform"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"mode":[[:space:]]*"desktop_packaged_run_scaffold"' "summary mode"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"dry_run":[[:space:]]*true' "summary dry_run"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"install_missing_intent":[[:space:]]*true' "summary install intent"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"api_addr":[[:space:]]*"127\.0\.0\.1:8095"' "summary api_addr"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"resolved_desktop_executable_path":[[:space:]]*".+"' "summary resolved path"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"resolved_desktop_executable_source":[[:space:]]*"override"' "summary resolved source"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"failure_stage":[[:space:]]*""' "summary failure stage empty on pass"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"doctor":[[:space:]]*\{' "summary doctor object present"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"doctor"' "summary doctor key"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"bootstrap":[[:space:]]*\{' "summary bootstrap object present"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"bootstrap"' "summary bootstrap key"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"status":[[:space:]]*"pass"' "summary includes pass statuses"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"doctor_summary_json_forwarded":[[:space:]]*""' "summary doctor summary forward path default empty"
 assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--mode run-full' "default bootstrap mode"
 assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--desktop-launch-strategy packaged' "default packaged launch strategy"
 assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode fix' "default doctor mode=fix"

@@ -7,7 +7,9 @@ param(
   [string]$ApiAddr = "127.0.0.1:8095",
   [string]$CommandRunner = "",
   [string]$DoctorSummaryJson = "",
-  [Nullable[int]]$PrintDoctorSummaryJson = $null
+  [Nullable[int]]$PrintDoctorSummaryJson = $null,
+  [string]$SummaryJson = "",
+  [int]$PrintSummaryJson = 0
 )
 
 
@@ -16,15 +18,114 @@ $ErrorActionPreference = "Stop"
 if ($null -ne $PrintDoctorSummaryJson -and $PrintDoctorSummaryJson -notin @(0, 1)) {
   throw "-PrintDoctorSummaryJson must be 0 or 1 when provided."
 }
+if ($PrintSummaryJson -notin @(0, 1)) {
+  throw "-PrintSummaryJson must be 0 or 1."
+}
 
 $scriptDir = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($scriptDir)) {
   $scriptDir = Split-Path -Parent $PSCommandPath
 }
+$repoRoot = ""
+try {
+  $repoRoot = (Resolve-Path -LiteralPath (Join-Path $scriptDir "..\..")).Path
+} catch {
+  $repoRoot = (Get-Location).Path
+}
+if ([string]::IsNullOrWhiteSpace($SummaryJson)) {
+  $SummaryJson = Join-Path $repoRoot ".easy-node-logs\desktop_packaged_run_windows_summary.json"
+}
 
 function Write-PackagedRunStep {
   param([string]$Message)
   Write-Host "[desktop-packaged-run] $Message"
+}
+
+function Resolve-OutputPath {
+  param([string]$Value)
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+
+  try {
+    return [System.IO.Path]::GetFullPath($Value)
+  } catch {
+    return $Value
+  }
+}
+
+function Write-PackagedRunSummary {
+  param(
+    [string]$SummaryPath,
+    [string]$Status,
+    [int]$Rc,
+    [bool]$DryRunEnabled,
+    [bool]$InstallMissingIntent,
+    [string]$ApiAddress,
+    [string]$Runner,
+    [bool]$PolicyBypassEnabled,
+    [string]$ResolvedDesktopExecutablePath,
+    [string]$ResolvedDesktopExecutableSource,
+    [string]$FailureStage,
+    [System.Collections.IDictionary]$DoctorStep,
+    [System.Collections.IDictionary]$BootstrapStep,
+    [string]$DoctorSummaryJsonForwarded,
+    [int]$PrintJson
+  )
+
+  if ([string]::IsNullOrWhiteSpace($SummaryPath)) {
+    return
+  }
+
+  try {
+    $summaryPathResolved = Resolve-OutputPath -Value $SummaryPath
+    $summaryDir = Split-Path -Parent $summaryPathResolved
+    if (-not [string]::IsNullOrWhiteSpace($summaryDir)) {
+      [System.IO.Directory]::CreateDirectory($summaryDir) | Out-Null
+    }
+
+    $summaryPayload = [ordered]@{
+      version                            = 1
+      generated_at_utc                   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+      status                             = $Status
+      rc                                 = $Rc
+      platform                           = "windows"
+      mode                               = "desktop_packaged_run_scaffold"
+      dry_run                            = $DryRunEnabled
+      install_missing_intent             = $InstallMissingIntent
+      api_addr                           = $ApiAddress
+      command_runner                     = $Runner
+      policy_bypass_enabled              = $PolicyBypassEnabled
+      resolved_desktop_executable_path   = $ResolvedDesktopExecutablePath
+      resolved_desktop_executable_source = $ResolvedDesktopExecutableSource
+      failure_stage                      = $FailureStage
+      doctor                             = [ordered]@{
+        status = [string]$DoctorStep.status
+        rc     = [int]$DoctorStep.rc
+      }
+      bootstrap                          = [ordered]@{
+        status = [string]$BootstrapStep.status
+        rc     = [int]$BootstrapStep.rc
+      }
+      doctor_summary_json_forwarded      = $DoctorSummaryJsonForwarded
+    }
+
+    $summaryJsonText = $summaryPayload | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText(
+      $summaryPathResolved,
+      $summaryJsonText + [Environment]::NewLine,
+      [System.Text.UTF8Encoding]::new($false)
+    )
+
+    Write-PackagedRunStep ("summary_json={0}" -f $summaryPathResolved)
+    if ($PrintJson -eq 1) {
+      Write-PackagedRunStep "summary_json_payload:"
+      Write-Host $summaryJsonText
+    }
+  } catch {
+    Write-Warning ("[desktop-packaged-run] failed to write summary json: {0}" -f $_.Exception.Message)
+  }
 }
 
 function Normalize-PathCandidate {
@@ -272,6 +373,12 @@ function Get-AutoInstallMissingEnvOverride {
   return $null
 }
 
+$SummaryJson = Resolve-OutputPath -Value $SummaryJson
+$doctorSummaryJsonForwarded = ""
+if (-not [string]::IsNullOrWhiteSpace($DoctorSummaryJson)) {
+  $doctorSummaryJsonForwarded = Resolve-OutputPath -Value $DoctorSummaryJson
+}
+
 $doctorScript = Join-Path $scriptDir "desktop_doctor.ps1"
 if (-not (Test-Path -LiteralPath $doctorScript -PathType Leaf)) {
   throw "missing doctor script: $doctorScript"
@@ -305,6 +412,21 @@ if ($installMissingWasSpecified) {
   }
 }
 
+$doctorStep = [ordered]@{
+  status = "skip"
+  rc     = 0
+}
+$bootstrapStep = [ordered]@{
+  status = "skip"
+  rc     = 0
+}
+$failureStage = "none"
+$resolvedDesktopExecutablePath = Normalize-PathCandidate -Value $DesktopExecutablePath
+$resolvedDesktopExecutableSource = "none"
+if (-not [string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
+  $resolvedDesktopExecutableSource = "override"
+}
+
 $doctorInvokeArgs = @()
 if ($installMissingIntent) {
   $doctorInvokeArgs += @("-Mode", "fix", "-InstallMissing")
@@ -325,16 +447,35 @@ if ($null -ne $PrintDoctorSummaryJson) {
 }
 
 & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $doctorScript @doctorInvokeArgs
-$doctorExitCode = $LASTEXITCODE
+$doctorExitCode = [int]$LASTEXITCODE
+$doctorStep.status = if ($doctorExitCode -eq 0) { "pass" } else { "fail" }
+$doctorStep.rc = $doctorExitCode
 if ($doctorExitCode -ne 0) {
+  $failureStage = "doctor"
+  Write-PackagedRunSummary `
+    -SummaryPath $SummaryJson `
+    -Status "fail" `
+    -Rc $doctorExitCode `
+    -DryRunEnabled ([bool]$DryRun) `
+    -InstallMissingIntent $installMissingIntent `
+    -ApiAddress $ApiAddr `
+    -Runner $CommandRunner `
+    -PolicyBypassEnabled $shouldEnablePolicyBypass `
+    -ResolvedDesktopExecutablePath $resolvedDesktopExecutablePath `
+    -ResolvedDesktopExecutableSource $resolvedDesktopExecutableSource `
+    -FailureStage $failureStage `
+    -DoctorStep $doctorStep `
+    -BootstrapStep $bootstrapStep `
+    -DoctorSummaryJsonForwarded $doctorSummaryJsonForwarded `
+    -PrintJson $PrintSummaryJson
   exit $doctorExitCode
 }
 
-$resolvedDesktopExecutablePath = $DesktopExecutablePath
 if ([string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
   $autoDiscoveredDesktopExecutable = Resolve-DesktopPackagedExecutableAuto -ScriptDirectory $scriptDir
   if ($null -ne $autoDiscoveredDesktopExecutable -and -not [string]::IsNullOrWhiteSpace($autoDiscoveredDesktopExecutable.Path)) {
     $resolvedDesktopExecutablePath = $autoDiscoveredDesktopExecutable.Path
+    $resolvedDesktopExecutableSource = [string]$autoDiscoveredDesktopExecutable.Source
     Write-PackagedRunStep ("packaged executable auto-discovered ({0}): {1}" -f $autoDiscoveredDesktopExecutable.Source, $resolvedDesktopExecutablePath)
   }
 }
@@ -362,4 +503,28 @@ if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
 }
 
 & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrapScript @bootstrapInvokeArgs
-exit $LASTEXITCODE
+$bootstrapExitCode = [int]$LASTEXITCODE
+$bootstrapStep.status = if ($bootstrapExitCode -eq 0) { "pass" } else { "fail" }
+$bootstrapStep.rc = $bootstrapExitCode
+if ($bootstrapExitCode -ne 0) {
+  $failureStage = "bootstrap"
+}
+
+Write-PackagedRunSummary `
+  -SummaryPath $SummaryJson `
+  -Status $(if ($bootstrapExitCode -eq 0) { "ok" } else { "fail" }) `
+  -Rc $bootstrapExitCode `
+  -DryRunEnabled ([bool]$DryRun) `
+  -InstallMissingIntent $installMissingIntent `
+  -ApiAddress $ApiAddr `
+  -Runner $CommandRunner `
+  -PolicyBypassEnabled $shouldEnablePolicyBypass `
+  -ResolvedDesktopExecutablePath $resolvedDesktopExecutablePath `
+  -ResolvedDesktopExecutableSource $resolvedDesktopExecutableSource `
+  -FailureStage $failureStage `
+  -DoctorStep $doctorStep `
+  -BootstrapStep $bootstrapStep `
+  -DoctorSummaryJsonForwarded $doctorSummaryJsonForwarded `
+  -PrintJson $PrintSummaryJson
+
+exit $bootstrapExitCode
