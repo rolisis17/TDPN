@@ -219,6 +219,7 @@ What this path does:
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
 - packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE`, then `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+- desktop metadata and packaged artifact names are GPM-first (`Global Private Mesh Desktop.exe` / `global-private-mesh-desktop`); TDPN naming remains env-override compatibility only
 
 Env override example, preferred GPM form (PowerShell):
 
@@ -272,6 +273,7 @@ Executable override and env hints:
 - preferred packaged executable override: `GPM_DESKTOP_PACKAGED_EXE`
 - compatibility alias: `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`
 - legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
+- packaged artifact naming remains GPM-first (`global-private-mesh-desktop` and `Global Private Mesh Desktop.AppImage`); TDPN naming is env-override compatibility only
 - local API behavior can still be tuned with `GPM_LOCAL_API_BASE_URL` and `GPM_LOCAL_API_TIMEOUT_SEC` (legacy aliases: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`)
 - keep manual executable overrides as support/lab usage in scaffold mode, not production defaults
 

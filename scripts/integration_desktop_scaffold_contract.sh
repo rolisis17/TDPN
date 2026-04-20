@@ -702,6 +702,59 @@ for path in "${JSON_FILES[@]}"; do
 done
 echo "[desktop-scaffold] JSON files are valid"
 
+DESKTOP_PACKAGE_JSON="apps/desktop/package.json"
+DESKTOP_CARGO_TOML="apps/desktop/src-tauri/Cargo.toml"
+DESKTOP_TAURI_CONFIG_JSON="apps/desktop/src-tauri/tauri.conf.json"
+EXPECTED_GPM_PACKAGE_NAME="gpm-desktop"
+EXPECTED_GPM_IDENTIFIER="com.gpm.desktop"
+
+package_json_name="$(jq -r '.name // empty' "$DESKTOP_PACKAGE_JSON")"
+if [[ "$package_json_name" != "$EXPECTED_GPM_PACKAGE_NAME" ]]; then
+  echo "desktop scaffold contract failed: desktop package.json name must be GPM-first ($EXPECTED_GPM_PACKAGE_NAME), found '$package_json_name'"
+  exit 1
+fi
+
+cargo_package_name="$(
+  awk -F'=' '
+    /^\[package\][[:space:]]*$/ {
+      in_package = 1
+      next
+    }
+    /^\[/ {
+      if (in_package) {
+        exit
+      }
+    }
+    in_package && $1 ~ /^[[:space:]]*name[[:space:]]*$/ {
+      value = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^"/, "", value)
+      gsub(/"$/, "", value)
+      print value
+      exit
+    }
+  ' "$DESKTOP_CARGO_TOML"
+)"
+if [[ -z "$cargo_package_name" ]]; then
+  echo "desktop scaffold contract failed: unable to resolve [package].name from $DESKTOP_CARGO_TOML"
+  exit 1
+fi
+if [[ "$cargo_package_name" != "$package_json_name" ]]; then
+  echo "desktop scaffold contract failed: desktop package names must match across package.json ($package_json_name) and Cargo.toml ($cargo_package_name)"
+  exit 1
+fi
+if [[ "$cargo_package_name" != "$EXPECTED_GPM_PACKAGE_NAME" ]]; then
+  echo "desktop scaffold contract failed: desktop Cargo package name must be GPM-first ($EXPECTED_GPM_PACKAGE_NAME), found '$cargo_package_name'"
+  exit 1
+fi
+
+tauri_identifier="$(jq -r '.identifier // empty' "$DESKTOP_TAURI_CONFIG_JSON")"
+if [[ "$tauri_identifier" != "$EXPECTED_GPM_IDENTIFIER" ]]; then
+  echo "desktop scaffold contract failed: desktop tauri identifier must be GPM-first ($EXPECTED_GPM_IDENTIFIER), found '$tauri_identifier'"
+  exit 1
+fi
+echo "[desktop-scaffold] desktop metadata is GPM-first (name/identifier) while runtime legacy compatibility aliases remain contract-checked elsewhere"
+
 TMP_DIR="$(mktemp -d)"
 cleanup() {
   rm -rf "$TMP_DIR"

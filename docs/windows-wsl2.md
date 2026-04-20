@@ -232,13 +232,14 @@ What this path does:
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
 - packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE` preferred, then `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+- desktop metadata and packaged artifact names are GPM-first (`Global Private Mesh Desktop.exe` / `global-private-mesh-desktop`); TDPN naming remains env-override compatibility only
 
 Env override example (PowerShell):
 
 ```powershell
 $env:GPM_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
 # legacy alias still supported:
-$env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\TDPN\TDPN Desktop\TDPN Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
+$env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
 ```
 
 Recommended sequence for installer testing:
@@ -288,6 +289,7 @@ bash ./scripts/linux/desktop_packaged_run.sh
 Dry-run and override guidance:
 - run `--dry-run` first to confirm executable discovery and local API preflight
 - executable override env auto-discovery order: `GPM_DESKTOP_PACKAGED_EXE` (preferred), `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`
+- packaged artifact naming remains GPM-first (`global-private-mesh-desktop` and `Global Private Mesh Desktop.AppImage`); TDPN naming is env-override compatibility only
 - optional local API tuning: `GPM_LOCAL_API_BASE_URL`, `GPM_LOCAL_API_TIMEOUT_SEC` (legacy aliases: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`)
 - keep manual override usage support/lab-focused while this remains scaffold/non-production
 
@@ -297,7 +299,7 @@ Linux env override example:
 GPM_DESKTOP_PACKAGED_EXE="$HOME/Applications/Global Private Mesh Desktop.AppImage" \
   bash ./scripts/linux/desktop_packaged_run.sh --dry-run
 # legacy alias still supported:
-TDPN_DESKTOP_PACKAGED_EXE="$HOME/Applications/TDPN Desktop.AppImage" \
+TDPN_DESKTOP_PACKAGED_EXE="$HOME/Applications/Global Private Mesh Desktop.AppImage" \
   bash ./scripts/linux/desktop_packaged_run.sh --dry-run
 ```
 
