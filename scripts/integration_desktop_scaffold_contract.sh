@@ -371,6 +371,14 @@ if ! grep -qF 'desktop_one_click.ps1' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
   echo "desktop scaffold contract failed: expected one-click remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
 fi
+if ! grep -qF 'desktop_node.cmd npm install' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop_node npm install remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_node.cmd npm run tauri -- dev' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop_node npm run remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
+  exit 1
+fi
 if ! grep -qF 'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force' "$WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"; then
   echo "desktop scaffold contract failed: expected execution-policy remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
@@ -387,8 +395,22 @@ for path in "${DESKTOP_SHELL_FILES[@]}"; do
 done
 echo "[desktop-scaffold] desktop_shell scripts exist"
 
+DESKTOP_NODE_FILES=(
+  "scripts/windows/desktop_node.ps1"
+  "scripts/windows/desktop_node.cmd"
+)
+for path in "${DESKTOP_NODE_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing desktop_node script: $path"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] desktop_node scripts exist"
+
 DESKTOP_SHELL_PS1="scripts/windows/desktop_shell.ps1"
 DESKTOP_SHELL_CMD="scripts/windows/desktop_shell.cmd"
+DESKTOP_NODE_PS1="scripts/windows/desktop_node.ps1"
+DESKTOP_NODE_CMD="scripts/windows/desktop_node.cmd"
 
 if ! grep -qF 'function Normalize-NodeToolName' "$DESKTOP_SHELL_PS1"; then
   echo "desktop scaffold contract failed: expected node tool normalization helper in $DESKTOP_SHELL_PS1"
@@ -418,6 +440,24 @@ if ! grep -qF '[Environment]::GetEnvironmentVariable("Path", "Machine")' "$DESKT
   echo "desktop scaffold contract failed: expected machine PATH refresh marker in $DESKTOP_SHELL_PS1"
   exit 1
 fi
+
+if ! grep -qF 'desktop_shell.ps1' "$DESKTOP_NODE_PS1"; then
+  echo "desktop scaffold contract failed: expected desktop_shell bridge marker in $DESKTOP_NODE_PS1"
+  exit 1
+fi
+if ! grep -qF 'Normalize-NodeToolName' "$DESKTOP_NODE_PS1"; then
+  echo "desktop scaffold contract failed: expected Node tool normalization helper in $DESKTOP_NODE_PS1"
+  exit 1
+fi
+if ! grep -qF 'ExecutionPolicy Bypass' "$DESKTOP_NODE_PS1"; then
+  echo "desktop scaffold contract failed: expected execution policy bypass marker in $DESKTOP_NODE_PS1"
+  exit 1
+fi
+if ! grep -qF 'desktop_node.ps1' "$DESKTOP_NODE_CMD"; then
+  echo "desktop scaffold contract failed: expected PowerShell launcher reference in $DESKTOP_NODE_CMD"
+  exit 1
+fi
+echo "[desktop-scaffold] desktop_node script markers are present"
 if ! grep -qF '[Environment]::GetEnvironmentVariable("Path", "User")' "$DESKTOP_SHELL_PS1"; then
   echo "desktop scaffold contract failed: expected user PATH refresh marker in $DESKTOP_SHELL_PS1"
   exit 1
@@ -1492,8 +1532,16 @@ if ! rg -q -- 'desktop_shell\.cmd' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must document desktop_shell.cmd execution-policy-safe npm wrapper usage"
   exit 1
 fi
+if ! rg -q -- 'desktop_node\.cmd' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must document desktop_node.cmd policy-safe npm/npx wrapper usage"
+  exit 1
+fi
 if ! rg -qi -- 'execution-policy-safe|policy-safe.*desktop_shell|desktop_shell.*policy-safe' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must explicitly describe desktop_shell as an execution-policy-safe wrapper"
+  exit 1
+fi
+if ! rg -qi -- 'desktop_node.*policy-safe|policy-safe.*desktop_node|desktop_node.*npm' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must explicitly describe desktop_node as a policy-safe npm/npx wrapper"
   exit 1
 fi
 if ! rg -q -- 'desktop_shell\.cmd npm install' "$README_FILE"; then
@@ -1502,6 +1550,14 @@ if ! rg -q -- 'desktop_shell\.cmd npm install' "$README_FILE"; then
 fi
 if ! rg -q -- 'desktop_shell\.cmd npm run tauri -- dev' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must include desktop_shell npm run tauri -- dev usage guidance"
+  exit 1
+fi
+if ! rg -q -- 'desktop_node\.cmd npm install' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must include desktop_node npm install usage guidance"
+  exit 1
+fi
+if ! rg -q -- 'desktop_node\.cmd npm run tauri -- dev' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must include desktop_node npm run tauri -- dev usage guidance"
   exit 1
 fi
 if ! rg -qi -- 'scripts\\windows\\local_api_session\.cmd' "$README_FILE"; then

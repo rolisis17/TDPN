@@ -580,6 +580,8 @@ function Get-RecommendedCommands {
   }
   if ($SelectedWorkflow -in @("desktop", "both")) {
     Add-UniqueCommand -Commands $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_dev.ps1 -DryRun"
+    Add-UniqueCommand -Commands $commands -Value "scripts\windows\desktop_node.cmd npm install"
+    Add-UniqueCommand -Commands $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
   }
 
   return @($commands.ToArray())

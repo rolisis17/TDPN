@@ -1215,6 +1215,9 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "npm.cmd -v"
   Add-UniqueValue -List $commands -Value "rustc -V"
   Add-UniqueValue -List $commands -Value "cargo -V"
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm install"
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npx --yes create-vite@latest"
   Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0} -InstallMissing -EnablePolicyBypass" -f $normalizedMode)
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
 

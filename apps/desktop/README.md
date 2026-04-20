@@ -164,6 +164,15 @@ scripts\windows\desktop_shell.cmd npm install
 scripts\windows\desktop_shell.cmd npm run tauri -- dev
 ```
 
+Simplified npm/npx wrapper (same policy-safe behavior):
+
+```cmd
+scripts\windows\desktop_node.cmd npm install
+scripts\windows\desktop_node.cmd npm run tauri -- dev
+scripts\windows\desktop_node.cmd npx --yes create-vite@latest
+scripts\windows\desktop_node.cmd install
+```
+
 Windows-native local API session (no WSL shim, preferred first step on Windows):
 
 ```powershell

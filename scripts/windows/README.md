@@ -41,3 +41,19 @@ After setup succeeds, common next steps are:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_dev.ps1 -DryRun
 ```
+
+## Policy-safe npm and npx wrapper
+
+If PowerShell blocks `npm.ps1`, use the Node wrapper below instead of raw `npm`:
+
+```powershell
+scripts\windows\desktop_node.cmd npm install
+scripts\windows\desktop_node.cmd npm run tauri -- dev
+scripts\windows\desktop_node.cmd npx --yes create-vite@latest
+```
+
+Notes:
+- defaults to `npm` when you omit the tool token:
+  - `scripts\windows\desktop_node.cmd install`
+- always runs with process-scope `ExecutionPolicy Bypass`
+- routes through `desktop_shell` so `npm`/`npx` resolve to `npm.cmd`/`npx.cmd`
