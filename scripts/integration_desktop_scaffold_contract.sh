@@ -566,6 +566,22 @@ if ! rg -qi -- 'DesktopLaunchStrategy[^[:cntrl:]]*dev|desktop-launch-strategy[^[
   echo "desktop scaffold contract failed: expected DesktopLaunchStrategy dev marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
   exit 1
 fi
+if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM one-click auto-install env marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN one-click auto-install legacy env alias marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- '-NoInstallMissing|\$NoInstallMissing' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected -NoInstallMissing override marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected install-intent conflict message marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
 if ! rg -qi -- 'powershell(\.exe)?' "$WINDOWS_DESKTOP_DEV_CMD_SCRIPT"; then
   echo "desktop scaffold contract failed: expected PowerShell invocation marker in $WINDOWS_DESKTOP_DEV_CMD_SCRIPT"
   exit 1
