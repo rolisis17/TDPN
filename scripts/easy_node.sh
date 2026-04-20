@@ -1919,6 +1919,192 @@ build_issuer_urls_csv() {
   echo "$out"
 }
 
+build_trust_urls_csv_from_directories() {
+  local authority_directory="$1"
+  local peer_dirs="$2"
+  local scheme="$3"
+  local directory_urls_csv=""
+
+  if [[ -n "$authority_directory" ]]; then
+    directory_urls_csv="$authority_directory"
+  fi
+  if [[ -n "$peer_dirs" ]]; then
+    if [[ -n "$directory_urls_csv" ]]; then
+      directory_urls_csv="$(merge_url_csv "$directory_urls_csv" "$peer_dirs")"
+    else
+      directory_urls_csv="$peer_dirs"
+    fi
+  fi
+
+  if [[ -z "$directory_urls_csv" ]]; then
+    echo ""
+    return
+  fi
+
+  build_issuer_urls_csv "" "$directory_urls_csv" "$scheme"
+}
+
+csv_contains_normalized_url() {
+  local csv="$1"
+  local target="$2"
+  local target_norm item item_norm
+
+  target_norm="$(printf '%s' "$(trim_url "$target")" | tr '[:upper:]' '[:lower:]')"
+  if [[ -z "$target_norm" ]]; then
+    return 1
+  fi
+
+  while IFS= read -r item; do
+    [[ -z "$item" ]] && continue
+    item_norm="$(printf '%s' "$(trim_url "$item")" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "$item_norm" && "$item_norm" == "$target_norm" ]]; then
+      return 0
+    fi
+  done < <(split_csv_lines "$csv")
+
+  return 1
+}
+
+url_is_remote_non_loopback_http() {
+  local raw="$1"
+  local host=""
+
+  raw="$(trim_url "$raw")"
+  if [[ "$raw" != http://* ]]; then
+    return 1
+  fi
+
+  host="$(host_from_url "$raw")"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  host="${host#[}"
+  host="${host%]}"
+  if [[ -z "$host" ]]; then
+    return 1
+  fi
+  if host_is_loopback "$host"; then
+    return 1
+  fi
+
+  return 0
+}
+
+server_preflight_diagnostics_warning() {
+  local message="$1"
+  echo "[diagnostics] warning: $message"
+}
+
+server_preflight_emit_endpoint_diagnostics() {
+  local mode="$1"
+  local authority_issuer="$2"
+  local authority_directory="$3"
+  local peer_dirs="$4"
+  local url_scheme="$5"
+  local warnings_var_name="$6"
+  local -n warnings_ref="$warnings_var_name"
+
+  local core_authority_issuer="$authority_issuer"
+  local authority_host=""
+  local issuer_urls_csv=""
+  local trust_urls_csv=""
+  local issuer_urls_count=0
+  local trust_urls_count=0
+  local http_count=0
+  local https_count=0
+  local has_remote_http=0
+  local endpoint_url=""
+  local endpoint_key=""
+  declare -A endpoint_seen=()
+
+  if [[ -z "$core_authority_issuer" && -n "$authority_directory" ]]; then
+    authority_host="$(host_from_url "$authority_directory")"
+    if [[ -n "$authority_host" ]]; then
+      core_authority_issuer="$(url_from_host_port "$authority_host" 8082)"
+    fi
+  fi
+  core_authority_issuer="$(trim_url "$(ensure_url_scheme "$core_authority_issuer" "$url_scheme")")"
+
+  issuer_urls_csv="$(build_issuer_urls_csv "$core_authority_issuer" "$peer_dirs" "$url_scheme")"
+  issuer_urls_csv="$(normalize_url_csv_scheme_unique "$issuer_urls_csv" "$url_scheme")"
+
+  trust_urls_csv="$(build_trust_urls_csv_from_directories "$authority_directory" "$peer_dirs" "$url_scheme")"
+  trust_urls_csv="$(normalize_url_csv_scheme_unique "$trust_urls_csv" "$url_scheme")"
+
+  issuer_urls_count="$(csv_count "$issuer_urls_csv")"
+  trust_urls_count="$(csv_count "$trust_urls_csv")"
+
+  case "$mode" in
+    provider)
+      if [[ -z "$core_authority_issuer" ]]; then
+        server_preflight_diagnostics_warning "provider mode missing authority issuer context; set --authority-issuer or --authority-directory so issuer peering can be derived"
+        warnings_ref=$((warnings_ref + 1))
+      fi
+      if ((issuer_urls_count < 1)); then
+        server_preflight_diagnostics_warning "provider mode missing issuer URL context; configure authority issuer and peer directories for provider peering"
+        warnings_ref=$((warnings_ref + 1))
+      fi
+      ;;
+    authority)
+      if ((issuer_urls_count < 1)); then
+        server_preflight_diagnostics_warning "authority mode missing issuer URL context; set authority issuer and/or peer directories so issuer peering is discoverable"
+        warnings_ref=$((warnings_ref + 1))
+      fi
+      if ((trust_urls_count < 1)); then
+        server_preflight_diagnostics_warning "authority mode missing trust URL context; set authority directory and/or peer directories for trust alignment"
+        warnings_ref=$((warnings_ref + 1))
+      fi
+      ;;
+  esac
+
+  if [[ -n "$core_authority_issuer" && "$issuer_urls_count" -gt 0 ]]; then
+    if ! csv_contains_normalized_url "$issuer_urls_csv" "$core_authority_issuer"; then
+      server_preflight_diagnostics_warning "core authority issuer is not present in derived issuer URL set; align authority issuer and peer directories"
+      warnings_ref=$((warnings_ref + 1))
+    fi
+  fi
+  if [[ -n "$core_authority_issuer" && "$trust_urls_count" -gt 0 ]]; then
+    if ! csv_contains_normalized_url "$trust_urls_csv" "$core_authority_issuer"; then
+      server_preflight_diagnostics_warning "core authority issuer is not present in derived trust URL set; align authority directory/peer directories with authority issuer"
+      warnings_ref=$((warnings_ref + 1))
+    fi
+  fi
+
+  while IFS= read -r endpoint_url; do
+    endpoint_url="$(trim_url "$endpoint_url")"
+    [[ -z "$endpoint_url" ]] && continue
+    endpoint_key="$(printf '%s' "$endpoint_url" | tr '[:upper:]' '[:lower:]')"
+    if [[ -n "${endpoint_seen[$endpoint_key]+x}" ]]; then
+      continue
+    fi
+    endpoint_seen["$endpoint_key"]=1
+
+    if [[ "$endpoint_key" == http://* ]]; then
+      http_count=$((http_count + 1))
+      if url_is_remote_non_loopback_http "$endpoint_key"; then
+        has_remote_http=1
+      fi
+    elif [[ "$endpoint_key" == https://* ]]; then
+      https_count=$((https_count + 1))
+    fi
+  done < <(
+    {
+      if [[ -n "$core_authority_issuer" ]]; then
+        printf '%s\n' "$core_authority_issuer"
+      fi
+      split_csv_lines "$issuer_urls_csv"
+      split_csv_lines "$trust_urls_csv"
+    } | awk 'NF > 0'
+  )
+
+  if ((http_count > 0 && https_count > 0)); then
+    server_preflight_diagnostics_warning "mixed HTTP/HTTPS endpoint posture detected across issuer/trust URLs; prefer a consistent HTTPS posture"
+    warnings_ref=$((warnings_ref + 1))
+  fi
+  if ((has_remote_http == 1)); then
+    server_preflight_diagnostics_warning "remote non-loopback HTTP endpoint detected in issuer/trust URLs; migrate remote endpoints to HTTPS"
+    warnings_ref=$((warnings_ref + 1))
+  fi
+}
+
 random_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 16
@@ -3529,6 +3715,7 @@ server_preflight() {
     echo "authority_directory: $authority_directory"
     echo "authority_issuer: $authority_issuer"
   fi
+  server_preflight_emit_endpoint_diagnostics "$mode" "$authority_issuer" "$authority_directory" "$peer_dirs" "$url_scheme" warnings
 
   if [[ -n "$peer_dirs" ]]; then
     local peer_url peer_payload peer_ops peer_op_count peer_host peer_issuer_url peer_issuer_id

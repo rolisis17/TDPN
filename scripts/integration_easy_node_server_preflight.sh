@@ -107,6 +107,16 @@ if ! rg -q "appears reachable over plain HTTP" /tmp/integration_easy_node_server
   cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
   exit 1
 fi
+if ! rg -q "prod profile is fail-closed and requires TLS/mTLS-capable peer and authority endpoints" /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log; then
+  echo "missing expected prod fail-closed TLS posture diagnostic"
+  cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
+  exit 1
+fi
+if ! rg -q "either run all peered nodes with --prod-profile 1, or use --prod-profile 0 for non-TLS lab peering" /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log; then
+  echo "missing expected profile alignment remediation diagnostic"
+  cat /tmp/integration_easy_node_server_preflight_prod_http_mismatch.log
+  exit 1
+fi
 
 PATH="$TMP_BIN:$PATH" \
 FAKE_CURL_FAIL_PEER_RELAYS=1 \
@@ -212,6 +222,39 @@ fi
 if ! rg -q "issuer_id collision with peers" /tmp/integration_easy_node_server_preflight_issuer_collision.log; then
   echo "missing expected issuer collision signal"
   cat /tmp/integration_easy_node_server_preflight_issuer_collision.log
+  exit 1
+fi
+
+# Targeted diagnostics scenario: prod issuer quorum/membership mismatch
+# plus mixed-scheme posture warning (HTTPS probe fails, HTTP fallback reachable).
+set +e
+PATH="$TMP_BIN:$PATH" \
+FAKE_CURL_HTTP_ONLY=1 \
+./scripts/easy_node.sh server-preflight \
+  --mode authority \
+  --peer-directories https://203.0.113.10:8081 \
+  --prod-profile 1 \
+  --min-peer-operators 0 >/tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log 2>&1
+prod_issuer_mixed_scheme_rc=$?
+set -e
+if [[ "$prod_issuer_mixed_scheme_rc" -eq 0 ]]; then
+  echo "expected prod authority preflight to fail when peer issuer quorum cannot be established over HTTPS"
+  cat /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log
+  exit 1
+fi
+if ! rg -q "prod profile requires at least one reachable peer issuer id" /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log; then
+  echo "missing expected issuer quorum/membership mismatch diagnostic"
+  cat /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log
+  exit 1
+fi
+if ! rg -q "peer issuer https://203.0.113.10:8082 appears reachable over plain HTTP" /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log; then
+  echo "missing expected mixed-scheme peer issuer posture diagnostic"
+  cat /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log
+  exit 1
+fi
+if ! rg -q "prod profile is fail-closed and requires TLS/mTLS-capable peer and authority endpoints" /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log; then
+  echo "missing expected prod fail-closed TLS posture diagnostic for mixed-scheme issuer scenario"
+  cat /tmp/integration_easy_node_server_preflight_prod_issuer_mixed_scheme.log
   exit 1
 fi
 
