@@ -272,19 +272,68 @@ find_packaged_desktop_executable() {
     return 0
   fi
 
-  local candidate=""
-  local static_candidates=(
-    "$DESKTOP_DIR/src-tauri/target/release/tdpn-desktop"
-    "$DESKTOP_DIR/target/release/tdpn-desktop"
-  )
-  for candidate in "${static_candidates[@]}"; do
-    if [[ -f "$candidate" ]]; then
-      absolute_path "$candidate"
+  local env_name=""
+  for env_name in GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE GPM_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
+    local env_value="${!env_name:-}"
+    if [[ -z "$env_value" ]]; then
+      continue
+    fi
+    if [[ -f "$env_value" ]]; then
+      absolute_path "$env_value"
       return 0
     fi
+    log "warning: env override $env_name points to a missing file: $env_value"
   done
 
+  local release_roots=(
+    "$DESKTOP_DIR/src-tauri/target/release"
+    "$DESKTOP_DIR/target/release"
+  )
+  local binary_names=(
+    "global-private-mesh-desktop"
+    "Global Private Mesh Desktop"
+    "gpm-desktop"
+    "tdpn-desktop"
+    "GPM Desktop"
+    "TDPN Desktop"
+  )
+
+  local release_root=""
+  local binary_name=""
+  local candidate=""
+  for release_root in "${release_roots[@]}"; do
+    for binary_name in "${binary_names[@]}"; do
+      candidate="$release_root/$binary_name"
+      if [[ -f "$candidate" ]]; then
+        absolute_path "$candidate"
+        return 0
+      fi
+    done
+  done
+
+  local appimage_names=(
+    "Global Private Mesh Desktop.AppImage"
+    "global-private-mesh-desktop.AppImage"
+    "global-private-mesh-desktop.appimage"
+    "GPM Desktop.AppImage"
+    "gpm-desktop.AppImage"
+    "gpm-desktop.appimage"
+    "TDPN Desktop.AppImage"
+    "tdpn-desktop.AppImage"
+    "tdpn-desktop.appimage"
+  )
   local appimage=""
+  local appimage_name=""
+  for release_root in "${release_roots[@]}"; do
+    for appimage_name in "${appimage_names[@]}"; do
+      appimage="$release_root/bundle/appimage/$appimage_name"
+      if [[ -f "$appimage" ]]; then
+        absolute_path "$appimage"
+        return 0
+      fi
+    done
+  done
+
   shopt -s nullglob
   local appimage_candidates=(
     "$DESKTOP_DIR/src-tauri/target/release/bundle/appimage/"*.AppImage

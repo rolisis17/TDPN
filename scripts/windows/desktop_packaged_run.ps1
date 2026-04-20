@@ -89,7 +89,11 @@ function Get-InstalledPackagedExecutableCandidates {
     "GPM Desktop\GPM Desktop.exe",
     "GPM Desktop\gpm-desktop.exe",
     "GPM\GPM Desktop\GPM Desktop.exe",
-    "GPM\GPM Desktop\gpm-desktop.exe"
+    "GPM\GPM Desktop\gpm-desktop.exe",
+    "Global Private Mesh Desktop\Global Private Mesh Desktop.exe",
+    "Global Private Mesh Desktop\global-private-mesh-desktop.exe",
+    "Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe",
+    "Global Private Mesh\Global Private Mesh Desktop\global-private-mesh-desktop.exe"
   )
 
   $candidates = @()
@@ -123,14 +127,34 @@ function Get-RepoPackagedExecutableCandidates {
   $relativePaths = @(
     "tdpn-desktop.exe",
     "TDPN Desktop.exe",
+    "gpm-desktop.exe",
+    "GPM Desktop.exe",
+    "global-private-mesh-desktop.exe",
+    "Global Private Mesh Desktop.exe",
     "bundle\nsis\tdpn-desktop.exe",
     "bundle\nsis\tdpn-desktop\tdpn-desktop.exe",
     "bundle\nsis\TDPN Desktop.exe",
     "bundle\nsis\TDPN Desktop\TDPN Desktop.exe",
+    "bundle\nsis\gpm-desktop.exe",
+    "bundle\nsis\gpm-desktop\gpm-desktop.exe",
+    "bundle\nsis\GPM Desktop.exe",
+    "bundle\nsis\GPM Desktop\GPM Desktop.exe",
+    "bundle\nsis\global-private-mesh-desktop.exe",
+    "bundle\nsis\global-private-mesh-desktop\global-private-mesh-desktop.exe",
+    "bundle\nsis\Global Private Mesh Desktop.exe",
+    "bundle\nsis\Global Private Mesh Desktop\Global Private Mesh Desktop.exe",
     "bundle\msi\tdpn-desktop.exe",
     "bundle\msi\tdpn-desktop\tdpn-desktop.exe",
     "bundle\msi\TDPN Desktop.exe",
-    "bundle\msi\TDPN Desktop\TDPN Desktop.exe"
+    "bundle\msi\TDPN Desktop\TDPN Desktop.exe",
+    "bundle\msi\gpm-desktop.exe",
+    "bundle\msi\gpm-desktop\gpm-desktop.exe",
+    "bundle\msi\GPM Desktop.exe",
+    "bundle\msi\GPM Desktop\GPM Desktop.exe",
+    "bundle\msi\global-private-mesh-desktop.exe",
+    "bundle\msi\global-private-mesh-desktop\global-private-mesh-desktop.exe",
+    "bundle\msi\Global Private Mesh Desktop.exe",
+    "bundle\msi\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"
   )
 
   $candidates = @()

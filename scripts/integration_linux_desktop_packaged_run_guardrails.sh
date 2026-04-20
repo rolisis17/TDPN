@@ -81,6 +81,8 @@ chmod +x "$FAKE_BOOTSTRAP_SCRIPT"
 
 FAKE_EXECUTABLE_PATH="$TMP_DIR/fake-desktop"
 printf '%s\n' "placeholder desktop executable used by dry-run integration guardrails" >"$FAKE_EXECUTABLE_PATH"
+FAKE_REBRAND_EXECUTABLE_PATH="$TMP_DIR/global-private-mesh-desktop"
+printf '%s\n' "placeholder rebrand desktop executable used by dry-run integration guardrails" >"$FAKE_REBRAND_EXECUTABLE_PATH"
 
 MISSING_EXECUTABLE_PATH="$TMP_DIR/missing-desktop"
 DOCTOR_MARKER_PATH="$TMP_DIR/doctor.marker"
@@ -114,6 +116,31 @@ if ! grep -F -- '--mode run-full' "$BOOTSTRAP_ARGS_MARKER_PATH" >/dev/null 2>&1;
 fi
 if ! grep -F -- '--desktop-launch-strategy packaged' "$BOOTSTRAP_ARGS_MARKER_PATH" >/dev/null 2>&1; then
   echo "linux desktop packaged-run guardrails failed: bootstrap invocation did not include packaged launch strategy"
+  cat "$BOOTSTRAP_ARGS_MARKER_PATH"
+  exit 1
+fi
+
+rm -f "$DOCTOR_MARKER_PATH"
+rm -f "$BOOTSTRAP_ARGS_MARKER_PATH"
+
+echo "[linux-desktop-packaged-run-guardrails] dry-run passes with rebrand env override path"
+run_expect_pass \
+  "dry_run_rebrand_env_override_pass" \
+  env \
+    DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
+    DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
+    GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$FAKE_REBRAND_EXECUTABLE_PATH" \
+    DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
+    BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
+    "$SCRIPT_UNDER_TEST" \
+      --dry-run
+
+if [[ ! -f "$BOOTSTRAP_ARGS_MARKER_PATH" ]]; then
+  echo "linux desktop packaged-run guardrails failed: bootstrap args marker missing after rebrand env override pass"
+  exit 1
+fi
+if ! grep -F -- "--desktop-executable-override-path $FAKE_REBRAND_EXECUTABLE_PATH" "$BOOTSTRAP_ARGS_MARKER_PATH" >/dev/null 2>&1; then
+  echo "linux desktop packaged-run guardrails failed: bootstrap invocation did not include rebrand override path"
   cat "$BOOTSTRAP_ARGS_MARKER_PATH"
   exit 1
 fi

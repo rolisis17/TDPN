@@ -106,7 +106,7 @@ fi
 
 resolve_auto_packaged_executable() {
   local env_name
-  for env_name in GPM_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
+  for env_name in GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE GPM_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
     local value="${!env_name:-}"
     if [[ -z "$value" ]]; then
       continue
@@ -121,10 +121,12 @@ resolve_auto_packaged_executable() {
   local release_root="$DESKTOP_DIR/src-tauri/target/release"
   local candidate
   local candidates=(
-    "$release_root/tdpn-desktop"
+    "$release_root/global-private-mesh-desktop"
+    "$release_root/Global Private Mesh Desktop"
     "$release_root/gpm-desktop"
-    "$release_root/TDPN Desktop"
+    "$release_root/tdpn-desktop"
     "$release_root/GPM Desktop"
+    "$release_root/TDPN Desktop"
   )
   for candidate in "${candidates[@]}"; do
     if [[ -f "$candidate" ]]; then
@@ -133,12 +135,33 @@ resolve_auto_packaged_executable() {
     fi
   done
 
-  local appimage
-  for appimage in "$release_root"/bundle/appimage/*.AppImage; do
-    if [[ -f "$appimage" ]]; then
-      printf '%s\n' "$appimage"
+  local appimage_candidates=(
+    "$release_root/bundle/appimage/Global Private Mesh Desktop.AppImage"
+    "$release_root/bundle/appimage/global-private-mesh-desktop.AppImage"
+    "$release_root/bundle/appimage/global-private-mesh-desktop.appimage"
+    "$release_root/bundle/appimage/GPM Desktop.AppImage"
+    "$release_root/bundle/appimage/gpm-desktop.AppImage"
+    "$release_root/bundle/appimage/gpm-desktop.appimage"
+    "$release_root/bundle/appimage/TDPN Desktop.AppImage"
+    "$release_root/bundle/appimage/tdpn-desktop.AppImage"
+    "$release_root/bundle/appimage/tdpn-desktop.appimage"
+  )
+  for candidate in "${appimage_candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
       return 0
     fi
+  done
+
+  local appimage
+  local appimage_glob
+  for appimage_glob in "*.AppImage" "*.appimage"; do
+    for appimage in "$release_root"/bundle/appimage/$appimage_glob; do
+      if [[ -f "$appimage" ]]; then
+        printf '%s\n' "$appimage"
+        return 0
+      fi
+    done
   done
 
   return 1
@@ -186,6 +209,7 @@ else
 fi
 
 if [[ -n "$resolved_desktop_executable_path" ]]; then
+  export GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$resolved_desktop_executable_path"
   export GPM_DESKTOP_PACKAGED_EXE="$resolved_desktop_executable_path"
   export TDPN_DESKTOP_PACKAGED_EXE="$resolved_desktop_executable_path"
 fi

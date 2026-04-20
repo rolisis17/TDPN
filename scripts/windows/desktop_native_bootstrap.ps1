@@ -332,13 +332,51 @@ function Get-DesktopPackagedExecutableCandidates {
     (Join-Path $desktopDir "target\release")
   )
 
+  $relativePaths = @(
+    "tdpn-desktop.exe",
+    "TDPN Desktop.exe",
+    "gpm-desktop.exe",
+    "GPM Desktop.exe",
+    "global-private-mesh-desktop.exe",
+    "Global Private Mesh Desktop.exe",
+    "bundle\nsis\tdpn-desktop.exe",
+    "bundle\nsis\tdpn-desktop\tdpn-desktop.exe",
+    "bundle\nsis\TDPN Desktop.exe",
+    "bundle\nsis\TDPN Desktop\TDPN Desktop.exe",
+    "bundle\nsis\gpm-desktop.exe",
+    "bundle\nsis\gpm-desktop\gpm-desktop.exe",
+    "bundle\nsis\GPM Desktop.exe",
+    "bundle\nsis\GPM Desktop\GPM Desktop.exe",
+    "bundle\nsis\global-private-mesh-desktop.exe",
+    "bundle\nsis\global-private-mesh-desktop\global-private-mesh-desktop.exe",
+    "bundle\nsis\Global Private Mesh Desktop.exe",
+    "bundle\nsis\Global Private Mesh Desktop\Global Private Mesh Desktop.exe",
+    "bundle\msi\tdpn-desktop.exe",
+    "bundle\msi\tdpn-desktop\tdpn-desktop.exe",
+    "bundle\msi\TDPN Desktop.exe",
+    "bundle\msi\TDPN Desktop\TDPN Desktop.exe",
+    "bundle\msi\gpm-desktop.exe",
+    "bundle\msi\gpm-desktop\gpm-desktop.exe",
+    "bundle\msi\GPM Desktop.exe",
+    "bundle\msi\GPM Desktop\GPM Desktop.exe",
+    "bundle\msi\global-private-mesh-desktop.exe",
+    "bundle\msi\global-private-mesh-desktop\global-private-mesh-desktop.exe",
+    "bundle\msi\Global Private Mesh Desktop.exe",
+    "bundle\msi\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"
+  )
+
   $candidates = @()
+  $seen = @{}
   foreach ($root in $roots) {
-    $candidates += (Join-Path $root "tdpn-desktop.exe")
-    $candidates += (Join-Path $root "bundle\nsis\tdpn-desktop.exe")
-    $candidates += (Join-Path $root "bundle\nsis\tdpn-desktop\tdpn-desktop.exe")
-    $candidates += (Join-Path $root "bundle\msi\tdpn-desktop.exe")
-    $candidates += (Join-Path $root "bundle\msi\tdpn-desktop\tdpn-desktop.exe")
+    foreach ($relativePath in $relativePaths) {
+      $candidate = Join-Path $root $relativePath
+      $candidateKey = $candidate.TrimEnd("\").ToLowerInvariant()
+      if ($seen.ContainsKey($candidateKey)) {
+        continue
+      }
+      $seen[$candidateKey] = $true
+      $candidates += $candidate
+    }
   }
 
   return $candidates
@@ -355,7 +393,7 @@ function Resolve-DesktopExecutablePath {
     $candidateOverride = $DesktopExecutableOverridePath.Trim()
     if (-not (Test-Path -LiteralPath $candidateOverride -PathType Leaf)) {
       throw (New-DesktopLaunchError -Headline "desktop executable override was not found: $candidateOverride" -Hints @(
-        "Pass -DesktopExecutableOverridePath with the full path to a packaged TDPN Desktop executable.",
+        "Pass -DesktopExecutableOverridePath with the full path to a packaged desktop executable.",
         "For a local build, try the packaged output under apps\desktop\src-tauri\target\release after building the desktop app."
       ))
     }
