@@ -11,7 +11,11 @@ if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
 fi
 
 TMP_DIR="$(mktemp -d)"
+PACKAGED_DEFAULT_CREATED="0"
 cleanup() {
+  if [[ "$PACKAGED_DEFAULT_CREATED" == "1" ]]; then
+    rm -f "${FAKE_PACKAGED_DEFAULT:-}"
+  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -134,11 +138,22 @@ FAKE_EXECUTABLE_OVERRIDE="$TMP_DIR/explicit-override-desktop"
 printf '%s\n' "placeholder executable for explicit override guardrails" >"$FAKE_EXECUTABLE_OVERRIDE"
 chmod +x "$FAKE_EXECUTABLE_OVERRIDE"
 
+PACKAGED_RELEASE_DIR="$ROOT_DIR/apps/desktop/src-tauri/target/release"
+FAKE_PACKAGED_DEFAULT="$PACKAGED_RELEASE_DIR/gpm-desktop"
+if [[ ! -f "$FAKE_PACKAGED_DEFAULT" ]]; then
+  mkdir -p "$PACKAGED_RELEASE_DIR"
+  printf '%s\n' "placeholder executable for packaged-default guardrails" >"$FAKE_PACKAGED_DEFAULT"
+  chmod +x "$FAKE_PACKAGED_DEFAULT"
+  PACKAGED_DEFAULT_CREATED="1"
+fi
+
 SUMMARY_ENV_PRIORITY_PATH="$TMP_DIR/run_desktop_env_priority_summary.json"
+SUMMARY_GLOBAL_ONLY_PATH="$TMP_DIR/run_desktop_env_global_summary.json"
 SUMMARY_TDPN_ONLY_PATH="$TMP_DIR/run_desktop_env_tdpn_summary.json"
 SUMMARY_OVERRIDE_PATH="$TMP_DIR/run_desktop_override_summary.json"
+SUMMARY_PACKAGED_DEFAULT_PATH="$TMP_DIR/run_desktop_packaged_default_summary.json"
 
-echo "[linux-desktop-native-bootstrap-guardrails] env override priority prefers GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE under --dry-run"
+echo "[linux-desktop-native-bootstrap-guardrails] env override priority prefers GPM_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
   "run_desktop_env_priority_dry_run_pass" \
   env \
@@ -151,8 +166,23 @@ run_expect_pass \
       --dry-run \
       --summary-json "$SUMMARY_ENV_PRIORITY_PATH"
 assert_summary_json_field_equals "$SUMMARY_ENV_PRIORITY_PATH" "resolved_desktop_launch_strategy" "packaged"
-assert_summary_json_field_equals "$SUMMARY_ENV_PRIORITY_PATH" "resolved_desktop_executable_path" "$FAKE_EXECUTABLE_ENV_GLOBAL"
-assert_summary_json_field_equals "$SUMMARY_ENV_PRIORITY_PATH" "resolved_desktop_executable_source" "packaged-default"
+assert_summary_json_field_equals "$SUMMARY_ENV_PRIORITY_PATH" "resolved_desktop_executable_path" "$FAKE_EXECUTABLE_ENV_GPM"
+assert_summary_json_field_equals "$SUMMARY_ENV_PRIORITY_PATH" "resolved_desktop_executable_source" "env-override:GPM_DESKTOP_PACKAGED_EXE"
+
+echo "[linux-desktop-native-bootstrap-guardrails] env override fallback uses GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE when GPM_DESKTOP_PACKAGED_EXE is unset"
+run_expect_pass \
+  "run_desktop_env_global_dry_run_pass" \
+  env \
+    GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$FAKE_EXECUTABLE_ENV_GLOBAL" \
+    TDPN_DESKTOP_PACKAGED_EXE="$FAKE_EXECUTABLE_ENV_TDPN" \
+    bash "$SCRIPT_UNDER_TEST" \
+      --mode run-desktop \
+      --desktop-launch-strategy packaged \
+      --dry-run \
+      --summary-json "$SUMMARY_GLOBAL_ONLY_PATH"
+assert_summary_json_field_equals "$SUMMARY_GLOBAL_ONLY_PATH" "resolved_desktop_launch_strategy" "packaged"
+assert_summary_json_field_equals "$SUMMARY_GLOBAL_ONLY_PATH" "resolved_desktop_executable_path" "$FAKE_EXECUTABLE_ENV_GLOBAL"
+assert_summary_json_field_equals "$SUMMARY_GLOBAL_ONLY_PATH" "resolved_desktop_executable_source" "env-override:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
 
 echo "[linux-desktop-native-bootstrap-guardrails] env override fallback uses TDPN_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
@@ -166,7 +196,7 @@ run_expect_pass \
       --summary-json "$SUMMARY_TDPN_ONLY_PATH"
 assert_summary_json_field_equals "$SUMMARY_TDPN_ONLY_PATH" "resolved_desktop_launch_strategy" "packaged"
 assert_summary_json_field_equals "$SUMMARY_TDPN_ONLY_PATH" "resolved_desktop_executable_path" "$FAKE_EXECUTABLE_ENV_TDPN"
-assert_summary_json_field_equals "$SUMMARY_TDPN_ONLY_PATH" "resolved_desktop_executable_source" "packaged-default"
+assert_summary_json_field_equals "$SUMMARY_TDPN_ONLY_PATH" "resolved_desktop_executable_source" "env-override:TDPN_DESKTOP_PACKAGED_EXE"
 
 echo "[linux-desktop-native-bootstrap-guardrails] explicit override path beats env overrides under --dry-run"
 run_expect_pass \
@@ -183,7 +213,19 @@ run_expect_pass \
       --summary-json "$SUMMARY_OVERRIDE_PATH"
 assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_launch_strategy" "packaged"
 assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_executable_path" "$FAKE_EXECUTABLE_OVERRIDE"
-assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_executable_source" "override"
+assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_executable_source" "override-path"
+
+echo "[linux-desktop-native-bootstrap-guardrails] packaged-default source is reported under --dry-run"
+run_expect_pass \
+  "run_desktop_packaged_default_dry_run_pass" \
+  bash "$SCRIPT_UNDER_TEST" \
+    --mode run-desktop \
+    --desktop-launch-strategy packaged \
+    --dry-run \
+    --summary-json "$SUMMARY_PACKAGED_DEFAULT_PATH"
+assert_summary_json_field_equals "$SUMMARY_PACKAGED_DEFAULT_PATH" "resolved_desktop_launch_strategy" "packaged"
+assert_summary_json_field_equals "$SUMMARY_PACKAGED_DEFAULT_PATH" "resolved_desktop_executable_path" "$FAKE_PACKAGED_DEFAULT"
+assert_summary_json_field_equals "$SUMMARY_PACKAGED_DEFAULT_PATH" "resolved_desktop_executable_source" "packaged-default"
 
 echo "[linux-desktop-native-bootstrap-guardrails] check --dry-run --print-summary-json emits summary payload"
 SUMMARY_PRINT_LOG="$TMP_DIR/check_dry_run_print_summary.log"

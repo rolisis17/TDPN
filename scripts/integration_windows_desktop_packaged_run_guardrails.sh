@@ -115,6 +115,18 @@ FAKE_EXECUTABLE_PATH="$TMP_DIR/fake-desktop.exe"
 printf '%s\n' "placeholder desktop executable used by dry-run integration guardrails" >"$FAKE_EXECUTABLE_PATH"
 FAKE_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_EXECUTABLE_PATH")"
 
+FAKE_GLOBAL_PRIVATE_MESH_EXECUTABLE_PATH="$TMP_DIR/fake-global-private-mesh-desktop.exe"
+printf '%s\n' "placeholder desktop executable for GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_GLOBAL_PRIVATE_MESH_EXECUTABLE_PATH"
+FAKE_GLOBAL_PRIVATE_MESH_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_GLOBAL_PRIVATE_MESH_EXECUTABLE_PATH")"
+
+FAKE_GPM_EXECUTABLE_PATH="$TMP_DIR/fake-gpm-desktop.exe"
+printf '%s\n' "placeholder desktop executable for GPM_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_GPM_EXECUTABLE_PATH"
+FAKE_GPM_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_GPM_EXECUTABLE_PATH")"
+
+FAKE_TDPN_EXECUTABLE_PATH="$TMP_DIR/fake-tdpn-desktop.exe"
+printf '%s\n' "placeholder desktop executable for TDPN_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_TDPN_EXECUTABLE_PATH"
+FAKE_TDPN_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_TDPN_EXECUTABLE_PATH")"
+
 MISSING_EXECUTABLE_PATH="$TMP_DIR/missing-desktop.exe"
 MISSING_EXECUTABLE_PATH_PS="$(to_powershell_path "$MISSING_EXECUTABLE_PATH")"
 
@@ -147,22 +159,25 @@ if [[ "${TDPN_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
 fi
 
 echo "[windows-desktop-packaged-run-guardrails] dry-run passes with Global Private Mesh env override and no explicit override path"
-run_expect_pass \
+run_expect_pass_regex \
   "dry_run_packaged_env_override_global_private_mesh_pass" \
+  "packaged executable auto-discovered \\(env\\): .*fake-global-private-mesh-desktop\\.exe|desktop launch resolved: strategy=packaged, source=env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE='$FAKE_GLOBAL_PRIVATE_MESH_EXECUTABLE_PATH_PS'; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
 
-echo "[windows-desktop-packaged-run-guardrails] dry-run passes with env override and no explicit override path"
-run_expect_pass \
-  "dry_run_packaged_env_override_pass" \
+echo "[windows-desktop-packaged-run-guardrails] dry-run prefers GPM env override over GLOBAL/TDPN fallbacks"
+run_expect_pass_regex \
+  "dry_run_packaged_env_override_gpm_preferred_pass" \
+  "packaged executable auto-discovered \\(env\\): .*fake-gpm-desktop\\.exe|desktop launch resolved: strategy=packaged, source=env:GPM_DESKTOP_PACKAGED_EXE" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE='$FAKE_GLOBAL_PRIVATE_MESH_EXECUTABLE_PATH_PS'; \$env:GPM_DESKTOP_PACKAGED_EXE='$FAKE_GPM_EXECUTABLE_PATH_PS'; \$env:TDPN_DESKTOP_PACKAGED_EXE='$FAKE_TDPN_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
 
-echo "[windows-desktop-packaged-run-guardrails] dry-run passes with TDPN env override and no explicit override path"
-run_expect_pass \
+echo "[windows-desktop-packaged-run-guardrails] dry-run keeps TDPN env override as the legacy fallback"
+run_expect_pass_regex \
   "dry_run_packaged_env_override_tdpn_pass" \
+  "packaged executable auto-discovered \\(env\\): .*fake-tdpn-desktop\\.exe|desktop launch resolved: strategy=packaged, source=env:TDPN_DESKTOP_PACKAGED_EXE" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE='$FAKE_TDPN_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
 
 echo "[windows-desktop-packaged-run-guardrails] dry-run auto-discovery passes with mocked Global Private Mesh LocalAppData candidate"
 run_expect_pass_regex \

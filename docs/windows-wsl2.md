@@ -116,11 +116,11 @@ bash ./scripts/integration_desktop_release_bundle_guardrails.sh
 ```
 
 Desktop local API hardening reminder:
-- `TDPN_LOCAL_API_ALLOW_REMOTE=1` with a non-loopback `TDPN_LOCAL_API_BASE_URL` now requires:
-  - `TDPN_LOCAL_API_AUTH_BEARER` to be set, and
-  - `https` in `TDPN_LOCAL_API_BASE_URL`.
-- Enabling desktop mutation controls (`TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` or `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) also requires `TDPN_LOCAL_API_AUTH_BEARER`, including loopback-only sessions.
-- `TDPN_LOCAL_API_AUTH_BEARER` must use token68 characters only (`A-Za-z0-9-._~+/=`), no whitespace/control chars.
+- `GPM_LOCAL_API_ALLOW_REMOTE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_REMOTE=1`) with a non-loopback `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`) now requires:
+  - `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) to be set, and
+  - `https` in `GPM_LOCAL_API_BASE_URL`.
+- Enabling desktop mutation controls (`GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` or `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`, legacy aliases: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` / `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) also requires `GPM_LOCAL_API_AUTH_BEARER`, including loopback-only sessions.
+- `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) must use token68 characters only (`A-Za-z0-9-._~+/=`), no whitespace/control chars.
 - Daemon local API (`--local-api`) rejects non-loopback HTTP binds unless `LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=1` is explicitly set (lab/dev only).
 
 Windows-native local API launcher (no WSL shim):
@@ -231,12 +231,12 @@ What this path does:
 - prefers packaged desktop launch for installer-style smoke checks
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
-- packaged executable auto-discovery order: env overrides (`GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE` preferred, then `GPM_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+- packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE` preferred, then `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
 
 Env override example (PowerShell):
 
 ```powershell
-$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
+$env:GPM_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
 # legacy alias still supported:
 $env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\TDPN\TDPN Desktop\TDPN Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
 ```
@@ -287,14 +287,14 @@ bash ./scripts/linux/desktop_packaged_run.sh
 
 Dry-run and override guidance:
 - run `--dry-run` first to confirm executable discovery and local API preflight
-- executable override env auto-discovery order: `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE` (preferred), `GPM_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`
-- optional local API tuning: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`
+- executable override env auto-discovery order: `GPM_DESKTOP_PACKAGED_EXE` (preferred), `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`
+- optional local API tuning: `GPM_LOCAL_API_BASE_URL`, `GPM_LOCAL_API_TIMEOUT_SEC` (legacy aliases: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`)
 - keep manual override usage support/lab-focused while this remains scaffold/non-production
 
 Linux env override example:
 
 ```bash
-GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$HOME/Applications/Global Private Mesh Desktop.AppImage" \
+GPM_DESKTOP_PACKAGED_EXE="$HOME/Applications/Global Private Mesh Desktop.AppImage" \
   bash ./scripts/linux/desktop_packaged_run.sh --dry-run
 # legacy alias still supported:
 TDPN_DESKTOP_PACKAGED_EXE="$HOME/Applications/TDPN Desktop.AppImage" \

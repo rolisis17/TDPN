@@ -268,18 +268,20 @@ find_packaged_desktop_executable() {
 - pass --desktop-executable-override-path with a valid packaged desktop executable
 - for local builds, check apps/desktop/src-tauri/target/release"
     fi
-    absolute_path "$override_path"
+    RESOLVED_DESKTOP_EXECUTABLE_SOURCE="override-path"
+    RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$override_path")"
     return 0
   fi
 
   local env_name=""
-  for env_name in GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE GPM_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
+  for env_name in GPM_DESKTOP_PACKAGED_EXE GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
     local env_value="${!env_name:-}"
     if [[ -z "$env_value" ]]; then
       continue
     fi
     if [[ -f "$env_value" ]]; then
-      absolute_path "$env_value"
+      RESOLVED_DESKTOP_EXECUTABLE_SOURCE="env-override:$env_name"
+      RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$env_value")"
       return 0
     fi
     log "warning: env override $env_name points to a missing file: $env_value"
@@ -305,7 +307,8 @@ find_packaged_desktop_executable() {
     for binary_name in "${binary_names[@]}"; do
       candidate="$release_root/$binary_name"
       if [[ -f "$candidate" ]]; then
-        absolute_path "$candidate"
+        RESOLVED_DESKTOP_EXECUTABLE_SOURCE="packaged-default"
+        RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$candidate")"
         return 0
       fi
     done
@@ -328,7 +331,8 @@ find_packaged_desktop_executable() {
     for appimage_name in "${appimage_names[@]}"; do
       appimage="$release_root/bundle/appimage/$appimage_name"
       if [[ -f "$appimage" ]]; then
-        absolute_path "$appimage"
+        RESOLVED_DESKTOP_EXECUTABLE_SOURCE="packaged-default"
+        RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$appimage")"
         return 0
       fi
     done
@@ -370,15 +374,8 @@ resolve_desktop_launch_plan() {
       ;;
   esac
 
-  local packaged_path=""
-  if packaged_path="$(find_packaged_desktop_executable "$DESKTOP_EXECUTABLE_OVERRIDE_PATH")"; then
+  if find_packaged_desktop_executable "$DESKTOP_EXECUTABLE_OVERRIDE_PATH"; then
     RESOLVED_DESKTOP_STRATEGY="packaged"
-    RESOLVED_DESKTOP_EXECUTABLE_PATH="$packaged_path"
-    if [[ -n "$DESKTOP_EXECUTABLE_OVERRIDE_PATH" ]]; then
-      RESOLVED_DESKTOP_EXECUTABLE_SOURCE="override"
-    else
-      RESOLVED_DESKTOP_EXECUTABLE_SOURCE="packaged-default"
-    fi
     return
   fi
 

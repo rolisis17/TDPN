@@ -291,19 +291,30 @@ SUMMARY_JSON_PS="$(to_powershell_path "$SUMMARY_JSON")"
 ENV_PRIORITY_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_env_priority_summary.json"
 ENV_PRIORITY_SUMMARY_JSON_PS="$(to_powershell_path "$ENV_PRIORITY_SUMMARY_JSON")"
 
+ENV_GLOBAL_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_env_global_summary.json"
+ENV_GLOBAL_SUMMARY_JSON_PS="$(to_powershell_path "$ENV_GLOBAL_SUMMARY_JSON")"
+
 ENV_TDPN_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_env_tdpn_summary.json"
 ENV_TDPN_SUMMARY_JSON_PS="$(to_powershell_path "$ENV_TDPN_SUMMARY_JSON")"
 
 EXPLICIT_BEATS_ENV_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_explicit_beats_env_summary.json"
 EXPLICIT_BEATS_ENV_SUMMARY_JSON_PS="$(to_powershell_path "$EXPLICIT_BEATS_ENV_SUMMARY_JSON")"
 
-echo "[windows-desktop-native-bootstrap-guardrails] env override priority uses GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE under --dry-run"
+echo "[windows-desktop-native-bootstrap-guardrails] env override priority uses GPM_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
   "env_priority_dry_run_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GPM_PS"); \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_PRIORITY_SUMMARY_JSON_PS")"
 assert_json_file_is_object "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary"
-assert_summary_desktop_resolution "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary" "$FAKE_DESKTOP_EXE_ENV_GLOBAL" "env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
+assert_summary_desktop_resolution "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary" "$FAKE_DESKTOP_EXE_ENV_GPM" "env:GPM_DESKTOP_PACKAGED_EXE"
+
+echo "[windows-desktop-native-bootstrap-guardrails] env override fallback uses GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE when GPM_DESKTOP_PACKAGED_EXE is unset"
+run_expect_pass \
+  "env_global_dry_run_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_GLOBAL_SUMMARY_JSON_PS")"
+assert_json_file_is_object "$ENV_GLOBAL_SUMMARY_JSON" "env_global_summary"
+assert_summary_desktop_resolution "$ENV_GLOBAL_SUMMARY_JSON" "env_global_summary" "$FAKE_DESKTOP_EXE_ENV_GLOBAL" "env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
 
 echo "[windows-desktop-native-bootstrap-guardrails] env override fallback uses TDPN_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \

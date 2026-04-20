@@ -71,7 +71,7 @@ Operator moderation UX notes:
 - Desktop `Recent Audit` now includes optional filters (`limit`, `offset`, `event`, `wallet_address`, `order`) and surfaces audit paging metadata (`count`, `total`, `limit`, `offset`, `has_more`, `next_offset`) in output when present.
 - After approve/reject decisions, desktop forces a session status refresh so role/readiness lock state reconciles immediately and surfaces backend `session_reconciled` hints when present.
 
-Remote hardening guardrails:
+Local API hardening:
 - non-loopback `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`) requires `GPM_LOCAL_API_ALLOW_REMOTE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_REMOTE=1`)
 - non-loopback `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`) with remote opt-in also requires:
   - `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`)
@@ -218,12 +218,12 @@ What this path does:
 - prefers packaged desktop launch for installer-style smoke checks
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
-- packaged executable auto-discovery order: env overrides (`GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then `GPM_DESKTOP_PACKAGED_EXE`, then `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+- packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE`, then `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
 
-Env override examples (PowerShell):
+Env override example, preferred GPM form (PowerShell):
 
 ```powershell
-$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
+$env:GPM_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
 ```
 
 Legacy compatibility alias example (PowerShell):
@@ -269,8 +269,8 @@ Dry-run guidance:
 - always run `--dry-run` first to verify executable discovery and local API preflight before real launch.
 
 Executable override and env hints:
-- preferred packaged executable override: `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`
-- compatibility alias: `GPM_DESKTOP_PACKAGED_EXE`
+- preferred packaged executable override: `GPM_DESKTOP_PACKAGED_EXE`
+- compatibility alias: `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`
 - legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
 - local API behavior can still be tuned with `GPM_LOCAL_API_BASE_URL` and `GPM_LOCAL_API_TIMEOUT_SEC` (legacy aliases: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`)
 - keep manual executable overrides as support/lab usage in scaffold mode, not production defaults
@@ -278,7 +278,7 @@ Executable override and env hints:
 Env override examples (Linux):
 
 ```bash
-export GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$PWD/apps/desktop/src-tauri/target/release/global-private-mesh-desktop"
+export GPM_DESKTOP_PACKAGED_EXE="$PWD/apps/desktop/src-tauri/target/release/global-private-mesh-desktop"
 bash ./scripts/linux/desktop_packaged_run.sh --dry-run
 ```
 
