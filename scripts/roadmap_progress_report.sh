@@ -6576,6 +6576,40 @@ profile_default_gate_next_command_sudo="$(
 )"
 profile_default_gate_next_command="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command")"
 profile_default_gate_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "$profile_default_gate_next_command_sudo")"
+profile_default_gate_fallback_campaign_timeout_sec="${MANUAL_VALIDATION_PROFILE_DEFAULT_GATE_CAMPAIGN_TIMEOUT_SEC:-2400}"
+if [[ ! "$profile_default_gate_fallback_campaign_timeout_sec" =~ ^[0-9]+$ ]]; then
+  profile_default_gate_fallback_campaign_timeout_sec="2400"
+fi
+if [[ "$profile_default_gate_status" != "pass" && "$profile_default_gate_status" != "skip" ]]; then
+  if [[ -z "$profile_default_gate_next_command" || -z "$profile_default_gate_next_command_sudo" ]]; then
+    profile_default_gate_command_summary_json_fallback="$(trim "$profile_compare_signoff_summary_json")"
+    if [[ -z "$profile_default_gate_command_summary_json_fallback" ]]; then
+      profile_default_gate_command_summary_json_fallback="$(trim "$profile_default_gate_summary_json_manual")"
+    fi
+    if [[ -z "$profile_default_gate_command_summary_json_fallback" ]]; then
+      profile_default_gate_command_summary_json_fallback="$ROOT_DIR/.easy-node-logs/profile_compare_campaign_signoff_summary.json"
+    fi
+    profile_default_gate_command_reports_dir_fallback="$(dirname "$profile_default_gate_command_summary_json_fallback")"
+    printf -v profile_default_gate_command_reports_dir_fallback_arg '%q' "$profile_default_gate_command_reports_dir_fallback"
+    printf -v profile_default_gate_command_summary_json_fallback_arg '%q' "$profile_default_gate_command_summary_json_fallback"
+    printf -v profile_default_gate_fallback_campaign_timeout_sec_arg '%q' "$profile_default_gate_fallback_campaign_timeout_sec"
+    profile_default_gate_generated_next_command="$(profile_default_gate_command_with_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $profile_default_gate_command_reports_dir_fallback_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $profile_default_gate_fallback_campaign_timeout_sec_arg --summary-json $profile_default_gate_command_summary_json_fallback_arg --print-summary-json 1")"
+    profile_default_gate_generated_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $profile_default_gate_command_reports_dir_fallback_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $profile_default_gate_fallback_campaign_timeout_sec_arg --summary-json $profile_default_gate_command_summary_json_fallback_arg --print-summary-json 1")"
+    if [[ -z "$profile_default_gate_next_command" ]]; then
+      profile_default_gate_next_command="$profile_default_gate_generated_next_command"
+    fi
+    if [[ -z "$profile_default_gate_next_command_sudo" ]]; then
+      profile_default_gate_next_command_sudo="$profile_default_gate_generated_next_command_sudo"
+    fi
+    if [[ -z "$profile_default_gate_next_command_source" ]]; then
+      profile_default_gate_next_command_source="default_non_sudo"
+    fi
+  fi
+  if [[ -z "$profile_default_gate_next_command_source" ]] \
+     && ([[ -n "$profile_default_gate_next_command" ]] || [[ -n "$profile_default_gate_next_command_sudo" ]]); then
+    profile_default_gate_next_command_source="default_non_sudo"
+  fi
+fi
 profile_default_gate_needs_attention_json="true"
 if [[ "$profile_default_gate_status" == "pass" || "$profile_default_gate_status" == "skip" ]]; then
   profile_default_gate_needs_attention_json="false"

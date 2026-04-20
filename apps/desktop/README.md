@@ -603,6 +603,10 @@ From `cmd.exe`:
 scripts\windows\desktop_release_bundle.cmd -Channel beta
 ```
 
+Windows release-bundle PATH/npm hardening:
+- `desktop_release_bundle` now auto-refreshes current-session PATH from machine+user PATH and augments common tool directories before preflight checks and npm invocation.
+- npm resolution now prefers `npm.cmd` and auto-falls back from `npm.ps1` to sibling `npm.cmd` when available to avoid PowerShell execution-policy traps.
+
 Skip-build validation mode:
 - `-SkipBuild` runs scaffold validation and env-scoping checks without requiring Node.js/npm/Rust toolchain.
 - real build path (without `-SkipBuild`) still requires toolchain and runs the Tauri bundle build.

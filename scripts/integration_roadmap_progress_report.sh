@@ -3676,6 +3676,41 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] profile default gate generates fallback command when summary lacks next_command"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --profile-compare-signoff-summary-json "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_missing_command.log 2>&1; then
+  echo "expected success when profile default gate next_command fields are missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_missing_command.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
+  def is_non_sudo_profile_gate_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
+  def is_sudo_profile_gate_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
+  .vpn_track.optional_gate_status.profile_default_gate == "pending"
+  and is_non_sudo_profile_gate_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_sudo_profile_gate_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and (.vpn_track.profile_default_gate.next_command_source == "default_non_sudo")
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-timeout-sec 2400"))
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--summary-json " + $src))
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--subject INVITE_KEY"))
+  and ((.next_actions // []) | any(.id == "profile_default_gate" and is_non_sudo_profile_gate_cmd(.command)))
+' "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_summary.json" >/dev/null; then
+  echo "profile default gate missing-command fallback summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] manual refresh invalid summary restore path"
 RESTORE_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_restore_target.json"
 RESTORE_MANUAL_REPORT_MD="$TMP_DIR/manual_validation_restore_target.md"

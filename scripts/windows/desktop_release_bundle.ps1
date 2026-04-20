@@ -122,16 +122,269 @@ function Validate-SigningPlaceholders {
   }
 }
 
+function Get-CommandPath {
+  param([string]$Name)
+  $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+  if ($null -eq $cmd) {
+    return ""
+  }
+  return [string]$cmd.Source
+}
+
+function Normalize-NpmCommandPath {
+  param(
+    [AllowEmptyString()]
+    [string]$PathValue
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return $PathValue
+  }
+
+  $leaf = [System.IO.Path]::GetFileName($PathValue)
+  if (-not $leaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return $PathValue
+  }
+
+  $parent = Split-Path -Parent $PathValue
+  if ([string]::IsNullOrWhiteSpace($parent)) {
+    return $PathValue
+  }
+
+  $siblingCmd = Join-Path $parent "npm.cmd"
+  if (Test-Path -LiteralPath $siblingCmd -PathType Leaf) {
+    return $siblingCmd
+  }
+
+  return $PathValue
+}
+
+function Get-CommonToolDirectories {
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $userProfile = [Environment]::GetFolderPath("UserProfile")
+  $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
+
+  $candidates = @(
+    (Join-Path $programFiles "Go\bin"),
+    (Join-Path $programFilesX86 "Go\bin"),
+    (Join-Path $systemDrive "Go\bin"),
+    (Join-Path $programFiles "nodejs"),
+    (Join-Path $programFilesX86 "nodejs"),
+    (Join-Path $systemDrive "nodejs"),
+    (Join-Path $userProfile ".cargo\bin"),
+    (Join-Path $programFiles "Git"),
+    (Join-Path $programFiles "Git\cmd"),
+    (Join-Path $programFiles "Git\bin"),
+    (Join-Path $programFiles "Git\usr\bin"),
+    (Join-Path $programFilesX86 "Git"),
+    (Join-Path $programFilesX86 "Git\cmd"),
+    (Join-Path $programFilesX86 "Git\bin"),
+    (Join-Path $programFilesX86 "Git\usr\bin")
+  )
+
+  $dirs = @()
+  $seen = @{}
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+      continue
+    }
+    $normalized = $candidate.TrimEnd("\")
+    $key = $normalized.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $dirs += $normalized
+  }
+
+  return $dirs
+}
+
+function Add-SessionPathSegments {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Segments
+  )
+
+  if ($Segments.Count -eq 0) {
+    return
+  }
+
+  $existing = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:Path)) {
+    $existing = $env:Path.Split(";")
+  }
+
+  $seen = @{}
+  $normalized = @()
+  foreach ($segment in @($existing + $Segments)) {
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      continue
+    }
+    $trimmed = $segment.Trim().TrimEnd("\")
+    if ($trimmed.Length -eq 0) {
+      continue
+    }
+    $key = $trimmed.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $normalized += $trimmed
+  }
+
+  $env:Path = ($normalized -join ";")
+}
+
+function Resolve-ToolPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  $nameLower = $Name.ToLowerInvariant()
+  $path = Get-CommandPath $Name
+  if ($nameLower -in @("npm", "npm.cmd")) {
+    $path = Normalize-NpmCommandPath -PathValue $path
+  }
+
+  $allowWindowsAppsAlias = $nameLower -eq "winget"
+  if (-not [string]::IsNullOrWhiteSpace($path) -and ($allowWindowsAppsAlias -or $path -notmatch '\\WindowsApps\\')) {
+    return $path
+  }
+
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $userProfile = [Environment]::GetFolderPath("UserProfile")
+  $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+  $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
+
+  $candidates = @()
+  switch ($nameLower) {
+    "node" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\node.exe"),
+        (Join-Path $programFilesX86 "nodejs\node.exe"),
+        (Join-Path $systemDrive "nodejs\node.exe")
+      )
+    }
+    "npm" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "npm.cmd" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "rustc" {
+      $candidates = @(
+        (Join-Path $userProfile ".cargo\bin\rustc.exe")
+      )
+    }
+    "cargo" {
+      $candidates = @(
+        (Join-Path $userProfile ".cargo\bin\cargo.exe")
+      )
+    }
+    "git" {
+      $candidates = @(
+        (Join-Path $programFiles "Git\cmd\git.exe"),
+        (Join-Path $programFiles "Git\bin\git.exe"),
+        (Join-Path $programFiles "Git\mingw64\bin\git.exe"),
+        (Join-Path $programFilesX86 "Git\cmd\git.exe"),
+        (Join-Path $programFilesX86 "Git\bin\git.exe"),
+        (Join-Path $programFilesX86 "Git\mingw64\bin\git.exe")
+      )
+    }
+    "winget" {
+      $candidates = @(
+        (Join-Path $localAppData "Microsoft\WindowsApps\winget.exe")
+      )
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
+function Resolve-NpmCommandPath {
+  param(
+    [switch]$LogFallbackHint,
+    [switch]$FailOnNpmPs1WithoutCmd
+  )
+
+  $npmRawPath = Get-CommandPath "npm"
+  if (-not [string]::IsNullOrWhiteSpace($npmRawPath)) {
+    $normalizedNpmPath = Normalize-NpmCommandPath -PathValue $npmRawPath
+    if ($npmRawPath -match '(?i)[\\/]npm\.ps1$') {
+      if ($normalizedNpmPath -match '(?i)[\\/]npm\.cmd$') {
+        if ($LogFallbackHint) {
+          Write-Host ("[desktop-release-bundle] npm resolver fallback: ignoring npm.ps1 shim and using sibling npm.cmd at {0}" -f $normalizedNpmPath)
+        }
+        return $normalizedNpmPath
+      }
+      $remediation = New-RemediationMessage -Headline "npm.ps1 was resolved but sibling npm.cmd was not found; refusing to invoke npm.ps1 to avoid PowerShell execution-policy failures." -Hints @(
+        "Install or repair Node.js LTS so npm.cmd exists next to npm.ps1 (typically under C:\\Program Files\\nodejs).",
+        "Alternatively run from cmd.exe and invoke npm.cmd directly after fixing PATH.",
+        "If Node.js was just installed, open a new terminal and rerun this script."
+      )
+      if ($FailOnNpmPs1WithoutCmd) {
+        throw $remediation
+      }
+      if ($LogFallbackHint) {
+        Write-Host "[desktop-release-bundle] npm.ps1 shim detected but npm.cmd was not found; treating npm as missing to avoid execution-policy failures."
+      }
+      return ""
+    }
+    return $normalizedNpmPath
+  }
+
+  $npmCmdPath = Resolve-ToolPath "npm.cmd"
+  if (-not [string]::IsNullOrWhiteSpace($npmCmdPath)) {
+    return $npmCmdPath
+  }
+
+  $npmPath = Resolve-ToolPath "npm"
+  if ([string]::IsNullOrWhiteSpace($npmPath)) {
+    return ""
+  }
+
+  return $npmPath
+}
+
 function Get-DesktopBuildMissingTools {
   $missing = @()
 
-  if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  $nodePath = Resolve-ToolPath "node"
+  $npmPath = Resolve-NpmCommandPath
+  $rustcPath = Resolve-ToolPath "rustc"
+  $cargoPath = Resolve-ToolPath "cargo"
+
+  if ([string]::IsNullOrWhiteSpace($nodePath)) {
     $missing += "Node.js LTS / node"
   }
-  if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+  if ([string]::IsNullOrWhiteSpace($npmPath)) {
     $missing += "npm.cmd"
   }
-  if (-not (Get-Command rustc -ErrorAction SilentlyContinue) -or -not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+  if ([string]::IsNullOrWhiteSpace($rustcPath) -or [string]::IsNullOrWhiteSpace($cargoPath)) {
     $missing += "Rust toolchain (rustc + cargo)"
   }
   return @($missing)
@@ -143,17 +396,43 @@ function Refresh-DesktopProcessPath {
   $segments = @()
 
   if (-not [string]::IsNullOrWhiteSpace($machinePath)) {
-    $segments += $machinePath
+    $segments += $machinePath.Split(";")
   }
   if (-not [string]::IsNullOrWhiteSpace($userPath)) {
-    $segments += $userPath
+    $segments += $userPath.Split(";")
   }
 
-  if ($segments.Count -eq 0) {
+  $seen = @{}
+  $normalized = @()
+  foreach ($segment in $segments) {
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      continue
+    }
+    $trimmed = [Environment]::ExpandEnvironmentVariables($segment.Trim())
+    if ($trimmed.Length -eq 0) {
+      continue
+    }
+    $key = $trimmed.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $normalized += $trimmed
+  }
+
+  if ($normalized.Count -eq 0) {
     return
   }
 
-  $env:PATH = [Environment]::ExpandEnvironmentVariables(($segments -join ";"))
+  $env:Path = ($normalized -join ";")
+}
+
+function Refresh-AndAugmentDesktopProcessPath {
+  Refresh-DesktopProcessPath
+  $commonToolDirs = Get-CommonToolDirectories
+  if ($commonToolDirs.Count -gt 0) {
+    Add-SessionPathSegments -Segments $commonToolDirs
+  }
 }
 
 function New-RemediationMessage {
@@ -246,7 +525,7 @@ function Assert-DesktopBuildTools {
     [switch]$AutoInstallMissing
   )
 
-  Refresh-DesktopProcessPath
+  Refresh-AndAugmentDesktopProcessPath
   $missing = Get-DesktopBuildMissingTools
   if ($missing.Count -eq 0) {
     return
@@ -254,7 +533,7 @@ function Assert-DesktopBuildTools {
 
   if ($AutoInstallMissing) {
     Install-MissingDesktopDependencies -MissingTools $missing
-    Refresh-DesktopProcessPath
+    Refresh-AndAugmentDesktopProcessPath
     $missing = Get-DesktopBuildMissingTools
     if ($missing.Count -eq 0) {
       return
@@ -583,9 +862,9 @@ try {
 
   Assert-DesktopBuildTools -AutoInstallMissing:$InstallMissing
 
-  Refresh-DesktopProcessPath
-  $npmPath = Get-Command npm.cmd -ErrorAction SilentlyContinue
-  if ($null -eq $npmPath) {
+  Refresh-AndAugmentDesktopProcessPath
+  $npmPath = Resolve-NpmCommandPath -LogFallbackHint -FailOnNpmPs1WithoutCmd
+  if ([string]::IsNullOrWhiteSpace($npmPath)) {
     throw (New-RemediationMessage -Headline "npm.cmd was not found in PATH after preflight." -Hints @(
       "Install or repair Node.js LTS, then open a new terminal so PATH picks up the updated npm.cmd location.",
       "If you want the script to attempt remediation, rerun with -InstallMissing."
@@ -602,7 +881,7 @@ try {
     }
 
     Write-Host "[desktop-release-bundle] running: npm.cmd $($npmArgs -join ' ')"
-    & $npmPath.Source @npmArgs
+    & $npmPath @npmArgs
     $rc = $LASTEXITCODE
     if ($rc -ne 0) {
       throw (New-RemediationMessage -Headline "tauri build failed with exit code $rc." -Hints @(
