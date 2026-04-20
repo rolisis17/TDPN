@@ -337,6 +337,84 @@
         </div>
       </section>
 
+      <section class="card" id="connection_console">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Connection console</p>
+            <h2>Client and server tabs in one portal window</h2>
+          </div>
+          <p class="section-lead">
+            Use the workspace tabs to run local tunnel connect/disconnect/status actions while keeping onboarding context in this page.
+          </p>
+        </div>
+        <div id="connection_snapshot" class="status-banner" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Connection snapshot</div>
+          <div id="connection_snapshot_line" class="status warn">
+            <strong id="connection_state">Unknown</strong>
+            <span id="connection_detail">Run Status to fetch the current connection state.</span>
+          </div>
+        </div>
+        <div class="tabs portal-tabs" role="tablist" aria-label="Portal workspaces">
+          <button id="tab_client" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel_client">
+            Client
+          </button>
+          <button id="tab_server" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel_server">
+            Server
+          </button>
+        </div>
+        <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
+          <p id="client_lock_hint" class="helper-copy">Client controls are available for client-capable roles.</p>
+          <p id="connect_policy_hint" class="helper-copy">
+            Connect policy: compat from env defaults; manual bootstrap/invite fields are policy-gated.
+          </p>
+          <div class="fields">
+            <label>
+              Interface
+              <input id="connect_interface" value="wgvpn0" spellcheck="false" autocomplete="off" />
+            </label>
+            <label>
+              Discovery wait (sec)
+              <input id="connect_discovery_wait_sec" type="number" min="1" step="1" value="20" />
+            </label>
+            <label>
+              Ready timeout (sec)
+              <input id="connect_ready_timeout_sec" type="number" min="1" step="1" value="35" />
+            </label>
+          </div>
+          <div class="checks-row">
+            <label class="check">
+              <input id="connect_run_preflight" type="checkbox" checked />
+              Run preflight
+            </label>
+            <label class="check">
+              <input id="connect_prod_profile" type="checkbox" />
+              PROD profile
+            </label>
+            <label class="check">
+              <input id="connect_install_route" type="checkbox" checked />
+              Install default route
+            </label>
+          </div>
+          <p class="helper-copy">
+            Connect requests use Step 2 path profile plus compatibility override fields when policy allows.
+          </p>
+          <div class="actions">
+            <button class="btn primary" id="connect_btn">Connect</button>
+            <button class="btn secondary" id="disconnect_btn">Disconnect</button>
+            <button class="btn secondary" id="status_btn">Status</button>
+          </div>
+        </div>
+        <div id="panel_server" class="tab-panel" role="tabpanel" aria-labelledby="tab_server">
+          <p id="server_lock_hint" class="helper-copy">Server controls are available only for approved operator/admin roles.</p>
+          <p class="helper-copy">
+            Server lifecycle approvals remain in Step 3. The status action here checks shared local connection state.
+          </p>
+          <div class="actions">
+            <button class="btn secondary" id="status_btn_server">Status</button>
+          </div>
+        </div>
+      </section>
+
       <section class="card">
         <div class="section-head">
           <div>

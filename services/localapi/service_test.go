@@ -493,10 +493,16 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
 		t.Setenv("GPM_PRODUCTION_MODE", "")
 		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
@@ -545,11 +551,35 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmConnectPolicySource != "default" {
 			t.Fatalf("gpmConnectPolicySource=%q want=default", s.gpmConnectPolicySource)
 		}
+		if s.gpmManifestTrustPolicyMode != "default" {
+			t.Fatalf("gpmManifestTrustPolicyMode=%q want=default", s.gpmManifestTrustPolicyMode)
+		}
+		if s.gpmManifestTrustPolicySource != "default" {
+			t.Fatalf("gpmManifestTrustPolicySource=%q want=default", s.gpmManifestTrustPolicySource)
+		}
+		if s.gpmManifestRequireHTTPS {
+			t.Fatalf("gpmManifestRequireHTTPS=%t want=false", s.gpmManifestRequireHTTPS)
+		}
+		if s.gpmManifestRequireSignature {
+			t.Fatalf("gpmManifestRequireSignature=%t want=false", s.gpmManifestRequireSignature)
+		}
+		if s.gpmManifestRequireHTTPSSource != "default" {
+			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=default", s.gpmManifestRequireHTTPSSource)
+		}
+		if s.gpmManifestRequireSigSource != "default" {
+			t.Fatalf("gpmManifestRequireSigSource=%q want=default", s.gpmManifestRequireSigSource)
+		}
 		if s.gpmAuthVerifyPolicyMode != "default" {
 			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=default", s.gpmAuthVerifyPolicyMode)
 		}
 		if s.gpmAuthVerifyPolicySource != "default" {
 			t.Fatalf("gpmAuthVerifyPolicySource=%q want=default", s.gpmAuthVerifyPolicySource)
+		}
+		if s.gpmAuthVerifyRequireCommand {
+			t.Fatalf("gpmAuthVerifyRequireCommand=%t want=false", s.gpmAuthVerifyRequireCommand)
+		}
+		if s.gpmAuthVerifyRequireCmdSource != "default" {
+			t.Fatalf("gpmAuthVerifyRequireCmdSource=%q want=default", s.gpmAuthVerifyRequireCmdSource)
 		}
 		if s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=false", s.gpmAuthVerifyRequireMetadata)
@@ -722,10 +752,16 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 	t.Run("production mode enforces secure connect and auth defaults when flags unset", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
@@ -744,11 +780,35 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmConnectPolicySource != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("gpmConnectPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmConnectPolicySource)
 		}
+		if s.gpmManifestTrustPolicyMode != "production" {
+			t.Fatalf("gpmManifestTrustPolicyMode=%q want=production", s.gpmManifestTrustPolicyMode)
+		}
+		if s.gpmManifestTrustPolicySource != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpmManifestTrustPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmManifestTrustPolicySource)
+		}
+		if !s.gpmManifestRequireHTTPS {
+			t.Fatalf("gpmManifestRequireHTTPS=%t want=true", s.gpmManifestRequireHTTPS)
+		}
+		if !s.gpmManifestRequireSignature {
+			t.Fatalf("gpmManifestRequireSignature=%t want=true", s.gpmManifestRequireSignature)
+		}
+		if s.gpmManifestRequireHTTPSSource != "production-default" {
+			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=production-default", s.gpmManifestRequireHTTPSSource)
+		}
+		if s.gpmManifestRequireSigSource != "production-default" {
+			t.Fatalf("gpmManifestRequireSigSource=%q want=production-default", s.gpmManifestRequireSigSource)
+		}
 		if !s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=true", s.gpmAuthVerifyRequireMetadata)
 		}
 		if !s.gpmAuthVerifyRequireWalletExt {
 			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=true", s.gpmAuthVerifyRequireWalletExt)
+		}
+		if !s.gpmAuthVerifyRequireCommand {
+			t.Fatalf("gpmAuthVerifyRequireCommand=%t want=true", s.gpmAuthVerifyRequireCommand)
+		}
+		if s.gpmAuthVerifyRequireCmdSource != "production-default" {
+			t.Fatalf("gpmAuthVerifyRequireCmdSource=%q want=production-default", s.gpmAuthVerifyRequireCmdSource)
 		}
 		if s.gpmAuthVerifyPolicyMode != "production" {
 			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=production", s.gpmAuthVerifyPolicyMode)
@@ -768,8 +828,14 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "0")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "0")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "0")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "0")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "0")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
@@ -788,11 +854,35 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmConnectPolicySource != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("gpmConnectPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmConnectPolicySource)
 		}
+		if s.gpmManifestTrustPolicyMode != "production" {
+			t.Fatalf("gpmManifestTrustPolicyMode=%q want=production", s.gpmManifestTrustPolicyMode)
+		}
+		if s.gpmManifestTrustPolicySource != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpmManifestTrustPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmManifestTrustPolicySource)
+		}
+		if s.gpmManifestRequireHTTPS {
+			t.Fatalf("gpmManifestRequireHTTPS=%t want=false", s.gpmManifestRequireHTTPS)
+		}
+		if s.gpmManifestRequireSignature {
+			t.Fatalf("gpmManifestRequireSignature=%t want=false", s.gpmManifestRequireSignature)
+		}
+		if s.gpmManifestRequireHTTPSSource != "GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS" {
+			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", s.gpmManifestRequireHTTPSSource)
+		}
+		if s.gpmManifestRequireSigSource != "TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE" {
+			t.Fatalf("gpmManifestRequireSigSource=%q want=TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", s.gpmManifestRequireSigSource)
+		}
 		if s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=false", s.gpmAuthVerifyRequireMetadata)
 		}
 		if s.gpmAuthVerifyRequireWalletExt {
 			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=false", s.gpmAuthVerifyRequireWalletExt)
+		}
+		if s.gpmAuthVerifyRequireCommand {
+			t.Fatalf("gpmAuthVerifyRequireCommand=%t want=false", s.gpmAuthVerifyRequireCommand)
+		}
+		if s.gpmAuthVerifyRequireCmdSource != "GPM_AUTH_VERIFY_REQUIRE_COMMAND" {
+			t.Fatalf("gpmAuthVerifyRequireCmdSource=%q want=GPM_AUTH_VERIFY_REQUIRE_COMMAND", s.gpmAuthVerifyRequireCmdSource)
 		}
 		if s.gpmAuthVerifyPolicyMode != "production" {
 			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=production", s.gpmAuthVerifyPolicyMode)
@@ -1810,8 +1900,15 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyCommand = lifecycleSuccessCommand("verify-ok")
 		svc.gpmConnectPolicyMode = "production"
 		svc.gpmConnectPolicySource = "GPM_PRODUCTION_MODE"
+		svc.gpmManifestTrustPolicyMode = "production"
+		svc.gpmManifestTrustPolicySource = "GPM_PRODUCTION_MODE"
+		svc.gpmManifestRequireHTTPS = true
+		svc.gpmManifestRequireHTTPSSource = "production-default"
+		svc.gpmManifestRequireSignature = true
+		svc.gpmManifestRequireSigSource = "production-default"
 		svc.gpmAuthVerifyPolicyMode = "production"
 		svc.gpmAuthVerifyPolicySource = "GPM_PRODUCTION_MODE"
+		svc.gpmAuthVerifyRequireCmdSource = "production-default"
 		svc.gpmAuthVerifyMetadataSource = "production-default"
 		svc.gpmAuthVerifyWalletExtSource = "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE"
 		svc.gpmLegacyEnvAliasesActive = []string{
@@ -1850,6 +1947,24 @@ func TestHandleConfig(t *testing.T) {
 		if got, _ := configMap["connect_policy_source"].(string); got != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("connect_policy_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
 		}
+		if got, _ := configMap["gpm_manifest_trust_policy_mode"].(string); got != "production" {
+			t.Fatalf("gpm_manifest_trust_policy_mode=%q want=%q", got, "production")
+		}
+		if got, _ := configMap["gpm_manifest_trust_policy_source"].(string); got != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpm_manifest_trust_policy_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
+		}
+		if got, _ := configMap["gpm_manifest_require_https"].(bool); !got {
+			t.Fatalf("gpm_manifest_require_https=%v want=true", configMap["gpm_manifest_require_https"])
+		}
+		if got, _ := configMap["gpm_manifest_require_https_policy_source"].(string); got != "production-default" {
+			t.Fatalf("gpm_manifest_require_https_policy_source=%q want=%q", got, "production-default")
+		}
+		if got, _ := configMap["gpm_manifest_require_signature"].(bool); !got {
+			t.Fatalf("gpm_manifest_require_signature=%v want=true", configMap["gpm_manifest_require_signature"])
+		}
+		if got, _ := configMap["gpm_manifest_require_signature_policy_source"].(string); got != "production-default" {
+			t.Fatalf("gpm_manifest_require_signature_policy_source=%q want=%q", got, "production-default")
+		}
 		if got, _ := configMap["gpm_auth_verify_policy_mode"].(string); got != "production" {
 			t.Fatalf("gpm_auth_verify_policy_mode=%q want=%q", got, "production")
 		}
@@ -1858,6 +1973,9 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["gpm_auth_verify_require_command"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_command=%v want=true", configMap["gpm_auth_verify_require_command"])
+		}
+		if got, _ := configMap["gpm_auth_verify_require_command_policy_source"].(string); got != "production-default" {
+			t.Fatalf("gpm_auth_verify_require_command_policy_source=%q want=%q", got, "production-default")
 		}
 		if got, _ := configMap["gpm_auth_verify_require_metadata"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_metadata=%v want=true", configMap["gpm_auth_verify_require_metadata"])
@@ -3662,6 +3780,54 @@ func TestGPMAuthVerifyStrictModeRequiresConfiguredVerifierCommand(t *testing.T) 
 	}
 	if _, ok := payload["session_token"]; ok {
 		t.Fatalf("session_token unexpectedly present payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyProductionDefaultRequireCommandFailsClosedWhenCommandUnset(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK", "1")
+	t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
+	t.Setenv("GPM_PRODUCTION_MODE", "1")
+	t.Setenv("TDPN_PRODUCTION_MODE", "")
+	t.Setenv("GPM_AUTH_VERIFY_COMMAND", "")
+	t.Setenv("TDPN_AUTH_VERIFY_COMMAND", "")
+	t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
+	t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
+	t.Setenv("GPM_STATE_STORE_PATH", filepath.Join(tmpDir, "gpm_state.json"))
+	t.Setenv("GPM_AUDIT_LOG_PATH", filepath.Join(tmpDir, "gpm_audit.jsonl"))
+
+	svc := New()
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	if !svc.gpmAuthVerifyRequireCommand {
+		t.Fatalf("gpmAuthVerifyRequireCommand=%t want=true", svc.gpmAuthVerifyRequireCommand)
+	}
+	if svc.gpmAuthVerifyRequireCmdSource != "production-default" {
+		t.Fatalf("gpmAuthVerifyRequireCmdSource=%q want=production-default", svc.gpmAuthVerifyRequireCmdSource)
+	}
+
+	challengeBody := `{"wallet_address":"cosmos1prodstrictcmd","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+	challengeMessage, _ := payload["message"].(string)
+	if strings.TrimSpace(challengeMessage) == "" {
+		t.Fatalf("challenge message missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1prodstrictcmd","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value","signature_kind":"sign_arbitrary","signature_source":"wallet_extension","signed_message":"` + challengeMessage + `"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "signature verifier command is required by policy") {
+		t.Fatalf("error=%q want strict-policy message payload=%v", errMsg, payload)
 	}
 }
 
@@ -6080,6 +6246,37 @@ func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 	}
 }
 
+func TestGPMClientRegisterRejectsPinnedManifestHTTPURLWhenHTTPSRequired(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestTrustPolicyMode = "production"
+	svc.gpmManifestRequireHTTPS = true
+	svc.gpmMainDomain = "https://pinned.globalprivatemesh.example:8443"
+	svc.gpmManifestURL = "http://pinned.globalprivatemesh.example:8443/v1/bootstrap/manifest"
+
+	now := time.Now().UTC()
+	const token = "gpm-session-token-http-manifest-blocked"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1httppinnedmanifest",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusBadGateway {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "must use https when pinned gpm main domain is configured") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
 func TestReadBootstrapManifestCacheWithHMACKeyReverification(t *testing.T) {
 	now := time.Now().UTC()
 
@@ -6365,6 +6562,59 @@ func TestGPMClientRegisterRejectsPinnedCacheFallbackWithoutSignedPayloadEvidence
 	}
 	errMsg, _ := payload["error"].(string)
 	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "missing signed payload evidence") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMClientRegisterRejectsCacheFallbackWhenSignatureRequiredButVerifierKeyMissing(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestTrustPolicyMode = "production"
+	svc.gpmManifestRequireSignature = true
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmMainDomain = "https://127.0.0.1:1"
+	svc.gpmManifestURL = "https://127.0.0.1:1/v1/bootstrap/manifest"
+
+	now := time.Now().UTC()
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Format(time.RFC3339),
+		SourceURL:         svc.gpmManifestURL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	const token = "gpm-session-token-cache-missing-key"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1cachemissingkey",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusBadGateway {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "verification key is required by policy") {
 		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 }

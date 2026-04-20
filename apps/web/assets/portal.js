@@ -48,6 +48,23 @@ const inviteKeyEl = byId("invite_key");
 const registerClientBtnEl = byId("register_client_btn");
 const manualSignInBtnEl = byId("signin_btn");
 const signinPolicyHintEl = document.getElementById("signin_policy_hint");
+const connectionSnapshotEl = byId("connection_snapshot");
+const connectionSnapshotLineEl = byId("connection_snapshot_line");
+const connectionStateEl = byId("connection_state");
+const connectionDetailEl = byId("connection_detail");
+const tabClientEl = byId("tab_client");
+const tabServerEl = byId("tab_server");
+const panelClientEl = byId("panel_client");
+const panelServerEl = byId("panel_server");
+const clientLockHintEl = byId("client_lock_hint");
+const serverLockHintEl = byId("server_lock_hint");
+const connectPolicyHintEl = byId("connect_policy_hint");
+const connectInterfaceEl = byId("connect_interface");
+const connectDiscoveryWaitSecEl = byId("connect_discovery_wait_sec");
+const connectReadyTimeoutSecEl = byId("connect_ready_timeout_sec");
+const connectRunPreflightEl = byId("connect_run_preflight");
+const connectProdProfileEl = byId("connect_prod_profile");
+const connectInstallRouteEl = byId("connect_install_route");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
@@ -73,7 +90,17 @@ const CONNECT_POLICY_SOURCE_LEGACY_DERIVED = "legacy_payload";
 const CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE = "config_unavailable";
 const LEGACY_ALIAS_ENV_NAME_REGEX = /\bTDPN_[A-Z0-9_]+\b/gi;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
+const PORTAL_WORKSPACE_TAB_STORAGE_KEY = "gpm.portal.workspace_tab.v1";
 const MAX_OUTPUT_CHARS = 64 * 1024;
+const CONNECTION_DEFAULT_STATE = "Unknown";
+const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
+const CONNECTION_HINT_KEYS = {
+  state: ["connection_state", "state", "status", "phase", "mode"],
+  connected: ["connected", "is_connected", "online", "active"],
+  disconnected: ["disconnected", "is_disconnected", "offline"],
+  healthy: ["healthy", "ok", "is_ok", "alive"],
+  detail: ["detail", "details", "message", "reason", "error", "description"]
+};
 const PERSISTED_FIELD_IDS = [
   "api_base",
   "role",
@@ -92,7 +119,10 @@ const PERSISTED_FIELD_IDS = [
   "audit_wallet_address",
   "audit_order",
   "path_profile",
-  "bootstrap_directory"
+  "bootstrap_directory",
+  "connect_interface",
+  "connect_discovery_wait_sec",
+  "connect_ready_timeout_sec"
 ];
 let operatorApplicationStatus = undefined;
 let selectedApplicationUpdatedAtUtc = "";
@@ -118,6 +148,9 @@ let operatorListActiveFilters = {
 };
 let operatorListNextCursor = "";
 let walletSignatureContext = null;
+let activeWorkspaceTab = "client";
+let connectionState = CONNECTION_DEFAULT_STATE;
+let connectionDetail = CONNECTION_DEFAULT_DETAIL;
 
 function localStore() {
   try {
@@ -202,6 +235,28 @@ function bindPersistenceListeners() {
     }
     el.addEventListener("input", persist);
     el.addEventListener("change", persist);
+  }
+}
+
+function restoreWorkspaceTabPreference() {
+  const store = localStore();
+  if (!store) {
+    activeWorkspaceTab = "client";
+    return;
+  }
+  const persisted = store.getItem(PORTAL_WORKSPACE_TAB_STORAGE_KEY);
+  activeWorkspaceTab = persisted === "server" ? "server" : "client";
+}
+
+function persistWorkspaceTabPreference() {
+  const store = localStore();
+  if (!store) {
+    return;
+  }
+  try {
+    store.setItem(PORTAL_WORKSPACE_TAB_STORAGE_KEY, activeWorkspaceTab === "server" ? "server" : "client");
+  } catch {
+    // Best effort only: ignore quota or browser storage errors.
   }
 }
 
@@ -670,6 +725,22 @@ function formatPolicySourceLabel(source) {
   return nonEmptyString(source) || "default";
 }
 
+function refreshConnectPolicyHint() {
+  if (!connectPolicyHintEl) {
+    return;
+  }
+  const mode = formatConnectPolicyModeLabel(connectPolicyMode);
+  const source = formatPolicySourceLabel(connectPolicySource);
+  let posture = "manual bootstrap/invite fields are optional compatibility controls.";
+  if (connectRequireSession) {
+    posture = "manual bootstrap/invite overrides are locked by session-required policy.";
+  } else if (!allowLegacyConnectOverride) {
+    posture = "manual bootstrap/invite overrides are disabled by policy.";
+  }
+  connectPolicyHintEl.textContent = `Connect policy: ${mode} (source: ${source}); ${posture}`;
+  connectPolicyHintEl.classList.toggle("locked", connectRequireSession || !allowLegacyConnectOverride);
+}
+
 function refreshPolicyPostureBanner() {
   const configUnavailable = connectPolicySource === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
   const strict = connectRequireSession || authVerifyRequireMetadata || authVerifyRequireWalletExtensionSource;
@@ -687,6 +758,7 @@ function refreshPolicyPostureBanner() {
     policyAuthVerifyEl.textContent =
       "Auth verify strictness: policy hints unavailable from /v1/config; using compatibility defaults and keeping manual verify available until runtime config is reachable.";
     syncManualSignInAction();
+    refreshConnectPolicyHint();
     return;
   }
   const metadataRequired = authVerifyRequireMetadata ? "required" : "optional";
@@ -700,6 +772,7 @@ function refreshPolicyPostureBanner() {
     `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
     `wallet-extension-source ${walletRequired} (source: ${walletSource}).${manualSignInGuidance}`;
   syncManualSignInAction();
+  refreshConnectPolicyHint();
 }
 
 function refreshLegacyAliasWarningBanner() {
@@ -1038,6 +1111,14 @@ function numberOrUndefined(value) {
   const parsed = Number(value);
   if (Number.isFinite(parsed) && parsed >= 0) {
     return parsed;
+  }
+  return undefined;
+}
+
+function positiveIntegerOrUndefined(value, minimum = 1) {
+  const parsed = numberOrUndefined(value);
+  if (parsed !== undefined && parsed >= minimum) {
+    return Math.floor(parsed);
   }
   return undefined;
 }
@@ -1770,6 +1851,204 @@ function parseBooleanLike(value) {
   return undefined;
 }
 
+function parseConnectionBooleanLike(value) {
+  const parsed = parseBooleanLike(value);
+  if (parsed !== undefined) {
+    return parsed;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["ok", "healthy", "online", "up", "connected", "ready", "active", "pass"].includes(normalized)) {
+    return true;
+  }
+  if (["offline", "down", "disconnected", "unhealthy", "error", "failed"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
+function toDetailText(value) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+}
+
+function findHintValue(payload, keys, depth = 0) {
+  if (payload === null || payload === undefined || depth > 4) {
+    return undefined;
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findHintValue(item, keys, depth + 1);
+      if (found !== undefined && found !== null) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (typeof payload !== "object") {
+    return undefined;
+  }
+  for (const [key, value] of Object.entries(payload)) {
+    if (keys.includes(key.toLowerCase()) && value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  for (const value of Object.values(payload)) {
+    const found = findHintValue(value, keys, depth + 1);
+    if (found !== undefined && found !== null) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function normalizeConnectionState(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim().toLowerCase();
+  if (!text) {
+    return undefined;
+  }
+  if (text.includes("connecting") || text.includes("pending") || text.includes("starting")) {
+    return "connecting";
+  }
+  if (text.includes("disconnecting") || text.includes("stopping")) {
+    return "disconnecting";
+  }
+  if (text.includes("degrad") || text.includes("unhealthy") || text.includes("error") || text.includes("failed")) {
+    return "degraded";
+  }
+  if (text.includes("disconnect") || text.includes("offline") || text === "down" || text === "stopped") {
+    return "disconnected";
+  }
+  if (text.includes("connect") || text.includes("online") || text === "up" || text === "active" || text === "ready") {
+    return "connected";
+  }
+  if (text.includes("healthy") || text === "ok" || text === "pass") {
+    return "healthy";
+  }
+  return undefined;
+}
+
+function formatConnectionStateLabel(stateKey) {
+  switch (stateKey) {
+    case "connected":
+      return "Connected";
+    case "disconnected":
+      return "Disconnected";
+    case "connecting":
+      return "Connecting";
+    case "disconnecting":
+      return "Disconnecting";
+    case "healthy":
+      return "Healthy";
+    case "degraded":
+      return "Degraded";
+    default:
+      return CONNECTION_DEFAULT_STATE;
+  }
+}
+
+function inferConnectionDetail(payload, source, stateKey, stateHint) {
+  const detailHint = toDetailText(findHintValue(payload, CONNECTION_HINT_KEYS.detail));
+  if (detailHint) {
+    return detailHint;
+  }
+  const stateText = toDetailText(stateHint);
+  if (stateText) {
+    return stateText;
+  }
+  const payloadText = toDetailText(payload);
+  if (payloadText) {
+    return payloadText;
+  }
+  if (source === "connect") {
+    return "Connect request completed.";
+  }
+  if (source === "disconnect") {
+    return "Disconnect request completed.";
+  }
+  if (source === "status") {
+    return "Status refreshed.";
+  }
+  return stateKey === "degraded" ? "Connection check reported issues." : CONNECTION_DEFAULT_DETAIL;
+}
+
+function inferConnectionSnapshot(source, payload) {
+  const stateHint = findHintValue(payload, CONNECTION_HINT_KEYS.state);
+  const connected = parseConnectionBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.connected));
+  const disconnected = parseConnectionBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.disconnected));
+  const healthy = parseConnectionBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.healthy));
+
+  let stateKey = normalizeConnectionState(stateHint);
+  if (!stateKey && connected === true) {
+    stateKey = "connected";
+  }
+  if (!stateKey && disconnected === true) {
+    stateKey = "disconnected";
+  }
+  if (!stateKey && connected === false) {
+    stateKey = "disconnected";
+  }
+  if (!stateKey && disconnected === false) {
+    stateKey = "connected";
+  }
+  if (!stateKey && source === "connect") {
+    stateKey = "connected";
+  }
+  if (!stateKey && source === "disconnect") {
+    stateKey = "disconnected";
+  }
+  if (!stateKey && source === "status" && healthy !== undefined) {
+    stateKey = healthy ? "healthy" : "degraded";
+  }
+  if (!stateKey) {
+    stateKey = normalizeConnectionState(connectionState) || "unknown";
+  }
+  return {
+    stateKey,
+    state: formatConnectionStateLabel(stateKey),
+    detail: inferConnectionDetail(payload, source, stateKey, stateHint)
+  };
+}
+
+function connectionSnapshotKind(stateKey) {
+  if (stateKey === "connected" || stateKey === "healthy") {
+    return "good";
+  }
+  if (stateKey === "degraded") {
+    return "bad";
+  }
+  return "warn";
+}
+
+function applyConnectionSnapshot(snapshot) {
+  connectionState = snapshot?.state || connectionState || CONNECTION_DEFAULT_STATE;
+  connectionDetail = snapshot?.detail || connectionDetail || CONNECTION_DEFAULT_DETAIL;
+  if (connectionStateEl) {
+    connectionStateEl.textContent = connectionState;
+  }
+  if (connectionDetailEl) {
+    connectionDetailEl.textContent = connectionDetail;
+  }
+  const kind = connectionSnapshotKind(snapshot?.stateKey);
+  connectionSnapshotEl.dataset.kind = kind;
+  connectionSnapshotLineEl.classList.remove("good", "warn", "bad");
+  connectionSnapshotLineEl.classList.add(kind);
+}
+
+function updateConnectionDashboard(source, payload) {
+  applyConnectionSnapshot(inferConnectionSnapshot(source, payload));
+}
+
 function parseServerReadiness(payload) {
   const readiness = payload?.readiness;
   if (!readiness || typeof readiness !== "object") {
@@ -1855,6 +2134,93 @@ function isServerRoleUnlocked(roleValue) {
 function isServerOnlyRole(roleValue) {
   const role = String(roleValue || "").trim().toLowerCase();
   return SERVER_ONLY_ROLES.has(role);
+}
+
+function isServerTabVisibleRole(roleValue = byId("role").value) {
+  if (serverReadiness && typeof serverReadiness.tabVisible === "boolean") {
+    return serverReadiness.tabVisible;
+  }
+  const role = String(serverReadiness?.role || roleValue || "").trim().toLowerCase();
+  return role === "operator" || role === "admin" || role === "server" || role === "server_only";
+}
+
+function isClientTabVisibleRole(roleValue = byId("role").value) {
+  if (serverReadiness && typeof serverReadiness.clientTabVisible === "boolean") {
+    return serverReadiness.clientTabVisible;
+  }
+  const role = String(serverReadiness?.role || roleValue || "").trim().toLowerCase();
+  if (role === "server" || role === "server_only") {
+    return false;
+  }
+  if (role === "operator" || role === "admin") {
+    return clientRegistered === true;
+  }
+  return true;
+}
+
+function computeClientTabLockHintText() {
+  const readiness = computeClientReadiness();
+  return readiness.guidanceText;
+}
+
+function computeServerTabLockHintText() {
+  const readiness = computeOperatorReadiness();
+  if (!isServerTabVisibleRole()) {
+    if (serverReadiness?.lockReason) {
+      return serverReadiness.lockReason;
+    }
+    return "Server tab is locked for the current role. Apply operator role and refresh readiness.";
+  }
+  return readiness.guidanceText;
+}
+
+function activateWorkspaceTab(name) {
+  const wantsClient = name === "client";
+  const clientEnabled = !tabClientEl.disabled;
+  const serverEnabled = !tabServerEl.disabled;
+  let selectedTab = wantsClient ? "client" : "server";
+  if (selectedTab === "client" && !clientEnabled && serverEnabled) {
+    selectedTab = "server";
+  } else if (selectedTab === "server" && !serverEnabled && clientEnabled) {
+    selectedTab = "client";
+  }
+  const isClient = selectedTab === "client";
+  tabClientEl.classList.toggle("active", isClient);
+  tabClientEl.setAttribute("aria-selected", String(isClient));
+  tabServerEl.classList.toggle("active", !isClient);
+  tabServerEl.setAttribute("aria-selected", String(!isClient));
+  panelClientEl.classList.toggle("active", isClient);
+  panelServerEl.classList.toggle("active", !isClient);
+  activeWorkspaceTab = selectedTab;
+  persistWorkspaceTabPreference();
+}
+
+function syncWorkspaceTabLockState() {
+  const clientTabVisible = isClientTabVisibleRole();
+  const serverTabVisible = isServerTabVisibleRole();
+  tabClientEl.disabled = !clientTabVisible;
+  tabClientEl.classList.toggle("locked", !clientTabVisible);
+  panelClientEl.classList.toggle("locked", !clientTabVisible);
+  tabServerEl.disabled = !serverTabVisible;
+  tabServerEl.classList.toggle("locked", !serverTabVisible);
+  panelServerEl.classList.toggle("locked", !serverTabVisible);
+
+  const clientTabActive = tabClientEl.classList.contains("active");
+  const serverTabActive = tabServerEl.classList.contains("active");
+  if ((clientTabActive && !clientTabVisible) || (serverTabActive && !serverTabVisible)) {
+    if (clientTabVisible) {
+      activateWorkspaceTab("client");
+    } else if (serverTabVisible) {
+      activateWorkspaceTab("server");
+    }
+  } else {
+    activateWorkspaceTab(activeWorkspaceTab);
+  }
+
+  clientLockHintEl.textContent = computeClientTabLockHintText();
+  clientLockHintEl.classList.toggle("locked", !clientTabVisible);
+  serverLockHintEl.textContent = computeServerTabLockHintText();
+  serverLockHintEl.classList.toggle("locked", !serverTabVisible);
 }
 
 function formatOperatorApplicationStatusLabel(status) {
@@ -2174,6 +2540,7 @@ function refreshClientReadiness() {
   setClientReadiness(readiness.kind, readiness.statusText, readiness.guidanceText, readiness.state);
   syncClientRegistrationAction(readiness);
   refreshOnboardingSteps();
+  syncWorkspaceTabLockState();
 }
 
 function setOperatorApplicationStatus(value) {
@@ -2804,6 +3171,61 @@ async function requestServerStatus() {
   return post("/v1/gpm/onboarding/server/status", request);
 }
 
+function connectValidationHint() {
+  if (connectRequireSession) {
+    return "session_token is required in session-required connect mode; sign in first";
+  }
+  if (allowLegacyConnectOverride) {
+    return "sign in + register client, or provide compatibility bootstrap_directory + invite";
+  }
+  return "sign in and register the client profile before connecting";
+}
+
+function buildConnectRequest() {
+  const pathProfile = byId("path_profile").value;
+  const request = {
+    session_token: byId("session_token").value.trim() || undefined,
+    path_profile: pathProfile,
+    policy_profile: pathProfile,
+    interface: nonEmptyString(connectInterfaceEl.value),
+    discovery_wait_sec: positiveIntegerOrUndefined(connectDiscoveryWaitSecEl.value),
+    ready_timeout_sec: positiveIntegerOrUndefined(connectReadyTimeoutSecEl.value),
+    run_preflight: connectRunPreflightEl.checked,
+    prod_profile: connectProdProfileEl.checked,
+    install_route: connectInstallRouteEl.checked
+  };
+  if (compatibilityOverrideEnabled()) {
+    const bootstrap = nonEmptyString(bootstrapDirectoryEl.value);
+    const invite = nonEmptyString(inviteKeyEl.value);
+    if (bootstrap) {
+      request.bootstrap_directory = bootstrap;
+    }
+    if (invite) {
+      request.invite_key = invite;
+    }
+  }
+  return request;
+}
+
+async function requestConnectControl() {
+  const request = buildConnectRequest();
+  if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
+    throw new Error(connectValidationHint());
+  }
+  const result = await post("/v1/connect", request);
+  inviteKeyEl.value = "";
+  persistPortalState();
+  return result;
+}
+
+async function requestDisconnectControl() {
+  return post("/v1/disconnect", {});
+}
+
+async function requestConnectionStatus() {
+  return get("/v1/status");
+}
+
 async function requestAuditRecent() {
   const filters = readAuditRecentFilters({
     fallbackLimit: AUDIT_RECENT_DEFAULT_LIMIT,
@@ -3063,6 +3485,18 @@ async function run(label, fn, options = {}) {
     setBusy(false);
   }
 }
+
+tabClientEl.addEventListener("click", () => {
+  if (!tabClientEl.disabled) {
+    activateWorkspaceTab("client");
+  }
+});
+
+tabServerEl.addEventListener("click", () => {
+  if (!tabServerEl.disabled) {
+    activateWorkspaceTab("server");
+  }
+});
 
 byId("challenge_btn").addEventListener("click", () =>
   run("auth_challenge", requestAuthChallenge)
@@ -3375,6 +3809,62 @@ byId("reject_operator_btn").addEventListener("click", () =>
   )
 );
 
+byId("connect_btn").addEventListener("click", () =>
+  run(
+    "connect",
+    async () => {
+      const result = await requestConnectControl();
+      updateConnectionDashboard("connect", result);
+      return result;
+    },
+    {
+      successDetail: () => "Connect request completed."
+    }
+  )
+);
+
+byId("disconnect_btn").addEventListener("click", () =>
+  run(
+    "disconnect",
+    async () => {
+      const result = await requestDisconnectControl();
+      updateConnectionDashboard("disconnect", result);
+      return result;
+    },
+    {
+      successDetail: () => "Disconnect request completed."
+    }
+  )
+);
+
+byId("status_btn").addEventListener("click", () =>
+  run(
+    "status",
+    async () => {
+      const result = await requestConnectionStatus();
+      updateConnectionDashboard("status", result);
+      return result;
+    },
+    {
+      successDetail: () => "Connection status refreshed."
+    }
+  )
+);
+
+byId("status_btn_server").addEventListener("click", () =>
+  run(
+    "status_server",
+    async () => {
+      const result = await requestConnectionStatus();
+      updateConnectionDashboard("status", result);
+      return result;
+    },
+    {
+      successDetail: () => "Connection status refreshed."
+    }
+  )
+);
+
 async function restoreSessionStatusBestEffort() {
   const token = byId("session_token").value.trim();
   if (!token) {
@@ -3403,7 +3893,14 @@ async function restoreSessionStatusBestEffort() {
 
 function initializePortal() {
   restorePortalState();
+  restoreWorkspaceTabPreference();
   refreshCompatibilityOverrideControls();
+  applyConnectionSnapshot({
+    stateKey: "unknown",
+    state: CONNECTION_DEFAULT_STATE,
+    detail: CONNECTION_DEFAULT_DETAIL
+  });
+  activateWorkspaceTab(activeWorkspaceTab);
   setSelectedApplicationUpdatedAt(selectedApplicationUpdatedAtEl.value, { persist: false });
   operatorListActiveFilters = readOperatorListFilters({ fallbackLimit: OPERATOR_LIST_ALL_LIMIT });
   writeOperatorListFilters(operatorListActiveFilters);

@@ -75,6 +75,12 @@ type Service struct {
 	gpmAllowLegacyConnectOverride bool
 	gpmConnectPolicyMode          string
 	gpmConnectPolicySource        string
+	gpmManifestTrustPolicyMode    string
+	gpmManifestTrustPolicySource  string
+	gpmManifestRequireHTTPS       bool
+	gpmManifestRequireHTTPSSource string
+	gpmManifestRequireSignature   bool
+	gpmManifestRequireSigSource   string
 	gpmAuthVerifyPolicyMode       string
 	gpmAuthVerifyPolicySource     string
 	gpmMainDomain                 string
@@ -86,6 +92,7 @@ type Service struct {
 	gpmApprovalToken              string
 	gpmAuthVerifyCommand          string
 	gpmAuthVerifyRequireCommand   bool
+	gpmAuthVerifyRequireCmdSource string
 	gpmAuthVerifyRequireMetadata  bool
 	gpmAuthVerifyRequireWalletExt bool
 	gpmAuthVerifyMetadataSource   string
@@ -268,6 +275,18 @@ func New() *Service {
 	if !gpmManifestHMACKeySet {
 		gpmManifestHMACKey = ""
 	}
+	gpmManifestRequireHTTPSRaw, gpmManifestRequireHTTPSSource, gpmManifestRequireHTTPSSet := preferredEnvValueWithSource(
+		"GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS",
+		"TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS",
+	)
+	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", gpmManifestRequireHTTPSSource)
+	gpmManifestRequireHTTPS := parseBoolWithDefault(gpmManifestRequireHTTPSRaw, false)
+	gpmManifestRequireSignatureRaw, gpmManifestRequireSigSource, gpmManifestRequireSignatureSet := preferredEnvValueWithSource(
+		"GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE",
+		"TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE",
+	)
+	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", gpmManifestRequireSigSource)
+	gpmManifestRequireSignature := parseBoolWithDefault(gpmManifestRequireSignatureRaw, false)
 	gpmApprovalAdminToken, gpmApprovalAdminTokenSource, gpmApprovalAdminTokenSet := preferredEnvValueWithSource(
 		"GPM_APPROVAL_ADMIN_TOKEN",
 		"TDPN_APPROVAL_ADMIN_TOKEN",
@@ -301,6 +320,7 @@ func New() *Service {
 	gpmAuthVerifyRequireCommand := parseBoolWithDefault(gpmAuthVerifyRequireCommandRaw, false)
 	if !gpmAuthVerifyRequireCommandSet {
 		gpmAuthVerifyRequireCommand = false
+		gpmAuthVerifyRequireCommandSource = "default"
 	}
 	gpmAuthVerifyRequireMetadataRaw, gpmAuthVerifyMetadataSource, gpmAuthVerifyRequireMetadataSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_METADATA",
@@ -327,6 +347,14 @@ func New() *Service {
 	if !gpmConnectPolicySet {
 		gpmConnectPolicySource = "default"
 	}
+	gpmManifestTrustPolicyMode := "default"
+	if gpmConnectPolicyProduction {
+		gpmManifestTrustPolicyMode = "production"
+	}
+	gpmManifestTrustPolicySource := "default"
+	if gpmConnectPolicySet {
+		gpmManifestTrustPolicySource = gpmConnectPolicySource
+	}
 	gpmAuthVerifyPolicyMode := "default"
 	if gpmConnectPolicyProduction {
 		gpmAuthVerifyPolicyMode = "production"
@@ -334,6 +362,24 @@ func New() *Service {
 	gpmAuthVerifyPolicySource := "default"
 	if gpmConnectPolicySet {
 		gpmAuthVerifyPolicySource = gpmConnectPolicySource
+	}
+	if !gpmManifestRequireHTTPSSet {
+		gpmManifestRequireHTTPSSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmManifestRequireHTTPS = true
+			gpmManifestRequireHTTPSSource = "production-default"
+		}
+	}
+	if !gpmManifestRequireSignatureSet {
+		gpmManifestRequireSigSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmManifestRequireSignature = true
+			gpmManifestRequireSigSource = "production-default"
+		}
+	}
+	if !gpmAuthVerifyRequireCommandSet && gpmConnectPolicyProduction {
+		gpmAuthVerifyRequireCommand = true
+		gpmAuthVerifyRequireCommandSource = "production-default"
 	}
 	if !gpmAuthVerifyRequireMetadataSet {
 		gpmAuthVerifyMetadataSource = "default"
@@ -405,6 +451,12 @@ func New() *Service {
 		gpmAllowLegacyConnectOverride: gpmAllowLegacyConnectOverride,
 		gpmConnectPolicyMode:          gpmConnectPolicyMode,
 		gpmConnectPolicySource:        gpmConnectPolicySource,
+		gpmManifestTrustPolicyMode:    gpmManifestTrustPolicyMode,
+		gpmManifestTrustPolicySource:  gpmManifestTrustPolicySource,
+		gpmManifestRequireHTTPS:       gpmManifestRequireHTTPS,
+		gpmManifestRequireHTTPSSource: gpmManifestRequireHTTPSSource,
+		gpmManifestRequireSignature:   gpmManifestRequireSignature,
+		gpmManifestRequireSigSource:   gpmManifestRequireSigSource,
 		gpmAuthVerifyPolicyMode:       gpmAuthVerifyPolicyMode,
 		gpmAuthVerifyPolicySource:     gpmAuthVerifyPolicySource,
 		gpmMainDomain:                 strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
@@ -416,6 +468,7 @@ func New() *Service {
 		gpmApprovalToken:              gpmApprovalToken,
 		gpmAuthVerifyCommand:          strings.TrimSpace(gpmAuthVerifyCommand),
 		gpmAuthVerifyRequireCommand:   gpmAuthVerifyRequireCommand,
+		gpmAuthVerifyRequireCmdSource: gpmAuthVerifyRequireCommandSource,
 		gpmAuthVerifyRequireMetadata:  gpmAuthVerifyRequireMetadata,
 		gpmAuthVerifyRequireWalletExt: gpmAuthVerifyRequireWalletExt,
 		gpmAuthVerifyMetadataSource:   gpmAuthVerifyMetadataSource,
@@ -564,6 +617,14 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if connectPolicySource == "" {
 		connectPolicySource = "default"
 	}
+	manifestTrustPolicyMode := strings.TrimSpace(s.gpmManifestTrustPolicyMode)
+	if manifestTrustPolicyMode == "" {
+		manifestTrustPolicyMode = "default"
+	}
+	manifestTrustPolicySource := strings.TrimSpace(s.gpmManifestTrustPolicySource)
+	if manifestTrustPolicySource == "" {
+		manifestTrustPolicySource = "default"
+	}
 	authVerifyPolicyMode := strings.TrimSpace(s.gpmAuthVerifyPolicyMode)
 	if authVerifyPolicyMode == "" {
 		authVerifyPolicyMode = "default"
@@ -572,6 +633,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if authVerifyPolicySource == "" {
 		authVerifyPolicySource = "default"
 	}
+	authVerifyRequireCommandSource := strings.TrimSpace(s.gpmAuthVerifyRequireCmdSource)
+	if authVerifyRequireCommandSource == "" {
+		authVerifyRequireCommandSource = "default"
+	}
 	authVerifyRequireMetadataSource := strings.TrimSpace(s.gpmAuthVerifyMetadataSource)
 	if authVerifyRequireMetadataSource == "" {
 		authVerifyRequireMetadataSource = "default"
@@ -579,6 +644,14 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	authVerifyRequireWalletExtSource := strings.TrimSpace(s.gpmAuthVerifyWalletExtSource)
 	if authVerifyRequireWalletExtSource == "" {
 		authVerifyRequireWalletExtSource = "default"
+	}
+	manifestRequireHTTPSSource := strings.TrimSpace(s.gpmManifestRequireHTTPSSource)
+	if manifestRequireHTTPSSource == "" {
+		manifestRequireHTTPSSource = "default"
+	}
+	manifestRequireSigSource := strings.TrimSpace(s.gpmManifestRequireSigSource)
+	if manifestRequireSigSource == "" {
+		manifestRequireSigSource = "default"
 	}
 	legacyEnvAliasesActive := append([]string{}, s.gpmLegacyEnvAliasesActive...)
 	legacyEnvAliasWarnings := append([]string{}, s.gpmLegacyEnvAliasWarnings...)
@@ -594,9 +667,16 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"allow_legacy_connect_override":                          s.gpmAllowLegacyConnectOverride,
 			"connect_policy_mode":                                    connectPolicyMode,
 			"connect_policy_source":                                  connectPolicySource,
+			"gpm_manifest_trust_policy_mode":                         manifestTrustPolicyMode,
+			"gpm_manifest_trust_policy_source":                       manifestTrustPolicySource,
+			"gpm_manifest_require_https":                             s.gpmManifestRequireHTTPS,
+			"gpm_manifest_require_https_policy_source":               manifestRequireHTTPSSource,
+			"gpm_manifest_require_signature":                         s.gpmManifestRequireSignature,
+			"gpm_manifest_require_signature_policy_source":           manifestRequireSigSource,
 			"gpm_auth_verify_policy_mode":                            authVerifyPolicyMode,
 			"gpm_auth_verify_policy_source":                          authVerifyPolicySource,
 			"gpm_auth_verify_require_command":                        s.gpmAuthVerifyRequireCommand,
+			"gpm_auth_verify_require_command_policy_source":          authVerifyRequireCommandSource,
 			"gpm_auth_verify_require_metadata":                       s.gpmAuthVerifyRequireMetadata,
 			"gpm_auth_verify_require_metadata_policy_source":         authVerifyRequireMetadataSource,
 			"gpm_auth_verify_require_wallet_extension_source":        s.gpmAuthVerifyRequireWalletExt,

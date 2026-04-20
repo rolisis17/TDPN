@@ -87,10 +87,13 @@ start_local_api() {
   local main_domain="$1"
   local manifest_url="$2"
   local cache_path="$3"
-  local require_verify_command="${4:-0}"
-  local require_metadata="${5:-0}"
-  local require_wallet_extension_source="${6:-0}"
-  local manifest_hmac_key="${7:-}"
+  local require_verify_command="${4-0}"
+  local require_metadata="${5-0}"
+  local require_wallet_extension_source="${6-0}"
+  local manifest_hmac_key="${7-}"
+  local production_mode="${8-0}"
+  local manifest_require_https="${9-}"
+  local manifest_require_signature="${10-}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -107,6 +110,9 @@ start_local_api() {
     GPM_BOOTSTRAP_MANIFEST_URL="$manifest_url" \
     GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$cache_path" \
     GPM_BOOTSTRAP_MANIFEST_HMAC_KEY="$manifest_hmac_key" \
+    GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS="$manifest_require_https" \
+    GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE="$manifest_require_signature" \
+    GPM_PRODUCTION_MODE="$production_mode" \
     GPM_AUTH_VERIFY_REQUIRE_COMMAND="$require_verify_command" \
     GPM_AUTH_VERIFY_REQUIRE_METADATA="$require_metadata" \
     GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE="$require_wallet_extension_source" \
@@ -267,6 +273,94 @@ assert_json_expr \
   "$strict_verify_missing_metadata_body" \
   '.ok == false and ((.error // "") | type == "string") and ((((.error // "") | ascii_downcase) | contains("metadata")) or (((.error // "") | ascii_downcase) | contains("wallet_extension_source")) or (((.error // "") | ascii_downcase) | contains("wallet extension source")) or (((.error // "") | ascii_downcase) | contains("signature_source")) or (((.error // "") | ascii_downcase) | contains("policy")))' \
   "expected strict auth verify error to reference metadata/wallet-extension-source policy"
+stop_local_api
+
+echo "[local-control-api-gpm-manifest-trust] production mode fails closed when external auth verifier command is not configured"
+prod_auth_cache_path="$TMP_DIR/prod_auth_cache.json"
+start_local_api \
+  "https://bootstrap.globalprivatemesh.example" \
+  "https://bootstrap.globalprivatemesh.example/v1/bootstrap/manifest" \
+  "$prod_auth_cache_path" \
+  "" \
+  0 \
+  0 \
+  "" \
+  1
+
+prod_auth_wallet="cosmos1prodauthstrict"
+prod_auth_challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "{\"wallet_address\":\"${prod_auth_wallet}\",\"wallet_provider\":\"keplr\"}")"
+prod_auth_challenge_id="$(jq -r '.challenge_id // ""' <<<"$prod_auth_challenge_json")"
+if [[ -z "$prod_auth_challenge_id" ]]; then
+  echo "failed to get production auth challenge_id"
+  echo "$prod_auth_challenge_json"
+  exit 1
+fi
+prod_auth_verify_body="$TMP_DIR/prod_auth_verify_missing_command.json"
+prod_auth_verify_code="$(curl -sS -o "$prod_auth_verify_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"wallet_address\":\"${prod_auth_wallet}\",\"wallet_provider\":\"keplr\",\"challenge_id\":\"${prod_auth_challenge_id}\",\"signature\":\"sig-contract-0123456789\"}" "${LOCAL_API_BASE}/v1/gpm/auth/verify")"
+if [[ "$prod_auth_verify_code" != "401" && "$prod_auth_verify_code" != "400" ]]; then
+  echo "expected production auth verify without external verifier command to fail with 401/400, got $prod_auth_verify_code"
+  cat "$prod_auth_verify_body"
+  exit 1
+fi
+assert_json_expr \
+  "$prod_auth_verify_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("verifier command is required"))' \
+  "expected production auth verify to fail closed when verifier command is not configured"
+stop_local_api
+
+echo "[local-control-api-gpm-manifest-trust] production mode requires https bootstrap manifest URLs when pinned domain is configured"
+prod_https_cache="$TMP_DIR/prod_https_cache.json"
+start_local_api \
+  "https://pinned.globalprivatemesh.example:8443" \
+  "http://pinned.globalprivatemesh.example:8443/v1/bootstrap/manifest" \
+  "$prod_https_cache" \
+  0 \
+  0 \
+  0 \
+  "" \
+  1
+
+session_token_prod_https="$(mint_session_token "cosmos1prodhttpsrequired")"
+prod_https_register_body="$TMP_DIR/prod_https_register.json"
+prod_https_register_code="$(curl -sS -o "$prod_https_register_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_prod_https}\",\"path_profile\":\"2hop\"}" "${LOCAL_API_BASE}/v1/gpm/onboarding/client/register")"
+if [[ "$prod_https_register_code" != "502" ]]; then
+  echo "expected production manifest trust to reject pinned HTTP manifest URL with 502, got $prod_https_register_code"
+  cat "$prod_https_register_body"
+  exit 1
+fi
+assert_json_expr \
+  "$prod_https_register_body" \
+  '.ok == false and ((.error // "") | contains("must use https")) and ((.error // "") | contains("pinned gpm main domain"))' \
+  "expected production manifest trust to fail closed for pinned HTTP manifest URLs"
+stop_local_api
+
+echo "[local-control-api-gpm-manifest-trust] production mode requires manifest signature verifier key for cache fallback"
+prod_sig_manifest_url="https://127.0.0.1:1/v1/bootstrap/manifest"
+prod_sig_bootstrap_directory="https://directory.prod-sig.globalprivatemesh.example:8081"
+prod_sig_cache_path="$TMP_DIR/prod_sig_cache_missing_key.json"
+write_manifest_cache "$prod_sig_cache_path" "$prod_sig_manifest_url" "$prod_sig_bootstrap_directory" true
+start_local_api \
+  "https://127.0.0.1:1" \
+  "$prod_sig_manifest_url" \
+  "$prod_sig_cache_path" \
+  0 \
+  0 \
+  0 \
+  "" \
+  1
+
+session_token_prod_sig="$(mint_session_token "cosmos1prodsigrequired")"
+prod_sig_register_body="$TMP_DIR/prod_sig_register.json"
+prod_sig_register_code="$(curl -sS -o "$prod_sig_register_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_prod_sig}\",\"path_profile\":\"2hop\"}" "${LOCAL_API_BASE}/v1/gpm/onboarding/client/register")"
+if [[ "$prod_sig_register_code" != "502" ]]; then
+  echo "expected production signature policy without verifier key to fail with 502, got $prod_sig_register_code"
+  cat "$prod_sig_register_body"
+  exit 1
+fi
+assert_json_expr \
+  "$prod_sig_register_body" \
+  '.ok == false and (.error | contains("cache fallback failed")) and (.error | contains("verification key is required by policy"))' \
+  "expected production manifest trust to require signature verifier key for cache fallback"
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] pinned host mismatch rejects onboarding manifest resolution"

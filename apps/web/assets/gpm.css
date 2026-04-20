@@ -482,6 +482,79 @@ select {
   gap: 8px;
 }
 
+.checks-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+label.check {
+  align-items: center;
+  display: inline-flex;
+  flex-direction: row;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+label.check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.tabs {
+  margin-top: 12px;
+  display: inline-flex;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 4px;
+  background: #f3f8fc;
+}
+
+.tab {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #2f4e66;
+  padding: 8px 14px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.tab.active {
+  background: #0f6f8f;
+  border-color: #0f6f8f;
+  color: #fff;
+}
+
+.tab.locked,
+.tab:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tab-panel {
+  display: none;
+  margin-top: 12px;
+  gap: 10px;
+}
+
+.tab-panel.active {
+  display: grid;
+}
+
+.tab-panel.locked {
+  opacity: 0.82;
+}
+
+.helper-copy.locked {
+  color: #805b1b;
+}
+
 .status {
   display: grid;
   gap: 4px;

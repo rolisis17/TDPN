@@ -2029,6 +2029,9 @@ func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapMan
 	if err != nil {
 		return gpmBootstrapManifest{}, "", false, err
 	}
+	if err := s.validateManifestSourceURLPolicy(manifestURL, pinnedHost, "gpm manifest url"); err != nil {
+		return gpmBootstrapManifest{}, "", false, err
+	}
 	if pinnedHost != "" {
 		manifestHost, err := normalizeHTTPHost(manifestURL)
 		if err != nil {
@@ -2081,6 +2084,10 @@ func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (
 	manifest = normalizeBootstrapManifest(manifest)
 	signatureVerified := false
 	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
+	requireSignature := s.gpmManifestRequireSignature
+	if requireSignature && hmacKey == "" {
+		return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest signature verification key is required by policy")
+	}
 	receivedSignature := strings.TrimSpace(resp.Header.Get("X-GPM-Signature"))
 	if hmacKey != "" {
 		if receivedSignature == "" {
@@ -2201,8 +2208,11 @@ func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, sig
 		Version:           1,
 		FetchedAtUTC:      time.Now().UTC().Format(time.RFC3339),
 		SourceURL:         s.gpmManifestURL,
-		SignatureVerified: signatureVerified || strings.TrimSpace(s.gpmManifestHMACKey) == "",
+		SignatureVerified: signatureVerified,
 		Manifest:          manifest,
+	}
+	if strings.TrimSpace(s.gpmManifestHMACKey) == "" && !s.gpmManifestRequireSignature {
+		cache.SignatureVerified = true
 	}
 	hmacKeyConfigured := strings.TrimSpace(s.gpmManifestHMACKey) != ""
 	if hmacKeyConfigured && signatureVerified && len(manifestBody) > 0 && strings.TrimSpace(manifestSignature) != "" {
@@ -2243,6 +2253,11 @@ func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, erro
 	if err != nil {
 		return gpmBootstrapManifest{}, false, err
 	}
+	if pinnedHost != "" || s.gpmManifestRequireHTTPS {
+		if err := s.validateManifestSourceURLPolicy(strings.TrimSpace(cache.SourceURL), pinnedHost, "cached manifest source url"); err != nil {
+			return gpmBootstrapManifest{}, false, err
+		}
+	}
 	if pinnedHost != "" {
 		cacheSourceHost, hostErr := normalizeHTTPHost(strings.TrimSpace(cache.SourceURL))
 		if hostErr != nil {
@@ -2262,6 +2277,9 @@ func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, erro
 func (s *Service) verifyCachedManifestSignature(cache gpmBootstrapManifestCacheFile) (bool, error) {
 	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
 	if hmacKey == "" {
+		if s.gpmManifestRequireSignature {
+			return false, errors.New("manifest signature verification key is required by policy")
+		}
 		return cache.SignatureVerified, nil
 	}
 
@@ -2300,6 +2318,26 @@ func (s *Service) pinnedGPMMainDomainHost() (string, error) {
 		return "", nil
 	}
 	return normalizeHTTPHost(mainDomain)
+}
+
+func (s *Service) validateManifestSourceURLPolicy(rawURL string, pinnedHost string, sourceLabel string) error {
+	parsed, err := parseAbsoluteHTTPURL(rawURL)
+	if err != nil {
+		return fmt.Errorf("%s is invalid: %w", sourceLabel, err)
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("%s host is empty", sourceLabel)
+	}
+	if strings.EqualFold(parsed.Scheme, "http") && s.gpmManifestRequireHTTPS {
+		if pinnedHost != "" {
+			return fmt.Errorf("%s must use https when pinned gpm main domain is configured", sourceLabel)
+		}
+		if !hostResolvesToLoopback(host) {
+			return fmt.Errorf("%s must use https for non-loopback hosts", sourceLabel)
+		}
+	}
+	return nil
 }
 
 func readFileWithHardLimit(path string, maxBytes int64) ([]byte, error) {

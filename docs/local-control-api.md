@@ -33,9 +33,12 @@ Defaults:
   - when enabled and explicit per-flag overrides are unset, daemon defaults become:
     - `/v1/connect` session-required (`connect_require_session=true`)
     - manual bootstrap/invite compatibility override locked (`allow_legacy_connect_override=false`)
+    - bootstrap manifest transport hardening enabled (`gpm_manifest_require_https=true`)
+    - bootstrap manifest signature evidence required (`gpm_manifest_require_signature=true`)
+    - auth-verify external verifier command required (`gpm_auth_verify_require_command=true`)
     - auth-verify strict metadata required (`gpm_auth_verify_require_metadata=true`)
     - auth-verify strict wallet-extension-source required (`gpm_auth_verify_require_wallet_extension_source=true`)
-  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, plus legacy `TDPN_*` aliases)
+  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, plus legacy `TDPN_*` aliases)
 - optional `/v1/connect` hardening flags (standalone or as explicit overrides):
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
@@ -48,6 +51,10 @@ Defaults:
   - cache fallback uses the same host check against the cached manifest source URL
   - this complements existing signature verification and expiry checks
   - if the main domain is unset, this hardening is skipped for dev compatibility
+- optional bootstrap manifest transport/signature hardening flags (standalone or as explicit production-default overrides):
+  - `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=1` (legacy alias: `TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=1`) requires HTTPS for bootstrap manifest URLs when the host is non-loopback or when a pinned main domain is configured
+  - `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=1` (legacy alias: `TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=1`) requires verified manifest signature evidence for both remote fetch and cache fallback
+  - default for both flags is `false` in compatibility mode, and `true` by default when `GPM_PRODUCTION_MODE=1` is enabled with no explicit override
 
 Runner behavior:
 - Linux/macOS default: execute `LOCAL_CONTROL_API_SCRIPT` directly.
@@ -81,7 +88,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/auth/challenge`
 - `POST /v1/gpm/auth/verify` (uses a pluggable signature verifier hook in the daemon; default verifier enforces baseline proof-shape guardrails while full wallet-extension verification remains a follow-on milestone; request supports optional signature metadata: `signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`; backward-compatible aliases `public_key` -> `signature_public_key` and `public_key_type` -> `signature_public_key_type` are accepted, and canonical keys take precedence when both canonical and alias values are non-empty; when provided, `signed_message` must exactly match the issued challenge message, `signature_kind` must be `sign_arbitrary` or `eip191`, `signature_source` must be `wallet_extension` or `manual`, `signature_public_key_type` must be `secp256k1` or `ed25519`, and `signature_envelope` (string or JSON payload) is normalized and capped at 16384 bytes; omitting metadata preserves existing behavior)
 - optional external verifier hook: set `GPM_AUTH_VERIFY_COMMAND` (legacy alias: `TDPN_AUTH_VERIFY_COMMAND`) to run a local command after baseline validation; the command receives context via env vars: `GPM_AUTH_VERIFY_CHALLENGE_ID`, `GPM_AUTH_VERIFY_MESSAGE`, `GPM_AUTH_VERIFY_WALLET_ADDRESS`, `GPM_AUTH_VERIFY_WALLET_PROVIDER`, `GPM_AUTH_VERIFY_SIGNATURE`, `GPM_AUTH_VERIFY_SIGNATURE_KIND`, `GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY`, `GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE`, `GPM_AUTH_VERIFY_SIGNATURE_SOURCE`, `GPM_AUTH_VERIFY_CHAIN_ID`, `GPM_AUTH_VERIFY_SIGNED_MESSAGE`, `GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE`
-- strict external-verifier policy: set `GPM_AUTH_VERIFY_REQUIRE_COMMAND=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_COMMAND=1`) to require `GPM_AUTH_VERIFY_COMMAND` to be configured; when enabled and the command is unset, `POST /v1/gpm/auth/verify` fails closed with a policy error.
+- strict external-verifier policy: set `GPM_AUTH_VERIFY_REQUIRE_COMMAND=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_COMMAND=1`) to require `GPM_AUTH_VERIFY_COMMAND` to be configured; this defaults to `false` in compatibility mode and defaults to `true` when `GPM_PRODUCTION_MODE=1` is enabled with no explicit override; when enabled and the command is unset, `POST /v1/gpm/auth/verify` fails closed with a policy error.
 - strict metadata policy: set `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`) to require `signature_kind`, `signature_source`, and `signed_message`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when required metadata is missing.
 - strict wallet-extension-source policy: set `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`) to require explicit `signature_source=wallet_extension`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when the source requirement is not met.
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
@@ -163,9 +170,16 @@ If auth is required and missing/invalid, the API returns `401`.
     "allow_legacy_connect_override": false,
     "connect_policy_mode": "production",
     "connect_policy_source": "GPM_PRODUCTION_MODE",
+    "gpm_manifest_trust_policy_mode": "production",
+    "gpm_manifest_trust_policy_source": "GPM_PRODUCTION_MODE",
+    "gpm_manifest_require_https": true,
+    "gpm_manifest_require_https_policy_source": "production-default",
+    "gpm_manifest_require_signature": true,
+    "gpm_manifest_require_signature_policy_source": "production-default",
     "gpm_auth_verify_policy_mode": "production",
     "gpm_auth_verify_policy_source": "GPM_PRODUCTION_MODE",
-    "gpm_auth_verify_require_command": false,
+    "gpm_auth_verify_require_command": true,
+    "gpm_auth_verify_require_command_policy_source": "production-default",
     "gpm_auth_verify_require_metadata": false,
     "gpm_auth_verify_require_metadata_policy_source": "production-default",
     "gpm_auth_verify_require_wallet_extension_source": false,
@@ -193,9 +207,16 @@ If auth is required and missing/invalid, the API returns `401`.
 Policy posture config hints:
 - `connect_policy_mode`: additive connect posture mode (`default|production` in current daemon behavior).
 - `connect_policy_source`: additive source for connect posture mode/defaulting (for example `GPM_PRODUCTION_MODE`, `GPM_CONNECT_REQUIRE_SESSION`, `TDPN_CONNECT_REQUIRE_SESSION`, or `default`).
+- `gpm_manifest_trust_policy_mode`: additive manifest-trust posture mode (`default|production`).
+- `gpm_manifest_trust_policy_source`: additive source for manifest-trust posture mode/defaulting (for example `GPM_PRODUCTION_MODE` or `default`).
+- `gpm_manifest_require_https`: whether manifest URL transport hardening is enabled.
+- `gpm_manifest_require_https_policy_source`: additive source for manifest HTTPS strictness (`production-default` when inherited from production mode with no explicit manifest HTTPS env override).
+- `gpm_manifest_require_signature`: whether strict manifest signature evidence policy is enabled for both remote fetch and cache fallback.
+- `gpm_manifest_require_signature_policy_source`: additive source for manifest signature strictness (`production-default` when inherited from production mode with no explicit signature-policy env override).
 - `gpm_auth_verify_policy_mode`: additive auth-verify posture mode (`default|production`).
 - `gpm_auth_verify_policy_source`: additive source for auth-verify posture mode/defaulting (for example `GPM_PRODUCTION_MODE` or `default`).
 - `gpm_auth_verify_require_command`: whether strict external verifier command policy is enabled.
+- `gpm_auth_verify_require_command_policy_source`: additive source for verifier-command strictness (`production-default` when inherited from production mode with no explicit verifier-command env override).
 - `gpm_auth_verify_require_metadata`: whether strict metadata policy is enabled (`signature_kind`, `signature_source`, and `signed_message` required at verify time).
 - `gpm_auth_verify_require_metadata_policy_source`: additive source for metadata strictness (`production-default` when inherited from production mode with no explicit metadata env override).
 - `gpm_auth_verify_require_wallet_extension_source`: whether strict wallet-extension-source policy is enabled (`signature_source=wallet_extension` required at verify time).
