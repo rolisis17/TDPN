@@ -378,12 +378,13 @@ run_linux_command \
 run_linux_command \
   "desktop-one-click" \
   "desktop_linux_one_click" \
-  "--install-missing" \
+  "--no-install-missing" \
   "--sample-flag" "one click value with spaces"
 
 run_linux_command \
   "desktop-packaged-run" \
   "desktop_linux_packaged_run" \
+  "--no-install-missing" \
   "--dry-run" \
   "--sample-flag" "packaged run value with spaces"
 
@@ -407,11 +408,13 @@ run_windows_command \
 run_windows_command \
   "desktop-one-click" \
   "$ONE_CLICK_WINDOWS_FAKE" \
+  "-InstallMissing:\$false" \
   "--sample-flag" "one click value with spaces"
 
 run_windows_command \
   "desktop-packaged-run" \
   "$PACKAGED_RUN_WINDOWS_FAKE" \
+  "-InstallMissing:\$false" \
   "--sample-flag" "packaged run value with spaces"
 
 run_windows_command \

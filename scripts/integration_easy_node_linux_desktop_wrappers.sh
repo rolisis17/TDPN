@@ -172,6 +172,7 @@ run_and_assert_wrapper \
 run_and_assert_wrapper \
   "desktop-linux-one-click" \
   "desktop_linux_one_click" \
+  "--no-install-missing" \
   "--reports-dir" "$TMP_DIR/reports one click with spaces" \
   "--summary-json" "$TMP_DIR/summary one click with spaces.json" \
   "--sample-flag" "one click value with spaces"
@@ -179,6 +180,7 @@ run_and_assert_wrapper \
 run_and_assert_wrapper \
   "desktop-linux-packaged-run" \
   "desktop_linux_packaged_run" \
+  "--no-install-missing" \
   "--reports-dir" "$TMP_DIR/reports packaged run with spaces" \
   "--summary-json" "$TMP_DIR/summary packaged run with spaces.json" \
   "--sample-flag" "packaged run value with spaces"
