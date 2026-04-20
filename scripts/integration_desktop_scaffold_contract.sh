@@ -220,6 +220,38 @@ if ! grep -qF -- '--desktop-executable-path' "$LINUX_PACKAGED_RUN_SCRIPT"; then
   echo "desktop scaffold contract failed: expected --desktop-executable-path marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1
 fi
+if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM shared auto-install env marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN shared auto-install legacy env alias marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--no-install-missing' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --no-install-missing override marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- '\$\{GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-\$\{TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-1\}\}|install_missing_effective[[:space:]]*=[[:space:]]*"?1"?|(effective_)?install(_missing|_intent)[[:space:]]*=[[:space:]]*"?1"?|default[^[:alnum:]]*(enable|enabled|true)[^[:alnum:]]*(install|auto[-_ ]?install)[^[:alnum:]]*missing' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected default-enabled install-intent marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'if[[:space:]]*\[\[[^]]*(effective_install_missing|install_intent|install_missing|auto_install_missing)[^]]*(==|=|-eq)[^]]*("?1"?|true|enabled)[^]]*\]\]|if[[:space:]]*\[\[[^]]*(effective_install_missing|install_intent|install_missing|auto_install_missing)[^]]*\]\]' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected effective install-intent condition marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'doctor_args\+\=\(--mode[[:space:]]+fix[[:space:]]+--install-missing\)' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected doctor fix-mode install-missing marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'doctor_args\+\=\(--mode[[:space:]]+check\)' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected doctor check-mode fallback marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'native_bootstrap_args\+\=\(--install-missing\)' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected native bootstrap --install-missing forwarding marker in $LINUX_PACKAGED_RUN_SCRIPT"
+  exit 1
+fi
 if ! grep -qiE 'scaffold|non-production' "$LINUX_PACKAGED_RUN_SCRIPT"; then
   echo "desktop scaffold contract failed: expected scaffold/non-production marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1

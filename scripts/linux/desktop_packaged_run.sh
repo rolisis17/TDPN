@@ -16,7 +16,8 @@ Usage:
 
 Options:
   --desktop-executable-path PATH    Explicit packaged executable path to launch.
-  --install-missing                 Run doctor in fix mode with install-missing enabled.
+  --install-missing                 Enable prerequisite auto-remediation.
+  --no-install-missing              Disable prerequisite auto-remediation.
   --dry-run                         Print intended actions without launching desktop.
   --api-addr HOST:PORT              Local control API address (default: 127.0.0.1:8095).
   --doctor-summary-json PATH        Forwarded to desktop_doctor.sh summary output path.
@@ -24,6 +25,8 @@ Options:
   --help                            Show this help message.
 
 Notes:
+  - Auto-remediation is enabled by default.
+  - Env overrides: GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING, TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING.
   - Runs scripts/linux/desktop_doctor.sh first (check or fix mode).
   - Prefers packaged executable path (explicit or auto-discovered).
   - If scripts/linux/desktop_native_bootstrap.sh exists, delegates launch to it.
@@ -46,11 +49,50 @@ to_lower() {
 }
 
 desktop_executable_path=""
-install_missing="0"
+install_missing_cli=""
+install_missing_effective="1"
 dry_run="0"
 api_addr="127.0.0.1:8095"
 doctor_summary_json=""
 print_doctor_summary_json=""
+
+parse_bool_token() {
+  local token="${1:-}"
+  token="${token#"${token%%[![:space:]]*}"}"
+  token="${token%"${token##*[![:space:]]}"}"
+  token="${token#\$}"
+  token="$(to_lower "$token")"
+
+  case "$token" in
+    1|true|yes|on)
+      printf '%s\n' "1"
+      return 0
+      ;;
+    0|false|no|off)
+      printf '%s\n' "0"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+resolve_install_missing_env_override() {
+  local env_name
+  local raw_value
+  local parsed_value
+
+  for env_name in GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING; do
+    raw_value="${!env_name:-}"
+    if parsed_value="$(parse_bool_token "$raw_value")"; then
+      printf '%s\n' "$parsed_value"
+      return 0
+    fi
+  done
+
+  return 1
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,7 +104,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --install-missing)
-      install_missing="1"
+      install_missing_cli="1"
+      shift
+      ;;
+    --no-install-missing)
+      install_missing_cli="0"
       shift
       ;;
     --dry-run)
@@ -99,6 +145,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$install_missing_cli" ]]; then
+  install_missing_effective="$install_missing_cli"
+else
+  if env_install_missing="$(resolve_install_missing_env_override)"; then
+    install_missing_effective="$env_install_missing"
+  fi
+fi
 
 if [[ -n "$print_doctor_summary_json" && "$print_doctor_summary_json" != "0" && "$print_doctor_summary_json" != "1" ]]; then
   fail "--print-doctor-summary-json must be 0 or 1"
@@ -174,7 +228,7 @@ run_doctor_first() {
   fi
 
   local doctor_args=()
-  if [[ "$install_missing" == "1" ]]; then
+  if [[ "$install_missing_effective" == "1" ]]; then
     doctor_args+=(--mode fix --install-missing)
   else
     doctor_args+=(--mode check)
@@ -189,7 +243,7 @@ run_doctor_first() {
     doctor_args+=(--print-summary-json "$print_doctor_summary_json")
   fi
 
-  log_step "doctor-start mode=$([[ "$install_missing" == "1" ]] && printf '%s' 'fix' || printf '%s' 'check') dry_run=$dry_run script=$doctor_script"
+  log_step "doctor-start mode=$([[ "$install_missing_effective" == "1" ]] && printf '%s' 'fix' || printf '%s' 'check') dry_run=$dry_run script=$doctor_script"
   bash "$doctor_script" "${doctor_args[@]}"
   log_step "doctor-finish status=ok"
 }
@@ -223,6 +277,9 @@ if [[ -f "$native_bootstrap_script" ]]; then
     --desktop-launch-strategy auto
     --api-addr "$api_addr"
   )
+  if [[ "$install_missing_effective" == "1" ]]; then
+    native_bootstrap_args+=(--install-missing)
+  fi
   if [[ "$dry_run" == "1" ]]; then
     native_bootstrap_args+=(--dry-run)
   fi

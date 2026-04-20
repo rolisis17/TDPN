@@ -285,6 +285,14 @@ bash ./scripts/linux/desktop_packaged_run.sh --dry-run
 bash ./scripts/linux/desktop_packaged_run.sh
 ```
 
+Linux packaged-run auto-remediation defaults (scaffold/non-production):
+- `desktop_packaged_run.sh` now enables missing dependency remediation by default, equivalent to `--install-missing`, unless explicitly disabled.
+- shared env knobs: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.
+- accepted values: `1` / `true` enables, `0` / `false` disables; unset defaults to enabled.
+- CLI precedence for Linux packaged-run:
+  - `--install-missing` explicitly enables remediation.
+  - `--no-install-missing` explicitly disables remediation, even when env would enable it.
+
 Dry-run guidance:
 - always run `--dry-run` first to verify executable discovery and local API preflight before real launch.
 
