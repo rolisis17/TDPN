@@ -52,16 +52,16 @@ Runner behavior:
   - `LOCAL_CONTROL_API_PREFER_GIT_BASH=0` to disable Git Bash auto-preference and use `bash` resolution from `PATH`.
 
 Desktop scaffold defaults (`apps/desktop`):
-- base URL: `http://127.0.0.1:8095` (`TDPN_LOCAL_API_BASE_URL`)
-- request timeout: `20s` (`TDPN_LOCAL_API_TIMEOUT_SEC`)
-- optional bearer auth for daemon API: `TDPN_LOCAL_API_AUTH_BEARER`
+- base URL: `http://127.0.0.1:8095` (`GPM_LOCAL_API_BASE_URL`, legacy alias: `TDPN_LOCAL_API_BASE_URL`)
+- request timeout: `20s` (`GPM_LOCAL_API_TIMEOUT_SEC`, legacy alias: `TDPN_LOCAL_API_TIMEOUT_SEC`)
+- optional bearer auth for daemon API: `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`)
 - local-only transport enforcement by default, with explicit opt-out:
-  - `TDPN_LOCAL_API_ALLOW_REMOTE=1`
-  - in local-only mode (`TDPN_LOCAL_API_ALLOW_REMOTE=0`), use a literal loopback IP host (`127.0.0.1` or `::1`), not a hostname.
+  - `GPM_LOCAL_API_ALLOW_REMOTE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_REMOTE=1`)
+  - in local-only mode (`GPM_LOCAL_API_ALLOW_REMOTE=0`, legacy alias: `TDPN_LOCAL_API_ALLOW_REMOTE=0`), use a literal loopback IP host (`127.0.0.1` or `::1`), not a hostname.
 - desktop mutating action gates are disabled by default (explicit opt-in):
-  - `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` for `control_update`
-  - `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` for `control_service_start|stop|restart`
-  - when either mutating gate is enabled, `TDPN_LOCAL_API_AUTH_BEARER` is required (including loopback-only desktop sessions)
+  - `GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1`) for `control_update`
+  - `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) for `control_service_start|stop|restart`
+  - when either mutating gate is enabled, `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) is required (including loopback-only desktop sessions)
 - desktop bearer token format is strict: token68 charset only (`A-Za-z0-9-._~+/=`), single-line, no whitespace/control characters, max 4096 chars
 - renderer CSP is locked down in `apps/desktop/src-tauri/tauri.conf.json`:
   - production: only app resources + Tauri IPC (`ipc:`), no direct remote daemon origin, and no `unsafe-inline` in `style-src`
@@ -118,7 +118,7 @@ Auth can be bypassed only in explicit developer mode when all of the following a
 For transport hardening, non-loopback binds are rejected unless `LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP=1` is set. Keep this unset in production.
 
 Secret handling guidance:
-- avoid passing `LOCAL_CONTROL_API_AUTH_TOKEN` / `TDPN_LOCAL_API_AUTH_BEARER` in CLI args; use process-local env vars instead
+- avoid passing `LOCAL_CONTROL_API_AUTH_TOKEN` / `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) in CLI args; use process-local env vars instead
 - avoid persisting tokens in shared shell profiles/history; prefer short-lived shell/session scope
 - never include invite keys or bearer tokens in logs, screenshots, or support tickets
 

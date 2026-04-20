@@ -74,6 +74,7 @@ const COMPAT_ADVANCED_LOCKED_HINT =
   "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
 const COMPAT_ADVANCED_DISABLED_HINT =
   "Legacy bootstrap/invite overrides are disabled by policy in this build.";
+const TDPN_ENV_NAME_REGEX = /\bTDPN_([A-Z0-9_]+)\b/g;
 const STORAGE_KEYS = Object.freeze({
   sessionToken: "gpm.desktop.session_token",
   role: "gpm.desktop.role",
@@ -134,12 +135,49 @@ function restoreSelectValue(selectEl, value) {
 }
 
 function formatPayloadForDisplay(payload) {
-  const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+  const normalizedPayload = normalizeLegacyEnvNameDisplayPayload(payload);
+  const text =
+    typeof normalizedPayload === "string"
+      ? normalizedPayload
+      : JSON.stringify(normalizedPayload, null, 2);
   if (text.length <= MAX_OUTPUT_CHARS) {
     return text;
   }
   const omitted = text.length - MAX_OUTPUT_CHARS;
   return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...[TRUNCATED ${omitted} chars]`;
+}
+
+function normalizeLegacyEnvNameDisplayText(value) {
+  if (typeof value !== "string" || !value.includes("TDPN_")) {
+    return value;
+  }
+  if (value.includes("GPM_")) {
+    return value;
+  }
+  return value.replace(TDPN_ENV_NAME_REGEX, (_match, suffix) => {
+    const tdpnName = `TDPN_${suffix}`;
+    return `GPM_${suffix} (legacy alias: ${tdpnName})`;
+  });
+}
+
+function normalizeLegacyEnvNameDisplayPayload(payload, depth = 0) {
+  if (depth > 6 || payload === null || payload === undefined) {
+    return payload;
+  }
+  if (typeof payload === "string") {
+    return normalizeLegacyEnvNameDisplayText(payload);
+  }
+  if (Array.isArray(payload)) {
+    return payload.map((entry) => normalizeLegacyEnvNameDisplayPayload(entry, depth + 1));
+  }
+  if (typeof payload === "object") {
+    const normalized = {};
+    for (const [key, value] of Object.entries(payload)) {
+      normalized[key] = normalizeLegacyEnvNameDisplayPayload(value, depth + 1);
+    }
+    return normalized;
+  }
+  return payload;
 }
 
 function print(label, payload) {

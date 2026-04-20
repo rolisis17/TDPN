@@ -28,33 +28,53 @@ impl LocalApiConfig {
             .unwrap_or_else(|| "http://127.0.0.1:8095".to_string());
         let base_url_display = redact_url_for_display(&base_url);
 
-        let timeout_sec = first_non_empty_env(&["GPM_LOCAL_API_TIMEOUT_SEC", "TDPN_LOCAL_API_TIMEOUT_SEC"])
-            .and_then(|v| v.parse::<u64>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(20);
+        let timeout_sec =
+            first_non_empty_env(&["GPM_LOCAL_API_TIMEOUT_SEC", "TDPN_LOCAL_API_TIMEOUT_SEC"])
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(20);
 
-        let allow_remote =
-            parse_optional_bool_env_any(&["GPM_LOCAL_API_ALLOW_REMOTE", "TDPN_LOCAL_API_ALLOW_REMOTE"])?
-                .unwrap_or(false);
-        let allow_update_mutations = parse_optional_bool_env_any(&[
+        let allow_remote = parse_optional_bool_env_any(
+            &["GPM_LOCAL_API_ALLOW_REMOTE", "TDPN_LOCAL_API_ALLOW_REMOTE"],
+            "GPM_LOCAL_API_ALLOW_REMOTE",
+            Some("TDPN_LOCAL_API_ALLOW_REMOTE"),
+        )?
+        .unwrap_or(false);
+        let allow_update_mutations = parse_optional_bool_env_any(
+            &[
+                "GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS",
+                "TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS",
+            ],
             "GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS",
-            "TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS",
-        ])?
+            Some("TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS"),
+        )?
         .unwrap_or(false);
-        let allow_service_mutations = parse_optional_bool_env_any(&[
+        let allow_service_mutations = parse_optional_bool_env_any(
+            &[
+                "GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS",
+                "TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS",
+            ],
             "GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS",
-            "TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS",
-        ])?
+            Some("TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS"),
+        )?
         .unwrap_or(false);
-        let connect_require_session = parse_optional_bool_env_any(&[
+        let connect_require_session = parse_optional_bool_env_any(
+            &[
+                "GPM_LOCAL_API_CONNECT_REQUIRE_SESSION",
+                "TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION",
+            ],
             "GPM_LOCAL_API_CONNECT_REQUIRE_SESSION",
-            "TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION",
-        ])?
+            Some("TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION"),
+        )?
         .unwrap_or(false);
-        let allow_legacy_connect_override = parse_optional_bool_env_any(&[
+        let allow_legacy_connect_override = parse_optional_bool_env_any(
+            &[
+                "GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
+                "TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
+            ],
             "GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
-            "TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
-        ])?
+            Some("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE"),
+        )?
         .unwrap_or(false);
 
         let auth_bearer =
@@ -65,7 +85,7 @@ impl LocalApiConfig {
 
         let parsed = reqwest::Url::parse(&base_url).map_err(|e| {
             format!(
-                "invalid TDPN_LOCAL_API_BASE_URL '{base_url_display}': {e} (expected absolute URL like http://127.0.0.1:8095)"
+                "invalid GPM_LOCAL_API_BASE_URL value '{base_url_display}': {e} (expected absolute URL like http://127.0.0.1:8095; legacy alias: TDPN_LOCAL_API_BASE_URL)"
             )
         })?;
 
@@ -73,24 +93,24 @@ impl LocalApiConfig {
             "http" | "https" => {}
             scheme => {
                 return Err(format!(
-                    "invalid TDPN_LOCAL_API_BASE_URL '{base_url_display}': unsupported scheme '{scheme}' (allowed: http, https)"
+                    "invalid GPM_LOCAL_API_BASE_URL value '{base_url_display}': unsupported scheme '{scheme}' (allowed: http, https; legacy alias: TDPN_LOCAL_API_BASE_URL)"
                 ));
             }
         }
 
         if parsed.host_str().is_none() {
             return Err(format!(
-                "invalid TDPN_LOCAL_API_BASE_URL '{base_url_display}': missing host"
+                "invalid GPM_LOCAL_API_BASE_URL value '{base_url_display}': missing host (legacy alias: TDPN_LOCAL_API_BASE_URL)"
             ));
         }
         if !parsed.username().is_empty() || parsed.password().is_some() {
             return Err(format!(
-                "invalid TDPN_LOCAL_API_BASE_URL '{base_url_display}': userinfo is not allowed"
+                "invalid GPM_LOCAL_API_BASE_URL value '{base_url_display}': userinfo is not allowed (legacy alias: TDPN_LOCAL_API_BASE_URL)"
             ));
         }
         if parsed.query().is_some() || parsed.fragment().is_some() {
             return Err(format!(
-                "invalid TDPN_LOCAL_API_BASE_URL '{base_url_display}': query and fragment are not allowed"
+                "invalid GPM_LOCAL_API_BASE_URL value '{base_url_display}': query and fragment are not allowed (legacy alias: TDPN_LOCAL_API_BASE_URL)"
             ));
         }
 
@@ -98,26 +118,26 @@ impl LocalApiConfig {
         if !allow_remote && !is_literal_loopback {
             let host = parsed.host_str().unwrap_or("<missing-host>");
             return Err(format!(
-                "TDPN_LOCAL_API_BASE_URL host '{host}' is not a literal loopback IP (use 127.0.0.1 or ::1); set TDPN_LOCAL_API_ALLOW_REMOTE=1 to allow remote hosts"
+                "GPM_LOCAL_API_BASE_URL host '{host}' is not a literal loopback IP (use 127.0.0.1 or ::1); set GPM_LOCAL_API_ALLOW_REMOTE=1 to allow remote hosts (legacy aliases: TDPN_LOCAL_API_BASE_URL, TDPN_LOCAL_API_ALLOW_REMOTE)"
             ));
         }
 
         if allow_remote && !is_literal_loopback {
             if auth_bearer.is_none() {
                 return Err(
-                    "TDPN_LOCAL_API_ALLOW_REMOTE=1 requires TDPN_LOCAL_API_AUTH_BEARER for non-loopback hosts"
+                    "GPM_LOCAL_API_ALLOW_REMOTE=1 requires GPM_LOCAL_API_AUTH_BEARER for non-loopback hosts (legacy aliases: TDPN_LOCAL_API_ALLOW_REMOTE, TDPN_LOCAL_API_AUTH_BEARER)"
                         .to_string(),
                 );
             }
             if parsed.scheme() != "https" {
                 return Err(format!(
-                    "TDPN_LOCAL_API_BASE_URL '{base_url_display}' must use https when TDPN_LOCAL_API_ALLOW_REMOTE=1 targets non-loopback hosts"
+                    "GPM_LOCAL_API_BASE_URL '{base_url_display}' must use https when GPM_LOCAL_API_ALLOW_REMOTE=1 targets non-loopback hosts (legacy aliases: TDPN_LOCAL_API_BASE_URL, TDPN_LOCAL_API_ALLOW_REMOTE)"
                 ));
             }
         }
         if (allow_update_mutations || allow_service_mutations) && auth_bearer.is_none() {
             return Err(
-                "desktop mutation controls require TDPN_LOCAL_API_AUTH_BEARER (set token before enabling TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS or TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS)"
+                "desktop mutation controls require GPM_LOCAL_API_AUTH_BEARER (set token before enabling GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS or GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS; legacy aliases: TDPN_LOCAL_API_AUTH_BEARER, TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS, TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS)"
                     .to_string(),
             );
         }
@@ -405,7 +425,12 @@ async fn read_limited_response_body(path: &str, response: &mut reqwest::Response
     Ok(String::from_utf8_lossy(&body).to_string())
 }
 
-fn parse_optional_bool_env_any(names: &[&str]) -> Result<Option<bool>, String> {
+fn parse_optional_bool_env_any(
+    names: &[&str],
+    preferred_name: &str,
+    legacy_alias: Option<&str>,
+) -> Result<Option<bool>, String> {
+    let display_name = format_env_with_legacy_alias(preferred_name, legacy_alias);
     for name in names {
         if let Some(raw) = std::env::var(name).ok() {
             let value = raw.trim();
@@ -417,7 +442,7 @@ fn parse_optional_bool_env_any(names: &[&str]) -> Result<Option<bool>, String> {
                 "1" | "true" | "yes" | "on" => Ok(Some(true)),
                 "0" | "false" | "no" | "off" => Ok(Some(false)),
                 _ => Err(format!(
-                    "invalid {name} value '{value}' (allowed: 1, true, yes, on, 0, false, no, off)"
+                    "invalid {display_name} value '{value}' (allowed: 1, true, yes, on, 0, false, no, off)"
                 )),
             };
         }
@@ -438,24 +463,33 @@ fn first_non_empty_env(names: &[&str]) -> Option<String> {
 }
 
 fn validate_auth_bearer(value: &str) -> Result<(), String> {
+    let display_name = format_env_with_legacy_alias(
+        "GPM_LOCAL_API_AUTH_BEARER",
+        Some("TDPN_LOCAL_API_AUTH_BEARER"),
+    );
     if value.len() > MAX_LOCAL_API_AUTH_BEARER_BYTES {
         return Err(format!(
-            "TDPN_LOCAL_API_AUTH_BEARER must be <= {MAX_LOCAL_API_AUTH_BEARER_BYTES} chars"
+            "{display_name} must be <= {MAX_LOCAL_API_AUTH_BEARER_BYTES} chars"
         ));
     }
     if value.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err(
-            "TDPN_LOCAL_API_AUTH_BEARER contains invalid whitespace/control characters"
-                .to_string(),
-        );
+        return Err(format!(
+            "{display_name} contains invalid whitespace/control characters"
+        ));
     }
     if value.chars().any(|c| !is_valid_bearer_token_char(c)) {
-        return Err(
-            "TDPN_LOCAL_API_AUTH_BEARER must use only token68 characters [A-Za-z0-9-._~+/=]"
-                .to_string(),
-        );
+        return Err(format!(
+            "{display_name} must use only token68 characters [A-Za-z0-9-._~+/=]"
+        ));
     }
     Ok(())
+}
+
+fn format_env_with_legacy_alias(preferred_name: &str, legacy_alias: Option<&str>) -> String {
+    match legacy_alias {
+        Some(alias) => format!("{preferred_name} (legacy alias: {alias})"),
+        None => preferred_name.to_string(),
+    }
 }
 
 fn is_valid_bearer_token_char(c: char) -> bool {
@@ -931,7 +965,11 @@ mod tests {
             ],
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
-                assert!(err.contains("invalid TDPN_LOCAL_API_ALLOW_REMOTE value"), "{err}");
+                assert!(err.contains("invalid GPM_LOCAL_API_ALLOW_REMOTE"), "{err}");
+                assert!(
+                    err.contains("legacy alias: TDPN_LOCAL_API_ALLOW_REMOTE"),
+                    "{err}"
+                );
             },
         );
     }
@@ -947,7 +985,13 @@ mod tests {
             ],
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected auth requirement");
-                assert!(err.contains("requires TDPN_LOCAL_API_AUTH_BEARER"), "{err}");
+                assert!(err.contains("requires GPM_LOCAL_API_AUTH_BEARER"), "{err}");
+                assert!(
+                    err.contains(
+                        "legacy aliases: TDPN_LOCAL_API_ALLOW_REMOTE, TDPN_LOCAL_API_AUTH_BEARER"
+                    ),
+                    "{err}"
+                );
             },
         );
     }
@@ -979,7 +1023,13 @@ mod tests {
             ],
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected auth requirement");
-                assert!(err.contains("requires TDPN_LOCAL_API_AUTH_BEARER"), "{err}");
+                assert!(err.contains("requires GPM_LOCAL_API_AUTH_BEARER"), "{err}");
+                assert!(
+                    err.contains(
+                        "legacy aliases: TDPN_LOCAL_API_ALLOW_REMOTE, TDPN_LOCAL_API_AUTH_BEARER"
+                    ),
+                    "{err}"
+                );
             },
         );
     }
@@ -1136,7 +1186,13 @@ mod tests {
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected auth requirement");
                 assert!(
-                    err.contains("desktop mutation controls require TDPN_LOCAL_API_AUTH_BEARER"),
+                    err.contains("desktop mutation controls require GPM_LOCAL_API_AUTH_BEARER"),
+                    "{err}"
+                );
+                assert!(
+                    err.contains(
+                        "legacy aliases: TDPN_LOCAL_API_AUTH_BEARER, TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS, TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS"
+                    ),
                     "{err}"
                 );
             },
@@ -1154,7 +1210,11 @@ mod tests {
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
                 assert!(
-                    err.contains("invalid TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS value"),
+                    err.contains("invalid GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS"),
+                    "{err}"
+                );
+                assert!(
+                    err.contains("legacy alias: TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS"),
                     "{err}"
                 );
             },
@@ -1188,7 +1248,11 @@ mod tests {
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
                 assert!(
-                    err.contains("invalid TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION value"),
+                    err.contains("invalid GPM_LOCAL_API_CONNECT_REQUIRE_SESSION"),
+                    "{err}"
+                );
+                assert!(
+                    err.contains("legacy alias: TDPN_LOCAL_API_CONNECT_REQUIRE_SESSION"),
                     "{err}"
                 );
             },
@@ -1222,7 +1286,11 @@ mod tests {
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
                 assert!(
-                    err.contains("invalid TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE value"),
+                    err.contains("invalid GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE"),
+                    "{err}"
+                );
+                assert!(
+                    err.contains("legacy alias: TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE"),
                     "{err}"
                 );
             },

@@ -72,19 +72,19 @@ Operator moderation UX notes:
 - After approve/reject decisions, desktop forces a session status refresh so role/readiness lock state reconciles immediately and surfaces backend `session_reconciled` hints when present.
 
 Remote hardening guardrails:
-- non-loopback `TDPN_LOCAL_API_BASE_URL` requires `TDPN_LOCAL_API_ALLOW_REMOTE=1`
-- non-loopback `TDPN_LOCAL_API_BASE_URL` with remote opt-in also requires:
-  - `TDPN_LOCAL_API_AUTH_BEARER`
+- non-loopback `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`) requires `GPM_LOCAL_API_ALLOW_REMOTE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_REMOTE=1`)
+- non-loopback `GPM_LOCAL_API_BASE_URL` (legacy alias: `TDPN_LOCAL_API_BASE_URL`) with remote opt-in also requires:
+  - `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`)
   - `https` scheme
-- enabling desktop mutation actions (`TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` or `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) requires `TDPN_LOCAL_API_AUTH_BEARER` even for loopback targets
-- `TDPN_LOCAL_API_AUTH_BEARER` must be a single-line token with no whitespace/control characters and only token68 chars (`A-Za-z0-9-._~+/=`); desktop rejects invalid values
+- enabling desktop mutation actions (`GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` / `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`, legacy aliases: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` / `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`) requires `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) even for loopback targets
+- `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) must be a single-line token with no whitespace/control characters and only token68 chars (`A-Za-z0-9-._~+/=`); desktop rejects invalid values
 - if `GPM_MAIN_DOMAIN` (legacy alias `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host; cache fallback checks the cached manifest source URL host too. This hardening is skipped when main domain is unset for dev compatibility, and it complements existing signature verification and expiry checks.
 - `control_connect` bootstrap URL validation allows `http://` only for literal loopback IPs (`127.0.0.1` / `::1`); `http://localhost:...` is rejected
 - desktop response rendering strips unbounded `output`/`raw` fields and redacts secret-like keys (including snake/camel/compact forms such as `accessToken`, `clientSecret`, `refreshToken`, `private_key`, `invite_key`, `api_key`)
 
 Secret handling guidance:
 - avoid passing local API auth tokens in command arguments; prefer process-local env vars for the current shell session only
-- do not store `TDPN_LOCAL_API_AUTH_BEARER` in shared shell profiles/history on multi-user hosts
+- do not store `GPM_LOCAL_API_AUTH_BEARER` (legacy alias: `TDPN_LOCAL_API_AUTH_BEARER`) in shared shell profiles/history on multi-user hosts
 - never paste `invite_key` values or bearer tokens into issue trackers, CI logs, or chat transcripts
 
 ## Development (once toolchains are installed)

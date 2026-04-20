@@ -430,7 +430,7 @@ function Resolve-DesktopExecutableResolution {
     $candidateOverride = $envValue.Trim()
     if (-not (Test-Path -LiteralPath $candidateOverride -PathType Leaf)) {
       throw (New-DesktopLaunchError -Headline ("desktop executable env override was not found ({0}): {1}" -f $envOverride.Name, $candidateOverride) -Hints @(
-        ("Set {0} with the full path to a packaged desktop executable." -f $envOverride.Name),
+        "Set GPM_DESKTOP_PACKAGED_EXE with the full path to a packaged desktop executable (TDPN_DESKTOP_PACKAGED_EXE remains available as a legacy alias; GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE is also supported).",
         ("Unset {0} to allow packaged auto-discovery under apps\desktop\src-tauri\target\release." -f $envOverride.Name),
         "You can also pass -DesktopExecutableOverridePath to force a one-off packaged executable path."
       ))
@@ -505,7 +505,7 @@ function Resolve-DesktopLaunchPlan {
     throw (New-DesktopLaunchError -Headline "packaged desktop launch was requested, but no packaged executable was found." -Hints @(
       "Build the desktop app first, then rerun with -DesktopLaunchStrategy packaged.",
       "Or pass -DesktopExecutableOverridePath to point at the packaged executable directly.",
-      "Or set GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE (or GPM_DESKTOP_PACKAGED_EXE / TDPN_DESKTOP_PACKAGED_EXE) to the packaged executable path.",
+      "Or set GPM_DESKTOP_PACKAGED_EXE to the packaged executable path (TDPN_DESKTOP_PACKAGED_EXE remains available as a legacy alias; GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE is also supported).",
       "For one-click startup, use -DesktopLaunchStrategy auto and let the script fall back to dev mode when no packaged executable exists."
     ))
   }

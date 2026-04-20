@@ -274,13 +274,15 @@ fi
 if ! awk '
   BEGIN { IGNORECASE = 1 }
   {
+    has_global[NR] = ($0 ~ /GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE/)
     has_gpm[NR] = ($0 ~ /GPM_DESKTOP_PACKAGED_EXE/)
+    has_primary[NR] = (has_global[NR] || has_gpm[NR])
     has_tdpn[NR] = ($0 ~ /TDPN_DESKTOP_PACKAGED_EXE/)
     has_alias_term[NR] = ($0 ~ /(alias|legacy|compatibility|compat)/)
   }
   END {
     for (i = 1; i <= NR; i++) {
-      if (!has_gpm[i]) {
+      if (!has_primary[i]) {
         continue
       }
       start = i - 8
@@ -293,7 +295,11 @@ if ! awk '
       }
       found_tdpn = 0
       found_alias_term = 0
+      found_primary = 0
       for (j = start; j <= end; j++) {
+        if (has_primary[j]) {
+          found_primary = 1
+        }
         if (has_tdpn[j]) {
           found_tdpn = 1
         }
@@ -301,7 +307,7 @@ if ! awk '
           found_alias_term = 1
         }
       }
-      if (found_tdpn && found_alias_term) {
+      if (found_primary && found_tdpn && found_alias_term) {
         print "ok"
         exit 0
       }
@@ -309,7 +315,7 @@ if ! awk '
     exit 1
   }
 ' "$README_FILE" >/dev/null; then
-  echo "desktop scaffold contract failed: README must describe GPM_DESKTOP_PACKAGED_EXE and TDPN_DESKTOP_PACKAGED_EXE as compatibility aliases"
+  echo "desktop scaffold contract failed: README must describe GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE or GPM_DESKTOP_PACKAGED_EXE with TDPN_DESKTOP_PACKAGED_EXE legacy compatibility alias context"
   exit 1
 fi
 
