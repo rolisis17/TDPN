@@ -27,6 +27,7 @@ const endpointPostureEl = byId("endpoint_posture");
 const endpointPostureLineEl = byId("endpoint_posture_line");
 const endpointPostureStatusEl = byId("endpoint_posture_status");
 const endpointPostureGuidanceEl = byId("endpoint_posture_guidance");
+const localApiAuthTokenEl = byId("local_api_auth_token");
 const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
 const clientReadinessStatusEl = byId("client_readiness_status");
@@ -235,6 +236,14 @@ function restorePortalState() {
   }
   if (typeof state.session_token === "string") {
     delete state.session_token;
+    try {
+      store.setItem(PORTAL_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // Best effort only: ignore quota or browser storage errors.
+    }
+  }
+  if (typeof state.local_api_auth_token === "string") {
+    delete state.local_api_auth_token;
     try {
       store.setItem(PORTAL_STORAGE_KEY, JSON.stringify(state));
     } catch {
@@ -2152,12 +2161,26 @@ function parseServerReadiness(payload) {
   const role = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
   const lockReason = nonEmptyString(firstDefined(readiness.lock_reason, readiness.lockReason));
   const clientLockReason = nonEmptyString(firstDefined(readiness.client_lock_reason, readiness.clientLockReason));
-  const endpointPosture = nonEmptyString(
-    firstDefined(readiness.endpoint_posture, readiness.endpointPosture)
-  );
+  const endpointPostureRaw = firstDefined(readiness.endpoint_posture, readiness.endpointPosture);
+  const endpointPosture =
+    endpointPostureRaw && typeof endpointPostureRaw === "object" && !Array.isArray(endpointPostureRaw)
+      ? endpointPostureRaw
+      : nonEmptyString(endpointPostureRaw);
   const endpointWarnings = parseNonEmptyStringList(
     firstDefined(readiness.endpoint_warnings, readiness.endpointWarnings)
   );
+  if (endpointPosture && typeof endpointPosture === "object" && !Array.isArray(endpointPosture)) {
+    for (const warning of parseNonEmptyStringList(
+      firstDefined(
+        endpointPosture.endpoint_warnings,
+        endpointPosture.endpointWarnings,
+        endpointPosture.warnings,
+        endpointPosture.warning
+      )
+    )) {
+      pushUniqueNonEmptyString(endpointWarnings, warning);
+    }
+  }
   return {
     role: role || undefined,
     tabVisible: parseBooleanLike(readiness.tab_visible),
@@ -2736,6 +2759,76 @@ function endpointPostureKind(posture) {
   return "warn";
 }
 
+function parseEndpointPostureObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function endpointPostureCount(value) {
+  const parsed = numberOrUndefined(value);
+  return parsed === undefined ? undefined : Math.floor(parsed);
+}
+
+function formatEndpointPostureCountSummary(posture) {
+  const totalUrls = endpointPostureCount(firstDefined(posture.total_urls, posture.totalUrls));
+  const httpUrls = endpointPostureCount(firstDefined(posture.http_urls, posture.httpUrls));
+  const httpsUrls = endpointPostureCount(firstDefined(posture.https_urls, posture.httpsUrls));
+  if (totalUrls === undefined && httpUrls === undefined && httpsUrls === undefined) {
+    return "";
+  }
+  const totalText = totalUrls !== undefined ? `${totalUrls} total` : "total unknown";
+  const httpsText = httpsUrls !== undefined ? `${httpsUrls} HTTPS` : "HTTPS ?";
+  const httpText = httpUrls !== undefined ? `${httpUrls} HTTP` : "HTTP ?";
+  return `${totalText} (${httpsText} / ${httpText})`;
+}
+
+function endpointPostureKindFromObject(posture, warnings) {
+  const hasRemoteHTTP = parseBooleanLike(firstDefined(posture.has_remote_http, posture.hasRemoteHttp));
+  const mixedScheme = parseBooleanLike(firstDefined(posture.mixed_scheme, posture.mixedScheme));
+  const httpUrls = endpointPostureCount(firstDefined(posture.http_urls, posture.httpUrls));
+  const httpsUrls = endpointPostureCount(firstDefined(posture.https_urls, posture.httpsUrls));
+  if (hasRemoteHTTP === true) {
+    return "bad";
+  }
+  if (mixedScheme === true || warnings.length > 0) {
+    return "warn";
+  }
+  if (httpUrls === 0 && httpsUrls !== undefined && httpsUrls > 0) {
+    return "good";
+  }
+  return "warn";
+}
+
+function endpointPostureGuidanceFromObject(posture, warnings) {
+  const totalUrls = endpointPostureCount(firstDefined(posture.total_urls, posture.totalUrls));
+  const httpUrls = endpointPostureCount(firstDefined(posture.http_urls, posture.httpUrls));
+  const httpsUrls = endpointPostureCount(firstDefined(posture.https_urls, posture.httpsUrls));
+  const mixedScheme = parseBooleanLike(firstDefined(posture.mixed_scheme, posture.mixedScheme));
+  const hasRemoteHTTP = parseBooleanLike(firstDefined(posture.has_remote_http, posture.hasRemoteHttp));
+  const guidanceParts = [];
+  if (totalUrls !== undefined || httpUrls !== undefined || httpsUrls !== undefined) {
+    guidanceParts.push(
+      `URL totals: ${totalUrls ?? "?"} total, ${httpsUrls ?? "?"} HTTPS, ${httpUrls ?? "?"} HTTP.`
+    );
+  }
+  if (mixedScheme === true) {
+    guidanceParts.push("Mixed HTTP/HTTPS endpoint posture detected; prefer HTTPS for issuer and trust endpoints.");
+  } else if (mixedScheme === false && httpUrls === 0 && httpsUrls !== undefined && httpsUrls > 0) {
+    guidanceParts.push("All discovered issuer/trust endpoints are HTTPS.");
+  }
+  if (hasRemoteHTTP === true) {
+    guidanceParts.push("Remote HTTP endpoint detected; migrate remote issuer/trust endpoints to HTTPS.");
+  } else if (hasRemoteHTTP === false && httpUrls !== undefined) {
+    guidanceParts.push("No remote HTTP endpoints detected.");
+  }
+  if (warnings.length > 0) {
+    guidanceParts.push(warnings.join(" "));
+  }
+  if (guidanceParts.length === 0) {
+    return "Endpoint posture object is available. Refresh server status after endpoint changes.";
+  }
+  return guidanceParts.join(" ");
+}
+
 function setEndpointPosture(kind, statusText, guidanceText) {
   endpointPostureEl.dataset.kind = kind || "warn";
   endpointPostureLineEl.classList.remove("good", "warn", "bad");
@@ -2766,16 +2859,28 @@ function refreshEndpointPosture() {
     return;
   }
 
-  const posture = nonEmptyString(serverReadiness.endpointPosture);
+  const posture = serverReadiness.endpointPosture;
+  const postureObject = parseEndpointPostureObject(posture);
+  const postureText = nonEmptyString(typeof posture === "string" ? posture : undefined);
   const warnings = Array.isArray(serverReadiness.endpointWarnings)
     ? serverReadiness.endpointWarnings
     : [];
-  if (posture) {
+  if (postureObject) {
+    const mode = nonEmptyString(firstDefined(postureObject.server_mode, postureObject.serverMode));
+    const modeText = mode ? `${formatEndpointPostureLabel(mode)} mode` : "Mode unknown";
+    const countSummary = formatEndpointPostureCountSummary(postureObject);
+    const statusText = countSummary ? `${modeText} - ${countSummary}` : modeText;
+    const guidance = endpointPostureGuidanceFromObject(postureObject, warnings);
+    setEndpointPosture(endpointPostureKindFromObject(postureObject, warnings), statusText, guidance);
+    return;
+  }
+
+  if (postureText) {
     const guidance =
       warnings.length > 0
         ? warnings.join(" ")
         : "No endpoint warnings reported by readiness.";
-    setEndpointPosture(endpointPostureKind(posture), formatEndpointPostureLabel(posture), guidance);
+    setEndpointPosture(endpointPostureKind(postureText), formatEndpointPostureLabel(postureText), guidance);
     return;
   }
 
@@ -3142,9 +3247,16 @@ function apiBase() {
   return pathname && pathname !== "/" ? `${parsed.origin}${pathname}` : parsed.origin;
 }
 
+function localApiAuthToken() {
+  return localApiAuthTokenEl.value.trim();
+}
+
 function createApiError(response, json) {
-  const message =
+  let message =
     (typeof json?.error === "string" && json.error.trim()) || `${response.status} ${response.statusText}`;
+  if (response.status === 401 && !localApiAuthToken()) {
+    message = `${message} Local API bearer token is missing. Set Local API auth token in the portal and retry.`;
+  }
   const err = new Error(message);
   err.status = response.status;
   err.statusText = response.statusText;
@@ -3160,7 +3272,7 @@ function isDecisionConflictError(err) {
 }
 
 async function post(path, body) {
-  const token = byId("session_token").value.trim();
+  const token = localApiAuthToken();
   const headers = {
     "Content-Type": "application/json"
   };
@@ -3186,7 +3298,7 @@ async function post(path, body) {
 }
 
 async function get(path) {
-  const token = byId("session_token").value.trim();
+  const token = localApiAuthToken();
   const headers = {};
   if (token) {
     headers.Authorization = `Bearer ${token}`;

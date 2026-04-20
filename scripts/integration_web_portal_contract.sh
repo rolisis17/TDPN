@@ -45,6 +45,10 @@ if ! grep -qF 'id="status_detail"' "$PORTAL_HTML"; then
   echo "web portal contract failed: missing readiness guidance marker id=status_detail in $PORTAL_HTML"
   exit 1
 fi
+if ! grep -qF 'id="local_api_auth_token"' "$PORTAL_HTML"; then
+  echo "web portal contract failed: missing local API bearer token marker id=local_api_auth_token in $PORTAL_HTML"
+  exit 1
+fi
 if ! grep -qF 'id="onboarding_step_client"' "$PORTAL_HTML"; then
   echo "web portal contract failed: missing client-step readiness marker id=onboarding_step_client in $PORTAL_HTML"
   exit 1
@@ -134,6 +138,17 @@ JS_MARKERS=(
   'setStepState(onboardingStepClientEl'
   'const clientLockReason = nonEmptyString(firstDefined(readiness.client_lock_reason, readiness.clientLockReason));'
   'clientTabVisible: parseBooleanLike(firstDefined(readiness.client_tab_visible, readiness.clientTabVisible))'
+  'const endpointPostureRaw = firstDefined(readiness.endpoint_posture, readiness.endpointPosture);'
+  'endpointPostureRaw && typeof endpointPostureRaw === "object" && !Array.isArray(endpointPostureRaw)'
+  'endpointPosture.endpoint_warnings'
+  'function parseEndpointPostureObject('
+  'function formatEndpointPostureCountSummary('
+  'function endpointPostureGuidanceFromObject('
+  'const localApiAuthTokenEl = byId("local_api_auth_token");'
+  'function localApiAuthToken() {'
+  'response.status === 401 && !localApiAuthToken()'
+  'Local API bearer token is missing. Set Local API auth token in the portal and retry.'
+  'const token = localApiAuthToken();'
   'function refreshServerReadinessStatus('
   'byId("register_client_btn").addEventListener'
   'assertClientRegistrationActionAllowed();'
@@ -157,6 +172,22 @@ for marker in "${JS_MARKERS[@]}"; do
   fi
 done
 echo "[web-portal] portal JS readiness compute/render/gating markers are present"
+
+ENDPOINT_POSTURE_OBJECT_FIELDS=(
+  'server_mode'
+  'total_urls'
+  'http_urls'
+  'https_urls'
+  'mixed_scheme'
+  'has_remote_http'
+)
+for field in "${ENDPOINT_POSTURE_OBJECT_FIELDS[@]}"; do
+  if ! grep -qF "$field" "$PORTAL_JS"; then
+    echo "web portal contract failed: missing endpoint posture object field marker '$field' in $PORTAL_JS"
+    exit 1
+  fi
+done
+echo "[web-portal] endpoint posture object markers are present"
 
 # Connection console JS contract markers.
 CONNECTION_JS_MARKERS=(
@@ -254,6 +285,20 @@ if ! grep -qF 'client_lock_reason' "$README_FILE"; then
   echo "web portal contract failed: README must mention readiness.client_lock_reason"
   exit 1
 fi
+if ! grep -qiE 'local api auth token.*authorization: bearer|authorization: bearer.*local api auth token' "$README_FILE"; then
+  echo "web portal contract failed: README must mention local API auth token bearer transport"
+  exit 1
+fi
+if ! grep -qiE '401.*local api auth token|local api auth token.*401' "$README_FILE"; then
+  echo "web portal contract failed: README must mention 401 guidance for missing local API auth token"
+  exit 1
+fi
+for field in server_mode total_urls http_urls https_urls mixed_scheme has_remote_http; do
+  if ! grep -qF "$field" "$README_FILE"; then
+    echo "web portal contract failed: README must mention readiness.endpoint_posture.$field"
+    exit 1
+  fi
+done
 if ! grep -qiE 'register(ing|ed)? client|client registration|register-client' "$README_FILE"; then
   echo "web portal contract failed: README must describe client registration lock/readiness behavior"
   exit 1

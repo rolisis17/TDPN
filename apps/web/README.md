@@ -23,6 +23,8 @@ Then open:
 
 - The portal calls the new GPM local API endpoints (`/v1/gpm/...`).
 - Default API base is `http://127.0.0.1:8095` and can be changed in the portal UI.
+- Portal transport auth now uses a dedicated `Local API auth token` UI control for the `Authorization: Bearer ...` header; `session_token` remains in request bodies for GPM session workflows.
+- If an endpoint returns `401` and the bearer token field is empty, portal error messaging now explicitly tells operators to set `Local API auth token` and retry.
 - `Recent Audit` now includes optional query controls for `limit`, `offset`, `event`, `wallet_address`, and `order`; default values preserve legacy behavior (`limit=25`, descending order, no filters).
 - Audit action output/status now includes compact pagination metadata (`returned`, `limit`, `offset`, optional `total`, `next_offset`, `has_more`) alongside returned entries.
 - Session lifecycle actions now use `POST /v1/gpm/session` with `action=status|refresh|revoke`.
@@ -32,6 +34,7 @@ Then open:
 - Connect payload handling is policy-aware: `session_token`/registered-session flow is preferred, and manual `bootstrap_directory`/`invite_key` are sent only when compatibility override is enabled and runtime policy allows it.
 - Client onboarding status is available via `POST /v1/gpm/onboarding/client/status` (`registered|not_registered`) and is used by portal step tracking.
 - Server readiness is available via `POST /v1/gpm/onboarding/server/status` and now drives portal operator/server lock guidance and onboarding step 3 state (`readiness.tab_visible`, `readiness.lifecycle_actions_unlocked`, `readiness.lock_reason`, `readiness.unlock_actions`) with heuristic fallback when unavailable; operator unlock is strict-bound and requires matching session/application `chain_operator_id`.
+- Endpoint posture rendering now accepts readiness object maps (not only strings): `readiness.endpoint_posture.server_mode`, `total_urls`, `http_urls`, `https_urls`, `mixed_scheme`, and `has_remote_http` are summarized in Step-3 guidance, and `readiness.endpoint_warnings` is preserved/merged into operator diagnostics.
 - Consolidated onboarding status is available via `POST /v1/gpm/onboarding/overview` and returns `session + registration + readiness` in one call; existing `client/status` and `server/status` endpoints remain supported for backward compatibility.
 - Readiness/overview payloads include additive chain-binding fields: `readiness.chain_binding_status`, `readiness.chain_binding_ok`, and `readiness.chain_binding_reason` to surface bound vs pending/mismatch operator chain-binding state while preserving backend reason text and appending actionable guidance (refresh session, re-apply/re-approve if mismatch persists).
 - Client-lock readiness fields are carried on the same server-status contract as `readiness.client_tab_visible` and `readiness.client_lock_reason`; portal/contract checks treat legacy `readiness.tab_visible` and `readiness.lock_reason` as compatibility aliases while client registration gating remains fail-closed.
