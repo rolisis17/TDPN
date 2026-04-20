@@ -1942,12 +1942,24 @@ func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalle
 		return err
 	}
 	if s.gpmAuthVerifyRequireCommand && strings.TrimSpace(s.gpmAuthVerifyCommand) == "" {
+		s.appendGPMAuthVerifyFailureAudit(challenge, walletAddress, walletProvider, "verifier_command_required", "policy")
 		return errors.New("signature verifier command is required by policy")
 	}
 	if err := s.runGPMAuthVerifierCommand(ctx, challenge, walletAddress, walletProvider, signature, signatureMetadata); err != nil {
+		s.appendGPMAuthVerifyFailureAudit(challenge, walletAddress, walletProvider, "verifier_command_error", "external_verifier")
 		return err
 	}
 	return nil
+}
+
+func (s *Service) appendGPMAuthVerifyFailureAudit(challenge gpmWalletChallenge, walletAddress string, walletProvider string, failureReasonCode string, failureReasonCategory string) {
+	s.appendGPMAudit("auth_verify_failed", map[string]any{
+		"wallet_address":          strings.TrimSpace(walletAddress),
+		"wallet_provider":         strings.TrimSpace(walletProvider),
+		"challenge_id":            strings.TrimSpace(challenge.ChallengeID),
+		"failure_reason_code":     strings.TrimSpace(failureReasonCode),
+		"failure_reason_category": strings.TrimSpace(failureReasonCategory),
+	})
 }
 
 func (s *Service) runGPMAuthVerifierCommand(ctx context.Context, challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string, signatureMetadata gpmAuthSignatureMetadata) error {

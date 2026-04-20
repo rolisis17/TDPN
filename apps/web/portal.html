@@ -407,9 +407,15 @@
         <div id="panel_server" class="tab-panel" role="tabpanel" aria-labelledby="tab_server">
           <p id="server_lock_hint" class="helper-copy">Server controls are available only for approved operator/admin roles.</p>
           <p class="helper-copy">
-            Server lifecycle approvals remain in Step 3. The status action here checks shared local connection state.
+            Server lifecycle actions use readiness policy from Step 3 and require a signed-in eligible session.
+          </p>
+          <p id="server_lifecycle_hint" class="helper-copy">
+            Refresh session/readiness to confirm lifecycle command availability.
           </p>
           <div class="actions">
+            <button class="btn secondary" id="server_start_btn">Start</button>
+            <button class="btn secondary" id="server_stop_btn">Stop</button>
+            <button class="btn secondary" id="server_restart_btn">Restart</button>
             <button class="btn secondary" id="status_btn_server">Status</button>
           </div>
         </div>

@@ -271,6 +271,32 @@ func readCommandLog(t *testing.T, path string) [][]string {
 	return out
 }
 
+func readAuditLogRecords(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	content := strings.TrimSpace(string(body))
+	if content == "" {
+		return nil
+	}
+	lines := strings.Split(content, "\n")
+	records := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		record := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode audit line: %v", err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
 func commandFlags(parts []string) map[string]string {
 	flags := map[string]string{}
 	for i := 1; i < len(parts); i++ {
@@ -3758,6 +3784,7 @@ func TestGPMAuthVerifyStrictModeRequiresConfiguredVerifierCommand(t *testing.T) 
 	svc.gpmRoleDefault = "client"
 	svc.gpmAuthVerifyRequireCommand = true
 	svc.gpmAuthVerifyCommand = ""
+	svc.gpmAuditLogPath = filepath.Join(t.TempDir(), "gpm_audit.jsonl")
 
 	challengeBody := `{"wallet_address":"cosmos1cmdstrictmissing","wallet_provider":"keplr"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
@@ -3780,6 +3807,35 @@ func TestGPMAuthVerifyStrictModeRequiresConfiguredVerifierCommand(t *testing.T) 
 	}
 	if _, ok := payload["session_token"]; ok {
 		t.Fatalf("session_token unexpectedly present payload=%v", payload)
+	}
+	records := readAuditLogRecords(t, svc.gpmAuditLogPath)
+	var failureRecord map[string]any
+	for _, record := range records {
+		if event, _ := record["event"].(string); event == "auth_verify_failed" {
+			failureRecord = record
+		}
+	}
+	if failureRecord == nil {
+		t.Fatalf("missing auth_verify_failed audit record records=%v", records)
+	}
+	fields, _ := failureRecord["fields"].(map[string]any)
+	if got, _ := fields["wallet_address"].(string); got != "cosmos1cmdstrictmissing" {
+		t.Fatalf("audit wallet_address=%q want=cosmos1cmdstrictmissing fields=%v", got, fields)
+	}
+	if got, _ := fields["wallet_provider"].(string); got != "keplr" {
+		t.Fatalf("audit wallet_provider=%q want=keplr fields=%v", got, fields)
+	}
+	if got, _ := fields["challenge_id"].(string); got != challengeID {
+		t.Fatalf("audit challenge_id=%q want=%q fields=%v", got, challengeID, fields)
+	}
+	if got, _ := fields["failure_reason_code"].(string); got != "verifier_command_required" {
+		t.Fatalf("audit failure_reason_code=%q want=verifier_command_required fields=%v", got, fields)
+	}
+	if got, _ := fields["failure_reason_category"].(string); got != "policy" {
+		t.Fatalf("audit failure_reason_category=%q want=policy fields=%v", got, fields)
+	}
+	if _, ok := fields["signature"]; ok {
+		t.Fatalf("audit fields unexpectedly include signature: %v", fields)
 	}
 }
 
@@ -4305,6 +4361,7 @@ func TestGPMAuthVerifyConfiguredVerifierCommandRejectsSignature(t *testing.T) {
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
 	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature("signed-proof-value", "bad-signature", 12)
+	svc.gpmAuditLogPath = filepath.Join(t.TempDir(), "gpm_audit.jsonl")
 
 	challengeBody := `{"wallet_address":"cosmos1cmdreject","wallet_provider":"keplr"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
@@ -4327,6 +4384,35 @@ func TestGPMAuthVerifyConfiguredVerifierCommandRejectsSignature(t *testing.T) {
 	}
 	if !strings.Contains(errMsg, "bad-signature") {
 		t.Fatalf("error=%q want verifier command output marker payload=%v", errMsg, payload)
+	}
+	records := readAuditLogRecords(t, svc.gpmAuditLogPath)
+	var failureRecord map[string]any
+	for _, record := range records {
+		if event, _ := record["event"].(string); event == "auth_verify_failed" {
+			failureRecord = record
+		}
+	}
+	if failureRecord == nil {
+		t.Fatalf("missing auth_verify_failed audit record records=%v", records)
+	}
+	fields, _ := failureRecord["fields"].(map[string]any)
+	if got, _ := fields["wallet_address"].(string); got != "cosmos1cmdreject" {
+		t.Fatalf("audit wallet_address=%q want=cosmos1cmdreject fields=%v", got, fields)
+	}
+	if got, _ := fields["wallet_provider"].(string); got != "keplr" {
+		t.Fatalf("audit wallet_provider=%q want=keplr fields=%v", got, fields)
+	}
+	if got, _ := fields["challenge_id"].(string); got != challengeID {
+		t.Fatalf("audit challenge_id=%q want=%q fields=%v", got, challengeID, fields)
+	}
+	if got, _ := fields["failure_reason_code"].(string); got != "verifier_command_error" {
+		t.Fatalf("audit failure_reason_code=%q want=verifier_command_error fields=%v", got, fields)
+	}
+	if got, _ := fields["failure_reason_category"].(string); got != "external_verifier" {
+		t.Fatalf("audit failure_reason_category=%q want=external_verifier fields=%v", got, fields)
+	}
+	if _, ok := fields["signature"]; ok {
+		t.Fatalf("audit fields unexpectedly include signature: %v", fields)
 	}
 }
 

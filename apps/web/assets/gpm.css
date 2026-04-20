@@ -555,6 +555,14 @@ label.check input {
   color: #805b1b;
 }
 
+#server_lifecycle_hint {
+  margin-bottom: 2px;
+}
+
+#server_lifecycle_hint.locked {
+  font-weight: 600;
+}
+
 .status {
   display: grid;
   gap: 4px;

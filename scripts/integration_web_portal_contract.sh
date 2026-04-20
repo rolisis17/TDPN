@@ -93,6 +93,10 @@ CONNECTION_UI_MARKERS=(
   'id="connect_btn"'
   'id="disconnect_btn"'
   'id="status_btn"'
+  'id="server_lifecycle_hint"'
+  'id="server_start_btn"'
+  'id="server_stop_btn"'
+  'id="server_restart_btn"'
   'id="status_btn_server"'
 )
 for marker in "${CONNECTION_UI_MARKERS[@]}"; do
@@ -152,6 +156,9 @@ CONNECTION_JS_MARKERS=(
   'function requestConnectControl('
   'function requestDisconnectControl('
   'function requestConnectionStatus('
+  'function computeServerLifecycleControlState('
+  'function syncServerLifecycleActionState('
+  'function requestServiceLifecycle('
   'function updateConnectionDashboard('
   'function restoreWorkspaceTabPreference('
   'function persistWorkspaceTabPreference('
@@ -161,6 +168,9 @@ CONNECTION_JS_MARKERS=(
   'byId("connect_btn").addEventListener'
   'byId("disconnect_btn").addEventListener'
   'byId("status_btn").addEventListener'
+  'serverStartBtnEl.addEventListener("click"'
+  'serverStopBtnEl.addEventListener("click"'
+  'serverRestartBtnEl.addEventListener("click"'
   'byId("status_btn_server").addEventListener'
   'tabClientEl.addEventListener("click"'
   'tabServerEl.addEventListener("click"'
@@ -241,6 +251,10 @@ if ! grep -qiE 'client[^[:alnum:]]*/[^[:alnum:]]*server.*tabs|tabs.*client.*serv
 fi
 if ! grep -qiE 'connect.*disconnect.*status|/v1/connect.*/v1/disconnect.*/v1/status' "$README_FILE"; then
   echo "web portal contract failed: README must mention connect/disconnect/status controls"
+  exit 1
+fi
+if ! grep -qiE 'server tab lifecycle controls|start.*stop.*restart.*gpm/service' "$README_FILE"; then
+  echo "web portal contract failed: README must mention server lifecycle controls"
   exit 1
 fi
 if ! grep -qF 'signArbitrary' "$README_FILE"; then

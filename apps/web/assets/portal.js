@@ -58,6 +58,10 @@ const panelClientEl = byId("panel_client");
 const panelServerEl = byId("panel_server");
 const clientLockHintEl = byId("client_lock_hint");
 const serverLockHintEl = byId("server_lock_hint");
+const serverLifecycleHintEl = byId("server_lifecycle_hint");
+const serverStartBtnEl = byId("server_start_btn");
+const serverStopBtnEl = byId("server_stop_btn");
+const serverRestartBtnEl = byId("server_restart_btn");
 const connectPolicyHintEl = byId("connect_policy_hint");
 const connectInterfaceEl = byId("connect_interface");
 const connectDiscoveryWaitSecEl = byId("connect_discovery_wait_sec");
@@ -2174,6 +2178,87 @@ function computeServerTabLockHintText() {
   return readiness.guidanceText;
 }
 
+function computeServerLifecycleControlState() {
+  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
+  const sessionToken = byId("session_token").value.trim();
+  if (!isServerTabVisibleRole(role)) {
+    return {
+      disabled: true,
+      locked: true,
+      hint: computeServerTabLockHintText()
+    };
+  }
+
+  if (serverReadiness?.serviceMutationsConfigured === false) {
+    return {
+      disabled: true,
+      locked: true,
+      hint: appendChainBindingGuidance(
+        "Lifecycle commands are unavailable because service mutations are not configured on this daemon.",
+        serverReadiness
+      )
+    };
+  }
+
+  if (serverReadiness?.lifecycleActionsUnlocked === false) {
+    const reason = serverReadiness.lockReason || "Lifecycle commands are locked by backend readiness policy.";
+    const unlockActions = Array.isArray(serverReadiness.unlockActions) ? serverReadiness.unlockActions : [];
+    const nextActions = unlockActions.length > 0 ? ` Next: ${unlockActions.join("; ")}` : "";
+    return {
+      disabled: true,
+      locked: true,
+      hint: appendChainBindingGuidance(`${reason}${nextActions}`, serverReadiness)
+    };
+  }
+
+  if (serverReadiness?.lifecycleActionsUnlocked === true) {
+    return {
+      disabled: false,
+      locked: false,
+      hint: "Lifecycle commands are unlocked by backend readiness. Use Start, Stop, or Restart to manage the service."
+    };
+  }
+
+  if (!sessionToken) {
+    return {
+      disabled: true,
+      locked: true,
+      hint: "Sign in and refresh server readiness to confirm lifecycle command availability."
+    };
+  }
+
+  if (!isServerRoleUnlocked(role)) {
+    return {
+      disabled: true,
+      locked: true,
+      hint: "Operator or admin role is required for lifecycle commands."
+    };
+  }
+
+  return {
+    disabled: false,
+    locked: false,
+    hint: "Lifecycle commands are available for this role. Refresh readiness if a command is rejected."
+  };
+}
+
+function syncServerLifecycleActionState() {
+  const isBusy = document.body.classList.contains("is-busy");
+  const state = computeServerLifecycleControlState();
+  const disabled = isBusy || state.disabled;
+  for (const button of [serverStartBtnEl, serverStopBtnEl, serverRestartBtnEl]) {
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", String(disabled));
+    if (state.locked && state.hint) {
+      button.title = state.hint;
+    } else {
+      button.removeAttribute("title");
+    }
+  }
+  serverLifecycleHintEl.textContent = state.hint;
+  serverLifecycleHintEl.classList.toggle("locked", state.locked);
+}
+
 function activateWorkspaceTab(name) {
   const wantsClient = name === "client";
   const clientEnabled = !tabClientEl.disabled;
@@ -2221,6 +2306,7 @@ function syncWorkspaceTabLockState() {
   clientLockHintEl.classList.toggle("locked", !clientTabVisible);
   serverLockHintEl.textContent = computeServerTabLockHintText();
   serverLockHintEl.classList.toggle("locked", !serverTabVisible);
+  syncServerLifecycleActionState();
 }
 
 function formatOperatorApplicationStatusLabel(status) {
@@ -3226,6 +3312,18 @@ async function requestConnectionStatus() {
   return get("/v1/status");
 }
 
+async function requestServiceLifecycle(action) {
+  const normalizedAction = nonEmptyString(action)?.toLowerCase();
+  if (!normalizedAction || !["start", "stop", "restart"].includes(normalizedAction)) {
+    throw new Error("service lifecycle action must be start, stop, or restart.");
+  }
+  const sessionToken = byId("session_token").value.trim();
+  if (!sessionToken) {
+    throw new Error("session_token is required for server lifecycle actions. Sign in first.");
+  }
+  return post(`/v1/gpm/service/${normalizedAction}`, { session_token: sessionToken });
+}
+
 async function requestAuditRecent() {
   const filters = readAuditRecentFilters({
     fallbackLimit: AUDIT_RECENT_DEFAULT_LIMIT,
@@ -3847,6 +3945,48 @@ byId("status_btn").addEventListener("click", () =>
     },
     {
       successDetail: () => "Connection status refreshed."
+    }
+  )
+);
+
+serverStartBtnEl.addEventListener("click", () =>
+  run(
+    "service_start",
+    async () => {
+      const result = await requestServiceLifecycle("start");
+      await refreshServerReadinessStatus({ quiet: true });
+      return result;
+    },
+    {
+      successDetail: () => "Server start request completed."
+    }
+  )
+);
+
+serverStopBtnEl.addEventListener("click", () =>
+  run(
+    "service_stop",
+    async () => {
+      const result = await requestServiceLifecycle("stop");
+      await refreshServerReadinessStatus({ quiet: true });
+      return result;
+    },
+    {
+      successDetail: () => "Server stop request completed."
+    }
+  )
+);
+
+serverRestartBtnEl.addEventListener("click", () =>
+  run(
+    "service_restart",
+    async () => {
+      const result = await requestServiceLifecycle("restart");
+      await refreshServerReadinessStatus({ quiet: true });
+      return result;
+    },
+    {
+      successDetail: () => "Server restart request completed."
     }
   )
 );

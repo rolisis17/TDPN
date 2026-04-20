@@ -27,7 +27,8 @@ Then open:
 - Audit action output/status now includes compact pagination metadata (`returned`, `limit`, `offset`, optional `total`, `next_offset`, `has_more`) alongside returned entries.
 - Session lifecycle actions now use `POST /v1/gpm/session` with `action=status|refresh|revoke`.
 - Portal now includes a single-window connection console with visible `Client`/`Server` tabs; role-ineligible tabs remain visible but disabled with lock guidance.
-- Portal connection console now includes `Connect`, `Disconnect`, and `Status` controls backed by `/v1/connect`, `/v1/disconnect`, and `/v1/status`.
+- Portal connection console includes `Connect`, `Disconnect`, and `Status` controls backed by `/v1/connect`, `/v1/disconnect`, and `/v1/status`.
+- Server tab lifecycle controls (`Start`, `Stop`, `Restart`) call `POST /v1/gpm/service/start|stop|restart` with `session_token`; controls auto-disable with explicit lock hints when readiness reports `lifecycle_actions_unlocked=false` or `service_mutations_configured=false`.
 - Connect payload handling is policy-aware: `session_token`/registered-session flow is preferred, and manual `bootstrap_directory`/`invite_key` are sent only when compatibility override is enabled and runtime policy allows it.
 - Client onboarding status is available via `POST /v1/gpm/onboarding/client/status` (`registered|not_registered`) and is used by portal step tracking.
 - Server readiness is available via `POST /v1/gpm/onboarding/server/status` and now drives portal operator/server lock guidance and onboarding step 3 state (`readiness.tab_visible`, `readiness.lifecycle_actions_unlocked`, `readiness.lock_reason`, `readiness.unlock_actions`) with heuristic fallback when unavailable; operator unlock is strict-bound and requires matching session/application `chain_operator_id`.
