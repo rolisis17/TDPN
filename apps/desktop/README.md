@@ -102,6 +102,9 @@ npm install
 npm run tauri dev
 ```
 
+Scaffold/non-production note:
+- desktop Tauri build paths auto-generate a placeholder `apps/desktop/src-tauri/icons/icon.ico` when it is missing, to avoid hard-failing first-run scaffold builds.
+
 Windows PowerShell policy note:
 - If `npm` is blocked by execution policy (`npm.ps1 cannot be loaded`), use one of:
   - `scripts\windows\desktop_one_click.cmd`

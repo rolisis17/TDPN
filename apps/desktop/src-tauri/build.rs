@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
+const MIN_VALID_ICO_SIZE_BYTES: u64 = 22;
+
 // Minimal 1x1 RGBA ICO payload used only as a scaffold fallback when no
 // project icon exists yet.
 fn placeholder_ico_bytes() -> [u8; 70] {
@@ -46,16 +48,31 @@ fn ensure_scaffold_icon() -> io::Result<()> {
     };
     let icon_dir = manifest_dir.join("icons");
     let icon_path = icon_dir.join("icon.ico");
-    if icon_path.exists() {
-        return Ok(());
-    }
 
-    fs::create_dir_all(&icon_dir)?;
-    fs::write(&icon_path, placeholder_ico_bytes())?;
-    println!(
-        "cargo:warning=generated scaffold placeholder icon at {}",
-        icon_path.display()
-    );
+    let write_reason = match fs::metadata(&icon_path) {
+        Ok(metadata) => {
+            if metadata.len() < MIN_VALID_ICO_SIZE_BYTES {
+                Some(format!(
+                    "existing icon appears empty or truncated ({} bytes)",
+                    metadata.len()
+                ))
+            } else {
+                None
+            }
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Some("icon file missing".to_string()),
+        Err(err) => return Err(err),
+    };
+
+    if let Some(reason) = write_reason {
+        fs::create_dir_all(&icon_dir)?;
+        fs::write(&icon_path, placeholder_ico_bytes())?;
+        println!(
+            "cargo:warning=generated scaffold placeholder icon at {} ({})",
+            icon_path.display(),
+            reason
+        );
+    }
     Ok(())
 }
 
