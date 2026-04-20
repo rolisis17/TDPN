@@ -155,6 +155,7 @@ Windows-native local API launcher (no WSL shim):
 Notes:
 - Default local API script path is `scripts\windows\easy_node_bridge.ps1`; that bridge targets `scripts\easy_node.sh` (exported as `/c/.../scripts/easy_node.sh` for the runner), and the run stays WSL-free.
 - Git Bash is required for default `easy_node.sh` execution.
+- `-InstallMissing` on `local_api_session` can now auto-install both Git for Windows (`Git.Git`) and Go (`GoLang.Go`) via `winget`, then retry detection.
 - Compatibility and override options:
   - explicit runner: `.\scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun`
   - explicit script path + runner: `.\scripts\windows\local_api_session.cmd -ScriptPath "C:\Users\dcella-d\TDPN1\scripts\easy_node.sh" -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun`

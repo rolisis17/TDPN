@@ -71,6 +71,7 @@ Windows local API bridge defaults (`scripts\windows\local_api_session.ps1`):
 - bridge default target script is repository `scripts\easy_node.sh` (exported as `/c/.../scripts/easy_node.sh` for Git Bash).
 - default run stays WSL-free and rejects `WindowsApps\bash.exe` (WSL shim).
 - Git Bash is still required for default `easy_node.sh` execution unless you explicitly provide an alternative `-ScriptPath` and compatible `-CommandRunner`.
+- `scripts\windows\local_api_session.ps1 -InstallMissing` can auto-install both Git for Windows (`Git.Git`) and Go (`GoLang.Go`) via `winget`.
 - compatibility overrides remain supported:
   - runner env override via `LOCAL_CONTROL_API_GIT_BASH_PATH` (with `-AllowRunnerEnvOverride` on the PowerShell bridge)
   - script path override via `-ScriptPath` (or `LOCAL_CONTROL_API_SCRIPT` when launching daemon directly)

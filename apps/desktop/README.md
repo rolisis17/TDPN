@@ -165,7 +165,7 @@ Notes:
   - local API launcher: `scripts\windows\local_api_session.ps1`
   - default `LOCAL_CONTROL_API_SCRIPT`: `C:\...\scripts\windows\easy_node_bridge.ps1`
   - bridge default target script: `C:\...\scripts\easy_node.sh` (exported to runner as `/c/.../scripts/easy_node.sh`)
-- Optional remediation: `-InstallMissing` attempts `winget` install of Go (`GoLang.Go`) and then retries tool detection before launching.
+- Optional remediation: `-InstallMissing` attempts `winget` install of required launcher tools (Git for Windows `Git.Git` and Go `GoLang.Go`) and then retries tool detection before launching.
 - The `.cmd` wrapper already applies process-scope `ExecutionPolicy Bypass` and is preferred to avoid local script-policy friction.
 - By default, Git Bash is required because `easy_node.sh` is executed through Git for Windows `bash.exe` (not `WindowsApps\bash.exe` / WSL shim).
 - Quick commands:

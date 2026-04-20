@@ -79,7 +79,15 @@ function Resolve-CommandRunner {
   }
 
   if ([string]::IsNullOrWhiteSpace($runner)) {
-    throw "No Windows-native bash runner was found. Install Git for Windows or pass -CommandRunner `<path-to-bash.exe`>."
+    throw @"
+No Windows-native bash runner was found.
+Install Git for Windows with:
+  winget install --id Git.Git --exact
+Or rerun with auto-remediation:
+  .\scripts\windows\local_api_session.ps1 -InstallMissing
+Or pass an explicit trusted runner path:
+  -CommandRunner <path-to-bash.exe>
+"@
   }
 
   if (-not [System.IO.Path]::IsPathRooted($runner)) {
@@ -270,19 +278,26 @@ function Refresh-ProcessPath {
   }
 }
 
-function Invoke-WingetInstallGo {
+function Invoke-WingetInstallPackage {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId,
+    [Parameter(Mandatory = $true)]
+    [string]$DisplayName
+  )
+
   $winget = Get-Command winget -ErrorAction SilentlyContinue
   if (-not $winget -or [string]::IsNullOrWhiteSpace($winget.Source) -or -not (Test-Path -LiteralPath $winget.Source -PathType Leaf)) {
     throw @"
-Go auto-remediation requested but winget was not found.
-Install Go manually with:
-  winget install --id GoLang.Go --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+$DisplayName auto-remediation requested but winget was not found.
+Install $DisplayName manually with:
+  winget install --id $PackageId --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
 "@
   }
 
   $installArgs = @(
     "install",
-    "--id", "GoLang.Go",
+    "--id", $PackageId,
     "--exact",
     "--source", "winget",
     "--accept-package-agreements",
@@ -292,7 +307,36 @@ Install Go manually with:
   )
   & $winget.Source @installArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "winget install for GoLang.Go failed with exit code $LASTEXITCODE"
+    throw "winget install for $PackageId failed with exit code $LASTEXITCODE"
+  }
+}
+
+function Invoke-WingetInstallGo {
+  Invoke-WingetInstallPackage -PackageId "GoLang.Go" -DisplayName "Go"
+}
+
+function Invoke-WingetInstallGit {
+  Invoke-WingetInstallPackage -PackageId "Git.Git" -DisplayName "Git for Windows"
+}
+
+function Resolve-CommandRunnerWithRemediation {
+  param(
+    [string]$ExplicitRunner,
+    [switch]$AllowEnvOverride,
+    [switch]$AllowUntrusted,
+    [switch]$InstallMissing
+  )
+
+  try {
+    return Resolve-CommandRunner -ExplicitRunner $ExplicitRunner -AllowEnvOverride:$AllowEnvOverride -AllowUntrusted:$AllowUntrusted
+  } catch {
+    if (-not $InstallMissing -or -not [string]::IsNullOrWhiteSpace($ExplicitRunner)) {
+      throw
+    }
+    Write-Host "local-api-session: git bash not found; attempting install with winget (Git.Git)..."
+    Invoke-WingetInstallGit
+    Refresh-ProcessPath
+    return Resolve-CommandRunner -ExplicitRunner $ExplicitRunner -AllowEnvOverride:$AllowEnvOverride -AllowUntrusted:$AllowUntrusted
   }
 }
 
@@ -344,7 +388,7 @@ $bridgeRunnerMode = ""
 $bridgeRunnerDisplay = ""
 
 if ($scriptPathExt -eq ".sh") {
-  $resolvedRunner = Resolve-CommandRunner -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner
+  $resolvedRunner = Resolve-CommandRunnerWithRemediation -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner -InstallMissing:$InstallMissing
   if ($resolvedRunner -match "(?i)bash(\.exe)?$") {
     $scriptPathForRunner = Convert-ToGitBashPath -PathValue $ScriptPath
   }
@@ -355,7 +399,7 @@ if ($scriptPathExt -eq ".sh") {
 } else {
   $commandRunnerMode = "implicit (powershell for .ps1)"
   $commandRunnerDisplay = "(implicit powershell)"
-  $resolvedBridgeRunner = Resolve-CommandRunner -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner
+  $resolvedBridgeRunner = Resolve-CommandRunnerWithRemediation -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner -InstallMissing:$InstallMissing
   if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
     $bridgeRunnerMode = "explicit (from -CommandRunner)"
   } elseif ($AllowRunnerEnvOverride -and -not [string]::IsNullOrWhiteSpace($env:LOCAL_CONTROL_API_GIT_BASH_PATH)) {
