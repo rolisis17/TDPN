@@ -46,6 +46,7 @@ const authVerifyPolicyHintEl = document.getElementById("auth_verify_policy_hint"
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 const signInPolicyHintEl = document.getElementById("signin_policy_hint");
+const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
 
 const updateBtnEl = byId("update_btn");
 const walletSignInBtnEl = byId("wallet_signin_btn");
@@ -83,6 +84,7 @@ const COMPAT_ADVANCED_LOCKED_HINT =
   "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
 const COMPAT_ADVANCED_DISABLED_HINT =
   "Legacy bootstrap/invite overrides are disabled by policy in this build.";
+const SESSION_BOOTSTRAP_DIRECTORY_AUTO_LABEL = "Auto (preferred trusted bootstrap)";
 const CONNECT_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const CONNECT_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
 const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
@@ -136,6 +138,7 @@ const state = {
   legacyEnvAliasesActive: [],
   legacyEnvAliasWarnings: [],
   legacyEnvAliasActiveCount: 0,
+  sessionBootstrapDirectoryOptions: [],
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
@@ -255,6 +258,47 @@ function restoreSelectValue(selectEl, value) {
   if (hasOption) {
     selectEl.value = value;
   }
+}
+
+function createBootstrapDirectoryOption(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function syncSessionBootstrapDirectoryOptions() {
+  const options = Array.isArray(state.sessionBootstrapDirectoryOptions)
+    ? state.sessionBootstrapDirectoryOptions
+    : [];
+  const compatOverrideActive =
+    state.allowLegacyConnectOverride && !state.connectRequireSession && compatEnableEl.checked;
+  const previousValue = sessionBootstrapDirectoryEl.value.trim();
+  sessionBootstrapDirectoryEl.replaceChildren(
+    createBootstrapDirectoryOption("", SESSION_BOOTSTRAP_DIRECTORY_AUTO_LABEL),
+    ...options.map((value) => createBootstrapDirectoryOption(value, value))
+  );
+  sessionBootstrapDirectoryEl.value = options.includes(previousValue) ? previousValue : "";
+  sessionBootstrapDirectoryEl.disabled = !state.sessionToken || compatOverrideActive;
+}
+
+function ingestSessionBootstrapDirectoryOptionsFromPayload(payload) {
+  const payloadSessionToken = nonEmptyStringOrUndefined(
+    firstDefined(
+      payload?.session_token,
+      payload?.sessionToken,
+      payload?.session?.session_token,
+      payload?.session?.sessionToken
+    )
+  );
+  if (!state.sessionToken && !payloadSessionToken) {
+    return;
+  }
+  const metadata = extractBootstrapRegistrationMetadata(payload);
+  for (const value of [metadata.directBootstrapDirectory, ...metadata.bootstrapDirectories]) {
+    pushUniqueNonEmptyString(state.sessionBootstrapDirectoryOptions, value);
+  }
+  syncSessionBootstrapDirectoryOptions();
 }
 
 function formatPayloadForDisplay(payload) {
@@ -1111,6 +1155,7 @@ function applyConnectionSnapshot(snapshot) {
 }
 
 function updateConnectionDashboard(source, payload) {
+  ingestSessionBootstrapDirectoryOptionsFromPayload(payload);
   applyConnectionSnapshot(inferConnectionSnapshot(source, payload));
 }
 
@@ -2749,6 +2794,7 @@ function setClientRegistrationStateFromPayload(payload, options = {}) {
     state.clientRegistrationTrustReason = trustState.trustReason;
     state.clientRegistrationTrustStatus = trustState.trustStatus;
   }
+  ingestSessionBootstrapDirectoryOptionsFromPayload(payload);
 }
 
 function clientRegistrationTrustHintText() {
@@ -3017,12 +3063,14 @@ function setSessionToken(value, options = {}) {
     state.clientRegistered = false;
     clearClientRegistrationTrustState();
     clearOperatorListPaginationState();
+    state.sessionBootstrapDirectoryOptions = [];
   }
   state.sessionToken = nextValue;
   sessionTokenEl.value = state.sessionToken;
   if (persist) {
     clearLegacySecretStorage();
   }
+  syncSessionBootstrapDirectoryOptions();
   syncServerRoleLockState();
   syncOperatorListPaginationControlState();
 }
@@ -3111,6 +3159,10 @@ function setCompatOverrideEnabled(enabled) {
   compatEnableEl.disabled = !state.allowLegacyConnectOverride || state.connectRequireSession;
   bootstrapDirectoryEl.disabled = !state.allowLegacyConnectOverride || state.connectRequireSession || !allow;
   inviteKeyEl.disabled = !state.allowLegacyConnectOverride || state.connectRequireSession || !allow;
+  if (allow) {
+    sessionBootstrapDirectoryEl.value = "";
+  }
+  syncSessionBootstrapDirectoryOptions();
 }
 
 function syncCompatAdvancedVisibility() {
@@ -3353,6 +3405,9 @@ async function call(label, command, args = {}, options = {}) {
 }
 
 function connectPayload() {
+  const compatOverrideActive =
+    state.allowLegacyConnectOverride && !state.connectRequireSession && compatEnableEl.checked;
+  const sessionBootstrapDirectory = nonEmptyStringOrUndefined(sessionBootstrapDirectoryEl.value);
   const payload = {
     session_token: state.sessionToken || undefined,
     path_profile: pathProfileEl.value,
@@ -3365,7 +3420,11 @@ function connectPayload() {
     install_route: byId("install_route").checked
   };
 
-  if (state.allowLegacyConnectOverride && !state.connectRequireSession && compatEnableEl.checked) {
+  if (state.sessionToken && !compatOverrideActive && sessionBootstrapDirectory) {
+    payload.session_bootstrap_directory = sessionBootstrapDirectory;
+  }
+
+  if (compatOverrideActive) {
     const bootstrap = bootstrapDirectoryEl.value.trim();
     const invite = inviteKeyEl.value.trim();
     if (bootstrap) {

@@ -265,6 +265,7 @@ Body:
 ```json
 {
   "session_token": "optional-session-token",
+  "session_bootstrap_directory": "https://HOST:8081",
   "bootstrap_directory": "https://HOST:8081",
   "invite_key": "inv-...",
   "path_profile": "1hop|2hop|3hop",
@@ -285,7 +286,8 @@ Notes:
 - UI compatibility controls for manual `bootstrap_directory`/`invite_key` overrides are policy-gated by `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE`); default is hidden/disabled.
 - when hardening mode is not enabled (default), legacy `bootstrap_directory` + `invite_key` behavior remains available.
 - when connect resolves credentials from a registered `session_token`, the session-bound `path_profile` from client registration is authoritative.
-- when connect resolves from a registered `session_token` and no manual `bootstrap_directory` override is provided, the daemon tries trusted `bootstrap_directories` in order (preferred first) with failover across candidates.
+- `session_bootstrap_directory` is only used for session-based connect flows; it must match one of the session's trusted bootstrap directories after manifest trust revalidation, and if omitted the daemon uses the preferred/fallback trusted directory list automatically.
+- `session_bootstrap_directory` must not be combined with manual `bootstrap_directory` / `invite_key` compatibility overrides.
 - conflicting request `path_profile`/`policy_profile` values are rejected fail-closed (request is not executed) with conflict semantics in the error message.
 
 Behavior:

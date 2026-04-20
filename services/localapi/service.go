@@ -114,17 +114,18 @@ type boundedOutputBuffer struct {
 }
 
 type connectRequest struct {
-	BootstrapDirectory string `json:"bootstrap_directory"`
-	InviteKey          string `json:"invite_key"`
-	SessionToken       string `json:"session_token,omitempty"`
-	PathProfile        string `json:"path_profile,omitempty"`
-	PolicyProfile      string `json:"policy_profile,omitempty"`
-	Interface          string `json:"interface,omitempty"`
-	DiscoveryWaitSec   int    `json:"discovery_wait_sec,omitempty"`
-	ReadyTimeoutSec    int    `json:"ready_timeout_sec,omitempty"`
-	RunPreflight       *bool  `json:"run_preflight,omitempty"`
-	ProdProfile        *bool  `json:"prod_profile,omitempty"`
-	InstallRoute       *bool  `json:"install_route,omitempty"`
+	BootstrapDirectory        string `json:"bootstrap_directory"`
+	InviteKey                 string `json:"invite_key"`
+	SessionToken              string `json:"session_token,omitempty"`
+	SessionBootstrapDirectory string `json:"session_bootstrap_directory,omitempty"`
+	PathProfile               string `json:"path_profile,omitempty"`
+	PolicyProfile             string `json:"policy_profile,omitempty"`
+	Interface                 string `json:"interface,omitempty"`
+	DiscoveryWaitSec          int    `json:"discovery_wait_sec,omitempty"`
+	ReadyTimeoutSec           int    `json:"ready_timeout_sec,omitempty"`
+	RunPreflight              *bool  `json:"run_preflight,omitempty"`
+	ProdProfile               *bool  `json:"prod_profile,omitempty"`
+	InstallRoute              *bool  `json:"install_route,omitempty"`
 }
 
 type connectDefaults struct {
@@ -741,7 +742,22 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	in.BootstrapDirectory = strings.TrimSpace(in.BootstrapDirectory)
 	in.InviteKey = strings.TrimSpace(in.InviteKey)
 	in.SessionToken = strings.TrimSpace(in.SessionToken)
+	in.SessionBootstrapDirectory = strings.TrimSpace(in.SessionBootstrapDirectory)
 	manualOverridesProvided := in.BootstrapDirectory != "" || in.InviteKey != ""
+	if in.SessionBootstrapDirectory != "" && in.SessionToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "session_bootstrap_directory requires session_token",
+		})
+		return
+	}
+	if in.SessionBootstrapDirectory != "" && manualOverridesProvided {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "session_bootstrap_directory cannot be combined with bootstrap_directory or invite_key; use the registered session secrets instead",
+		})
+		return
+	}
 	if manualOverridesProvided && (s.gpmConnectRequireSession || !s.gpmAllowLegacyConnectOverride) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -767,8 +783,28 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if in.SessionToken != "" {
 		resolvedBootstrapDirectories, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(r.Context(), in.SessionToken)
 		if resolveErr == nil {
+			if in.SessionBootstrapDirectory != "" {
+				selectedBootstrapDirectory := in.SessionBootstrapDirectory
+				selectedTrusted := false
+				for _, trustedBootstrapDirectory := range resolvedBootstrapDirectories {
+					if trustedBootstrapDirectory == selectedBootstrapDirectory {
+						selectedTrusted = true
+						break
+					}
+				}
+				if !selectedTrusted {
+					writeJSON(w, http.StatusForbidden, map[string]any{
+						"ok":    false,
+						"error": fmt.Sprintf("session_bootstrap_directory %q is not in the session's trusted bootstrap directories; use one of the registered session bootstrap_directories or re-register the client profile", selectedBootstrapDirectory),
+					})
+					return
+				}
+				sessionBootstrapDirectories = append(sessionBootstrapDirectories, selectedBootstrapDirectory)
+			}
 			if in.BootstrapDirectory == "" {
-				sessionBootstrapDirectories = append(sessionBootstrapDirectories, resolvedBootstrapDirectories...)
+				if len(sessionBootstrapDirectories) == 0 {
+					sessionBootstrapDirectories = append(sessionBootstrapDirectories, resolvedBootstrapDirectories...)
+				}
 			}
 			if in.InviteKey == "" {
 				in.InviteKey = sessionInvite

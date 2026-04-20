@@ -44,6 +44,7 @@ const compatOverrideSectionEl = document.getElementById("compat_override_section
 const compatOverrideEl = byId("compat_override");
 const compatOverrideHintEl = byId("compat_override_hint");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
+const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
 const registerClientBtnEl = byId("register_client_btn");
 const manualSignInBtnEl = byId("signin_btn");
@@ -139,6 +140,7 @@ const PERSISTED_FIELD_IDS = [
   "audit_order",
   "path_profile",
   "bootstrap_directory",
+  "session_bootstrap_directory",
   "connect_interface",
   "connect_discovery_wait_sec",
   "connect_ready_timeout_sec"
@@ -880,6 +882,7 @@ function refreshCompatibilityOverrideControls() {
   bootstrapDirectoryEl.setAttribute("aria-disabled", String(!overrideEnabled));
   inviteKeyEl.disabled = !allowLegacyConnectOverride || !overrideEnabled;
   inviteKeyEl.setAttribute("aria-disabled", String(!overrideEnabled));
+  refreshSessionBootstrapDirectoryControls();
 
   if (compatOverrideSectionEl) {
     compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;
@@ -1126,6 +1129,43 @@ function extractBootstrapRegistrationMetadata(payload) {
     usesFallbackDirectory: fallbackBootstrapDirectory.length > 0,
     hasBootstrapDirectory: resolvedBootstrapDirectory.length > 0
   };
+}
+
+function extractBootstrapDirectoryOptions(payload) {
+  const metadata = extractBootstrapRegistrationMetadata(payload);
+  const directories = [];
+  appendBootstrapDirectoryEntries(directories, metadata.directBootstrapDirectory);
+  appendBootstrapDirectoryEntries(directories, metadata.bootstrapDirectories);
+  return directories;
+}
+
+function refreshSessionBootstrapDirectoryControls() {
+  if (!sessionBootstrapDirectoryEl) {
+    return;
+  }
+  const hasSessionToken = Boolean(byId("session_token").value.trim());
+  const disabled = !hasSessionToken || compatibilityOverrideEnabled();
+  sessionBootstrapDirectoryEl.disabled = disabled;
+  sessionBootstrapDirectoryEl.setAttribute("aria-disabled", String(disabled));
+}
+
+function refreshSessionBootstrapDirectoryOptions(payload) {
+  if (!sessionBootstrapDirectoryEl) {
+    return;
+  }
+  const directories = extractBootstrapDirectoryOptions(payload);
+  const previousValue = nonEmptyString(sessionBootstrapDirectoryEl.value) || "";
+  const optionNodes = [new Option("Auto (preferred entry)", "")];
+  for (const directory of directories) {
+    optionNodes.push(new Option(directory, directory));
+  }
+  sessionBootstrapDirectoryEl.replaceChildren(...optionNodes);
+  const nextValue = previousValue && directories.includes(previousValue) ? previousValue : "";
+  sessionBootstrapDirectoryEl.value = nextValue;
+  if (nextValue !== previousValue) {
+    persistPortalState();
+  }
+  refreshSessionBootstrapDirectoryControls();
 }
 
 function numberOrUndefined(value) {
@@ -2611,6 +2651,7 @@ function applyClientRegistrationPayload(payload) {
   }
   const trustState = parseClientRegistrationTrustDriftState(payload);
   setClientRegistrationTrustDriftState(trustState.trustDrift, trustState.guidanceText);
+  refreshSessionBootstrapDirectoryOptions(payload);
   if (trustState.trustDrift) {
     clientRegistered = false;
   }
@@ -2868,6 +2909,7 @@ function refreshClientReadiness() {
   const readiness = computeClientReadiness();
   setClientReadiness(readiness.kind, readiness.statusText, readiness.guidanceText, readiness.state);
   syncClientRegistrationAction(readiness);
+  refreshSessionBootstrapDirectoryControls();
   refreshOnboardingSteps();
   syncWorkspaceTabLockState();
 }
@@ -2885,6 +2927,7 @@ function bindReadinessListeners() {
     clientRegistered = false;
     setClientRegistrationTrustDriftState(false, "");
     setOperatorListNextCursor("");
+    refreshSessionBootstrapDirectoryControls();
   });
   byId("wallet_address").addEventListener("input", () => {
     setSelectedApplicationUpdatedAt("");
@@ -3050,6 +3093,7 @@ function applySession(result) {
   byId("session_token").value = token;
   const role = result.session?.role || result.role || result.profile?.role || "client";
   byId("role").value = role;
+  refreshSessionBootstrapDirectoryOptions(result);
   refreshOperatorReadiness();
   persistPortalState();
 }
@@ -3477,6 +3521,7 @@ function applyOnboardingOverviewPayload(payload) {
     return;
   }
   syncSessionDerivedState(payload);
+  refreshSessionBootstrapDirectoryOptions(payload);
   const role = sessionRoleFromResult(payload);
   if (typeof role === "string" && role.trim()) {
     byId("role").value = role;
@@ -3510,8 +3555,9 @@ function connectValidationHint() {
 
 function buildConnectRequest() {
   const pathProfile = byId("path_profile").value;
+  const sessionToken = byId("session_token").value.trim();
   const request = {
-    session_token: byId("session_token").value.trim() || undefined,
+    session_token: sessionToken || undefined,
     path_profile: pathProfile,
     policy_profile: pathProfile,
     interface: nonEmptyString(connectInterfaceEl.value),
@@ -3521,6 +3567,15 @@ function buildConnectRequest() {
     prod_profile: connectProdProfileEl.checked,
     install_route: connectInstallRouteEl.checked
   };
+  if (sessionToken && !compatibilityOverrideEnabled()) {
+    const bootstrapDirectory = nonEmptyString(sessionBootstrapDirectoryEl.value);
+    const bootstrapDirectoryIsRendered =
+      bootstrapDirectory &&
+      Array.from(sessionBootstrapDirectoryEl.options).some((option) => option.value === bootstrapDirectory);
+    if (bootstrapDirectoryIsRendered) {
+      request.session_bootstrap_directory = bootstrapDirectory;
+    }
+  }
   if (compatibilityOverrideEnabled()) {
     const bootstrap = nonEmptyString(bootstrapDirectoryEl.value);
     const invite = nonEmptyString(inviteKeyEl.value);
@@ -3879,9 +3934,7 @@ byId("signin_btn").addEventListener("click", () =>
 byId("session_btn").addEventListener("click", () =>
   run("session_status", async () => {
     const result = await requestSessionLifecycle("status");
-    syncSessionDerivedState(result);
-    byId("role").value = sessionRoleFromResult(result);
-    refreshOperatorReadiness();
+    applySession(result);
     await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     await refreshServerReadinessStatus({ quiet: true });
@@ -3893,11 +3946,7 @@ byId("session_btn").addEventListener("click", () =>
 byId("session_rotate_btn").addEventListener("click", () =>
   run("session_rotate", async () => {
     const result = await requestSessionLifecycle("refresh");
-    syncSessionDerivedState(result);
-    if (result.session_token) {
-      byId("session_token").value = result.session_token;
-    }
-    byId("role").value = sessionRoleFromResult(result);
+    applySession(result);
     setOperatorApplicationStatus(undefined);
     setSelectedApplicationUpdatedAt("");
     await refreshClientRegistrationStatus({ quiet: true });
@@ -4277,9 +4326,7 @@ async function restoreSessionStatusBestEffort() {
   setStatus("warn", "Restoring session", "Checking stored session token status.");
   try {
     const result = await requestSessionLifecycle("status");
-    syncSessionDerivedState(result);
-    byId("role").value = sessionRoleFromResult(result);
-    refreshOperatorReadiness();
+    applySession(result);
     persistPortalState();
     print("session_status (auto)", result);
     setStatus("good", "Session restored", "Stored session token is active.");

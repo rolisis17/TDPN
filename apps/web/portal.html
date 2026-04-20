@@ -365,12 +365,18 @@
         <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
           <p id="client_lock_hint" class="helper-copy">Client controls are available for client-capable roles.</p>
           <p id="connect_policy_hint" class="helper-copy">
-            Connect policy: compat from env defaults; manual bootstrap/invite fields are policy-gated.
+            Connect policy: compat from env defaults; the session-trusted bootstrap selector uses the preferred entry; manual bootstrap/invite fields are policy-gated.
           </p>
           <div class="fields">
             <label>
               Interface
               <input id="connect_interface" value="wgvpn0" spellcheck="false" autocomplete="off" />
+            </label>
+            <label>
+              Session bootstrap directory (session-trusted)
+              <select id="session_bootstrap_directory">
+                <option value="">Auto (preferred entry)</option>
+              </select>
             </label>
             <label>
               Discovery wait (sec)
