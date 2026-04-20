@@ -32,6 +32,17 @@ Optional easy launcher path:
 - `docs/easy-3-machine-test.md`
 - `docs/windows-wsl2.md` (Windows 11 + WSL2 path)
 
+Desktop native prerequisites (scaffold/beta desktop flows):
+- Windows desktop native (`desktop-doctor` / `desktop-native-bootstrap`):
+  - Go + Node.js/npm + Rust (rustup MSVC toolchain) + Git (with Git Bash).
+  - Visual Studio Build Tools (C++), Windows 10/11 SDK, and Microsoft Edge WebView2 Runtime.
+- Linux desktop native (`desktop-doctor` / `desktop-native-bootstrap`):
+  - Go + Node.js/npm + Rust + Git.
+  - `pkg-config` plus GTK/WebKit development libraries required by Tauri/WebView (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, or distro equivalents).
+- Start with `./scripts/easy_node.sh desktop-doctor --platform windows|linux`, then run `./scripts/easy_node.sh desktop-native-bootstrap --platform windows|linux`.
+- `desktop-doctor` / `desktop-native-bootstrap` now surface proactive prerequisite checks and remediation hints (including `recommended_commands` in summary JSON output).
+- Compatibility note: desktop helper scripts remain scaffold/non-production compatibility tooling and are not a production-readiness claim.
+
 Project root:
 - run all commands from repository root
 
@@ -96,6 +107,7 @@ Desktop launcher wrappers:
 - `--platform auto` is the default and routes to the current host platform.
 - Use `--platform linux` or `--platform windows` for an explicit path.
 - `EASY_NODE_DESKTOP_PLATFORM` overrides host detection for deterministic automation.
+- `desktop-doctor` and `desktop-native-bootstrap` now emit proactive prerequisite checks plus copy/paste remediation hints.
 - Existing platform-specific desktop commands remain available and documented below.
 
 ## 3a) Phase 0/1 targeted gates

@@ -50,6 +50,38 @@ if ! grep -qF './scripts/linux/desktop_one_click.sh' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing one-click remediation command marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'collect_native_dependency_report()' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing native dependency report marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'missing_native_dependencies' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing missing_native_dependencies summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'native_dependency_report' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing native_dependency_report summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'pkg-config' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing pkg-config native prerequisite marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'libgtk-3-dev' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing GTK3 native apt hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'libwebkit2gtk-4.1-dev' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing WebKit2GTK native apt hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'libsoup-3.0-dev' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing libsoup3 native apt hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'libjavascriptcoregtk-4.1-dev' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing javascriptcoregtk native apt hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -130,6 +162,16 @@ if ! grep -Fq '"recommended_commands"' "$TMP_DIR/print_summary_json_pass.log"; t
   cat "$TMP_DIR/print_summary_json_pass.log"
   exit 1
 fi
+if ! grep -Fq '"missing_native_dependencies"' "$TMP_DIR/print_summary_json_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing missing_native_dependencies in print-summary-json output"
+  cat "$TMP_DIR/print_summary_json_pass.log"
+  exit 1
+fi
+if ! grep -Fq '"native_dependency_report"' "$TMP_DIR/print_summary_json_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing native_dependency_report in print-summary-json output"
+  cat "$TMP_DIR/print_summary_json_pass.log"
+  exit 1
+fi
 
 SUMMARY_JSON="$TMP_DIR/desktop_doctor_summary.json"
 echo "[linux-desktop-doctor-guardrails] summary json is written when requested"
@@ -163,6 +205,16 @@ if ! jq -e '.recommended_commands | map(test("desktop_doctor\\.sh --mode fix --i
 fi
 if ! jq -e '.recommended_commands | map(test("desktop_one_click\\.sh")) | any' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "linux desktop doctor guardrails failed: summary json missing desktop_one_click remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.missing_native_dependencies | type == "array"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing missing_native_dependencies array"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.native_dependency_report | type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing native_dependency_report object"
   cat "$SUMMARY_JSON"
   exit 1
 fi

@@ -269,6 +269,238 @@ function Resolve-GitBashPath {
   return ""
 }
 
+function Get-VswherePath {
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $candidate = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+    return $candidate
+  }
+  return ""
+}
+
+function Get-MsvcHostx64x64ClPath {
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $installationRoots = @()
+  $seen = @{}
+
+  $vswherePath = Get-VswherePath
+  if (-not [string]::IsNullOrWhiteSpace($vswherePath)) {
+    try {
+      $paths = & $vswherePath -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+      foreach ($path in @($paths)) {
+        if ([string]::IsNullOrWhiteSpace($path)) {
+          continue
+        }
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+          continue
+        }
+        $key = $path.TrimEnd("\").ToLowerInvariant()
+        if ($seen.ContainsKey($key)) {
+          continue
+        }
+        $seen[$key] = $true
+        $installationRoots += $path
+      }
+    } catch {
+      Write-Verbose "vswhere query failed: $($_.Exception.Message)"
+    }
+  }
+
+  $vsYears = @("2022", "2019", "2017")
+  $vsSkus = @("BuildTools", "Community", "Professional", "Enterprise")
+  foreach ($year in $vsYears) {
+    foreach ($sku in $vsSkus) {
+      $candidateRoot = Join-Path $programFilesX86 ("Microsoft Visual Studio\{0}\{1}" -f $year, $sku)
+      if (-not (Test-Path -LiteralPath $candidateRoot -PathType Container)) {
+        continue
+      }
+      $key = $candidateRoot.TrimEnd("\").ToLowerInvariant()
+      if ($seen.ContainsKey($key)) {
+        continue
+      }
+      $seen[$key] = $true
+      $installationRoots += $candidateRoot
+    }
+  }
+
+  foreach ($installationRoot in $installationRoots) {
+    $msvcRoot = Join-Path $installationRoot "VC\Tools\MSVC"
+    if (-not (Test-Path -LiteralPath $msvcRoot -PathType Container)) {
+      continue
+    }
+
+    $versionDirs = Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    foreach ($versionDir in $versionDirs) {
+      $clPath = Join-Path $versionDir.FullName "bin\Hostx64\x64\cl.exe"
+      if (Test-Path -LiteralPath $clPath -PathType Leaf) {
+        return $clPath
+      }
+    }
+  }
+
+  $wildcardPatterns = @(
+    (Join-Path $programFilesX86 "Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe"),
+    (Join-Path $programFiles "Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe")
+  )
+  foreach ($pattern in $wildcardPatterns) {
+    $matches = @(Get-Item -Path $pattern -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)
+    if ($matches.Count -gt 0) {
+      return $matches[0].FullName
+    }
+  }
+
+  return ""
+}
+
+function Get-WindowsSdkEvidencePath {
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $candidateRoots = @()
+  $seen = @{}
+
+  try {
+    $sdkReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v10.0" -ErrorAction Stop
+    $installationFolder = [string]$sdkReg.InstallationFolder
+    if (-not [string]::IsNullOrWhiteSpace($installationFolder) -and (Test-Path -LiteralPath $installationFolder -PathType Container)) {
+      $key = $installationFolder.TrimEnd("\").ToLowerInvariant()
+      $seen[$key] = $true
+      $candidateRoots += $installationFolder
+    }
+  } catch {
+    Write-Verbose "windows sdk registry key not found: $($_.Exception.Message)"
+  }
+
+  $defaultRoot = Join-Path $programFilesX86 "Windows Kits\10"
+  if (Test-Path -LiteralPath $defaultRoot -PathType Container) {
+    $key = $defaultRoot.TrimEnd("\").ToLowerInvariant()
+    if (-not $seen.ContainsKey($key)) {
+      $seen[$key] = $true
+      $candidateRoots += $defaultRoot
+    }
+  }
+
+  foreach ($root in $candidateRoots) {
+    $includeRoot = Join-Path $root "Include"
+    if (-not (Test-Path -LiteralPath $includeRoot -PathType Container)) {
+      continue
+    }
+
+    $versionDirs = Get-ChildItem -LiteralPath $includeRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    foreach ($versionDir in $versionDirs) {
+      $versionName = $versionDir.Name
+      $windowsHeader = Join-Path $versionDir.FullName "um\windows.h"
+      if (-not (Test-Path -LiteralPath $windowsHeader -PathType Leaf)) {
+        continue
+      }
+
+      $rcPath = Join-Path $root ("bin\{0}\x64\rc.exe" -f $versionName)
+      if (Test-Path -LiteralPath $rcPath -PathType Leaf) {
+        return $rcPath
+      }
+
+      return $windowsHeader
+    }
+  }
+
+  return ""
+}
+
+function Get-WebView2RuntimeEvidencePath {
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+
+  $runtimeRoots = @(
+    (Join-Path $programFilesX86 "Microsoft\EdgeWebView\Application"),
+    (Join-Path $programFiles "Microsoft\EdgeWebView\Application"),
+    (Join-Path $localAppData "Microsoft\EdgeWebView\Application")
+  )
+
+  foreach ($runtimeRoot in $runtimeRoots) {
+    if (-not (Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
+      continue
+    }
+
+    $versionDirs = Get-ChildItem -LiteralPath $runtimeRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    foreach ($versionDir in $versionDirs) {
+      $exePath = Join-Path $versionDir.FullName "msedgewebview2.exe"
+      if (Test-Path -LiteralPath $exePath -PathType Leaf) {
+        return $exePath
+      }
+    }
+  }
+
+  $runtimeGuid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+  $registryPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$runtimeGuid",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$runtimeGuid",
+    "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$runtimeGuid"
+  )
+  foreach ($registryPath in $registryPaths) {
+    try {
+      $runtimeReg = Get-ItemProperty -Path $registryPath -ErrorAction Stop
+      $runtimeVersion = [string]$runtimeReg.pv
+      if (-not [string]::IsNullOrWhiteSpace($runtimeVersion)) {
+        return ("registry:{0}:pv={1}" -f $registryPath, $runtimeVersion)
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return ""
+}
+
+function Get-DefaultDesktopPrerequisiteSummary {
+  return [ordered]@{
+    msvc_build_tools_x64 = [ordered]@{
+      installed = $false
+      package_id = "Microsoft.VisualStudio.2022.BuildTools"
+      evidence = ""
+      remediation_hint = "winget install --id Microsoft.VisualStudio.2022.BuildTools --exact (then ensure MSVC v143 x64/x64 and a Windows 10/11 SDK component are selected in Visual Studio Installer)"
+    }
+    windows_sdk = [ordered]@{
+      installed = $false
+      package_id = "Microsoft.WindowsSDK.10.0"
+      evidence = ""
+      remediation_hint = "install Windows 10/11 SDK from Visual Studio Installer (Individual components) or https://developer.microsoft.com/windows/downloads/windows-sdk/"
+    }
+    webview2_runtime = [ordered]@{
+      installed = $false
+      package_id = "Microsoft.EdgeWebView2Runtime"
+      evidence = ""
+      remediation_hint = "winget install --id Microsoft.EdgeWebView2Runtime --exact (or install from https://developer.microsoft.com/microsoft-edge/webview2/)"
+    }
+  }
+}
+
+function Get-DesktopPrerequisiteReport {
+  $msvcEvidence = Get-MsvcHostx64x64ClPath
+  $windowsSdkEvidence = Get-WindowsSdkEvidencePath
+  $webView2Evidence = Get-WebView2RuntimeEvidencePath
+
+  $entries = Get-DefaultDesktopPrerequisiteSummary
+  $entries.msvc_build_tools_x64.installed = -not [string]::IsNullOrWhiteSpace($msvcEvidence)
+  $entries.msvc_build_tools_x64.evidence = $msvcEvidence
+  $entries.windows_sdk.installed = -not [string]::IsNullOrWhiteSpace($windowsSdkEvidence)
+  $entries.windows_sdk.evidence = $windowsSdkEvidence
+  $entries.webview2_runtime.installed = -not [string]::IsNullOrWhiteSpace($webView2Evidence)
+  $entries.webview2_runtime.evidence = $webView2Evidence
+
+  $missingPackageIds = @()
+  foreach ($key in @("msvc_build_tools_x64", "windows_sdk", "webview2_runtime")) {
+    $entry = $entries[$key]
+    if (-not [bool]$entry.installed) {
+      $missingPackageIds += [string]$entry.package_id
+    }
+  }
+
+  return [PSCustomObject]@{
+    entries = $entries
+    missing_package_ids = $missingPackageIds
+  }
+}
+
 function Get-ToolReport {
   $goPath = Resolve-ToolPath "go"
   $nodePath = Resolve-ToolPath "node"
@@ -312,6 +544,37 @@ function Convert-ToolReport {
   }
 }
 
+function Convert-DesktopPrerequisiteReport {
+  param(
+    [pscustomobject]$Report
+  )
+
+  if ($null -eq $Report -or $null -eq $Report.entries) {
+    return (Get-DefaultDesktopPrerequisiteSummary)
+  }
+
+  return [ordered]@{
+    msvc_build_tools_x64 = [ordered]@{
+      installed = [bool]$Report.entries.msvc_build_tools_x64.installed
+      package_id = [string]$Report.entries.msvc_build_tools_x64.package_id
+      evidence = [string]$Report.entries.msvc_build_tools_x64.evidence
+      remediation_hint = [string]$Report.entries.msvc_build_tools_x64.remediation_hint
+    }
+    windows_sdk = [ordered]@{
+      installed = [bool]$Report.entries.windows_sdk.installed
+      package_id = [string]$Report.entries.windows_sdk.package_id
+      evidence = [string]$Report.entries.windows_sdk.evidence
+      remediation_hint = [string]$Report.entries.windows_sdk.remediation_hint
+    }
+    webview2_runtime = [ordered]@{
+      installed = [bool]$Report.entries.webview2_runtime.installed
+      package_id = [string]$Report.entries.webview2_runtime.package_id
+      evidence = [string]$Report.entries.webview2_runtime.evidence
+      remediation_hint = [string]$Report.entries.webview2_runtime.remediation_hint
+    }
+  }
+}
+
 function Show-ToolReport {
   param(
     [Parameter(Mandatory = $true)]
@@ -327,6 +590,29 @@ function Show-ToolReport {
   Write-Host ("  git: " + $(if ($Report.git) { $Report.git } else { "missing" }))
   Write-Host ("  git bash: " + $(if ($Report.git_bash) { $Report.git_bash } else { "missing" }))
   Write-Host ("  winget: " + $(if ($Report.winget) { $Report.winget } else { "missing" }))
+}
+
+function Show-DesktopPrerequisiteReport {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Report
+  )
+
+  Write-Host "desktop prerequisite report:"
+  foreach ($key in @("msvc_build_tools_x64", "windows_sdk", "webview2_runtime")) {
+    $entry = $Report.entries[$key]
+    $label = Get-DependencyLabel -PackageId ([string]$entry.package_id)
+    $status = if ([bool]$entry.installed) { "ok" } else { "missing" }
+    $evidence = [string]$entry.evidence
+    if ([string]::IsNullOrWhiteSpace($evidence)) {
+      Write-Host ("  - {0}: {1}" -f $label, $status)
+    } else {
+      Write-Host ("  - {0}: {1} ({2})" -f $label, $status, $evidence)
+    }
+    if (-not [bool]$entry.installed) {
+      Write-Host ("    remediation: {0}" -f $entry.remediation_hint)
+    }
+  }
 }
 
 function Add-UniqueValue {
@@ -346,7 +632,8 @@ function Add-UniqueValue {
 function Get-MissingPackageIds {
   param(
     [Parameter(Mandatory = $true)]
-    [pscustomobject]$Report
+    [pscustomobject]$Report,
+    [pscustomobject]$DesktopPrerequisiteReport = $null
   )
 
   $ids = New-Object System.Collections.ArrayList
@@ -366,6 +653,14 @@ function Get-MissingPackageIds {
   if (-not $Report.winget) {
     Add-UniqueValue -List $ids -Value "Microsoft.AppInstaller"
   }
+  if ($null -ne $DesktopPrerequisiteReport -and $null -ne $DesktopPrerequisiteReport.missing_package_ids) {
+    foreach ($packageId in @($DesktopPrerequisiteReport.missing_package_ids)) {
+      if ([string]::IsNullOrWhiteSpace($packageId)) {
+        continue
+      }
+      Add-UniqueValue -List $ids -Value $packageId
+    }
+  }
 
   return @($ids.ToArray())
 }
@@ -382,6 +677,9 @@ function Get-DependencyLabel {
     "Rustlang.Rustup" { return "Rust toolchain (rustc + cargo)" }
     "Git.Git" { return "Git + Git Bash" }
     "Microsoft.AppInstaller" { return "App Installer (winget)" }
+    "Microsoft.VisualStudio.2022.BuildTools" { return "Microsoft Visual C++ Build Tools (Hostx64/x64)" }
+    "Microsoft.WindowsSDK.10.0" { return "Windows 10/11 SDK" }
+    "Microsoft.EdgeWebView2Runtime" { return "Microsoft Edge WebView2 Runtime" }
     default { return $PackageId }
   }
 }
@@ -398,7 +696,23 @@ function Get-DependencyInstallHint {
     "Rustlang.Rustup" { return "winget install --id Rustlang.Rustup --exact" }
     "Git.Git" { return "winget install --id Git.Git --exact" }
     "Microsoft.AppInstaller" { return "install App Installer from Microsoft Store" }
+    "Microsoft.VisualStudio.2022.BuildTools" { return "winget install --id Microsoft.VisualStudio.2022.BuildTools --exact; then ensure MSVC v143 x64/x64 + Windows 10/11 SDK components are selected in Visual Studio Installer" }
+    "Microsoft.WindowsSDK.10.0" { return "install Windows 10/11 SDK from Visual Studio Installer (Individual components) or https://developer.microsoft.com/windows/downloads/windows-sdk/" }
+    "Microsoft.EdgeWebView2Runtime" { return "winget install --id Microsoft.EdgeWebView2Runtime --exact (or install from https://developer.microsoft.com/microsoft-edge/webview2/)" }
     default { return "winget install --id $PackageId --exact" }
+  }
+}
+
+function Get-DependencyWingetPackageId {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  switch ($PackageId) {
+    "Microsoft.AppInstaller" { return "" }
+    "Microsoft.WindowsSDK.10.0" { return "" }
+    default { return $PackageId }
   }
 }
 
@@ -411,6 +725,38 @@ function Get-WingetInstallCommand {
   return ("winget install --id {0} --exact --accept-source-agreements --accept-package-agreements --silent" -f $PackageId)
 }
 
+function Get-DependencyManualRemediationCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  switch ($PackageId) {
+    "Microsoft.AppInstaller" { return 'Start-Process "ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"' }
+    "Microsoft.WindowsSDK.10.0" { return 'Start-Process "https://developer.microsoft.com/windows/downloads/windows-sdk/"' }
+    default { return "" }
+  }
+}
+
+function Get-DependencyRecommendedCommands {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PackageId
+  )
+
+  $commands = New-Object System.Collections.ArrayList
+  $wingetPackageId = Get-DependencyWingetPackageId -PackageId $PackageId
+  if (-not [string]::IsNullOrWhiteSpace($wingetPackageId)) {
+    Add-UniqueValue -List $commands -Value (Get-WingetInstallCommand -PackageId $wingetPackageId)
+  }
+  $manualCommand = Get-DependencyManualRemediationCommand -PackageId $PackageId
+  if (-not [string]::IsNullOrWhiteSpace($manualCommand)) {
+    Add-UniqueValue -List $commands -Value $manualCommand
+  }
+
+  return @($commands.ToArray())
+}
+
 function Get-RecommendedCommands {
   param(
     [AllowEmptyCollection()]
@@ -421,7 +767,9 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
 
   foreach ($packageId in $MissingPackageIds) {
-    Add-UniqueValue -List $commands -Value (Get-WingetInstallCommand -PackageId $packageId)
+    foreach ($dependencyCommand in @(Get-DependencyRecommendedCommands -PackageId $packageId)) {
+      Add-UniqueValue -List $commands -Value $dependencyCommand
+    }
   }
 
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
@@ -475,10 +823,11 @@ function Get-InstallablePackageIds {
 
   $installable = New-Object System.Collections.ArrayList
   foreach ($id in $PackageIds) {
-    if ($id -eq "Microsoft.AppInstaller") {
+    $wingetPackageId = Get-DependencyWingetPackageId -PackageId $id
+    if ([string]::IsNullOrWhiteSpace($wingetPackageId)) {
       continue
     }
-    Add-UniqueValue -List $installable -Value $id
+    Add-UniqueValue -List $installable -Value $wingetPackageId
   }
   return @($installable.ToArray())
 }
@@ -555,6 +904,7 @@ $summary = [ordered]@{
   status = "unknown"
   mode = $Mode
   tool_report = [ordered]@{}
+  desktop_prerequisites = (Get-DefaultDesktopPrerequisiteSummary)
   missing_package_ids = @()
   install_missing_enabled = [bool]$InstallMissing
   install_attempted = $false
@@ -586,8 +936,11 @@ try {
   $report = Get-ToolReport
   $summary.tool_report = Convert-ToolReport -Report $report
   Show-ToolReport -Report $report
+  $desktopPrerequisiteReport = Get-DesktopPrerequisiteReport
+  $summary.desktop_prerequisites = Convert-DesktopPrerequisiteReport -Report $desktopPrerequisiteReport
+  Show-DesktopPrerequisiteReport -Report $desktopPrerequisiteReport
 
-  $missingPackageIds = @(Get-MissingPackageIds -Report $report)
+  $missingPackageIds = @(Get-MissingPackageIds -Report $report -DesktopPrerequisiteReport $desktopPrerequisiteReport)
   $summary.missing_package_ids = @($missingPackageIds)
   Show-MissingDependencies -PackageIds $missingPackageIds
 
@@ -633,7 +986,10 @@ try {
           $report = Get-ToolReport
           $summary.tool_report = Convert-ToolReport -Report $report
           Show-ToolReport -Report $report
-          $missingPackageIds = @(Get-MissingPackageIds -Report $report)
+          $desktopPrerequisiteReport = Get-DesktopPrerequisiteReport
+          $summary.desktop_prerequisites = Convert-DesktopPrerequisiteReport -Report $desktopPrerequisiteReport
+          Show-DesktopPrerequisiteReport -Report $desktopPrerequisiteReport
+          $missingPackageIds = @(Get-MissingPackageIds -Report $report -DesktopPrerequisiteReport $desktopPrerequisiteReport)
           $summary.missing_package_ids = @($missingPackageIds)
           Show-MissingDependencies -PackageIds $missingPackageIds
         }

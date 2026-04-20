@@ -35,6 +35,11 @@ assert_marker_present "winget install --id" "$SCRIPT_UNDER_TEST"
 assert_marker_present "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
 assert_marker_present "GPM_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
 assert_marker_present "TDPN_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
+assert_marker_present "Microsoft.VisualStudio.2022.BuildTools" "$SCRIPT_UNDER_TEST"
+assert_marker_present "Microsoft.WindowsSDK.10.0" "$SCRIPT_UNDER_TEST"
+assert_marker_present "Microsoft.EdgeWebView2Runtime" "$SCRIPT_UNDER_TEST"
+assert_marker_present "developer.microsoft.com/windows/downloads/windows-sdk/" "$SCRIPT_UNDER_TEST"
+assert_marker_present "developer.microsoft.com/microsoft-edge/webview2/" "$SCRIPT_UNDER_TEST"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -180,6 +185,21 @@ assert_summary_recommended_commands() {
   exit 1
 }
 
+assert_summary_desktop_prerequisites() {
+  local json_path="$1"
+  local context_label="$2"
+  local strategy_kind="${3:-packaged}"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  local log_path="$TMP_DIR/assert_desktop_prerequisites_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'desktop_prerequisites')) { throw 'desktop_prerequisites field missing' }; \$desktop = \$summary.desktop_prerequisites; if (\$null -eq \$desktop) { throw 'desktop_prerequisites is null' }; \$keys = @('msvc_build_tools_x64','windows_sdk','webview2_runtime'); \$idMap = @{ msvc_build_tools_x64='Microsoft.VisualStudio.2022.BuildTools'; windows_sdk='Microsoft.WindowsSDK.10.0'; webview2_runtime='Microsoft.EdgeWebView2Runtime' }; foreach (\$key in \$keys) { if (-not (\$desktop.PSObject.Properties.Name -contains \$key)) { throw ('desktop prerequisite entry missing: {0}' -f \$key) }; \$entry = \$desktop.\$key; if (\$null -eq \$entry) { throw ('desktop prerequisite entry is null: {0}' -f \$key) }; if (-not (\$entry.PSObject.Properties.Name -contains 'installed')) { throw ('desktop prerequisite installed field missing: {0}' -f \$key) }; if (-not (\$entry.installed -is [bool])) { throw ('desktop prerequisite installed field is not boolean: {0}' -f \$key) } }; \$missing = @(); if (\$summary.PSObject.Properties.Name -contains 'missing_package_ids' -and \$null -ne \$summary.missing_package_ids) { \$missing = @(\$summary.missing_package_ids) }; if ($(ps_single_quote "$strategy_kind") -eq 'packaged') { foreach (\$id in \$idMap.Values) { if (\$missing -contains \$id) { throw ('packaged strategy should not require desktop build prerequisite id: {0}' -f \$id) } } } else { foreach (\$key in \$keys) { \$entry = \$desktop.\$key; \$id = \$idMap[\$key]; if (-not [bool]\$entry.installed -and -not (\$missing -contains \$id)) { throw ('missing_package_ids does not include desktop prerequisite id when prerequisite is missing: {0}' -f \$id) } } }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: desktop_prerequisites assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
 assert_summary_desktop_resolution() {
   local json_path="$1"
   local context_label="$2"
@@ -300,6 +320,9 @@ ENV_TDPN_SUMMARY_JSON_PS="$(to_powershell_path "$ENV_TDPN_SUMMARY_JSON")"
 EXPLICIT_BEATS_ENV_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_explicit_beats_env_summary.json"
 EXPLICIT_BEATS_ENV_SUMMARY_JSON_PS="$(to_powershell_path "$EXPLICIT_BEATS_ENV_SUMMARY_JSON")"
 
+DEV_STRATEGY_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_dev_strategy_summary.json"
+DEV_STRATEGY_SUMMARY_JSON_PS="$(to_powershell_path "$DEV_STRATEGY_SUMMARY_JSON")"
+
 echo "[windows-desktop-native-bootstrap-guardrails] env override priority uses GPM_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
   "env_priority_dry_run_pass" \
@@ -307,6 +330,7 @@ run_expect_pass \
     "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GPM_PS"); \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_PRIORITY_SUMMARY_JSON_PS")"
 assert_json_file_is_object "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary"
 assert_summary_desktop_resolution "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary" "$FAKE_DESKTOP_EXE_ENV_GPM" "env:GPM_DESKTOP_PACKAGED_EXE"
+assert_summary_desktop_prerequisites "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary" "packaged"
 
 echo "[windows-desktop-native-bootstrap-guardrails] env override fallback uses GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE when GPM_DESKTOP_PACKAGED_EXE is unset"
 run_expect_pass \
@@ -315,6 +339,7 @@ run_expect_pass \
     "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_GLOBAL_SUMMARY_JSON_PS")"
 assert_json_file_is_object "$ENV_GLOBAL_SUMMARY_JSON" "env_global_summary"
 assert_summary_desktop_resolution "$ENV_GLOBAL_SUMMARY_JSON" "env_global_summary" "$FAKE_DESKTOP_EXE_ENV_GLOBAL" "env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
+assert_summary_desktop_prerequisites "$ENV_GLOBAL_SUMMARY_JSON" "env_global_summary" "packaged"
 
 echo "[windows-desktop-native-bootstrap-guardrails] env override fallback uses TDPN_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
@@ -323,6 +348,7 @@ run_expect_pass \
     "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_TDPN_SUMMARY_JSON_PS")"
 assert_json_file_is_object "$ENV_TDPN_SUMMARY_JSON" "env_tdpn_summary"
 assert_summary_desktop_resolution "$ENV_TDPN_SUMMARY_JSON" "env_tdpn_summary" "$FAKE_DESKTOP_EXE_ENV_TDPN" "env:TDPN_DESKTOP_PACKAGED_EXE"
+assert_summary_desktop_prerequisites "$ENV_TDPN_SUMMARY_JSON" "env_tdpn_summary" "packaged"
 
 echo "[windows-desktop-native-bootstrap-guardrails] explicit override path beats env overrides under --dry-run"
 run_expect_pass \
@@ -331,6 +357,18 @@ run_expect_pass \
     "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GPM_PS"); \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DesktopExecutableOverridePath $(ps_single_quote "$FAKE_DESKTOP_EXE_PS") -DryRun $SUMMARY_FLAG $(ps_single_quote "$EXPLICIT_BEATS_ENV_SUMMARY_JSON_PS")"
 assert_json_file_is_object "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary"
 assert_summary_desktop_resolution "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary" "$FAKE_DESKTOP_EXE" "override"
+assert_summary_desktop_prerequisites "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary" "packaged"
+
+echo "[windows-desktop-native-bootstrap-guardrails] dev strategy check summary carries desktop prerequisite diagnostics"
+run_expect_pass \
+  "dev_strategy_summary_pass" \
+  run_ps_with_fake_prereqs \
+    -Mode check \
+    -DesktopLaunchStrategy dev \
+    -DryRun \
+    "$SUMMARY_FLAG" "$DEV_STRATEGY_SUMMARY_JSON_PS"
+assert_json_file_is_object "$DEV_STRATEGY_SUMMARY_JSON" "dev_strategy_summary"
+assert_summary_desktop_prerequisites "$DEV_STRATEGY_SUMMARY_JSON" "dev_strategy_summary" "dev"
 
 echo "[windows-desktop-native-bootstrap-guardrails] summary json is written when requested"
 run_expect_pass \
@@ -349,6 +387,7 @@ if [[ ! -f "$SUMMARY_JSON" ]]; then
 fi
 assert_json_file_is_object "$SUMMARY_JSON" "summary_json_file"
 assert_summary_recommended_commands "$SUMMARY_JSON" "summary_json_file"
+assert_summary_desktop_prerequisites "$SUMMARY_JSON" "summary_json_file" "packaged"
 
 PRINT_SUMMARY_FLAG="$(detect_print_summary_flag "$SCRIPT_UNDER_TEST")"
 if [[ -z "$PRINT_SUMMARY_FLAG" ]]; then
@@ -375,5 +414,6 @@ if [[ ! -f "$PRINTED_SUMMARY_JSON" ]]; then
 fi
 assert_json_file_is_object "$PRINTED_SUMMARY_JSON" "printed_summary_json"
 assert_summary_recommended_commands "$PRINTED_SUMMARY_JSON" "printed_summary_json"
+assert_summary_desktop_prerequisites "$PRINTED_SUMMARY_JSON" "printed_summary_json" "packaged"
 
 echo "windows desktop native bootstrap guardrails integration check ok"

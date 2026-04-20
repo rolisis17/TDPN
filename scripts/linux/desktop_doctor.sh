@@ -11,8 +11,8 @@ Usage:
   ./scripts/linux/desktop_doctor.sh fix [--install-missing] [--dry-run] [--summary-json PATH]
 
 Modes:
-  check  Report prerequisite tool availability (scaffold, non-production).
-  fix    Optionally attempt apt-based remediation for missing tools when --install-missing is provided.
+  check  Report prerequisite tool/native dependency availability (scaffold, non-production).
+  fix    Optionally attempt apt-based remediation for missing tools/native dependencies when --install-missing is provided.
 
 Flags:
   --mode check|fix         Explicit mode selector.
@@ -95,6 +95,46 @@ tool_is_missing() {
   return 1
 }
 
+native_dep_is_missing() {
+  local needle="$1"
+  local item
+  for item in "${MISSING_NATIVE_DEPS[@]}"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+native_dep_label() {
+  local key="$1"
+  case "$key" in
+    pkg_config)
+      printf '%s' "pkg-config"
+      ;;
+    gtk3)
+      printf '%s' "gtk+-3.0 (GTK3 dev files)"
+      ;;
+    webkit2gtk)
+      printf '%s' "webkit2gtk-4.1/4.0 (WebKit2GTK dev files)"
+      ;;
+    libsoup3)
+      printf '%s' "libsoup-3.0 (libsoup3 dev files)"
+      ;;
+    javascriptcoregtk)
+      printf '%s' "javascriptcoregtk-4.1/4.0 (javascriptcoregtk dev files)"
+      ;;
+    *)
+      printf '%s' "$key"
+      ;;
+  esac
+}
+
+pkg_config_module_exists() {
+  local module_name="$1"
+  pkg-config --exists "$module_name" >/dev/null 2>&1
+}
+
 collect_tool_report() {
   MISSING_TOOLS=()
   local tool
@@ -107,6 +147,78 @@ collect_tool_report() {
       MISSING_TOOLS+=("$tool")
     fi
   done
+}
+
+collect_native_dependency_report() {
+  MISSING_NATIVE_DEPS=()
+
+  local key
+  for key in "${NATIVE_DEPENDENCY_KEYS[@]}"; do
+    NATIVE_DEP_FOUND["$key"]="0"
+    NATIVE_DEP_DETAIL["$key"]=""
+  done
+
+  local pkg_config_path=""
+  if pkg_config_path="$(command -v pkg-config 2>/dev/null)"; then
+    NATIVE_DEP_FOUND["pkg_config"]="1"
+    NATIVE_DEP_DETAIL["pkg_config"]="$pkg_config_path"
+  else
+    NATIVE_DEP_DETAIL["pkg_config"]="pkg-config command not found on PATH"
+    MISSING_NATIVE_DEPS+=("pkg_config")
+  fi
+
+  if [[ "${NATIVE_DEP_FOUND["pkg_config"]}" != "1" ]]; then
+    NATIVE_DEP_DETAIL["gtk3"]="cannot validate gtk+-3.0 without pkg-config"
+    NATIVE_DEP_DETAIL["webkit2gtk"]="cannot validate webkit2gtk-4.1/4.0 without pkg-config"
+    NATIVE_DEP_DETAIL["libsoup3"]="cannot validate libsoup-3.0 without pkg-config"
+    NATIVE_DEP_DETAIL["javascriptcoregtk"]="cannot validate javascriptcoregtk-4.1/4.0 without pkg-config"
+    MISSING_NATIVE_DEPS+=("gtk3" "webkit2gtk" "libsoup3" "javascriptcoregtk")
+    return 0
+  fi
+
+  if pkg_config_module_exists "gtk+-3.0"; then
+    NATIVE_DEP_FOUND["gtk3"]="1"
+    NATIVE_DEP_DETAIL["gtk3"]="gtk+-3.0"
+  else
+    NATIVE_DEP_DETAIL["gtk3"]="missing pkg-config module gtk+-3.0"
+    MISSING_NATIVE_DEPS+=("gtk3")
+  fi
+
+  local webkit_module=""
+  if pkg_config_module_exists "webkit2gtk-4.1"; then
+    webkit_module="webkit2gtk-4.1"
+  elif pkg_config_module_exists "webkit2gtk-4.0"; then
+    webkit_module="webkit2gtk-4.0"
+  fi
+  if [[ -n "$webkit_module" ]]; then
+    NATIVE_DEP_FOUND["webkit2gtk"]="1"
+    NATIVE_DEP_DETAIL["webkit2gtk"]="$webkit_module"
+  else
+    NATIVE_DEP_DETAIL["webkit2gtk"]="missing pkg-config module webkit2gtk-4.1 or webkit2gtk-4.0"
+    MISSING_NATIVE_DEPS+=("webkit2gtk")
+  fi
+
+  if pkg_config_module_exists "libsoup-3.0"; then
+    NATIVE_DEP_FOUND["libsoup3"]="1"
+    NATIVE_DEP_DETAIL["libsoup3"]="libsoup-3.0"
+  else
+    NATIVE_DEP_DETAIL["libsoup3"]="missing pkg-config module libsoup-3.0"
+    MISSING_NATIVE_DEPS+=("libsoup3")
+  fi
+
+  local javascriptcore_module=""
+  if pkg_config_module_exists "javascriptcoregtk-4.1"; then
+    javascriptcore_module="javascriptcoregtk-4.1"
+  elif pkg_config_module_exists "javascriptcoregtk-4.0"; then
+    javascriptcore_module="javascriptcoregtk-4.0"
+  fi
+  if [[ -n "$javascriptcore_module" ]]; then
+    NATIVE_DEP_FOUND["javascriptcoregtk"]="1"
+    NATIVE_DEP_DETAIL["javascriptcoregtk"]="$javascriptcore_module"
+  else
+    NATIVE_DEP_DETAIL["javascriptcoregtk"]="missing pkg-config module javascriptcoregtk-4.1 or javascriptcoregtk-4.0"
+    MISSING_NATIVE_DEPS+=("javascriptcoregtk")
+  fi
 }
 
 build_apt_packages() {
@@ -145,6 +257,210 @@ build_apt_packages() {
       APT_PACKAGES+=("bash")
     fi
   fi
+
+  if native_dep_is_missing "pkg_config"; then
+    if add_unique "pkg-config" "${APT_PACKAGES[@]}"; then
+      APT_PACKAGES+=("pkg-config")
+    fi
+  fi
+
+  if native_dep_is_missing "gtk3"; then
+    if add_unique "libgtk-3-dev" "${APT_PACKAGES[@]}"; then
+      APT_PACKAGES+=("libgtk-3-dev")
+    fi
+  fi
+
+  if native_dep_is_missing "webkit2gtk"; then
+    if add_unique "libwebkit2gtk-4.1-dev" "${APT_PACKAGES[@]}"; then
+      APT_PACKAGES+=("libwebkit2gtk-4.1-dev")
+    fi
+  fi
+
+  if native_dep_is_missing "libsoup3"; then
+    if add_unique "libsoup-3.0-dev" "${APT_PACKAGES[@]}"; then
+      APT_PACKAGES+=("libsoup-3.0-dev")
+    fi
+  fi
+
+  if native_dep_is_missing "javascriptcoregtk"; then
+    if add_unique "libjavascriptcoregtk-4.1-dev" "${APT_PACKAGES[@]}"; then
+      APT_PACKAGES+=("libjavascriptcoregtk-4.1-dev")
+    fi
+  fi
+}
+
+build_dnf_packages() {
+  DNF_PACKAGES=()
+
+  if tool_is_missing "go"; then
+    DNF_PACKAGES+=("golang")
+  fi
+  if tool_is_missing "node" || tool_is_missing "npm"; then
+    if add_unique "nodejs" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("nodejs")
+    fi
+    if add_unique "npm" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("npm")
+    fi
+  fi
+  if tool_is_missing "rustc" || tool_is_missing "cargo"; then
+    if add_unique "rust" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("rust")
+    fi
+    if add_unique "cargo" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("cargo")
+    fi
+  fi
+  if tool_is_missing "git"; then
+    if add_unique "git" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("git")
+    fi
+  fi
+  if tool_is_missing "bash"; then
+    if add_unique "bash" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("bash")
+    fi
+  fi
+  if native_dep_is_missing "pkg_config"; then
+    if add_unique "pkgconf-pkg-config" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("pkgconf-pkg-config")
+    fi
+  fi
+  if native_dep_is_missing "gtk3"; then
+    if add_unique "gtk3-devel" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("gtk3-devel")
+    fi
+  fi
+  if native_dep_is_missing "webkit2gtk"; then
+    if add_unique "webkit2gtk4.1-devel" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("webkit2gtk4.1-devel")
+    fi
+  fi
+  if native_dep_is_missing "libsoup3"; then
+    if add_unique "libsoup3-devel" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("libsoup3-devel")
+    fi
+  fi
+  if native_dep_is_missing "javascriptcoregtk"; then
+    if add_unique "javascriptcoregtk4.1-devel" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("javascriptcoregtk4.1-devel")
+    fi
+  fi
+}
+
+build_pacman_packages() {
+  PACMAN_PACKAGES=()
+
+  if tool_is_missing "go"; then
+    PACMAN_PACKAGES+=("go")
+  fi
+  if tool_is_missing "node" || tool_is_missing "npm"; then
+    if add_unique "nodejs" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("nodejs")
+    fi
+    if add_unique "npm" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("npm")
+    fi
+  fi
+  if tool_is_missing "rustc" || tool_is_missing "cargo"; then
+    if add_unique "rust" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("rust")
+    fi
+  fi
+  if tool_is_missing "git"; then
+    if add_unique "git" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("git")
+    fi
+  fi
+  if tool_is_missing "bash"; then
+    if add_unique "bash" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("bash")
+    fi
+  fi
+  if native_dep_is_missing "pkg_config"; then
+    if add_unique "pkgconf" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("pkgconf")
+    fi
+  fi
+  if native_dep_is_missing "gtk3"; then
+    if add_unique "gtk3" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("gtk3")
+    fi
+  fi
+  if native_dep_is_missing "webkit2gtk"; then
+    if add_unique "webkit2gtk-4.1" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("webkit2gtk-4.1")
+    fi
+  fi
+  if native_dep_is_missing "libsoup3"; then
+    if add_unique "libsoup3" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("libsoup3")
+    fi
+  fi
+  if native_dep_is_missing "javascriptcoregtk"; then
+    if add_unique "webkit2gtk-4.1" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("webkit2gtk-4.1")
+    fi
+  fi
+}
+
+build_zypper_packages() {
+  ZYPPER_PACKAGES=()
+
+  if tool_is_missing "go"; then
+    ZYPPER_PACKAGES+=("go")
+  fi
+  if tool_is_missing "node" || tool_is_missing "npm"; then
+    if add_unique "nodejs20" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("nodejs20")
+    fi
+    if add_unique "npm20" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("npm20")
+    fi
+  fi
+  if tool_is_missing "rustc" || tool_is_missing "cargo"; then
+    if add_unique "rust" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("rust")
+    fi
+    if add_unique "cargo" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("cargo")
+    fi
+  fi
+  if tool_is_missing "git"; then
+    if add_unique "git" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("git")
+    fi
+  fi
+  if tool_is_missing "bash"; then
+    if add_unique "bash" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("bash")
+    fi
+  fi
+  if native_dep_is_missing "pkg_config"; then
+    if add_unique "pkgconf-pkg-config" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("pkgconf-pkg-config")
+    fi
+  fi
+  if native_dep_is_missing "gtk3"; then
+    if add_unique "gtk3-devel" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("gtk3-devel")
+    fi
+  fi
+  if native_dep_is_missing "webkit2gtk"; then
+    if add_unique "webkit2gtk3-devel" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("webkit2gtk3-devel")
+    fi
+  fi
+  if native_dep_is_missing "libsoup3"; then
+    if add_unique "libsoup-3_0-devel" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("libsoup-3_0-devel")
+    fi
+  fi
+  if native_dep_is_missing "javascriptcoregtk"; then
+    if add_unique "javascriptcoregtk-4_1-devel" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("javascriptcoregtk-4_1-devel")
+    fi
+  fi
 }
 
 build_recommended_commands() {
@@ -156,8 +472,27 @@ build_recommended_commands() {
   fi
 
   if [[ "${#APT_PACKAGES[@]}" -gt 0 ]]; then
-    RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get update")
-    RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get install -y ${APT_PACKAGES[*]}")
+    if [[ "$apt_get_available" == "1" ]]; then
+      RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get update")
+      RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get install -y ${APT_PACKAGES[*]}")
+    elif [[ "$dnf_available" == "1" ]]; then
+      build_dnf_packages
+      if [[ "${#DNF_PACKAGES[@]}" -gt 0 ]]; then
+        RECOMMENDED_COMMANDS+=("${apt_prefix}dnf install -y ${DNF_PACKAGES[*]}")
+      fi
+    elif [[ "$pacman_available" == "1" ]]; then
+      build_pacman_packages
+      if [[ "${#PACMAN_PACKAGES[@]}" -gt 0 ]]; then
+        RECOMMENDED_COMMANDS+=("${apt_prefix}pacman -Sy --needed ${PACMAN_PACKAGES[*]}")
+      fi
+    elif [[ "$zypper_available" == "1" ]]; then
+      build_zypper_packages
+      if [[ "${#ZYPPER_PACKAGES[@]}" -gt 0 ]]; then
+        RECOMMENDED_COMMANDS+=("${apt_prefix}zypper install -y ${ZYPPER_PACKAGES[*]}")
+      fi
+    else
+      RECOMMENDED_COMMANDS+=("install missing prerequisites with your distro package manager: ${APT_PACKAGES[*]}")
+    fi
   fi
 
   RECOMMENDED_COMMANDS+=("./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
@@ -240,24 +575,44 @@ esac
 TOOLS=(go node npm rustc cargo git bash)
 declare -A TOOL_PATHS=()
 MISSING_TOOLS=()
+NATIVE_DEPENDENCY_KEYS=(pkg_config gtk3 webkit2gtk libsoup3 javascriptcoregtk)
+declare -A NATIVE_DEP_FOUND=()
+declare -A NATIVE_DEP_DETAIL=()
+MISSING_NATIVE_DEPS=()
 APT_PACKAGES=()
+DNF_PACKAGES=()
+PACMAN_PACKAGES=()
+ZYPPER_PACKAGES=()
 RECOMMENDED_COMMANDS=()
 
 install_attempted="0"
 install_completed="0"
 install_skipped_reason=""
 apt_get_available="0"
+dnf_available="0"
+pacman_available="0"
+zypper_available="0"
 error_message=""
 exit_code="0"
 
 if command -v apt-get >/dev/null 2>&1; then
   apt_get_available="1"
 fi
+if command -v dnf >/dev/null 2>&1; then
+  dnf_available="1"
+fi
+if command -v pacman >/dev/null 2>&1; then
+  pacman_available="1"
+fi
+if command -v zypper >/dev/null 2>&1; then
+  zypper_available="1"
+fi
 
 log "mode=$mode"
 log "scaffold-only, non-production remediation helper for Linux desktop prerequisites"
 
 collect_tool_report
+collect_native_dependency_report
 build_apt_packages
 build_recommended_commands
 
@@ -276,6 +631,24 @@ else
   log "missing tools: ${MISSING_TOOLS[*]}"
   if [[ "${#APT_PACKAGES[@]}" -gt 0 ]]; then
     log "apt remediation package hints: ${APT_PACKAGES[*]}"
+  fi
+fi
+
+log "native desktop dependency report:"
+for key in "${NATIVE_DEPENDENCY_KEYS[@]}"; do
+  if [[ "${NATIVE_DEP_FOUND[$key]}" == "1" ]]; then
+    echo "  - $(native_dep_label "$key"): ${NATIVE_DEP_DETAIL[$key]}"
+  else
+    echo "  - $(native_dep_label "$key"): missing (${NATIVE_DEP_DETAIL[$key]})"
+  fi
+done
+
+if [[ "${#MISSING_NATIVE_DEPS[@]}" -eq 0 ]]; then
+  log "all native Linux desktop prerequisites detected"
+else
+  log "missing native Linux desktop prerequisites: ${MISSING_NATIVE_DEPS[*]}"
+  if [[ "${#APT_PACKAGES[@]}" -gt 0 ]]; then
+    log "native remediation package hints are included in recommended commands and apt package hints"
   fi
 fi
 
@@ -312,6 +685,7 @@ if [[ "$mode" == "fix" && "$install_missing" == "1" ]]; then
             install_completed="1"
             log "apt remediation completed"
             collect_tool_report
+            collect_native_dependency_report
             build_apt_packages
             build_recommended_commands
           else
@@ -333,7 +707,7 @@ fi
 status="unknown"
 if [[ "$exit_code" != "0" ]]; then
   status="error"
-elif [[ "${#MISSING_TOOLS[@]}" -eq 0 ]]; then
+elif [[ "${#MISSING_TOOLS[@]}" -eq 0 && "${#MISSING_NATIVE_DEPS[@]}" -eq 0 ]]; then
   if [[ "$mode" == "fix" && "$install_attempted" == "1" ]]; then
     status="fixed"
   else
@@ -364,7 +738,19 @@ for tool in "${TOOLS[@]}"; do
 done
 tool_report_json+=$'\n'"  }"
 
+native_dependency_report_json="{"
+first_native_dep="1"
+for key in "${NATIVE_DEPENDENCY_KEYS[@]}"; do
+  if [[ "$first_native_dep" == "0" ]]; then
+    native_dependency_report_json+=","
+  fi
+  first_native_dep="0"
+  native_dependency_report_json+=$'\n'"    \"${key}\": {\"found\": $(json_bool "${NATIVE_DEP_FOUND[$key]}"), \"detail\": \"$(json_escape "${NATIVE_DEP_DETAIL[$key]}")\"}"
+done
+native_dependency_report_json+=$'\n'"  }"
+
 missing_tools_json="$(json_array_from_values "${MISSING_TOOLS[@]}")"
+missing_native_dependencies_json="$(json_array_from_values "${MISSING_NATIVE_DEPS[@]}")"
 apt_packages_json="$(json_array_from_values "${APT_PACKAGES[@]}")"
 recommended_commands_json="$(json_array_from_values "${RECOMMENDED_COMMANDS[@]}")"
 
@@ -384,9 +770,11 @@ summary_json_payload=$(
   "error": "$(json_escape "$error_message")",
   "notes": "Linux desktop doctor is scaffold-only and non-production.",
   "missing_tools": $missing_tools_json,
+  "missing_native_dependencies": $missing_native_dependencies_json,
   "apt_packages": $apt_packages_json,
   "recommended_commands": $recommended_commands_json,
-  "tool_report": $tool_report_json
+  "tool_report": $tool_report_json,
+  "native_dependency_report": $native_dependency_report_json
 }
 EOF
 )

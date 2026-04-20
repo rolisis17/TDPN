@@ -23,6 +23,7 @@ API_HEALTH_ENDPOINT=""
 SUMMARY_STATUS="ok"
 SUMMARY_ERROR=""
 RECOMMENDED_COMMANDS=()
+NATIVE_DESKTOP_PREREQS_ASSERTED="0"
 
 log() {
   echo "[desktop-native-bootstrap] $*"
@@ -106,6 +107,7 @@ Modes:
 
 Notes:
   - This is a scaffold and expects scripts/linux/desktop_doctor.sh for non-dry-run check/bootstrap.
+  - Desktop dev launch modes fail early when Linux native desktop prerequisites are missing.
   - In --dry-run, missing doctor script is reported but does not fail to keep integration guardrails stable.
 USAGE
 }
@@ -136,6 +138,78 @@ absolute_path() {
   printf '%s/%s\n' "$parent_dir" "$(basename "$candidate")"
 }
 
+pkg_config_module_exists() {
+  local module_name="$1"
+  pkg-config --exists "$module_name" >/dev/null 2>&1
+}
+
+assert_native_desktop_prerequisites_for_dev() {
+  if [[ "$NATIVE_DESKTOP_PREREQS_ASSERTED" == "1" ]]; then
+    return 0
+  fi
+
+  local missing_lines=()
+  local pkg_config_missing="0"
+
+  if ! command -v pkg-config >/dev/null 2>&1; then
+    pkg_config_missing="1"
+    missing_lines+=("pkg-config command is missing")
+  fi
+
+  if [[ "$pkg_config_missing" == "1" ]]; then
+    missing_lines+=("GTK3 development files could not be validated without pkg-config")
+    missing_lines+=("WebKit2GTK development files could not be validated without pkg-config")
+    missing_lines+=("libsoup3 development files could not be validated without pkg-config")
+    missing_lines+=("javascriptcoregtk development files could not be validated without pkg-config")
+  else
+    if ! pkg_config_module_exists "gtk+-3.0"; then
+      missing_lines+=("GTK3 development files are missing (pkg-config module: gtk+-3.0)")
+    fi
+
+    if ! pkg_config_module_exists "webkit2gtk-4.1" && ! pkg_config_module_exists "webkit2gtk-4.0"; then
+      missing_lines+=("WebKit2GTK development files are missing (pkg-config module: webkit2gtk-4.1 or webkit2gtk-4.0)")
+    fi
+
+    if ! pkg_config_module_exists "libsoup-3.0"; then
+      missing_lines+=("libsoup3 development files are missing (pkg-config module: libsoup-3.0)")
+    fi
+
+    if ! pkg_config_module_exists "javascriptcoregtk-4.1" && ! pkg_config_module_exists "javascriptcoregtk-4.0"; then
+      missing_lines+=("javascriptcoregtk development files are missing (pkg-config module: javascriptcoregtk-4.1 or javascriptcoregtk-4.0)")
+    fi
+  fi
+
+  if [[ "${#missing_lines[@]}" -eq 0 ]]; then
+    NATIVE_DESKTOP_PREREQS_ASSERTED="1"
+    return 0
+  fi
+
+  local install_prefix=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    install_prefix="sudo "
+  fi
+
+  local hint_lines=()
+  hint_lines+=("missing native Linux desktop prerequisites required for Tauri dev mode:")
+  local line
+  for line in "${missing_lines[@]}"; do
+    hint_lines+=("- $line")
+  done
+  hint_lines+=("- run ./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1")
+  hint_lines+=("- run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
+  hint_lines+=("- apt hint: ${install_prefix}apt-get install -y pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev")
+
+  if command -v dnf >/dev/null 2>&1; then
+    hint_lines+=("- dnf hint: ${install_prefix}dnf install -y pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel libsoup3-devel javascriptcoregtk4.1-devel")
+  elif command -v pacman >/dev/null 2>&1; then
+    hint_lines+=("- pacman hint: ${install_prefix}pacman -Sy --needed pkgconf gtk3 webkit2gtk-4.1 libsoup3")
+  elif command -v zypper >/dev/null 2>&1; then
+    hint_lines+=("- zypper hint: ${install_prefix}zypper install -y pkgconf-pkg-config gtk3-devel webkit2gtk3-devel libsoup-3_0-devel javascriptcoregtk-4_1-devel")
+  fi
+
+  die "$(printf '%s\n' "${hint_lines[@]}")"
+}
+
 cleanup_background_api() {
   if [[ -z "$API_BG_PID" ]]; then
     return
@@ -151,6 +225,10 @@ build_recommended_commands() {
   RECOMMENDED_COMMANDS=(
     "./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1"
     "./scripts/linux/desktop_doctor.sh --mode fix --install-missing"
+    "sudo apt-get install -y pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev"
+    "sudo dnf install -y pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel libsoup3-devel javascriptcoregtk4.1-devel"
+    "sudo pacman -Sy --needed pkgconf gtk3 webkit2gtk-4.1 libsoup3"
+    "sudo zypper install -y pkgconf-pkg-config gtk3-devel webkit2gtk3-devel libsoup-3_0-devel javascriptcoregtk-4_1-devel"
     "./scripts/linux/desktop_native_bootstrap.sh --mode bootstrap --install-missing --print-summary-json 1"
     "./scripts/linux/desktop_native_bootstrap.sh --mode run-api --api-addr $API_ADDR"
     "./scripts/linux/desktop_native_bootstrap.sh --mode run-desktop --desktop-launch-strategy auto"
@@ -448,10 +526,12 @@ run_desktop_dev() {
     else
       log "dry-run: npm install skipped because node_modules exists"
     fi
+    log "dry-run: native Linux desktop prerequisite enforcement is skipped (run desktop_doctor check to validate)"
     log "dry-run: would run in $DESKTOP_DIR -> npm run tauri -- dev"
     return 0
   fi
 
+  assert_native_desktop_prerequisites_for_dev
   require_command npm "install Node.js/npm and ensure npm is on PATH"
   pushd "$DESKTOP_DIR" >/dev/null
   if [[ "$should_install" == "1" ]]; then
@@ -644,6 +724,12 @@ fi
 
 if [[ "$MODE" == "run-full" ]]; then
   resolve_local_api_health_endpoint "$API_ADDR"
+
+  if [[ "$RESOLVED_DESKTOP_STRATEGY" == "dev" && "$DRY_RUN" != "1" ]]; then
+    log "validating native Linux desktop prerequisites for dev launch"
+    assert_native_desktop_prerequisites_for_dev
+  fi
+
   if [[ "$DRY_RUN" == "1" ]]; then
     log "dry-run: would start local API in background from repo root: go run ./cmd/node --local-api"
     log "dry-run: would wait for health endpoint: $API_HEALTH_ENDPOINT"

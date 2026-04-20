@@ -68,6 +68,13 @@ assert_script_marker "write_summary_json_file"
 assert_script_marker "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
 assert_script_marker "GPM_DESKTOP_PACKAGED_EXE"
 assert_script_marker "TDPN_DESKTOP_PACKAGED_EXE"
+assert_script_marker "assert_native_desktop_prerequisites_for_dev"
+assert_script_marker "missing native Linux desktop prerequisites required for Tauri dev mode"
+assert_script_marker "pkg-config"
+assert_script_marker "libgtk-3-dev"
+assert_script_marker "libwebkit2gtk-4.1-dev"
+assert_script_marker "libsoup-3.0-dev"
+assert_script_marker "libjavascriptcoregtk-4.1-dev"
 
 echo "[linux-desktop-native-bootstrap-guardrails] check --dry-run passes"
 run_expect_pass \
@@ -90,6 +97,36 @@ run_expect_pass \
     --mode run-full \
     --desktop-launch-strategy auto \
     --dry-run
+
+FAKE_BIN_DIR="$TMP_DIR/fake-bin"
+mkdir -p "$FAKE_BIN_DIR"
+FAKE_PKG_CONFIG="$FAKE_BIN_DIR/pkg-config"
+cat >"$FAKE_PKG_CONFIG" <<'EOF_FAKE_PKG_CONFIG'
+#!/usr/bin/env bash
+exit 1
+EOF_FAKE_PKG_CONFIG
+chmod +x "$FAKE_PKG_CONFIG"
+
+echo "[linux-desktop-native-bootstrap-guardrails] run-desktop dev fails fast when native prerequisites are missing"
+run_expect_fail_regex \
+  "run_desktop_dev_missing_native_fail" \
+  "missing native Linux desktop prerequisites required for Tauri dev mode|desktop_doctor\\.sh --mode fix --install-missing|libgtk-3-dev" \
+  env \
+    PATH="$FAKE_BIN_DIR:$PATH" \
+    bash "$SCRIPT_UNDER_TEST" \
+      --mode run-desktop \
+      --desktop-launch-strategy dev
+
+echo "[linux-desktop-native-bootstrap-guardrails] run-full dev fails before API startup when native prerequisites are missing"
+run_expect_fail_regex \
+  "run_full_dev_missing_native_fail" \
+  "missing native Linux desktop prerequisites required for Tauri dev mode|desktop_doctor\\.sh --mode fix --install-missing|libsoup-3.0-dev" \
+  env \
+    PATH="$FAKE_BIN_DIR:$PATH" \
+    bash "$SCRIPT_UNDER_TEST" \
+      --mode run-full \
+      --desktop-launch-strategy dev \
+      --api-addr 127.0.0.1:8095
 
 echo "[linux-desktop-native-bootstrap-guardrails] invalid mode fails"
 run_expect_fail_regex \

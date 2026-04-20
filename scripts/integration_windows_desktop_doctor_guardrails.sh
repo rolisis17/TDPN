@@ -167,6 +167,28 @@ if ! grep -qF 'desktop_one_click.ps1' "$SCRIPT_UNDER_TEST"; then
   exit 1
 fi
 
+echo "[windows-desktop-doctor-guardrails] desktop prerequisite markers are present"
+if ! grep -qF 'Microsoft.VisualStudio.2022.BuildTools' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing Visual C++ Build Tools package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Microsoft.WindowsSDK.10.0' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing Windows SDK package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Microsoft.EdgeWebView2Runtime' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing WebView2 runtime package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'developer.microsoft.com/windows/downloads/windows-sdk/' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing Windows SDK official remediation hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'developer.microsoft.com/microsoft-edge/webview2/' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing WebView2 official remediation hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+
 echo "[windows-desktop-doctor-guardrails] check dry-run passes"
 run_expect_pass \
   "check_dry_run_pass" \
@@ -214,6 +236,41 @@ if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd i
 fi
 if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd run tauri -- dev"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing tauri dev remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.desktop_prerequisites | type == "object" and has("msvc_build_tools_x64") and has("windows_sdk") and has("webview2_runtime")' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing desktop_prerequisites object with expected keys"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.desktop_prerequisites.msvc_build_tools_x64.installed | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing msvc_build_tools_x64 installed boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.desktop_prerequisites.windows_sdk.installed | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing windows_sdk installed boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.desktop_prerequisites.webview2_runtime.installed | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing webview2_runtime installed boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e 'if .desktop_prerequisites.msvc_build_tools_x64.installed == false then (.missing_package_ids | index("Microsoft.VisualStudio.2022.BuildTools") != null) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: missing package ids do not include Visual C++ Build Tools when prerequisite is missing"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e 'if .desktop_prerequisites.windows_sdk.installed == false then (.missing_package_ids | index("Microsoft.WindowsSDK.10.0") != null) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: missing package ids do not include Windows SDK when prerequisite is missing"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e 'if .desktop_prerequisites.webview2_runtime.installed == false then (.missing_package_ids | index("Microsoft.EdgeWebView2Runtime") != null) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: missing package ids do not include WebView2 runtime when prerequisite is missing"
   cat "$SUMMARY_JSON"
   exit 1
 fi
