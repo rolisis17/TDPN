@@ -1015,6 +1015,7 @@ function parseServerReadiness(payload) {
 
 function appendChainBindingGuidance(guidanceText, readiness) {
   const statusRaw = nonEmptyString(readiness?.chainBindingStatus);
+  const statusKey = statusRaw.toLowerCase();
   const status = statusRaw ? statusRaw.replace(/[_-]+/g, " ") : "";
   const ok = readiness?.chainBindingOk;
   const reason = nonEmptyString(readiness?.chainBindingReason);
@@ -1023,14 +1024,31 @@ function appendChainBindingGuidance(guidanceText, readiness) {
   }
   let bindingHint = "";
   if (ok === true) {
-    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: ready.";
+    bindingHint =
+      statusKey === "bound"
+        ? "Chain binding: bound. Strict chain binding is satisfied (session/app chain_operator_id match)."
+        : status
+          ? `Chain binding: ${status}. Strict chain binding is satisfied.`
+          : "Chain binding: ready. Strict chain binding is satisfied.";
   } else if (ok === false) {
-    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: not ready.";
+    bindingHint =
+      status
+        ? `Chain binding: ${status}. Strict chain binding requires both session and approved-application chain_operator_id values to be present and matching.`
+        : "Chain binding: not ready. Strict chain binding requires both session and approved-application chain_operator_id values to be present and matching.";
   } else {
-    bindingHint = `Chain binding: ${status}.`;
+    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: unknown.";
   }
   if (reason) {
     bindingHint = `${bindingHint} ${reason}`;
+  }
+  if (statusKey === "mismatch") {
+    bindingHint =
+      `${bindingHint} Next: refresh session to resync chain_operator_id; ` +
+      "if mismatch persists, re-apply and re-approve with the intended chain_operator_id.";
+  } else if (statusKey === "pending_approval" || statusKey === "pending approval") {
+    bindingHint = `${bindingHint} Next: wait for operator approval, then refresh session to lift server lifecycle locks.`;
+  } else if (ok === false) {
+    bindingHint = `${bindingHint} Next: refresh session and operator status to reconcile strict chain binding.`;
   }
   return `${guidanceText} ${bindingHint}`;
 }
@@ -1301,7 +1319,8 @@ function computeOperatorReadiness() {
         return {
           kind: "good",
           statusText: statusLabel,
-          guidanceText: "Operator application is approved. Server controls are eligible for this session role."
+          guidanceText:
+            "Operator application is approved, but server lifecycle unlock still requires strict chain binding (session/app chain_operator_id both present and matching). Refresh readiness/session to confirm."
         };
       case "rejected":
         return {

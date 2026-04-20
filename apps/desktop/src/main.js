@@ -1320,8 +1320,22 @@ function appendReadinessDiagnosticsHint(baseHint, readiness) {
   return `${baseHint} Diagnostics: ${summarized}${suffix}`;
 }
 
+function chainBindingActionHint(statusKey, ok) {
+  if (statusKey === "mismatch") {
+    return "Next: refresh session to resync chain_operator_id; if mismatch persists, re-apply and re-approve with the intended chain_operator_id.";
+  }
+  if (statusKey === "pending_approval" || statusKey === "pending approval") {
+    return "Next: wait for operator approval, then refresh session to lift server lifecycle locks.";
+  }
+  if (ok === false) {
+    return "Next: refresh session and operator status to reconcile strict chain binding.";
+  }
+  return "";
+}
+
 function appendChainBindingHint(baseHint, readiness) {
   const statusRaw = typeof readiness?.chainBindingStatus === "string" ? readiness.chainBindingStatus.trim() : "";
+  const statusKey = statusRaw.toLowerCase();
   const status = statusRaw ? statusRaw.replace(/[_-]+/g, " ") : "";
   const ok = readiness?.chainBindingOk;
   const reason = typeof readiness?.chainBindingReason === "string" ? readiness.chainBindingReason.trim() : "";
@@ -1330,14 +1344,26 @@ function appendChainBindingHint(baseHint, readiness) {
   }
   let bindingHint = "";
   if (ok === true) {
-    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: ready.";
+    bindingHint =
+      statusKey === "bound"
+        ? "Chain binding: bound. Strict chain binding is satisfied (session/app chain_operator_id match)."
+        : status
+          ? `Chain binding: ${status}. Strict chain binding is satisfied.`
+          : "Chain binding: ready. Strict chain binding is satisfied.";
   } else if (ok === false) {
-    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: not ready.";
+    bindingHint =
+      status
+        ? `Chain binding: ${status}. Strict chain binding requires both session and approved-application chain_operator_id values to be present and matching.`
+        : "Chain binding: not ready. Strict chain binding requires both session and approved-application chain_operator_id values to be present and matching.";
   } else {
-    bindingHint = `Chain binding: ${status}.`;
+    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: unknown.";
   }
   if (reason) {
     bindingHint = `${bindingHint} ${reason}`;
+  }
+  const actionHint = chainBindingActionHint(statusKey, ok);
+  if (actionHint) {
+    bindingHint = `${bindingHint} ${actionHint}`;
   }
   return `${baseHint} ${bindingHint}`;
 }
@@ -1378,9 +1404,9 @@ function computeServerLockHintText() {
   if (role === "operator") {
     if (state.operatorApplicationStatus === "approved") {
       if (!state.serviceMutationsAllowed) {
-        return "Operator approved. Service lifecycle actions are disabled by environment policy.";
+        return "Operator approved. Service lifecycle actions are disabled by environment policy; strict chain binding still requires matching session/application chain_operator_id values.";
       }
-      return "Operator approved. Server controls are unlocked.";
+      return "Operator approved. Final unlock still requires strict chain binding (matching session/application chain_operator_id); refresh server readiness to confirm.";
     }
     if (state.operatorApplicationStatus === "pending") {
       return "Operator application pending approval. Server lifecycle actions stay locked until approved.";

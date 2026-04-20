@@ -414,10 +414,15 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 		}
 		sessionChainOperatorID := strings.TrimSpace(session.ChainOperatorID)
 		approvedChainOperatorID := strings.TrimSpace(app.ChainOperatorID)
-		if !gpmOperatorChainIDsCompatible(sessionChainOperatorID, approvedChainOperatorID) {
+		bound, reason := gpmStrictOperatorChainBinding(sessionChainOperatorID, approvedChainOperatorID)
+		if !bound {
+			errorMessage := "operator session is out of sync with approved application; refresh or rotate session"
+			if strings.TrimSpace(reason) != "" {
+				errorMessage = fmt.Sprintf("%s (%s)", errorMessage, reason)
+			}
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"ok":    false,
-				"error": "operator session is out of sync with approved application; refresh or rotate session",
+				"error": errorMessage,
 			})
 			return false
 		}
@@ -1049,10 +1054,16 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 		strings.TrimSpace(s.serviceStop) != "" &&
 		strings.TrimSpace(s.serviceRestart) != ""
 
+	strictChainBound := false
+	strictChainBindingReason := ""
+	if role == "operator" && operatorApplicationStatus == "approved" {
+		strictChainBound, strictChainBindingReason = gpmStrictOperatorChainBinding(sessionChainOperatorID, chainOperatorID)
+	}
+
 	lifecycleActionsUnlocked := role == "admin" ||
 		(role == "operator" &&
 			operatorApplicationStatus == "approved" &&
-			gpmOperatorChainIDsCompatible(sessionChainOperatorID, chainOperatorID))
+			strictChainBound)
 
 	chainBindingStatus := "not_applicable"
 	chainBindingOK := false
@@ -1060,12 +1071,12 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 	if role == "operator" {
 		switch operatorApplicationStatus {
 		case "approved":
-			if gpmOperatorChainIDsCompatible(sessionChainOperatorID, chainOperatorID) {
+			if strictChainBound {
 				chainBindingStatus = "bound"
 				chainBindingOK = true
 			} else {
 				chainBindingStatus = "mismatch"
-				chainBindingReason = "operator session chain_operator_id does not match approved operator application chain_operator_id"
+				chainBindingReason = strictChainBindingReason
 			}
 		case "pending":
 			chainBindingStatus = "pending_approval"
@@ -1091,11 +1102,27 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 		case "operator":
 			switch operatorApplicationStatus {
 			case "approved":
-				lockReason = "operator session is out of sync with approved application; refresh or rotate session"
-				unlockActions = append(unlockActions,
-					"Refresh or rotate session via /v1/gpm/session",
-					"Sign in again if session/application chain IDs are still out of sync",
-				)
+				lockReason = "operator session is out of sync with approved application"
+				if strings.TrimSpace(strictChainBindingReason) != "" {
+					lockReason = fmt.Sprintf("%s: %s", lockReason, strictChainBindingReason)
+				}
+				switch {
+				case strings.Contains(strictChainBindingReason, "session chain_operator_id is missing"):
+					unlockActions = append(unlockActions,
+						"Refresh or rotate session via /v1/gpm/session",
+						"Sign in again to mint a session with chain_operator_id",
+					)
+				case strings.Contains(strictChainBindingReason, "application chain_operator_id is missing"):
+					unlockActions = append(unlockActions,
+						"Have an admin approve/re-approve operator application with chain_operator_id",
+						"Check /v1/gpm/onboarding/operator/status until approved chain_operator_id is present",
+					)
+				default:
+					unlockActions = append(unlockActions,
+						"Refresh or rotate session via /v1/gpm/session",
+						"Sign in again if session/application chain IDs are still out of sync",
+					)
+				}
 			case "pending":
 				lockReason = "operator application status \"pending\" is not approved"
 				unlockActions = append(unlockActions,
@@ -1734,6 +1761,23 @@ func normalizeGPMPathProfile(raw string) string {
 		return profile
 	}
 	return "2hop"
+}
+
+func gpmStrictOperatorChainBinding(sessionChainOperatorID string, approvedChainOperatorID string) (bool, string) {
+	sessionChainOperatorID = strings.TrimSpace(sessionChainOperatorID)
+	approvedChainOperatorID = strings.TrimSpace(approvedChainOperatorID)
+	switch {
+	case sessionChainOperatorID == "" && approvedChainOperatorID == "":
+		return false, "operator session chain_operator_id is missing and approved operator application chain_operator_id is missing"
+	case sessionChainOperatorID == "":
+		return false, "operator session chain_operator_id is missing"
+	case approvedChainOperatorID == "":
+		return false, "approved operator application chain_operator_id is missing"
+	case !subtleEqual(sessionChainOperatorID, approvedChainOperatorID):
+		return false, "operator session chain_operator_id does not match approved operator application chain_operator_id"
+	default:
+		return true, ""
+	}
 }
 
 func gpmOperatorChainIDsCompatible(sessionChainOperatorID string, approvedChainOperatorID string) bool {

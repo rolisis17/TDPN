@@ -79,7 +79,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
 - `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile` that is used as authoritative connect policy for session-token connects)
 - `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, `bootstrap_directory`, and persisted `path_profile` when available)
-- `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and chain-id sync hints)
+- `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and strict chain-binding checks)
 - `POST /v1/gpm/onboarding/overview` (consolidated onboarding contract for a `session_token`, returning `session + registration + readiness` in one response)
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
@@ -90,7 +90,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 ## Authentication
 
 Mutating endpoints (`POST /v1/connect`, `POST /v1/disconnect`, `POST /v1/set_profile`, `POST /v1/update`, `POST /v1/service/start`, `POST /v1/service/stop`, `POST /v1/service/restart`) require auth by default.
-GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/service/stop`, `POST /v1/gpm/service/restart`) also require an approved `operator` or `admin` session issued via `/v1/gpm/session`.
+GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/service/stop`, `POST /v1/gpm/service/restart`) also require an approved `operator` or `admin` session issued via `/v1/gpm/session`; for `operator` sessions, unlock is strict-bound and requires session/application `chain_operator_id` values to both be present and equal.
 `POST /v1/gpm/onboarding/operator/list` uses command-read auth and requires a valid `admin` `session_token`:
 - missing `session_token`: `400` (`session_token is required`)
 - missing/expired session token: `404` (`session not found`)
@@ -267,10 +267,10 @@ Success payload:
 - `readiness.session_chain_operator_id`: chain id on resolved session when present
 - `readiness.tab_visible`: `true` for `operator|admin`, else `false`
 - `readiness.client_tab_visible`: `true` when the client tab is eligible/visible for the resolved role/session context
-- `readiness.lifecycle_actions_unlocked`: `true` for `admin`, or `operator` with approved application and non-conflicting chain ids
+- `readiness.lifecycle_actions_unlocked`: `true` for `admin`, or `operator` with approved application where both `readiness.chain_operator_id` and `readiness.session_chain_operator_id` are present and equal (strict chain binding)
 - `readiness.chain_binding_status`: additive chain-binding state for operator sessions (`bound|pending_approval|mismatch|not_applicable|unknown`)
 - `readiness.chain_binding_ok`: additive boolean convenience flag (`true` only when chain binding is currently healthy/bound)
-- `readiness.chain_binding_reason`: additive operator-facing reason when chain binding is not healthy (for example pending approval or chain-id mismatch)
+- `readiness.chain_binding_reason`: additive operator-facing reason when chain binding is not healthy (for example pending approval or chain-id mismatch); preserve this reason in clients and append actionable next steps (refresh session, or re-apply/re-approve when mismatch persists)
 - `readiness.service_mutations_configured`: `true` when all legacy service lifecycle commands are configured (`LOCAL_CONTROL_API_SERVICE_START_COMMAND`, `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`, `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`)
 - `readiness.lock_reason`: non-empty reason when lifecycle actions are locked
 - `readiness.client_lock_reason`: non-empty reason when the client tab is role-locked

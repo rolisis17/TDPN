@@ -300,6 +300,22 @@ for marker in "${STRICT_VERIFY_POLICY_GPM_MARKERS[@]}"; do
 done
 echo "[local-control-api-contract] strict verifier-command policy markers in source are present"
 
+# Strict chain-binding lifecycle unlock checks must remain fail-closed for
+# operator sessions (both session/application chain_operator_id must be present
+# and matching).
+STRICT_CHAIN_BINDING_MARKERS=(
+  'func[[:space:]]+gpmStrictOperatorChainBinding\('
+  'operator session chain_operator_id is missing'
+  'approved operator application chain_operator_id is missing'
+  'bound,[[:space:]]*reason[[:space:]]*:=[[:space:]]*gpmStrictOperatorChainBinding'
+  'strictChainBound,[[:space:]]*strictChainBindingReason[[:space:]]*=[[:space:]]*gpmStrictOperatorChainBinding'
+  'lifecycleActionsUnlocked[[:space:]]*:=[[:space:]]*role[[:space:]]*==[[:space:]]*"admin"[[:space:]]*\|\|'
+)
+for marker in "${STRICT_CHAIN_BINDING_MARKERS[@]}"; do
+  require_gpm_api_marker "$marker" "strict chain-binding lifecycle enforcement"
+done
+echo "[local-control-api-contract] strict chain-binding lifecycle markers in source are present"
+
 echo "[local-control-api-contract] start local API (update disabled)"
 start_local_api 0
 
