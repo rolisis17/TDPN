@@ -15,6 +15,10 @@ const policyPostureEl = byId("policy_posture");
 const policyPostureLineEl = byId("policy_posture_line");
 const policyConnectPolicyEl = byId("policy_connect_policy");
 const policyAuthVerifyEl = byId("policy_auth_verify");
+const legacyAliasWarningEl = byId("legacy_alias_warning");
+const legacyAliasWarningLineEl = byId("legacy_alias_warning_line");
+const legacyAliasWarningTitleEl = byId("legacy_alias_warning_title");
+const legacyAliasWarningDetailEl = byId("legacy_alias_warning_detail");
 const operatorReadinessEl = byId("operator_readiness");
 const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
@@ -67,6 +71,7 @@ const CONNECT_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
 const CONNECT_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const CONNECT_POLICY_SOURCE_LEGACY_DERIVED = "legacy_payload";
 const CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE = "config_unavailable";
+const LEGACY_ALIAS_ENV_NAME_REGEX = /\bTDPN_[A-Z0-9_]+\b/gi;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const PERSISTED_FIELD_IDS = [
@@ -101,6 +106,11 @@ let authVerifyRequireMetadata = false;
 let authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let authVerifyRequireWalletExtensionSource = false;
 let authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+let legacyAliasTelemetry = {
+  active: false,
+  aliases: [],
+  migrationHints: []
+};
 let operatorListActiveFilters = {
   status: "",
   search: "",
@@ -419,6 +429,214 @@ function parseAuthVerifyRequireWalletExtensionPolicySourceConfig(payload) {
   return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 }
 
+function normalizeLegacyAliasName(value) {
+  const text = nonEmptyString(value);
+  if (!text) {
+    return "";
+  }
+  const candidate = text.toUpperCase();
+  if (/^TDPN_[A-Z0-9_]+$/.test(candidate)) {
+    return candidate;
+  }
+  return "";
+}
+
+function pushLegacyAliasNames(target, value, depth = 0) {
+  if (depth > 6 || value === null || value === undefined) {
+    return;
+  }
+  if (typeof value === "string") {
+    LEGACY_ALIAS_ENV_NAME_REGEX.lastIndex = 0;
+    const matches = value.match(LEGACY_ALIAS_ENV_NAME_REGEX);
+    if (!matches) {
+      return;
+    }
+    for (const match of matches) {
+      const aliasName = normalizeLegacyAliasName(match);
+      if (aliasName) {
+        pushUniqueNonEmptyString(target, aliasName);
+      }
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      pushLegacyAliasNames(target, entry, depth + 1);
+    }
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      const keyAliasName = normalizeLegacyAliasName(key);
+      if (keyAliasName) {
+        pushUniqueNonEmptyString(target, keyAliasName);
+      }
+      pushLegacyAliasNames(target, entry, depth + 1);
+    }
+  }
+}
+
+function pushLegacyAliasMigrationHint(target, value) {
+  const text = nonEmptyString(value);
+  if (!text) {
+    return;
+  }
+  pushUniqueNonEmptyString(target, text);
+}
+
+function pushLegacyAliasMappingHints(aliases, hints, value, depth = 0) {
+  if (depth > 4 || value === null || value === undefined) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      pushLegacyAliasMappingHints(aliases, hints, entry, depth + 1);
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    pushLegacyAliasMigrationHint(hints, value);
+    pushLegacyAliasNames(aliases, value);
+    return;
+  }
+
+  const legacyAlias = normalizeLegacyAliasName(
+    firstDefined(
+      value.legacy_alias,
+      value.legacyAlias,
+      value.legacy_env,
+      value.legacyEnv,
+      value.alias,
+      value.name,
+      value.key
+    )
+  );
+  const primaryEnv = nonEmptyString(
+    firstDefined(
+      value.primary_env,
+      value.primaryEnv,
+      value.primary_key,
+      value.primaryKey,
+      value.preferred_env,
+      value.preferredEnv,
+      value.replacement,
+      value.target
+    )
+  );
+  if (legacyAlias) {
+    pushUniqueNonEmptyString(aliases, legacyAlias);
+    const resolvedPrimary = primaryEnv || legacyAlias.replace(/^TDPN_/, "GPM_");
+    pushUniqueNonEmptyString(hints, `Migrate ${legacyAlias} to ${resolvedPrimary}.`);
+  }
+  pushLegacyAliasMigrationHint(
+    hints,
+    firstDefined(value.hint, value.message, value.note, value.description, value.migration_hint, value.migrationHint)
+  );
+
+  for (const [key, entry] of Object.entries(value)) {
+    const keyAlias = normalizeLegacyAliasName(key);
+    if (keyAlias) {
+      pushUniqueNonEmptyString(aliases, keyAlias);
+      if (typeof entry === "string") {
+        const preferredEnv = nonEmptyString(entry) || keyAlias.replace(/^TDPN_/, "GPM_");
+        pushUniqueNonEmptyString(hints, `Migrate ${keyAlias} to ${preferredEnv}.`);
+      }
+    }
+    pushLegacyAliasMappingHints(aliases, hints, entry, depth + 1);
+  }
+}
+
+function parseLegacyAliasTelemetryConfig(payload, options = {}) {
+  const policySources = Array.isArray(options.policySources) ? options.policySources : [];
+  const scopes = runtimeConfigScopes(payload);
+  const telemetryScopes = [...scopes];
+  for (const scope of scopes) {
+    const telemetryObject = readConfigObject(scope, [
+      "legacy_alias_telemetry",
+      "legacyAliasTelemetry",
+      "legacy_aliases_telemetry",
+      "legacyAliasesTelemetry",
+      "compat_alias_telemetry",
+      "compatAliasTelemetry"
+    ]);
+    if (telemetryObject) {
+      telemetryScopes.push(telemetryObject);
+    }
+  }
+
+  const explicitActive = firstDefined(
+    ...telemetryScopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "legacy_aliases_active",
+        "legacyAliasesActive",
+        "legacy_alias_active",
+        "legacyAliasActive",
+        "tdpn_aliases_active",
+        "tdpnAliasesActive",
+        "has_legacy_aliases",
+        "hasLegacyAliases",
+        "active"
+      ])
+    )
+  );
+
+  const aliases = [];
+  const migrationHints = [];
+
+  for (const scope of telemetryScopes) {
+    for (const key of [
+      "legacy_aliases",
+      "legacyAliases",
+      "legacy_alias_keys",
+      "legacyAliasKeys",
+      "active_aliases",
+      "activeAliases",
+      "tdpn_aliases",
+      "tdpnAliases",
+      "aliases",
+      "env_aliases",
+      "envAliases",
+      "source_keys",
+      "sourceKeys"
+    ]) {
+      pushLegacyAliasNames(aliases, scope?.[key]);
+    }
+    for (const key of [
+      "legacy_alias_migration_hints",
+      "legacyAliasMigrationHints",
+      "migration_hints",
+      "migrationHints",
+      "messages",
+      "notes"
+    ]) {
+      pushLegacyAliasMappingHints(aliases, migrationHints, scope?.[key]);
+    }
+    for (const key of [
+      "legacy_alias_map",
+      "legacyAliasMap",
+      "alias_map",
+      "aliasMap",
+      "legacy_alias_mapping",
+      "legacyAliasMapping",
+      "migration_map",
+      "migrationMap"
+    ]) {
+      pushLegacyAliasMappingHints(aliases, migrationHints, scope?.[key]);
+    }
+  }
+
+  for (const source of policySources) {
+    pushLegacyAliasNames(aliases, source);
+  }
+
+  const active = explicitActive === true || aliases.length > 0;
+  return {
+    active,
+    aliases,
+    migrationHints
+  };
+}
+
 function formatConnectPolicyModeLabel(mode) {
   if (mode === "production") {
     return "production";
@@ -482,6 +700,39 @@ function refreshPolicyPostureBanner() {
     `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
     `wallet-extension-source ${walletRequired} (source: ${walletSource}).${manualSignInGuidance}`;
   syncManualSignInAction();
+}
+
+function refreshLegacyAliasWarningBanner() {
+  const aliases = Array.isArray(legacyAliasTelemetry.aliases) ? legacyAliasTelemetry.aliases : [];
+  const migrationHints = Array.isArray(legacyAliasTelemetry.migrationHints)
+    ? legacyAliasTelemetry.migrationHints
+    : [];
+  const active = legacyAliasTelemetry.active === true || aliases.length > 0;
+
+  legacyAliasWarningEl.hidden = !active;
+  if (!active) {
+    return;
+  }
+
+  legacyAliasWarningEl.dataset.kind = "warn";
+  legacyAliasWarningLineEl.classList.remove("good", "warn", "bad");
+  legacyAliasWarningLineEl.classList.add("warn");
+
+  const aliasMappings = aliases.slice(0, 3).map((aliasName) => `${aliasName} -> ${aliasName.replace(/^TDPN_/, "GPM_")}`);
+  const aliasOverflowCount = aliases.length > 3 ? aliases.length - 3 : 0;
+  const mappingSummary = aliasMappings.length > 0 ? aliasMappings.join("; ") : "";
+  const mappingOverflow = aliasOverflowCount > 0 ? ` (+${aliasOverflowCount} more)` : "";
+
+  legacyAliasWarningTitleEl.textContent = mappingSummary
+    ? `Legacy alias telemetry detected: ${mappingSummary}${mappingOverflow}.`
+    : "Legacy TDPN_* alias telemetry detected.";
+
+  const defaultHint =
+    aliases.length > 0
+      ? "Migrate active TDPN_* aliases to their matching GPM_* env names."
+      : "Migrate TDPN_* aliases to GPM_* env names to avoid future breakage.";
+  const hintSummary = migrationHints.slice(0, 2).join(" ");
+  legacyAliasWarningDetailEl.textContent = hintSummary ? `${hintSummary} ${defaultHint}` : defaultHint;
 }
 
 function strictWalletExtensionSourceRequired() {
@@ -572,8 +823,16 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireMetadataPolicySource = parseAuthVerifyRequireMetadataPolicySourceConfig(config);
     authVerifyRequireWalletExtensionSource = parseAuthVerifyRequireWalletExtensionSourceConfig(config);
     authVerifyRequireWalletExtensionPolicySource = parseAuthVerifyRequireWalletExtensionPolicySourceConfig(config);
+    legacyAliasTelemetry = parseLegacyAliasTelemetryConfig(config, {
+      policySources: [
+        connectPolicySource,
+        authVerifyRequireMetadataPolicySource,
+        authVerifyRequireWalletExtensionPolicySource
+      ]
+    });
     refreshCompatibilityOverrideControls();
     refreshPolicyPostureBanner();
+    refreshLegacyAliasWarningBanner();
     persistPortalState();
     return config;
   } catch (err) {
@@ -585,8 +844,14 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     authVerifyRequireWalletExtensionSource = false;
     authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    legacyAliasTelemetry = {
+      active: false,
+      aliases: [],
+      migrationHints: []
+    };
     refreshCompatibilityOverrideControls();
     refreshPolicyPostureBanner();
+    refreshLegacyAliasWarningBanner();
     persistPortalState();
     if (!quiet) {
       throw err;
@@ -3150,6 +3415,7 @@ function initializePortal() {
   persistPortalState();
   refreshOperatorReadiness();
   refreshPolicyPostureBanner();
+  refreshLegacyAliasWarningBanner();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
   void refreshConnectPolicyConfigBestEffort({ quiet: true });
   void restoreSessionStatusBestEffort();

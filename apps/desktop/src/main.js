@@ -11,6 +11,7 @@ function byId(id) {
 const outputEl = byId("output");
 const apiBaseEl = byId("api_base");
 const apiHintsEl = byId("api_hints");
+const legacyAliasRuntimeHintEl = document.getElementById("legacy_alias_runtime_hint");
 const manifestSourceEl = byId("manifest_source");
 const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
@@ -119,6 +120,9 @@ const state = {
   authVerifyRequireWalletExtensionSource: false,
   authVerifyRuntimeRequireWalletExtensionSource: false,
   authVerifyPolicySource: AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT,
+  legacyEnvAliasesActive: [],
+  legacyEnvAliasWarnings: [],
+  legacyEnvAliasActiveCount: 0,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
@@ -1488,6 +1492,144 @@ function readRuntimeAuthVerifyPolicyMetadata(runtimeCfg) {
   };
 }
 
+function normalizeLegacyAliasEnvName(value) {
+  const parsed = nonEmptyStringOrUndefined(value);
+  if (!parsed) {
+    return undefined;
+  }
+  const upper = parsed.toUpperCase();
+  if (!upper.startsWith("TDPN_")) {
+    return undefined;
+  }
+  return upper;
+}
+
+function appendLegacyAliasEnvNames(target, value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      appendLegacyAliasEnvNames(target, entry);
+    }
+    return;
+  }
+  if (typeof value === "string" && value.includes(",")) {
+    for (const entry of value.split(",")) {
+      appendLegacyAliasEnvNames(target, entry);
+    }
+    return;
+  }
+  const alias = normalizeLegacyAliasEnvName(value);
+  if (alias) {
+    pushUniqueNonEmptyString(target, alias);
+  }
+}
+
+function appendLegacyAliasWarnings(target, value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      appendLegacyAliasWarnings(target, entry);
+    }
+    return;
+  }
+  if (typeof value === "string" && value.includes(";")) {
+    for (const entry of value.split(";")) {
+      appendLegacyAliasWarnings(target, entry);
+    }
+    return;
+  }
+  const warning = nonEmptyStringOrUndefined(value);
+  if (!warning) {
+    return;
+  }
+  pushUniqueNonEmptyString(target, normalizeLegacyEnvNameDisplayText(warning));
+}
+
+function readRuntimeLegacyAliasTelemetry(runtimeCfg) {
+  const scopes = collectRuntimeConfigScopes(runtimeCfg);
+  const activeAliases = [];
+  const warnings = [];
+  let activeCount;
+  for (const scope of scopes) {
+    appendLegacyAliasEnvNames(
+      activeAliases,
+      firstDefined(
+        scope.gpm_legacy_env_aliases_active,
+        scope.gpmLegacyEnvAliasesActive,
+        scope.legacy_env_aliases_active,
+        scope.legacyEnvAliasesActive
+      )
+    );
+    appendLegacyAliasWarnings(
+      warnings,
+      firstDefined(
+        scope.gpm_legacy_env_alias_warnings,
+        scope.gpmLegacyEnvAliasWarnings,
+        scope.legacy_env_alias_warnings,
+        scope.legacyEnvAliasWarnings
+      )
+    );
+    appendLegacyAliasWarnings(
+      warnings,
+      readConfigString(scope, [
+        "gpm_legacy_env_aliases_warning",
+        "gpmLegacyEnvAliasesWarning",
+        "legacy_env_aliases_warning",
+        "legacyEnvAliasesWarning",
+        "gpm_legacy_env_alias_warning",
+        "gpmLegacyEnvAliasWarning",
+        "legacy_env_alias_warning",
+        "legacyEnvAliasWarning"
+      ])
+    );
+    if (activeCount === undefined) {
+      activeCount = nonNegativeIntegerOrUndefined(
+        firstDefined(
+          scope.gpm_legacy_env_aliases_active_count,
+          scope.gpmLegacyEnvAliasesActiveCount,
+          scope.legacy_env_aliases_active_count,
+          scope.legacyEnvAliasesActiveCount
+        )
+      );
+    }
+  }
+  if (activeCount === undefined) {
+    activeCount = activeAliases.length;
+  }
+  return {
+    activeAliases,
+    warnings,
+    activeCount
+  };
+}
+
+function mergeLegacyAliasTelemetry(baseTelemetry, runtimeTelemetry) {
+  const activeAliases = [];
+  const warnings = [];
+  let activeCount = 0;
+  for (const telemetry of [baseTelemetry, runtimeTelemetry]) {
+    if (!telemetry || typeof telemetry !== "object") {
+      continue;
+    }
+    for (const alias of Array.isArray(telemetry.activeAliases) ? telemetry.activeAliases : []) {
+      appendLegacyAliasEnvNames(activeAliases, alias);
+    }
+    for (const warning of Array.isArray(telemetry.warnings) ? telemetry.warnings : []) {
+      appendLegacyAliasWarnings(warnings, warning);
+    }
+    const parsedCount = nonNegativeIntegerOrUndefined(telemetry.activeCount);
+    if (parsedCount !== undefined && parsedCount > activeCount) {
+      activeCount = parsedCount;
+    }
+  }
+  if (activeAliases.length > activeCount) {
+    activeCount = activeAliases.length;
+  }
+  return {
+    activeAliases,
+    warnings,
+    activeCount
+  };
+}
+
 function formatConfigMeta(cfg) {
   const baseUrl = readConfigString(cfg, ["base_url", "api_base_url", "api_url"]) || "unknown";
   const timeout = numberOrUndefined(firstDefined(cfg.timeout_sec, cfg.timeoutSeconds, cfg.api_timeout_sec));
@@ -2627,6 +2769,48 @@ function updateConnectPolicyHint() {
   connectPolicyHintEl.classList.toggle("locked", state.connectRequireSession || !state.allowLegacyConnectOverride);
 }
 
+function summarizeLegacyAliasNames(aliasNames, maxVisible = 3) {
+  const names = Array.isArray(aliasNames) ? aliasNames.filter((value) => typeof value === "string" && value) : [];
+  if (names.length === 0) {
+    return "";
+  }
+  if (names.length <= maxVisible) {
+    return names.join(", ");
+  }
+  const visible = names.slice(0, maxVisible).join(", ");
+  return `${visible}, +${names.length - maxVisible} more`;
+}
+
+function updateLegacyAliasRuntimeHint() {
+  if (!legacyAliasRuntimeHintEl) {
+    return;
+  }
+  const aliases = Array.isArray(state.legacyEnvAliasesActive) ? state.legacyEnvAliasesActive : [];
+  const warningList = Array.isArray(state.legacyEnvAliasWarnings) ? state.legacyEnvAliasWarnings : [];
+  const parsedCount = nonNegativeIntegerOrUndefined(state.legacyEnvAliasActiveCount) || 0;
+  const aliasCount = Math.max(parsedCount, aliases.length);
+  if (aliasCount <= 0) {
+    legacyAliasRuntimeHintEl.textContent = "";
+    legacyAliasRuntimeHintEl.classList.remove("locked");
+    return;
+  }
+  const aliasSummary = summarizeLegacyAliasNames(aliases);
+  let hintText = `Legacy TDPN_* env aliases are active (${aliasCount})`;
+  if (aliasSummary) {
+    hintText = `${hintText}: ${aliasSummary}.`;
+  } else {
+    hintText = `${hintText}.`;
+  }
+  hintText =
+    `${hintText} Migration: replace TDPN_* variables with equivalent GPM_* names ` +
+    "(for example TDPN_MAIN_DOMAIN -> GPM_MAIN_DOMAIN) to stay forward-compatible.";
+  if (warningList.length > 0) {
+    hintText = `${hintText} ${warningList[0]}`;
+  }
+  legacyAliasRuntimeHintEl.textContent = hintText;
+  legacyAliasRuntimeHintEl.classList.add("locked");
+}
+
 function isManualSignInLockedByRuntimePolicy() {
   return state.authVerifyRuntimeRequireWalletExtensionSource === true;
 }
@@ -3407,6 +3591,7 @@ async function init() {
   try {
     const cfg = await invoke("control_config");
     const meta = formatConfigMeta(cfg || {});
+    let legacyAliasTelemetry = readRuntimeLegacyAliasTelemetry(cfg || {});
     let connectRequireSession = meta.connectRequireSession;
     let allowLegacyConnectOverride = meta.allowLegacyConnectOverride;
     let connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
@@ -3419,6 +3604,10 @@ async function init() {
       const runtimeCfg = await invoke("control_runtime_config");
       const runtimeConnectPolicy = readRuntimeConnectPolicyMetadata(runtimeCfg || {});
       const runtimeAuthVerifyPolicy = readRuntimeAuthVerifyPolicyMetadata(runtimeCfg || {});
+      legacyAliasTelemetry = mergeLegacyAliasTelemetry(
+        legacyAliasTelemetry,
+        readRuntimeLegacyAliasTelemetry(runtimeCfg || {})
+      );
       if (runtimeConnectPolicy.connectRequireSession !== undefined) {
         connectRequireSession = runtimeConnectPolicy.connectRequireSession;
       }
@@ -3465,6 +3654,9 @@ async function init() {
     state.authVerifyRequireWalletExtensionSource = !!authVerifyRequireWalletExtensionSource;
     state.authVerifyRuntimeRequireWalletExtensionSource = authVerifyRuntimeRequireWalletExtensionSource;
     state.authVerifyPolicySource = authVerifyPolicySource;
+    state.legacyEnvAliasesActive = legacyAliasTelemetry.activeAliases;
+    state.legacyEnvAliasWarnings = legacyAliasTelemetry.warnings;
+    state.legacyEnvAliasActiveCount = legacyAliasTelemetry.activeCount;
     apiBaseEl.textContent = meta.apiLine;
     apiHintsEl.textContent = [
       meta.hintLine,
@@ -3481,6 +3673,7 @@ async function init() {
     state.serviceMutationsAllowed = meta.serviceMutationsEnabled;
     applyConnectModePolicy(connectRequireSession);
     updateAuthVerifyPolicyHint();
+    updateLegacyAliasRuntimeHint();
     syncServerRoleLockState();
   } catch (err) {
     apiBaseEl.textContent = "API: unavailable";
@@ -3494,8 +3687,12 @@ async function init() {
     state.authVerifyRequireWalletExtensionSource = false;
     state.authVerifyRuntimeRequireWalletExtensionSource = false;
     state.authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
+    state.legacyEnvAliasesActive = [];
+    state.legacyEnvAliasWarnings = [];
+    state.legacyEnvAliasActiveCount = 0;
     applyConnectModePolicy(false);
     updateAuthVerifyPolicyHint();
+    updateLegacyAliasRuntimeHint();
     syncServerRoleLockState();
     print("init (error)", err);
   }

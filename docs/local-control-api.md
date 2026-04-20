@@ -175,6 +175,14 @@ If auth is required and missing/invalid, the API returns `401`.
     "gpm_manifest_url": "https://globalprivatemesh.net/v1/bootstrap/manifest",
     "gpm_manifest_cache_path": ".easy-node-logs/gpm_bootstrap_manifest_cache.json",
     "gpm_manifest_cache_max_age_sec": 86400,
+    "gpm_legacy_env_aliases_active": [
+      "TDPN_PRODUCTION_MODE"
+    ],
+    "gpm_legacy_env_aliases_active_count": 1,
+    "gpm_legacy_env_alias_warnings": [
+      "TDPN_PRODUCTION_MODE is deprecated; migrate to GPM_PRODUCTION_MODE"
+    ],
+    "gpm_legacy_env_aliases_warning": "TDPN_PRODUCTION_MODE is deprecated; migrate to GPM_PRODUCTION_MODE",
     "command_timeout_sec": 120,
     "allow_update": false,
     "allow_remote": false
@@ -193,9 +201,18 @@ Policy posture config hints:
 - `gpm_auth_verify_require_wallet_extension_source`: whether strict wallet-extension-source policy is enabled (`signature_source=wallet_extension` required at verify time).
 - `gpm_auth_verify_require_wallet_extension_policy_source`: additive source for wallet-extension-source strictness (`production-default` when inherited from production mode with no explicit wallet-source env override).
 - `gpm_auth_verify_command_configured`: whether `GPM_AUTH_VERIFY_COMMAND` is currently configured.
+- `gpm_legacy_env_aliases_active`: additive list of active legacy alias env keys (currently `TDPN_*`) that were actually selected as effective runtime sources.
+- `gpm_legacy_env_aliases_active_count`: additive count of `gpm_legacy_env_aliases_active` (convenience telemetry for lightweight clients).
+- `gpm_legacy_env_alias_warnings`: additive list of deprecation warnings for active legacy aliases.
+- `gpm_legacy_env_aliases_warning`: additive semicolon-joined warning string for simple status banners/log forwarding.
+
+Legacy alias telemetry semantics:
+- Active aliases are only aliases that were effective at runtime. If both primary `GPM_*` and legacy `TDPN_*` are set for the same setting, the primary key wins and the legacy alias is shadowed (not reported as active).
+- Warning fields describe deprecation/migration guidance for active aliases and are empty when no legacy alias is active.
 
 Backward compatibility notes:
 - These mode/source posture keys are additive observability fields; clients must treat them as optional.
+- Legacy alias telemetry fields are additive observability only; clients must treat missing fields as "no telemetry provided" and continue normal operation.
 - Older daemons may return only legacy booleans (`connect_require_session`, `allow_legacy_connect_override`, and auth-verify strictness booleans); clients should continue functioning by deriving posture from those booleans when mode/source keys are absent.
 
 ### `POST /v1/connect`

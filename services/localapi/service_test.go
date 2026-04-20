@@ -563,6 +563,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmAuthVerifyWalletExtSource != "default" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=default", s.gpmAuthVerifyWalletExtSource)
 		}
+		if got := len(s.gpmLegacyEnvAliasesActive); got != 0 {
+			t.Fatalf("gpmLegacyEnvAliasesActive len=%d want=0", got)
+		}
+		if got := len(s.gpmLegacyEnvAliasWarnings); got != 0 {
+			t.Fatalf("gpmLegacyEnvAliasWarnings len=%d want=0", got)
+		}
 	})
 
 	t.Run("overrides and timeout validation", func(t *testing.T) {
@@ -670,6 +676,46 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAuthVerifyWalletExtSource != "TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", s.gpmAuthVerifyWalletExtSource)
+		}
+	})
+
+	t.Run("tdpn aliases are tracked for runtime telemetry", func(t *testing.T) {
+		t.Setenv("GPM_MAIN_DOMAIN", "")
+		t.Setenv("TDPN_MAIN_DOMAIN", "https://legacy-main.example")
+		t.Setenv("GPM_PRODUCTION_MODE", "")
+		t.Setenv("TDPN_PRODUCTION_MODE", "1")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "1")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "1")
+
+		s := New()
+
+		wantAliases := map[string]struct{}{
+			"TDPN_MAIN_DOMAIN":                  {},
+			"TDPN_PRODUCTION_MODE":              {},
+			"TDPN_CONNECT_REQUIRE_SESSION":      {},
+			"TDPN_AUTH_VERIFY_REQUIRE_METADATA": {},
+		}
+		if got, want := len(s.gpmLegacyEnvAliasesActive), len(wantAliases); got != want {
+			t.Fatalf("gpmLegacyEnvAliasesActive len=%d want=%d aliases=%v", got, want, s.gpmLegacyEnvAliasesActive)
+		}
+		for _, alias := range s.gpmLegacyEnvAliasesActive {
+			if _, ok := wantAliases[alias]; !ok {
+				t.Fatalf("unexpected legacy alias tracked: %q all=%v", alias, s.gpmLegacyEnvAliasesActive)
+			}
+			delete(wantAliases, alias)
+		}
+		if len(wantAliases) != 0 {
+			t.Fatalf("missing expected legacy aliases: %v all=%v", wantAliases, s.gpmLegacyEnvAliasesActive)
+		}
+		if got, want := len(s.gpmLegacyEnvAliasWarnings), 4; got != want {
+			t.Fatalf("gpmLegacyEnvAliasWarnings len=%d want=%d warnings=%v", got, want, s.gpmLegacyEnvAliasWarnings)
+		}
+		for _, warning := range s.gpmLegacyEnvAliasWarnings {
+			if !strings.Contains(warning, "is deprecated; migrate to GPM_") {
+				t.Fatalf("unexpected warning format: %q", warning)
+			}
 		}
 	})
 
@@ -1768,6 +1814,14 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyPolicySource = "GPM_PRODUCTION_MODE"
 		svc.gpmAuthVerifyMetadataSource = "production-default"
 		svc.gpmAuthVerifyWalletExtSource = "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE"
+		svc.gpmLegacyEnvAliasesActive = []string{
+			"TDPN_PRODUCTION_MODE",
+			"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
+		}
+		svc.gpmLegacyEnvAliasWarnings = []string{
+			"TDPN_PRODUCTION_MODE is deprecated; migrate to GPM_PRODUCTION_MODE",
+			"TDPN_AUTH_VERIFY_REQUIRE_METADATA is deprecated; migrate to GPM_AUTH_VERIFY_REQUIRE_METADATA",
+		}
 		svc.gpmMainDomain = "https://gpm.example"
 		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
 		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
@@ -1831,6 +1885,41 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["gpm_manifest_cache_max_age_sec"].(float64); int(got) != 7200 {
 			t.Fatalf("gpm_manifest_cache_max_age_sec=%v want=7200", configMap["gpm_manifest_cache_max_age_sec"])
+		}
+		if got, _ := configMap["gpm_legacy_env_aliases_active_count"].(float64); int(got) != 2 {
+			t.Fatalf("gpm_legacy_env_aliases_active_count=%v want=2", configMap["gpm_legacy_env_aliases_active_count"])
+		}
+		activeAliasesRaw, ok := configMap["gpm_legacy_env_aliases_active"].([]any)
+		if !ok {
+			t.Fatalf("gpm_legacy_env_aliases_active missing array: %T %v", configMap["gpm_legacy_env_aliases_active"], configMap["gpm_legacy_env_aliases_active"])
+		}
+		if len(activeAliasesRaw) != 2 {
+			t.Fatalf("gpm_legacy_env_aliases_active len=%d want=2 values=%v", len(activeAliasesRaw), activeAliasesRaw)
+		}
+		gotAliases := map[string]struct{}{}
+		for _, raw := range activeAliasesRaw {
+			value, _ := raw.(string)
+			gotAliases[value] = struct{}{}
+		}
+		if _, ok := gotAliases["TDPN_PRODUCTION_MODE"]; !ok {
+			t.Fatalf("gpm_legacy_env_aliases_active missing TDPN_PRODUCTION_MODE: %v", activeAliasesRaw)
+		}
+		if _, ok := gotAliases["TDPN_AUTH_VERIFY_REQUIRE_METADATA"]; !ok {
+			t.Fatalf("gpm_legacy_env_aliases_active missing TDPN_AUTH_VERIFY_REQUIRE_METADATA: %v", activeAliasesRaw)
+		}
+		warningsRaw, ok := configMap["gpm_legacy_env_alias_warnings"].([]any)
+		if !ok {
+			t.Fatalf("gpm_legacy_env_alias_warnings missing array: %T %v", configMap["gpm_legacy_env_alias_warnings"], configMap["gpm_legacy_env_alias_warnings"])
+		}
+		if len(warningsRaw) != 2 {
+			t.Fatalf("gpm_legacy_env_alias_warnings len=%d want=2 values=%v", len(warningsRaw), warningsRaw)
+		}
+		combinedWarning, _ := configMap["gpm_legacy_env_aliases_warning"].(string)
+		if !strings.Contains(combinedWarning, "TDPN_PRODUCTION_MODE is deprecated; migrate to GPM_PRODUCTION_MODE") {
+			t.Fatalf("gpm_legacy_env_aliases_warning missing production deprecation message: %q", combinedWarning)
+		}
+		if !strings.Contains(combinedWarning, "TDPN_AUTH_VERIFY_REQUIRE_METADATA is deprecated; migrate to GPM_AUTH_VERIFY_REQUIRE_METADATA") {
+			t.Fatalf("gpm_legacy_env_aliases_warning missing metadata deprecation message: %q", combinedWarning)
 		}
 		if got, _ := configMap["command_timeout_sec"].(float64); int(got) != 150 {
 			t.Fatalf("command_timeout_sec=%v want=150", configMap["command_timeout_sec"])

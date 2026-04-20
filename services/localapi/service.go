@@ -90,6 +90,8 @@ type Service struct {
 	gpmAuthVerifyRequireWalletExt bool
 	gpmAuthVerifyMetadataSource   string
 	gpmAuthVerifyWalletExtSource  string
+	gpmLegacyEnvAliasesActive     []string
+	gpmLegacyEnvAliasWarnings     []string
 	gpmAuthSignatureVerifier      gpmAuthSignatureVerifier
 	gpmStateStorePath             string
 	gpmAuditLogPath               string
@@ -188,77 +190,135 @@ func New() *Service {
 	serviceStart := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_SERVICE_START_COMMAND"))
 	serviceStop := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_SERVICE_STOP_COMMAND"))
 	serviceRestart := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND"))
-	gpmMainDomain := preferredEnvValue(
+	legacyEnvAliasSeen := map[string]struct{}{}
+	legacyEnvAliasesActive := make([]string, 0, 8)
+	legacyEnvAliasWarnings := make([]string, 0, 8)
+	noteLegacyAlias := func(primaryKey string, sourceKey string) {
+		if !strings.HasPrefix(sourceKey, "TDPN_") {
+			return
+		}
+		if _, exists := legacyEnvAliasSeen[sourceKey]; exists {
+			return
+		}
+		legacyEnvAliasSeen[sourceKey] = struct{}{}
+		legacyEnvAliasesActive = append(legacyEnvAliasesActive, sourceKey)
+		legacyEnvAliasWarnings = append(
+			legacyEnvAliasWarnings,
+			fmt.Sprintf("%s is deprecated; migrate to %s", sourceKey, primaryKey),
+		)
+	}
+	gpmMainDomainRaw, gpmMainDomainSource, gpmMainDomainSet := preferredEnvValueWithSource(
 		"GPM_MAIN_DOMAIN",
 		"TDPN_MAIN_DOMAIN",
-		"https://bootstrap.globalprivatemesh.invalid",
 	)
-	gpmManifestURL := preferredEnvValue(
+	noteLegacyAlias("GPM_MAIN_DOMAIN", gpmMainDomainSource)
+	gpmMainDomain := gpmMainDomainRaw
+	if !gpmMainDomainSet {
+		gpmMainDomain = "https://bootstrap.globalprivatemesh.invalid"
+	}
+	gpmManifestURLRaw, gpmManifestURLSource, gpmManifestURLSet := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_URL",
 		"TDPN_BOOTSTRAP_MANIFEST_URL",
-		"",
 	)
+	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_URL", gpmManifestURLSource)
+	gpmManifestURL := gpmManifestURLRaw
+	if !gpmManifestURLSet {
+		gpmManifestURL = ""
+	}
 	if gpmManifestURL == "" {
 		gpmManifestURL = strings.TrimRight(gpmMainDomain, "/") + "/v1/bootstrap/manifest"
 	}
-	gpmManifestCache := preferredEnvValue(
+	gpmManifestCacheRaw, gpmManifestCacheSource, gpmManifestCacheSet := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_CACHE_PATH",
 		"TDPN_BOOTSTRAP_MANIFEST_CACHE_PATH",
-		".easy-node-logs/gpm_bootstrap_manifest_cache.json",
 	)
+	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_CACHE_PATH", gpmManifestCacheSource)
+	gpmManifestCache := gpmManifestCacheRaw
+	if !gpmManifestCacheSet {
+		gpmManifestCache = ".easy-node-logs/gpm_bootstrap_manifest_cache.json"
+	}
 	gpmManifestMaxAgeSec := 24 * 60 * 60
-	if raw := preferredEnvValue(
+	if raw, source, set := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC",
 		"TDPN_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC",
-		"",
-	); raw != "" {
+	); set && raw != "" {
+		noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC", source)
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			gpmManifestMaxAgeSec = parsed
 		}
 	}
-	gpmRoleDefault := strings.ToLower(preferredEnvValue(
+	gpmRoleDefaultRaw, gpmRoleDefaultSource, gpmRoleDefaultSet := preferredEnvValueWithSource(
 		"GPM_DEFAULT_ROLE",
 		"TDPN_DEFAULT_ROLE",
-		"client",
-	))
+	)
+	noteLegacyAlias("GPM_DEFAULT_ROLE", gpmRoleDefaultSource)
+	gpmRoleDefault := strings.ToLower(gpmRoleDefaultRaw)
+	if !gpmRoleDefaultSet {
+		gpmRoleDefault = "client"
+	}
 	if gpmRoleDefault != "operator" && gpmRoleDefault != "admin" {
 		gpmRoleDefault = "client"
 	}
-	gpmManifestHMACKey := preferredEnvValue(
+	gpmManifestHMACKeyRaw, gpmManifestHMACKeySource, gpmManifestHMACKeySet := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_HMAC_KEY",
 		"TDPN_BOOTSTRAP_MANIFEST_HMAC_KEY",
-		"",
 	)
-	gpmApprovalToken := firstNonEmpty(
-		strings.TrimSpace(os.Getenv("GPM_APPROVAL_ADMIN_TOKEN")),
-		strings.TrimSpace(os.Getenv("TDPN_APPROVAL_ADMIN_TOKEN")),
-		strings.TrimSpace(os.Getenv("GPM_OPERATOR_APPROVAL_TOKEN")),
-		strings.TrimSpace(os.Getenv("TDPN_OPERATOR_APPROVAL_TOKEN")),
+	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_HMAC_KEY", gpmManifestHMACKeySource)
+	gpmManifestHMACKey := gpmManifestHMACKeyRaw
+	if !gpmManifestHMACKeySet {
+		gpmManifestHMACKey = ""
+	}
+	gpmApprovalAdminToken, gpmApprovalAdminTokenSource, gpmApprovalAdminTokenSet := preferredEnvValueWithSource(
+		"GPM_APPROVAL_ADMIN_TOKEN",
+		"TDPN_APPROVAL_ADMIN_TOKEN",
 	)
-	gpmAuthVerifyCommand := preferredEnvValue(
+	noteLegacyAlias("GPM_APPROVAL_ADMIN_TOKEN", gpmApprovalAdminTokenSource)
+	gpmOperatorApprovalToken, gpmOperatorApprovalTokenSource, gpmOperatorApprovalTokenSet := preferredEnvValueWithSource(
+		"GPM_OPERATOR_APPROVAL_TOKEN",
+		"TDPN_OPERATOR_APPROVAL_TOKEN",
+	)
+	noteLegacyAlias("GPM_OPERATOR_APPROVAL_TOKEN", gpmOperatorApprovalTokenSource)
+	gpmApprovalToken := ""
+	if gpmApprovalAdminTokenSet {
+		gpmApprovalToken = gpmApprovalAdminToken
+	} else if gpmOperatorApprovalTokenSet {
+		gpmApprovalToken = gpmOperatorApprovalToken
+	}
+	gpmAuthVerifyCommandRaw, gpmAuthVerifyCommandSource, gpmAuthVerifyCommandSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_COMMAND",
 		"TDPN_AUTH_VERIFY_COMMAND",
-		"",
 	)
-	gpmAuthVerifyRequireCommand := parseBoolWithDefault(preferredEnvValue(
+	noteLegacyAlias("GPM_AUTH_VERIFY_COMMAND", gpmAuthVerifyCommandSource)
+	gpmAuthVerifyCommand := gpmAuthVerifyCommandRaw
+	if !gpmAuthVerifyCommandSet {
+		gpmAuthVerifyCommand = ""
+	}
+	gpmAuthVerifyRequireCommandRaw, gpmAuthVerifyRequireCommandSource, gpmAuthVerifyRequireCommandSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_COMMAND",
 		"TDPN_AUTH_VERIFY_REQUIRE_COMMAND",
-		"",
-	), false)
+	)
+	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_COMMAND", gpmAuthVerifyRequireCommandSource)
+	gpmAuthVerifyRequireCommand := parseBoolWithDefault(gpmAuthVerifyRequireCommandRaw, false)
+	if !gpmAuthVerifyRequireCommandSet {
+		gpmAuthVerifyRequireCommand = false
+	}
 	gpmAuthVerifyRequireMetadataRaw, gpmAuthVerifyMetadataSource, gpmAuthVerifyRequireMetadataSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_METADATA",
 		"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
 	)
+	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_METADATA", gpmAuthVerifyMetadataSource)
 	gpmAuthVerifyRequireMetadata := parseBoolWithDefault(gpmAuthVerifyRequireMetadataRaw, false)
 	gpmAuthVerifyRequireWalletExtRaw, gpmAuthVerifyWalletExtSource, gpmAuthVerifyRequireWalletExtSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
 		"TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
 	)
+	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", gpmAuthVerifyWalletExtSource)
 	gpmAuthVerifyRequireWalletExt := parseBoolWithDefault(gpmAuthVerifyRequireWalletExtRaw, false)
 	gpmConnectPolicyRaw, gpmConnectPolicySource, gpmConnectPolicySet := preferredEnvValueWithSource(
 		"GPM_PRODUCTION_MODE",
 		"TDPN_PRODUCTION_MODE",
 	)
+	noteLegacyAlias("GPM_PRODUCTION_MODE", gpmConnectPolicySource)
 	gpmConnectPolicyProduction := parseBoolWithDefault(gpmConnectPolicyRaw, false)
 	gpmConnectPolicyMode := "default"
 	if gpmConnectPolicyProduction {
@@ -289,32 +349,42 @@ func New() *Service {
 			gpmAuthVerifyWalletExtSource = "production-default"
 		}
 	}
-	gpmConnectRequireSessionRaw, _, gpmConnectRequireSessionSet := preferredEnvValueWithSource(
+	gpmConnectRequireSessionRaw, gpmConnectRequireSessionSource, gpmConnectRequireSessionSet := preferredEnvValueWithSource(
 		"GPM_CONNECT_REQUIRE_SESSION",
 		"TDPN_CONNECT_REQUIRE_SESSION",
 	)
+	noteLegacyAlias("GPM_CONNECT_REQUIRE_SESSION", gpmConnectRequireSessionSource)
 	gpmConnectRequireSession := parseBoolWithDefault(gpmConnectRequireSessionRaw, false)
 	if !gpmConnectRequireSessionSet && gpmConnectPolicyProduction {
 		gpmConnectRequireSession = true
 	}
-	gpmAllowLegacyConnectOverrideRaw, _, gpmAllowLegacyConnectOverrideSet := preferredEnvValueWithSource(
+	gpmAllowLegacyConnectOverrideRaw, gpmAllowLegacyConnectOverrideSource, gpmAllowLegacyConnectOverrideSet := preferredEnvValueWithSource(
 		"GPM_ALLOW_LEGACY_CONNECT_OVERRIDE",
 		"TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE",
 	)
+	noteLegacyAlias("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", gpmAllowLegacyConnectOverrideSource)
 	gpmAllowLegacyConnectOverride := parseBoolWithDefault(gpmAllowLegacyConnectOverrideRaw, false)
 	if !gpmAllowLegacyConnectOverrideSet && gpmConnectPolicyProduction {
 		gpmAllowLegacyConnectOverride = false
 	}
-	gpmStateStorePath := preferredEnvValue(
+	gpmStateStorePathRaw, gpmStateStorePathSource, gpmStateStorePathSet := preferredEnvValueWithSource(
 		"GPM_STATE_STORE_PATH",
 		"TDPN_STATE_STORE_PATH",
-		".easy-node-logs/gpm_state.json",
 	)
-	gpmAuditLogPath := preferredEnvValue(
+	noteLegacyAlias("GPM_STATE_STORE_PATH", gpmStateStorePathSource)
+	gpmStateStorePath := gpmStateStorePathRaw
+	if !gpmStateStorePathSet {
+		gpmStateStorePath = ".easy-node-logs/gpm_state.json"
+	}
+	gpmAuditLogPathRaw, gpmAuditLogPathSource, gpmAuditLogPathSet := preferredEnvValueWithSource(
 		"GPM_AUDIT_LOG_PATH",
 		"TDPN_AUDIT_LOG_PATH",
-		".easy-node-logs/gpm_audit.jsonl",
 	)
+	noteLegacyAlias("GPM_AUDIT_LOG_PATH", gpmAuditLogPathSource)
+	gpmAuditLogPath := gpmAuditLogPathRaw
+	if !gpmAuditLogPathSet {
+		gpmAuditLogPath = ".easy-node-logs/gpm_audit.jsonl"
+	}
 
 	svc := &Service{
 		addr:                          addr,
@@ -350,6 +420,8 @@ func New() *Service {
 		gpmAuthVerifyRequireWalletExt: gpmAuthVerifyRequireWalletExt,
 		gpmAuthVerifyMetadataSource:   gpmAuthVerifyMetadataSource,
 		gpmAuthVerifyWalletExtSource:  gpmAuthVerifyWalletExtSource,
+		gpmLegacyEnvAliasesActive:     append([]string{}, legacyEnvAliasesActive...),
+		gpmLegacyEnvAliasWarnings:     append([]string{}, legacyEnvAliasWarnings...),
 		gpmAuthSignatureVerifier:      defaultGPMAuthSignatureVerifier,
 		gpmStateStorePath:             strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:               strings.TrimSpace(gpmAuditLogPath),
@@ -508,6 +580,12 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if authVerifyRequireWalletExtSource == "" {
 		authVerifyRequireWalletExtSource = "default"
 	}
+	legacyEnvAliasesActive := append([]string{}, s.gpmLegacyEnvAliasesActive...)
+	legacyEnvAliasWarnings := append([]string{}, s.gpmLegacyEnvAliasWarnings...)
+	legacyEnvAliasWarning := ""
+	if len(legacyEnvAliasWarnings) > 0 {
+		legacyEnvAliasWarning = strings.Join(legacyEnvAliasWarnings, "; ")
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
@@ -528,6 +606,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_manifest_url":                                       strings.TrimSpace(s.gpmManifestURL),
 			"gpm_manifest_cache_path":                                strings.TrimSpace(s.gpmManifestCache),
 			"gpm_manifest_cache_max_age_sec":                         manifestCacheMaxAgeSec,
+			"gpm_legacy_env_aliases_active":                          legacyEnvAliasesActive,
+			"gpm_legacy_env_aliases_active_count":                    len(legacyEnvAliasesActive),
+			"gpm_legacy_env_alias_warnings":                          legacyEnvAliasWarnings,
+			"gpm_legacy_env_aliases_warning":                         legacyEnvAliasWarning,
 			"command_timeout_sec":                                    commandTimeoutSec,
 			"allow_update":                                           s.allowUpdate,
 			"allow_remote":                                           !isLoopbackBindAddr(s.addr),
