@@ -84,7 +84,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`), optional `search` substring filter (`wallet_address`, `chain_operator_id`, `server_label`, `status`, `reason`), optional `limit` (default `100`, clamped `1..500`), and optional cursor pagination via `cursor="<updated_at_utc>|<wallet_address>"`; response includes additive pagination metadata `total`, `has_more`, `next_cursor`, and echoed `request` fields)
-- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when `GPM_APPROVAL_ADMIN_TOKEN` is configured; request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
+- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when an approval admin token env is configured; primary env is `GPM_APPROVAL_ADMIN_TOKEN` (legacy aliases: `TDPN_APPROVAL_ADMIN_TOKEN`, `GPM_OPERATOR_APPROVAL_TOKEN`, `TDPN_OPERATOR_APPROVAL_TOKEN`); request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
 - `GET /v1/gpm/audit/recent` (command-read auth; supports optional `limit` (default `25`, clamped `1..200`), optional `offset` (`>=0`), optional exact case-insensitive `event` filter, optional normalized `wallet_address` filter against `fields.wallet_address`, and optional `order` (`desc|asc`, default `desc`); response includes additive metadata `total`, `count`, `limit`, `offset`, `has_more`, `next_offset`, and echoed `filters`)
 
 ## Authentication
@@ -98,8 +98,8 @@ GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/serv
 - invalid cursor format: `400` (`cursor must be in the format <updated_at_utc>|<wallet_address>`)
 `POST /v1/gpm/onboarding/operator/approve` also requires admin-level authorization:
 - preferred: `session_token` for a valid `admin` session.
-- compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (or legacy alias) when configured.
-- if `GPM_APPROVAL_ADMIN_TOKEN` is unset and no admin session token is provided, approval is rejected.
+- compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (legacy aliases: `TDPN_APPROVAL_ADMIN_TOKEN`, `GPM_OPERATOR_APPROVAL_TOKEN`, `TDPN_OPERATOR_APPROVAL_TOKEN`) when configured.
+- if the approval admin token env is unset and no admin session token is provided, approval is rejected.
 - decision contract hardening:
   - request body fields:
     - `wallet_address` (required)

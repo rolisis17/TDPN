@@ -1564,7 +1564,7 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 	}
 	if !sessionAuth {
 		if strings.TrimSpace(s.gpmApprovalToken) == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "admin session_token is required when GPM_APPROVAL_ADMIN_TOKEN is unset"})
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "admin session_token is required when approval admin token env is unset (GPM_APPROVAL_ADMIN_TOKEN; legacy aliases: TDPN_APPROVAL_ADMIN_TOKEN, GPM_OPERATOR_APPROVAL_TOKEN, TDPN_OPERATOR_APPROVAL_TOKEN)"})
 			return
 		}
 		if subtleEqual(strings.TrimSpace(in.AdminToken), strings.TrimSpace(s.gpmApprovalToken)) == false {

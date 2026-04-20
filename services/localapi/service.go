@@ -223,10 +223,11 @@ func New() *Service {
 		"TDPN_BOOTSTRAP_MANIFEST_HMAC_KEY",
 		"",
 	)
-	gpmApprovalToken := preferredEnvValue(
-		"GPM_OPERATOR_APPROVAL_TOKEN",
-		"TDPN_OPERATOR_APPROVAL_TOKEN",
-		"",
+	gpmApprovalToken := firstNonEmpty(
+		strings.TrimSpace(os.Getenv("GPM_APPROVAL_ADMIN_TOKEN")),
+		strings.TrimSpace(os.Getenv("TDPN_APPROVAL_ADMIN_TOKEN")),
+		strings.TrimSpace(os.Getenv("GPM_OPERATOR_APPROVAL_TOKEN")),
+		strings.TrimSpace(os.Getenv("TDPN_OPERATOR_APPROVAL_TOKEN")),
 	)
 	gpmAuthVerifyCommand := preferredEnvValue(
 		"GPM_AUTH_VERIFY_COMMAND",

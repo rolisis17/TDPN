@@ -641,6 +641,37 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 	})
 
+	t.Run("approval token env aliases honor new-key precedence", func(t *testing.T) {
+		t.Setenv("GPM_APPROVAL_ADMIN_TOKEN", "")
+		t.Setenv("TDPN_APPROVAL_ADMIN_TOKEN", "")
+		t.Setenv("GPM_OPERATOR_APPROVAL_TOKEN", "")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_TOKEN", "")
+
+		s := New()
+		if s.gpmApprovalToken != "" {
+			t.Fatalf("gpmApprovalToken=%q want empty", s.gpmApprovalToken)
+		}
+
+		t.Setenv("GPM_OPERATOR_APPROVAL_TOKEN", "legacy-operator-token")
+		s = New()
+		if s.gpmApprovalToken != "legacy-operator-token" {
+			t.Fatalf("gpmApprovalToken=%q want legacy operator token", s.gpmApprovalToken)
+		}
+
+		t.Setenv("GPM_APPROVAL_ADMIN_TOKEN", "new-admin-token")
+		s = New()
+		if s.gpmApprovalToken != "new-admin-token" {
+			t.Fatalf("gpmApprovalToken=%q want new admin token precedence", s.gpmApprovalToken)
+		}
+
+		t.Setenv("GPM_APPROVAL_ADMIN_TOKEN", "")
+		t.Setenv("TDPN_APPROVAL_ADMIN_TOKEN", "tdpn-admin-token")
+		s = New()
+		if s.gpmApprovalToken != "tdpn-admin-token" {
+			t.Fatalf("gpmApprovalToken=%q want TDPN admin alias", s.gpmApprovalToken)
+		}
+	})
+
 	t.Run("invalid script path fails safe", func(t *testing.T) {
 		t.Setenv("LOCAL_CONTROL_API_SCRIPT", filepath.Join(t.TempDir(), "does-not-exist.sh"))
 		s := New()
