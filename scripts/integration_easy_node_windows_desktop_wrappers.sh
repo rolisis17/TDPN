@@ -35,8 +35,16 @@ PACKAGED_RUN_FAKE="$TMP_DIR/fake_desktop_windows_packaged_run.sh"
 DEV_FAKE="$TMP_DIR/fake_desktop_windows_dev.sh"
 SHELL_FAKE="$TMP_DIR/fake_desktop_windows_shell.sh"
 RELEASE_BUNDLE_FAKE="$TMP_DIR/fake_desktop_windows_release_bundle.sh"
+INSTALLER_FAKE="$TMP_DIR/fake_desktop_windows_installer.sh"
 LOCAL_API_SESSION_FAKE="$TMP_DIR/fake_desktop_windows_local_api_session.sh"
 DOCTOR_PS1="$TMP_DIR/fake_desktop_windows_doctor.ps1"
+WRAPPER_SCOPE_RAW="${EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_SCOPE:-all}"
+WRAPPER_SCOPE="$(printf '%s' "$WRAPPER_SCOPE_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+
+if [[ "$WRAPPER_SCOPE" != "all" && "$WRAPPER_SCOPE" != "installer" ]]; then
+  echo "invalid EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_SCOPE: $WRAPPER_SCOPE_RAW (expected all|installer)"
+  exit 2
+fi
 
 create_fake_wrapper_script() {
   local target_script="$1"
@@ -226,6 +234,7 @@ run_and_assert_wrapper() {
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
     DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
+    DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 
@@ -251,6 +260,7 @@ run_and_assert_windows_platform_command() {
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
     DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
+    DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" --platform windows "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 
@@ -266,6 +276,7 @@ create_fake_wrapper_script "$PACKAGED_RUN_FAKE" "desktop_windows_packaged_run" "
 create_fake_wrapper_script "$DEV_FAKE" "desktop_windows_dev" "FAKE_WINDOWS_DEV_RC"
 create_fake_wrapper_script "$SHELL_FAKE" "desktop_windows_shell" "FAKE_WINDOWS_SHELL_RC"
 create_fake_wrapper_script "$RELEASE_BUNDLE_FAKE" "desktop_windows_release_bundle" "FAKE_WINDOWS_RELEASE_BUNDLE_RC"
+create_fake_wrapper_script "$INSTALLER_FAKE" "desktop_windows_installer" "FAKE_WINDOWS_INSTALLER_RC"
 create_fake_wrapper_script "$LOCAL_API_SESSION_FAKE" "desktop_windows_local_api_session" "FAKE_WINDOWS_LOCAL_API_SESSION_RC"
 cat >"$DOCTOR_PS1" <<'EOF_FAKE_PS1'
 # fake powershell payload; runtime contract only
@@ -281,11 +292,15 @@ assert_help_contains "./scripts/easy_node.sh desktop-windows-packaged-run [deskt
 assert_help_contains "./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]"
 
 echo "[easy-node-windows-desktop-wrappers] forwarding contract"
+if [[ "$WRAPPER_SCOPE" == "all" ]]; then
 run_and_assert_wrapper \
   "desktop-windows-doctor" \
   "desktop_windows_doctor" \
@@ -367,7 +382,46 @@ run_and_assert_wrapper \
   "desktop_windows_local_api_session" \
   "--dry-run" \
   "--sample-flag" "local api session value with spaces"
+fi
 
+run_and_assert_windows_platform_command \
+  "desktop-installer" \
+  "desktop_windows_installer" \
+  "-DryRun" \
+  "--sample-flag" "desktop installer generic windows value with spaces"
+
+run_and_assert_wrapper \
+  "desktop-windows-installer" \
+  "desktop_windows_installer" \
+  "-DryRun" \
+  "--sample-flag" "desktop installer value with spaces"
+
+echo "[easy-node-windows-desktop-wrappers] installer exit semantics contract"
+set +e
+env \
+  EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+  DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_FAKE" \
+  DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_FAKE" \
+  DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT="$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" \
+  DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
+  DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+  DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
+  DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
+  DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
+  DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
+  DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
+  FAKE_WINDOWS_INSTALLER_RC=13 \
+  bash "$SCRIPT_UNDER_TEST" desktop-windows-installer --sample-flag "rc passthrough" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+rc=$?
+set -e
+if [[ "$rc" -ne 13 ]]; then
+  echo "expected easy_node installer wrapper to return fake script exit code 13, got $rc"
+  cat "$STDOUT_OUT"
+  cat "$STDERR_OUT"
+  exit 1
+fi
+
+if [[ "$WRAPPER_SCOPE" == "all" ]]; then
 echo "[easy-node-windows-desktop-wrappers] exit semantics contract"
 set +e
 env \
@@ -380,6 +434,7 @@ env \
   DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
   DESKTOP_WINDOWS_SHELL_SCRIPT="$SHELL_FAKE" \
   DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
+  DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_FAKE" \
   DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
   FAKE_WINDOWS_PACKAGED_RUN_RC=13 \
   bash "$SCRIPT_UNDER_TEST" desktop-windows-packaged-run --sample-flag "rc passthrough" >"$STDOUT_OUT" 2>"$STDERR_OUT"
@@ -415,5 +470,6 @@ assert_runtime_ps1_invocation \
   "$RUNTIME_CAPTURE" \
   "$DOCTOR_PS1" \
   "--sample-flag" "runtime value with spaces"
+fi
 
 echo "easy-node windows desktop wrappers integration check ok"

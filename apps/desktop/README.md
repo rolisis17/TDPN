@@ -442,6 +442,7 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-native-bootstrap --mode run-full --desktop-launch-strategy auto
 ./scripts/easy_node.sh desktop-linux-one-click --install-missing
 ./scripts/easy_node.sh desktop-linux-dev
+./scripts/easy_node.sh desktop-linux-installer --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run --dry-run
 ./scripts/easy_node.sh desktop-linux-packaged-run
 ```
@@ -454,9 +455,18 @@ Optional generic wrapper form (if your branch exposes it):
 
 Equivalent `easy_node.sh` wrapper usage on Windows (scaffold/non-production):
 
+Windows installer helper (scaffold/non-production):
+
+```powershell
+scripts\windows\desktop_installer.ps1 -DryRun
+scripts\windows\desktop_installer.cmd -DryRun
+```
+
 ```powershell
 .\scripts\easy_node.sh desktop-windows-doctor --mode check
 .\scripts\easy_node.sh desktop-windows-dev
+.\scripts\easy_node.sh desktop-windows-installer -DryRun
+.\scripts\easy_node.sh desktop-installer --platform windows -DryRun
 .\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
 ```
 
@@ -466,6 +476,7 @@ Generic desktop `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-doctor [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [...]
+./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
 ```

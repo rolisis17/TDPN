@@ -208,6 +208,9 @@ echo "[ci] easy-node windows gate-wrapper integration"
 echo "[ci] easy-node windows desktop wrappers integration"
 ./scripts/integration_easy_node_windows_desktop_wrappers.sh
 
+echo "[ci] easy-node windows desktop installer wrappers integration"
+EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_SCOPE=installer ./scripts/integration_easy_node_windows_desktop_wrappers.sh
+
 echo "[ci] easy-node desktop wrappers integration"
 ./scripts/integration_easy_node_desktop_wrappers.sh
 

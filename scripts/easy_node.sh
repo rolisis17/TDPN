@@ -240,6 +240,7 @@ Usage:
   ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]
   ./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]
+  ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
@@ -247,6 +248,7 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-linux-dev [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-linux-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
@@ -255,6 +257,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
+  ./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -395,6 +398,7 @@ Usage:
   ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]
   ./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]
+  ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
@@ -402,6 +406,7 @@ Usage:
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-linux-dev [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]
   ./scripts/easy_node.sh desktop-linux-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-linux-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-doctor [desktop_doctor args...]
@@ -410,6 +415,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
+  ./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -8754,6 +8760,11 @@ desktop_linux_release_bundle() {
   run_desktop_wrapper_script "$script" "$@"
 }
 
+desktop_linux_installer() {
+  local script="${DESKTOP_LINUX_INSTALLER_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_installer.sh}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
 desktop_windows_doctor() {
   local script="${DESKTOP_WINDOWS_DOCTOR_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_doctor.ps1}"
   run_desktop_wrapper_script "$script" "$@"
@@ -8786,6 +8797,11 @@ desktop_windows_packaged_run() {
 
 desktop_windows_release_bundle() {
   local script="${DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_release_bundle.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_installer() {
+  local script="${DESKTOP_WINDOWS_INSTALLER_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_installer.ps1}"
   run_desktop_wrapper_script "$script" "$@"
 }
 
@@ -15934,6 +15950,10 @@ main() {
       shift
       desktop_shell "$@"
       ;;
+    desktop-installer)
+      shift
+      desktop_generic_dispatch desktop-installer desktop_linux_installer desktop_windows_installer "$@"
+      ;;
     desktop-packaged-run)
       shift
       desktop_generic_dispatch desktop-packaged-run desktop_linux_packaged_run desktop_windows_packaged_run "$@"
@@ -15961,6 +15981,10 @@ main() {
     desktop-linux-dev)
       shift
       desktop_linux_dev "$@"
+      ;;
+    desktop-linux-installer)
+      shift
+      desktop_linux_installer "$@"
       ;;
     desktop-linux-packaged-run)
       shift
@@ -15993,6 +16017,10 @@ main() {
     desktop-windows-shell)
       shift
       desktop_windows_shell "$@"
+      ;;
+    desktop-windows-installer)
+      shift
+      desktop_windows_installer "$@"
       ;;
     desktop-windows-packaged-run)
       shift

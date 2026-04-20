@@ -97,6 +97,7 @@ run_step "phase-4 windows full parity handoff check integration" ./scripts/integ
 run_step "phase-4 windows full parity handoff run integration" ./scripts/integration_phase4_windows_full_parity_handoff_run.sh
 run_step "easy-node windows gate-wrapper integration" ./scripts/integration_easy_node_windows_gate_wrappers.sh
 run_step "easy-node windows desktop wrappers integration" ./scripts/integration_easy_node_windows_desktop_wrappers.sh
+run_step "easy-node windows desktop installer wrappers integration" env EASY_NODE_WINDOWS_DESKTOP_WRAPPERS_SCOPE=installer ./scripts/integration_easy_node_windows_desktop_wrappers.sh
 run_step "easy-node desktop wrappers integration" ./scripts/integration_easy_node_desktop_wrappers.sh
 run_step "windows desktop doctor guardrails integration" ./scripts/integration_windows_desktop_doctor_guardrails.sh
 run_step "windows desktop native bootstrap guardrails integration" ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
