@@ -239,6 +239,16 @@
             <span id="client_readiness_guidance">Sign in first, then register the client profile.</span>
           </div>
         </div>
+        <div id="bootstrap_trust_status" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Bootstrap trust status</div>
+          <div id="bootstrap_trust_status_line" class="status warn">
+            <strong>Trust state: <span id="bootstrap_trust_state">Unknown</span></strong>
+            <span id="bootstrap_trust_guidance">Fetch manifest to load bootstrap trust details.</span>
+          </div>
+          <p id="bootstrap_trust_summary" class="helper-copy">
+            Source: unknown | Signature: unknown | Expiry: unknown
+          </p>
+        </div>
         <p class="helper-copy">
           The client lane stays visible for every role. If your role is server-only, this banner explains the lock reason and next path.
         </p>

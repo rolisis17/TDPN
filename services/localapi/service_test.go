@@ -7816,6 +7816,151 @@ func TestReadBootstrapManifestCacheRejectsOversizedFile(t *testing.T) {
 	}
 }
 
+func TestGPMBootstrapManifestResponseIncludesTrustTelemetry(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 2 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 15 * time.Minute
+
+	now := time.Now().UTC()
+	manifestGeneratedAt := now.Add(-time.Minute).Format(time.RFC3339)
+	manifestExpiresAt := now.Add(2 * time.Hour).Format(time.RFC3339)
+	bootstrapDirectory := "https://directory.telemetry.globalprivatemesh.example:8081"
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      manifestGeneratedAt,
+			"expires_at_utc":        manifestExpiresAt,
+			"bootstrap_directories": []string{bootstrapDirectory},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+	expectedPinnedHost, err := normalizeHTTPHost(manifestServer.URL)
+	if err != nil {
+		t.Fatalf("normalize manifest server host: %v", err)
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMBootstrapManifest, http.MethodGet, "/v1/gpm/bootstrap/manifest", "")
+	if code != http.StatusOK {
+		t.Fatalf("bootstrap manifest status=%d body=%v", code, payload)
+	}
+
+	if ok, _ := payload["ok"].(bool); !ok {
+		t.Fatalf("ok=%v want=true payload=%v", payload["ok"], payload)
+	}
+	if got, _ := payload["source"].(string); got != "remote" {
+		t.Fatalf("source=%q want=remote payload=%v", got, payload)
+	}
+	if signatureVerified, _ := payload["signature_verified"].(bool); signatureVerified {
+		t.Fatalf("signature_verified=%v want=false payload=%v", signatureVerified, payload)
+	}
+	if got, _ := payload["trust_status"].(string); got != "trusted_remote_compat" {
+		t.Fatalf("trust_status=%q want=trusted_remote_compat payload=%v", got, payload)
+	}
+	if got, _ := payload["manifest_expires_at_utc"].(string); got != manifestExpiresAt {
+		t.Fatalf("manifest_expires_at_utc=%q want=%q payload=%v", got, manifestExpiresAt, payload)
+	}
+	if got, _ := payload["manifest_generated_at_utc"].(string); got != manifestGeneratedAt {
+		t.Fatalf("manifest_generated_at_utc=%q want=%q payload=%v", got, manifestGeneratedAt, payload)
+	}
+	if got, _ := payload["manifest_source_url"].(string); got != manifestServer.URL {
+		t.Fatalf("manifest_source_url=%q want=%q payload=%v", got, manifestServer.URL, payload)
+	}
+	if got, _ := payload["pinned_main_domain_host"].(string); got != expectedPinnedHost {
+		t.Fatalf("pinned_main_domain_host=%q want=%q payload=%v", got, expectedPinnedHost, payload)
+	}
+	if got, _ := payload["signature_required_by_policy"].(bool); got {
+		t.Fatalf("signature_required_by_policy=%v want=false payload=%v", got, payload)
+	}
+	if got, _ := payload["https_required_by_policy"].(bool); got {
+		t.Fatalf("https_required_by_policy=%v want=false payload=%v", got, payload)
+	}
+	if got, _ := payload["cache_max_age_sec"].(float64); got != 7200 {
+		t.Fatalf("cache_max_age_sec=%v want=7200 payload=%v", got, payload)
+	}
+	if got, _ := payload["remote_refresh_interval_sec"].(float64); got != 900 {
+		t.Fatalf("remote_refresh_interval_sec=%v want=900 payload=%v", got, payload)
+	}
+	expiresInSec, _ := payload["manifest_expires_in_sec"].(float64)
+	if expiresInSec <= 0 || expiresInSec > 7200 {
+		t.Fatalf("manifest_expires_in_sec=%v want >0 and <=7200 payload=%v", expiresInSec, payload)
+	}
+	if _, hasWarning := payload["remote_refresh_warning"]; hasWarning {
+		t.Fatalf("remote_refresh_warning should be absent for remote source payload=%v", payload)
+	}
+	manifestPayload, ok := payload["manifest"].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest type=%T want map payload=%v", payload["manifest"], payload)
+	}
+	if gotVersion, _ := manifestPayload["version"].(float64); gotVersion != 1 {
+		t.Fatalf("manifest.version=%v want=1 manifest=%v", gotVersion, manifestPayload)
+	}
+}
+
+func TestGPMBootstrapManifestResponseIncludesRefreshWarningOnCacheFallback(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 30 * time.Second
+
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-2 * time.Minute).Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache-warning.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMBootstrapManifest, http.MethodGet, "/v1/gpm/bootstrap/manifest", "")
+	if code != http.StatusOK {
+		t.Fatalf("bootstrap manifest status=%d body=%v", code, payload)
+	}
+
+	if got, _ := payload["source"].(string); got != "cache" {
+		t.Fatalf("source=%q want=cache payload=%v", got, payload)
+	}
+	if signatureVerified, _ := payload["signature_verified"].(bool); !signatureVerified {
+		t.Fatalf("signature_verified=%v want=true payload=%v", signatureVerified, payload)
+	}
+	if got, _ := payload["trust_status"].(string); got != "trusted_cache" {
+		t.Fatalf("trust_status=%q want=trusted_cache payload=%v", got, payload)
+	}
+	if got, _ := payload["manifest_source_url"].(string); got != manifestServer.URL {
+		t.Fatalf("manifest_source_url=%q want=%q payload=%v", got, manifestServer.URL, payload)
+	}
+	warning, _ := payload["remote_refresh_warning"].(string)
+	if !strings.Contains(warning, "periodic remote refresh failed") {
+		t.Fatalf("remote_refresh_warning=%q want periodic refresh warning payload=%v", warning, payload)
+	}
+	if got, _ := payload["signature_required_by_policy"].(bool); got {
+		t.Fatalf("signature_required_by_policy=%v want=false payload=%v", got, payload)
+	}
+}
+
 func TestGPMClientRegisterUsesPinnedCacheFirstWhenCacheIsFresh(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()

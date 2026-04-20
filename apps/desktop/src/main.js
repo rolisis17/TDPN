@@ -13,6 +13,12 @@ const apiBaseEl = byId("api_base");
 const apiHintsEl = byId("api_hints");
 const legacyAliasRuntimeHintEl = document.getElementById("legacy_alias_runtime_hint");
 const manifestSourceEl = byId("manifest_source");
+const bootstrapTrustCardEl = document.getElementById("bootstrap_trust_card");
+const bootstrapTrustStateEl = document.getElementById("bootstrap_trust_state");
+const bootstrapTrustSourceEl = document.getElementById("bootstrap_trust_source");
+const bootstrapTrustSignatureEl = document.getElementById("bootstrap_trust_signature");
+const bootstrapTrustExpiryEl = document.getElementById("bootstrap_trust_expiry");
+const bootstrapTrustGuidanceEl = document.getElementById("bootstrap_trust_guidance");
 const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
 const walletProviderEl = byId("wallet_provider");
@@ -120,6 +126,17 @@ const REGISTRATION_TRUST_DRIFT_STATUS_FRAGMENTS = Object.freeze([
   "untrust",
   "invalid",
   "mismatch"
+]);
+const BOOTSTRAP_MANIFEST_TRUST_DEGRADED_STATUS_FRAGMENTS = Object.freeze([
+  "degrad",
+  "revok",
+  "invalid",
+  "untrust",
+  "stale",
+  "expired",
+  "fail",
+  "mismatch",
+  "drift"
 ]);
 
 const state = {
@@ -3676,12 +3693,392 @@ function connectPayload() {
   return payload;
 }
 
+function parseEpochMilliseconds(value) {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value <= 0) {
+      return undefined;
+    }
+    if (value > 1e12) {
+      return Math.trunc(value);
+    }
+    return Math.trunc(value * 1000);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    if (/^[0-9]+$/.test(trimmed)) {
+      return parseEpochMilliseconds(Number(trimmed));
+    }
+    const parsed = Date.parse(trimmed);
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed);
+    }
+  }
+  return undefined;
+}
+
+function formatDurationCompact(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return "unknown";
+  }
+  const abs = Math.abs(Math.trunc(seconds));
+  if (abs < 60) {
+    return `${abs}s`;
+  }
+  if (abs < 3600) {
+    return `${Math.floor(abs / 60)}m`;
+  }
+  if (abs < 86400) {
+    return `${Math.floor(abs / 3600)}h`;
+  }
+  return `${Math.floor(abs / 86400)}d`;
+}
+
+function normalizeBootstrapManifestSource(value) {
+  const source = nonEmptyStringOrUndefined(value);
+  if (!source) {
+    return "unknown";
+  }
+  const compact = source.toLowerCase().replace(/[\s-]+/g, "_");
+  if (compact.includes("remote")) {
+    return "remote";
+  }
+  if (compact.includes("cache") || compact.includes("cached") || compact.includes("local")) {
+    return "cache";
+  }
+  return source;
+}
+
+function normalizeManifestSignatureVerified(value) {
+  const direct = toBooleanLike(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const text = nonEmptyStringOrUndefined(value)?.toLowerCase();
+  if (!text) {
+    return undefined;
+  }
+  if (text.includes("unverified") || text.includes("not_verified") || text.includes("invalid") || text.includes("fail")) {
+    return false;
+  }
+  if (text.includes("verified") || text.includes("valid") || text.includes("trusted") || text === "pass") {
+    return true;
+  }
+  return undefined;
+}
+
+function hasBootstrapManifestTrustDegradedFragment(value) {
+  const text = nonEmptyStringOrUndefined(value)?.toLowerCase();
+  if (!text) {
+    return false;
+  }
+  return BOOTSTRAP_MANIFEST_TRUST_DEGRADED_STATUS_FRAGMENTS.some((fragment) => text.includes(fragment));
+}
+
+function isBootstrapManifestPayloadCandidate(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return (
+    Object.prototype.hasOwnProperty.call(value, "bootstrap_directories") ||
+    Object.prototype.hasOwnProperty.call(value, "bootstrapDirectories") ||
+    Object.prototype.hasOwnProperty.call(value, "expires_at_utc") ||
+    Object.prototype.hasOwnProperty.call(value, "expiresAtUtc") ||
+    Object.prototype.hasOwnProperty.call(value, "generated_at_utc") ||
+    Object.prototype.hasOwnProperty.call(value, "generatedAtUtc") ||
+    Object.prototype.hasOwnProperty.call(value, "version")
+  );
+}
+
+function deriveBootstrapManifestTrustTelemetry(result) {
+  const response = result && typeof result === "object" ? result : {};
+  const manifestCandidates = [
+    response?.manifest,
+    response?.bootstrap_manifest,
+    response?.bootstrapManifest,
+    response?.trusted_manifest,
+    response?.trustedManifest,
+    response?.data?.manifest,
+    response?.data?.bootstrap_manifest,
+    response?.data?.bootstrapManifest,
+    response?.result?.manifest,
+    response?.result?.bootstrap_manifest,
+    response?.result?.bootstrapManifest,
+    response
+  ];
+
+  let manifest = null;
+  for (const candidate of manifestCandidates) {
+    if (isBootstrapManifestPayloadCandidate(candidate)) {
+      manifest = candidate;
+      break;
+    }
+  }
+
+  const source = normalizeBootstrapManifestSource(
+    firstDefined(
+      response?.source,
+      response?.manifest_source,
+      response?.manifestSource,
+      response?.trust_source,
+      response?.trustSource,
+      response?.telemetry?.source,
+      response?.trust?.source,
+      manifest?.source,
+      manifest?.manifest_source,
+      manifest?.manifestSource
+    )
+  );
+  const signatureVerified = normalizeManifestSignatureVerified(
+    firstDefined(
+      response?.signature_verified,
+      response?.signatureVerified,
+      response?.manifest_signature_verified,
+      response?.manifestSignatureVerified,
+      response?.trust?.signature_verified,
+      response?.trust?.signatureVerified,
+      response?.telemetry?.signature_verified,
+      response?.telemetry?.signatureVerified,
+      manifest?.signature_verified,
+      manifest?.signatureVerified
+    )
+  );
+  const trustStatus =
+    toDetailText(
+      firstDefined(
+        response?.trust_status,
+        response?.trustStatus,
+        response?.manifest_trust_status,
+        response?.manifestTrustStatus,
+        response?.status,
+        response?.trust?.status,
+        manifest?.trust_status,
+        manifest?.trustStatus
+      )
+    ) || "";
+  const trustReason =
+    toDetailText(
+      firstDefined(
+        response?.trust_reason,
+        response?.trustReason,
+        response?.status_reason,
+        response?.statusReason,
+        response?.degraded_reason,
+        response?.degradedReason,
+        response?.message,
+        response?.warning,
+        response?.warnings,
+        response?.recommendation,
+        response?.guidance,
+        response?.next_action,
+        response?.nextAction,
+        response?.remediation,
+        response?.trust?.reason,
+        manifest?.trust_reason,
+        manifest?.trustReason
+      )
+    ) || "";
+  const explicitDegraded = toBooleanLike(
+    firstDefined(
+      response?.degraded,
+      response?.is_degraded,
+      response?.isDegraded,
+      response?.trust_degraded,
+      response?.trustDegraded,
+      response?.manifest_degraded,
+      response?.manifestDegraded,
+      response?.signature_degraded,
+      response?.signatureDegraded
+    )
+  );
+  const explicitRevoked = toBooleanLike(
+    firstDefined(response?.revoked, response?.is_revoked, response?.isRevoked, response?.trust_revoked, response?.trustRevoked)
+  );
+  const guidanceText =
+    toDetailText(
+      firstDefined(
+        response?.guidance,
+        response?.recommended_action,
+        response?.recommendedAction,
+        response?.next_action,
+        response?.nextAction,
+        response?.remediation,
+        response?.action_hint,
+        response?.actionHint,
+        response?.trust?.guidance
+      )
+    ) || "";
+
+  const expiresAtRaw =
+    toDetailText(
+      firstDefined(
+        manifest?.expires_at_utc,
+        manifest?.expiresAtUtc,
+        manifest?.expires_at,
+        manifest?.expiresAt,
+        response?.expires_at_utc,
+        response?.expiresAtUtc,
+        response?.expires_at,
+        response?.expiresAt,
+        response?.trust?.expires_at_utc,
+        response?.trust?.expiresAtUtc
+      )
+    ) || "";
+  const expiresAtMs = parseEpochMilliseconds(expiresAtRaw);
+  const expiresInRaw = firstDefined(
+    response?.expires_in_sec,
+    response?.expiresInSec,
+    response?.expiry_in_sec,
+    response?.expiryInSec,
+    response?.manifest_expires_in_sec,
+    response?.manifestExpiresInSec,
+    manifest?.expires_in_sec,
+    manifest?.expiresInSec,
+    manifest?.expiry_in_sec,
+    manifest?.expiryInSec
+  );
+  let expiresInSec;
+  if (expiresInRaw !== undefined && expiresInRaw !== null && String(expiresInRaw).trim() !== "") {
+    const parsed = Number(expiresInRaw);
+    if (Number.isFinite(parsed)) {
+      expiresInSec = Math.trunc(parsed);
+    }
+  }
+  if (!Number.isFinite(expiresInSec) && Number.isFinite(expiresAtMs)) {
+    expiresInSec = Math.floor((expiresAtMs - Date.now()) / 1000);
+  }
+  const expired = Number.isFinite(expiresInSec) ? expiresInSec <= 0 : Number.isFinite(expiresAtMs) ? expiresAtMs <= Date.now() : false;
+  const expiringSoon = Number.isFinite(expiresInSec) ? expiresInSec > 0 && expiresInSec <= 900 : false;
+
+  const degradedByStatus = hasBootstrapManifestTrustDegradedFragment(trustStatus) || hasBootstrapManifestTrustDegradedFragment(trustReason);
+  const degraded =
+    explicitRevoked === true ||
+    explicitDegraded === true ||
+    degradedByStatus ||
+    signatureVerified === false ||
+    expired;
+
+  let stateKey = "unknown";
+  if (degraded) {
+    stateKey = "degraded";
+  } else if (expiringSoon) {
+    stateKey = "warning";
+  } else if (signatureVerified === true) {
+    stateKey = "healthy";
+  }
+  const stateLabel =
+    stateKey === "degraded"
+      ? "Degraded"
+      : stateKey === "warning"
+        ? "Warning"
+        : stateKey === "healthy"
+          ? "Healthy"
+          : "Unknown";
+
+  const sourceLabel = source === "remote" ? "remote" : source === "cache" ? "cache" : source || "unknown";
+  const signatureLabel =
+    signatureVerified === true ? "verified" : signatureVerified === false ? "not verified" : "unknown";
+  let expiryLabel = "unknown";
+  if (Number.isFinite(expiresInSec)) {
+    if (expiresInSec <= 0) {
+      expiryLabel = `expired ${formatDurationCompact(expiresInSec)} ago`;
+    } else {
+      const expiresAtLabel = expiresAtRaw || (Number.isFinite(expiresAtMs) ? new Date(expiresAtMs).toISOString() : "");
+      expiryLabel = `in ${formatDurationCompact(expiresInSec)}${expiresAtLabel ? ` (${expiresAtLabel})` : ""}`;
+    }
+  } else if (expiresAtRaw) {
+    expiryLabel = expiresAtRaw;
+  }
+
+  let guidance = guidanceText || trustReason;
+  if (!guidance) {
+    if (signatureVerified === false) {
+      guidance = "Signature verification failed; refresh manifest from a trusted remote source and verify signer policy.";
+    } else if (expired) {
+      guidance = "Manifest is expired; refresh bootstrap manifest before registering or connecting clients.";
+    } else if (degraded) {
+      guidance = "Bootstrap trust is degraded; refresh manifest and re-register client profile.";
+    } else if (expiringSoon) {
+      guidance = "Manifest expires soon; plan a refresh to avoid bootstrap trust drift.";
+    } else {
+      guidance = "Bootstrap trust posture is healthy.";
+    }
+  }
+
+  return {
+    source,
+    sourceLabel,
+    signatureVerified,
+    signatureLabel,
+    trustStatus,
+    trustReason,
+    stateKey,
+    stateLabel,
+    degraded,
+    expiryLabel,
+    guidance
+  };
+}
+
+function renderBootstrapManifestTrustTelemetry(telemetry) {
+  const trust = telemetry && typeof telemetry === "object" ? telemetry : deriveBootstrapManifestTrustTelemetry(null);
+  const sourceLabel = trust.sourceLabel || "unknown";
+  const signatureLabel = trust.signatureLabel || "unknown";
+  const signatureSummary =
+    trust.signatureVerified === true
+      ? "signature verified"
+      : trust.signatureVerified === false
+        ? "signature not verified"
+        : "signature unknown";
+
+  manifestSourceEl.textContent = `Manifest: ${sourceLabel} (${signatureSummary})`;
+
+  if (!bootstrapTrustStateEl || !bootstrapTrustSourceEl || !bootstrapTrustSignatureEl || !bootstrapTrustExpiryEl || !bootstrapTrustGuidanceEl) {
+    return;
+  }
+
+  bootstrapTrustStateEl.textContent = trust.stateLabel || "Unknown";
+  bootstrapTrustSourceEl.textContent = `Source: ${sourceLabel}`;
+  bootstrapTrustSignatureEl.textContent = `Signature: ${signatureLabel}`;
+  bootstrapTrustExpiryEl.textContent = `Expiry: ${trust.expiryLabel || "unknown"}`;
+  bootstrapTrustGuidanceEl.textContent = `Guidance: ${trust.guidance || "Load manifest to evaluate bootstrap trust posture."}`;
+
+  if (bootstrapTrustCardEl) {
+    bootstrapTrustCardEl.dataset.state = trust.stateKey || "unknown";
+  }
+  bootstrapTrustGuidanceEl.classList.toggle("locked", trust.degraded === true);
+}
+
+function renderBootstrapManifestTrustUnavailable(detail) {
+  renderBootstrapManifestTrustTelemetry({
+    source: "unknown",
+    sourceLabel: "unavailable",
+    signatureVerified: undefined,
+    signatureLabel: "unknown",
+    stateKey: "unknown",
+    stateLabel: "Unknown",
+    degraded: false,
+    expiryLabel: "unavailable",
+    guidance: detail || "Manifest lookup is unavailable; retry Manifest and verify local API connectivity."
+  });
+}
+
 async function loadManifest() {
   const result = await call("gpm_manifest", "control_gpm_bootstrap_manifest");
-  state.manifest = result?.manifest || null;
-  const source = result?.source || "unknown";
-  const sig = result?.signature_verified === true ? "signature verified" : "signature not verified";
-  manifestSourceEl.textContent = `Manifest: ${source} (${sig})`;
+  const manifestPayloadCandidates = [result?.manifest, result?.bootstrap_manifest, result?.bootstrapManifest, result];
+  state.manifest = null;
+  for (const candidate of manifestPayloadCandidates) {
+    if (isBootstrapManifestPayloadCandidate(candidate)) {
+      state.manifest = candidate;
+      break;
+    }
+  }
+  renderBootstrapManifestTrustTelemetry(deriveBootstrapManifestTrustTelemetry(result));
   return result;
 }
 
@@ -4427,7 +4824,7 @@ async function init() {
   try {
     await loadManifest();
   } catch {
-    manifestSourceEl.textContent = "Manifest: unavailable";
+    renderBootstrapManifestTrustUnavailable("Manifest lookup failed; use Manifest to retry and confirm trust posture.");
   }
 
   await refreshSessionOnInit();

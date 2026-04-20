@@ -128,6 +128,7 @@ type gpmTrustedBootstrapManifestCache struct {
 	Manifest          gpmBootstrapManifest
 	SignatureVerified bool
 	FetchedAtUTC      time.Time
+	SourceURL         string
 }
 
 type gpmAuthChallengeRequest struct {
@@ -542,17 +543,68 @@ func (s *Service) handleGPMBootstrapManifest(w http.ResponseWriter, r *http.Requ
 	if !s.requireCommandReadAuth(w, r) {
 		return
 	}
-	manifest, source, signatureVerified, err := s.resolveBootstrapManifest(r.Context())
+	manifest, source, signatureVerified, manifestSourceURL, remoteRefreshWarning, err := s.resolveBootstrapManifestWithTelemetry(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                 true,
-		"source":             source,
-		"signature_verified": signatureVerified,
-		"manifest":           manifest,
-	})
+	pinnedHost, pinnedHostErr := s.pinnedGPMMainDomainHost()
+	if pinnedHostErr != nil {
+		pinnedHost = ""
+	}
+	payload := map[string]any{
+		"ok":                           true,
+		"source":                       source,
+		"signature_verified":           signatureVerified,
+		"manifest":                     manifest,
+		"trust_status":                 buildGPMBootstrapManifestTrustStatus(source, signatureVerified),
+		"manifest_expires_at_utc":      strings.TrimSpace(manifest.ExpiresAtUTC),
+		"manifest_expires_in_sec":      secondsUntilRFC3339(manifest.ExpiresAtUTC),
+		"manifest_generated_at_utc":    strings.TrimSpace(manifest.GeneratedAtUTC),
+		"manifest_source_url":          strings.TrimSpace(manifestSourceURL),
+		"pinned_main_domain_host":      strings.TrimSpace(pinnedHost),
+		"signature_required_by_policy": s.gpmManifestRequireSignature,
+		"https_required_by_policy":     s.gpmManifestRequireHTTPS,
+		"cache_max_age_sec":            int64(s.gpmManifestMaxAge / time.Second),
+		"remote_refresh_interval_sec":  int64(s.gpmManifestRemoteRefreshIntvl / time.Second),
+	}
+	if source == "cache" && strings.TrimSpace(remoteRefreshWarning) != "" {
+		payload["remote_refresh_warning"] = strings.TrimSpace(remoteRefreshWarning)
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func buildGPMBootstrapManifestTrustStatus(source string, signatureVerified bool) string {
+	source = strings.TrimSpace(source)
+	switch source {
+	case "cache":
+		if signatureVerified {
+			return "trusted_cache"
+		}
+		return "trusted_cache_compat"
+	case "remote":
+		if signatureVerified {
+			return "trusted_remote"
+		}
+		return "trusted_remote_compat"
+	default:
+		if signatureVerified {
+			return "trusted"
+		}
+		return "trusted_compat"
+	}
+}
+
+func secondsUntilRFC3339(raw string) int64 {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	seconds := int64(time.Until(parsed).Seconds())
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
 }
 
 func (s *Service) handleGPMAuthChallenge(w http.ResponseWriter, r *http.Request) {
@@ -2604,28 +2656,37 @@ func randomBase64URL(byteLen int) (string, error) {
 }
 
 func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapManifest, string, bool, error) {
+	manifest, source, signatureVerified, _, _, err := s.resolveBootstrapManifestWithTelemetry(ctx)
+	return manifest, source, signatureVerified, err
+}
+
+func (s *Service) resolveBootstrapManifestWithTelemetry(ctx context.Context) (gpmBootstrapManifest, string, bool, string, string, error) {
 	manifestURL := strings.TrimSpace(s.gpmManifestURL)
 	// Cache-first policy: use a valid trusted cache artifact when available and only
 	// attempt a bounded remote refresh when cache is missing/stale/invalid.
 	cacheEntry, cacheErr := s.readTrustedBootstrapManifestCache()
 	if cacheErr == nil {
+		cacheSourceURL := strings.TrimSpace(cacheEntry.SourceURL)
+		if cacheSourceURL == "" {
+			cacheSourceURL = manifestURL
+		}
 		if !s.shouldAttemptRemoteManifestRefresh(cacheEntry.FetchedAtUTC) {
-			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, nil
+			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, cacheSourceURL, "", nil
 		}
 		manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifestWithPolicy(ctx, manifestURL)
 		if err != nil {
-			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, nil
+			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, cacheSourceURL, "periodic remote refresh failed; serving last trusted cached manifest", nil
 		}
 		_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
-		return manifest, "remote", signatureVerified, nil
+		return manifest, "remote", signatureVerified, manifestURL, "", nil
 	}
 
 	manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifestWithPolicy(ctx, manifestURL)
 	if err != nil {
-		return gpmBootstrapManifest{}, "", false, fmt.Errorf("manifest cache read failed (%v) and remote manifest refresh failed (%v)", cacheErr, err)
+		return gpmBootstrapManifest{}, "", false, manifestURL, "", fmt.Errorf("manifest cache read failed (%v) and remote manifest refresh failed (%v)", cacheErr, err)
 	}
 	_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
-	return manifest, "remote", signatureVerified, nil
+	return manifest, "remote", signatureVerified, manifestURL, "", nil
 }
 
 func (s *Service) shouldAttemptRemoteManifestRefresh(fetchedAt time.Time) bool {
@@ -2890,6 +2951,7 @@ func (s *Service) readTrustedBootstrapManifestCache() (gpmTrustedBootstrapManife
 		Manifest:          normalizeBootstrapManifest(cache.Manifest),
 		SignatureVerified: signatureVerified,
 		FetchedAtUTC:      fetchedAt,
+		SourceURL:         strings.TrimSpace(cache.SourceURL),
 	}, nil
 }
 

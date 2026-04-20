@@ -24,6 +24,7 @@ Desktop onboarding UX cues:
 - A persistent `Onboarding state` card now shows `Signed out`, `Session active`, `Operator pending`, `Operator approved`, or `Operator rejected`.
 - The card also shows one `Next recommended action` message that follows the flow `challenge -> verify -> register -> operator apply -> await approval`.
 - Server-lane lock hints now include a direct action path and required conditions when server/operator actions are locked.
+- A compact `Bootstrap Trust` card now summarizes `GET /v1/gpm/bootstrap/manifest` posture (source `remote|cache`, signature verification status, expiry timing, and actionable guidance when trust is degraded or data is stale/missing).
 
 What this scaffold does not include yet:
 - production-grade installer/signing/update pipeline

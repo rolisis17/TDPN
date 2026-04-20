@@ -38,6 +38,11 @@ const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
 const clientReadinessStatusEl = byId("client_readiness_status");
 const clientReadinessGuidanceEl = byId("client_readiness_guidance");
+const bootstrapTrustStatusEl = byId("bootstrap_trust_status");
+const bootstrapTrustStatusLineEl = byId("bootstrap_trust_status_line");
+const bootstrapTrustStateEl = byId("bootstrap_trust_state");
+const bootstrapTrustGuidanceEl = byId("bootstrap_trust_guidance");
+const bootstrapTrustSummaryEl = byId("bootstrap_trust_summary");
 const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
 const walletChainIdEl = byId("wallet_chain_id");
 const challengeMessageEl = byId("challenge_message");
@@ -193,6 +198,7 @@ let walletSignatureContext = null;
 let activeWorkspaceTab = "client";
 let connectionState = CONNECTION_DEFAULT_STATE;
 let connectionDetail = CONNECTION_DEFAULT_DETAIL;
+let bootstrapTrustTelemetry = null;
 
 function localStore() {
   try {
@@ -2110,6 +2116,376 @@ function parseConnectionBooleanLike(value) {
   return undefined;
 }
 
+function parseTimestampMs(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const asNumber = Number(normalized);
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    return asNumber > 1e12 ? asNumber : asNumber * 1000;
+  }
+  const parsed = Date.parse(normalized);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return undefined;
+}
+
+function formatDurationCompact(deltaMs) {
+  const totalSeconds = Math.floor(Math.abs(deltaMs) / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const minutesRemainder = totalMinutes % 60;
+    return minutesRemainder > 0 ? `${totalHours}h ${minutesRemainder}m` : `${totalHours}h`;
+  }
+  const totalDays = Math.floor(totalHours / 24);
+  const hoursRemainder = totalHours % 24;
+  return hoursRemainder > 0 ? `${totalDays}d ${hoursRemainder}h` : `${totalDays}d`;
+}
+
+function formatBootstrapManifestExpiryLabel(expiresAtMs) {
+  if (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs) || expiresAtMs <= 0) {
+    return "unknown";
+  }
+  const deltaMs = expiresAtMs - Date.now();
+  const iso = new Date(expiresAtMs).toISOString();
+  if (deltaMs <= 0) {
+    return `expired ${formatDurationCompact(deltaMs)} ago (${iso})`;
+  }
+  return `in ${formatDurationCompact(deltaMs)} (${iso})`;
+}
+
+function normalizeBootstrapManifestSource(value) {
+  const raw = nonEmptyString(value);
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "remote" || normalized === "cache") {
+    return normalized;
+  }
+  return raw;
+}
+
+function formatBootstrapManifestSourceLabel(source) {
+  const normalized = normalizeBootstrapManifestSource(source);
+  if (normalized === "remote") {
+    return "remote";
+  }
+  if (normalized === "cache") {
+    return "cache";
+  }
+  return nonEmptyString(source) || "unknown";
+}
+
+function extractBootstrapTrustTelemetry(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const manifest = readConfigObject(payload, ["manifest"]) || {};
+  const source = normalizeBootstrapManifestSource(
+    firstDefined(
+      payload?.source,
+      payload?.manifest_source,
+      payload?.manifestSource,
+      payload?.telemetry?.source,
+      payload?.trust?.source
+    )
+  );
+  const signatureVerified = firstDefined(
+    parseBooleanLike(payload?.signature_verified),
+    parseBooleanLike(payload?.signatureVerified),
+    parseBooleanLike(payload?.telemetry?.signature_verified),
+    parseBooleanLike(payload?.telemetry?.signatureVerified),
+    parseBooleanLike(payload?.trust?.signature_verified),
+    parseBooleanLike(payload?.trust?.signatureVerified),
+    parseBooleanLike(manifest?.signature_verified),
+    parseBooleanLike(manifest?.signatureVerified)
+  );
+  const expiresAtMs = parseTimestampMs(
+    firstDefined(
+      manifest?.expires_at_utc,
+      manifest?.expiresAtUtc,
+      payload?.expires_at_utc,
+      payload?.expiresAtUtc,
+      payload?.manifest_expires_at_utc,
+      payload?.manifestExpiresAtUtc,
+      payload?.telemetry?.expires_at_utc,
+      payload?.telemetry?.expiresAtUtc
+    )
+  );
+  const generatedAtMs = parseTimestampMs(
+    firstDefined(
+      manifest?.generated_at_utc,
+      manifest?.generatedAtUtc,
+      payload?.generated_at_utc,
+      payload?.generatedAtUtc,
+      payload?.manifest_generated_at_utc,
+      payload?.manifestGeneratedAtUtc,
+      payload?.telemetry?.generated_at_utc,
+      payload?.telemetry?.generatedAtUtc
+    )
+  );
+  const fetchedAtMs = parseTimestampMs(
+    firstDefined(
+      payload?.fetched_at_utc,
+      payload?.fetchedAtUtc,
+      payload?.telemetry?.fetched_at_utc,
+      payload?.telemetry?.fetchedAtUtc,
+      payload?.trust?.fetched_at_utc,
+      payload?.trust?.fetchedAtUtc
+    )
+  );
+  const cacheAgeSec = positiveIntegerOrUndefined(
+    firstDefined(
+      payload?.cache_age_sec,
+      payload?.cacheAgeSec,
+      payload?.telemetry?.cache_age_sec,
+      payload?.telemetry?.cacheAgeSec
+    ),
+    0
+  );
+  const resolvePolicy = nonEmptyString(
+    firstDefined(
+      payload?.resolve_policy,
+      payload?.resolvePolicy,
+      payload?.manifest_resolve_policy,
+      payload?.manifestResolvePolicy,
+      payload?.telemetry?.resolve_policy,
+      payload?.telemetry?.resolvePolicy
+    )
+  );
+  const trustState = nonEmptyString(
+    firstDefined(
+      payload?.trust_state,
+      payload?.trustState,
+      payload?.manifest_trust_state,
+      payload?.manifestTrustState,
+      payload?.trust?.state
+    )
+  );
+  const trustReason = nonEmptyString(
+    firstDefined(
+      payload?.trust_reason,
+      payload?.trustReason,
+      payload?.status_reason,
+      payload?.statusReason,
+      payload?.warning,
+      payload?.telemetry?.trust_reason,
+      payload?.telemetry?.trustReason
+    )
+  );
+  const trustDegraded = firstDefined(
+    parseBooleanLike(payload?.trust_degraded),
+    parseBooleanLike(payload?.trustDegraded),
+    parseBooleanLike(payload?.degraded),
+    parseBooleanLike(payload?.telemetry?.trust_degraded),
+    parseBooleanLike(payload?.telemetry?.trustDegraded),
+    parseBooleanLike(payload?.trust?.degraded)
+  );
+  const warnings = [];
+  for (const candidate of [
+    payload?.warnings,
+    payload?.warning,
+    payload?.manifest_warnings,
+    payload?.manifestWarnings,
+    payload?.telemetry?.warnings,
+    payload?.telemetry?.warning,
+    payload?.trust?.warnings,
+    payload?.trust?.warning
+  ]) {
+    for (const warning of parseNonEmptyStringList(candidate)) {
+      pushUniqueNonEmptyString(warnings, warning);
+    }
+  }
+  if (trustReason) {
+    pushUniqueNonEmptyString(warnings, trustReason);
+  }
+  return {
+    source,
+    signatureVerified,
+    expiresAtMs,
+    generatedAtMs,
+    fetchedAtMs,
+    cacheAgeSec,
+    resolvePolicy,
+    trustState,
+    trustReason,
+    trustDegraded,
+    warnings
+  };
+}
+
+function summarizeBootstrapTrustTelemetry(telemetry) {
+  const sourceLabel = formatBootstrapManifestSourceLabel(telemetry?.source);
+  const signatureLabel =
+    telemetry?.signatureVerified === true
+      ? "verified"
+      : telemetry?.signatureVerified === false
+        ? "not verified"
+        : "unknown";
+  const summaryParts = [
+    `Source: ${sourceLabel}`,
+    `Signature: ${signatureLabel}`,
+    `Expiry: ${formatBootstrapManifestExpiryLabel(telemetry?.expiresAtMs)}`
+  ];
+  if (typeof telemetry?.cacheAgeSec === "number" && Number.isFinite(telemetry.cacheAgeSec)) {
+    summaryParts.push(`Cache age: ${Math.max(0, Math.floor(telemetry.cacheAgeSec))}s`);
+  }
+  if (telemetry?.resolvePolicy) {
+    summaryParts.push(`Policy: ${telemetry.resolvePolicy}`);
+  }
+  return summaryParts.join(" | ");
+}
+
+function classifyBootstrapTrustTelemetry(telemetry) {
+  if (!telemetry) {
+    return {
+      kind: "warn",
+      stateText: "Unknown",
+      guidanceText: "Fetch manifest to load bootstrap trust details.",
+      summaryText: "Source: unknown | Signature: unknown | Expiry: unknown"
+    };
+  }
+  const trustStateKey = (telemetry.trustState || "").toLowerCase();
+  const hasBadTrustState =
+    trustStateKey.includes("degrad") ||
+    trustStateKey.includes("untrust") ||
+    trustStateKey.includes("invalid") ||
+    trustStateKey.includes("revok") ||
+    trustStateKey.includes("stale") ||
+    trustStateKey.includes("expired") ||
+    trustStateKey.includes("fail");
+  const hasWarnings = Array.isArray(telemetry.warnings) && telemetry.warnings.length > 0;
+  const expiresAtMs = telemetry.expiresAtMs;
+  const expiresInMs = typeof expiresAtMs === "number" ? expiresAtMs - Date.now() : undefined;
+  const expiresSoon = typeof expiresInMs === "number" && expiresInMs > 0 && expiresInMs <= 60 * 60 * 1000;
+  let kind = "good";
+  let stateText = "Healthy";
+  let guidanceText = "Manifest trust is healthy for current bootstrap onboarding.";
+  if (typeof expiresInMs === "number" && expiresInMs <= 0) {
+    kind = "bad";
+    stateText = "Expired";
+    guidanceText = "Manifest trust has expired. Fetch manifest again and re-register client before connecting.";
+  } else if (telemetry.trustDegraded === true || hasBadTrustState) {
+    kind = "bad";
+    stateText = "Degraded trust";
+    guidanceText =
+      telemetry.trustReason ||
+      "Bootstrap trust is degraded. Resolve trust warnings before registering or connecting.";
+  } else if (telemetry.signatureVerified === false) {
+    kind = "warn";
+    stateText = "Signature not verified";
+    guidanceText =
+      "Manifest signature verification is not confirmed. Treat bootstrap trust as degraded until verification succeeds.";
+  } else if (telemetry.signatureVerified === undefined) {
+    kind = "warn";
+    stateText = "Signature unknown";
+    guidanceText = "Manifest signature verification status is unavailable. Fetch manifest again to confirm trust.";
+  } else if (hasWarnings || expiresSoon) {
+    kind = "warn";
+    stateText = expiresSoon ? "Expiring soon" : "Warning";
+    guidanceText = expiresSoon
+      ? "Manifest trust expires soon. Refresh manifest and complete registration updates before expiry."
+      : "Manifest trust has warnings. Review warning details before registering or connecting.";
+  } else if (telemetry.source === "cache") {
+    guidanceText =
+      "Using trusted cache fallback. Periodically fetch manifest to confirm remote trust source availability.";
+  } else if (telemetry.source === "remote") {
+    guidanceText = "Using remote manifest source with verified trust state.";
+  }
+  if (hasWarnings) {
+    const warningSummary = telemetry.warnings.slice(0, 2).join(" ");
+    guidanceText = `${guidanceText} ${warningSummary}`;
+  }
+  if (telemetry.generatedAtMs && kind !== "bad") {
+    guidanceText = `${guidanceText} Generated at ${new Date(telemetry.generatedAtMs).toISOString()}.`;
+  }
+  return {
+    kind,
+    stateText,
+    guidanceText,
+    summaryText: summarizeBootstrapTrustTelemetry(telemetry)
+  };
+}
+
+function setBootstrapTrustStatus(kind, stateText, guidanceText, summaryText) {
+  bootstrapTrustStatusEl.dataset.kind = kind || "warn";
+  bootstrapTrustStatusLineEl.classList.remove("good", "warn", "bad");
+  if (kind) {
+    bootstrapTrustStatusLineEl.classList.add(kind);
+  }
+  bootstrapTrustStateEl.textContent = stateText;
+  bootstrapTrustGuidanceEl.textContent = guidanceText;
+  bootstrapTrustSummaryEl.textContent = summaryText;
+}
+
+function applyBootstrapTrustStatusPayload(payload) {
+  const parsedTelemetry = extractBootstrapTrustTelemetry(payload);
+  if (parsedTelemetry) {
+    bootstrapTrustTelemetry = parsedTelemetry;
+  }
+  const classification = classifyBootstrapTrustTelemetry(bootstrapTrustTelemetry);
+  setBootstrapTrustStatus(
+    classification.kind,
+    classification.stateText,
+    classification.guidanceText,
+    classification.summaryText
+  );
+}
+
+function markBootstrapTrustStatusRefreshIssue(error) {
+  const message = nonEmptyString(String(error && error.message ? error.message : error || ""));
+  if (bootstrapTrustTelemetry) {
+    const classified = classifyBootstrapTrustTelemetry(bootstrapTrustTelemetry);
+    const guidance = message
+      ? `${classified.guidanceText} Auto refresh issue: ${message}`
+      : classified.guidanceText;
+    setBootstrapTrustStatus(classified.kind, classified.stateText, guidance, classified.summaryText);
+    return;
+  }
+  const guidance = message
+    ? `Manifest trust could not be loaded automatically. ${message}`
+    : "Manifest trust could not be loaded automatically. Use Fetch Manifest to retry.";
+  setBootstrapTrustStatus("warn", "Unavailable", guidance, "Source: unknown | Signature: unknown | Expiry: unknown");
+}
+
+async function requestBootstrapManifest() {
+  const result = await get("/v1/gpm/bootstrap/manifest");
+  applyBootstrapTrustStatusPayload(result);
+  return result;
+}
+
+async function refreshBootstrapTrustStatusBestEffort(options = {}) {
+  const { quiet = true } = options;
+  try {
+    return await requestBootstrapManifest();
+  } catch (err) {
+    markBootstrapTrustStatusRefreshIssue(err);
+    if (!quiet) {
+      throw err;
+    }
+    return undefined;
+  }
+}
+
 function toDetailText(value) {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
@@ -3505,6 +3881,7 @@ function bindCompatibilityOverrideListeners() {
   });
   byId("api_base").addEventListener("change", () => {
     void refreshConnectPolicyConfigBestEffort({ quiet: true });
+    void refreshBootstrapTrustStatusBestEffort({ quiet: true });
   });
 }
 
@@ -4054,6 +4431,7 @@ async function requestAuthVerify(options = {}) {
   await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
   await refreshServerReadinessStatus({ quiet: true });
+  await refreshBootstrapTrustStatusBestEffort({ quiet: true });
   return result;
 }
 
@@ -4098,6 +4476,7 @@ function applyOnboardingOverviewPayload(payload) {
     byId("role").value = role;
   }
   applyClientRegistrationPayload(payload);
+  applyBootstrapTrustStatusPayload(payload);
   setServerReadiness(parseServerReadiness(payload));
 }
 
@@ -4546,6 +4925,7 @@ byId("session_btn").addEventListener("click", () =>
     await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     await refreshServerReadinessStatus({ quiet: true });
+    await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     persistPortalState();
     return result;
   })
@@ -4560,6 +4940,7 @@ byId("session_rotate_btn").addEventListener("click", () =>
     await refreshClientRegistrationStatus({ quiet: true });
     await refreshOperatorApplicationStatus({ quiet: true });
     await refreshServerReadinessStatus({ quiet: true });
+    await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     persistPortalState();
     return result;
   })
@@ -4576,12 +4957,13 @@ byId("session_revoke_btn").addEventListener("click", () =>
     setSelectedApplicationUpdatedAt("");
     setServerReadiness(null);
     persistPortalState();
+    await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     return result;
   })
 );
 
 byId("manifest_btn").addEventListener("click", () =>
-  run("bootstrap_manifest", async () => get("/v1/gpm/bootstrap/manifest"))
+  run("bootstrap_manifest", requestBootstrapManifest)
 );
 
 byId("audit_recent_btn").addEventListener("click", () =>
@@ -4612,6 +4994,7 @@ byId("register_client_btn").addEventListener("click", () =>
     applySession(result);
     await refreshClientRegistrationStatus({ quiet: true });
     await refreshServerReadinessStatus({ quiet: true });
+    await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     return result;
   })
 );
@@ -4932,6 +5315,7 @@ async function restoreSessionStatusBestEffort() {
     setServerReadiness(null);
     setOperatorApplicationStatus(undefined);
     setSelectedApplicationUpdatedAt("");
+    await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     return;
   }
   setStatus("warn", "Restoring session", "Checking stored session token status.");
@@ -4948,6 +5332,7 @@ async function restoreSessionStatusBestEffort() {
   await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
   await refreshServerReadinessStatus({ quiet: true });
+  await refreshBootstrapTrustStatusBestEffort({ quiet: true });
 }
 
 function initializePortal() {
@@ -4974,6 +5359,7 @@ function initializePortal() {
   refreshLegacyAliasWarningBanner();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
   void refreshConnectPolicyConfigBestEffort({ quiet: true });
+  void refreshBootstrapTrustStatusBestEffort({ quiet: true });
   void restoreSessionStatusBestEffort();
 }
 
