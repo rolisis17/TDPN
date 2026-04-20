@@ -12,12 +12,12 @@ Usage:
 
 Modes:
   check  Report prerequisite tool/native dependency availability (scaffold, non-production).
-  fix    Optionally attempt apt-based remediation for missing tools/native dependencies when --install-missing is provided.
+  fix    Optionally attempt package-manager remediation (apt-get/dnf/pacman/zypper) for missing tools/native dependencies when --install-missing is provided.
 
 Flags:
   --mode check|fix         Explicit mode selector.
-  --install-missing        In fix mode, attempt apt-get install for missing dependencies when apt-get exists.
-  --dry-run                Print intended remediation actions without executing apt commands.
+  --install-missing        In fix mode, attempt package-manager install for missing dependencies when a supported manager exists.
+  --dry-run                Print intended remediation actions without executing package-manager commands.
   --summary-json PATH      Write a summary JSON object to PATH.
   --print-summary-json 0|1 Print summary JSON to stdout (default: 0).
   --help                   Show this help text.
@@ -463,6 +463,43 @@ build_zypper_packages() {
   fi
 }
 
+select_package_manager() {
+  package_manager_selected=""
+  if [[ "$apt_get_available" == "1" ]]; then
+    package_manager_selected="apt-get"
+  elif [[ "$dnf_available" == "1" ]]; then
+    package_manager_selected="dnf"
+  elif [[ "$pacman_available" == "1" ]]; then
+    package_manager_selected="pacman"
+  elif [[ "$zypper_available" == "1" ]]; then
+    package_manager_selected="zypper"
+  fi
+}
+
+build_selected_remediation_packages() {
+  REMEDIATION_PACKAGES=()
+  case "$package_manager_selected" in
+    apt-get)
+      REMEDIATION_PACKAGES=("${APT_PACKAGES[@]}")
+      ;;
+    dnf)
+      build_dnf_packages
+      REMEDIATION_PACKAGES=("${DNF_PACKAGES[@]}")
+      ;;
+    pacman)
+      build_pacman_packages
+      REMEDIATION_PACKAGES=("${PACMAN_PACKAGES[@]}")
+      ;;
+    zypper)
+      build_zypper_packages
+      REMEDIATION_PACKAGES=("${ZYPPER_PACKAGES[@]}")
+      ;;
+    *)
+      REMEDIATION_PACKAGES=()
+      ;;
+  esac
+}
+
 build_recommended_commands() {
   RECOMMENDED_COMMANDS=()
 
@@ -584,6 +621,7 @@ DNF_PACKAGES=()
 PACMAN_PACKAGES=()
 ZYPPER_PACKAGES=()
 RECOMMENDED_COMMANDS=()
+REMEDIATION_PACKAGES=()
 
 install_attempted="0"
 install_completed="0"
@@ -592,6 +630,7 @@ apt_get_available="0"
 dnf_available="0"
 pacman_available="0"
 zypper_available="0"
+package_manager_selected=""
 error_message=""
 exit_code="0"
 
@@ -614,6 +653,8 @@ log "scaffold-only, non-production remediation helper for Linux desktop prerequi
 collect_tool_report
 collect_native_dependency_report
 build_apt_packages
+select_package_manager
+build_selected_remediation_packages
 build_recommended_commands
 
 log "tool report:"
@@ -653,12 +694,14 @@ else
 fi
 
 if [[ "$mode" == "fix" && "$install_missing" == "1" ]]; then
-  if [[ "${#APT_PACKAGES[@]}" -eq 0 ]]; then
+  log "fix mode: selected package manager: ${package_manager_selected:-none}"
+
+  if [[ -z "$package_manager_selected" ]]; then
+    install_skipped_reason="no supported package manager available (apt-get/dnf/pacman/zypper)"
+    log "fix mode: automatic remediation skipped; no supported package manager detected"
+  elif [[ "${#REMEDIATION_PACKAGES[@]}" -eq 0 ]]; then
     install_skipped_reason="nothing to install"
-    log "fix mode: no apt remediation needed"
-  elif [[ "$apt_get_available" != "1" ]]; then
-    install_skipped_reason="apt-get not available"
-    log "fix mode: apt-get not detected; automatic remediation skipped"
+    log "fix mode: no remediation needed for $package_manager_selected"
   else
     install_attempted="1"
 
@@ -668,33 +711,89 @@ if [[ "$mode" == "fix" && "$install_missing" == "1" ]]; then
     elif command -v sudo >/dev/null 2>&1; then
       run_prefix=("sudo")
     else
-      install_skipped_reason="requires root or sudo for apt-get install"
+      install_skipped_reason="requires root or sudo for $package_manager_selected install"
       log "fix mode: remediation requires root privileges or sudo"
       run_prefix=()
     fi
 
     if [[ -z "$install_skipped_reason" ]]; then
       if [[ "$dry_run" == "1" ]]; then
-        log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }apt-get update"
-        log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }apt-get install -y ${APT_PACKAGES[*]}"
+        case "$package_manager_selected" in
+          apt-get)
+            log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }apt-get update"
+            log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }apt-get install -y ${REMEDIATION_PACKAGES[*]}"
+            ;;
+          dnf)
+            log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }dnf install -y ${REMEDIATION_PACKAGES[*]}"
+            ;;
+          pacman)
+            log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }pacman -Sy --needed ${REMEDIATION_PACKAGES[*]}"
+            ;;
+          zypper)
+            log "dry-run: ${run_prefix[*]:+${run_prefix[*]} }zypper install -y ${REMEDIATION_PACKAGES[*]}"
+            ;;
+        esac
+        log "dry-run: no package-manager commands executed (preview only)"
       else
-        log "running apt remediation (scaffold flow): apt-get update"
-        if "${run_prefix[@]}" apt-get update; then
-          log "running apt remediation (scaffold flow): apt-get install -y ${APT_PACKAGES[*]}"
-          if "${run_prefix[@]}" apt-get install -y "${APT_PACKAGES[@]}"; then
-            install_completed="1"
-            log "apt remediation completed"
-            collect_tool_report
-            collect_native_dependency_report
-            build_apt_packages
-            build_recommended_commands
-          else
-            error_message="apt-get install failed during remediation"
+        case "$package_manager_selected" in
+          apt-get)
+            log "running remediation (scaffold flow): apt-get update"
+            if "${run_prefix[@]}" apt-get update; then
+              log "running remediation (scaffold flow): apt-get install -y ${REMEDIATION_PACKAGES[*]}"
+              if "${run_prefix[@]}" apt-get install -y "${REMEDIATION_PACKAGES[@]}"; then
+                install_completed="1"
+                log "apt-get remediation completed"
+              else
+                error_message="apt-get install failed during remediation"
+                exit_code="1"
+              fi
+            else
+              error_message="apt-get update failed during remediation"
+              exit_code="1"
+            fi
+            ;;
+          dnf)
+            log "running remediation (scaffold flow): dnf install -y ${REMEDIATION_PACKAGES[*]}"
+            if "${run_prefix[@]}" dnf install -y "${REMEDIATION_PACKAGES[@]}"; then
+              install_completed="1"
+              log "dnf remediation completed"
+            else
+              error_message="dnf install failed during remediation"
+              exit_code="1"
+            fi
+            ;;
+          pacman)
+            log "running remediation (scaffold flow): pacman -Sy --needed --noconfirm ${REMEDIATION_PACKAGES[*]}"
+            if "${run_prefix[@]}" pacman -Sy --needed --noconfirm "${REMEDIATION_PACKAGES[@]}"; then
+              install_completed="1"
+              log "pacman remediation completed"
+            else
+              error_message="pacman install failed during remediation"
+              exit_code="1"
+            fi
+            ;;
+          zypper)
+            log "running remediation (scaffold flow): zypper install -y --non-interactive ${REMEDIATION_PACKAGES[*]}"
+            if "${run_prefix[@]}" zypper install -y --non-interactive "${REMEDIATION_PACKAGES[@]}"; then
+              install_completed="1"
+              log "zypper remediation completed"
+            else
+              error_message="zypper install failed during remediation"
+              exit_code="1"
+            fi
+            ;;
+          *)
+            error_message="unsupported package manager selected for remediation"
             exit_code="1"
-          fi
-        else
-          error_message="apt-get update failed during remediation"
-          exit_code="1"
+            ;;
+        esac
+
+        if [[ "$install_completed" == "1" ]]; then
+          collect_tool_report
+          collect_native_dependency_report
+          build_apt_packages
+          build_selected_remediation_packages
+          build_recommended_commands
         fi
       fi
     fi
@@ -752,6 +851,7 @@ native_dependency_report_json+=$'\n'"  }"
 missing_tools_json="$(json_array_from_values "${MISSING_TOOLS[@]}")"
 missing_native_dependencies_json="$(json_array_from_values "${MISSING_NATIVE_DEPS[@]}")"
 apt_packages_json="$(json_array_from_values "${APT_PACKAGES[@]}")"
+remediation_packages_json="$(json_array_from_values "${REMEDIATION_PACKAGES[@]}")"
 recommended_commands_json="$(json_array_from_values "${RECOMMENDED_COMMANDS[@]}")"
 
 summary_json_payload=$(
@@ -767,11 +867,13 @@ summary_json_payload=$(
   "install_attempted": $(json_bool "$install_attempted"),
   "install_completed": $(json_bool "$install_completed"),
   "install_skipped_reason": "$(json_escape "$install_skipped_reason")",
+  "package_manager_selected": "$(json_escape "$package_manager_selected")",
   "error": "$(json_escape "$error_message")",
   "notes": "Linux desktop doctor is scaffold-only and non-production.",
   "missing_tools": $missing_tools_json,
   "missing_native_dependencies": $missing_native_dependencies_json,
   "apt_packages": $apt_packages_json,
+  "remediation_packages": $remediation_packages_json,
   "recommended_commands": $recommended_commands_json,
   "tool_report": $tool_report_json,
   "native_dependency_report": $native_dependency_report_json

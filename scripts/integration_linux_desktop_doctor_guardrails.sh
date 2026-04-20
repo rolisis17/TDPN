@@ -26,8 +26,20 @@ if ! grep -qF 'build_recommended_commands()' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing build_recommended_commands marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'select_package_manager()' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing select_package_manager marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'build_selected_remediation_packages()' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing build_selected_remediation_packages marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF 'RECOMMENDED_COMMANDS=()' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing RECOMMENDED_COMMANDS marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'REMEDIATION_PACKAGES=()' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing REMEDIATION_PACKAGES marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
 if ! grep -qF 'recommended_commands_json=' "$SCRIPT_UNDER_TEST"; then
@@ -52,6 +64,14 @@ if ! grep -qF './scripts/linux/desktop_one_click.sh' "$SCRIPT_UNDER_TEST"; then
 fi
 if ! grep -qF 'collect_native_dependency_report()' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing native dependency report marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF '"package_manager_selected": "$(json_escape "$package_manager_selected")"' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing package_manager_selected summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF '"remediation_packages": $remediation_packages_json' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing remediation_packages summary marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
 if ! grep -qF 'missing_native_dependencies' "$SCRIPT_UNDER_TEST"; then
@@ -80,6 +100,26 @@ if ! grep -qF 'libsoup-3.0-dev' "$SCRIPT_UNDER_TEST"; then
 fi
 if ! grep -qF 'libjavascriptcoregtk-4.1-dev' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing javascriptcoregtk native apt hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'fix mode: selected package manager:' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing package-manager selection runtime marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'dnf install -y ${REMEDIATION_PACKAGES[*]}' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing dnf remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'pacman -Sy --needed ${REMEDIATION_PACKAGES[*]}' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing pacman remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'zypper install -y ${REMEDIATION_PACKAGES[*]}' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing zypper remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'dry-run: no package-manager commands executed (preview only)' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing dry-run safe no-execution marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
 
@@ -148,6 +188,16 @@ run_expect_pass \
     --mode fix \
     --install-missing \
     --dry-run
+if ! grep -Fq 'fix mode: selected package manager:' "$TMP_DIR/fix_dry_run_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing package-manager selection output in fix dry-run log"
+  cat "$TMP_DIR/fix_dry_run_pass.log"
+  exit 1
+fi
+if ! grep -Eq 'dry-run: .*apt-get update|dry-run: .*apt-get install -y|dry-run: .*dnf install -y|dry-run: .*pacman -Sy --needed|dry-run: .*zypper install -y|fix mode: no remediation needed for|automatic remediation skipped' "$TMP_DIR/fix_dry_run_pass.log"; then
+  echo "linux desktop doctor guardrails failed: fix dry-run log missing package-manager command preview or explicit no-remediation reason"
+  cat "$TMP_DIR/fix_dry_run_pass.log"
+  exit 1
+fi
 
 echo "[linux-desktop-doctor-guardrails] print-summary-json includes recommended_commands"
 run_expect_pass \
@@ -215,6 +265,16 @@ if ! jq -e '.missing_native_dependencies | type == "array"' "$SUMMARY_JSON" >/de
 fi
 if ! jq -e '.native_dependency_report | type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "linux desktop doctor guardrails failed: summary json missing native_dependency_report object"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.package_manager_selected | type == "string"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing package_manager_selected string"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.remediation_packages | type == "array"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing remediation_packages array"
   cat "$SUMMARY_JSON"
   exit 1
 fi
