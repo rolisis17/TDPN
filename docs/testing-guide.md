@@ -118,6 +118,10 @@ Desktop launcher wrappers:
 ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
 ```
 
+`desktop-install-launch` defaults:
+- auto-adds build-if-missing unless explicitly overridden.
+- applies launch-after-install defaults when installer scripts expose launch flags.
+
 - `--platform auto` is the default and routes to the current host platform.
 - Use `--platform linux` or `--platform windows` for an explicit path.
 - `EASY_NODE_DESKTOP_PLATFORM` overrides host detection for deterministic automation.

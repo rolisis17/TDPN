@@ -697,7 +697,7 @@ Notes:
   - desktop-windows-native-bootstrap-guardrails runs the Windows-native bootstrap guardrail integration contract to verify dry-run mode handling, invalid-mode fail-close behavior, and summary-json output markers before operator-facing runs.
   - desktop-windows-installer-guardrails runs the Windows desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
   - desktop-linux-installer-guardrails runs the Linux desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
-  - desktop-install-launch aliases route to desktop installer flows with launch-after-install defaults when installer scripts support launch flags; older installer scripts still run unchanged for compatibility.
+  - desktop-install-launch aliases route to desktop installer flows with build-if-missing enabled by default and launch-after-install defaults when installer scripts support launch flags; older installer scripts still run unchanged for compatibility.
   - legacy desktop platform aliases (`desktop-linux-*`, `desktop-windows-*`) remain compatible and print migration hints to unified commands; set `EASY_NODE_DESKTOP_SUPPRESS_LEGACY_HINT=1` to suppress hints in scripted environments.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
@@ -8816,16 +8816,36 @@ desktop_installer_launch_after_install_override_provided() {
   return 1
 }
 
+desktop_installer_build_if_missing_override_provided() {
+  local normalized=""
+  local arg=""
+  for arg in "$@"; do
+    normalized="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+      *buildifmissing*|*build-if-missing*|*build_if_missing*)
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  done
+  return 1
+}
+
 desktop_linux_installer_launch() {
   local script="${DESKTOP_LINUX_INSTALLER_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_installer.sh}"
   local -a forwarded=("$@")
   local -a launch_defaults=()
+  local -a build_defaults=()
   if ! desktop_installer_launch_after_install_override_provided "${forwarded[@]}"; then
     if desktop_installer_script_supports_launch_after_install "$script"; then
       launch_defaults=(--launch-after-install 1)
     fi
   fi
-  run_desktop_wrapper_script "$script" "${launch_defaults[@]}" "${forwarded[@]}"
+  if ! desktop_installer_build_if_missing_override_provided "${forwarded[@]}"; then
+    build_defaults=(--build-if-missing)
+  fi
+  run_desktop_wrapper_script "$script" "${build_defaults[@]}" "${launch_defaults[@]}" "${forwarded[@]}"
 }
 
 desktop_linux_installer_guardrails() {
@@ -8882,6 +8902,7 @@ desktop_windows_installer_launch() {
   local script="${DESKTOP_WINDOWS_INSTALLER_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_installer.ps1}"
   local -a forwarded=("$@")
   local -a launch_defaults=()
+  local -a build_defaults=()
   if ! desktop_installer_launch_after_install_override_provided "${forwarded[@]}"; then
     if desktop_installer_script_supports_launch_after_install "$script"; then
       if grep -qiE '\[[[:space:]]*switch[[:space:]]*\][[:space:]]*\$LaunchAfterInstall' "$script"; then
@@ -8893,7 +8914,10 @@ desktop_windows_installer_launch() {
       fi
     fi
   fi
-  run_desktop_wrapper_script "$script" "${launch_defaults[@]}" "${forwarded[@]}"
+  if ! desktop_installer_build_if_missing_override_provided "${forwarded[@]}"; then
+    build_defaults=(-BuildIfMissing)
+  fi
+  run_desktop_wrapper_script "$script" "${build_defaults[@]}" "${launch_defaults[@]}" "${forwarded[@]}"
 }
 
 desktop_windows_local_api_session() {

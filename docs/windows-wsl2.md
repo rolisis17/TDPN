@@ -493,6 +493,10 @@ One-command installer launch aliases:
 - Linux: `./scripts/easy_node.sh desktop-install-launch --platform linux --build-if-missing --install-missing`
 - Windows: `.\scripts\easy_node.sh desktop-install-launch --platform windows -BuildIfMissing -InstallMissing`
 
+Alias defaults:
+- `desktop-install-launch`, `desktop-linux-install-launch`, and `desktop-windows-install-launch` auto-add build-if-missing when not explicitly provided.
+- launch-after-install defaults are applied when the installer script supports launch flags.
+
 Installer summary launch fields:
 - installer summaries include launch-after-install telemetry fields when supported by the installer script (requested/effective launch state and launch command/result metadata).
 

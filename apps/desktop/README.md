@@ -497,6 +497,9 @@ One-command installer launch alias (Linux, scaffold/non-production):
 ./scripts/easy_node.sh desktop-install-launch --platform linux --build-if-missing --install-missing
 ```
 
+Alias defaults:
+- `desktop-install-launch` and `desktop-linux-install-launch` auto-add `--build-if-missing` when not explicitly provided.
+
 Installer summary launch fields:
 - installer summaries include launch-after-install telemetry fields when supported by the installer script (requested/effective launch state and launch command/result metadata).
 
@@ -536,6 +539,10 @@ Generic desktop `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [...]
 ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [...]
 ```
+
+Alias defaults:
+- `desktop-install-launch` and `desktop-windows-install-launch` auto-add build-if-missing when not explicitly provided.
+- launch-after-install defaults are applied when the target installer script exposes launch flags.
 
 Platform routing notes:
 - `--platform auto` is the default and picks the current host platform for the scaffold command.
