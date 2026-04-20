@@ -137,6 +137,48 @@ run_expect_pass \
     -DryRun \
     -DesktopExecutablePath "$FAKE_EXECUTABLE_PATH_PS"
 
+echo "[windows-desktop-packaged-run-guardrails] default auto-install intent keeps doctor in fix mode"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_default_fix" \
+  "\\[desktop-doctor\\][[:space:]]+mode=fix" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+echo "[windows-desktop-packaged-run-guardrails] GPM env disable forces doctor check mode"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_gpm_env_disable_check" \
+  "\\[desktop-doctor\\][[:space:]]+mode=check" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+echo "[windows-desktop-packaged-run-guardrails] GPM env enable keeps doctor fix mode"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_gpm_env_enable_fix" \
+  "\\[desktop-doctor\\][[:space:]]+mode=fix" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+echo "[windows-desktop-packaged-run-guardrails] TDPN legacy alias disable applies when GPM env is unset"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_tdpn_legacy_disable_check" \
+  "\\[desktop-doctor\\][[:space:]]+mode=check" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+echo "[windows-desktop-packaged-run-guardrails] explicit -InstallMissing:\$false overrides env enable and forces check mode"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_explicit_false_beats_env_enable" \
+  "\\[desktop-doctor\\][[:space:]]+mode=check" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing:\$false"
+
+echo "[windows-desktop-packaged-run-guardrails] explicit -InstallMissing overrides env disable and forces fix mode"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_explicit_true_beats_env_disable" \
+  "\\[desktop-doctor\\][[:space:]]+mode=fix" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing"
+
 GPM_DESKTOP_PACKAGED_EXE_WAS_SET="0"
 GPM_DESKTOP_PACKAGED_EXE_ORIGINAL=""
 if [[ "${GPM_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
