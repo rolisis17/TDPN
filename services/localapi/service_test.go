@@ -1506,6 +1506,8 @@ func TestHandleConfig(t *testing.T) {
 		svc.authToken = "cfg-secret"
 		svc.gpmConnectRequireSession = true
 		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmAuthVerifyRequireCommand = true
+		svc.gpmAuthVerifyCommand = lifecycleSuccessCommand("verify-ok")
 		svc.gpmMainDomain = "https://gpm.example"
 		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
 		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
@@ -1527,6 +1529,12 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["allow_legacy_connect_override"].(bool); !got {
 			t.Fatalf("allow_legacy_connect_override=%v want=true", configMap["allow_legacy_connect_override"])
+		}
+		if got, _ := configMap["gpm_auth_verify_require_command"].(bool); !got {
+			t.Fatalf("gpm_auth_verify_require_command=%v want=true", configMap["gpm_auth_verify_require_command"])
+		}
+		if got, _ := configMap["gpm_auth_verify_command_configured"].(bool); !got {
+			t.Fatalf("gpm_auth_verify_command_configured=%v want=true", configMap["gpm_auth_verify_command_configured"])
 		}
 		if got, _ := configMap["gpm_main_domain"].(string); got != "https://gpm.example" {
 			t.Fatalf("gpm_main_domain=%q want=%q", got, "https://gpm.example")
@@ -3103,6 +3111,7 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAllowsValidSignature(t *testing.T
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyRequireCommand = true
 	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature("signed-proof-value", "bad-signature", 11)
 
 	challengeBody := `{"wallet_address":"cosmos1cmdallow","wallet_provider":"keplr"}`
@@ -3122,6 +3131,37 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAllowsValidSignature(t *testing.T
 	}
 	if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
 		t.Fatalf("session_token missing payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyStrictModeRequiresConfiguredVerifierCommand(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyRequireCommand = true
+	svc.gpmAuthVerifyCommand = ""
+
+	challengeBody := `{"wallet_address":"cosmos1cmdstrictmissing","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	if strings.TrimSpace(challengeID) == "" {
+		t.Fatalf("challenge_id missing: %v", payload)
+	}
+
+	verifyBody := `{"wallet_address":"cosmos1cmdstrictmissing","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "signature verifier command is required by policy") {
+		t.Fatalf("error=%q want strict-policy message payload=%v", errMsg, payload)
+	}
+	if _, ok := payload["session_token"]; ok {
+		t.Fatalf("session_token unexpectedly present payload=%v", payload)
 	}
 }
 

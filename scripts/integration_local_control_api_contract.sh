@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 GPM_API_FILE="services/localapi/gpm_api.go"
+LOCAL_API_SERVICE_FILE="services/localapi/service.go"
 
 for cmd in go curl jq mktemp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -192,6 +193,15 @@ require_gpm_api_marker() {
   fi
 }
 
+require_localapi_service_marker() {
+  local pattern="$1"
+  local description="$2"
+  if ! grep -qE "$pattern" "$LOCAL_API_SERVICE_FILE"; then
+    echo "local control API contract failed: missing ${description} marker /${pattern}/ in $LOCAL_API_SERVICE_FILE"
+    exit 1
+  fi
+}
+
 api_get() {
   local path="$1"
   curl -fsS -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" "${LOCAL_API_BASE}${path}"
@@ -205,6 +215,10 @@ api_post_json() {
 
 if [[ ! -f "$GPM_API_FILE" ]]; then
   echo "local control API contract failed: missing source file: $GPM_API_FILE"
+  exit 1
+fi
+if [[ ! -f "$LOCAL_API_SERVICE_FILE" ]]; then
+  echo "local control API contract failed: missing source file: $LOCAL_API_SERVICE_FILE"
   exit 1
 fi
 
@@ -261,6 +275,28 @@ for marker in "${VERIFY_METADATA_ENV_MARKERS[@]}"; do
   require_gpm_api_marker "$marker" "verifier metadata env propagation"
 done
 echo "[local-control-api-contract] gpm auth verify metadata markers in source are present"
+
+# Strict verifier-command policy must be wired end-to-end:
+# - env parsing for strict policy toggle
+# - /v1/config policy/configured surface
+# - fail-closed policy check in verify path
+STRICT_VERIFY_POLICY_SERVICE_MARKERS=(
+  '"GPM_AUTH_VERIFY_REQUIRE_COMMAND",[[:space:]]*$'
+  '"TDPN_AUTH_VERIFY_REQUIRE_COMMAND",[[:space:]]*$'
+  '"gpm_auth_verify_require_command":[[:space:]]*s\.gpmAuthVerifyRequireCommand'
+  '"gpm_auth_verify_command_configured":[[:space:]]*strings\.TrimSpace\(s\.gpmAuthVerifyCommand\)[[:space:]]*!=[[:space:]]*""'
+)
+for marker in "${STRICT_VERIFY_POLICY_SERVICE_MARKERS[@]}"; do
+  require_localapi_service_marker "$marker" "strict verifier-command policy service wiring"
+done
+STRICT_VERIFY_POLICY_GPM_MARKERS=(
+  'if[[:space:]]+s\.gpmAuthVerifyRequireCommand[[:space:]]+&&[[:space:]]+strings\.TrimSpace\(s\.gpmAuthVerifyCommand\)[[:space:]]*==[[:space:]]*""[[:space:]]*\{'
+  'signature verifier command is required by policy'
+)
+for marker in "${STRICT_VERIFY_POLICY_GPM_MARKERS[@]}"; do
+  require_gpm_api_marker "$marker" "strict verifier-command policy fail-closed check"
+done
+echo "[local-control-api-contract] strict verifier-command policy markers in source are present"
 
 echo "[local-control-api-contract] start local API (update disabled)"
 start_local_api 0

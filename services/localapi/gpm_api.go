@@ -1605,6 +1605,9 @@ func (s *Service) verifyGPMAuthSignature(ctx context.Context, challenge gpmWalle
 	if err := verifier(challenge, walletAddress, walletProvider, signature); err != nil {
 		return err
 	}
+	if s.gpmAuthVerifyRequireCommand && strings.TrimSpace(s.gpmAuthVerifyCommand) == "" {
+		return errors.New("signature verifier command is required by policy")
+	}
 	if err := s.runGPMAuthVerifierCommand(ctx, challenge, walletAddress, walletProvider, signature, signatureMetadata); err != nil {
 		return err
 	}
