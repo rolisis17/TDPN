@@ -62,6 +62,30 @@ if ! grep -qF './scripts/linux/desktop_one_click.sh' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing one-click remediation command marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -Eq 'TOOLS=\([^)]*\bjq\b' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing jq in TOOLS marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if [[ "$(grep -cF 'tool_is_missing "jq"' "$SCRIPT_UNDER_TEST")" -lt 4 ]]; then
+  echo "linux desktop doctor guardrails failed: expected jq missing-tool checks for apt/dnf/pacman/zypper in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'APT_PACKAGES+=("jq")' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing apt jq remediation package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'DNF_PACKAGES+=("jq")' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing dnf jq remediation package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'PACMAN_PACKAGES+=("jq")' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing pacman jq remediation package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'ZYPPER_PACKAGES+=("jq")' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing zypper jq remediation package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF 'collect_native_dependency_report()' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing native dependency report marker in $SCRIPT_UNDER_TEST"
   exit 1
@@ -180,6 +204,11 @@ if ! grep -Fq './scripts/linux/desktop_one_click.sh' "$TMP_DIR/check_dry_run_pas
   cat "$TMP_DIR/check_dry_run_pass.log"
   exit 1
 fi
+if ! grep -Eq '  - jq: ' "$TMP_DIR/check_dry_run_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing jq tool report line in check dry-run log"
+  cat "$TMP_DIR/check_dry_run_pass.log"
+  exit 1
+fi
 
 echo "[linux-desktop-doctor-guardrails] fix dry-run passes"
 run_expect_pass \
@@ -209,6 +238,11 @@ run_expect_pass \
 
 if ! grep -Fq '"recommended_commands"' "$TMP_DIR/print_summary_json_pass.log"; then
   echo "linux desktop doctor guardrails failed: missing recommended_commands in print-summary-json output"
+  cat "$TMP_DIR/print_summary_json_pass.log"
+  exit 1
+fi
+if ! grep -Fq '"missing_tools"' "$TMP_DIR/print_summary_json_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing missing_tools in print-summary-json output"
   cat "$TMP_DIR/print_summary_json_pass.log"
   exit 1
 fi
@@ -258,6 +292,11 @@ if ! jq -e '.recommended_commands | map(test("desktop_one_click\\.sh")) | any' "
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '.missing_tools | type == "array"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing missing_tools array"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! jq -e '.missing_native_dependencies | type == "array"' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "linux desktop doctor guardrails failed: summary json missing missing_native_dependencies array"
   cat "$SUMMARY_JSON"
@@ -277,6 +316,41 @@ if ! jq -e '.remediation_packages | type == "array"' "$SUMMARY_JSON" >/dev/null 
   echo "linux desktop doctor guardrails failed: summary json missing remediation_packages array"
   cat "$SUMMARY_JSON"
   exit 1
+fi
+if ! jq -e '.tool_report.jq | type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing tool_report.jq object"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.tool_report.jq.found | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing tool_report.jq.found boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.tool_report.jq.path | type == "string"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing tool_report.jq.path string"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if jq -e '.missing_tools | index("jq") != null' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  if ! jq -e '.apt_packages | index("jq") != null' "$SUMMARY_JSON" >/dev/null 2>&1; then
+    echo "linux desktop doctor guardrails failed: jq missing but apt_packages does not include jq"
+    cat "$SUMMARY_JSON"
+    exit 1
+  fi
+  if jq -e '.package_manager_selected == ""' "$SUMMARY_JSON" >/dev/null 2>&1; then
+    if ! jq -e '.recommended_commands | map(test("jq")) | any' "$SUMMARY_JSON" >/dev/null 2>&1; then
+      echo "linux desktop doctor guardrails failed: jq missing with no selected package manager but recommended_commands does not mention jq"
+      cat "$SUMMARY_JSON"
+      exit 1
+    fi
+  else
+    if ! jq -e '.remediation_packages | index("jq") != null' "$SUMMARY_JSON" >/dev/null 2>&1; then
+      echo "linux desktop doctor guardrails failed: jq missing but remediation_packages does not include jq"
+      cat "$SUMMARY_JSON"
+      exit 1
+    fi
+  fi
 fi
 
 echo "[linux-desktop-doctor-guardrails] invalid mode fails with expected message"

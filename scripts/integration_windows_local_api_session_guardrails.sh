@@ -59,14 +59,18 @@ assert_marker_present "-File \"%PS1%\"" "$LOCAL_API_SESSION_CMD"
 
 echo "[windows-local-api-session-guardrails] marker checks: powershell script go/runtime guidance"
 assert_marker_present "function Resolve-GoExecutable" "$LOCAL_API_SESSION_PS1"
+assert_marker_present "function Resolve-JqExecutable" "$LOCAL_API_SESSION_PS1"
 assert_marker_present '[switch]$InstallMissing' "$LOCAL_API_SESSION_PS1"
 assert_marker_present "winget install --id GoLang.Go --exact" "$LOCAL_API_SESSION_PS1"
+assert_marker_present "winget install --id jqlang.jq --exact" "$LOCAL_API_SESSION_PS1"
 assert_marker_present "Invoke-WingetInstallGo" "$LOCAL_API_SESSION_PS1"
+assert_marker_present "Invoke-WingetInstallJq" "$LOCAL_API_SESSION_PS1"
 assert_marker_present "Refresh-ProcessPath" "$LOCAL_API_SESSION_PS1"
 assert_marker_present '$goArgs = @("run", "./cmd/node")' "$LOCAL_API_SESSION_PS1"
 assert_marker_present '$goArgs += @("--local-api")' "$LOCAL_API_SESSION_PS1"
 assert_marker_present 'Write-Host "  command: go ' "$LOCAL_API_SESSION_PS1"
 assert_marker_present 'Write-Host "  install_missing: $installMissingEnabled"' "$LOCAL_API_SESSION_PS1"
+assert_marker_present 'Write-Host "  jq_preflight: enabled"' "$LOCAL_API_SESSION_PS1"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -147,6 +151,7 @@ run_ps1_dry_run_check() {
     "local-api-session (windows-native):" \
     "command: go run ./cmd/node --local-api" \
     "install_missing: $expected_install_missing" \
+    "jq_preflight: enabled" \
     "local-api-session dry-run: command not executed"
   do
     if ! grep -Fq -- "$marker" "$log_path"; then

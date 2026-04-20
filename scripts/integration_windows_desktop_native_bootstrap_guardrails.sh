@@ -37,6 +37,8 @@ assert_marker_present "GPM_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
 assert_marker_present "TDPN_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Microsoft.VisualStudio.2022.BuildTools" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Microsoft.WindowsSDK.10.0" "$SCRIPT_UNDER_TEST"
+assert_marker_present "jqlang.jq" "$SCRIPT_UNDER_TEST"
+assert_marker_present "jq: " "$SCRIPT_UNDER_TEST"
 if grep -qF '"Microsoft.WindowsSDK.10.0" { return "" }' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop native bootstrap guardrails failed: Windows SDK must not be hard-skipped from winget remediation"
   exit 1
@@ -60,6 +62,10 @@ elif command -v powershell.exe >/dev/null 2>&1; then
 else
   echo "windows desktop native bootstrap guardrails failed: missing powershell/pwsh/powershell.exe"
   exit 2
+fi
+POWERSHELL_BIN_PATH="$(command -v "$POWERSHELL_BIN" 2>/dev/null || true)"
+if [[ -z "$POWERSHELL_BIN_PATH" ]]; then
+  POWERSHELL_BIN_PATH="$POWERSHELL_BIN"
 fi
 
 POWERSHELL_USES_WINDOWS_PATHS="0"
@@ -187,10 +193,39 @@ assert_summary_recommended_commands() {
   local json_path_ps
   json_path_ps="$(to_powershell_path "$json_path")"
   local log_path="$TMP_DIR/assert_recommended_${context_label}.log"
-  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'recommended_commands')) { throw 'recommended_commands field missing' }; if (\$null -eq \$summary.recommended_commands) { throw 'recommended_commands is null' }; \$recommended = @(\$summary.recommended_commands); if (\$recommended.Count -lt 3) { throw 'recommended_commands is unexpectedly short' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force*' })) { throw 'missing execution-policy recommendation' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*desktop_native_bootstrap.ps1*' })) { throw 'missing bootstrap rerun recommendation' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*-InstallMissing*' })) { throw 'missing -InstallMissing recommendation' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*desktop_one_click.ps1*' })) { throw 'missing desktop_one_click recommendation' }; \$missing = @(); if (\$summary.PSObject.Properties.Name -contains 'missing_package_ids' -and \$null -ne \$summary.missing_package_ids) { \$missing = @(\$summary.missing_package_ids) }; if (\$missing.Count -gt 0) { if (-not (\$recommended | Where-Object { \$_.ToString() -like '*winget install --id*' })) { throw 'missing winget remediation recommendation when packages are missing' } }; if (\$missing -contains 'Microsoft.WindowsSDK.10.0') { if (-not (\$recommended | Where-Object { \$_.ToString() -like '*winget install --id Microsoft.WindowsSDK.10.0 --exact*' })) { throw 'missing Windows SDK winget remediation recommendation when Windows SDK is missing' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*windows-sdk*' })) { throw 'missing Windows SDK fallback guidance link when Windows SDK is missing' } }" >"$log_path" 2>&1; then
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'recommended_commands')) { throw 'recommended_commands field missing' }; if (\$null -eq \$summary.recommended_commands) { throw 'recommended_commands is null' }; \$recommended = @(\$summary.recommended_commands); if (\$recommended.Count -lt 3) { throw 'recommended_commands is unexpectedly short' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force*' })) { throw 'missing execution-policy recommendation' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*desktop_native_bootstrap.ps1*' })) { throw 'missing bootstrap rerun recommendation' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*-InstallMissing*' })) { throw 'missing -InstallMissing recommendation' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*desktop_one_click.ps1*' })) { throw 'missing desktop_one_click recommendation' }; \$missing = @(); if (\$summary.PSObject.Properties.Name -contains 'missing_package_ids' -and \$null -ne \$summary.missing_package_ids) { \$missing = @(\$summary.missing_package_ids) }; if (\$missing.Count -gt 0) { if (-not (\$recommended | Where-Object { \$_.ToString() -like '*winget install --id*' })) { throw 'missing winget remediation recommendation when packages are missing' } }; if (\$missing -contains 'Microsoft.WindowsSDK.10.0') { if (-not (\$recommended | Where-Object { \$_.ToString() -like '*winget install --id Microsoft.WindowsSDK.10.0 --exact*' })) { throw 'missing Windows SDK winget remediation recommendation when Windows SDK is missing' }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*windows-sdk*' })) { throw 'missing Windows SDK fallback guidance link when Windows SDK is missing' } }; if (\$missing -contains 'jqlang.jq') { if (-not (\$recommended | Where-Object { \$_.ToString() -like '*winget install --id jqlang.jq --exact*' })) { throw 'missing jq winget remediation recommendation when jq is missing' } }" >"$log_path" 2>&1; then
     return 0
   fi
   echo "windows desktop native bootstrap guardrails failed: recommended_commands assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
+assert_summary_jq_missing_remediation() {
+  local json_path="$1"
+  local context_label="$2"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  local log_path="$TMP_DIR/assert_jq_missing_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; \$missing = @(); if (\$summary.PSObject.Properties.Name -contains 'missing_package_ids' -and \$null -ne \$summary.missing_package_ids) { \$missing = @(\$summary.missing_package_ids) }; if (-not (\$missing -contains 'jqlang.jq')) { throw 'expected jqlang.jq in missing_package_ids for jq-missing scenario' }; \$recommended = @(); if (\$summary.PSObject.Properties.Name -contains 'recommended_commands' -and \$null -ne \$summary.recommended_commands) { \$recommended = @(\$summary.recommended_commands) }; if (-not (\$recommended | Where-Object { \$_.ToString() -like '*winget install --id jqlang.jq --exact*' })) { throw 'missing jq winget remediation recommendation when jq is missing' }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: jq remediation assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
+assert_summary_missing_package_absent() {
+  local json_path="$1"
+  local context_label="$2"
+  local package_id="$3"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  local log_path="$TMP_DIR/assert_missing_absent_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; \$missing = @(); if (\$summary.PSObject.Properties.Name -contains 'missing_package_ids' -and \$null -ne \$summary.missing_package_ids) { \$missing = @(\$summary.missing_package_ids) }; if (\$missing -contains $(ps_single_quote "$package_id")) { throw ('unexpected package id in missing_package_ids: {0}' -f $(ps_single_quote "$package_id")) }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: missing-package absence assertion failed for $context_label"
   cat "$log_path"
   exit 1
 }
@@ -230,7 +265,8 @@ assert_summary_desktop_resolution() {
 }
 
 FAKE_TOOL_DIR="$TMP_DIR/fake-tools"
-mkdir -p "$FAKE_TOOL_DIR"
+FAKE_TOOL_DIR_NO_JQ="$TMP_DIR/fake-tools-no-jq"
+mkdir -p "$FAKE_TOOL_DIR" "$FAKE_TOOL_DIR_NO_JQ"
 
 FAKE_GO="$FAKE_TOOL_DIR/go"
 cat >"$FAKE_GO" <<'EOF_FAKE_GO'
@@ -246,7 +282,29 @@ exit 0
 EOF_FAKE_GIT_BASH
 chmod +x "$FAKE_GIT_BASH"
 
+FAKE_JQ="$FAKE_TOOL_DIR/jq"
+cat >"$FAKE_JQ" <<'EOF_FAKE_JQ'
+#!/usr/bin/env bash
+exit 0
+EOF_FAKE_JQ
+chmod +x "$FAKE_JQ"
+
+FAKE_GO_NO_JQ="$FAKE_TOOL_DIR_NO_JQ/go"
+cat >"$FAKE_GO_NO_JQ" <<'EOF_FAKE_GO_NO_JQ'
+#!/usr/bin/env bash
+exit 0
+EOF_FAKE_GO_NO_JQ
+chmod +x "$FAKE_GO_NO_JQ"
+
+FAKE_GIT_BASH_NO_JQ="$FAKE_TOOL_DIR_NO_JQ/bash.exe"
+cat >"$FAKE_GIT_BASH_NO_JQ" <<'EOF_FAKE_GIT_BASH_NO_JQ'
+#!/usr/bin/env bash
+exit 0
+EOF_FAKE_GIT_BASH_NO_JQ
+chmod +x "$FAKE_GIT_BASH_NO_JQ"
+
 FAKE_GIT_BASH_PS="$(to_powershell_path "$FAKE_GIT_BASH")"
+FAKE_GIT_BASH_NO_JQ_PS="$(to_powershell_path "$FAKE_GIT_BASH_NO_JQ")"
 
 FAKE_DESKTOP_EXE="$TMP_DIR/fake-desktop.exe"
 printf '%s\n' "placeholder desktop executable used by dry-run integration guardrails" >"$FAKE_DESKTOP_EXE"
@@ -268,7 +326,14 @@ run_ps_with_fake_prereqs() {
   env \
     PATH="$FAKE_TOOL_DIR:$PATH" \
     LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_PS" \
-    "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" "$@"
+    "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" -SkipPathRefresh "$@"
+}
+
+run_ps_with_fake_prereqs_no_jq() {
+  env \
+    PATH="$FAKE_TOOL_DIR_NO_JQ" \
+    LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_NO_JQ_PS" \
+    "$POWERSHELL_BIN_PATH" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" -SkipPathRefresh "$@"
 }
 
 echo "[windows-desktop-native-bootstrap-guardrails] check --dry-run passes"
@@ -280,19 +345,21 @@ run_expect_pass \
     -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
     -DryRun
 
-echo "[windows-desktop-native-bootstrap-guardrails] bootstrap --dry-run passes"
-run_expect_pass \
-  "bootstrap_dry_run_pass" \
-  run_ps_with_fake_prereqs \
+echo "[windows-desktop-native-bootstrap-guardrails] bootstrap --dry-run enforces jq prerequisite when jq is missing"
+run_expect_fail_regex \
+  "bootstrap_dry_run_missing_jq_fail" \
+  "jqlang\\.jq|required dependencies missing|missing prerequisites" \
+  run_ps_with_fake_prereqs_no_jq \
     -Mode bootstrap \
     -DesktopLaunchStrategy packaged \
     -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
     -DryRun
 
-echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run passes"
-run_expect_pass \
-  "run_full_dry_run_pass" \
-  run_ps_with_fake_prereqs \
+echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run enforces jq prerequisite when jq is missing"
+run_expect_fail_regex \
+  "run_full_dry_run_missing_jq_fail" \
+  "jqlang\\.jq|required dependencies missing|missing prerequisites" \
+  run_ps_with_fake_prereqs_no_jq \
     -Mode run-full \
     -DesktopLaunchStrategy packaged \
     -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
@@ -332,6 +399,12 @@ EXPLICIT_BEATS_ENV_SUMMARY_JSON_PS="$(to_powershell_path "$EXPLICIT_BEATS_ENV_SU
 
 DEV_STRATEGY_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_dev_strategy_summary.json"
 DEV_STRATEGY_SUMMARY_JSON_PS="$(to_powershell_path "$DEV_STRATEGY_SUMMARY_JSON")"
+
+RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_run_desktop_packaged_no_jq_summary.json"
+RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON_PS="$(to_powershell_path "$RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON")"
+
+JQ_MISSING_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_jq_missing_summary.json"
+JQ_MISSING_SUMMARY_JSON_PS="$(to_powershell_path "$JQ_MISSING_SUMMARY_JSON")"
 
 echo "[windows-desktop-native-bootstrap-guardrails] env override priority uses GPM_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
@@ -379,6 +452,31 @@ run_expect_pass \
     "$SUMMARY_FLAG" "$DEV_STRATEGY_SUMMARY_JSON_PS"
 assert_json_file_is_object "$DEV_STRATEGY_SUMMARY_JSON" "dev_strategy_summary"
 assert_summary_desktop_prerequisites "$DEV_STRATEGY_SUMMARY_JSON" "dev_strategy_summary" "dev"
+
+echo "[windows-desktop-native-bootstrap-guardrails] run-desktop packaged --dry-run does not require jq"
+run_expect_pass \
+  "run_desktop_packaged_no_jq_dry_run_pass" \
+  run_ps_with_fake_prereqs_no_jq \
+    -Mode run-desktop \
+    -DesktopLaunchStrategy packaged \
+    -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
+    -DryRun \
+    "$SUMMARY_FLAG" "$RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON_PS"
+assert_json_file_is_object "$RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON" "run_desktop_packaged_no_jq_summary"
+assert_summary_missing_package_absent "$RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON" "run_desktop_packaged_no_jq_summary" "jqlang.jq"
+
+echo "[windows-desktop-native-bootstrap-guardrails] check --dry-run with jq missing recommends jqlang.jq remediation"
+run_expect_pass \
+  "check_missing_jq_dry_run_pass" \
+  run_ps_with_fake_prereqs_no_jq \
+    -Mode check \
+    -DesktopLaunchStrategy packaged \
+    -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
+    -DryRun \
+    "$SUMMARY_FLAG" "$JQ_MISSING_SUMMARY_JSON_PS"
+assert_json_file_is_object "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
+assert_summary_recommended_commands "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
+assert_summary_jq_missing_remediation "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
 
 echo "[windows-desktop-native-bootstrap-guardrails] summary json is written when requested"
 run_expect_pass \

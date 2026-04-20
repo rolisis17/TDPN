@@ -174,6 +174,7 @@ function Resolve-ToolPath {
 
   $programFiles = [Environment]::GetFolderPath("ProgramFiles")
   $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
   $userProfile = [Environment]::GetFolderPath("UserProfile")
   $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
 
@@ -241,6 +242,16 @@ function Resolve-ToolPath {
       $candidates = @(
         (Join-Path $programFiles "Git\git-bash.exe"),
         (Join-Path $programFilesX86 "Git\git-bash.exe")
+      )
+    }
+    "jq" {
+      $candidates = @(
+        (Join-Path $localAppData "Microsoft\WinGet\Links\jq.exe"),
+        (Join-Path $programFiles "jq\jq.exe"),
+        (Join-Path $programFilesX86 "jq\jq.exe"),
+        (Join-Path $systemDrive "jq\jq.exe"),
+        (Join-Path $programFiles "Git\usr\bin\jq.exe"),
+        (Join-Path $programFilesX86 "Git\usr\bin\jq.exe")
       )
     }
   }
@@ -753,6 +764,7 @@ function Resolve-DesktopLaunchPlan {
 
 function Get-ToolReport {
   $goPath = Resolve-ToolPath "go"
+  $jqPath = Resolve-ToolPath "jq"
   $nodePath = Resolve-ToolPath "node"
   $npmPath = Resolve-ToolPath "npm.cmd"
   if ([string]::IsNullOrWhiteSpace($npmPath)) {
@@ -766,6 +778,7 @@ function Get-ToolReport {
 
   return [PSCustomObject]@{
     go = $goPath
+    jq = $jqPath
     node = $nodePath
     npm = $npmPath
     rustc = $rustcPath
@@ -784,6 +797,7 @@ function Show-ToolReport {
 
   Write-Host "tool report:"
   Write-Host ("  go: " + $(if ($Report.go) { $Report.go } else { "missing" }))
+  Write-Host ("  jq: " + $(if ($Report.jq) { $Report.jq } else { "missing" }))
   Write-Host ("  node: " + $(if ($Report.node) { $Report.node } else { "missing" }))
   Write-Host ("  npm: " + $(if ($Report.npm) { $Report.npm } else { "missing" }))
   Write-Host ("  rustc: " + $(if ($Report.rustc) { $Report.rustc } else { "missing" }))
@@ -800,6 +814,7 @@ function Get-SummaryToolReport {
 
   return [ordered]@{
     go = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.go)) { $Report.go } else { "" })
+    jq = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.jq)) { $Report.jq } else { "" })
     node = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.node)) { $Report.node } else { "" })
     npm = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.npm)) { $Report.npm } else { "" })
     rustc = $(if ($null -ne $Report -and -not [string]::IsNullOrWhiteSpace($Report.rustc)) { $Report.rustc } else { "" })
@@ -935,6 +950,7 @@ function Get-DependencyLabel {
 
   switch ($PackageId) {
     "GoLang.Go" { return "Go" }
+    "jqlang.jq" { return "jq CLI (jqlang.jq)" }
     "OpenJS.NodeJS.LTS" { return "Node.js LTS / npm" }
     "Rustlang.Rustup" { return "Rust toolchain (rustc + cargo)" }
     "Git.Git" { return "Git for Windows bash.exe" }
@@ -953,6 +969,7 @@ function Get-DependencyInstallHint {
 
   switch ($PackageId) {
     "GoLang.Go" { return "winget install --id GoLang.Go --exact" }
+    "jqlang.jq" { return "winget install --id jqlang.jq --exact" }
     "OpenJS.NodeJS.LTS" { return "winget install --id OpenJS.NodeJS.LTS --exact" }
     "Rustlang.Rustup" { return "winget install --id Rustlang.Rustup --exact" }
     "Git.Git" { return "winget install --id Git.Git --exact" }
@@ -970,6 +987,7 @@ function Get-DependencyWingetPackageId {
   )
 
   switch ($PackageId) {
+    "jqlang.jq" { return "jqlang.jq" }
     default { return $PackageId }
   }
 }
@@ -1093,7 +1111,7 @@ function Format-MissingDependencyMessage {
     $lines += ("- {0}: install with {1}" -f $label, $hint)
   }
 
-  if ($PackageIds -contains "GoLang.Go" -or $PackageIds -contains "OpenJS.NodeJS.LTS" -or $PackageIds -contains "Rustlang.Rustup" -or $PackageIds -contains "Microsoft.VisualStudio.2022.BuildTools" -or $PackageIds -contains "Microsoft.EdgeWebView2Runtime") {
+  if ($PackageIds -contains "GoLang.Go" -or $PackageIds -contains "jqlang.jq" -or $PackageIds -contains "OpenJS.NodeJS.LTS" -or $PackageIds -contains "Rustlang.Rustup" -or $PackageIds -contains "Microsoft.VisualStudio.2022.BuildTools" -or $PackageIds -contains "Microsoft.EdgeWebView2Runtime") {
     $lines += "- rerun with -InstallMissing to let winget install what it can after App Installer is available"
   }
 
@@ -1145,6 +1163,9 @@ function Get-MissingIds {
       if (-not $Report.git_bash) {
         $ids["Git.Git"] = $true
       }
+      if (-not $Report.jq) {
+        $ids["jqlang.jq"] = $true
+      }
     }
     "run-desktop" {
       if ($needsDesktopBuildTools) {
@@ -1164,6 +1185,9 @@ function Get-MissingIds {
       if (-not $Report.git_bash) {
         $ids["Git.Git"] = $true
       }
+      if (-not $Report.jq) {
+        $ids["jqlang.jq"] = $true
+      }
       if ($needsDesktopBuildTools) {
         if (-not $Report.node -or -not $Report.npm) {
           $ids["OpenJS.NodeJS.LTS"] = $true
@@ -1180,6 +1204,9 @@ function Get-MissingIds {
       }
       if (-not $Report.git_bash) {
         $ids["Git.Git"] = $true
+      }
+      if (-not $Report.jq) {
+        $ids["jqlang.jq"] = $true
       }
       if ($needsDesktopBuildTools) {
         if (-not $Report.node -or -not $Report.npm) {

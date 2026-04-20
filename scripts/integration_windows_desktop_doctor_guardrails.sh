@@ -154,6 +154,14 @@ if ! grep -qF 'winget install --id' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing winget remediation command marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'jqlang.jq' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing jq winget package marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'jq:' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing jq tool report output marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF 'npm.cmd install' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing npm install remediation command marker in $SCRIPT_UNDER_TEST"
   exit 1
@@ -240,6 +248,11 @@ if ! jq -e 'type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '.tool_report | type == "object" and has("jq")' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing tool_report.jq field"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! jq -e '.recommended_commands | type == "array" and length >= 2' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing recommended_commands guidance array"
   cat "$SUMMARY_JSON"
@@ -262,6 +275,11 @@ if ! jq -e '.recommended_commands | any(type == "string" and contains("desktop_s
 fi
 if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd run tauri -- dev"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing tauri dev remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e 'if ((.tool_report.jq // "") | tostring | length) == 0 then (.missing_package_ids | index("jqlang.jq") != null) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: missing package ids do not include jqlang.jq when jq tool is missing"
   cat "$SUMMARY_JSON"
   exit 1
 fi

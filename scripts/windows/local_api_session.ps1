@@ -263,6 +263,48 @@ Then open a new terminal and rerun:
 "@
 }
 
+function Resolve-JqExecutable {
+  $cmd = Get-Command jq -ErrorAction SilentlyContinue
+  if ($cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source) -and (Test-Path -LiteralPath $cmd.Source -PathType Leaf)) {
+    return $cmd.Source
+  }
+
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    $candidates += (Join-Path $env:ProgramFiles "jq\jq.exe")
+    $candidates += (Join-Path $env:ProgramFiles "Git\usr\bin\jq.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "jq\jq.exe")
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "Git\usr\bin\jq.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $candidates += (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\jq.exe")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:SystemDrive)) {
+    $candidates += (Join-Path $env:SystemDrive "jq\jq.exe")
+  }
+
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  throw @"
+jq was not found in PATH (or common install paths).
+Install jq with:
+  winget install --id jqlang.jq --exact
+Or rerun with auto-remediation:
+  .\scripts\windows\local_api_session.ps1 -InstallMissing
+Then open a new terminal and rerun:
+  .\scripts\windows\local_api_session.ps1
+"@
+}
+
 function Refresh-ProcessPath {
   $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -313,6 +355,10 @@ Install $DisplayName manually with:
 
 function Invoke-WingetInstallGo {
   Invoke-WingetInstallPackage -PackageId "GoLang.Go" -DisplayName "Go"
+}
+
+function Invoke-WingetInstallJq {
+  Invoke-WingetInstallPackage -PackageId "jqlang.jq" -DisplayName "jq"
 }
 
 function Invoke-WingetInstallGit {
@@ -458,6 +504,7 @@ Write-Host "  allow_update: $AllowUpdate"
 Write-Host "  command_timeout_sec: $CommandTimeoutSec"
 $installMissingEnabled = if ($InstallMissing) { "true" } else { "false" }
 Write-Host "  install_missing: $installMissingEnabled"
+Write-Host "  jq_preflight: enabled"
 if (-not [string]::IsNullOrWhiteSpace($Config)) {
   Write-Host "  node_config: $Config"
 } else {
@@ -489,6 +536,29 @@ Try opening a new terminal and verify:
   go version
 If still missing, reinstall manually:
   winget install --id GoLang.Go --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+"@
+  }
+}
+
+$jqExe = ""
+try {
+  $jqExe = Resolve-JqExecutable
+} catch {
+  if (-not $InstallMissing) {
+    throw
+  }
+  Write-Host "local-api-session: jq not found; attempting install with winget (jqlang.jq)..."
+  Invoke-WingetInstallJq
+  Refresh-ProcessPath
+  try {
+    $jqExe = Resolve-JqExecutable
+  } catch {
+    throw @"
+jq installation was attempted but jq is still unavailable in PATH/common locations.
+Try opening a new terminal and verify:
+  jq --version
+If still missing, reinstall manually:
+  winget install --id jqlang.jq --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
 "@
   }
 }

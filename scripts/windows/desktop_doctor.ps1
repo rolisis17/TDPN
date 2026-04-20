@@ -146,7 +146,7 @@ function Resolve-ToolPath {
   )
 
   $path = Get-CommandPath $Name
-  $allowWindowsAppsAlias = $Name.ToLowerInvariant() -eq "winget"
+  $allowWindowsAppsAlias = @("winget", "jq") -contains $Name.ToLowerInvariant()
   if (-not [string]::IsNullOrWhiteSpace($path) -and ($allowWindowsAppsAlias -or $path -notmatch '\\WindowsApps\\')) {
     return $path
   }
@@ -220,6 +220,14 @@ function Resolve-ToolPath {
       $candidates = @(
         (Join-Path $programFiles "Git\git-bash.exe"),
         (Join-Path $programFilesX86 "Git\git-bash.exe")
+      )
+    }
+    "jq" {
+      $candidates = @(
+        (Join-Path $programFiles "jq\jq.exe"),
+        (Join-Path $programFilesX86 "jq\jq.exe"),
+        (Join-Path $userProfile "scoop\shims\jq.exe"),
+        (Join-Path $userProfile "AppData\Local\Microsoft\WinGet\Links\jq.exe")
       )
     }
   }
@@ -512,6 +520,7 @@ function Get-ToolReport {
   $cargoPath = Resolve-ToolPath "cargo"
   $gitPath = Resolve-ToolPath "git"
   $gitBashPath = Resolve-GitBashPath
+  $jqPath = Resolve-ToolPath "jq"
   $wingetPath = Resolve-ToolPath "winget"
 
   return [PSCustomObject]@{
@@ -522,6 +531,7 @@ function Get-ToolReport {
     cargo = $cargoPath
     git = $gitPath
     git_bash = $gitBashPath
+    jq = $jqPath
     winget = $wingetPath
   }
 }
@@ -540,6 +550,7 @@ function Convert-ToolReport {
     cargo = $Report.cargo
     git = $Report.git
     git_bash = $Report.git_bash
+    jq = $Report.jq
     winget = $Report.winget
   }
 }
@@ -589,6 +600,7 @@ function Show-ToolReport {
   Write-Host ("  cargo: " + $(if ($Report.cargo) { $Report.cargo } else { "missing" }))
   Write-Host ("  git: " + $(if ($Report.git) { $Report.git } else { "missing" }))
   Write-Host ("  git bash: " + $(if ($Report.git_bash) { $Report.git_bash } else { "missing" }))
+  Write-Host ("  jq: " + $(if ($Report.jq) { $Report.jq } else { "missing" }))
   Write-Host ("  winget: " + $(if ($Report.winget) { $Report.winget } else { "missing" }))
 }
 
@@ -650,6 +662,9 @@ function Get-MissingPackageIds {
   if (-not $Report.git -or -not $Report.git_bash) {
     Add-UniqueValue -List $ids -Value "Git.Git"
   }
+  if (-not $Report.jq) {
+    Add-UniqueValue -List $ids -Value "jqlang.jq"
+  }
   if (-not $Report.winget) {
     Add-UniqueValue -List $ids -Value "Microsoft.AppInstaller"
   }
@@ -676,6 +691,7 @@ function Get-DependencyLabel {
     "OpenJS.NodeJS.LTS" { return "Node.js LTS / npm" }
     "Rustlang.Rustup" { return "Rust toolchain (rustc + cargo)" }
     "Git.Git" { return "Git + Git Bash" }
+    "jqlang.jq" { return "jq" }
     "Microsoft.AppInstaller" { return "App Installer (winget)" }
     "Microsoft.VisualStudio.2022.BuildTools" { return "Microsoft Visual C++ Build Tools (Hostx64/x64)" }
     "Microsoft.WindowsSDK.10.0" { return "Windows 10/11 SDK" }
@@ -695,6 +711,7 @@ function Get-DependencyInstallHint {
     "OpenJS.NodeJS.LTS" { return "winget install --id OpenJS.NodeJS.LTS --exact" }
     "Rustlang.Rustup" { return "winget install --id Rustlang.Rustup --exact" }
     "Git.Git" { return "winget install --id Git.Git --exact" }
+    "jqlang.jq" { return "winget install --id jqlang.jq --exact" }
     "Microsoft.AppInstaller" { return "install App Installer from Microsoft Store" }
     "Microsoft.VisualStudio.2022.BuildTools" { return "winget install --id Microsoft.VisualStudio.2022.BuildTools --exact; then ensure MSVC v143 x64/x64 + Windows 10/11 SDK components are selected in Visual Studio Installer" }
     "Microsoft.WindowsSDK.10.0" { return "winget install --id Microsoft.WindowsSDK.10.0 --exact (or install Windows 10/11 SDK from Visual Studio Installer (Individual components) or https://developer.microsoft.com/windows/downloads/windows-sdk/)" }

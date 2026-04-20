@@ -258,6 +258,12 @@ build_apt_packages() {
     fi
   fi
 
+  if tool_is_missing "jq"; then
+    if add_unique "jq" "${APT_PACKAGES[@]}"; then
+      APT_PACKAGES+=("jq")
+    fi
+  fi
+
   if native_dep_is_missing "pkg_config"; then
     if add_unique "pkg-config" "${APT_PACKAGES[@]}"; then
       APT_PACKAGES+=("pkg-config")
@@ -321,6 +327,11 @@ build_dnf_packages() {
       DNF_PACKAGES+=("bash")
     fi
   fi
+  if tool_is_missing "jq"; then
+    if add_unique "jq" "${DNF_PACKAGES[@]}"; then
+      DNF_PACKAGES+=("jq")
+    fi
+  fi
   if native_dep_is_missing "pkg_config"; then
     if add_unique "pkgconf-pkg-config" "${DNF_PACKAGES[@]}"; then
       DNF_PACKAGES+=("pkgconf-pkg-config")
@@ -375,6 +386,11 @@ build_pacman_packages() {
   if tool_is_missing "bash"; then
     if add_unique "bash" "${PACMAN_PACKAGES[@]}"; then
       PACMAN_PACKAGES+=("bash")
+    fi
+  fi
+  if tool_is_missing "jq"; then
+    if add_unique "jq" "${PACMAN_PACKAGES[@]}"; then
+      PACMAN_PACKAGES+=("jq")
     fi
   fi
   if native_dep_is_missing "pkg_config"; then
@@ -434,6 +450,11 @@ build_zypper_packages() {
   if tool_is_missing "bash"; then
     if add_unique "bash" "${ZYPPER_PACKAGES[@]}"; then
       ZYPPER_PACKAGES+=("bash")
+    fi
+  fi
+  if tool_is_missing "jq"; then
+    if add_unique "jq" "${ZYPPER_PACKAGES[@]}"; then
+      ZYPPER_PACKAGES+=("jq")
     fi
   fi
   if native_dep_is_missing "pkg_config"; then
@@ -609,7 +630,7 @@ case "$print_summary_json" in
     ;;
 esac
 
-TOOLS=(go node npm rustc cargo git bash)
+TOOLS=(go node npm rustc cargo git bash jq)
 declare -A TOOL_PATHS=()
 MISSING_TOOLS=()
 NATIVE_DEPENDENCY_KEYS=(pkg_config gtk3 webkit2gtk libsoup3 javascriptcoregtk)
