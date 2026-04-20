@@ -250,6 +250,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -400,6 +401,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -8751,6 +8753,11 @@ desktop_windows_one_click() {
   run_desktop_wrapper_script "$script" "$@"
 }
 
+desktop_windows_dev() {
+  local script="${DESKTOP_WINDOWS_DEV_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_dev.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
 desktop_windows_packaged_run() {
   local script="${DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_packaged_run.ps1}"
   run_desktop_wrapper_script "$script" "$@"
@@ -15903,6 +15910,10 @@ main() {
     desktop-windows-one-click)
       shift
       desktop_windows_one_click "$@"
+      ;;
+    desktop-windows-dev)
+      shift
+      desktop_windows_dev "$@"
       ;;
     desktop-windows-packaged-run)
       shift

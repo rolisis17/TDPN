@@ -32,6 +32,7 @@ NATIVE_BOOTSTRAP_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap.sh"
 NATIVE_BOOTSTRAP_GUARDRAILS_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap_guardrails.sh"
 ONE_CLICK_FAKE="$TMP_DIR/fake_desktop_windows_one_click.sh"
 PACKAGED_RUN_FAKE="$TMP_DIR/fake_desktop_windows_packaged_run.sh"
+DEV_FAKE="$TMP_DIR/fake_desktop_windows_dev.sh"
 RELEASE_BUNDLE_FAKE="$TMP_DIR/fake_desktop_windows_release_bundle.sh"
 LOCAL_API_SESSION_FAKE="$TMP_DIR/fake_desktop_windows_local_api_session.sh"
 DOCTOR_PS1="$TMP_DIR/fake_desktop_windows_doctor.ps1"
@@ -221,6 +222,7 @@ run_and_assert_wrapper() {
     DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT="$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" \
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+    DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
@@ -234,6 +236,7 @@ create_fake_wrapper_script "$NATIVE_BOOTSTRAP_FAKE" "desktop_windows_native_boot
 create_fake_wrapper_script "$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" "desktop_windows_native_bootstrap_guardrails" "FAKE_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_RC"
 create_fake_wrapper_script "$ONE_CLICK_FAKE" "desktop_windows_one_click" "FAKE_WINDOWS_ONE_CLICK_RC"
 create_fake_wrapper_script "$PACKAGED_RUN_FAKE" "desktop_windows_packaged_run" "FAKE_WINDOWS_PACKAGED_RUN_RC"
+create_fake_wrapper_script "$DEV_FAKE" "desktop_windows_dev" "FAKE_WINDOWS_DEV_RC"
 create_fake_wrapper_script "$RELEASE_BUNDLE_FAKE" "desktop_windows_release_bundle" "FAKE_WINDOWS_RELEASE_BUNDLE_RC"
 create_fake_wrapper_script "$LOCAL_API_SESSION_FAKE" "desktop_windows_local_api_session" "FAKE_WINDOWS_LOCAL_API_SESSION_RC"
 cat >"$DOCTOR_PS1" <<'EOF_FAKE_PS1'
@@ -247,6 +250,7 @@ assert_help_contains "./scripts/easy_node.sh desktop-windows-native-bootstrap [d
 assert_help_contains "./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]"
 
@@ -295,6 +299,12 @@ run_and_assert_wrapper \
   "--sample-flag" "packaged run value with spaces"
 
 run_and_assert_wrapper \
+  "desktop-windows-dev" \
+  "desktop_windows_dev" \
+  "-NoInstallMissing" \
+  "--sample-flag" "desktop dev value with spaces"
+
+run_and_assert_wrapper \
   "desktop-windows-release-bundle" \
   "desktop_windows_release_bundle" \
   "--bundle-dir" "$TMP_DIR/release bundle with spaces" \
@@ -315,6 +325,7 @@ env \
   DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT="$NATIVE_BOOTSTRAP_GUARDRAILS_FAKE" \
   DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_FAKE" \
   DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_FAKE" \
+  DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_FAKE" \
   DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_FAKE" \
   DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_SESSION_FAKE" \
   FAKE_WINDOWS_PACKAGED_RUN_RC=13 \

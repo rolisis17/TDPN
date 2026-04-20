@@ -365,6 +365,14 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-packaged-run
 ```
 
+Equivalent `easy_node.sh` wrapper usage on Windows (scaffold/non-production):
+
+```powershell
+.\scripts\easy_node.sh desktop-windows-doctor --mode check
+.\scripts\easy_node.sh desktop-windows-dev
+.\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
+```
+
 Generic desktop `easy_node.sh` wrapper usage (scaffold/non-production):
 
 ```bash

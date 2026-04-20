@@ -386,6 +386,7 @@ Equivalent `easy_node.sh` wrapper usage on Windows (scaffold/non-production):
 .\scripts\easy_node.sh desktop-windows-native-bootstrap --mode bootstrap --install-missing
 .\scripts\easy_node.sh desktop-windows-native-bootstrap --mode run-full --desktop-launch-strategy auto
 .\scripts\easy_node.sh desktop-windows-one-click --install-missing
+.\scripts\easy_node.sh desktop-windows-dev
 .\scripts\easy_node.sh desktop-windows-packaged-run --dry-run
 .\scripts\easy_node.sh desktop-windows-packaged-run
 .\scripts\easy_node.sh desktop-windows-release-bundle --bundle-dir .easy-node-logs/windows_release_bundle
