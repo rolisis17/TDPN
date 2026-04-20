@@ -2814,7 +2814,7 @@ function updateLegacyAliasRuntimeHint() {
 }
 
 function isManualSignInLockedByRuntimePolicy() {
-  return state.authVerifyRuntimeRequireWalletExtensionSource === true;
+  return state.authVerifyRequireWalletExtensionSource === true;
 }
 
 function syncIdentitySignInPolicyControls() {
@@ -2824,19 +2824,19 @@ function syncIdentitySignInPolicyControls() {
     ? WALLET_SIGN_IN_LABEL_REQUIRED
     : WALLET_SIGN_IN_LABEL_RECOMMENDED;
   walletSignInBtnEl.title = manualSignInLocked
-    ? "Runtime auth policy requires signature_source=wallet_extension."
+    ? "Active auth policy requires signature_source=wallet_extension."
     : "Recommended sign-in path.";
   signInBtnEl.disabled = manualSignInLocked;
   signInBtnEl.textContent = manualSignInLocked ? MANUAL_SIGN_IN_LABEL_DISABLED : MANUAL_SIGN_IN_LABEL;
   signInBtnEl.title = manualSignInLocked
-    ? "Manual Sign In is locked by runtime auth policy requiring signature_source=wallet_extension."
+    ? "Manual Sign In is locked by active auth policy requiring signature_source=wallet_extension."
     : "Manual fallback path when policy allows manual source.";
   if (!signInPolicyHintEl) {
     return;
   }
   if (manualSignInLocked) {
     signInPolicyHintEl.textContent =
-      "Wallet Sign-In is required by runtime auth policy; manual Sign In is disabled.";
+      "Wallet Sign-In is required by active auth policy; manual Sign In is disabled.";
     signInPolicyHintEl.classList.add("locked");
     return;
   }
@@ -3302,7 +3302,7 @@ signInBtnEl.addEventListener("click", async () => {
   if (isManualSignInLockedByRuntimePolicy()) {
     print(
       "validation",
-      "Manual Sign In is disabled by runtime auth policy; use Wallet Sign-In (signature_source must be wallet_extension)."
+      "Manual Sign In is disabled by active auth policy; use Wallet Sign-In (signature_source must be wallet_extension)."
     );
     return;
   }

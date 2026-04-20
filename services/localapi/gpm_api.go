@@ -40,6 +40,12 @@ const (
 	gpmAuthVerifierOutputLimit     = 8 * 1024
 )
 
+var (
+	errConnectSessionTokenEmpty            = errors.New("session token is empty")
+	errConnectSessionTokenInvalidOrExpired = errors.New("session token is missing or expired")
+	errConnectSessionNotRegistered         = errors.New("session is not fully registered for connect")
+)
+
 type gpmRuntimeState struct {
 	mu         sync.RWMutex
 	challenges map[string]gpmWalletChallenge
@@ -453,15 +459,15 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 func (s *Service) resolveConnectSecretsFromSession(sessionToken string) ([]string, string, string, error) {
 	sessionToken = strings.TrimSpace(sessionToken)
 	if sessionToken == "" {
-		return nil, "", "", errors.New("session token is empty")
+		return nil, "", "", errConnectSessionTokenEmpty
 	}
 	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
 	if !ok {
-		return nil, "", "", errors.New("session token is missing or expired")
+		return nil, "", "", errConnectSessionTokenInvalidOrExpired
 	}
 	bootstrapDirectories := sessionConnectBootstrapDirectories(session)
 	if len(bootstrapDirectories) == 0 || strings.TrimSpace(session.InviteKey) == "" {
-		return nil, "", "", errors.New("session is not fully registered for connect")
+		return nil, "", "", errConnectSessionNotRegistered
 	}
 	return bootstrapDirectories, session.InviteKey, strings.TrimSpace(session.PathProfile), nil
 }

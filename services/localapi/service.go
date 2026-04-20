@@ -735,6 +735,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionPathProfile := ""
 	sessionBootstrapDirectories := []string{}
+	var sessionResolveErr error
 	if in.SessionToken != "" {
 		resolvedBootstrapDirectories, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(in.SessionToken)
 		if resolveErr == nil {
@@ -745,7 +746,28 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 				in.InviteKey = sessionInvite
 			}
 			sessionPathProfile = normalizeOptionalPathProfile(resolvedSessionPathProfile)
+		} else {
+			sessionResolveErr = resolveErr
 		}
+	}
+	if in.SessionToken != "" && sessionResolveErr != nil && (s.gpmConnectRequireSession || !manualOverridesProvided) {
+		statusCode := http.StatusBadRequest
+		errMsg := "failed to resolve session_token for connect"
+		switch {
+		case errors.Is(sessionResolveErr, errConnectSessionTokenInvalidOrExpired):
+			statusCode = http.StatusUnauthorized
+			errMsg = "invalid or expired session_token"
+		case errors.Is(sessionResolveErr, errConnectSessionNotRegistered):
+			statusCode = http.StatusForbidden
+			errMsg = "session_token is valid but not registered for connect; register the client profile first"
+		case errors.Is(sessionResolveErr, errConnectSessionTokenEmpty):
+			errMsg = "session_token is required for connect"
+		}
+		writeJSON(w, statusCode, map[string]any{
+			"ok":    false,
+			"error": errMsg,
+		})
+		return
 	}
 	bootstrapDirectories := []string{}
 	if in.BootstrapDirectory != "" {

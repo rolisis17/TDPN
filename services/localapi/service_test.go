@@ -1594,6 +1594,52 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid session token fails closed with unauthorized in session-required mode", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-missing-token"
+		}`)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "invalid or expired session_token" {
+			t.Fatalf("error=%q want invalid-or-expired-session-token", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("invalid session rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("session token must be registered for connect in session-required mode", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-connect-unregistered-session-token",
+			WalletAddress:  "cosmos1connectunregistered",
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      time.Now().UTC(),
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-unregistered-session-token"
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "not registered for connect") {
+			t.Fatalf("error=%q want not-registered-for-connect guidance", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("unregistered session rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
 	t.Run("registered session token resolves connect secrets", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true

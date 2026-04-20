@@ -329,6 +329,25 @@ if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
   cat "$connect_policy_manual_body"
   exit 1
 fi
+
+: >"$CALLS_FILE"
+connect_policy_invalid_session_body="$TMP_DIR/connect_policy_invalid_session.json"
+connect_policy_invalid_session_code="$(curl -sS -o "$connect_policy_invalid_session_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data '{"session_token":"gpm-connect-invalid-session-token","run_preflight":false}' "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_policy_invalid_session_code" != "401" ]]; then
+  echo "expected invalid connect session_token to fail with 401, got $connect_policy_invalid_session_code"
+  cat "$connect_policy_invalid_session_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_policy_invalid_session_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) == "invalid or expired session_token")' \
+  "expected invalid connect session_token error to fail closed with invalid-or-expired guidance"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected invalid session_token connect rejection to avoid invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_policy_invalid_session_body"
+  exit 1
+fi
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] production mode fails closed when external auth verifier command is not configured"

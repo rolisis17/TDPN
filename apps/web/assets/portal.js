@@ -824,7 +824,7 @@ function syncManualSignInAction() {
   const policyLocked = strictWalletExtensionSourceRequired();
   const disabled = isBusy || policyLocked;
   const guidance = policyLocked
-    ? "Manual verify is disabled by runtime policy. Use Sign + Verify (Wallet)."
+    ? "Manual verify is disabled by active auth policy. Use Sign + Verify (Wallet)."
     : "Manual verify is available in compatibility mode.";
 
   manualSignInBtnEl.disabled = disabled;
@@ -3176,7 +3176,7 @@ async function requestAuthVerify(options = {}) {
   if (manualSource && strictWalletExtensionSourceRequired()) {
     const policySource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
     throw new Error(
-      `Manual verify is disabled by runtime policy (wallet-extension-source required; source: ${policySource}). Use Sign + Verify (Wallet).`
+      `Manual verify is disabled by active auth policy (wallet-extension-source required; source: ${policySource}). Use Sign + Verify (Wallet).`
     );
   }
   const request = {

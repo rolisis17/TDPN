@@ -136,6 +136,8 @@ JS_MARKERS=(
   'allowLegacyConnectOverride'
   'function parseAllowLegacyConnectOverrideConfig('
   'compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;'
+  'Manual verify is disabled by active auth policy. Use Sign + Verify (Wallet).'
+  'Manual verify is disabled by active auth policy (wallet-extension-source required; source:'
 )
 for marker in "${JS_MARKERS[@]}"; do
   if ! grep -qF "$marker" "$PORTAL_JS"; then
