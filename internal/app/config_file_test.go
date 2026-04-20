@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -291,6 +293,72 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 	}
 	if got := os.Getenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL"); got != "" {
 		t.Fatalf("CLIENT_REQUIRE_HTTPS_CONTROL_URL=%q want empty", got)
+	}
+}
+
+func TestApplyConfigFileRejectsTooManyEntries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "many.env")
+	var b strings.Builder
+	for i := 0; i < configFileMaxEntries+1; i++ {
+		b.WriteString(fmt.Sprintf("KEY_%d=%d\n", i, i))
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	err := applyConfigFile(path)
+	if err == nil {
+		t.Fatalf("expected too-many-entries validation error")
+	}
+	if !strings.Contains(err.Error(), "too many entries") {
+		t.Fatalf("expected too-many-entries error, got %v", err)
+	}
+}
+
+func TestApplyConfigFileIgnoresUnsafeEnvKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unsafe-keys.env")
+	content := strings.Join([]string{
+		"SAFE_KEY=ok",
+		"1BAD_KEY=bad",
+		"BAD-KEY=bad",
+		"BAD.KEY=bad",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("SAFE_KEY", "")
+	t.Setenv("1BAD_KEY", "")
+	if err := applyConfigFile(path); err != nil {
+		t.Fatalf("applyConfigFile: %v", err)
+	}
+	if got := os.Getenv("SAFE_KEY"); got != "ok" {
+		t.Fatalf("SAFE_KEY=%q want ok", got)
+	}
+	if got := os.Getenv("1BAD_KEY"); got != "" {
+		t.Fatalf("1BAD_KEY=%q want empty", got)
+	}
+}
+
+func TestIsSafeConfigEnvKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{key: "FOO", want: true},
+		{key: "_FOO1", want: true},
+		{key: "1FOO", want: false},
+		{key: "FOO-BAR", want: false},
+		{key: "FOO.BAR", want: false},
+		{key: " ", want: false},
+		{key: strings.Repeat("A", configFileMaxKeyBytes+1), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(strconv.Quote(tc.key), func(t *testing.T) {
+			if got := isSafeConfigEnvKey(tc.key); got != tc.want {
+				t.Fatalf("isSafeConfigEnvKey(%q)=%v want %v", tc.key, got, tc.want)
+			}
+		})
 	}
 }
 

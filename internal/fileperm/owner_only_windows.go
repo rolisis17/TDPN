@@ -26,9 +26,28 @@ type sddlACE struct {
 }
 
 // ValidateOwnerOnly enforces owner-only ACL policy for secret files on Windows.
-func ValidateOwnerOnly(path string, _ os.FileInfo) error {
-	sd, err := windows.GetNamedSecurityInfo(
-		path,
+func ValidateOwnerOnly(path string, info os.FileInfo) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %q for ACL validation: %w", path, err)
+	}
+	defer f.Close()
+	openInfo, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %q during ACL validation: %w", path, err)
+	}
+	if !openInfo.Mode().IsRegular() {
+		return fmt.Errorf("file %q must be a regular file", path)
+	}
+	if info != nil && !os.SameFile(info, openInfo) {
+		return fmt.Errorf("file %q changed during ACL validation", path)
+	}
+	sd, err := windows.GetSecurityInfo(
+		windows.Handle(f.Fd()),
 		windows.SE_FILE_OBJECT,
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
 	)

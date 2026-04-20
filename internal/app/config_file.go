@@ -12,6 +12,8 @@ import (
 const (
 	configFileMaxBytes     int64 = 1 << 20
 	configFileLineMaxBytes       = 16 << 10
+	configFileMaxEntries         = 4096
+	configFileMaxKeyBytes        = 256
 )
 
 var blockedGenericConfigFileEnvKeys = map[string]struct{}{
@@ -57,8 +59,11 @@ func applyConfigFile(path string) error {
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
-		if key == "" {
+		if key == "" || !isSafeConfigEnvKey(key) {
 			continue
+		}
+		if _, exists := values[key]; !exists && len(values) >= configFileMaxEntries {
+			return fmt.Errorf("read config file: too many entries (max %d)", configFileMaxEntries)
 		}
 		values[key] = val
 	}
@@ -185,6 +190,24 @@ func isBlockedGenericConfigFileEnvKey(key string) bool {
 	}
 	return strings.HasPrefix(normalized, "LOCAL_CONTROL_API_SERVICE_") &&
 		strings.HasSuffix(normalized, "_COMMAND")
+}
+
+func isSafeConfigEnvKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" || len(key) > configFileMaxKeyBytes {
+		return false
+	}
+	for i, r := range key {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func setEnvIfUnset(key string, value string) {

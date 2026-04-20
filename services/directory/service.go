@@ -2945,9 +2945,21 @@ func (s *Service) enforcePeerTrustSet(peerURL string, pubB64Set []string) error 
 }
 
 func (s *Service) selectTrustedPeerPubKeys(peerURL string, pubB64Set []string) ([]string, error) {
-	filtered := dedupeStrings(pubB64Set)
+	filtered := make([]string, 0, len(pubB64Set))
+	seen := make(map[string]struct{}, len(pubB64Set))
+	for _, candidate := range pubB64Set {
+		normalized := normalizePeerPubKey(candidate)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		filtered = append(filtered, normalized)
+	}
 	if len(filtered) == 0 {
-		return nil, fmt.Errorf("peer returned no pubkeys")
+		return nil, fmt.Errorf("peer returned no valid pubkeys")
 	}
 	if !s.peerTrustStrict {
 		return filtered, nil
@@ -3006,11 +3018,7 @@ func (s *Service) loadOrCreateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.privateKeyPath), 0o755); err != nil {
-		return nil, nil, err
-	}
-	enc := base64.RawURLEncoding.EncodeToString(priv)
-	if err := os.WriteFile(s.privateKeyPath, []byte(enc+"\n"), 0o600); err != nil {
+	if err := s.persistPrivateKey(priv); err != nil {
 		return nil, nil, err
 	}
 	return pub, priv, nil
@@ -4977,7 +4985,18 @@ func loadPeerTrustedKeys(path string) (map[string]string, error) {
 }
 
 func appendPeerTrustedKey(path string, peerURL string, key string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("peer trusted keys file path is required")
+	}
 	peerURL = normalizePeerURL(peerURL)
+	if peerURL == "" {
+		return fmt.Errorf("peer trusted key peer url is required")
+	}
+	key = normalizePeerPubKey(key)
+	if key == "" {
+		return fmt.Errorf("invalid peer trusted key")
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -4992,13 +5011,15 @@ func appendPeerTrustedKey(path string, peerURL string, key string) error {
 		}
 		return fmt.Errorf("peer trusted key conflict for %s", peerURL)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
+	existingData, err := readFileBounded(path, directoryTrustedKeysFileMaxBytes)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	defer f.Close()
-	_, err = f.WriteString(peerURL + " " + key + "\n")
-	return err
+	if len(existingData) > 0 && existingData[len(existingData)-1] != '\n' {
+		existingData = append(existingData, '\n')
+	}
+	existingData = append(existingData, []byte(peerURL+" "+key+"\n")...)
+	return writeFileAtomic(path, existingData, 0o644)
 }
 
 func normalizeCountryCode(v string) string {
@@ -6177,6 +6198,9 @@ func readFileBounded(path string, maxBytes int64) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("file path is required")
 	}
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("max bytes must be positive")
+	}
 	lstatInfo, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -6202,16 +6226,10 @@ func readFileBounded(path string, maxBytes int64) ([]byte, error) {
 	if !os.SameFile(lstatInfo, info) {
 		return nil, fmt.Errorf("file %s changed during open", path)
 	}
-	if maxBytes > 0 {
-		if info.Size() > maxBytes {
-			return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
-		}
+	if info.Size() > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
 	}
-	limit := maxBytes
-	if limit <= 0 {
-		limit = 1
-	}
-	b, err := io.ReadAll(io.LimitReader(file, limit+1))
+	b, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -349,6 +350,24 @@ func TestEnforcePeerTrustTOFUPins(t *testing.T) {
 	}
 	if got := loaded["https://peer-a.local"]; got != pubB64 {
 		t.Fatalf("expected pinned key, got %q", got)
+	}
+}
+
+func TestEnforcePeerTrustTOFURejectsInvalidKeyWithoutPinning(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "peer_trusted_keys.txt")
+	s := &Service{
+		peerTrustStrict: true,
+		peerTrustTOFU:   true,
+		peerTrustFile:   file,
+	}
+	if err := s.enforcePeerTrust("peer-a.local", "not-valid-base64"); err == nil {
+		t.Fatalf("expected invalid peer key rejection")
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		if err != nil {
+			t.Fatalf("stat peer trust file: %v", err)
+		}
+		t.Fatalf("expected no peer trust file persisted for invalid key")
 	}
 }
 
@@ -2994,6 +3013,39 @@ func TestBuildTrustAttestationsCapsAdjudicationWindows(t *testing.T) {
 	appealUpper := time.Now().Add(1*time.Minute + 2*time.Second).Unix()
 	if got.AppealUntil < appealLower || got.AppealUntil > appealUpper {
 		t.Fatalf("expected appeal_until capped near 1m horizon, got %d", got.AppealUntil)
+	}
+}
+
+func TestReadFileBoundedRejectsNonPositiveMaxBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	_, err := readFileBounded(path, 0)
+	if err == nil {
+		t.Fatalf("expected non-positive max-bytes validation error")
+	}
+	if !strings.Contains(err.Error(), "max bytes must be positive") {
+		t.Fatalf("expected max-bytes validation error, got %v", err)
+	}
+}
+
+func TestReadFileBoundedRejectsSymlinkFromSyncSuite(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not supported in test environment: %v", err)
+	}
+	_, err := readFileBounded(link, 64)
+	if err == nil {
+		t.Fatalf("expected symlink rejection")
+	}
+	if !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("expected symlink validation error, got %v", err)
 	}
 }
 

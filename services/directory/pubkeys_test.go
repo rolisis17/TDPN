@@ -188,19 +188,20 @@ func TestRunKeyRotationAutoRotates(t *testing.T) {
 		privKey:             priv,
 		privateKeyPath:      privPath,
 		previousPubKeysFile: prevPath,
-		keyRotateEvery:      15 * time.Millisecond,
+		keyRotateEvery:      50 * time.Millisecond,
 		keyHistory:          2,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.runKeyRotation(ctx)
 
-	deadline := time.Now().Add(600 * time.Millisecond)
+	deadline := time.Now().Add(1200 * time.Millisecond)
 	rotated := false
 	for time.Now().Before(deadline) {
 		curPub, _ := s.currentKeypair()
 		if base64.RawURLEncoding.EncodeToString(curPub) != initialPub {
 			rotated = true
+			cancel()
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

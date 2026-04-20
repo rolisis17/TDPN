@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "PS1=%SCRIPT_DIR%desktop_doctor.ps1"
 if not exist "%PS1%" (
@@ -9,8 +9,8 @@ if not exist "%PS1%" (
 
 if not "%~1"=="" (
   set "FORWARD_ARGS=%*"
-  echo(%FORWARD_ARGS%| findstr /r "[&|<>^]" >nul
-  if not errorlevel 1 (
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$argsLine = $env:FORWARD_ARGS; if ($argsLine -match '[&|<>^%%!]') { exit 1 }"
+  if errorlevel 1 (
     echo Unsupported cmd metacharacters in arguments. Use "%PS1%" directly.
     exit /b 2
   )

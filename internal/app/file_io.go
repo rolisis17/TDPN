@@ -12,6 +12,9 @@ func readAppFileBounded(path string, maxBytes int64) ([]byte, error) {
 	if path == "" {
 		return nil, fmt.Errorf("file path is required")
 	}
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("max bytes must be positive")
+	}
 	lstatInfo, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -40,11 +43,7 @@ func readAppFileBounded(path string, maxBytes int64) ([]byte, error) {
 	if maxBytes > 0 && info.Size() > maxBytes {
 		return nil, fmt.Errorf("file %s exceeds %d bytes", path, maxBytes)
 	}
-	limit := maxBytes
-	if limit <= 0 {
-		limit = 1
-	}
-	payload, err := io.ReadAll(io.LimitReader(file, limit+1))
+	payload, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
