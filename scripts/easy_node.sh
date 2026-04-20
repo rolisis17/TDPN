@@ -244,6 +244,11 @@ Usage:
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
+  ./scripts/easy_node.sh desktop-check [--platform auto|linux|windows] [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-fix [--platform auto|linux|windows] [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-start [--platform auto|linux|windows] [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-api [--platform auto|linux|windows] [local_api_session args...]
+  ./scripts/easy_node.sh desktop-install [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-linux-doctor [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
@@ -404,6 +409,11 @@ Usage:
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
+  ./scripts/easy_node.sh desktop-check [--platform auto|linux|windows] [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-fix [--platform auto|linux|windows] [desktop_doctor args...]
+  ./scripts/easy_node.sh desktop-start [--platform auto|linux|windows] [desktop_one_click args...]
+  ./scripts/easy_node.sh desktop-api [--platform auto|linux|windows] [local_api_session args...]
+  ./scripts/easy_node.sh desktop-install [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-linux-doctor [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-linux-native-bootstrap [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-linux-one-click [desktop_one_click args...]
@@ -15981,6 +15991,26 @@ main() {
     desktop-local-api-session)
       shift
       desktop_generic_dispatch desktop-local-api-session local_api_session desktop_windows_local_api_session "$@"
+      ;;
+    desktop-check)
+      shift
+      desktop_generic_dispatch desktop-check desktop_linux_doctor desktop_windows_doctor "$@"
+      ;;
+    desktop-fix)
+      shift
+      desktop_generic_dispatch desktop-fix desktop_linux_doctor desktop_windows_doctor --mode fix --install-missing "$@"
+      ;;
+    desktop-start)
+      shift
+      desktop_generic_dispatch desktop-start desktop_linux_one_click desktop_windows_one_click "$@"
+      ;;
+    desktop-api)
+      shift
+      desktop_generic_dispatch desktop-api local_api_session desktop_windows_local_api_session "$@"
+      ;;
+    desktop-install)
+      shift
+      desktop_generic_dispatch desktop-install desktop_linux_installer desktop_windows_installer "$@"
       ;;
     desktop-linux-doctor)
       shift
