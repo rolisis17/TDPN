@@ -901,6 +901,21 @@ func TestRunTDPNDRejectsGRPCAuthTokenAndTokenFileTogether(t *testing.T) {
 	}
 }
 
+func TestRunTDPNDRejectsSettlementAuthPrincipalWithoutToken(t *testing.T) {
+	err := runTDPND(
+		context.Background(),
+		[]string{
+			"--settlement-http-listen", "127.0.0.1:0",
+			"--settlement-http-auth-principal", "bridge-principal",
+		},
+		nil,
+		func() chainScaffold { return app.NewChainScaffold() },
+		runtimeDeps{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "--settlement-http-auth-principal requires --settlement-http-auth-token") {
+		t.Fatalf("expected settlement auth principal/token dependency error, got %v", err)
+	}
+}
 func TestRunTDPNDGRPCModeAuthEnforcementWithTokenFile(t *testing.T) {
 	const authToken = "tdpn-file-auth-token"
 

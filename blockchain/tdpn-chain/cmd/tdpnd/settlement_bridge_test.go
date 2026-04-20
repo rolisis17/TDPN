@@ -593,6 +593,184 @@ func TestRunTDPNDSettlementHTTPAuthContractGETAndPOSTBearerRequired(t *testing.T
 	}
 }
 
+func TestRunTDPNDSettlementHTTPAuthPrincipalBindsIdentityFields(t *testing.T) {
+	const authToken = "bridge-principal-token"
+	const authPrincipal = "Bridge-Principal-1"
+	const canonicalPrincipal = "bridge-principal-1"
+
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	scaffold := app.NewChainScaffold()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{
+				"--settlement-http-listen", "settlement-auth-principal-test",
+				"--settlement-http-auth-token", authToken,
+				"--settlement-http-auth-principal", authPrincipal,
+			},
+			nil,
+			func() chainScaffold { return scaffold },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-auth-principal-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+	authHeaders := map[string]string{"Authorization": "Bearer " + authToken}
+
+	sponsorMismatchBody := `{"ReservationID":"sponsor-res-principal-mismatch-1","SponsorID":"other-sponsor","SubjectID":"app-principal-1","SessionID":"sess-principal-1","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2030-12-31T00:00:00Z"}`
+	status, payload := doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnsponsor/reservations", sponsorMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected sponsor caller mismatch to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "SponsorID must match authenticated caller" {
+		t.Fatalf("expected sponsor mismatch error, got %q", got)
+	}
+
+	sponsorAutofillBody := `{"ReservationID":"sponsor-res-principal-ok-1","SubjectID":"app-principal-1","SessionID":"sess-principal-2","AmountMicros":500,"Currency":"uusdc","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2030-12-31T00:00:00Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnsponsor/reservations", sponsorAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected sponsor caller autofill to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnsponsor/delegations/sponsor-res-principal-ok-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected sponsor delegation by-id get to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "delegation", "SponsorID", canonicalPrincipal)
+
+	_, err = scaffold.BillingMsgServer().CreateReservation(context.Background(), app.BillingCreateReservationRequest{
+		Record: billingtypes.CreditReservation{
+			ReservationID: "billing-res-principal-1",
+			SponsorID:     canonicalPrincipal,
+			SessionID:     "sess-principal-2",
+			AssetDenom:    "uusdc",
+			Amount:        500,
+			Status:        chaintypes.ReconciliationSubmitted,
+			CreatedAtUnix: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed billing reservation: %v", err)
+	}
+
+	settlementMismatchBody := `{"SettlementID":"settlement-principal-mismatch-1","ReservationID":"billing-res-principal-1","SessionID":"sess-principal-2","SubjectID":"other-principal","ChargedMicros":500,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:01Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnbilling/settlements", settlementMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected settlement subject caller mismatch to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "SubjectID must match authenticated caller" {
+		t.Fatalf("expected settlement subject mismatch error, got %q", got)
+	}
+
+	settlementAutofillBody := `{"SettlementID":"settlement-principal-ok-1","ReservationID":"billing-res-principal-1","SessionID":"sess-principal-2","ChargedMicros":500,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:02Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnbilling/settlements", settlementAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected settlement subject caller autofill to return 200, got %d payload=%v", status, payload)
+	}
+
+	rewardMismatchBody := `{"RewardID":"reward-principal-mismatch-1","ProviderSubjectID":"other-principal","SessionID":"sess-principal-3","RewardMicros":50,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:03Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnrewards/issues", rewardMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected reward provider caller mismatch to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "ProviderSubjectID must match authenticated caller" {
+		t.Fatalf("expected reward provider mismatch error, got %q", got)
+	}
+
+	rewardAutofillBody := `{"RewardID":"reward-principal-ok-1","SessionID":"sess-principal-4","RewardMicros":51,"Currency":"uusdc","IssuedAt":"2026-01-01T00:00:04Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnrewards/issues", rewardAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected reward provider caller autofill to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnrewards/accruals/reward-principal-ok-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected reward accrual by-id get to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "accrual", "ProviderID", canonicalPrincipal)
+
+	policyBody := `{"PolicyID":"policy-principal-1","Title":"auth-principal-policy","Description":"identity binding policy seed","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpngovernance/policies", policyBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected governance policy seed to return 200, got %d payload=%v", status, payload)
+	}
+
+	decisionMismatchBody := `{"DecisionID":"decision-principal-mismatch-1","PolicyID":"policy-principal-1","ProposalID":"proposal-principal-1","Outcome":"approve","Decider":"other-principal","Reason":"mismatch","DecidedAt":"2026-01-01T00:00:01Z","Status":"submitted"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpngovernance/decisions", decisionMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected governance decision caller mismatch to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "Decider must match authenticated caller" {
+		t.Fatalf("expected decision mismatch error, got %q", got)
+	}
+
+	decisionAutofillBody := `{"DecisionID":"decision-principal-ok-1","PolicyID":"policy-principal-1","ProposalID":"proposal-principal-2","Outcome":"approve","Reason":"autofill","DecidedAt":"2026-01-01T00:00:02Z","Status":"submitted"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpngovernance/decisions", decisionAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected governance decision caller autofill to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpngovernance/decisions/decision-principal-ok-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected governance decision by-id get to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "decision", "Decider", canonicalPrincipal)
+
+	actionMismatchBody := `{"ActionID":"action-principal-mismatch-1","Action":"policy.bootstrap","Actor":"other-principal","Reason":"mismatch","EvidencePointer":"obj://audit/action-principal-mismatch-1","Timestamp":"2026-01-01T00:00:03Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpngovernance/audit-actions", actionMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected governance audit caller mismatch to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "Actor must match authenticated caller" {
+		t.Fatalf("expected audit mismatch error, got %q", got)
+	}
+
+	actionAutofillBody := `{"ActionID":"action-principal-ok-1","Action":"policy.bootstrap","Reason":"autofill","EvidencePointer":"obj://audit/action-principal-ok-1","Timestamp":"2026-01-01T00:00:04Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpngovernance/audit-actions", actionAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected governance audit caller autofill to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpngovernance/audit-actions/action-principal-ok-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected governance audit by-id get to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "action", "Actor", canonicalPrincipal)
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
 func TestRunTDPNDSettlementHTTPSlashEvidenceRejectsInvalidObjectiveRef(t *testing.T) {
 	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

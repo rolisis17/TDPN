@@ -65,8 +65,9 @@ type grpcRuntimeConfig struct {
 }
 
 type settlementHTTPConfig struct {
-	listenAddr string
-	authToken  string
+	listenAddr    string
+	authToken     string
+	authPrincipal string
 }
 
 type stateDirConfigurableScaffold interface {
@@ -137,6 +138,7 @@ func runTDPND(
 	settlementHTTPListen := flags.String("settlement-http-listen", "", "listen address for settlement HTTP bridge")
 	settlementHTTPAuthToken := flags.String("settlement-http-auth-token", "", "optional bearer token for settlement HTTP POST endpoints")
 	settlementHTTPAuthTokenFile := flags.String("settlement-http-auth-token-file", "", "path to file containing settlement HTTP bearer token")
+	settlementHTTPAuthPrincipal := flags.String("settlement-http-auth-principal", "", "optional caller principal bound to settlement identity fields in authenticated mode")
 	cometHome := flags.String("comet-home", "", "home directory for CometBFT runtime")
 	cometMoniker := flags.String("comet-moniker", "", "moniker for CometBFT runtime")
 	cometP2PLAddr := flags.String("comet-p2p-laddr", "", "listen address for CometBFT p2p networking")
@@ -224,9 +226,17 @@ func runTDPND(
 	if settlementAuthToken == "" {
 		settlementAuthToken = strings.TrimSpace(os.Getenv("SETTLEMENT_HTTP_AUTH_TOKEN"))
 	}
+	settlementAuthPrincipal := strings.TrimSpace(*settlementHTTPAuthPrincipal)
+	if settlementAuthPrincipal == "" {
+		settlementAuthPrincipal = strings.TrimSpace(os.Getenv("SETTLEMENT_HTTP_AUTH_PRINCIPAL"))
+	}
+	if settlementAuthPrincipal != "" && settlementAuthToken == "" {
+		return errors.New("--settlement-http-auth-principal requires --settlement-http-auth-token, --settlement-http-auth-token-file, or SETTLEMENT_HTTP_AUTH_TOKEN")
+	}
 	settlementCfg := settlementHTTPConfig{
-		listenAddr: settlementListenAddr,
-		authToken:  settlementAuthToken,
+		listenAddr:    settlementListenAddr,
+		authToken:     settlementAuthToken,
+		authPrincipal: settlementAuthPrincipal,
 	}
 
 	var (

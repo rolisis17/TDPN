@@ -42,6 +42,10 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
     - `GET /x/vpngovernance/decisions[/{decision_id}]`
     - `GET /x/vpngovernance/audit-actions[/{action_id}]`
   - bridge auth policy: bearer token (when configured) applies to all `POST` writes (including validator/governance write routes); `GET` query routes and `GET /health` remain open.
+  - optional identity-bound mode: `--settlement-http-auth-principal` (or `SETTLEMENT_HTTP_AUTH_PRINCIPAL`) binds authenticated writes to one canonical caller principal.
+    - when configured, `SubjectID` (`/x/vpnbilling/settlements`), `ProviderSubjectID` (`/x/vpnrewards/issues`), `SponsorID` (`/x/vpnsponsor/reservations`), `Decider` (`/x/vpngovernance/decisions`), and `Actor` (`/x/vpngovernance/audit-actions`) must match that principal (case-insensitive); mismatches are rejected (`403`).
+    - when configured and those fields are omitted, the bridge auto-fills them from the configured principal.
+    - when not configured, legacy behavior is preserved.
 
 ## Reconciliation contract
 - Records use canonical lifecycle statuses via `types/ReconciliationStatus`: `pending -> submitted -> confirmed`, with explicit `failed` retained for replay/reconciliation.

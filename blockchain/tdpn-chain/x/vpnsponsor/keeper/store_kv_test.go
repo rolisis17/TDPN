@@ -119,6 +119,9 @@ func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
 	if _, ok := store.GetAuthorization("bad-json"); ok {
 		t.Fatal("expected malformed authorization payload to be rejected by GetAuthorization")
 	}
+	if _, err := store.ListAuthorizationsWithError(); err == nil {
+		t.Fatal("expected strict authorization list decode to fail on malformed payload")
+	}
 
 	delegations := store.ListDelegations()
 	if len(delegations) != 2 {
@@ -129,5 +132,8 @@ func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
 	}
 	if _, ok := store.GetDelegation("bad-json"); ok {
 		t.Fatal("expected malformed delegation payload to be rejected by GetDelegation")
+	}
+	if _, err := store.ListDelegationsWithError(); err == nil {
+		t.Fatal("expected strict delegation list decode to fail on malformed payload")
 	}
 }

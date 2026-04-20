@@ -2,6 +2,8 @@ package keeper
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
@@ -59,6 +61,24 @@ func (s *KVStore) ListAuthorizations() []types.SponsorAuthorization {
 	return records
 }
 
+func (s *KVStore) ListAuthorizationsWithError() ([]types.SponsorAuthorization, error) {
+	records := make([]types.SponsorAuthorization, 0)
+	var decodeErr error
+	s.store.IteratePrefix([]byte(authorizationPrefix), func(key []byte, value []byte) bool {
+		var record types.SponsorAuthorization
+		if err := json.Unmarshal(value, &record); err != nil {
+			decodeErr = fmt.Errorf("decode authorization %q: %w", strings.TrimPrefix(string(key), authorizationPrefix), err)
+			return false
+		}
+		records = append(records, record)
+		return true
+	})
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	return records, nil
+}
+
 func (s *KVStore) UpsertDelegation(record types.DelegatedSessionCredit) {
 	payload, err := json.Marshal(record)
 	if err != nil {
@@ -91,6 +111,24 @@ func (s *KVStore) ListDelegations() []types.DelegatedSessionCredit {
 		return true
 	})
 	return records
+}
+
+func (s *KVStore) ListDelegationsWithError() ([]types.DelegatedSessionCredit, error) {
+	records := make([]types.DelegatedSessionCredit, 0)
+	var decodeErr error
+	s.store.IteratePrefix([]byte(delegationPrefix), func(key []byte, value []byte) bool {
+		var record types.DelegatedSessionCredit
+		if err := json.Unmarshal(value, &record); err != nil {
+			decodeErr = fmt.Errorf("decode delegation %q: %w", strings.TrimPrefix(string(key), delegationPrefix), err)
+			return false
+		}
+		records = append(records, record)
+		return true
+	})
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	return records, nil
 }
 
 func authorizationKey(authID string) []byte {

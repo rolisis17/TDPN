@@ -7,6 +7,7 @@ import (
 	"time"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
+	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
 )
 
@@ -652,6 +653,43 @@ func TestKeeperDelegateSessionCreditOverflowSafeCreditsExceeded(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "max credits exceeded") {
 		t.Fatalf("expected max credits exceeded error message, got: %v", err)
+	}
+}
+
+func TestKeeperDelegateSessionCreditFailsClosedOnMalformedDelegationSnapshot(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	backend.Set([]byte("delegation/bad-json"), []byte("{not-valid-json"))
+
+	_, err := k.DelegateSessionCredit(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	})
+	if err == nil {
+		t.Fatal("expected malformed delegation snapshot to block delegation creation")
+	}
+	if !strings.Contains(err.Error(), "load delegations") {
+		t.Fatalf("expected delegation load error, got: %v", err)
+	}
+	if _, ok := k.GetDelegation("res-1"); ok {
+		t.Fatal("expected failed delegation creation to leave state unchanged")
 	}
 }
 

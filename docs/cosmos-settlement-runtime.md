@@ -52,6 +52,7 @@ Shadow dual-write note:
 - Optional runtime flags:
   - `--settlement-http-listen`
   - `--settlement-http-auth-token`
+  - `--settlement-http-auth-principal` (optional identity binding for billing/reward/sponsor/governance caller fields when auth token mode is enabled)
   - `--state-dir` (optional file-backed module stores under one runtime state root)
 - Example:
   - `go run ./cmd/tdpnd --settlement-http-listen 127.0.0.1:8080 --state-dir ./.tdpn-chain-state`
@@ -88,6 +89,9 @@ Shadow dual-write note:
     - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
     - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
   - when `--settlement-http-auth-token` is set, bearer auth is required on all `POST` endpoints (including validator/governance writes) only; `GET` query paths and `GET /health` remain open.
+  - optional identity-bound writes:
+    - when `--settlement-http-auth-principal` (or `SETTLEMENT_HTTP_AUTH_PRINCIPAL`) is configured with auth token mode, `SubjectID`, `ProviderSubjectID`, `SponsorID`, `Decider`, and `Actor` are bound to that principal (case-insensitive), mismatches return `403`, and omitted fields are auto-filled.
+    - `--settlement-http-auth-principal` requires `--settlement-http-auth-token` (or token-file/env equivalent).
   - if you use that mode, bind the bridge to `127.0.0.1` only or another private-only transport and do not expose it on a reachable listener; unauthenticated GETs can leak settlement, validator, and governance state to any caller.
 - VPN services can target this bridge with `COSMOS_SETTLEMENT_ENDPOINT=http://127.0.0.1:8080`.
 - Bridge responsibilities remain control-plane only; VPN dataplane forwarding does not couple to bridge liveness.

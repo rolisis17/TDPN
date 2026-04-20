@@ -41,9 +41,10 @@ type settlementBridgeScaffold interface {
 }
 
 type settlementBridgeHandler struct {
-	scaffold   settlementBridgeScaffold
-	authToken  string
-	listenAddr string
+	scaffold      settlementBridgeScaffold
+	authToken     string
+	authPrincipal string
+	listenAddr    string
 }
 
 type loopbackHostCheckFunc func(string) bool
@@ -175,9 +176,10 @@ func runSettlementHTTPMode(
 	defer listener.Close()
 
 	handler := &settlementBridgeHandler{
-		scaffold:   scaffold,
-		authToken:  cfg.authToken,
-		listenAddr: listener.Addr().String(),
+		scaffold:      scaffold,
+		authToken:     cfg.authToken,
+		authPrincipal: canonicalBridgePrincipal(cfg.authPrincipal),
+		listenAddr:    listener.Addr().String(),
 	}
 	server := &http.Server{
 		Handler:           handler.routes(),
@@ -320,6 +322,17 @@ func (h *settlementBridgeHandler) handleBillingSettlement(w http.ResponseWriter,
 	settlementID := strings.TrimSpace(payload.SettlementID)
 	sessionID := strings.TrimSpace(payload.SessionID)
 	subjectID := strings.TrimSpace(payload.SubjectID)
+	if authenticatedPrincipal := h.authenticatedPrincipal(); authenticatedPrincipal != "" {
+		boundSubjectID, ok := bindIdentityFieldToAuthenticatedCaller(subjectID, authenticatedPrincipal)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{
+				OK:    false,
+				Error: "SubjectID must match authenticated caller",
+			})
+			return
+		}
+		subjectID = boundSubjectID
+	}
 	currency := strings.TrimSpace(payload.Currency)
 	reservationID := strings.TrimSpace(payload.ReservationID)
 	if settlementID == "" || reservationID == "" || sessionID == "" || subjectID == "" || currency == "" {
@@ -446,6 +459,18 @@ func (h *settlementBridgeHandler) handleRewardIssue(w http.ResponseWriter, r *ht
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
+	providerSubjectID := strings.TrimSpace(payload.ProviderSubjectID)
+	if authenticatedPrincipal := h.authenticatedPrincipal(); authenticatedPrincipal != "" {
+		boundProviderSubjectID, ok := bindIdentityFieldToAuthenticatedCaller(providerSubjectID, authenticatedPrincipal)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{
+				OK:    false,
+				Error: "ProviderSubjectID must match authenticated caller",
+			})
+			return
+		}
+		providerSubjectID = boundProviderSubjectID
+	}
 
 	accrualID := strings.TrimSpace(payload.RewardID)
 	distributionID := "dist:" + accrualID
@@ -455,7 +480,7 @@ func (h *settlementBridgeHandler) handleRewardIssue(w http.ResponseWriter, r *ht
 		Record: rewardtypes.RewardAccrual{
 			AccrualID:      accrualID,
 			SessionID:      payload.SessionID,
-			ProviderID:     payload.ProviderSubjectID,
+			ProviderID:     providerSubjectID,
 			AssetDenom:     payload.Currency,
 			Amount:         payload.RewardMicros,
 			AccruedAtUnix:  issuedUnix,
@@ -590,6 +615,17 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 	subjectID := strings.TrimSpace(payload.SubjectID)
 	reservationID := strings.TrimSpace(payload.ReservationID)
 	sponsorID := strings.TrimSpace(payload.SponsorID)
+	if authenticatedPrincipal := h.authenticatedPrincipal(); authenticatedPrincipal != "" {
+		boundSponsorID, ok := bindIdentityFieldToAuthenticatedCaller(sponsorID, authenticatedPrincipal)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{
+				OK:    false,
+				Error: "SponsorID must match authenticated caller",
+			})
+			return
+		}
+		sponsorID = boundSponsorID
+	}
 	appID := strings.TrimSpace(payload.AppID)
 	endUserID := strings.TrimSpace(payload.EndUserID)
 	if reservationID == "" || sponsorID == "" {
@@ -1231,14 +1267,25 @@ func (h *settlementBridgeHandler) handleGovernanceDecisions(w http.ResponseWrite
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
-
+	decider := strings.TrimSpace(payload.Decider)
+	if authenticatedPrincipal := h.authenticatedPrincipal(); authenticatedPrincipal != "" {
+		boundDecider, ok := bindIdentityFieldToAuthenticatedCaller(decider, authenticatedPrincipal)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{
+				OK:    false,
+				Error: "Decider must match authenticated caller",
+			})
+			return
+		}
+		decider = boundDecider
+	}
 	resp, err := h.scaffold.GovernanceMsgServer().RecordDecision(r.Context(), app.GovernanceRecordDecisionRequest{
 		Record: governancetypes.GovernanceDecision{
 			DecisionID:    payload.DecisionID,
 			PolicyID:      payload.PolicyID,
 			ProposalID:    payload.ProposalID,
 			Outcome:       strings.ToLower(strings.TrimSpace(payload.Outcome)),
-			Decider:       payload.Decider,
+			Decider:       decider,
 			Reason:        payload.Reason,
 			DecidedAtUnix: unixOrZero(payload.DecidedAt),
 			Status:        chaintypes.ReconciliationSubmitted,
@@ -1306,12 +1353,23 @@ func (h *settlementBridgeHandler) handleGovernanceAuditActions(w http.ResponseWr
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
-
+	actor := strings.TrimSpace(payload.Actor)
+	if authenticatedPrincipal := h.authenticatedPrincipal(); authenticatedPrincipal != "" {
+		boundActor, ok := bindIdentityFieldToAuthenticatedCaller(actor, authenticatedPrincipal)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{
+				OK:    false,
+				Error: "Actor must match authenticated caller",
+			})
+			return
+		}
+		actor = boundActor
+	}
 	resp, err := h.scaffold.GovernanceMsgServer().RecordAuditAction(r.Context(), app.GovernanceRecordAuditActionRequest{
 		Record: governancetypes.GovernanceAuditAction{
 			ActionID:        payload.ActionID,
 			Action:          payload.Action,
-			Actor:           payload.Actor,
+			Actor:           actor,
 			Reason:          payload.Reason,
 			EvidencePointer: payload.EvidencePointer,
 			TimestampUnix:   unixOrZero(payload.Timestamp),
@@ -1360,6 +1418,28 @@ func isAllowedUnauthenticatedOrigin(rawOrigin, listenAddr string) bool {
 	return isAllowedUnauthenticatedOriginWithLoopbackCheck(rawOrigin, listenAddr, isLoopbackHost)
 }
 
+func canonicalBridgePrincipal(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func bindIdentityFieldToAuthenticatedCaller(rawFieldValue, authenticatedPrincipal string) (string, bool) {
+	principal := canonicalBridgePrincipal(authenticatedPrincipal)
+	if principal == "" {
+		return strings.TrimSpace(rawFieldValue), true
+	}
+	rawFieldValue = canonicalBridgePrincipal(rawFieldValue)
+	if rawFieldValue == "" || rawFieldValue == principal {
+		return principal, true
+	}
+	return "", false
+}
+
+func (h *settlementBridgeHandler) authenticatedPrincipal() string {
+	if h == nil || h.authToken == "" {
+		return ""
+	}
+	return canonicalBridgePrincipal(h.authPrincipal)
+}
 func isAllowedUnauthenticatedOriginWithLoopbackCheck(rawOrigin, listenAddr string, isLoopbackHostCheck loopbackHostCheckFunc) bool {
 	if isLoopbackHostCheck == nil {
 		return false

@@ -189,7 +189,12 @@ func (k *Keeper) DelegateSessionCreditAtUnix(record types.DelegatedSessionCredit
 		}
 		return compatibilityDelegation, nil
 	}
-	delegatedCredits, overflowed := delegatedCreditsByAuthorization(k.store.ListDelegations(), normalized.AuthorizationID)
+	delegations, err := k.listDelegationsForAccountingLocked()
+	if err != nil {
+		return types.DelegatedSessionCredit{}, err
+	}
+
+	delegatedCredits, overflowed := delegatedCreditsByAuthorization(delegations, normalized.AuthorizationID)
 	if overflowed {
 		return types.DelegatedSessionCredit{}, authorizationCreditsExceededError(normalized.AuthorizationID, authorization.MaxCredits)
 	}
@@ -349,6 +354,17 @@ func checkedAddInt64(left int64, right int64) (int64, bool) {
 		return 0, true
 	}
 	return left + right, false
+}
+
+func (k *Keeper) listDelegationsForAccountingLocked() ([]types.DelegatedSessionCredit, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListDelegationsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load delegations: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListDelegations(), nil
 }
 
 func canonicalAuthorizationID(value string) string {

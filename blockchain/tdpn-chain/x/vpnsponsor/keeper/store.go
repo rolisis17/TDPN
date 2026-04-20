@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 
@@ -32,6 +33,12 @@ type KeeperStore interface {
 type KeeperStoreWithWriteErrors interface {
 	UpsertAuthorizationWithError(record types.SponsorAuthorization) error
 	UpsertDelegationWithError(record types.DelegatedSessionCredit) error
+}
+
+// KeeperStoreWithReadErrors allows callers to fail closed when decoding persisted records.
+type KeeperStoreWithReadErrors interface {
+	ListAuthorizationsWithError() ([]types.SponsorAuthorization, error)
+	ListDelegationsWithError() ([]types.DelegatedSessionCredit, error)
 }
 
 // InMemoryStore is the default keeper store implementation.
@@ -75,6 +82,10 @@ func (s *InMemoryStore) ListAuthorizations() []types.SponsorAuthorization {
 	return records
 }
 
+func (s *InMemoryStore) ListAuthorizationsWithError() ([]types.SponsorAuthorization, error) {
+	return s.ListAuthorizations(), nil
+}
+
 func (s *InMemoryStore) UpsertDelegation(record types.DelegatedSessionCredit) {
 	s.delegations[record.ReservationID] = record
 }
@@ -101,6 +112,10 @@ func (s *InMemoryStore) ListDelegations() []types.DelegatedSessionCredit {
 		records = append(records, s.delegations[id])
 	}
 	return records
+}
+
+func (s *InMemoryStore) ListDelegationsWithError() ([]types.DelegatedSessionCredit, error) {
+	return s.ListDelegations(), nil
 }
 
 type fileStoreSnapshot struct {
@@ -216,6 +231,10 @@ func (s *FileStore) ListAuthorizations() []types.SponsorAuthorization {
 	return records
 }
 
+func (s *FileStore) ListAuthorizationsWithError() ([]types.SponsorAuthorization, error) {
+	return s.ListAuthorizations(), nil
+}
+
 func (s *FileStore) UpsertDelegation(record types.DelegatedSessionCredit) {
 	_ = s.UpsertDelegationWithError(record)
 }
@@ -259,6 +278,10 @@ func (s *FileStore) ListDelegations() []types.DelegatedSessionCredit {
 		records = append(records, s.delegations[id])
 	}
 	return records
+}
+
+func (s *FileStore) ListDelegationsWithError() ([]types.DelegatedSessionCredit, error) {
+	return s.ListDelegations(), nil
 }
 
 func (s *FileStore) persistLocked() error {
@@ -321,6 +344,11 @@ func writeFileAtomic(path string, payload []byte) error {
 }
 
 func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows does not provide a portable directory fsync; file durability is
+		// still guarded by fsync on the temp file before rename.
+		return nil
+	}
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
