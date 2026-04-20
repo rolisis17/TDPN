@@ -327,7 +327,7 @@ token_proof_verified=false
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-key_json="$(go run ./cmd/tokenpop gen)"
+key_json="$(go run ./cmd/tokenpop gen --show-private-key)"
 token_proof_priv_key="$(printf '%s' "$key_json" | jq -r '.private_key // empty')"
 generated_pop_pub_key="$(printf '%s' "$key_json" | jq -r '.public_key // empty')"
 token_proof_priv_key_file=""

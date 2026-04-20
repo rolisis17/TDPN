@@ -42,6 +42,26 @@ make_private_temp_file() {
   printf '%s\n' "$file_path"
 }
 
+redact_token_json() {
+  local payload="$1"
+  if command -v jq >/dev/null 2>&1 && printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$payload" | jq -c '
+      if type == "object" then
+        (if has("token") then .token = "[redacted]" else . end)
+        | (if has("private_key") then .private_key = "[redacted]" else . end)
+        | (if has("credential") then .credential = "[redacted]" else . end)
+      else
+        .
+      end
+    '
+    return
+  fi
+  printf '%s\n' "$payload" | sed -E \
+    -e 's/"token":"[^"]*"/"token":"[redacted]"/g' \
+    -e 's/"private_key":"[^"]*"/"private_key":"[redacted]"/g' \
+    -e 's/"credential":"[^"]*"/"credential":"[redacted]"/g'
+}
+
 NODE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_node_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
 REVOKE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_revoke_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.json")"
 DISPUTE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_dispute_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
@@ -101,12 +121,12 @@ if [[ "$ready" -ne 1 ]]; then
 fi
 
 client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-pop_json=$(go run ./cmd/tokenpop gen)
+pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
   echo "failed to generate seed token PoP keypair"
-  echo "$pop_json" | sed -E 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+  redact_token_json "$pop_json"
   exit 1
 fi
 
@@ -117,7 +137,7 @@ jti=$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')
 
 if [[ -z "$token" || -z "$jti" ]]; then
   echo "failed to parse token/jti for lifecycle chaos seed token"
-  echo "$token_json" | sed -E 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+  redact_token_json "$token_json"
   cat "${NODE_LOG}"
   exit 1
 fi
@@ -183,7 +203,7 @@ dispute_pid=$!
 : >"${FRESH_LOG}"
 (
   for _ in $(seq 1 "${FRESH_LOOPS}"); do
-    popj=$(go run ./cmd/tokenpop gen || true)
+    popj=$(go run ./cmd/tokenpop gen --show-private-key || true)
     pop_pub_iter=$(echo "$popj" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
     pop_priv_iter=$(echo "$popj" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
     if [[ -z "$pop_pub_iter" || -z "$pop_priv_iter" ]]; then

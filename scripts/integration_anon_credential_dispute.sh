@@ -52,7 +52,7 @@ if [[ -z "$anon_cred" ]]; then
   exit 1
 fi
 
-pop_json=$(go run ./cmd/tokenpop gen)
+pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" ]]; then
   echo "failed to generate token PoP keypair"

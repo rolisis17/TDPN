@@ -491,7 +491,7 @@ run_mode_scenario() {
   wait_for_backlog_status "${base_url}/v1/settlement/status"
 
   local pop_pub_key
-  pop_pub_key="$(go run ./cmd/tokenpop gen | jq -r '.public_key // empty')"
+  pop_pub_key="$(go run ./cmd/tokenpop gen --show-private-key | jq -r '.public_key // empty')"
   if [[ -z "${pop_pub_key}" || "${pop_pub_key}" == "null" ]]; then
     echo "failed to generate pop public key for sponsor token outage check (mode=${mode})"
     dump_logs

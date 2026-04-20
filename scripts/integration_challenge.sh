@@ -44,7 +44,7 @@ trap cleanup EXIT
 
 sleep 2
 
-pop_json=$(go run ./cmd/tokenpop gen)
+pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 POP_PUBLIC_KEY=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 POP_PRIVATE_KEY=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$POP_PUBLIC_KEY" || -z "$POP_PRIVATE_KEY" ]]; then

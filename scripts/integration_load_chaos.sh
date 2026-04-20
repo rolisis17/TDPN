@@ -166,7 +166,7 @@ if ! echo "$local_relays_json" | rg -q "\"control_url\":\"${CORE_EXIT_CONTROL_UR
   exit 1
 fi
 
-pop_json=$(go run ./cmd/tokenpop gen)
+pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then

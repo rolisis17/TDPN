@@ -7,6 +7,26 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
+redact_token_json() {
+  local payload="$1"
+  if command -v jq >/dev/null 2>&1 && printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$payload" | jq -c '
+      if type == "object" then
+        (if has("token") then .token = "[redacted]" else . end)
+        | (if has("private_key") then .private_key = "[redacted]" else . end)
+        | (if has("credential") then .credential = "[redacted]" else . end)
+      else
+        .
+      end
+    '
+    return
+  fi
+  printf '%s\n' "$payload" | sed -E \
+    -e 's/"token":"[^"]*"/"token":"[redacted]"/g' \
+    -e 's/"private_key":"[^"]*"/"private_key":"[redacted]"/g' \
+    -e 's/"credential":"[^"]*"/"credential":"[redacted]"/g'
+}
+
 timeout 25s go run ./cmd/node --directory >/tmp/multi_issuer_directory.log 2>&1 &
 dir_pid=$!
 
@@ -32,12 +52,12 @@ trap cleanup EXIT
 
 sleep 3
 
-pop_json=$(go run ./cmd/tokenpop gen)
+pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
   echo "failed to generate token PoP keypair"
-  echo "$pop_json" | sed -E 's/("private_key"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+  redact_token_json "$pop_json"
   exit 1
 fi
 
@@ -48,7 +68,7 @@ jti=$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')
 
 if [[ -z "$token" || -z "$jti" ]]; then
   echo "failed to parse issuer-b token/jti"
-  echo "$token_json" | sed -E 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1[redacted]/g'
+  redact_token_json "$token_json"
   cat /tmp/multi_issuer_b.log
   exit 1
 fi

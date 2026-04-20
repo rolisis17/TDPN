@@ -650,7 +650,7 @@ run_mode_scenario() {
   '
 
   local pop_json
-  pop_json="$(go run ./cmd/tokenpop gen)"
+  pop_json="$(go run ./cmd/tokenpop gen --show-private-key)"
   local pop_pub_key
   pop_pub_key="$(printf '%s' "${pop_json}" | jq -r '.public_key // empty')"
   local pop_priv_key

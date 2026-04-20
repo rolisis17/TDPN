@@ -241,7 +241,7 @@ jq -e --arg reservation_id "${RESERVATION_ID}" --arg sponsor_id "${SPONSOR_ID}" 
   (.expires_at | type == "number" and . > 0)
 ' "${RESP_FILE}" >/dev/null
 
-pop_pub_key="$(go run ./cmd/tokenpop gen | jq -r '.public_key // empty')"
+pop_pub_key="$(go run ./cmd/tokenpop gen --show-private-key | jq -r '.public_key // empty')"
 if [[ -z "${pop_pub_key}" ]]; then
   echo "failed to generate pop public key for sponsor token request"
   cat "${LOG_FILE}"

@@ -84,7 +84,7 @@ trap cleanup EXIT
 
 sleep 2
 
-provider_pop_json=$(go run ./cmd/tokenpop gen)
+provider_pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 provider_pop_pub=$(echo "$provider_pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$provider_pop_pub" ]]; then
   echo "failed to generate provider pop key"
@@ -102,7 +102,7 @@ if [[ -z "$provider_token_t1" ]]; then
   exit 1
 fi
 
-relay_key_json=$(go run ./cmd/tokenpop gen)
+relay_key_json=$(go run ./cmd/tokenpop gen --show-private-key)
 relay_pub=$(echo "$relay_key_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$relay_pub" ]]; then
   echo "failed to generate relay pubkey"
@@ -141,7 +141,7 @@ if ! echo "$entry_resp" | rg -q '"accepted":true'; then
   exit 1
 fi
 
-provider_pop_t2_json=$(go run ./cmd/tokenpop gen)
+provider_pop_t2_json=$(go run ./cmd/tokenpop gen --show-private-key)
 provider_pop_t2_pub=$(echo "$provider_pop_t2_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$provider_pop_t2_pub" ]]; then
   echo "failed to generate provider tier2 pop key"
@@ -191,7 +191,7 @@ if ! curl -sS http://127.0.0.1:8081/v1/relays | rg -q '"relay_id":"exit-provider
   exit 1
 fi
 
-client_pop_json=$(go run ./cmd/tokenpop gen)
+client_pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 client_pop_pub=$(echo "$client_pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$client_pop_pub" ]]; then
   echo "failed to generate client pop key"
