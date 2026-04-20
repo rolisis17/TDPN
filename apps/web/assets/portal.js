@@ -11,6 +11,11 @@ const statusBannerEl = byId("status_banner");
 const statusTitleEl = byId("status_title");
 const statusDetailEl = byId("status_detail");
 const statusLineEl = byId("status_line");
+const onboardingStateBannerEl = byId("onboarding_state_banner");
+const onboardingStateLineEl = byId("onboarding_state_line");
+const onboardingStateTitleEl = byId("onboarding_state_title");
+const onboardingStateDetailEl = byId("onboarding_state_detail");
+const onboardingNextActionEl = byId("onboarding_next_action");
 const policyPostureEl = byId("policy_posture");
 const policyPostureLineEl = byId("policy_posture_line");
 const policyConnectPolicyEl = byId("policy_connect_policy");
@@ -2416,6 +2421,10 @@ function isClientTabVisibleRole(roleValue = byId("role").value) {
   return true;
 }
 
+function formatDirectActionGuidance(directPath, requiredConditions) {
+  return `Direct path: ${directPath}. Required conditions: ${requiredConditions}.`;
+}
+
 function computeClientTabLockHintText() {
   const readiness = computeClientReadiness();
   return readiness.guidanceText;
@@ -2424,10 +2433,11 @@ function computeClientTabLockHintText() {
 function computeServerTabLockHintText() {
   const readiness = computeOperatorReadiness();
   if (!isServerTabVisibleRole()) {
-    if (serverReadiness?.lockReason) {
-      return serverReadiness.lockReason;
-    }
-    return "Server tab is locked for the current role. Apply operator role and refresh readiness.";
+    const reason = serverReadiness?.lockReason || "Server tab is locked for the current role.";
+    return `${reason} ${formatDirectActionGuidance(
+      "Use Apply Operator Role, then Check Operator Status and Refresh Session",
+      "active session token, approved operator application, and matching session/application chain_operator_id values"
+    )}`;
   }
   return readiness.guidanceText;
 }
@@ -2633,6 +2643,116 @@ function refreshOnboardingSteps() {
     return;
   }
   setStepState(onboardingStepOperatorEl, "active");
+}
+
+function effectivePortalOperatorApplicationStatus() {
+  return normalizeOperatorApplicationStatus(serverReadiness?.operatorApplicationStatus || operatorApplicationStatus);
+}
+
+function computePortalNextRecommendedAction() {
+  const sessionToken = byId("session_token").value.trim();
+  if (!sessionToken) {
+    const challengeId = byId("challenge_id").value.trim();
+    const signature = byId("signature").value.trim();
+    if (!challengeId) {
+      return "Request Challenge.";
+    }
+    if (!signature) {
+      return "Sign Challenge (Wallet) or run Sign + Verify (Wallet).";
+    }
+    return "Verify + Create Session.";
+  }
+
+  const clientReadiness = computeClientReadiness();
+  if (
+    clientReadiness.state === "ready_to_register" ||
+    clientReadiness.state === "re_registration_required"
+  ) {
+    return "Register Client.";
+  }
+
+  const operatorStatus = effectivePortalOperatorApplicationStatus();
+  if (operatorStatus === "pending") {
+    return "Wait for operator approval, then refresh Session or Check Operator Status.";
+  }
+  if (operatorStatus === "rejected") {
+    return "Apply Operator Role again after updating operator details.";
+  }
+  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
+  if (operatorStatus !== "approved" && role !== "admin" && role !== "server" && role !== "server_only") {
+    return "Apply Operator Role.";
+  }
+  if (serverReadiness?.lifecycleActionsUnlocked === false) {
+    return "Check Operator Status and refresh Session to unlock server actions.";
+  }
+  return "Continue in Client or Server tab based on your role.";
+}
+
+function computePortalOnboardingState() {
+  const sessionToken = byId("session_token").value.trim();
+  if (!sessionToken) {
+    const challengeId = byId("challenge_id").value.trim();
+    const signature = byId("signature").value.trim();
+    if (!challengeId) {
+      return {
+        kind: "warn",
+        title: "Signed out",
+        detail: "No active session token is loaded."
+      };
+    }
+    if (!signature) {
+      return {
+        kind: "warn",
+        title: "Signed out",
+        detail: "Challenge is ready, but signature verification is still pending."
+      };
+    }
+    return {
+      kind: "warn",
+      title: "Signed out",
+      detail: "Challenge and signature are ready, but session verification is still pending."
+    };
+  }
+
+  const operatorStatus = effectivePortalOperatorApplicationStatus();
+  if (operatorStatus === "pending") {
+    return {
+      kind: "warn",
+      title: "Operator pending",
+      detail: "Session is active and operator approval is pending."
+    };
+  }
+  if (operatorStatus === "approved") {
+    return {
+      kind: "good",
+      title: "Operator approved",
+      detail: "Session is active and operator approval is complete."
+    };
+  }
+  if (operatorStatus === "rejected") {
+    return {
+      kind: "bad",
+      title: "Operator rejected",
+      detail: "Session is active, but operator application was rejected."
+    };
+  }
+  return {
+    kind: "good",
+    title: "Session active",
+    detail: "Session token is active. Continue with client registration and operator onboarding."
+  };
+}
+
+function syncPortalOnboardingStateBanner() {
+  const onboardingState = computePortalOnboardingState();
+  onboardingStateBannerEl.dataset.kind = onboardingState.kind || "warn";
+  onboardingStateLineEl.classList.remove("good", "warn", "bad");
+  if (onboardingState.kind) {
+    onboardingStateLineEl.classList.add(onboardingState.kind);
+  }
+  onboardingStateTitleEl.textContent = onboardingState.title;
+  onboardingStateDetailEl.textContent = onboardingState.detail;
+  onboardingNextActionEl.textContent = `Next recommended action: ${computePortalNextRecommendedAction()}`;
 }
 
 function syncSessionDerivedState(result) {
@@ -3178,7 +3298,10 @@ function computeOperatorReadiness() {
     return {
       kind: "warn",
       statusText: "Not signed in",
-      guidanceText: "Sign in first to unlock operator onboarding."
+      guidanceText: `Sign in first to unlock operator onboarding. ${formatDirectActionGuidance(
+        "Request Challenge, then run Sign + Verify (Wallet) or Verify + Create Session",
+        "active session token"
+      )}`
     };
   }
 
@@ -3205,13 +3328,23 @@ function computeOperatorReadiness() {
     }
     const reason = serverReadiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
     const nextActions = serverReadiness.unlockActions.length > 0 ? ` Next: ${serverReadiness.unlockActions.join("; ")}` : "";
+    const requiredConditions =
+      serverReadiness.unlockActions.length > 0
+        ? serverReadiness.unlockActions.join("; ")
+        : "approved operator application and matching session/application chain_operator_id values";
     return {
       kind:
         serverReadiness.operatorApplicationStatus === "rejected" || serverReadiness.tabVisible === false
           ? "bad"
           : "warn",
       statusText: statusLabel,
-      guidanceText: appendChainBindingGuidance(`${reason}${nextActions}`, serverReadiness)
+      guidanceText: appendChainBindingGuidance(
+        `${reason}${nextActions} ${formatDirectActionGuidance(
+          "Use Apply Operator Role or Check Operator Status, then Refresh Session",
+          requiredConditions
+        )}`,
+        serverReadiness
+      )
     };
   }
 
@@ -3236,25 +3369,37 @@ function computeOperatorReadiness() {
         return {
           kind: "bad",
           statusText: statusLabel,
-          guidanceText: "Operator role is not fully eligible. Check operator status, then refresh or rotate session after re-approval."
+          guidanceText: `Operator role is not fully eligible. ${formatDirectActionGuidance(
+            "Apply Operator Role again, then Check Operator Status and Refresh Session",
+            "approved operator application and matching session/application chain_operator_id values"
+          )}`
         };
       case "pending":
         return {
           kind: "warn",
           statusText: statusLabel,
-          guidanceText: "Operator role is not fully eligible yet. Check operator status and refresh or rotate session after approval."
+          guidanceText: `Operator role is not fully eligible yet. ${formatDirectActionGuidance(
+            "Wait for approval, then Check Operator Status and Refresh Session",
+            "approved operator application and matching session/application chain_operator_id values"
+          )}`
         };
       case "not_submitted":
         return {
           kind: "warn",
           statusText: statusLabel,
-          guidanceText: "Operator role is not fully eligible yet. Submit operator application, then refresh or rotate session after approval."
+          guidanceText: `Operator role is not fully eligible yet. ${formatDirectActionGuidance(
+            "Apply Operator Role",
+            "approved operator application and matching session/application chain_operator_id values"
+          )}`
         };
       default:
         return {
           kind: "warn",
           statusText: statusLabel,
-          guidanceText: "Operator role is not fully eligible yet. Check operator status and refresh or rotate session."
+          guidanceText: `Operator role is not fully eligible yet. ${formatDirectActionGuidance(
+            "Check Operator Status and refresh Session",
+            "approved operator application and matching session/application chain_operator_id values"
+          )}`
         };
     }
   }
@@ -3264,19 +3409,28 @@ function computeOperatorReadiness() {
       return {
         kind: "warn",
         statusText: statusLabel,
-        guidanceText: "Apply operator role to start server approval."
+        guidanceText: `Apply operator role to start server approval. ${formatDirectActionGuidance(
+          "Apply Operator Role",
+          "approved operator application and matching session/application chain_operator_id values"
+        )}`
       };
     case "pending":
       return {
         kind: "warn",
         statusText: statusLabel,
-        guidanceText: "Operator application is pending approval."
+        guidanceText: `Operator application is pending approval. ${formatDirectActionGuidance(
+          "Wait for approval, then Refresh Session",
+          "approved operator application and matching session/application chain_operator_id values"
+        )}`
       };
     case "rejected":
       return {
         kind: "bad",
         statusText: statusLabel,
-        guidanceText: "Operator application was rejected. Re-apply or contact an admin."
+        guidanceText: `Operator application was rejected. ${formatDirectActionGuidance(
+          "Apply Operator Role again or contact an admin reviewer",
+          "approved operator application and matching session/application chain_operator_id values"
+        )}`
       };
     case "approved":
       return {
@@ -3308,6 +3462,7 @@ function refreshClientReadiness() {
   refreshSessionBootstrapDirectoryControls();
   refreshOnboardingSteps();
   syncWorkspaceTabLockState();
+  syncPortalOnboardingStateBanner();
 }
 
 function setOperatorApplicationStatus(value) {
@@ -3330,6 +3485,17 @@ function bindReadinessListeners() {
   });
   byId("chain_operator_id").addEventListener("input", () => {
     setSelectedApplicationUpdatedAt("");
+  });
+  byId("challenge_id").addEventListener("input", () => {
+    clearWalletSignatureContext();
+    syncPortalOnboardingStateBanner();
+  });
+  byId("signature").addEventListener("input", () => {
+    clearWalletSignatureContext();
+    syncPortalOnboardingStateBanner();
+  });
+  challengeMessageEl.addEventListener("input", () => {
+    syncPortalOnboardingStateBanner();
   });
 }
 
@@ -3554,6 +3720,7 @@ function applyChallengePayload(payload) {
     byId("challenge_id").value = challengeId;
   }
   challengeMessageEl.value = challengeMessageFromPayload(payload);
+  syncPortalOnboardingStateBanner();
 }
 
 function readWalletPayload() {
@@ -3845,6 +4012,7 @@ async function signChallengeWithWalletExtension() {
   );
   byId("signature").value = signature;
   persistPortalState();
+  syncPortalOnboardingStateBanner();
   return {
     wallet_provider: provider,
     wallet_address: walletAddress,

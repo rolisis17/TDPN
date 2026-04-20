@@ -272,6 +272,7 @@ Usage:
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
@@ -390,6 +391,7 @@ Usage:
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
+  ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
   ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
@@ -593,6 +595,7 @@ Notes:
   - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. This wrapper is invite-key subject only and rejects anon-cred flags.
   - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, then calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping.
   - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
+  - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
@@ -9571,6 +9574,11 @@ profile_default_gate_token_probe() {
   "$profile_default_gate_token_probe_script" "$@"
 }
 
+gpm_endpoint_posture_remediate() {
+  local gpm_endpoint_posture_remediate_script="${GPM_ENDPOINT_POSTURE_REMEDIATE_SCRIPT:-$ROOT_DIR/scripts/gpm_endpoint_posture_remediate.sh}"
+  "$gpm_endpoint_posture_remediate_script" "$@"
+}
+
 profile_default_gate_live() {
   local raw_host_a="${A_HOST:-}"
   local raw_host_b="${B_HOST:-}"
@@ -16245,6 +16253,10 @@ main() {
     profile-default-gate-token-probe)
       shift
       profile_default_gate_token_probe "$@"
+      ;;
+    gpm-endpoint-posture-remediate)
+      shift
+      gpm_endpoint_posture_remediate "$@"
       ;;
     client-vpn-preflight)
       shift

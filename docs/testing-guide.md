@@ -694,6 +694,29 @@ No-sudo deterministic fallback (when docker rehearsal endpoints are known):
 
 `manual-validation-status`, `manual-validation-report`, and `roadmap-progress-report` now surface this as the profile-default gate primary command when derivable, and also print an explicit `sudo` fallback command.
 
+Endpoint posture auto-remediation (report/apply wrappers for common gate misconfig classes):
+
+```bash
+# report-only (default): emits findings + remediation commands
+./scripts/easy_node.sh gpm-endpoint-posture-remediate \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --signoff-arg --subject \
+  --signoff-arg <INVITE_KEY> \
+  --signoff-arg --campaign-timeout-sec \
+  --signoff-arg 300
+
+# apply mode: idempotent env upserts + executable remediation script output
+./scripts/easy_node.sh gpm-endpoint-posture-remediate \
+  --mode apply \
+  --env-file deploy/.env.easy.client \
+  --set-a-host <A_HOST> \
+  --set-b-host <B_HOST> \
+  --set-campaign-subject <INVITE_KEY> \
+  --remediation-script .easy-node-logs/gpm_endpoint_posture_remediation.sh
+```
+
+This helper focuses on deterministic fixes/hints for missing live-run env wiring (`A_HOST`/`B_HOST`/invite subject), deprecated subject aliases (`--subject|--key|--invite-key`), low campaign timeout posture, and stale/missing campaign signoff summary artifacts.
+
 Real client VPN smoke test (machine C / tester host, Linux root):
 
 ```bash

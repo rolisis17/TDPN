@@ -3,11 +3,13 @@ package localapi
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -455,6 +457,69 @@ func deterministicEd25519Proof(message string) (signatureBase64 string, publicKe
 	privateKey := ed25519.NewKeyFromSeed(seed)
 	signature := ed25519.Sign(privateKey, []byte(message))
 	publicKey := privateKey.Public().(ed25519.PublicKey)
+	return base64.StdEncoding.EncodeToString(signature), base64.StdEncoding.EncodeToString(publicKey)
+}
+
+func deterministicSecp256k1Proof(message string) (signatureBase64 string, publicKeyBase64 string) {
+	privateKey := big.NewInt(1)
+	hash := sha256.Sum256([]byte(message))
+	nonceSeed := sha256.Sum256([]byte("gpm-auth-secp256k1-test-nonce:" + message))
+	maxNonce := new(big.Int).Sub(new(big.Int).Set(secp256k1CurveOrder), big.NewInt(1))
+	nonce := new(big.Int).SetBytes(nonceSeed[:])
+	nonce.Mod(nonce, maxNonce)
+	nonce.Add(nonce, big.NewInt(1))
+
+	generator := newSecp256k1Point(secp256k1GeneratorX, secp256k1GeneratorY)
+
+	var r *big.Int
+	var s *big.Int
+	for attempts := 0; attempts < 8; attempts++ {
+		noncePoint := secp256k1ScalarMult(generator, nonce)
+		if !noncePoint.Infinity && noncePoint.X != nil {
+			candidateR := new(big.Int).Mod(noncePoint.X, secp256k1CurveOrder)
+			if candidateR.Sign() != 0 {
+				nonceInv := new(big.Int).ModInverse(nonce, secp256k1CurveOrder)
+				if nonceInv != nil {
+					candidateS := new(big.Int).Mul(candidateR, privateKey)
+					candidateS.Add(candidateS, new(big.Int).SetBytes(hash[:]))
+					candidateS.Mul(candidateS, nonceInv)
+					candidateS.Mod(candidateS, secp256k1CurveOrder)
+					if candidateS.Sign() != 0 {
+						r = candidateR
+						s = candidateS
+						break
+					}
+				}
+			}
+		}
+		nonce.Add(nonce, big.NewInt(1))
+		if nonce.Cmp(secp256k1CurveOrder) >= 0 {
+			nonce.SetInt64(1)
+		}
+	}
+	if r == nil || s == nil {
+		panic("failed to derive deterministic secp256k1 signature")
+	}
+
+	publicKeyPoint := secp256k1ScalarMult(generator, privateKey)
+	if publicKeyPoint.Infinity || publicKeyPoint.X == nil || publicKeyPoint.Y == nil {
+		panic("failed to derive deterministic secp256k1 public key")
+	}
+
+	signature := make([]byte, 64)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(signature[32-len(rBytes):32], rBytes)
+	copy(signature[64-len(sBytes):], sBytes)
+
+	publicKey := make([]byte, 33)
+	publicKey[0] = 0x02
+	if publicKeyPoint.Y.Bit(0) == 1 {
+		publicKey[0] = 0x03
+	}
+	xBytes := publicKeyPoint.X.Bytes()
+	copy(publicKey[33-len(xBytes):], xBytes)
+
 	return base64.StdEncoding.EncodeToString(signature), base64.StdEncoding.EncodeToString(publicKey)
 }
 
@@ -4490,7 +4555,6 @@ func TestGPMAuthVerifyConfiguredVerifierCommandPropagatesSignatureMetadata(t *te
 	svc.gpmRoleDefault = "client"
 	expectedMetadata := gpmAuthSignatureMetadata{
 		SignatureKind:          "eip191",
-		SignaturePublicKey:     "04abc123",
 		SignaturePublicKeyType: "secp256k1",
 		SignatureSource:        "wallet_extension",
 		ChainID:                "evm-11155111",
@@ -4510,11 +4574,30 @@ func TestGPMAuthVerifyConfiguredVerifierCommandPropagatesSignatureMetadata(t *te
 	if strings.TrimSpace(challengeMessage) == "" {
 		t.Fatalf("message missing: %v", payload)
 	}
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	expectedMetadata.SignaturePublicKey = publicKey
 	expectedMetadata.SignedMessage = challengeMessage
-	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata("signed-proof-value", expectedMetadata, "bad-signature-metadata", 13)
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata(signature, expectedMetadata, "bad-signature-metadata", 13)
 
-	verifyBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value","signature_kind":"eip191","signature_public_key":"04abc123","signature_public_key_type":"secp256k1","signature_source":"wallet_extension","chain_id":"evm-11155111","signed_message":"` + challengeMessage + `","signature_envelope":"envelope-v1"}`
-	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1cmdmeta",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_kind":            "eip191",
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signature_source":          "wallet_extension",
+		"chain_id":                  "evm-11155111",
+		"signed_message":            challengeMessage,
+		"signature_envelope":        "envelope-v1",
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
 	if code != http.StatusOK {
 		t.Fatalf("verify status=%d body=%v", code, payload)
 	}
@@ -4529,7 +4612,6 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAcceptsLegacyPublicKeyAliases(t *
 	svc.gpmRoleDefault = "client"
 	expectedMetadata := gpmAuthSignatureMetadata{
 		SignatureKind:          "eip191",
-		SignaturePublicKey:     "04legacyabc",
 		SignaturePublicKeyType: "secp256k1",
 		SignatureSource:        "wallet_extension",
 		ChainID:                "evm-11155111",
@@ -4549,16 +4631,18 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAcceptsLegacyPublicKeyAliases(t *
 	if strings.TrimSpace(challengeMessage) == "" {
 		t.Fatalf("message missing: %v", payload)
 	}
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	expectedMetadata.SignaturePublicKey = publicKey
 	expectedMetadata.SignedMessage = challengeMessage
-	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata("signed-proof-value", expectedMetadata, "bad-signature-metadata", 13)
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata(signature, expectedMetadata, "bad-signature-metadata", 13)
 
 	verifyRequest := map[string]any{
 		"wallet_address":     "cosmos1cmdmetaalias",
 		"wallet_provider":    "keplr",
 		"challenge_id":       challengeID,
-		"signature":          "signed-proof-value",
+		"signature":          signature,
 		"signature_kind":     "eip191",
-		"public_key":         "04legacyabc",
+		"public_key":         publicKey,
 		"public_key_type":    "secp256k1",
 		"signature_source":   "wallet_extension",
 		"chain_id":           "evm-11155111",
@@ -4585,7 +4669,6 @@ func TestGPMAuthVerifyConfiguredVerifierCommandCanonicalPublicKeyMetadataTakesPr
 	svc.gpmRoleDefault = "client"
 	expectedMetadata := gpmAuthSignatureMetadata{
 		SignatureKind:          "eip191",
-		SignaturePublicKey:     "04canonicalabc",
 		SignaturePublicKeyType: "secp256k1",
 		SignatureSource:        "wallet_extension",
 		ChainID:                "evm-11155111",
@@ -4605,16 +4688,18 @@ func TestGPMAuthVerifyConfiguredVerifierCommandCanonicalPublicKeyMetadataTakesPr
 	if strings.TrimSpace(challengeMessage) == "" {
 		t.Fatalf("message missing: %v", payload)
 	}
+	signature, canonicalPublicKey := deterministicSecp256k1Proof(challengeMessage)
+	expectedMetadata.SignaturePublicKey = canonicalPublicKey
 	expectedMetadata.SignedMessage = challengeMessage
-	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata("signed-proof-value", expectedMetadata, "bad-signature-metadata", 13)
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignatureMetadata(signature, expectedMetadata, "bad-signature-metadata", 13)
 
 	verifyRequest := map[string]any{
 		"wallet_address":            "cosmos1cmdmetaprefer",
 		"wallet_provider":           "keplr",
 		"challenge_id":              challengeID,
-		"signature":                 "signed-proof-value",
+		"signature":                 signature,
 		"signature_kind":            "eip191",
-		"signature_public_key":      "04canonicalabc",
+		"signature_public_key":      canonicalPublicKey,
 		"public_key":                "04legacyignored",
 		"signature_public_key_type": "secp256k1",
 		"public_key_type":           "ed25519",
@@ -4655,14 +4740,15 @@ func TestGPMAuthVerifyAcceptsKnownOptionalSignatureMetadataValues(t *testing.T) 
 	if strings.TrimSpace(challengeMessage) == "" {
 		t.Fatalf("message missing: %v", payload)
 	}
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
 
 	verifyRequest := map[string]any{
 		"wallet_address":            "cosmos1metaallow",
 		"wallet_provider":           "keplr",
 		"challenge_id":              challengeID,
-		"signature":                 "signed-proof-value",
+		"signature":                 signature,
 		"signature_kind":            "sign_arbitrary",
-		"signature_public_key":      "02abc123",
+		"signature_public_key":      publicKey,
 		"signature_public_key_type": "secp256k1",
 		"signature_source":          "manual",
 		"chain_id":                  "mesh-mainnet-1",
@@ -4862,12 +4948,12 @@ func TestGPMAuthVerifyCryptographicProofWithOptionalMetadata(t *testing.T) {
 		}
 	})
 
-	t.Run("allows unsupported signature_public_key_type when strict crypto policy is disabled", func(t *testing.T) {
+	t.Run("accepts valid secp256k1 proof when metadata is provided", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
 		svc.gpmRoleDefault = "client"
 
-		challengeBody := `{"wallet_address":"cosmos1compatsecp","wallet_provider":"keplr"}`
+		challengeBody := `{"wallet_address":"cosmos1secp256k1pass","wallet_provider":"keplr"}`
 		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
 		if code != http.StatusOK {
 			t.Fatalf("challenge status=%d body=%v", code, payload)
@@ -4880,13 +4966,14 @@ func TestGPMAuthVerifyCryptographicProofWithOptionalMetadata(t *testing.T) {
 		if strings.TrimSpace(challengeMessage) == "" {
 			t.Fatalf("message missing: %v", payload)
 		}
+		signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
 
 		verifyRequest := map[string]any{
-			"wallet_address":            "cosmos1compatsecp",
+			"wallet_address":            "cosmos1secp256k1pass",
 			"wallet_provider":           "keplr",
 			"challenge_id":              challengeID,
-			"signature":                 "signed-proof-value",
-			"signature_public_key":      "04abcdef",
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
 			"signature_public_key_type": "secp256k1",
 			"signed_message":            challengeMessage,
 		}
@@ -4896,6 +4983,75 @@ func TestGPMAuthVerifyCryptographicProofWithOptionalMetadata(t *testing.T) {
 		}
 
 		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusOK {
+			t.Fatalf("verify status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+			t.Fatalf("session_token missing payload=%v", payload)
+		}
+	})
+
+	t.Run("rejects invalid secp256k1 proof when metadata is provided", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+
+		challengeBody := `{"wallet_address":"cosmos1secp256k1fail","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+		signature, publicKey := deterministicSecp256k1Proof("different-message")
+
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1secp256k1fail",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "secp256k1",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusUnauthorized {
+			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "secp256k1 signature verification failed") {
+			t.Fatalf("error=%q want secp256k1 verification failure payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("allows missing cryptographic proof metadata when strict crypto policy is disabled", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+
+		challengeBody := `{"wallet_address":"cosmos1compatmissingproof","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+
+		verifyBody := `{"wallet_address":"cosmos1compatmissingproof","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
 		if code != http.StatusOK {
 			t.Fatalf("verify status=%d body=%v", code, payload)
 		}
@@ -4933,7 +5089,7 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects unsupported signature_public_key_type when strict crypto policy enabled", func(t *testing.T) {
+	t.Run("rejects invalid secp256k1 proofs when strict crypto policy is enabled", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
 		svc.gpmRoleDefault = "client"
@@ -4952,13 +5108,14 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 		if strings.TrimSpace(challengeMessage) == "" {
 			t.Fatalf("message missing: %v", payload)
 		}
+		signature, publicKey := deterministicSecp256k1Proof("different-message")
 
 		verifyRequest := map[string]any{
 			"wallet_address":            "cosmos1strictcryptosecp",
 			"wallet_provider":           "keplr",
 			"challenge_id":              challengeID,
-			"signature":                 "signed-proof-value",
-			"signature_public_key":      "04abcdef",
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
 			"signature_public_key_type": "secp256k1",
 			"signed_message":            challengeMessage,
 		}
@@ -4972,11 +5129,52 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
 		}
 		errMsg, _ := payload["error"].(string)
-		if !strings.Contains(errMsg, "not supported for strict cryptographic proof policy") {
-			t.Fatalf("error=%q want strict unsupported-type message payload=%v", errMsg, payload)
+		if !strings.Contains(errMsg, "secp256k1 signature verification failed") {
+			t.Fatalf("error=%q want strict secp256k1 verification failure payload=%v", errMsg, payload)
 		}
-		if !strings.Contains(errMsg, "secp256k1") {
-			t.Fatalf("error=%q want secp256k1 in message payload=%v", errMsg, payload)
+	})
+
+	t.Run("accepts valid secp256k1 proofs when strict crypto policy is enabled", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmRoleDefault = "client"
+		svc.gpmAuthVerifyRequireCryptoProof = true
+
+		challengeBody := `{"wallet_address":"cosmos1strictcryptosecppass","wallet_provider":"keplr"}`
+		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+		if code != http.StatusOK {
+			t.Fatalf("challenge status=%d body=%v", code, payload)
+		}
+		challengeID, _ := payload["challenge_id"].(string)
+		if strings.TrimSpace(challengeID) == "" {
+			t.Fatalf("challenge_id missing: %v", payload)
+		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+		signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+
+		verifyRequest := map[string]any{
+			"wallet_address":            "cosmos1strictcryptosecppass",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "secp256k1",
+			"signed_message":            challengeMessage,
+		}
+		verifyBodyBytes, err := json.Marshal(verifyRequest)
+		if err != nil {
+			t.Fatalf("json marshal verify request: %v", err)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+		if code != http.StatusOK {
+			t.Fatalf("verify status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
+			t.Fatalf("session_token missing payload=%v", payload)
 		}
 	})
 

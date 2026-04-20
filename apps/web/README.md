@@ -23,6 +23,9 @@ Then open:
 
 - The portal calls the new GPM local API endpoints (`/v1/gpm/...`).
 - Default API base is `http://127.0.0.1:8095` and can be changed in the portal UI.
+- Portal onboarding now includes a persistent `Onboarding state` banner that surfaces `Signed out`, `Session active`, `Operator pending`, `Operator approved`, or `Operator rejected`.
+- The onboarding banner includes a single `Next recommended action` hint that follows `challenge -> verify -> register -> operator apply -> await approval`.
+- Server/operator lock messaging now includes a direct action path and required conditions when the lane is locked.
 - Portal transport auth now uses a dedicated `Local API auth token` UI control for the `Authorization: Bearer ...` header; `session_token` remains in request bodies for GPM session workflows.
 - If an endpoint returns `401` and the bearer token field is empty, portal error messaging now explicitly tells operators to set `Local API auth token` and retry.
 - `Recent Audit` now includes optional query controls for `limit`, `offset`, `event`, `wallet_address`, and `order`; default values preserve legacy behavior (`limit=25`, descending order, no filters).

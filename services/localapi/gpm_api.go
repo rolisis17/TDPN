@@ -7,12 +7,14 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	urlpkg "net/url"
@@ -47,7 +49,24 @@ var (
 	errConnectSessionNotRegistered         = errors.New("session is not fully registered for connect")
 	errConnectSessionBootstrapTrustError   = errors.New("session bootstrap trust revalidation failed")
 	errConnectSessionBootstrapRevoked      = errors.New("session bootstrap directories are no longer trusted")
+
+	secp256k1FieldPrime   = mustBigIntFromHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
+	secp256k1CurveOrder   = mustBigIntFromHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
+	secp256k1GeneratorX   = mustBigIntFromHex("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")
+	secp256k1GeneratorY   = mustBigIntFromHex("483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8")
+	secp256k1SqrtExponent = new(big.Int).Div(
+		new(big.Int).Add(new(big.Int).Set(secp256k1FieldPrime), big.NewInt(1)),
+		big.NewInt(4),
+	)
 )
+
+func mustBigIntFromHex(raw string) *big.Int {
+	value, ok := new(big.Int).SetString(strings.TrimSpace(raw), 16)
+	if !ok {
+		panic(fmt.Sprintf("invalid bigint literal %q", raw))
+	}
+	return value
+}
 
 type gpmRuntimeState struct {
 	mu         sync.RWMutex
@@ -2073,6 +2092,351 @@ func decodeGPMAuthProofMaterial(raw string, expectedLen int, fieldName string) (
 	return nil, fmt.Errorf("%s must decode to %d bytes (hex or base64)", fieldName, expectedLen)
 }
 
+func decodeGPMAuthProofMaterialFlexible(raw string, fieldName string) ([]byte, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, fmt.Errorf("%s is required", fieldName)
+	}
+	hexCandidates := []string{value}
+	if strings.HasPrefix(value, "0x") || strings.HasPrefix(value, "0X") {
+		hexCandidates = append(hexCandidates, value[2:])
+	}
+	for _, candidate := range hexCandidates {
+		if candidate == "" {
+			continue
+		}
+		hexVariants := []string{candidate}
+		if len(candidate)%2 == 1 {
+			hexVariants = append(hexVariants, "0"+candidate)
+		}
+		for _, variant := range hexVariants {
+			decoded, err := hex.DecodeString(variant)
+			if err == nil && len(decoded) > 0 {
+				return decoded, nil
+			}
+		}
+	}
+	base64Encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+	for _, encoding := range base64Encodings {
+		decoded, err := encoding.DecodeString(value)
+		if err == nil && len(decoded) > 0 {
+			return decoded, nil
+		}
+	}
+	return nil, fmt.Errorf("%s must be hex or base64", fieldName)
+}
+
+type secp256k1Point struct {
+	X        *big.Int
+	Y        *big.Int
+	Infinity bool
+}
+
+func secp256k1PointInfinity() secp256k1Point {
+	return secp256k1Point{Infinity: true}
+}
+
+func newSecp256k1Point(x *big.Int, y *big.Int) secp256k1Point {
+	return secp256k1Point{
+		X: new(big.Int).Set(x),
+		Y: new(big.Int).Set(y),
+	}
+}
+
+func secp256k1IsOnCurve(x *big.Int, y *big.Int) bool {
+	if x == nil || y == nil {
+		return false
+	}
+	if x.Sign() < 0 || y.Sign() < 0 || x.Cmp(secp256k1FieldPrime) >= 0 || y.Cmp(secp256k1FieldPrime) >= 0 {
+		return false
+	}
+	// secp256k1: y^2 = x^3 + 7 mod p
+	lhs := new(big.Int).Mul(y, y)
+	lhs.Mod(lhs, secp256k1FieldPrime)
+
+	rhs := new(big.Int).Mul(x, x)
+	rhs.Mul(rhs, x)
+	rhs.Add(rhs, big.NewInt(7))
+	rhs.Mod(rhs, secp256k1FieldPrime)
+
+	return lhs.Cmp(rhs) == 0
+}
+
+func secp256k1RecoverYFromX(x *big.Int, odd bool) (*big.Int, error) {
+	if x == nil || x.Sign() < 0 || x.Cmp(secp256k1FieldPrime) >= 0 {
+		return nil, errors.New("signature_public_key has invalid secp256k1 X coordinate")
+	}
+	ySquared := new(big.Int).Mul(x, x)
+	ySquared.Mul(ySquared, x)
+	ySquared.Add(ySquared, big.NewInt(7))
+	ySquared.Mod(ySquared, secp256k1FieldPrime)
+
+	y := new(big.Int).Exp(ySquared, secp256k1SqrtExponent, secp256k1FieldPrime)
+
+	// Verify that y is a valid square root.
+	check := new(big.Int).Mul(y, y)
+	check.Mod(check, secp256k1FieldPrime)
+	if check.Cmp(ySquared) != 0 {
+		return nil, errors.New("signature_public_key has invalid secp256k1 compressed point")
+	}
+
+	if (y.Bit(0) == 1) != odd {
+		y.Sub(secp256k1FieldPrime, y)
+	}
+	return y, nil
+}
+
+func decodeGPMAuthSecp256k1PublicKey(publicKeyRaw string) (*big.Int, *big.Int, error) {
+	publicKey, err := decodeGPMAuthProofMaterialFlexible(publicKeyRaw, "signature_public_key")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var x *big.Int
+	var y *big.Int
+
+	switch len(publicKey) {
+	case 33:
+		prefix := publicKey[0]
+		if prefix != 0x02 && prefix != 0x03 {
+			return nil, nil, errors.New("signature_public_key compressed secp256k1 key must start with 0x02 or 0x03")
+		}
+		x = new(big.Int).SetBytes(publicKey[1:])
+		y, err = secp256k1RecoverYFromX(x, prefix == 0x03)
+		if err != nil {
+			return nil, nil, err
+		}
+	case 64:
+		x = new(big.Int).SetBytes(publicKey[:32])
+		y = new(big.Int).SetBytes(publicKey[32:])
+	case 65:
+		if publicKey[0] != 0x04 {
+			return nil, nil, errors.New("signature_public_key uncompressed secp256k1 key must start with 0x04")
+		}
+		x = new(big.Int).SetBytes(publicKey[1:33])
+		y = new(big.Int).SetBytes(publicKey[33:])
+	default:
+		return nil, nil, fmt.Errorf(
+			"signature_public_key must decode to 33, 64, or 65 bytes for secp256k1 (got %d)",
+			len(publicKey),
+		)
+	}
+
+	if !secp256k1IsOnCurve(x, y) {
+		return nil, nil, errors.New("signature_public_key is not a valid secp256k1 point")
+	}
+	return x, y, nil
+}
+
+type secp256k1ASN1Signature struct {
+	R *big.Int
+	S *big.Int
+}
+
+func validateGPMAuthSecp256k1SignatureScalars(r *big.Int, s *big.Int) error {
+	if r == nil || r.Sign() <= 0 || r.Cmp(secp256k1CurveOrder) >= 0 {
+		return errors.New("signature contains invalid secp256k1 r value")
+	}
+	if s == nil || s.Sign() <= 0 || s.Cmp(secp256k1CurveOrder) >= 0 {
+		return errors.New("signature contains invalid secp256k1 s value")
+	}
+	return nil
+}
+
+func decodeGPMAuthSecp256k1Signature(signatureRaw string) (*big.Int, *big.Int, error) {
+	signature, err := decodeGPMAuthProofMaterialFlexible(signatureRaw, "signature")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(signature) == 65 {
+		// Common wallet signatures append a recovery byte (v).
+		signature = signature[:64]
+	}
+
+	if len(signature) == 64 {
+		r := new(big.Int).SetBytes(signature[:32])
+		s := new(big.Int).SetBytes(signature[32:])
+		if err := validateGPMAuthSecp256k1SignatureScalars(r, s); err != nil {
+			return nil, nil, err
+		}
+		return r, s, nil
+	}
+
+	var derSig secp256k1ASN1Signature
+	rest, err := asn1.Unmarshal(signature, &derSig)
+	if err == nil && len(rest) == 0 {
+		if err := validateGPMAuthSecp256k1SignatureScalars(derSig.R, derSig.S); err != nil {
+			return nil, nil, err
+		}
+		return derSig.R, derSig.S, nil
+	}
+
+	return nil, nil, errors.New("signature must decode to 64-byte r||s (or 65-byte with recovery id) or ASN.1 DER for secp256k1")
+}
+
+func secp256k1PointDouble(point secp256k1Point) secp256k1Point {
+	if point.Infinity || point.Y.Sign() == 0 {
+		return secp256k1PointInfinity()
+	}
+
+	num := new(big.Int).Mul(point.X, point.X)
+	num.Mul(num, big.NewInt(3))
+	num.Mod(num, secp256k1FieldPrime)
+
+	den := new(big.Int).Mul(point.Y, big.NewInt(2))
+	den.Mod(den, secp256k1FieldPrime)
+	denInv := new(big.Int).ModInverse(den, secp256k1FieldPrime)
+	if denInv == nil {
+		return secp256k1PointInfinity()
+	}
+
+	lambda := new(big.Int).Mul(num, denInv)
+	lambda.Mod(lambda, secp256k1FieldPrime)
+
+	x3 := new(big.Int).Mul(lambda, lambda)
+	twoX := new(big.Int).Mul(point.X, big.NewInt(2))
+	x3.Sub(x3, twoX)
+	x3.Mod(x3, secp256k1FieldPrime)
+	if x3.Sign() < 0 {
+		x3.Add(x3, secp256k1FieldPrime)
+	}
+
+	y3 := new(big.Int).Sub(point.X, x3)
+	y3.Mul(lambda, y3)
+	y3.Sub(y3, point.Y)
+	y3.Mod(y3, secp256k1FieldPrime)
+	if y3.Sign() < 0 {
+		y3.Add(y3, secp256k1FieldPrime)
+	}
+
+	return secp256k1Point{X: x3, Y: y3}
+}
+
+func secp256k1PointAdd(pointA secp256k1Point, pointB secp256k1Point) secp256k1Point {
+	if pointA.Infinity {
+		return pointB
+	}
+	if pointB.Infinity {
+		return pointA
+	}
+
+	if pointA.X.Cmp(pointB.X) == 0 {
+		sumY := new(big.Int).Add(pointA.Y, pointB.Y)
+		sumY.Mod(sumY, secp256k1FieldPrime)
+		if sumY.Sign() == 0 {
+			return secp256k1PointInfinity()
+		}
+		return secp256k1PointDouble(pointA)
+	}
+
+	num := new(big.Int).Sub(pointB.Y, pointA.Y)
+	num.Mod(num, secp256k1FieldPrime)
+
+	den := new(big.Int).Sub(pointB.X, pointA.X)
+	den.Mod(den, secp256k1FieldPrime)
+	denInv := new(big.Int).ModInverse(den, secp256k1FieldPrime)
+	if denInv == nil {
+		return secp256k1PointInfinity()
+	}
+
+	lambda := new(big.Int).Mul(num, denInv)
+	lambda.Mod(lambda, secp256k1FieldPrime)
+
+	x3 := new(big.Int).Mul(lambda, lambda)
+	x3.Sub(x3, pointA.X)
+	x3.Sub(x3, pointB.X)
+	x3.Mod(x3, secp256k1FieldPrime)
+	if x3.Sign() < 0 {
+		x3.Add(x3, secp256k1FieldPrime)
+	}
+
+	y3 := new(big.Int).Sub(pointA.X, x3)
+	y3.Mul(lambda, y3)
+	y3.Sub(y3, pointA.Y)
+	y3.Mod(y3, secp256k1FieldPrime)
+	if y3.Sign() < 0 {
+		y3.Add(y3, secp256k1FieldPrime)
+	}
+
+	return secp256k1Point{X: x3, Y: y3}
+}
+
+func secp256k1ScalarMult(point secp256k1Point, scalar *big.Int) secp256k1Point {
+	if point.Infinity || scalar == nil || scalar.Sign() <= 0 {
+		return secp256k1PointInfinity()
+	}
+	result := secp256k1PointInfinity()
+	addend := point
+
+	for bit := 0; bit < scalar.BitLen(); bit++ {
+		if scalar.Bit(bit) == 1 {
+			result = secp256k1PointAdd(result, addend)
+		}
+		addend = secp256k1PointDouble(addend)
+	}
+	return result
+}
+
+func secp256k1VerifyDigest(publicKeyX *big.Int, publicKeyY *big.Int, digest []byte, r *big.Int, s *big.Int) bool {
+	if !secp256k1IsOnCurve(publicKeyX, publicKeyY) {
+		return false
+	}
+	if err := validateGPMAuthSecp256k1SignatureScalars(r, s); err != nil {
+		return false
+	}
+
+	hashInt := new(big.Int).SetBytes(digest)
+	orderBits := secp256k1CurveOrder.BitLen()
+	if len(digest)*8 > orderBits {
+		hashInt.Rsh(hashInt, uint(len(digest)*8-orderBits))
+	}
+
+	sInv := new(big.Int).ModInverse(s, secp256k1CurveOrder)
+	if sInv == nil {
+		return false
+	}
+
+	u1 := new(big.Int).Mul(hashInt, sInv)
+	u1.Mod(u1, secp256k1CurveOrder)
+	u2 := new(big.Int).Mul(r, sInv)
+	u2.Mod(u2, secp256k1CurveOrder)
+
+	generator := newSecp256k1Point(secp256k1GeneratorX, secp256k1GeneratorY)
+	publicKey := newSecp256k1Point(publicKeyX, publicKeyY)
+	point := secp256k1PointAdd(
+		secp256k1ScalarMult(generator, u1),
+		secp256k1ScalarMult(publicKey, u2),
+	)
+	if point.Infinity || point.X == nil {
+		return false
+	}
+
+	v := new(big.Int).Mod(point.X, secp256k1CurveOrder)
+	return v.Cmp(r) == 0
+}
+
+func verifyGPMAuthSignatureSecp256k1(publicKeyRaw string, signatureRaw string, message string) error {
+	publicKeyX, publicKeyY, err := decodeGPMAuthSecp256k1PublicKey(publicKeyRaw)
+	if err != nil {
+		return err
+	}
+	r, s, err := decodeGPMAuthSecp256k1Signature(signatureRaw)
+	if err != nil {
+		return err
+	}
+	hash := sha256.Sum256([]byte(message))
+	if !secp256k1VerifyDigest(publicKeyX, publicKeyY, hash[:], r, s) {
+		return errors.New("secp256k1 signature verification failed")
+	}
+	return nil
+}
+
 func verifyGPMAuthSignatureEd25519(publicKeyRaw string, signatureRaw string, message string) error {
 	publicKey, err := decodeGPMAuthProofMaterial(publicKeyRaw, ed25519.PublicKeySize, "signature_public_key")
 	if err != nil {
@@ -2116,6 +2480,8 @@ func (s *Service) verifyGPMAuthSignatureCryptographicProof(signature string, sig
 		return nil
 	}
 	switch signatureMetadata.SignaturePublicKeyType {
+	case "secp256k1":
+		return verifyGPMAuthSignatureSecp256k1(signatureMetadata.SignaturePublicKey, signature, signatureMetadata.SignedMessage)
 	case "ed25519":
 		return verifyGPMAuthSignatureEd25519(signatureMetadata.SignaturePublicKey, signature, signatureMetadata.SignedMessage)
 	default:

@@ -68,6 +68,10 @@ const compatAdvancedHintEl = document.querySelector("details.advanced > p");
 const desktopStepSessionEl = document.getElementById("desktop_step_session");
 const desktopStepClientEl = document.getElementById("desktop_step_client");
 const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
+const desktopOnboardingBannerEl = document.getElementById("desktop_onboarding_banner");
+const desktopOnboardingStateEl = document.getElementById("desktop_onboarding_state");
+const desktopOnboardingDetailEl = document.getElementById("desktop_onboarding_detail");
+const desktopOnboardingNextActionEl = document.getElementById("desktop_onboarding_next_action");
 const operatorListNextBtnEl = byId("operator_list_next_btn");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const OPERATOR_PENDING_LIST_LIMIT = 25;
@@ -552,6 +556,7 @@ function applyChallengePayload(payload) {
   if (state.authChallengeMessage) {
     signedMessageEl.value = state.authChallengeMessage;
   }
+  syncDesktopOnboardingBanner();
 }
 
 function readWalletPayload() {
@@ -2600,6 +2605,120 @@ function setDesktopStepState(el, value) {
   el.dataset.state = value;
 }
 
+function formatDirectActionGuidance(directPath, requiredConditions) {
+  return `Direct path: ${directPath}. Required conditions: ${requiredConditions}.`;
+}
+
+function effectiveDesktopOperatorApplicationStatus() {
+  return normalizeOperatorApplicationStatus(
+    state.serverReadiness?.operatorApplicationStatus || state.operatorApplicationStatus
+  );
+}
+
+function computeDesktopNextRecommendedAction() {
+  if (!state.sessionToken) {
+    const challengeId = challengeIdEl.value.trim();
+    const signature = walletSignatureEl.value.trim();
+    if (!challengeId) {
+      return "Request Challenge.";
+    }
+    if (!signature) {
+      return "Use Wallet Sign-In (Recommended) or provide a manual signature.";
+    }
+    return "Use Sign In to verify and create a session.";
+  }
+
+  if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired || !state.clientRegistered) {
+    return "Register Client.";
+  }
+
+  const operatorStatus = effectiveDesktopOperatorApplicationStatus();
+  if (operatorStatus === "pending") {
+    return "Wait for operator approval, then run Session or Operator Status.";
+  }
+  if (operatorStatus === "rejected") {
+    return "Apply Operator Role again after updating operator details.";
+  }
+  const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
+  if (operatorStatus !== "approved" && role !== "admin" && role !== "server" && role !== "server_only") {
+    return "Apply Operator Role.";
+  }
+  if (state.serverReadiness?.lifecycleActionsUnlocked === false) {
+    return "Run Session and Operator Status to refresh Step 3 readiness.";
+  }
+  return "Continue in Client or Server controls based on your role.";
+}
+
+function computeDesktopOnboardingBannerState() {
+  if (!state.sessionToken) {
+    const challengeId = challengeIdEl.value.trim();
+    const signature = walletSignatureEl.value.trim();
+    if (!challengeId) {
+      return {
+        state: "warn",
+        title: "Signed out",
+        detail: "No active session token is loaded."
+      };
+    }
+    if (!signature) {
+      return {
+        state: "warn",
+        title: "Signed out",
+        detail: "Challenge is ready, but signature verification is still pending."
+      };
+    }
+    return {
+      state: "warn",
+      title: "Signed out",
+      detail: "Challenge and signature are ready, but session verification is still pending."
+    };
+  }
+
+  const operatorStatus = effectiveDesktopOperatorApplicationStatus();
+  if (operatorStatus === "pending") {
+    return {
+      state: "warn",
+      title: "Operator pending",
+      detail: "Session is active and operator approval is pending."
+    };
+  }
+  if (operatorStatus === "approved") {
+    return {
+      state: "good",
+      title: "Operator approved",
+      detail: "Session is active and operator approval is complete."
+    };
+  }
+  if (operatorStatus === "rejected") {
+    return {
+      state: "bad",
+      title: "Operator rejected",
+      detail: "Session is active, but operator application was rejected."
+    };
+  }
+  return {
+    state: "good",
+    title: "Session active",
+    detail: "Session token is active. Continue with client registration and operator onboarding."
+  };
+}
+
+function syncDesktopOnboardingBanner() {
+  if (
+    !desktopOnboardingBannerEl ||
+    !desktopOnboardingStateEl ||
+    !desktopOnboardingDetailEl ||
+    !desktopOnboardingNextActionEl
+  ) {
+    return;
+  }
+  const onboardingState = computeDesktopOnboardingBannerState();
+  desktopOnboardingBannerEl.dataset.state = onboardingState.state;
+  desktopOnboardingStateEl.textContent = onboardingState.title;
+  desktopOnboardingDetailEl.textContent = onboardingState.detail;
+  desktopOnboardingNextActionEl.textContent = `Next recommended action: ${computeDesktopNextRecommendedAction()}`;
+}
+
 function inferClientRegistrationFromPayload(payload) {
   return extractBootstrapRegistrationMetadata(payload).hasBootstrapDirectory;
 }
@@ -3002,16 +3121,22 @@ function computeServerLockHintText() {
       }
     } else {
       const reason = readiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
-      if (readiness.unlockActions.length > 0) {
-        hintText = `${reason} Next: ${readiness.unlockActions.join("; ")}`;
-      } else {
-        hintText = reason;
-      }
+      const requiredConditions =
+        readiness.unlockActions.length > 0
+          ? readiness.unlockActions.join("; ")
+          : "approved operator application and matching session/application chain_operator_id values";
+      hintText = `${reason} ${formatDirectActionGuidance(
+        "Use Apply Operator Role or Operator Status, then refresh Session",
+        requiredConditions
+      )}`;
     }
     return appendReadinessDiagnosticsHint(appendChainBindingHint(hintText, readiness), readiness);
   }
   if (!state.sessionToken) {
-    return "Sign in first to unlock server onboarding.";
+    return `Sign in first to unlock server onboarding. ${formatDirectActionGuidance(
+      "Request Challenge, then run Wallet Sign-In or Sign In",
+      "an active session token"
+    )}`;
   }
   const role = (state.role || "client").toLowerCase();
   if (role === "admin") {
@@ -3028,15 +3153,27 @@ function computeServerLockHintText() {
       return "Operator approved. Final unlock still requires strict chain binding (matching session/application chain_operator_id); refresh server readiness to confirm.";
     }
     if (state.operatorApplicationStatus === "pending") {
-      return "Operator application pending approval. Server lifecycle actions stay locked until approved.";
+      return `Operator application pending approval. ${formatDirectActionGuidance(
+        "Wait for approval, then run Session",
+        "approved operator application and matching session/application chain_operator_id values"
+      )}`;
     }
     if (state.operatorApplicationStatus === "rejected") {
-      return "Operator application rejected; re-apply or contact admin to unlock server lifecycle actions.";
+      return `Operator application rejected. ${formatDirectActionGuidance(
+        "Apply Operator Role again and refresh Session",
+        "approved operator application and matching session/application chain_operator_id values"
+      )}`;
     }
     if (state.operatorApplicationStatus === "not_submitted") {
-      return "Operator role detected but no approved application yet. Submit operator application to unlock server lifecycle actions.";
+      return `Operator role detected with no approved application. ${formatDirectActionGuidance(
+        "Apply Operator Role",
+        "approved operator application and matching session/application chain_operator_id values"
+      )}`;
     }
-    return "Operator role detected; check operator status and refresh session after approval to unlock server lifecycle actions.";
+    return `Operator role detected. ${formatDirectActionGuidance(
+      "Check Operator Status, then refresh Session after approval",
+      "approved operator application and matching session/application chain_operator_id values"
+    )}`;
   }
   if (role === "server" || role === "server_only") {
     if (!state.serviceMutationsAllowed) {
@@ -3044,7 +3181,10 @@ function computeServerLockHintText() {
     }
     return "Server controls are unlocked for server-only role.";
   }
-  return "Apply operator role to start server approval.";
+  return `Server lane is locked for this role. ${formatDirectActionGuidance(
+    "Apply Operator Role",
+    "approved operator application and matching session/application chain_operator_id values"
+  )}`;
 }
 
 function computeClientLockHintText() {
@@ -3054,7 +3194,11 @@ function computeClientLockHintText() {
   if (state.serverReadiness) {
     const readiness = state.serverReadiness;
     if (readiness.clientTabVisible === false) {
-      return readiness.clientLockReason || "Client controls are locked by backend readiness policy for this role.";
+      const reason = readiness.clientLockReason || "Client controls are locked by backend readiness policy for this role.";
+      return `${reason} ${formatDirectActionGuidance(
+        "Use Register Client when the role allows client lane access",
+        "client-capable role with an active session token"
+      )}`;
     }
     if (readiness.clientTabVisible === true) {
       if (state.connectRequireSession && !state.sessionToken) {
@@ -3069,10 +3213,16 @@ function computeClientLockHintText() {
       return "Sign in first to unlock client controls.";
     }
     if ((role === "operator" || role === "admin") && !state.clientRegistered) {
-      return "Server-capable session detected. Register client profile to unlock the Client tab for dual-role use.";
+      return `Server-capable session detected. ${formatDirectActionGuidance(
+        "Register Client",
+        "active session token and successful client registration"
+      )}`;
     }
     if (role === "server" || role === "server_only") {
-      return "Client controls are disabled for server-only role.";
+      return `Client controls are disabled for server-only role. ${formatDirectActionGuidance(
+        "Continue in Server lane",
+        "operator/server readiness in Step 3"
+      )}`;
     }
     return "Client controls are locked by current role policy.";
   }
@@ -3112,6 +3262,7 @@ function syncServerRoleLockState() {
   serverLockHintEl.textContent = computeServerLockHintText();
   serverLockHintEl.classList.toggle("locked", !serverTabVisible);
   syncDesktopOnboardingSteps();
+  syncDesktopOnboardingBanner();
 }
 
 function setRole(role, options = {}) {
@@ -3770,19 +3921,23 @@ walletAddressEl.addEventListener("input", () => {
   clearWalletSignatureContext();
   state.authChallengeMessage = "";
   setSelectedApplicationUpdatedAt("");
+  syncDesktopOnboardingBanner();
 });
 challengeIdEl.addEventListener("input", () => {
   clearWalletSignatureContext();
   state.authChallengeMessage = "";
+  syncDesktopOnboardingBanner();
 });
 walletSignatureEl.addEventListener("input", () => {
   clearWalletSignatureContext();
+  syncDesktopOnboardingBanner();
 });
 signatureChainIdEl.addEventListener("input", () => {
   clearWalletSignatureContext();
 });
 signedMessageEl.addEventListener("input", () => {
   clearWalletSignatureContext();
+  syncDesktopOnboardingBanner();
 });
 chainOperatorIdEl.addEventListener("input", () => {
   writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorIdEl.value);
