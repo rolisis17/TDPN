@@ -66,6 +66,23 @@ Runner behavior:
   - `LOCAL_CONTROL_API_GIT_BASH_PATH` to pin a Git Bash path.
   - `LOCAL_CONTROL_API_PREFER_GIT_BASH=0` to disable Git Bash auto-preference and use `bash` resolution from `PATH`.
 
+Windows local API bridge defaults (`scripts\windows\local_api_session.ps1`):
+- default `LOCAL_CONTROL_API_SCRIPT` is `scripts\windows\easy_node_bridge.ps1`.
+- bridge default target script is repository `scripts\easy_node.sh` (exported as `/c/.../scripts/easy_node.sh` for Git Bash).
+- default run stays WSL-free and rejects `WindowsApps\bash.exe` (WSL shim).
+- Git Bash is still required for default `easy_node.sh` execution unless you explicitly provide an alternative `-ScriptPath` and compatible `-CommandRunner`.
+- compatibility overrides remain supported:
+  - runner env override via `LOCAL_CONTROL_API_GIT_BASH_PATH` (with `-AllowRunnerEnvOverride` on the PowerShell bridge)
+  - script path override via `-ScriptPath` (or `LOCAL_CONTROL_API_SCRIPT` when launching daemon directly)
+
+Exact Windows examples:
+
+```powershell
+scripts\windows\local_api_session.cmd -DryRun
+scripts\windows\local_api_session.cmd -ScriptPath "C:\Users\dcella-d\TDPN1\scripts\easy_node.sh" -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun
+$env:LOCAL_CONTROL_API_GIT_BASH_PATH="C:\Program Files\Git\bin\bash.exe"; scripts\windows\local_api_session.ps1 -AllowRunnerEnvOverride -DryRun
+```
+
 Desktop scaffold defaults (`apps/desktop`):
 - base URL: `http://127.0.0.1:8095` (`GPM_LOCAL_API_BASE_URL`, legacy alias: `TDPN_LOCAL_API_BASE_URL`)
 - request timeout: `20s` (`GPM_LOCAL_API_TIMEOUT_SEC`, legacy alias: `TDPN_LOCAL_API_TIMEOUT_SEC`)

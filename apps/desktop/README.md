@@ -161,12 +161,21 @@ scripts\windows\local_api_session.cmd
 
 Notes:
 - Default run command (recommended): `scripts\windows\local_api_session.cmd`
+- Default bridge behavior is Windows-native and WSL-free:
+  - local API launcher: `scripts\windows\local_api_session.ps1`
+  - default `LOCAL_CONTROL_API_SCRIPT`: `C:\...\scripts\windows\easy_node_bridge.ps1`
+  - bridge default target script: `C:\...\scripts\easy_node.sh` (exported to runner as `/c/.../scripts/easy_node.sh`)
 - Optional remediation: `-InstallMissing` attempts `winget` install of Go (`GoLang.Go`) and then retries tool detection before launching.
 - The `.cmd` wrapper already applies process-scope `ExecutionPolicy Bypass` and is preferred to avoid local script-policy friction.
-- This launcher prefers Git for Windows `bash.exe` (not `WindowsApps\bash.exe` / WSL shim).
+- By default, Git Bash is required because `easy_node.sh` is executed through Git for Windows `bash.exe` (not `WindowsApps\bash.exe` / WSL shim).
 - Quick commands:
   - `scripts\windows\local_api_session.cmd -InstallMissing`
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun -InstallMissing`
+- Keep compatibility overrides when needed:
+  - Script path override: `scripts\windows\local_api_session.cmd -ScriptPath "C:\Users\dcella-d\TDPN1\scripts\easy_node.sh"`
+  - Runner override: `scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe"`
+  - Env compatibility override: `set LOCAL_CONTROL_API_GIT_BASH_PATH=C:\Program Files\Git\bin\bash.exe` then run `scripts\windows\local_api_session.cmd -AllowRunnerEnvOverride`
+- If you explicitly provide an alternative `-ScriptPath` and compatible `-CommandRunner`, you can change runner requirements; default behavior still expects Git Bash for `easy_node.sh`.
 - Override runner explicitly when needed:
   - `scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe"`
 - `-DryRun` prints the resolved command/runner without starting the daemon.

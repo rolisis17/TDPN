@@ -308,7 +308,12 @@ $repoRoot = Resolve-Path (Join-Path $scriptDir "..\..")
 Validate-ApiAddrPolicy -Addr $ApiAddr -AllowRemote:$AllowRemoteBind
 
 if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
-  $ScriptPath = Join-Path $repoRoot.Path "scripts\easy_node.sh"
+  $preferredBridgePath = Join-Path $repoRoot.Path "scripts\windows\easy_node_bridge.ps1"
+  if (Test-Path -LiteralPath $preferredBridgePath -PathType Leaf) {
+    $ScriptPath = $preferredBridgePath
+  } else {
+    $ScriptPath = Join-Path $repoRoot.Path "scripts\easy_node.sh"
+  }
 } elseif (-not [System.IO.Path]::IsPathRooted($ScriptPath)) {
   $ScriptPath = Join-Path $repoRoot.Path $ScriptPath
 }
@@ -319,8 +324,8 @@ if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
 }
 
 $scriptPathExt = [System.IO.Path]::GetExtension($ScriptPath).ToLowerInvariant()
-if ($scriptPathExt -ne ".sh") {
-  throw "Script path must reference a .sh script file."
+if ($scriptPathExt -notin @(".sh", ".ps1")) {
+  throw "Script path must reference a .sh or .ps1 file."
 }
 if (-not $AllowExternalScript) {
   $repoScriptsRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot.Path "scripts"))
@@ -331,10 +336,34 @@ if (-not $AllowExternalScript) {
   }
 }
 
-$resolvedRunner = Resolve-CommandRunner -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner
+$resolvedRunner = ""
 $scriptPathForRunner = $ScriptPath
-if ($resolvedRunner -match "(?i)bash(\.exe)?$") {
-  $scriptPathForRunner = Convert-ToGitBashPath -PathValue $ScriptPath
+$commandRunnerMode = ""
+$commandRunnerDisplay = ""
+$bridgeRunnerMode = ""
+$bridgeRunnerDisplay = ""
+
+if ($scriptPathExt -eq ".sh") {
+  $resolvedRunner = Resolve-CommandRunner -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner
+  if ($resolvedRunner -match "(?i)bash(\.exe)?$") {
+    $scriptPathForRunner = Convert-ToGitBashPath -PathValue $ScriptPath
+  }
+  $commandRunnerMode = "explicit"
+  $commandRunnerDisplay = $resolvedRunner
+  $bridgeRunnerMode = "(not-used)"
+  $bridgeRunnerDisplay = "(not-used)"
+} else {
+  $commandRunnerMode = "implicit (powershell for .ps1)"
+  $commandRunnerDisplay = "(implicit powershell)"
+  $resolvedBridgeRunner = Resolve-CommandRunner -ExplicitRunner $CommandRunner -AllowEnvOverride:$AllowRunnerEnvOverride -AllowUntrusted:$AllowUntrustedRunner
+  if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
+    $bridgeRunnerMode = "explicit (from -CommandRunner)"
+  } elseif ($AllowRunnerEnvOverride -and -not [string]::IsNullOrWhiteSpace($env:LOCAL_CONTROL_API_GIT_BASH_PATH)) {
+    $bridgeRunnerMode = "env override (LOCAL_CONTROL_API_GIT_BASH_PATH)"
+  } else {
+    $bridgeRunnerMode = "auto-discovered (trusted defaults only)"
+  }
+  $bridgeRunnerDisplay = $resolvedBridgeRunner
 }
 
 if (-not [string]::IsNullOrWhiteSpace($Config)) {
@@ -346,9 +375,19 @@ if (-not [string]::IsNullOrWhiteSpace($Config)) {
 
 Set-Item -Path "Env:LOCAL_CONTROL_API_ADDR" -Value $ApiAddr
 Set-Item -Path "Env:LOCAL_CONTROL_API_SCRIPT" -Value $scriptPathForRunner
-Set-Item -Path "Env:LOCAL_CONTROL_API_RUNNER" -Value $resolvedRunner
+Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_RUNNER" -Value $resolvedRunner
 Set-Item -Path "Env:LOCAL_CONTROL_API_ALLOW_UPDATE" -Value $AllowUpdate
 Set-Item -Path "Env:LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC" -Value ([string]$CommandTimeoutSec)
+
+if ($scriptPathExt -eq ".ps1") {
+  Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_BRIDGE_COMMAND_RUNNER" -Value $bridgeRunnerDisplay
+  Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_BRIDGE_ALLOW_RUNNER_ENV_OVERRIDE" -Value $(if ($AllowRunnerEnvOverride) { "1" } else { "" })
+  Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_BRIDGE_ALLOW_UNTRUSTED_RUNNER" -Value $(if ($AllowUntrustedRunner) { "1" } else { "" })
+} else {
+  Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_BRIDGE_COMMAND_RUNNER" -Value ""
+  Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_BRIDGE_ALLOW_RUNNER_ENV_OVERRIDE" -Value ""
+  Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_BRIDGE_ALLOW_UNTRUSTED_RUNNER" -Value ""
+}
 
 Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_CONNECT_PATH_PROFILE" -Value $ConnectPathProfileDefault
 Set-Or-ClearEnv -Name "LOCAL_CONTROL_API_CONNECT_INTERFACE" -Value $ConnectInterfaceDefault
@@ -365,7 +404,12 @@ Write-Host "local-api-session (windows-native):"
 Write-Host "  api_addr: $ApiAddr"
 Write-Host "  script_path: $ScriptPath"
 Write-Host "  script_path_runner: $scriptPathForRunner"
-Write-Host "  command_runner: $resolvedRunner"
+Write-Host "  command_runner_mode: $commandRunnerMode"
+Write-Host "  command_runner: $commandRunnerDisplay"
+if ($scriptPathExt -eq ".ps1") {
+  Write-Host "  bridge_command_runner_mode: $bridgeRunnerMode"
+  Write-Host "  bridge_command_runner: $bridgeRunnerDisplay"
+}
 Write-Host "  allow_update: $AllowUpdate"
 Write-Host "  command_timeout_sec: $CommandTimeoutSec"
 $installMissingEnabled = if ($InstallMissing) { "true" } else { "false" }

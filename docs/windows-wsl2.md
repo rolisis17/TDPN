@@ -148,12 +148,18 @@ Desktop local API hardening reminder:
 Windows-native local API launcher (no WSL shim):
 
 ```powershell
+.\scripts\windows\local_api_session.cmd
 ./scripts/windows/local_api_session.ps1
 ```
 
 Notes:
-- This prefers Git for Windows `bash.exe` and rejects `WindowsApps\bash.exe` (WSL shim).
-- Use `-CommandRunner` to pin a specific runner path.
+- Default local API script path is `scripts\windows\easy_node_bridge.ps1`; that bridge targets `scripts\easy_node.sh` (exported as `/c/.../scripts/easy_node.sh` for the runner), and the run stays WSL-free.
+- Git Bash is required for default `easy_node.sh` execution.
+- Compatibility and override options:
+  - explicit runner: `.\scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun`
+  - explicit script path + runner: `.\scripts\windows\local_api_session.cmd -ScriptPath "C:\Users\dcella-d\TDPN1\scripts\easy_node.sh" -CommandRunner "C:\Program Files\Git\bin\bash.exe" -DryRun`
+  - env compatibility override: `$env:LOCAL_CONTROL_API_GIT_BASH_PATH="C:\Program Files\Git\bin\bash.exe"; .\scripts\windows\local_api_session.ps1 -AllowRunnerEnvOverride -DryRun`
+- If you explicitly supply an alternative script/runner pair, Git Bash is not mandatory for that custom flow.
 
 Windows-native desktop bootstrap (recommended for client machines):
 

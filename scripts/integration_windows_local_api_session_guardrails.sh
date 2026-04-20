@@ -32,6 +32,26 @@ assert_marker_present() {
   fi
 }
 
+strip_crlf() {
+  local value="$1"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/}"
+  printf '%s' "$value"
+}
+
+extract_banner_field() {
+  local log_path="$1"
+  local field_name="$2"
+  local line
+  line="$(grep -F "  $field_name:" "$log_path" | head -n 1 || true)"
+  line="$(strip_crlf "$line")"
+  if [[ -z "$line" ]]; then
+    printf '%s' ""
+    return
+  fi
+  printf '%s' "${line#*${field_name}: }"
+}
+
 echo "[windows-local-api-session-guardrails] marker checks: cmd wrapper policy + guardrails"
 assert_marker_present "-ExecutionPolicy Bypass" "$LOCAL_API_SESSION_CMD"
 assert_marker_present "Unsupported cmd metacharacters" "$LOCAL_API_SESSION_CMD"
@@ -86,6 +106,12 @@ to_powershell_path() {
   printf '%s' "$path"
 }
 
+resolve_windows_git_bash_runner() {
+  local result
+  result="$("$POWERSHELL_BIN" -NoProfile -Command "\$candidates=@('C:\\Program Files\\Git\\bin\\bash.exe','C:\\Program Files\\Git\\usr\\bin\\bash.exe','C:\\Program Files (x86)\\Git\\bin\\bash.exe','C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe'); foreach (\$candidate in \$candidates) { if (Test-Path -LiteralPath \$candidate -PathType Leaf) { Write-Output \$candidate; break } }" 2>/dev/null || true)"
+  strip_crlf "$result"
+}
+
 if command -v cmd >/dev/null 2>&1; then
   CMD_BIN="cmd"
 elif command -v cmd.exe >/dev/null 2>&1; then
@@ -106,8 +132,12 @@ LOCAL_API_SESSION_PS1_PS="$(to_powershell_path "$LOCAL_API_SESSION_PS1")"
 run_ps1_dry_run_check() {
   local name="$1"
   local expected_install_missing="$2"
-  shift 2
+  local mode="$3"
+  shift 3
   local log_path="$TMP_DIR/${name}.log"
+  local script_path
+  local command_runner
+  local runner_lc
   if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$LOCAL_API_SESSION_PS1_PS" "$@" >"$log_path" 2>&1; then
     echo "windows local api session guardrails failed: expected local_api_session.ps1 $name to pass"
     cat "$log_path"
@@ -125,13 +155,71 @@ run_ps1_dry_run_check() {
       exit 1
     fi
   done
+
+  script_path="$(extract_banner_field "$log_path" "script_path")"
+  command_runner="$(extract_banner_field "$log_path" "command_runner")"
+
+  if [[ -z "$script_path" ]]; then
+    echo "windows local api session guardrails failed: missing script_path banner field for $name"
+    cat "$log_path"
+    exit 1
+  fi
+
+  case "$mode" in
+    default)
+      if [[ "$script_path" == *.ps1 ]]; then
+        :
+      elif [[ "$script_path" == *.sh ]]; then
+        if [[ -z "$command_runner" ]]; then
+          echo "windows local api session guardrails failed: .sh default script_path requires command_runner for $name"
+          cat "$log_path"
+          exit 1
+        fi
+      else
+        echo "windows local api session guardrails failed: default script_path must end with .ps1 or .sh for $name"
+        cat "$log_path"
+        exit 1
+      fi
+      ;;
+    legacy_sh_runner)
+      if [[ "$script_path" != *.sh ]]; then
+        echo "windows local api session guardrails failed: legacy mode expected .sh script_path for $name"
+        cat "$log_path"
+        exit 1
+      fi
+      if [[ -z "$command_runner" ]]; then
+        echo "windows local api session guardrails failed: legacy mode expected non-empty command_runner for $name"
+        cat "$log_path"
+        exit 1
+      fi
+      runner_lc="${command_runner,,}"
+      if [[ "$runner_lc" != *bash.exe && "$runner_lc" != */bash ]]; then
+        echo "windows local api session guardrails failed: legacy mode expected bash runner for $name"
+        cat "$log_path"
+        exit 1
+      fi
+      ;;
+    *)
+      echo "windows local api session guardrails failed: unknown dry-run check mode '$mode'"
+      exit 1
+      ;;
+  esac
 }
 
 echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 dry-run"
-run_ps1_dry_run_check "ps1_dry_run" "false" -DryRun
+run_ps1_dry_run_check "ps1_dry_run" "false" "default" -DryRun
 
 echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 dry-run with auto-remediation intent"
-run_ps1_dry_run_check "ps1_dry_run_install_missing" "true" -DryRun -InstallMissing
+run_ps1_dry_run_check "ps1_dry_run_install_missing" "true" "default" -DryRun -InstallMissing
+
+echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 legacy .sh + runner compatibility"
+LEGACY_SCRIPT_PATH_PS="$(to_powershell_path "$ROOT_DIR/scripts/easy_node.sh")"
+LEGACY_COMMAND_RUNNER="$(resolve_windows_git_bash_runner)"
+if [[ -z "$LEGACY_COMMAND_RUNNER" ]]; then
+  echo "windows local api session guardrails failed: legacy compatibility check requires Git for Windows bash.exe"
+  exit 2
+fi
+run_ps1_dry_run_check "ps1_dry_run_legacy_sh_runner" "false" "legacy_sh_runner" -DryRun -ScriptPath "$LEGACY_SCRIPT_PATH_PS" -CommandRunner "$LEGACY_COMMAND_RUNNER"
 
 echo "[windows-local-api-session-guardrails] runtime check: cmd wrapper dry-run pass-through"
 CMD_DRY_RUN_LOG="$TMP_DIR/cmd_dry_run.log"
