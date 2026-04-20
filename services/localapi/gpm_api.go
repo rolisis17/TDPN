@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -32,6 +33,7 @@ const (
 	gpmSessionTTL                  = 12 * time.Hour
 	gpmManifestHTTPTimeout         = 6 * time.Second
 	gpmManifestBodyLimit           = 1 << 20
+	gpmManifestCacheBodyLimit      = 2 << 20
 	gpmAuthSignatureMaxLen         = 8 * 1024
 	gpmAuthSignatureEnvelopeMaxLen = 16 * 1024
 	gpmAuthVerifierOutputLimit     = 8 * 1024
@@ -84,11 +86,13 @@ type gpmBootstrapManifest struct {
 }
 
 type gpmBootstrapManifestCacheFile struct {
-	Version           int                  `json:"version"`
-	FetchedAtUTC      string               `json:"fetched_at_utc"`
-	SourceURL         string               `json:"source_url"`
-	SignatureVerified bool                 `json:"signature_verified"`
-	Manifest          gpmBootstrapManifest `json:"manifest"`
+	Version               int                  `json:"version"`
+	FetchedAtUTC          string               `json:"fetched_at_utc"`
+	SourceURL             string               `json:"source_url"`
+	SignatureVerified     bool                 `json:"signature_verified"`
+	ManifestSignature     string               `json:"manifest_signature,omitempty"`
+	ManifestPayloadBase64 string               `json:"manifest_payload_base64,omitempty"`
+	Manifest              gpmBootstrapManifest `json:"manifest"`
 }
 
 type gpmAuthChallengeRequest struct {
@@ -2012,9 +2016,9 @@ func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapMan
 			return gpmBootstrapManifest{}, "", false, fmt.Errorf("gpm manifest url host mismatch: got %q, pinned gpm main domain host %q; update GPM_MAIN_DOMAIN or GPM_BOOTSTRAP_MANIFEST_URL", manifestHost, pinnedHost)
 		}
 	}
-	manifest, signatureVerified, err := s.fetchRemoteManifest(ctx, manifestURL)
+	manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifest(ctx, manifestURL)
 	if err == nil {
-		_ = s.writeBootstrapManifestCache(manifest, signatureVerified)
+		_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
 		return manifest, "remote", signatureVerified, nil
 	}
 	cacheManifest, cacheSignatureVerified, cacheErr := s.readBootstrapManifestCache()
@@ -2024,49 +2028,49 @@ func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapMan
 	return cacheManifest, "cache", cacheSignatureVerified, nil
 }
 
-func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, error) {
+func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {
 	client := &http.Client{Timeout: gpmManifestHTTPTimeout}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmBootstrapManifest{}, false, nil, "", err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmBootstrapManifest{}, false, nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return gpmBootstrapManifest{}, false, fmt.Errorf("manifest endpoint returned %d", resp.StatusCode)
+		return gpmBootstrapManifest{}, false, nil, "", fmt.Errorf("manifest endpoint returned %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, gpmManifestBodyLimit+1))
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmBootstrapManifest{}, false, nil, "", err
 	}
 	if len(body) > gpmManifestBodyLimit {
-		return gpmBootstrapManifest{}, false, errors.New("manifest response too large")
+		return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest response too large")
 	}
 	var manifest gpmBootstrapManifest
 	if err := json.Unmarshal(body, &manifest); err != nil {
-		return gpmBootstrapManifest{}, false, fmt.Errorf("invalid manifest json: %w", err)
+		return gpmBootstrapManifest{}, false, nil, "", fmt.Errorf("invalid manifest json: %w", err)
 	}
 	if err := validateBootstrapManifest(manifest); err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmBootstrapManifest{}, false, nil, "", err
 	}
 	manifest = normalizeBootstrapManifest(manifest)
 	signatureVerified := false
 	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
+	receivedSignature := strings.TrimSpace(resp.Header.Get("X-GPM-Signature"))
 	if hmacKey != "" {
-		received := strings.TrimSpace(resp.Header.Get("X-GPM-Signature"))
-		if received == "" {
-			return gpmBootstrapManifest{}, false, errors.New("manifest signature header missing")
+		if receivedSignature == "" {
+			return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest signature header missing")
 		}
 		expected := computeManifestHMAC(body, hmacKey)
-		if !subtleEqual(received, expected) {
-			return gpmBootstrapManifest{}, false, errors.New("manifest signature verification failed")
+		if !subtleEqual(receivedSignature, expected) {
+			return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest signature verification failed")
 		}
 		signatureVerified = true
 	}
-	return manifest, signatureVerified, nil
+	return manifest, signatureVerified, body, receivedSignature, nil
 }
 
 func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
@@ -2160,7 +2164,7 @@ func computeManifestHMAC(body []byte, secret string) string {
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, signatureVerified bool) error {
+func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, signatureVerified bool, manifestBody []byte, manifestSignature string) error {
 	cachePath := strings.TrimSpace(s.gpmManifestCache)
 	if cachePath == "" {
 		return nil
@@ -2178,6 +2182,11 @@ func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, sig
 		SignatureVerified: signatureVerified || strings.TrimSpace(s.gpmManifestHMACKey) == "",
 		Manifest:          manifest,
 	}
+	hmacKeyConfigured := strings.TrimSpace(s.gpmManifestHMACKey) != ""
+	if hmacKeyConfigured && signatureVerified && len(manifestBody) > 0 && strings.TrimSpace(manifestSignature) != "" {
+		cache.ManifestPayloadBase64 = base64.StdEncoding.EncodeToString(manifestBody)
+		cache.ManifestSignature = strings.TrimSpace(manifestSignature)
+	}
 	body, err := json.MarshalIndent(cache, "", "  ")
 	if err != nil {
 		return err
@@ -2190,7 +2199,7 @@ func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, erro
 	if cachePath == "" {
 		return gpmBootstrapManifest{}, false, errors.New("manifest cache path is empty")
 	}
-	body, err := os.ReadFile(cachePath)
+	body, err := readFileWithHardLimit(cachePath, gpmManifestCacheBodyLimit)
 	if err != nil {
 		return gpmBootstrapManifest{}, false, err
 	}
@@ -2221,10 +2230,46 @@ func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, erro
 			return gpmBootstrapManifest{}, false, fmt.Errorf("cached manifest source host mismatch: got %q, pinned gpm main domain host %q; clear the cache or refresh it from the pinned domain", cacheSourceHost, pinnedHost)
 		}
 	}
-	if strings.TrimSpace(s.gpmManifestHMACKey) != "" && !cache.SignatureVerified {
-		return gpmBootstrapManifest{}, false, errors.New("cached manifest is not signature-verified")
+	signatureVerified, err := s.verifyCachedManifestSignature(cache)
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
 	}
-	return normalizeBootstrapManifest(cache.Manifest), cache.SignatureVerified, nil
+	return normalizeBootstrapManifest(cache.Manifest), signatureVerified, nil
+}
+
+func (s *Service) verifyCachedManifestSignature(cache gpmBootstrapManifestCacheFile) (bool, error) {
+	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
+	if hmacKey == "" {
+		return cache.SignatureVerified, nil
+	}
+
+	payloadBase64 := strings.TrimSpace(cache.ManifestPayloadBase64)
+	signature := strings.TrimSpace(cache.ManifestSignature)
+	if payloadBase64 == "" || signature == "" {
+		return false, errors.New("cached manifest is missing signed payload evidence")
+	}
+	payload, err := base64.StdEncoding.DecodeString(payloadBase64)
+	if err != nil {
+		return false, fmt.Errorf("cached manifest payload decode failed: %w", err)
+	}
+	expected := computeManifestHMAC(payload, hmacKey)
+	if !subtleEqual(signature, expected) {
+		return false, errors.New("cached manifest signature verification failed")
+	}
+
+	var payloadManifest gpmBootstrapManifest
+	if err := json.Unmarshal(payload, &payloadManifest); err != nil {
+		return false, fmt.Errorf("cached manifest payload json invalid: %w", err)
+	}
+	if err := validateBootstrapManifest(payloadManifest); err != nil {
+		return false, fmt.Errorf("cached manifest payload invalid: %w", err)
+	}
+	normalizedPayloadManifest := normalizeBootstrapManifest(payloadManifest)
+	normalizedCachedManifest := normalizeBootstrapManifest(cache.Manifest)
+	if !reflect.DeepEqual(normalizedPayloadManifest, normalizedCachedManifest) {
+		return false, errors.New("cached manifest payload does not match cached manifest body")
+	}
+	return true, nil
 }
 
 func (s *Service) pinnedGPMMainDomainHost() (string, error) {
@@ -2233,6 +2278,23 @@ func (s *Service) pinnedGPMMainDomainHost() (string, error) {
 		return "", nil
 	}
 	return normalizeHTTPHost(mainDomain)
+}
+
+func readFileWithHardLimit(path string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("file %q exceeds max size %d bytes", path, maxBytes)
+	}
+	return body, nil
 }
 
 func normalizeHTTPHost(raw string) (string, error) {

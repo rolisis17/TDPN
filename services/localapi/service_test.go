@@ -2,6 +2,7 @@ package localapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -5813,6 +5814,159 @@ func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 	}
 }
 
+func TestReadBootstrapManifestCacheWithHMACKeyReverification(t *testing.T) {
+	now := time.Now().UTC()
+
+	newManifest := func(directory string) gpmBootstrapManifest {
+		return gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{directory},
+		}
+	}
+
+	newCacheService := func(t *testing.T, hmacKey string) *Service {
+		t.Helper()
+		manifestURL := "https://bootstrap-cache.globalprivatemesh.example/v1/bootstrap/manifest"
+		return &Service{
+			gpmMainDomain:      "https://bootstrap-cache.globalprivatemesh.example",
+			gpmManifestURL:     manifestURL,
+			gpmManifestCache:   filepath.Join(t.TempDir(), "manifest_cache.json"),
+			gpmManifestMaxAge:  24 * time.Hour,
+			gpmManifestHMACKey: hmacKey,
+		}
+	}
+
+	t.Run("rejects tampered cached manifest when key is configured", func(t *testing.T) {
+		svc := newCacheService(t, "manifest-cache-hmac-test-key")
+		originalDirectory := "https://directory-trusted.globalprivatemesh.example:8081"
+		tamperedDirectory := "https://directory-tampered.globalprivatemesh.example:8081"
+		manifest := newManifest(originalDirectory)
+		manifestBody, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatalf("marshal manifest: %v", err)
+		}
+		manifestSignature := computeManifestHMAC(manifestBody, svc.gpmManifestHMACKey)
+		if err := svc.writeBootstrapManifestCache(manifest, true, manifestBody, manifestSignature); err != nil {
+			t.Fatalf("write cache: %v", err)
+		}
+		cacheBody, err := os.ReadFile(svc.gpmManifestCache)
+		if err != nil {
+			t.Fatalf("read cache: %v", err)
+		}
+		tamperedBody := strings.Replace(string(cacheBody), originalDirectory, tamperedDirectory, 1)
+		if tamperedBody == string(cacheBody) {
+			t.Fatal("expected cache tamper replacement to modify payload")
+		}
+		if err := os.WriteFile(svc.gpmManifestCache, []byte(tamperedBody), 0o600); err != nil {
+			t.Fatalf("write tampered cache: %v", err)
+		}
+
+		manifest, signatureVerified, err := svc.readBootstrapManifestCache()
+		if err == nil {
+			t.Fatalf("expected tampered cache to fail cryptographic re-verification, got manifest=%+v signature_verified=%t", manifest, signatureVerified)
+		}
+	})
+
+	t.Run("accepts untampered cached manifest when key is configured", func(t *testing.T) {
+		svc := newCacheService(t, "manifest-cache-hmac-test-key")
+		directory := "https://directory-intact.globalprivatemesh.example:8081"
+		manifest := newManifest(directory)
+		manifestBody, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatalf("marshal manifest: %v", err)
+		}
+		manifestSignature := computeManifestHMAC(manifestBody, svc.gpmManifestHMACKey)
+		if err := svc.writeBootstrapManifestCache(manifest, true, manifestBody, manifestSignature); err != nil {
+			t.Fatalf("write cache: %v", err)
+		}
+
+		manifest, signatureVerified, err := svc.readBootstrapManifestCache()
+		if err != nil {
+			t.Fatalf("read cache: %v", err)
+		}
+		if !signatureVerified {
+			t.Fatalf("signature_verified=%t want=true", signatureVerified)
+		}
+		if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != directory {
+			t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{directory})
+		}
+	})
+
+	t.Run("preserves legacy bool-only cache behavior when key is unset", func(t *testing.T) {
+		svc := newCacheService(t, "")
+		directory := "https://directory-legacy.globalprivatemesh.example:8081"
+		cache := gpmBootstrapManifestCacheFile{
+			Version:           1,
+			FetchedAtUTC:      now.Format(time.RFC3339),
+			SourceURL:         svc.gpmManifestURL,
+			SignatureVerified: false,
+			Manifest:          newManifest(directory),
+		}
+		cacheBody, err := json.MarshalIndent(cache, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal legacy cache: %v", err)
+		}
+		if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+			t.Fatalf("write legacy cache: %v", err)
+		}
+
+		manifest, signatureVerified, err := svc.readBootstrapManifestCache()
+		if err != nil {
+			t.Fatalf("read legacy cache: %v", err)
+		}
+		if signatureVerified {
+			t.Fatalf("signature_verified=%t want=false", signatureVerified)
+		}
+		if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != directory {
+			t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{directory})
+		}
+	})
+}
+
+func TestGPMStateStoreLoadSkipsOversizedFile(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "gpm_state_oversized.json")
+	oversized := strings.Repeat("A", gpmStateStoreLoadMaxBytes+1)
+	if err := os.WriteFile(statePath, []byte(oversized), 0o600); err != nil {
+		t.Fatalf("write oversized state file: %v", err)
+	}
+
+	svc := &Service{
+		gpmStateStorePath: statePath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	svc.loadGPMStateBestEffort()
+
+	sessions, _ := svc.gpmState.snapshotPersistent(time.Now().UTC())
+	if len(sessions) != 0 {
+		t.Fatalf("expected oversized state load to be skipped, sessions=%d", len(sessions))
+	}
+	if len(svc.gpmState.listOperators()) != 0 {
+		t.Fatalf("expected oversized state load to be skipped, operators=%d", len(svc.gpmState.listOperators()))
+	}
+}
+
+func TestReadBootstrapManifestCacheRejectsOversizedFile(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "manifest_cache_oversized.json")
+	oversized := strings.Repeat("A", gpmManifestCacheBodyLimit+1)
+	if err := os.WriteFile(cachePath, []byte(oversized), 0o600); err != nil {
+		t.Fatalf("write oversized cache file: %v", err)
+	}
+
+	svc := &Service{
+		gpmManifestCache:  cachePath,
+		gpmManifestMaxAge: 24 * time.Hour,
+	}
+	_, _, err := svc.readBootstrapManifestCache()
+	if err == nil {
+		t.Fatal("expected oversized cache file to be rejected")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Fatalf("error=%q want contains max size", err.Error())
+	}
+}
+
 func TestGPMClientRegisterUsesPinnedCacheFallbackWhenRemoteFetchFails(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
@@ -5856,6 +6010,151 @@ func TestGPMClientRegisterUsesPinnedCacheFallbackWhenRemoteFetchFails(t *testing
 	svc.gpmState.putSession(gpmSession{
 		Token:          token,
 		WalletAddress:  "cosmos1cachefallback",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusOK {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected remote manifest fetch attempt before cache fallback")
+	}
+
+	source, _ := payload["source"].(string)
+	if source != "cache" {
+		t.Fatalf("source=%q want=cache payload=%v", source, payload)
+	}
+	signatureVerified, _ := payload["signature_verified"].(bool)
+	if !signatureVerified {
+		t.Fatalf("signature_verified=%v want=true payload=%v", signatureVerified, payload)
+	}
+	profile, _ := payload["profile"].(map[string]any)
+	gotBootstrap, _ := profile["bootstrap_directory"].(string)
+	if gotBootstrap != bootstrapDirectory {
+		t.Fatalf("profile.bootstrap_directory=%q want=%q payload=%v", gotBootstrap, bootstrapDirectory, payload)
+	}
+}
+
+func TestGPMClientRegisterRejectsPinnedCacheFallbackWithoutSignedPayloadEvidenceWhenHMACRequired(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestHMACKey = "test-manifest-hmac-key"
+
+	var manifestHits int
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	const token = "gpm-session-token-cache-hmac-missing-evidence"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1cachehmacevidence",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusBadGateway {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected remote manifest fetch attempt before cache fallback")
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "missing signed payload evidence") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMClientRegisterUsesPinnedCacheFallbackWithSignedPayloadEvidenceWhenHMACRequired(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestHMACKey = "test-manifest-hmac-key"
+
+	var manifestHits int
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	const bootstrapDirectory = "https://directory.cache.globalprivatemesh.example:8081"
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{bootstrapDirectory},
+	}
+	manifestPayload, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest payload: %v", err)
+	}
+	manifestSignature := computeManifestHMAC(manifestPayload, svc.gpmManifestHMACKey)
+	cache := gpmBootstrapManifestCacheFile{
+		Version:               1,
+		FetchedAtUTC:          now.Format(time.RFC3339),
+		SourceURL:             manifestServer.URL,
+		SignatureVerified:     false,
+		ManifestSignature:     manifestSignature,
+		ManifestPayloadBase64: base64.StdEncoding.EncodeToString(manifestPayload),
+		Manifest:              manifest,
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	const token = "gpm-session-token-cache-hmac-verified"
+	svc.gpmState.putSession(gpmSession{
+		Token:          token,
+		WalletAddress:  "cosmos1cachehmacverified",
 		WalletProvider: "keplr",
 		Role:           "client",
 		CreatedAt:      now,
