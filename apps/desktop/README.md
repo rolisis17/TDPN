@@ -119,6 +119,9 @@ npm run tauri dev
 
 Scaffold/non-production note:
 - desktop Tauri build paths auto-generate a placeholder `apps/desktop/src-tauri/icons/icon.ico` when it is missing, to avoid hard-failing first-run scaffold builds.
+- icon preflight is deterministic and local-only: `apps/desktop/src-tauri/build.rs` now validates ICO structure and, when missing/invalid, writes a minimal embedded fallback icon with explicit cargo warning logs.
+- icon readiness contract check is available via:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test icon_scaffold_contract`
 
 Windows desktop dev launcher (preferred on Windows, scaffold/non-production):
 
@@ -352,8 +355,9 @@ bash ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
 
 Modes:
 - `check` prints readiness and missing prerequisites.
-- `fix` applies first-run remediation and, with `--install-missing`, installs missing dependencies via available distro package managers (`apt`, `dnf`, `pacman`, `zypper`).
-- Linux desktop doctor now prints exact copy/paste remediation commands and mirrors them in summary JSON `recommended_commands` (distro install hints, doctor rerun, and one-click rerun).
+- `fix` applies first-run remediation and, with `--install-missing`, runs explicit remediation only (no implicit installs without the flag): distro package managers (`apt`, `dnf`, `pacman`, `zypper`) plus `cargo install tauri-cli --locked` when `cargo-tauri` is missing.
+- required binary checks include: `bash`, `go`, `node`, `npm`, `rustc`, `cargo`, `cargo-tauri`, `git`, `jq`.
+- Linux desktop doctor now prints exact copy/paste remediation commands and mirrors them in summary JSON `recommended_commands`, including Debian/Ubuntu (`apt-get`) and Fedora (`dnf`) command hints where applicable.
 
 Recommended first-run sequence on Linux:
 1. Run `desktop_doctor` with `--mode fix --install-missing`.

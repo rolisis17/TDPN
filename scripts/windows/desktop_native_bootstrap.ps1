@@ -47,6 +47,28 @@ function Quote-PowerShellSingleQuotedString {
   return "'" + ($Value -replace "'", "''") + "'"
 }
 
+function Get-ProcessBypassRerunCommand {
+  $scriptPath = Quote-PowerShellSingleQuotedString -Value $PSCommandPath
+  $modeArg = " -Mode " + (Quote-PowerShellSingleQuotedString -Value $Mode)
+  $desktopLaunchStrategyArg = " -DesktopLaunchStrategy " + (Quote-PowerShellSingleQuotedString -Value $DesktopLaunchStrategy)
+  $desktopExecutableOverrideArg = if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
+    " -DesktopExecutableOverridePath " + (Quote-PowerShellSingleQuotedString -Value $DesktopExecutableOverridePath)
+  } else {
+    ""
+  }
+  $installMissingArg = if ($InstallMissing) { " -InstallMissing" } else { "" }
+  $skipPathRefreshArg = if ($SkipPathRefresh) { " -SkipPathRefresh" } else { "" }
+  $dryRunArg = if ($DryRun) { " -DryRun" } else { "" }
+  $forceNpmInstallArg = if ($ForceNpmInstall) { " -ForceNpmInstall" } else { "" }
+  $apiAddrArg = " -ApiAddr " + (Quote-PowerShellSingleQuotedString -Value $ApiAddr)
+  $commandRunnerArg = if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
+    " -CommandRunner " + (Quote-PowerShellSingleQuotedString -Value $CommandRunner)
+  } else {
+    ""
+  }
+  return ("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg)
+}
+
 function Get-CommonToolDirectories {
   $programFiles = [Environment]::GetFolderPath("ProgramFiles")
   $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
@@ -287,44 +309,62 @@ function Resolve-NpmCommandPath {
     $siblingNpmCmdPath = Join-Path (Split-Path -Parent $npmPath) "npm.cmd"
     if (Test-Path -LiteralPath $siblingNpmCmdPath -PathType Leaf) {
       if ($LogFallbackHint) {
-        Write-Step ("npm resolver fallback: using sibling npm.cmd at {0}" -f $siblingNpmCmdPath)
+        Write-Step ("npm resolver fallback: ignoring npm.ps1 shim and using sibling npm.cmd at {0}" -f $siblingNpmCmdPath)
       }
       return $siblingNpmCmdPath
     }
+    if ($LogFallbackHint) {
+      Write-Step "npm.ps1 shim detected but npm.cmd was not found; treating npm as missing to avoid execution-policy failures."
+    }
+    return ""
   }
 
   return $npmPath
 }
 
 function Ensure-PolicyBypassProcess {
+  $effectivePolicy = ""
+  try {
+    $effectivePolicy = [string](Get-ExecutionPolicy)
+  } catch {
+    $effectivePolicy = ""
+  }
+  $effectivePolicy = $effectivePolicy.Trim()
+  if ([string]::IsNullOrWhiteSpace($effectivePolicy)) {
+    $effectivePolicy = "Unknown"
+  }
+  $isPolicyRisk = $effectivePolicy.Equals("Restricted", [System.StringComparison]::OrdinalIgnoreCase) -or $effectivePolicy.Equals("AllSigned", [System.StringComparison]::OrdinalIgnoreCase)
+  $rerunCommand = Get-ProcessBypassRerunCommand
+
+  if ($null -ne $script:BootstrapSummary) {
+    $script:BootstrapSummary.execution_policy_effective = $effectivePolicy
+    $script:BootstrapSummary.execution_policy_risk_detected = [bool]$isPolicyRisk
+    $script:BootstrapSummary.execution_policy_bypass_opt_in = [bool]$EnablePolicyBypass
+    $script:BootstrapSummary.execution_policy_bypass_command = $rerunCommand
+  }
+
   if (-not $EnablePolicyBypass) {
-    Write-Step "execution policy left unchanged (pass -EnablePolicyBypass to opt in)"
-    $scriptPath = Quote-PowerShellSingleQuotedString -Value $PSCommandPath
-    $modeArg = " -Mode " + (Quote-PowerShellSingleQuotedString -Value $Mode)
-    $desktopLaunchStrategyArg = " -DesktopLaunchStrategy " + (Quote-PowerShellSingleQuotedString -Value $DesktopLaunchStrategy)
-    $desktopExecutableOverrideArg = if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
-      " -DesktopExecutableOverridePath " + (Quote-PowerShellSingleQuotedString -Value $DesktopExecutableOverridePath)
+    if ($isPolicyRisk) {
+      Write-Step ("execution policy risk detected: effective_policy={0}" -f $effectivePolicy)
+      Write-Step "execution policy may block direct .ps1 invocations in this shell."
     } else {
-      ""
+      Write-Step ("execution policy unchanged for current process (effective_policy={0}; pass -EnablePolicyBypass to opt in)" -f $effectivePolicy)
     }
-    $installMissingArg = if ($InstallMissing) { " -InstallMissing" } else { "" }
-    $skipPathRefreshArg = if ($SkipPathRefresh) { " -SkipPathRefresh" } else { "" }
-    $dryRunArg = if ($DryRun) { " -DryRun" } else { "" }
-    $forceNpmInstallArg = if ($ForceNpmInstall) { " -ForceNpmInstall" } else { "" }
-    $apiAddrArg = " -ApiAddr " + (Quote-PowerShellSingleQuotedString -Value $ApiAddr)
-    $commandRunnerArg = if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
-      " -CommandRunner " + (Quote-PowerShellSingleQuotedString -Value $CommandRunner)
-    } else {
-      ""
-    }
-    Write-Step ("rerun with process-scope bypass: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg)
+    Write-Step ("rerun in this shell with process-scope bypass: {0}" -f $rerunCommand)
     return
   }
   try {
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
     Write-Step "execution policy set to Bypass for current process"
+    if ($null -ne $script:BootstrapSummary) {
+      $script:BootstrapSummary.execution_policy_process_state = "Bypass"
+    }
   } catch {
     Write-Warning "failed to set process execution policy bypass: $($_.Exception.Message)"
+    Write-Step ("fallback bypass command: {0}" -f $rerunCommand)
+    if ($null -ne $script:BootstrapSummary) {
+      $script:BootstrapSummary.execution_policy_process_state = "BypassSetFailed"
+    }
   }
 }
 
@@ -1170,10 +1210,40 @@ function Get-RecommendedCommands {
       Add-UniqueValue -List $commands -Value $dependencyCommand
     }
   }
+  Add-UniqueValue -List $commands -Value "go version"
+  Add-UniqueValue -List $commands -Value "node -v"
+  Add-UniqueValue -List $commands -Value "npm.cmd -v"
+  Add-UniqueValue -List $commands -Value "rustc -V"
+  Add-UniqueValue -List $commands -Value "cargo -V"
   Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0} -InstallMissing -EnablePolicyBypass" -f $normalizedMode)
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
 
   return @($commands.ToArray())
+}
+
+function Resolve-NextCommand {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$RecommendedCommands = @(),
+    [AllowEmptyCollection()]
+    [string[]]$MissingPackageIds = @()
+  )
+
+  if ($RecommendedCommands.Count -eq 0) {
+    return ""
+  }
+
+  $preferredWithInstall = $RecommendedCommands | Where-Object { $_ -like "*desktop_native_bootstrap.ps1*" -and $_ -like "*-InstallMissing*" } | Select-Object -First 1
+  if ($MissingPackageIds.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$preferredWithInstall)) {
+    return [string]$preferredWithInstall
+  }
+
+  $preferredBootstrap = $RecommendedCommands | Where-Object { $_ -like "*desktop_native_bootstrap.ps1*" -and $_ -like "*-Mode run-full*" } | Select-Object -First 1
+  if (-not [string]::IsNullOrWhiteSpace([string]$preferredBootstrap)) {
+    return [string]$preferredBootstrap
+  }
+
+  return [string]$RecommendedCommands[0]
 }
 
 function Show-RecommendedCommands {
@@ -1802,9 +1872,15 @@ $script:BootstrapSummary = [ordered]@{
   tool_report = (Get-SummaryToolReport -Report $null)
   desktop_prerequisites = (Get-DefaultDesktopPrerequisiteSummary)
   missing_package_ids = @()
+  next_command = ""
   recommended_commands = @()
   install_missing = [bool]$InstallMissing
   install_attempted = $false
+  execution_policy_effective = ""
+  execution_policy_risk_detected = $false
+  execution_policy_bypass_opt_in = [bool]$EnablePolicyBypass
+  execution_policy_bypass_command = ""
+  execution_policy_process_state = "Unchanged"
   error = ""
 }
 $script:BootstrapExitCode = 1
@@ -1820,9 +1896,15 @@ try {
     $script:BootstrapSummary.error = $script:BootstrapErrorMessage
   }
   $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -SelectedMode $Mode)
+  $nextCommand = Resolve-NextCommand -RecommendedCommands $recommendedCommands -MissingPackageIds @($script:BootstrapSummary.missing_package_ids)
+  $script:BootstrapSummary.next_command = $nextCommand
   $script:BootstrapSummary.recommended_commands = @($recommendedCommands)
   $script:BootstrapSummary.generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
   $script:BootstrapSummary.status = Resolve-SummaryStatus -ExitCode $script:BootstrapExitCode -DryRunEnabled ([bool]$DryRun) -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -HasError (-not [string]::IsNullOrWhiteSpace($script:BootstrapSummary.error))
+  Write-Step ("status={0} mode={1} missing_package_count={2}" -f $script:BootstrapSummary.status, $Mode, @($script:BootstrapSummary.missing_package_ids).Count)
+  if (-not [string]::IsNullOrWhiteSpace($nextCommand)) {
+    Write-Step ("next command: {0}" -f $nextCommand)
+  }
   Show-RecommendedCommands -Commands $recommendedCommands
   Emit-Summary -Summary $script:BootstrapSummary
 }

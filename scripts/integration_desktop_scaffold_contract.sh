@@ -18,8 +18,10 @@ REQUIRED_FILES=(
   "apps/desktop/src/main.js"
   "apps/desktop/src-tauri/Cargo.toml"
   "apps/desktop/src-tauri/build.rs"
+  "apps/desktop/src-tauri/build_support/icon_scaffold.rs"
   "apps/desktop/src-tauri/src/main.rs"
   "apps/desktop/src-tauri/src/local_api.rs"
+  "apps/desktop/src-tauri/tests/icon_scaffold_contract.rs"
   "apps/desktop/src-tauri/tauri.conf.json"
   "apps/desktop/src-tauri/capabilities/default.json"
 )
@@ -33,43 +35,68 @@ done
 echo "[desktop-scaffold] required files exist"
 
 BUILD_RS_FILE="apps/desktop/src-tauri/build.rs"
-BUILD_RS_ICON_FALLBACK_MARKERS=(
-  'fn placeholder_ico_bytes()'
-  'fn ensure_scaffold_icon() -> io::Result<()>'
-  'icon_dir.join("icon.ico")'
-  'fs::create_dir_all(&icon_dir)?'
-  'fs::write(&icon_path, placeholder_ico_bytes())?'
-  'generated scaffold placeholder icon'
+BUILD_RS_ICON_PREFLIGHT_MARKERS=(
+  '#[path = "build_support/icon_scaffold.rs"]'
+  'mod icon_scaffold;'
+  'fn icon_path_from_manifest_dir()'
+  'icon_scaffold::ensure_scaffold_icon'
+  'desktop icon preflight:'
+  'desktop icon validation'
+  'tauri_build::build()'
 )
-for marker in "${BUILD_RS_ICON_FALLBACK_MARKERS[@]}"; do
+for marker in "${BUILD_RS_ICON_PREFLIGHT_MARKERS[@]}"; do
   if ! grep -qF -- "$marker" "$BUILD_RS_FILE"; then
-    echo "desktop scaffold contract failed: missing build.rs icon fallback marker '$marker' in $BUILD_RS_FILE"
+    echo "desktop scaffold contract failed: missing build.rs icon preflight marker '$marker' in $BUILD_RS_FILE"
     exit 1
   fi
 done
-if ! grep -qF -- 'if icon_path.exists() {' "$BUILD_RS_FILE" && \
-   ! grep -qF -- 'fs::metadata(&icon_path)' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs icon-missing detection marker (expected icon_path.exists() or fs::metadata(&icon_path)) in $BUILD_RS_FILE"
+if ! grep -qF -- 'IconScaffoldStatus::AlreadyValid' "$BUILD_RS_FILE"; then
+  echo "desktop scaffold contract failed: missing build.rs IconScaffoldStatus::AlreadyValid handling marker in $BUILD_RS_FILE"
   exit 1
 fi
-if ! grep -qF -- 'io::ErrorKind::NotFound' "$BUILD_RS_FILE" && \
-   ! grep -qF -- 'if icon_path.exists() {' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs icon-not-found handling marker (expected io::ErrorKind::NotFound or icon_path.exists guard) in $BUILD_RS_FILE"
+if ! grep -qF -- 'IconScaffoldStatus::CreatedFromEmbeddedBytes' "$BUILD_RS_FILE"; then
+  echo "desktop scaffold contract failed: missing build.rs IconScaffoldStatus::CreatedFromEmbeddedBytes handling marker in $BUILD_RS_FILE"
   exit 1
 fi
-if ! grep -qF -- 'if let Err(err) = ensure_scaffold_icon() {' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs continue-on-icon-fallback-error guard marker in $BUILD_RS_FILE"
+if ! grep -qF -- 'IconScaffoldStatus::ReplacedInvalidFile' "$BUILD_RS_FILE"; then
+  echo "desktop scaffold contract failed: missing build.rs IconScaffoldStatus::ReplacedInvalidFile handling marker in $BUILD_RS_FILE"
   exit 1
 fi
-if ! grep -qF -- 'failed to prepare scaffold icon (continuing)' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs continue-on-error warning marker in $BUILD_RS_FILE"
-  exit 1
-fi
+echo "[desktop-scaffold] build.rs icon preflight markers are present"
+
+ICON_SCAFFOLD_MODULE="apps/desktop/src-tauri/build_support/icon_scaffold.rs"
+ICON_SCAFFOLD_MARKERS=(
+  'pub enum IconScaffoldStatus'
+  'pub fn placeholder_ico_bytes()'
+  'pub fn ico_bytes_are_valid'
+  'pub fn ensure_scaffold_icon'
+)
+for marker in "${ICON_SCAFFOLD_MARKERS[@]}"; do
+  if ! grep -qF -- "$marker" "$ICON_SCAFFOLD_MODULE"; then
+    echo "desktop scaffold contract failed: missing icon scaffold marker '$marker' in $ICON_SCAFFOLD_MODULE"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] icon scaffold module markers are present"
+
+ICON_SCAFFOLD_TEST="apps/desktop/src-tauri/tests/icon_scaffold_contract.rs"
+ICON_SCAFFOLD_TEST_MARKERS=(
+  'placeholder_icon_payload_is_valid_ico'
+  'ensure_scaffold_icon_generates_missing_icon'
+  'ensure_scaffold_icon_replaces_invalid_icon'
+)
+for marker in "${ICON_SCAFFOLD_TEST_MARKERS[@]}"; do
+  if ! grep -qF -- "$marker" "$ICON_SCAFFOLD_TEST"; then
+    echo "desktop scaffold contract failed: missing icon scaffold test marker '$marker' in $ICON_SCAFFOLD_TEST"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] icon scaffold test markers are present"
+
 if ! grep -qF -- 'tauri_build::build()' "$BUILD_RS_FILE"; then
   echo "desktop scaffold contract failed: missing build.rs tauri build continuation marker in $BUILD_RS_FILE"
   exit 1
 fi
-echo "[desktop-scaffold] build.rs icon fallback markers are present"
 
 RELEASE_SCAFFOLD_FILES=(
   "scripts/windows/desktop_release_bundle.ps1"

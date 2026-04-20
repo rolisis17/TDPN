@@ -1,87 +1,68 @@
 use std::env;
-use std::fs;
-use std::io;
 use std::path::PathBuf;
 
-const MIN_VALID_ICO_SIZE_BYTES: u64 = 22;
+#[path = "build_support/icon_scaffold.rs"]
+mod icon_scaffold;
 
-// Minimal 1x1 RGBA ICO payload used only as a scaffold fallback when no
-// project icon exists yet.
-fn placeholder_ico_bytes() -> [u8; 70] {
-    [
-        // ICONDIR
-        0x00, 0x00, // reserved
-        0x01, 0x00, // image type = icon
-        0x01, 0x00, // image count = 1
-        // ICONDIRENTRY
-        0x01, // width = 1
-        0x01, // height = 1
-        0x00, // color count
-        0x00, // reserved
-        0x01, 0x00, // planes
-        0x20, 0x00, // bit count = 32
-        0x30, 0x00, 0x00, 0x00, // image bytes = 48
-        0x16, 0x00, 0x00, 0x00, // image offset = 22
-        // BITMAPINFOHEADER (40 bytes)
-        0x28, 0x00, 0x00, 0x00, // header size
-        0x01, 0x00, 0x00, 0x00, // width = 1
-        0x02, 0x00, 0x00, 0x00, // height = 2 (xor + and masks)
-        0x01, 0x00, // planes
-        0x20, 0x00, // bpp = 32
-        0x00, 0x00, 0x00, 0x00, // compression = BI_RGB
-        0x04, 0x00, 0x00, 0x00, // image size = 4
-        0x00, 0x00, 0x00, 0x00, // x pixels per meter
-        0x00, 0x00, 0x00, 0x00, // y pixels per meter
-        0x00, 0x00, 0x00, 0x00, // colors used
-        0x00, 0x00, 0x00, 0x00, // important colors
-        // XOR mask pixel (BGRA)
-        0xFF, 0xFF, 0xFF, 0xFF, // white, opaque
-        // AND mask row (padded to 4 bytes)
-        0x00, 0x00, 0x00, 0x00,
-    ]
-}
-
-fn ensure_scaffold_icon() -> io::Result<()> {
-    let manifest_dir = match env::var("CARGO_MANIFEST_DIR") {
-        Ok(v) => PathBuf::from(v),
-        Err(_) => return Ok(()),
-    };
-    let icon_dir = manifest_dir.join("icons");
-    let icon_path = icon_dir.join("icon.ico");
-
-    let write_reason = match fs::metadata(&icon_path) {
-        Ok(metadata) => {
-            if metadata.len() < MIN_VALID_ICO_SIZE_BYTES {
-                Some(format!(
-                    "existing icon appears empty or truncated ({} bytes)",
-                    metadata.len()
-                ))
-            } else {
-                None
-            }
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Some("icon file missing".to_string()),
-        Err(err) => return Err(err),
-    };
-
-    if let Some(reason) = write_reason {
-        fs::create_dir_all(&icon_dir)?;
-        fs::write(&icon_path, placeholder_ico_bytes())?;
-        println!(
-            "cargo:warning=generated scaffold placeholder icon at {} ({})",
-            icon_path.display(),
-            reason
-        );
-    }
-    Ok(())
+fn icon_path_from_manifest_dir() -> Option<PathBuf> {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").ok()?;
+    Some(PathBuf::from(manifest_dir).join("icons").join("icon.ico"))
 }
 
 fn main() {
-    if let Err(err) = ensure_scaffold_icon() {
+    if let Some(icon_path) = icon_path_from_manifest_dir() {
+        match icon_scaffold::ensure_scaffold_icon(&icon_path) {
+            Ok(result) => match result.status {
+                icon_scaffold::IconScaffoldStatus::AlreadyValid => {
+                    println!(
+                        "cargo:warning=desktop icon preflight: icon is present and valid at {}",
+                        result.icon_path.display()
+                    );
+                }
+                icon_scaffold::IconScaffoldStatus::CreatedFromEmbeddedBytes
+                | icon_scaffold::IconScaffoldStatus::ReplacedInvalidFile => {
+                    println!(
+                        "cargo:warning=desktop icon preflight: wrote deterministic fallback icon at {} ({})",
+                        result.icon_path.display(),
+                        result.reason
+                    );
+                }
+            },
+            Err(err) => {
+                println!(
+                    "cargo:warning=desktop icon preflight failed at {}: {}",
+                    icon_path.display(),
+                    err
+                );
+            }
+        }
+
+        match icon_scaffold::icon_file_is_valid(&icon_path) {
+            Ok(true) => {
+                println!(
+                    "cargo:warning=desktop icon validation passed for {}",
+                    icon_path.display()
+                );
+            }
+            Ok(false) => {
+                println!(
+                    "cargo:warning=desktop icon validation failed for {} (tauri build may fail without a valid .ico)",
+                    icon_path.display()
+                );
+            }
+            Err(err) => {
+                println!(
+                    "cargo:warning=desktop icon validation could not read {}: {}",
+                    icon_path.display(),
+                    err
+                );
+            }
+        }
+    } else {
         println!(
-            "cargo:warning=failed to prepare scaffold icon (continuing): {}",
-            err
+            "cargo:warning=desktop icon preflight skipped: CARGO_MANIFEST_DIR was unavailable"
         );
     }
+
     tauri_build::build()
 }

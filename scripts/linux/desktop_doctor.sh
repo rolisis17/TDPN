@@ -12,15 +12,23 @@ Usage:
 
 Modes:
   check  Report prerequisite tool/native dependency availability (scaffold, non-production).
-  fix    Optionally attempt package-manager remediation (apt-get/dnf/pacman/zypper) for missing tools/native dependencies when --install-missing is provided.
+  fix    Optionally attempt package-manager remediation (apt-get/dnf/pacman/zypper) and cargo-tauri remediation for missing tools/native dependencies when --install-missing is provided.
 
 Flags:
   --mode check|fix         Explicit mode selector.
-  --install-missing        In fix mode, attempt package-manager install for missing dependencies when a supported manager exists.
+  --install-missing        In fix mode, attempt explicit remediation for missing dependencies.
   --dry-run                Print intended remediation actions without executing package-manager commands.
   --summary-json PATH      Write a summary JSON object to PATH.
   --print-summary-json 0|1 Print summary JSON to stdout (default: 0).
   --help                   Show this help text.
+
+Required binary checks:
+  bash, go, node, npm, rustc, cargo, cargo-tauri, git, jq
+
+Linux remediation command hints (examples; generated at runtime based on missing dependencies):
+  Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y <missing-packages>
+  Fedora:        sudo dnf install -y <missing-packages>
+  cargo-tauri:   cargo install tauri-cli --locked
 USAGE
 }
 
@@ -133,6 +141,37 @@ native_dep_label() {
 pkg_config_module_exists() {
   local module_name="$1"
   pkg-config --exists "$module_name" >/dev/null 2>&1
+}
+
+cargo_tauri_remediation_command() {
+  printf '%s' "cargo install tauri-cli --locked"
+}
+
+build_pass_fail_summary() {
+  TOOL_PASS_COUNT=$(( ${#TOOLS[@]} - ${#MISSING_TOOLS[@]} ))
+  TOOL_FAIL_COUNT=${#MISSING_TOOLS[@]}
+  NATIVE_PASS_COUNT=$(( ${#NATIVE_DEPENDENCY_KEYS[@]} - ${#MISSING_NATIVE_DEPS[@]} ))
+  NATIVE_FAIL_COUNT=${#MISSING_NATIVE_DEPS[@]}
+
+  PASS_FAIL_RESULT="PASS"
+  if [[ "$TOOL_FAIL_COUNT" -gt 0 || "$NATIVE_FAIL_COUNT" -gt 0 || "$exit_code" != "0" ]]; then
+    PASS_FAIL_RESULT="FAIL"
+  fi
+}
+
+build_next_command_hints() {
+  NEXT_COMMAND_HINTS=()
+
+  if [[ "$PASS_FAIL_RESULT" == "PASS" ]]; then
+    NEXT_COMMAND_HINTS+=("./scripts/linux/desktop_dev.sh")
+    NEXT_COMMAND_HINTS+=("./scripts/linux/desktop_native_bootstrap.sh --mode run-full --desktop-launch-strategy auto")
+    NEXT_COMMAND_HINTS+=("./scripts/linux/desktop_one_click.sh")
+    return 0
+  fi
+
+  NEXT_COMMAND_HINTS+=("./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
+  NEXT_COMMAND_HINTS+=("./scripts/linux/desktop_doctor.sh --mode check")
+  NEXT_COMMAND_HINTS+=("./scripts/linux/desktop_native_bootstrap.sh --mode bootstrap --install-missing")
 }
 
 collect_tool_report() {
@@ -524,37 +563,82 @@ build_selected_remediation_packages() {
 build_recommended_commands() {
   RECOMMENDED_COMMANDS=()
 
-  local apt_prefix=""
+  local sudo_prefix=""
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    apt_prefix="sudo "
+    sudo_prefix="sudo "
   fi
 
+  build_dnf_packages
+  build_pacman_packages
+  build_zypper_packages
+
+  # Always include distro-targeted copy/paste hints for Debian/Ubuntu and Fedora.
   if [[ "${#APT_PACKAGES[@]}" -gt 0 ]]; then
-    if [[ "$apt_get_available" == "1" ]]; then
-      RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get update")
-      RECOMMENDED_COMMANDS+=("${apt_prefix}apt-get install -y ${APT_PACKAGES[*]}")
-    elif [[ "$dnf_available" == "1" ]]; then
-      build_dnf_packages
-      if [[ "${#DNF_PACKAGES[@]}" -gt 0 ]]; then
-        RECOMMENDED_COMMANDS+=("${apt_prefix}dnf install -y ${DNF_PACKAGES[*]}")
-      fi
-    elif [[ "$pacman_available" == "1" ]]; then
-      build_pacman_packages
-      if [[ "${#PACMAN_PACKAGES[@]}" -gt 0 ]]; then
-        RECOMMENDED_COMMANDS+=("${apt_prefix}pacman -Sy --needed ${PACMAN_PACKAGES[*]}")
-      fi
-    elif [[ "$zypper_available" == "1" ]]; then
-      build_zypper_packages
-      if [[ "${#ZYPPER_PACKAGES[@]}" -gt 0 ]]; then
-        RECOMMENDED_COMMANDS+=("${apt_prefix}zypper install -y ${ZYPPER_PACKAGES[*]}")
-      fi
-    else
-      RECOMMENDED_COMMANDS+=("install missing prerequisites with your distro package manager: ${APT_PACKAGES[*]}")
-    fi
+    RECOMMENDED_COMMANDS+=("${sudo_prefix}apt-get update")
+    RECOMMENDED_COMMANDS+=("${sudo_prefix}apt-get install -y ${APT_PACKAGES[*]}")
+  fi
+
+  if [[ "${#DNF_PACKAGES[@]}" -gt 0 ]]; then
+    RECOMMENDED_COMMANDS+=("${sudo_prefix}dnf install -y ${DNF_PACKAGES[*]}")
+  fi
+
+  if [[ "$pacman_available" == "1" && "${#PACMAN_PACKAGES[@]}" -gt 0 ]]; then
+    RECOMMENDED_COMMANDS+=("${sudo_prefix}pacman -Sy --needed ${PACMAN_PACKAGES[*]}")
+  fi
+
+  if [[ "$zypper_available" == "1" && "${#ZYPPER_PACKAGES[@]}" -gt 0 ]]; then
+    RECOMMENDED_COMMANDS+=("${sudo_prefix}zypper install -y ${ZYPPER_PACKAGES[*]}")
+  fi
+
+  if tool_is_missing "cargo-tauri"; then
+    RECOMMENDED_COMMANDS+=("$(cargo_tauri_remediation_command)")
   fi
 
   RECOMMENDED_COMMANDS+=("./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
+  RECOMMENDED_COMMANDS+=("./scripts/linux/desktop_doctor.sh --mode check")
   RECOMMENDED_COMMANDS+=("./scripts/linux/desktop_one_click.sh")
+}
+
+run_cargo_tauri_remediation() {
+  if ! tool_is_missing "cargo-tauri"; then
+    cargo_tauri_install_skipped_reason="already installed"
+    return 0
+  fi
+
+  if [[ "$mode" != "fix" || "$install_missing" != "1" ]]; then
+    cargo_tauri_install_skipped_reason="--install-missing not provided"
+    return 0
+  fi
+
+  if tool_is_missing "cargo"; then
+    cargo_tauri_install_skipped_reason="cargo is missing; install Rust/Cargo before cargo-tauri remediation"
+    log "cargo-tauri remediation skipped: cargo is missing"
+    return 0
+  fi
+
+  cargo_tauri_install_attempted="1"
+  install_attempted="1"
+
+  local install_cmd
+  install_cmd="$(cargo_tauri_remediation_command)"
+  if [[ "$dry_run" == "1" ]]; then
+    log "dry-run: $install_cmd"
+    return 0
+  fi
+
+  log "running remediation (scaffold flow): $install_cmd"
+  if cargo install tauri-cli --locked; then
+    cargo_tauri_install_completed="1"
+    install_completed="1"
+    cargo_tauri_install_skipped_reason=""
+    log "cargo-tauri remediation completed"
+    return 0
+  fi
+
+  cargo_tauri_install_skipped_reason="cargo install tauri-cli --locked failed"
+  error_message="cargo install tauri-cli --locked failed during remediation"
+  exit_code="1"
+  return 1
 }
 
 mode="check"
@@ -630,7 +714,7 @@ case "$print_summary_json" in
     ;;
 esac
 
-TOOLS=(go node npm rustc cargo git bash jq)
+TOOLS=(bash go node npm rustc cargo cargo-tauri git jq)
 declare -A TOOL_PATHS=()
 MISSING_TOOLS=()
 NATIVE_DEPENDENCY_KEYS=(pkg_config gtk3 webkit2gtk libsoup3 javascriptcoregtk)
@@ -643,10 +727,20 @@ PACMAN_PACKAGES=()
 ZYPPER_PACKAGES=()
 RECOMMENDED_COMMANDS=()
 REMEDIATION_PACKAGES=()
+NEXT_COMMAND_HINTS=()
+
+PASS_FAIL_RESULT="FAIL"
+TOOL_PASS_COUNT=0
+TOOL_FAIL_COUNT=0
+NATIVE_PASS_COUNT=0
+NATIVE_FAIL_COUNT=0
 
 install_attempted="0"
 install_completed="0"
 install_skipped_reason=""
+cargo_tauri_install_attempted="0"
+cargo_tauri_install_completed="0"
+cargo_tauri_install_skipped_reason=""
 apt_get_available="0"
 dnf_available="0"
 pacman_available="0"
@@ -824,6 +918,18 @@ elif [[ "$mode" == "fix" ]]; then
   log "fix mode selected without --install-missing; remediation skipped"
 fi
 
+if [[ "$mode" == "fix" && "$install_missing" == "1" && "$exit_code" == "0" ]]; then
+  run_cargo_tauri_remediation || true
+
+  if [[ "$cargo_tauri_install_completed" == "1" ]]; then
+    collect_tool_report
+    collect_native_dependency_report
+    build_apt_packages
+    build_selected_remediation_packages
+    build_recommended_commands
+  fi
+fi
+
 status="unknown"
 if [[ "$exit_code" != "0" ]]; then
   status="error"
@@ -840,6 +946,9 @@ else
     status="missing"
   fi
 fi
+
+build_pass_fail_summary
+build_next_command_hints
 
 generated_at_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
@@ -872,8 +981,10 @@ native_dependency_report_json+=$'\n'"  }"
 missing_tools_json="$(json_array_from_values "${MISSING_TOOLS[@]}")"
 missing_native_dependencies_json="$(json_array_from_values "${MISSING_NATIVE_DEPS[@]}")"
 apt_packages_json="$(json_array_from_values "${APT_PACKAGES[@]}")"
+dnf_packages_json="$(json_array_from_values "${DNF_PACKAGES[@]}")"
 remediation_packages_json="$(json_array_from_values "${REMEDIATION_PACKAGES[@]}")"
 recommended_commands_json="$(json_array_from_values "${RECOMMENDED_COMMANDS[@]}")"
+next_commands_json="$(json_array_from_values "${NEXT_COMMAND_HINTS[@]}")"
 
 summary_json_payload=$(
   cat <<EOF
@@ -888,14 +999,26 @@ summary_json_payload=$(
   "install_attempted": $(json_bool "$install_attempted"),
   "install_completed": $(json_bool "$install_completed"),
   "install_skipped_reason": "$(json_escape "$install_skipped_reason")",
+  "cargo_tauri_install_attempted": $(json_bool "$cargo_tauri_install_attempted"),
+  "cargo_tauri_install_completed": $(json_bool "$cargo_tauri_install_completed"),
+  "cargo_tauri_install_skipped_reason": "$(json_escape "$cargo_tauri_install_skipped_reason")",
   "package_manager_selected": "$(json_escape "$package_manager_selected")",
   "error": "$(json_escape "$error_message")",
   "notes": "Linux desktop doctor is scaffold-only and non-production.",
+  "pass_fail_summary": {
+    "result": "$(json_escape "$PASS_FAIL_RESULT")",
+    "tool_pass_count": $TOOL_PASS_COUNT,
+    "tool_fail_count": $TOOL_FAIL_COUNT,
+    "native_pass_count": $NATIVE_PASS_COUNT,
+    "native_fail_count": $NATIVE_FAIL_COUNT
+  },
   "missing_tools": $missing_tools_json,
   "missing_native_dependencies": $missing_native_dependencies_json,
   "apt_packages": $apt_packages_json,
+  "dnf_packages": $dnf_packages_json,
   "remediation_packages": $remediation_packages_json,
   "recommended_commands": $recommended_commands_json,
+  "next_commands": $next_commands_json,
   "tool_report": $tool_report_json,
   "native_dependency_report": $native_dependency_report_json
 }
@@ -911,10 +1034,14 @@ if [[ "$print_summary_json" == "1" ]]; then
 fi
 
 log "status=$status"
+log "preflight pass/fail summary: result=$PASS_FAIL_RESULT tools_pass=$TOOL_PASS_COUNT tools_fail=$TOOL_FAIL_COUNT native_pass=$NATIVE_PASS_COUNT native_fail=$NATIVE_FAIL_COUNT"
 log "recommended remediation commands:"
 for cmd in "${RECOMMENDED_COMMANDS[@]}"; do
   echo "  - $cmd"
 done
-log "next step: run Linux desktop bootstrap/packaged flow after prerequisites are ready"
+log "next command hints:"
+for cmd in "${NEXT_COMMAND_HINTS[@]}"; do
+  echo "  - $cmd"
+done
 
 exit "$exit_code"

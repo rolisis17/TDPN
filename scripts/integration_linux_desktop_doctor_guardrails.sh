@@ -90,6 +90,26 @@ if ! grep -qF 'collect_native_dependency_report()' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing native dependency report marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'cargo-tauri' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing cargo-tauri prerequisite marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'cargo install tauri-cli --locked' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing cargo-tauri remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Required binary checks:' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing required binary checks help marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Debian/Ubuntu:' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing Debian/Ubuntu remediation help marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Fedora:' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing Fedora remediation help marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF '"package_manager_selected": "$(json_escape "$package_manager_selected")"' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing package_manager_selected summary marker in $SCRIPT_UNDER_TEST"
   exit 1
@@ -104,6 +124,18 @@ if ! grep -qF 'missing_native_dependencies' "$SCRIPT_UNDER_TEST"; then
 fi
 if ! grep -qF 'native_dependency_report' "$SCRIPT_UNDER_TEST"; then
   echo "linux desktop doctor guardrails failed: missing native_dependency_report summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF '"pass_fail_summary"' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing pass_fail_summary summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF '"next_commands"' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing next_commands summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF '"dnf_packages": $dnf_packages_json' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing dnf_packages summary marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
 if ! grep -qF 'pkg-config' "$SCRIPT_UNDER_TEST"; then
@@ -146,6 +178,14 @@ if ! grep -qF 'dry-run: no package-manager commands executed (preview only)' "$S
   echo "linux desktop doctor guardrails failed: missing dry-run safe no-execution marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'preflight pass/fail summary:' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing pass/fail runtime output marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'next command hints:' "$SCRIPT_UNDER_TEST"; then
+  echo "linux desktop doctor guardrails failed: missing next command hints runtime output marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -183,6 +223,32 @@ run_expect_fail_regex() {
   fi
 }
 
+echo "[linux-desktop-doctor-guardrails] help text includes required-binary + distro remediation hints"
+run_expect_pass \
+  "help_pass" \
+  "$SCRIPT_UNDER_TEST" \
+    --help
+if ! grep -Fq 'Required binary checks:' "$TMP_DIR/help_pass.log"; then
+  echo "linux desktop doctor guardrails failed: help output missing required binary checks section"
+  cat "$TMP_DIR/help_pass.log"
+  exit 1
+fi
+if ! grep -Fq 'Debian/Ubuntu:' "$TMP_DIR/help_pass.log"; then
+  echo "linux desktop doctor guardrails failed: help output missing Debian/Ubuntu remediation hint section"
+  cat "$TMP_DIR/help_pass.log"
+  exit 1
+fi
+if ! grep -Fq 'Fedora:' "$TMP_DIR/help_pass.log"; then
+  echo "linux desktop doctor guardrails failed: help output missing Fedora remediation hint section"
+  cat "$TMP_DIR/help_pass.log"
+  exit 1
+fi
+if ! grep -Fq 'cargo install tauri-cli --locked' "$TMP_DIR/help_pass.log"; then
+  echo "linux desktop doctor guardrails failed: help output missing cargo-tauri remediation hint command"
+  cat "$TMP_DIR/help_pass.log"
+  exit 1
+fi
+
 echo "[linux-desktop-doctor-guardrails] check dry-run passes"
 run_expect_pass \
   "check_dry_run_pass" \
@@ -206,6 +272,21 @@ if ! grep -Fq './scripts/linux/desktop_one_click.sh' "$TMP_DIR/check_dry_run_pas
 fi
 if ! grep -Eq '  - jq: ' "$TMP_DIR/check_dry_run_pass.log"; then
   echo "linux desktop doctor guardrails failed: missing jq tool report line in check dry-run log"
+  cat "$TMP_DIR/check_dry_run_pass.log"
+  exit 1
+fi
+if ! grep -Eq '  - cargo-tauri: ' "$TMP_DIR/check_dry_run_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing cargo-tauri tool report line in check dry-run log"
+  cat "$TMP_DIR/check_dry_run_pass.log"
+  exit 1
+fi
+if ! grep -Fq 'preflight pass/fail summary:' "$TMP_DIR/check_dry_run_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing pass/fail summary runtime output in check dry-run log"
+  cat "$TMP_DIR/check_dry_run_pass.log"
+  exit 1
+fi
+if ! grep -Fq 'next command hints:' "$TMP_DIR/check_dry_run_pass.log"; then
+  echo "linux desktop doctor guardrails failed: missing next command hints runtime output in check dry-run log"
   cat "$TMP_DIR/check_dry_run_pass.log"
   exit 1
 fi
@@ -332,6 +413,61 @@ if ! jq -e '.tool_report.jq.path | type == "string"' "$SUMMARY_JSON" >/dev/null 
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '.tool_report["cargo-tauri"] | type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing tool_report.cargo-tauri object"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.tool_report["cargo-tauri"].found | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing tool_report.cargo-tauri.found boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.tool_report["cargo-tauri"].path | type == "string"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing tool_report.cargo-tauri.path string"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.pass_fail_summary | type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing pass_fail_summary object"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.pass_fail_summary.result | type == "string" and (. == "PASS" or . == "FAIL")' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing pass_fail_summary.result"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.pass_fail_summary.tool_pass_count | type == "number"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing pass_fail_summary.tool_pass_count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.pass_fail_summary.tool_fail_count | type == "number"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing pass_fail_summary.tool_fail_count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.pass_fail_summary.native_pass_count | type == "number"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing pass_fail_summary.native_pass_count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.pass_fail_summary.native_fail_count | type == "number"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing pass_fail_summary.native_fail_count"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.next_commands | type == "array" and length >= 1' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing next_commands array"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.dnf_packages | type == "array"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "linux desktop doctor guardrails failed: summary json missing dnf_packages array"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if jq -e '.missing_tools | index("jq") != null' "$SUMMARY_JSON" >/dev/null 2>&1; then
   if ! jq -e '.apt_packages | index("jq") != null' "$SUMMARY_JSON" >/dev/null 2>&1; then
     echo "linux desktop doctor guardrails failed: jq missing but apt_packages does not include jq"
@@ -350,6 +486,13 @@ if jq -e '.missing_tools | index("jq") != null' "$SUMMARY_JSON" >/dev/null 2>&1;
       cat "$SUMMARY_JSON"
       exit 1
     fi
+  fi
+fi
+if jq -e '.missing_tools | index("cargo-tauri") != null' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  if ! jq -e '.recommended_commands | map(test("cargo install tauri-cli --locked")) | any' "$SUMMARY_JSON" >/dev/null 2>&1; then
+    echo "linux desktop doctor guardrails failed: cargo-tauri missing but recommended_commands does not include cargo install tauri-cli --locked"
+    cat "$SUMMARY_JSON"
+    exit 1
   fi
 fi
 
