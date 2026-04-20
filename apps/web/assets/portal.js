@@ -293,6 +293,69 @@ function nonEmptyString(value) {
   return trimmed || undefined;
 }
 
+function pushUniqueNonEmptyString(target, value) {
+  const parsed = nonEmptyString(value);
+  if (!parsed) {
+    return;
+  }
+  if (!target.includes(parsed)) {
+    target.push(parsed);
+  }
+}
+
+function appendBootstrapDirectoryEntries(target, value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      pushUniqueNonEmptyString(target, entry);
+    }
+    return;
+  }
+  pushUniqueNonEmptyString(target, value);
+}
+
+function extractBootstrapRegistrationMetadata(payload) {
+  const directBootstrapDirectory =
+    nonEmptyString(
+      firstDefined(
+        payload?.registration?.bootstrap_directory,
+        payload?.registration?.bootstrapDirectory,
+        payload?.session?.bootstrap_directory,
+        payload?.session?.bootstrapDirectory,
+        payload?.profile?.bootstrap_directory,
+        payload?.profile?.bootstrapDirectory,
+        payload?.bootstrap_directory,
+        payload?.bootstrapDirectory
+      )
+    ) || "";
+
+  const bootstrapDirectories = [];
+  for (const candidate of [
+    payload?.registration?.bootstrap_directories,
+    payload?.registration?.bootstrapDirectories,
+    payload?.session?.bootstrap_directories,
+    payload?.session?.bootstrapDirectories,
+    payload?.profile?.bootstrap_directories,
+    payload?.profile?.bootstrapDirectories,
+    payload?.bootstrap_directories,
+    payload?.bootstrapDirectories
+  ]) {
+    appendBootstrapDirectoryEntries(bootstrapDirectories, candidate);
+  }
+
+  const fallbackBootstrapDirectory =
+    directBootstrapDirectory || bootstrapDirectories.length === 0 ? "" : bootstrapDirectories[0];
+  const resolvedBootstrapDirectory = directBootstrapDirectory || fallbackBootstrapDirectory;
+
+  return {
+    directBootstrapDirectory,
+    bootstrapDirectories,
+    fallbackBootstrapDirectory,
+    resolvedBootstrapDirectory,
+    usesFallbackDirectory: fallbackBootstrapDirectory.length > 0,
+    hasBootstrapDirectory: resolvedBootstrapDirectory.length > 0
+  };
+}
+
 function numberOrUndefined(value) {
   const parsed = Number(value);
   if (Number.isFinite(parsed) && parsed >= 0) {
@@ -856,12 +919,57 @@ function withSessionReconciledHint(payload, hintSource = payload) {
   };
 }
 
+function formatBootstrapDirectoryFallbackHint(payload) {
+  const metadata = extractBootstrapRegistrationMetadata(payload);
+  if (!metadata.usesFallbackDirectory || !metadata.resolvedBootstrapDirectory) {
+    return undefined;
+  }
+  const count = metadata.bootstrapDirectories.length;
+  return {
+    bootstrapDirectory: metadata.resolvedBootstrapDirectory,
+    message: `Using bootstrap_directories[0] fallback (${count} candidate${count === 1 ? "" : "s"}).`
+  };
+}
+
+function withBootstrapDirectoryFallbackHint(payload, hintSource = payload) {
+  const hint = formatBootstrapDirectoryFallbackHint(hintSource);
+  if (!hint) {
+    return payload;
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    if (
+      Object.prototype.hasOwnProperty.call(payload, "bootstrap_directory_fallback") ||
+      Object.prototype.hasOwnProperty.call(payload, "bootstrap_directory_fallback_hint")
+    ) {
+      return payload;
+    }
+    return {
+      ...payload,
+      bootstrap_directory_fallback: hint.bootstrapDirectory,
+      bootstrap_directory_fallback_hint: hint.message
+    };
+  }
+  return {
+    result: payload,
+    bootstrap_directory_fallback: hint.bootstrapDirectory,
+    bootstrap_directory_fallback_hint: hint.message
+  };
+}
+
 function appendSessionReconciledDetail(detail, hintSource) {
   const hint = formatSessionReconciledHint(hintSource);
   if (!hint) {
     return detail;
   }
   return `${detail} session_reconciled=${hint}.`;
+}
+
+function appendBootstrapDirectoryFallbackDetail(detail, hintSource) {
+  const hint = formatBootstrapDirectoryFallbackHint(hintSource);
+  if (!hint) {
+    return detail;
+  }
+  return `${detail} bootstrap_directory fallback=${hint.bootstrapDirectory}.`;
 }
 
 function readOperatorEntryText(entry, candidates) {
@@ -1140,13 +1248,7 @@ function refreshOnboardingSteps() {
 }
 
 function syncSessionDerivedState(result) {
-  const session = result && result.session ? result.session : {};
-  const bootstrapDirectory = typeof session.bootstrap_directory === "string" ? session.bootstrap_directory.trim() : "";
-  const profileBootstrap =
-    result && result.profile && typeof result.profile.bootstrap_directory === "string"
-      ? result.profile.bootstrap_directory.trim()
-      : "";
-  clientRegistered = bootstrapDirectory.length > 0 || profileBootstrap.length > 0;
+  clientRegistered = extractBootstrapRegistrationMetadata(result).hasBootstrapDirectory;
 }
 
 function parseClientRegistrationStatus(payload) {
@@ -1459,7 +1561,8 @@ function setStatus(kind, title, detail) {
 }
 
 function print(label, payload) {
-  const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+  const displayPayload = withBootstrapDirectoryFallbackHint(payload, payload);
+  const text = typeof displayPayload === "string" ? displayPayload : JSON.stringify(displayPayload, null, 2);
   outputEl.textContent = `[${new Date().toISOString()}] ${label}\n${text}`;
 }
 
@@ -2236,10 +2339,13 @@ async function run(label, fn, options = {}) {
   setStatus("warn", `${label} in progress`, "Please wait while the portal completes the request.");
   try {
     const result = await fn();
-    const outputPayload = withSessionReconciledHint(outputMapper ? outputMapper(result) : result, result);
+    const outputPayload = withBootstrapDirectoryFallbackHint(
+      withSessionReconciledHint(outputMapper ? outputMapper(result) : result, result),
+      result
+    );
     print(label, outputPayload);
-    const detail = appendSessionReconciledDetail(
-      successDetail ? successDetail(result) : "The request finished successfully.",
+    const detail = appendBootstrapDirectoryFallbackDetail(
+      appendSessionReconciledDetail(successDetail ? successDetail(result) : "The request finished successfully.", result),
       result
     );
     setStatus(successKind ? successKind(result) : "good", `${label} completed`, detail);

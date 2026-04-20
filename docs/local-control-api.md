@@ -77,8 +77,8 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - strict metadata policy: set `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`) to require `signature_kind`, `signature_source`, and `signed_message`; default is `false` for compatibility, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when required metadata is missing.
 - strict wallet-extension-source policy: set `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`) to require explicit `signature_source=wallet_extension`; default is `false` for compatibility, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when the source requirement is not met.
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
-- `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile` that is used as authoritative connect policy for session-token connects)
-- `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, `bootstrap_directory`, and persisted `path_profile` when available)
+- `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile`, trusted `bootstrap_directories` from the signed manifest, and preferred `bootstrap_directory`; used as authoritative connect policy for session-token connects)
+- `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, preferred `bootstrap_directory`, trusted `bootstrap_directories`, and persisted `path_profile` when available)
 - `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and strict chain-binding checks)
 - `POST /v1/gpm/onboarding/overview` (consolidated onboarding contract for a `session_token`, returning `session + registration + readiness` in one response)
 - `POST /v1/gpm/onboarding/operator/apply`
@@ -179,6 +179,7 @@ Body:
 
 ```json
 {
+  "session_token": "optional-session-token",
   "bootstrap_directory": "https://HOST:8081",
   "invite_key": "inv-...",
   "path_profile": "1hop|2hop|3hop",
@@ -199,12 +200,13 @@ Notes:
 - UI compatibility controls for manual `bootstrap_directory`/`invite_key` overrides are policy-gated by `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE`); default is hidden/disabled.
 - when hardening mode is not enabled (default), legacy `bootstrap_directory` + `invite_key` behavior remains available.
 - when connect resolves credentials from a registered `session_token`, the session-bound `path_profile` from client registration is authoritative.
+- when connect resolves from a registered `session_token` and no manual `bootstrap_directory` override is provided, the daemon tries trusted `bootstrap_directories` in order (preferred first) with failover across candidates.
 - conflicting request `path_profile`/`policy_profile` values are rejected fail-closed (request is not executed) with conflict semantics in the error message.
 
 Behavior:
 - runs optional `client-vpn-preflight`
 - then runs `client-vpn-up` (background)
-- returns status payload
+- returns status payload and selected `bootstrap_directory`
 
 ### `POST /v1/disconnect`
 - Runs `client-vpn-down --force-iface-cleanup 1`.
@@ -296,7 +298,7 @@ Resolution and errors:
 
 Success payload:
 - `ok`: `true`
-- `session`: same session shape returned by `POST /v1/gpm/session` (`wallet_address`, `wallet_provider`, `role`, `created_at_utc`, `expires_at_utc`, `bootstrap_directory`, optional `path_profile`, optional `chain_operator_id`)
+- `session`: same session shape returned by `POST /v1/gpm/session` (`wallet_address`, `wallet_provider`, `role`, `created_at_utc`, `expires_at_utc`, preferred `bootstrap_directory`, trusted `bootstrap_directories`, optional `path_profile`, optional `chain_operator_id`)
 - `registration`: same registration shape as `POST /v1/gpm/onboarding/client/status`
 - `readiness`: same readiness shape as `POST /v1/gpm/onboarding/server/status`
 - `readiness` therefore includes additive chain-binding readiness keys: `chain_binding_status`, `chain_binding_ok`, `chain_binding_reason`

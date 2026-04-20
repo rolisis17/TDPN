@@ -209,6 +209,69 @@ function nonEmptyStringOrUndefined(value) {
   return normalized || undefined;
 }
 
+function pushUniqueNonEmptyString(target, value) {
+  const parsed = nonEmptyStringOrUndefined(value);
+  if (!parsed) {
+    return;
+  }
+  if (!target.includes(parsed)) {
+    target.push(parsed);
+  }
+}
+
+function appendBootstrapDirectoryEntries(target, value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      pushUniqueNonEmptyString(target, entry);
+    }
+    return;
+  }
+  pushUniqueNonEmptyString(target, value);
+}
+
+function extractBootstrapRegistrationMetadata(payload) {
+  const directBootstrapDirectory =
+    nonEmptyStringOrUndefined(
+      firstDefined(
+        payload?.registration?.bootstrap_directory,
+        payload?.registration?.bootstrapDirectory,
+        payload?.session?.bootstrap_directory,
+        payload?.session?.bootstrapDirectory,
+        payload?.profile?.bootstrap_directory,
+        payload?.profile?.bootstrapDirectory,
+        payload?.bootstrap_directory,
+        payload?.bootstrapDirectory
+      )
+    ) || "";
+
+  const bootstrapDirectories = [];
+  for (const candidate of [
+    payload?.registration?.bootstrap_directories,
+    payload?.registration?.bootstrapDirectories,
+    payload?.session?.bootstrap_directories,
+    payload?.session?.bootstrapDirectories,
+    payload?.profile?.bootstrap_directories,
+    payload?.profile?.bootstrapDirectories,
+    payload?.bootstrap_directories,
+    payload?.bootstrapDirectories
+  ]) {
+    appendBootstrapDirectoryEntries(bootstrapDirectories, candidate);
+  }
+
+  const fallbackBootstrapDirectory =
+    directBootstrapDirectory || bootstrapDirectories.length === 0 ? "" : bootstrapDirectories[0];
+  const resolvedBootstrapDirectory = directBootstrapDirectory || fallbackBootstrapDirectory;
+
+  return {
+    directBootstrapDirectory,
+    bootstrapDirectories,
+    fallbackBootstrapDirectory,
+    resolvedBootstrapDirectory,
+    usesFallbackDirectory: fallbackBootstrapDirectory.length > 0,
+    hasBootstrapDirectory: resolvedBootstrapDirectory.length > 0
+  };
+}
+
 function parseJSONOrRawString(value) {
   const normalized = nonEmptyStringOrUndefined(value);
   if (!normalized) {
@@ -432,6 +495,43 @@ function withSessionReconciledHint(payload, hintSource = payload) {
   return {
     result: payload,
     session_reconciled_hint: hint
+  };
+}
+
+function formatBootstrapDirectoryFallbackHint(payload) {
+  const metadata = extractBootstrapRegistrationMetadata(payload);
+  if (!metadata.usesFallbackDirectory || !metadata.resolvedBootstrapDirectory) {
+    return undefined;
+  }
+  const count = metadata.bootstrapDirectories.length;
+  return {
+    bootstrapDirectory: metadata.resolvedBootstrapDirectory,
+    message: `Using bootstrap_directories[0] fallback (${count} candidate${count === 1 ? "" : "s"}).`
+  };
+}
+
+function withBootstrapDirectoryFallbackHint(payload, hintSource = payload) {
+  const hint = formatBootstrapDirectoryFallbackHint(hintSource);
+  if (!hint) {
+    return payload;
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    if (
+      Object.prototype.hasOwnProperty.call(payload, "bootstrap_directory_fallback") ||
+      Object.prototype.hasOwnProperty.call(payload, "bootstrap_directory_fallback_hint")
+    ) {
+      return payload;
+    }
+    return {
+      ...payload,
+      bootstrap_directory_fallback: hint.bootstrapDirectory,
+      bootstrap_directory_fallback_hint: hint.message
+    };
+  }
+  return {
+    result: payload,
+    bootstrap_directory_fallback: hint.bootstrapDirectory,
+    bootstrap_directory_fallback_hint: hint.message
   };
 }
 
@@ -1240,11 +1340,7 @@ function setDesktopStepState(el, value) {
 }
 
 function inferClientRegistrationFromPayload(payload) {
-  const sessionBootstrap = payload?.session?.bootstrap_directory;
-  const profileBootstrap = payload?.profile?.bootstrap_directory;
-  const sessionValue = typeof sessionBootstrap === "string" ? sessionBootstrap.trim() : "";
-  const profileValue = typeof profileBootstrap === "string" ? profileBootstrap.trim() : "";
-  return sessionValue.length > 0 || profileValue.length > 0;
+  return extractBootstrapRegistrationMetadata(payload).hasBootstrapDirectory;
 }
 
 function parseClientRegistrationStatus(payload) {
@@ -1685,7 +1781,10 @@ async function call(label, command, args = {}, options = {}) {
       typeof formatResultForDisplay === "function"
         ? formatResultForDisplay(result)
         : result;
-    print(label, withSessionReconciledHint(payloadForDisplay, result));
+    print(
+      label,
+      withBootstrapDirectoryFallbackHint(withSessionReconciledHint(payloadForDisplay, result), result)
+    );
     return result;
   } catch (err) {
     print(`${label} (error)`, err);

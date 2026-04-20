@@ -488,11 +488,12 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		in.PathProfile = strings.TrimSpace(in.PolicyProfile)
 	}
 	sessionPathProfile := ""
+	sessionBootstrapDirectories := []string{}
 	if in.SessionToken != "" {
-		sessionBootstrap, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(in.SessionToken)
+		resolvedBootstrapDirectories, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(in.SessionToken)
 		if resolveErr == nil {
 			if in.BootstrapDirectory == "" {
-				in.BootstrapDirectory = sessionBootstrap
+				sessionBootstrapDirectories = append(sessionBootstrapDirectories, resolvedBootstrapDirectories...)
 			}
 			if in.InviteKey == "" {
 				in.InviteKey = sessionInvite
@@ -500,7 +501,13 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			sessionPathProfile = normalizeOptionalPathProfile(resolvedSessionPathProfile)
 		}
 	}
-	if in.BootstrapDirectory == "" || in.InviteKey == "" {
+	bootstrapDirectories := []string{}
+	if in.BootstrapDirectory != "" {
+		bootstrapDirectories = append(bootstrapDirectories, in.BootstrapDirectory)
+	} else {
+		bootstrapDirectories = append(bootstrapDirectories, sessionBootstrapDirectories...)
+	}
+	if len(bootstrapDirectories) == 0 || in.InviteKey == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
 			"error": "connect requires either bootstrap_directory+invite_key or a registered session_token",
@@ -519,12 +526,14 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		}
 		in.PathProfile = sessionPathProfile
 	}
-	if err := validateBootstrapDirectoryURL(in.BootstrapDirectory); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"ok":    false,
-			"error": err.Error(),
-		})
-		return
+	for _, bootstrapDirectory := range bootstrapDirectories {
+		if err := validateBootstrapDirectoryURL(bootstrapDirectory); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
+			return
+		}
 	}
 	if err := validateInviteKey(in.InviteKey); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -544,112 +553,147 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	policy := deriveConnectPolicy(options)
 
-	if options.runPreflight {
-		preflightArgs := []string{
-			"client-vpn-preflight",
-			"--bootstrap-directory", in.BootstrapDirectory,
+	inviteKeyPath := ""
+	var cleanupInviteKey func()
+	defer func() {
+		if cleanupInviteKey != nil {
+			cleanupInviteKey()
+		}
+	}()
+
+	lastFailureStage := ""
+	lastFailureBootstrapDirectory := ""
+	lastFailureRC := 0
+	lastFailureOutput := ""
+
+	for _, bootstrapDirectory := range bootstrapDirectories {
+		if options.runPreflight {
+			preflightArgs := []string{
+				"client-vpn-preflight",
+				"--bootstrap-directory", bootstrapDirectory,
+				"--discovery-wait-sec", strconv.Itoa(options.discoveryWaitSec),
+				"--prod-profile", strconv.Itoa(policy.prodFlag),
+				"--interface", options.interfaceName,
+				"--operator-floor-check", strconv.Itoa(policy.operatorFloorCheck),
+				"--operator-min-operators", strconv.Itoa(policy.operatorMin),
+				"--issuer-quorum-check", strconv.Itoa(policy.issuerQuorumCheck),
+				"--issuer-min-operators", strconv.Itoa(policy.issuerMin),
+			}
+			preflightOut, preflightRC, preflightErr := s.runEasyNode(r.Context(), preflightArgs...)
+			if preflightErr != nil {
+				if errors.Is(preflightErr, errCommandConcurrencySaturated) {
+					writeJSON(w, http.StatusTooManyRequests, map[string]any{
+						"ok":     false,
+						"stage":  "preflight",
+						"error":  s.commandConcurrencyError(),
+						"rc":     preflightRC,
+						"output": preflightOut,
+					})
+					return
+				}
+				lastFailureStage = "preflight"
+				lastFailureBootstrapDirectory = bootstrapDirectory
+				lastFailureRC = preflightRC
+				lastFailureOutput = preflightOut
+				continue
+			}
+		}
+
+		if inviteKeyPath == "" {
+			path, cleanup, stageErr := writeSecretTempFile("tdpn-localapi-invite-", in.InviteKey)
+			if stageErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{
+					"ok":    false,
+					"stage": "connect",
+					"error": "failed to stage invite key",
+				})
+				return
+			}
+			inviteKeyPath = path
+			cleanupInviteKey = cleanup
+		}
+
+		upArgs := []string{
+			"client-vpn-up",
+			"--bootstrap-directory", bootstrapDirectory,
 			"--discovery-wait-sec", strconv.Itoa(options.discoveryWaitSec),
-			"--prod-profile", strconv.Itoa(policy.prodFlag),
-			"--interface", options.interfaceName,
+			"--subject-file", inviteKeyPath,
+			"--min-sources", "1",
+			"--min-operators", strconv.Itoa(policy.minOperators),
+			"--path-profile", options.profile,
+			"--session-reuse", "1",
+			"--allow-session-churn", "0",
 			"--operator-floor-check", strconv.Itoa(policy.operatorFloorCheck),
 			"--operator-min-operators", strconv.Itoa(policy.operatorMin),
 			"--issuer-quorum-check", strconv.Itoa(policy.issuerQuorumCheck),
 			"--issuer-min-operators", strconv.Itoa(policy.issuerMin),
+			"--beta-profile", strconv.Itoa(policy.betaProfile),
+			"--prod-profile", strconv.Itoa(policy.prodFlag),
+			"--interface", options.interfaceName,
+			"--ready-timeout-sec", strconv.Itoa(options.readyTimeoutSec),
+			"--install-route", boolTo01(policy.installRoute),
+			"--force-restart", "1",
+			"--foreground", "0",
 		}
-		preflightOut, preflightRC, preflightErr := s.runEasyNode(r.Context(), preflightArgs...)
-		if preflightErr != nil {
-			if errors.Is(preflightErr, errCommandConcurrencySaturated) {
+		upOut, upRC, upErr := s.runEasyNode(r.Context(), upArgs...)
+		if upErr != nil {
+			if errors.Is(upErr, errCommandConcurrencySaturated) {
 				writeJSON(w, http.StatusTooManyRequests, map[string]any{
 					"ok":     false,
-					"stage":  "preflight",
+					"stage":  "connect",
 					"error":  s.commandConcurrencyError(),
-					"rc":     preflightRC,
-					"output": preflightOut,
+					"rc":     upRC,
+					"output": upOut,
 				})
 				return
 			}
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"ok":     false,
-				"stage":  "preflight",
-				"rc":     preflightRC,
-				"output": preflightOut,
-			})
-			return
+			lastFailureStage = "connect"
+			lastFailureBootstrapDirectory = bootstrapDirectory
+			lastFailureRC = upRC
+			lastFailureOutput = upOut
+			continue
 		}
-	}
 
-	inviteKeyPath, cleanupInviteKey, err := writeSecretTempFile("tdpn-localapi-invite-", in.InviteKey)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"ok":    false,
-			"stage": "connect",
-			"error": "failed to stage invite key",
-		})
-		return
-	}
-	defer cleanupInviteKey()
-
-	upArgs := []string{
-		"client-vpn-up",
-		"--bootstrap-directory", in.BootstrapDirectory,
-		"--discovery-wait-sec", strconv.Itoa(options.discoveryWaitSec),
-		"--subject-file", inviteKeyPath,
-		"--min-sources", "1",
-		"--min-operators", strconv.Itoa(policy.minOperators),
-		"--path-profile", options.profile,
-		"--session-reuse", "1",
-		"--allow-session-churn", "0",
-		"--operator-floor-check", strconv.Itoa(policy.operatorFloorCheck),
-		"--operator-min-operators", strconv.Itoa(policy.operatorMin),
-		"--issuer-quorum-check", strconv.Itoa(policy.issuerQuorumCheck),
-		"--issuer-min-operators", strconv.Itoa(policy.issuerMin),
-		"--beta-profile", strconv.Itoa(policy.betaProfile),
-		"--prod-profile", strconv.Itoa(policy.prodFlag),
-		"--interface", options.interfaceName,
-		"--ready-timeout-sec", strconv.Itoa(options.readyTimeoutSec),
-		"--install-route", boolTo01(policy.installRoute),
-		"--force-restart", "1",
-		"--foreground", "0",
-	}
-	upOut, upRC, upErr := s.runEasyNode(r.Context(), upArgs...)
-	if upErr != nil {
-		if errors.Is(upErr, errCommandConcurrencySaturated) {
+		statusOut, _, statusErr := s.runEasyNode(r.Context(), "client-vpn-status", "--show-json", "1")
+		if errors.Is(statusErr, errCommandConcurrencySaturated) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{
-				"ok":     false,
-				"stage":  "connect",
-				"error":  s.commandConcurrencyError(),
-				"rc":     upRC,
-				"output": upOut,
+				"ok":    false,
+				"stage": "status",
+				"error": s.commandConcurrencyError(),
 			})
 			return
 		}
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"ok":     false,
-			"stage":  "connect",
-			"rc":     upRC,
-			"output": upOut,
+		var statusPayload any
+		if json.Unmarshal([]byte(statusOut), &statusPayload) != nil {
+			statusPayload = map[string]any{"raw": statusOut}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":                  true,
+			"stage":               "connect",
+			"output":              upOut,
+			"status":              statusPayload,
+			"profile":             options.profile,
+			"bootstrap_directory": bootstrapDirectory,
 		})
 		return
 	}
-	statusOut, _, statusErr := s.runEasyNode(r.Context(), "client-vpn-status", "--show-json", "1")
-	if errors.Is(statusErr, errCommandConcurrencySaturated) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{
-			"ok":    false,
-			"stage": "status",
-			"error": s.commandConcurrencyError(),
+
+	if lastFailureStage == "preflight" {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok":                  false,
+			"stage":               "preflight",
+			"rc":                  lastFailureRC,
+			"output":              lastFailureOutput,
+			"bootstrap_directory": lastFailureBootstrapDirectory,
 		})
 		return
 	}
-	var statusPayload any
-	if json.Unmarshal([]byte(statusOut), &statusPayload) != nil {
-		statusPayload = map[string]any{"raw": statusOut}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"stage":   "connect",
-		"output":  upOut,
-		"status":  statusPayload,
-		"profile": options.profile,
+	writeJSON(w, http.StatusBadGateway, map[string]any{
+		"ok":                  false,
+		"stage":               "connect",
+		"rc":                  lastFailureRC,
+		"output":              lastFailureOutput,
+		"bootstrap_directory": lastFailureBootstrapDirectory,
 	})
 }
 

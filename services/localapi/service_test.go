@@ -60,6 +60,26 @@ fi
 
 case "$cmd" in
   client-vpn-preflight)
+    bootstrap_directory=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --bootstrap-directory)
+          bootstrap_directory="${2:-}"
+          if [[ $# -gt 1 ]]; then
+            shift 2
+          else
+            shift
+          fi
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    if [[ -n "${LOCALAPI_TEST_PREFLIGHT_FAIL_BOOTSTRAP:-}" && "$bootstrap_directory" == "${LOCALAPI_TEST_PREFLIGHT_FAIL_BOOTSTRAP}" ]]; then
+      echo "preflight failed"
+      exit 42
+    fi
     if [[ "${LOCALAPI_TEST_PREFLIGHT_FAIL:-0}" == "1" ]]; then
       echo "preflight failed"
       exit 42
@@ -68,9 +88,18 @@ case "$cmd" in
     ;;
   client-vpn-up)
     subject_file=""
+    bootstrap_directory=""
     saw_inline_subject="0"
     while [[ $# -gt 0 ]]; do
       case "$1" in
+        --bootstrap-directory)
+          bootstrap_directory="${2:-}"
+          if [[ $# -gt 1 ]]; then
+            shift 2
+          else
+            shift
+          fi
+          ;;
         --subject)
           saw_inline_subject="1"
           if [[ $# -gt 1 ]]; then
@@ -108,6 +137,10 @@ case "$cmd" in
     if [[ "$subject_value" == *$'\n'* || "$subject_value" == *$'\r'* ]]; then
       echo "invalid subject value"
       exit 49
+    fi
+    if [[ -n "${LOCALAPI_TEST_UP_FAIL_BOOTSTRAP:-}" && "$bootstrap_directory" == "${LOCALAPI_TEST_UP_FAIL_BOOTSTRAP}" ]]; then
+      echo "connect failed"
+      exit 43
     fi
     if [[ "${LOCALAPI_TEST_UP_FAIL:-0}" == "1" ]]; then
       echo "connect failed"
@@ -1231,6 +1264,48 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		}
 		mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir.example:8081")
 		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
+	})
+
+	t.Run("session bootstrap directories fail over from first to second", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		firstBootstrap := "https://dir-first.example:8081"
+		secondBootstrap := "https://dir-second.example:8081"
+		svc.gpmState.putSession(gpmSession{
+			Token:                "gpm-connect-session-failover-token",
+			WalletAddress:        "cosmos1connectfailover",
+			WalletProvider:       "keplr",
+			Role:                 "client",
+			CreatedAt:            time.Now().UTC(),
+			ExpiresAt:            time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:   firstBootstrap,
+			BootstrapDirectories: []string{firstBootstrap, secondBootstrap},
+			InviteKey:            "wallet:cosmos1connectfailover",
+		})
+		t.Setenv("LOCALAPI_TEST_UP_FAIL_BOOTSTRAP", firstBootstrap)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-session-failover-token"
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["bootstrap_directory"].(string); got != secondBootstrap {
+			t.Fatalf("bootstrap_directory=%q want=%q payload=%v", got, secondBootstrap, payload)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 5 {
+			t.Fatalf("commands=%d want=5 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-preflight" || cmds[1][0] != "client-vpn-up" || cmds[2][0] != "client-vpn-preflight" || cmds[3][0] != "client-vpn-up" || cmds[4][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", firstBootstrap)
+		mustFlagValue(t, cmds[1], "--bootstrap-directory", firstBootstrap)
+		mustFlagValue(t, cmds[2], "--bootstrap-directory", secondBootstrap)
+		mustFlagValue(t, cmds[3], "--bootstrap-directory", secondBootstrap)
 	})
 }
 
@@ -4021,14 +4096,15 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
 	svc.gpmManifestMaxAge = 24 * time.Hour
 
-	bootstrapDirectory := "https://directory.globalprivatemesh.example:8081"
+	primaryBootstrapDirectory := "https://directory-primary.globalprivatemesh.example:8081"
+	secondaryBootstrapDirectory := "https://directory-secondary.globalprivatemesh.example:8081"
 	now := time.Now().UTC()
 	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"version":               1,
 			"generated_at_utc":      now.Format(time.RFC3339),
 			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
-			"bootstrap_directories": []string{bootstrapDirectory},
+			"bootstrap_directories": []string{primaryBootstrapDirectory, secondaryBootstrapDirectory},
 		})
 	}))
 	t.Cleanup(manifestServer.Close)
@@ -4045,7 +4121,7 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 		ExpiresAt:      now.Add(time.Hour),
 	})
 
-	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
+	registerBody := `{"session_token":"` + token + `","bootstrap_directory":"` + secondaryBootstrapDirectory + `","path_profile":"3hop"}`
 	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
 	if code != http.StatusOK {
 		t.Fatalf("register status=%d body=%v", code, payload)
@@ -4053,8 +4129,8 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 
 	profile, _ := payload["profile"].(map[string]any)
 	gotBootstrap, _ := profile["bootstrap_directory"].(string)
-	if gotBootstrap != bootstrapDirectory {
-		t.Fatalf("profile bootstrap_directory=%q want=%q", gotBootstrap, bootstrapDirectory)
+	if gotBootstrap != secondaryBootstrapDirectory {
+		t.Fatalf("profile bootstrap_directory=%q want=%q", gotBootstrap, secondaryBootstrapDirectory)
 	}
 	gotProfile, _ := profile["path_profile"].(string)
 	if gotProfile != "3hop" {
@@ -4065,8 +4141,14 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 	if !ok {
 		t.Fatal("expected session to persist after registration")
 	}
-	if session.BootstrapDirectory != bootstrapDirectory {
-		t.Fatalf("session bootstrap_directory=%q want=%q", session.BootstrapDirectory, bootstrapDirectory)
+	if session.BootstrapDirectory != secondaryBootstrapDirectory {
+		t.Fatalf("session bootstrap_directory=%q want=%q", session.BootstrapDirectory, secondaryBootstrapDirectory)
+	}
+	if len(session.BootstrapDirectories) != 2 {
+		t.Fatalf("session bootstrap_directories=%v want two directories", session.BootstrapDirectories)
+	}
+	if session.BootstrapDirectories[0] != primaryBootstrapDirectory || session.BootstrapDirectories[1] != secondaryBootstrapDirectory {
+		t.Fatalf("session bootstrap_directories=%v want=%v", session.BootstrapDirectories, []string{primaryBootstrapDirectory, secondaryBootstrapDirectory})
 	}
 	if !strings.HasPrefix(session.InviteKey, "wallet:") {
 		t.Fatalf("session invite_key=%q want wallet:* fallback", session.InviteKey)
@@ -5850,8 +5932,12 @@ func TestGPMStateStorePersistAndLoadRoundTrip(t *testing.T) {
 		CreatedAt:          now,
 		ExpiresAt:          expiresAt,
 		BootstrapDirectory: "https://directory.gpm.example:8081",
-		InviteKey:          "wallet:cosmos1persist",
-		ChainOperatorID:    "operator-persist-1",
+		BootstrapDirectories: []string{
+			"https://directory.gpm.example:8081",
+			"https://directory-backup.gpm.example:8081",
+		},
+		InviteKey:       "wallet:cosmos1persist",
+		ChainOperatorID: "operator-persist-1",
 	})
 	svc.gpmState.upsertOperator(gpmOperatorApplication{
 		WalletAddress:   "cosmos1persist",
@@ -5877,6 +5963,12 @@ func TestGPMStateStorePersistAndLoadRoundTrip(t *testing.T) {
 	}
 	if session.ChainOperatorID != "operator-persist-1" {
 		t.Fatalf("loaded chain_operator_id=%q want=operator-persist-1", session.ChainOperatorID)
+	}
+	if len(session.BootstrapDirectories) != 2 {
+		t.Fatalf("loaded bootstrap_directories=%v want two directories", session.BootstrapDirectories)
+	}
+	if session.BootstrapDirectories[0] != "https://directory.gpm.example:8081" || session.BootstrapDirectories[1] != "https://directory-backup.gpm.example:8081" {
+		t.Fatalf("loaded bootstrap_directories=%v", session.BootstrapDirectories)
 	}
 
 	operator, ok := loaded.gpmState.getOperator("cosmos1persist")

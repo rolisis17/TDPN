@@ -53,16 +53,17 @@ type gpmWalletChallenge struct {
 }
 
 type gpmSession struct {
-	Token              string    `json:"token"`
-	WalletAddress      string    `json:"wallet_address"`
-	WalletProvider     string    `json:"wallet_provider"`
-	Role               string    `json:"role"`
-	CreatedAt          time.Time `json:"created_at"`
-	ExpiresAt          time.Time `json:"expires_at"`
-	BootstrapDirectory string    `json:"bootstrap_directory,omitempty"`
-	InviteKey          string    `json:"invite_key,omitempty"`
-	PathProfile        string    `json:"path_profile,omitempty"`
-	ChainOperatorID    string    `json:"chain_operator_id,omitempty"`
+	Token                string    `json:"token"`
+	WalletAddress        string    `json:"wallet_address"`
+	WalletProvider       string    `json:"wallet_provider"`
+	Role                 string    `json:"role"`
+	CreatedAt            time.Time `json:"created_at"`
+	ExpiresAt            time.Time `json:"expires_at"`
+	BootstrapDirectory   string    `json:"bootstrap_directory,omitempty"`
+	BootstrapDirectories []string  `json:"bootstrap_directories,omitempty"`
+	InviteKey            string    `json:"invite_key,omitempty"`
+	PathProfile          string    `json:"path_profile,omitempty"`
+	ChainOperatorID      string    `json:"chain_operator_id,omitempty"`
 }
 
 type gpmOperatorApplication struct {
@@ -430,19 +431,20 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 	return true
 }
 
-func (s *Service) resolveConnectSecretsFromSession(sessionToken string) (string, string, string, error) {
+func (s *Service) resolveConnectSecretsFromSession(sessionToken string) ([]string, string, string, error) {
 	sessionToken = strings.TrimSpace(sessionToken)
 	if sessionToken == "" {
-		return "", "", "", errors.New("session token is empty")
+		return nil, "", "", errors.New("session token is empty")
 	}
 	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
 	if !ok {
-		return "", "", "", errors.New("session token is missing or expired")
+		return nil, "", "", errors.New("session token is missing or expired")
 	}
-	if strings.TrimSpace(session.BootstrapDirectory) == "" || strings.TrimSpace(session.InviteKey) == "" {
-		return "", "", "", errors.New("session is not fully registered for connect")
+	bootstrapDirectories := sessionConnectBootstrapDirectories(session)
+	if len(bootstrapDirectories) == 0 || strings.TrimSpace(session.InviteKey) == "" {
+		return nil, "", "", errors.New("session is not fully registered for connect")
 	}
-	return session.BootstrapDirectory, session.InviteKey, strings.TrimSpace(session.PathProfile), nil
+	return bootstrapDirectories, session.InviteKey, strings.TrimSpace(session.PathProfile), nil
 }
 
 func (s *Service) handleGPMBootstrapManifest(w http.ResponseWriter, r *http.Request) {
@@ -864,6 +866,7 @@ func (s *Service) handleGPMClientRegister(w http.ResponseWriter, r *http.Request
 	}
 	pathProfile := normalizeGPMPathProfile(in.PathProfile)
 	session.BootstrapDirectory = bootstrapDirectory
+	session.BootstrapDirectories = normalizeBootstrapDirectories(manifest.BootstrapDirectories)
 	session.InviteKey = inviteKey
 	session.PathProfile = pathProfile
 	s.gpmState.putSession(session)
@@ -1005,9 +1008,10 @@ func buildGPMClientRegistration(session gpmSession) map[string]any {
 		status = "registered"
 	}
 	registration := map[string]any{
-		"wallet_address":      session.WalletAddress,
-		"status":              status,
-		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
+		"wallet_address":        session.WalletAddress,
+		"status":                status,
+		"bootstrap_directory":   strings.TrimSpace(session.BootstrapDirectory),
+		"bootstrap_directories": sessionTrustedBootstrapDirectories(session),
 	}
 	if profile := strings.TrimSpace(session.PathProfile); profile != "" {
 		registration["path_profile"] = profile
@@ -1640,14 +1644,15 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 
 func serializeGPMSession(session gpmSession) map[string]any {
 	return map[string]any{
-		"wallet_address":      session.WalletAddress,
-		"wallet_provider":     session.WalletProvider,
-		"role":                session.Role,
-		"created_at_utc":      session.CreatedAt.Format(time.RFC3339),
-		"expires_at_utc":      session.ExpiresAt.Format(time.RFC3339),
-		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
-		"path_profile":        strings.TrimSpace(session.PathProfile),
-		"chain_operator_id":   strings.TrimSpace(session.ChainOperatorID),
+		"wallet_address":        session.WalletAddress,
+		"wallet_provider":       session.WalletProvider,
+		"role":                  session.Role,
+		"created_at_utc":        session.CreatedAt.Format(time.RFC3339),
+		"expires_at_utc":        session.ExpiresAt.Format(time.RFC3339),
+		"bootstrap_directory":   strings.TrimSpace(session.BootstrapDirectory),
+		"bootstrap_directories": sessionTrustedBootstrapDirectories(session),
+		"path_profile":          strings.TrimSpace(session.PathProfile),
+		"chain_operator_id":     strings.TrimSpace(session.ChainOperatorID),
 	}
 }
 
@@ -2095,16 +2100,58 @@ func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
 }
 
 func normalizeBootstrapManifest(manifest gpmBootstrapManifest) gpmBootstrapManifest {
-	normalized := make([]string, 0, len(manifest.BootstrapDirectories))
-	for _, dir := range manifest.BootstrapDirectories {
+	manifest.BootstrapDirectories = normalizeBootstrapDirectories(manifest.BootstrapDirectories)
+	return manifest
+}
+
+func normalizeBootstrapDirectories(directories []string) []string {
+	normalized := make([]string, 0, len(directories))
+	seen := map[string]struct{}{}
+	for _, dir := range directories {
 		trimmed := strings.TrimSpace(dir)
 		if trimmed == "" {
 			continue
 		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
 		normalized = append(normalized, trimmed)
 	}
-	manifest.BootstrapDirectories = normalized
-	return manifest
+	return normalized
+}
+
+func sessionTrustedBootstrapDirectories(session gpmSession) []string {
+	directories := normalizeBootstrapDirectories(session.BootstrapDirectories)
+	if len(directories) == 0 {
+		if preferred := strings.TrimSpace(session.BootstrapDirectory); preferred != "" {
+			return []string{preferred}
+		}
+	}
+	return directories
+}
+
+func sessionConnectBootstrapDirectories(session gpmSession) []string {
+	preferred := strings.TrimSpace(session.BootstrapDirectory)
+	trusted := sessionTrustedBootstrapDirectories(session)
+	ordered := make([]string, 0, len(trusted)+1)
+	appendIfMissing := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		for _, existing := range ordered {
+			if existing == candidate {
+				return
+			}
+		}
+		ordered = append(ordered, candidate)
+	}
+	appendIfMissing(preferred)
+	for _, directory := range trusted {
+		appendIfMissing(directory)
+	}
+	return ordered
 }
 
 func computeManifestHMAC(body []byte, secret string) string {
