@@ -71,6 +71,7 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
   - `signature_source must be wallet_extension by policy` or `unsupported signature_source` -> retry with wallet-extension one-click (`Keplr`/`Leap`) or relax strict source policy for manual testing.
   - `signed_message does not match issued challenge message` -> request a fresh challenge and re-sign the returned message without edits.
 - Operator approval (`POST /v1/gpm/onboarding/operator/approve`) now expects an admin session token (`session_token`) by default; legacy `admin_token` fallback remains supported when `GPM_APPROVAL_ADMIN_TOKEN` is configured.
+- Desktop now surfaces strict operator-approval runtime policy hints from `control_runtime_config` (`gpm_operator_approval_require_session`, `gpm_operator_approval_require_session_policy_source`) and enforces session-token moderation flow for approve/reject actions in the desktop UX.
 - Operator queue listing is available via `POST /v1/gpm/onboarding/operator/list`; desktop provides a “List Pending Operators” action that sends the active `session_token` with `status=pending` and a bounded `limit`.
  
 Operator moderation UX notes:

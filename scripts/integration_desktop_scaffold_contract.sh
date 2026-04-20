@@ -812,6 +812,10 @@ if ! grep -qF 'id="server_lock_hint"' "$DESKTOP_HTML_FILE"; then
   echo "desktop scaffold contract failed: missing server lock hint marker in $DESKTOP_HTML_FILE"
   exit 1
 fi
+if ! grep -qF 'id="operator_approval_policy_hint"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing operator approval policy hint marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
 if ! grep -qF 'id="legacy_compat_section"' "$DESKTOP_HTML_FILE"; then
   echo "desktop scaffold contract failed: missing legacy compatibility section marker in $DESKTOP_HTML_FILE"
   exit 1
@@ -926,6 +930,26 @@ if ! rg -q -- 'tab(Server|Client)El\.disabled[[:space:]]*=' "$JS_FILE"; then
 fi
 if ! grep -qF 'function requireClientControlEligibility(actionLabel)' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing client control eligibility guard helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function readRuntimeOperatorApprovalPolicyMetadata(runtimeCfg)' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing runtime operator-approval policy parser in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function updateOperatorApprovalPolicyHint()' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing operator approval policy hint updater in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'formatOperatorApprovalPolicySourceHint(' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing operator approval policy source hint formatter usage in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'state.operatorApprovalRequireSession' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing operator approval strictness state marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'requireSessionToken("approve an operator")' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing explicit session-token gate for approve operator action in $JS_FILE"
   exit 1
 fi
 if ! grep -qF 'function requireServerTabEligibility(actionLabel)' "$JS_FILE"; then

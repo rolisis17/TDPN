@@ -43,6 +43,7 @@ const serverLockHintEl = byId("server_lock_hint");
 const clientLockHintEl = byId("client_lock_hint");
 const connectPolicyHintEl = document.getElementById("connect_policy_hint");
 const authVerifyPolicyHintEl = document.getElementById("auth_verify_policy_hint");
+const operatorApprovalPolicyHintEl = document.getElementById("operator_approval_policy_hint");
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 const signInPolicyHintEl = document.getElementById("signin_policy_hint");
@@ -91,6 +92,8 @@ const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
 const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
 const AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const AUTH_VERIFY_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT = "env_default";
+const OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
 const WALLET_SIGN_IN_LABEL_RECOMMENDED = "Wallet Sign-In (Recommended)";
 const WALLET_SIGN_IN_LABEL_REQUIRED = "Wallet Sign-In (Required)";
 const MANUAL_SIGN_IN_LABEL = "Sign In (Manual)";
@@ -135,6 +138,8 @@ const state = {
   authVerifyRequireWalletExtensionSource: false,
   authVerifyRuntimeRequireWalletExtensionSource: false,
   authVerifyPolicySource: AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT,
+  operatorApprovalRequireSession: false,
+  operatorApprovalPolicySource: OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT,
   legacyEnvAliasesActive: [],
   legacyEnvAliasWarnings: [],
   legacyEnvAliasActiveCount: 0,
@@ -1271,6 +1276,14 @@ function normalizeAuthVerifyPolicySource(value) {
   );
 }
 
+function normalizeOperatorApprovalPolicySource(value) {
+  return normalizePolicySource(
+    value,
+    OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG,
+    OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT
+  );
+}
+
 function normalizePolicyRequirement(value) {
   if (typeof value === "boolean") {
     return value;
@@ -1547,6 +1560,43 @@ function readRuntimeAuthVerifyPolicyMetadata(runtimeCfg) {
     authVerifyRequireMetadata,
     authVerifyRequireWalletExtensionSource,
     authVerifyPolicySource
+  };
+}
+
+function readRuntimeOperatorApprovalPolicyMetadata(runtimeCfg) {
+  const baseScopes = collectRuntimeConfigScopes(runtimeCfg);
+  const scopes = collectRuntimeSectionScopes(baseScopes, [["operator_approval_policy", "operatorApprovalPolicy"], ["operator_approval", "operatorApproval"], ["operator"]]);
+  const operatorApprovalRequireSession = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_operator_approval_require_session",
+        "gpmOperatorApprovalRequireSession",
+        "operator_approval_require_session",
+        "operatorApprovalRequireSession",
+        "approval_require_session",
+        "approvalRequireSession"
+      ])
+    )
+  );
+  const operatorApprovalPolicySource = normalizeOperatorApprovalPolicySource(
+    firstDefined(
+      ...scopes.map((scope) =>
+        readConfigString(scope, [
+          "gpm_operator_approval_require_session_policy_source",
+          "gpmOperatorApprovalRequireSessionPolicySource",
+          "operator_approval_require_session_policy_source",
+          "operatorApprovalRequireSessionPolicySource",
+          "operator_approval_policy_source",
+          "operatorApprovalPolicySource",
+          "approval_policy_source",
+          "approvalPolicySource"
+        ])
+      )
+    )
+  );
+  return {
+    operatorApprovalRequireSession,
+    operatorApprovalPolicySource
   };
 }
 
@@ -1828,6 +1878,28 @@ function formatAuthVerifyPolicySourceHint(source, requireMetadata, requireWallet
     requireMetadata,
     requireWalletExtensionSource
   )} (${formatAuthVerifyPolicySourceLabel(source)})`;
+}
+
+function formatOperatorApprovalPolicySourceLabel(source) {
+  if (source === OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config";
+  }
+  if (source === OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT) {
+    return "env default";
+  }
+  return nonEmptyStringOrUndefined(source)?.replace(/_/g, " ") || "env default";
+}
+
+function formatOperatorApprovalPolicyClientSourceLabel(source) {
+  if (source === OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config (/v1/config)";
+  }
+  return "env defaults (GPM_OPERATOR_APPROVAL_REQUIRE_SESSION; legacy alias: TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION)";
+}
+
+function formatOperatorApprovalPolicySourceHint(source, requireSession) {
+  const mode = requireSession ? "session-required" : "compat";
+  return `operator approval policy: ${mode} (${formatOperatorApprovalPolicySourceLabel(source)})`;
 }
 
 function normalizeOperatorApplicationStatus(value) {
@@ -3310,6 +3382,22 @@ function updateAuthVerifyPolicyHint() {
   syncIdentitySignInPolicyControls();
 }
 
+function updateOperatorApprovalPolicyHint() {
+  if (!operatorApprovalPolicyHintEl) {
+    return;
+  }
+  const sourceLabel = formatOperatorApprovalPolicyClientSourceLabel(state.operatorApprovalPolicySource);
+  if (state.operatorApprovalRequireSession) {
+    operatorApprovalPolicyHintEl.textContent =
+      `Operator approval policy: admin session token required from ${sourceLabel}; legacy admin_token fallback is disabled by policy.`;
+    operatorApprovalPolicyHintEl.classList.add("locked");
+    return;
+  }
+  operatorApprovalPolicyHintEl.textContent =
+    `Operator approval policy: session token preferred from ${sourceLabel}; legacy admin_token fallback remains a backend compatibility path when policy allows it.`;
+  operatorApprovalPolicyHintEl.classList.remove("locked");
+}
+
 function applyConnectModePolicy(enabled) {
   state.connectRequireSession = !!enabled;
   syncCompatAdvancedVisibility();
@@ -3877,10 +3965,13 @@ byId("operator_list_next_btn").addEventListener("click", async () => {
 });
 
 byId("approve_operator_btn").addEventListener("click", async () => {
+  if (!requireSessionToken("approve an operator")) {
+    return;
+  }
   const request = {
     wallet_address: walletAddressEl.value.trim(),
     approved: true,
-    session_token: state.sessionToken || undefined
+    session_token: state.sessionToken
   };
   const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
   if (ifUpdatedAtUtc) {
@@ -4061,10 +4152,13 @@ async function init() {
     let authVerifyRequireWalletExtensionSource = meta.authVerifyRequireWalletExtensionSource;
     let authVerifyRuntimeRequireWalletExtensionSource = false;
     let authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
+    let operatorApprovalRequireSession = false;
+    let operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
     try {
       const runtimeCfg = await invoke("control_runtime_config");
       const runtimeConnectPolicy = readRuntimeConnectPolicyMetadata(runtimeCfg || {});
       const runtimeAuthVerifyPolicy = readRuntimeAuthVerifyPolicyMetadata(runtimeCfg || {});
+      const runtimeOperatorApprovalPolicy = readRuntimeOperatorApprovalPolicyMetadata(runtimeCfg || {});
       legacyAliasTelemetry = mergeLegacyAliasTelemetry(
         legacyAliasTelemetry,
         readRuntimeLegacyAliasTelemetry(runtimeCfg || {})
@@ -4102,11 +4196,21 @@ async function init() {
       ) {
         authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_RUNTIME_CONFIG;
       }
+      if (runtimeOperatorApprovalPolicy.operatorApprovalRequireSession !== undefined) {
+        operatorApprovalRequireSession = runtimeOperatorApprovalPolicy.operatorApprovalRequireSession === true;
+      }
+      if (runtimeOperatorApprovalPolicy.operatorApprovalPolicySource) {
+        operatorApprovalPolicySource = runtimeOperatorApprovalPolicy.operatorApprovalPolicySource;
+      } else if (runtimeOperatorApprovalPolicy.operatorApprovalRequireSession !== undefined) {
+        operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG;
+      }
     } catch {
       connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
       connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
       authVerifyRuntimeRequireWalletExtensionSource = false;
       authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
+      operatorApprovalRequireSession = false;
+      operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
     }
     state.connectPolicySource = connectPolicySource;
     state.connectPolicyMode = connectPolicyMode;
@@ -4115,6 +4219,8 @@ async function init() {
     state.authVerifyRequireWalletExtensionSource = !!authVerifyRequireWalletExtensionSource;
     state.authVerifyRuntimeRequireWalletExtensionSource = authVerifyRuntimeRequireWalletExtensionSource;
     state.authVerifyPolicySource = authVerifyPolicySource;
+    state.operatorApprovalRequireSession = operatorApprovalRequireSession === true;
+    state.operatorApprovalPolicySource = operatorApprovalPolicySource;
     state.legacyEnvAliasesActive = legacyAliasTelemetry.activeAliases;
     state.legacyEnvAliasWarnings = legacyAliasTelemetry.warnings;
     state.legacyEnvAliasActiveCount = legacyAliasTelemetry.activeCount;
@@ -4126,7 +4232,8 @@ async function init() {
         authVerifyPolicySource,
         state.authVerifyRequireMetadata,
         state.authVerifyRequireWalletExtensionSource
-      )
+      ),
+      formatOperatorApprovalPolicySourceHint(operatorApprovalPolicySource, state.operatorApprovalRequireSession)
     ]
       .filter((value) => typeof value === "string" && value.trim().length > 0)
       .join(" | ");
@@ -4134,6 +4241,7 @@ async function init() {
     state.serviceMutationsAllowed = meta.serviceMutationsEnabled;
     applyConnectModePolicy(connectRequireSession);
     updateAuthVerifyPolicyHint();
+    updateOperatorApprovalPolicyHint();
     updateLegacyAliasRuntimeHint();
     syncServerRoleLockState();
   } catch (err) {
@@ -4148,11 +4256,14 @@ async function init() {
     state.authVerifyRequireWalletExtensionSource = false;
     state.authVerifyRuntimeRequireWalletExtensionSource = false;
     state.authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
+    state.operatorApprovalRequireSession = false;
+    state.operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
     state.legacyEnvAliasesActive = [];
     state.legacyEnvAliasWarnings = [];
     state.legacyEnvAliasActiveCount = 0;
     applyConnectModePolicy(false);
     updateAuthVerifyPolicyHint();
+    updateOperatorApprovalPolicyHint();
     updateLegacyAliasRuntimeHint();
     syncServerRoleLockState();
     print("init (error)", err);
