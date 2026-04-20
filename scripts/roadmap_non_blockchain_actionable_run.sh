@@ -159,6 +159,32 @@ action_command_argv_allowed() {
       return 1
     fi
     script_path="${argv[1]}"
+    if [[ "$script_path" == -* ]]; then
+      # Keep shell-evaluated modes blocked in argv-safe path mode.
+      return 1
+    fi
+    case "$script_path" in
+      "$ROOT_DIR"/scripts/*)
+        ;;
+      scripts/*)
+        script_path="$ROOT_DIR/$script_path"
+        ;;
+      ./scripts/*)
+        script_path="$ROOT_DIR/${script_path#./}"
+        ;;
+      /*)
+        # Allow explicit absolute script paths (used by integration harnesses).
+        ;;
+      *)
+        # Resolve plain/relative script paths against repo root.
+        script_path="$ROOT_DIR/$script_path"
+        ;;
+    esac
+    if [[ "$script_path" == *".."* ]]; then
+      return 1
+    fi
+    [[ -f "$script_path" ]]
+    return
   else
     script_path="$cmd"
   fi

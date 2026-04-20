@@ -575,7 +575,8 @@ if ! jq -e '
   and .inputs.allow_profile_default_gate_unreachable == false
   and .inputs.action_timeout_sec == 0
   and .inputs.profile_default_gate_default_timeout_sec == 2400
-  and .inputs.profile_default_gate_subject == "inv-override-subject"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and .summary.actions_executed == 1
   and .summary.pass == 1
   and .summary.fail == 0
@@ -614,11 +615,12 @@ bash ./scripts/roadmap_next_actions_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
-  and .inputs.profile_default_gate_subject == "inv-placeholder-replaced"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
-  and ((.actions[0].command // "") | contains("--subject inv-placeholder-replaced"))
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
   and (((.actions[0].command // "") | contains("INVITE_KEY")) | not)
   and (((.actions[0].command // "") | contains("--campaign-subject")) | not)
 ' "$SUMMARY_PROFILE_PLACEHOLDER_OVERRIDE" >/dev/null; then
@@ -653,11 +655,12 @@ bash ./scripts/roadmap_next_actions_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
-  and .inputs.profile_default_gate_subject == "inv-key-placeholder-replaced"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
-  and ((.actions[0].command // "") | contains("--key inv-key-placeholder-replaced"))
+  and ((.actions[0].command // "") | contains("--key [redacted]"))
   and (((.actions[0].command // "") | contains("INVITE_KEY")) | not)
   and (((.actions[0].command // "") | contains("--campaign-subject")) | not)
 ' "$SUMMARY_PROFILE_PLACEHOLDER_KEY_OVERRIDE" >/dev/null; then
@@ -697,11 +700,12 @@ bash ./scripts/roadmap_next_actions_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
-  and .inputs.profile_default_gate_subject == "inv-should-not-append"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
-  and ((.actions[0].command // "") | contains("--key inv-existing-key"))
+  and ((.actions[0].command // "") | contains("--key [redacted]"))
   and (((.actions[0].command // "") | contains("--campaign-subject")) | not)
 ' "$SUMMARY_PROFILE_EXISTING_KEY_NO_DUP" >/dev/null; then
   echo "profile existing key no-dup summary mismatch"
@@ -736,14 +740,15 @@ bash ./scripts/roadmap_next_actions_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
-  and .inputs.profile_default_gate_subject == "inv-live-converted"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
   and ((.actions[0].command // "") | contains("profile-default-gate-live"))
   and ((.actions[0].command // "") | contains("--host-a 100.113.245.61"))
   and ((.actions[0].command // "") | contains("--host-b 100.64.244.24"))
-  and ((.actions[0].command // "") | contains("--subject inv-live-converted"))
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
   and (((.actions[0].command // "") | contains("127.0.0.1")) | not)
 ' "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE" >/dev/null; then
   echo "profile localhost-to-live conversion summary mismatch"
@@ -800,14 +805,15 @@ if ! jq -e '
   and .rc == 0
   and .roadmap.generated_this_run == false
   and .roadmap.actions_selected_count == 1
-  and .inputs.profile_default_gate_subject == "inv-live-provided-converted"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
   and ((.actions[0].command // "") | contains("profile-default-gate-live"))
   and ((.actions[0].command // "") | contains("--host-a 100.113.245.61"))
   and ((.actions[0].command // "") | contains("--host-b 100.64.244.24"))
-  and ((.actions[0].command // "") | contains("--subject inv-live-provided-converted"))
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
   and (((.actions[0].command // "") | contains("127.0.0.1")) | not)
 ' "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_PROVIDED" >/dev/null; then
   echo "provided roadmap localhost-to-live conversion summary mismatch"
@@ -1005,7 +1011,8 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.allow_profile_default_gate_unreachable == true
-  and .inputs.profile_default_gate_subject == "inv-unreachable-override"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and .summary.actions_executed == 1
   and .summary.pass == 1
   and .summary.fail == 0
