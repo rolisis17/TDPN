@@ -80,6 +80,7 @@ What this does:
    - local control API GPM bootstrap trust contract (`integration_local_control_api_gpm_manifest_trust.sh`)
    - desktop scaffold contract (`integration_desktop_scaffold_contract.sh`)
    - web portal scaffold contract (`integration_web_portal_contract.sh`, including bootstrap trust panel + telemetry render markers)
+   - web home contract (`integration_web_home_contract.sh`, validating stable homepage HTML/CSS markers in `apps/web/index.html` + `apps/web/assets/gpm.css`)
    - windows desktop native bootstrap guardrails (`integration_windows_desktop_native_bootstrap_guardrails.sh`)
 
 Expected result:

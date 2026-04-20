@@ -19,6 +19,18 @@ Then open:
 - `http://127.0.0.1:8088/index.html`
 - `http://127.0.0.1:8088/portal.html`
 
+## Homepage Visual Contract (Premium Surface)
+
+Use this as the change contract for `index.html` (public marketing surface) so refreshes keep the same intent and quality bar.
+
+- Scope: premium styling is intentionally scoped to `.page-home` in `assets/gpm.css`; keep portal UX operational-first and avoid leaking homepage-only polish styles into `portal.html`.
+- Narrative sections: preserve the current high-level order and purpose (`Hero` -> onboarding lanes -> flow cues -> product controls/value -> governance -> release direction) so role-based onboarding context stays obvious before deeper policy details.
+- Typography direction: keep the humanist/system-forward stack (`"Segoe UI Variable Text"`, `"Aptos"`, `"Segoe UI"`, `"Inter"`, sans-serif), large editorial hero headline with tight tracking, and readable long-form section copy with calmer line-height.
+- Visual tokens: preserve the cool trust-focused palette and token usage (`--bg`, `--panel`, `--text`, `--muted`, `--line`, `--brand`, `--brand-strong`) plus lane differentiation (client blue family vs operator green family); new sections should use these tokens before introducing new colors.
+- Motion expectations: retain staged reveal behavior (`.reveal`, `.reveal--1..5`, `gpm-reveal-up`) and subtle hover lift for cards/buttons; always keep `prefers-reduced-motion` behavior as a first-class fallback (no forced animation).
+- Mobile behavior: preserve responsive intent at `900px` and `640px` breakpoints (stacked top bar, single-column content grids, full-width primary actions, tighter card radii/padding) so copy remains scannable and CTAs remain thumb-friendly.
+- Portal coherence: homepage should remain the narrative front door into `portal.html` (client registration and operator review links) while sharing the same product language and trust posture cues; visual treatments can be richer on homepage, but terminology and lane semantics must stay consistent with portal workflows.
+
 ## Notes
 
 - The portal calls the new GPM local API endpoints (`/v1/gpm/...`).

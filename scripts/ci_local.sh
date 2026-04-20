@@ -483,6 +483,9 @@ echo "[ci] desktop scaffold contract integration"
 echo "[ci] web portal contract integration"
 ./scripts/integration_web_portal_contract.sh
 
+echo "[ci] web home contract integration"
+./scripts/integration_web_home_contract.sh
+
 echo "[ci] easy-node client profile env integration"
 ./scripts/integration_easy_node_client_profile_env.sh
 
