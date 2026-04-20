@@ -489,6 +489,30 @@ if ! grep -qiE 'run-full|bootstrap' "$LINUX_ONE_CLICK_SCRIPT"; then
   echo "desktop scaffold contract failed: expected launch-mode marker in $LINUX_ONE_CLICK_SCRIPT"
   exit 1
 fi
+if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM one-click auto-install env marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN one-click auto-install legacy env alias marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '--no-install-missing' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected --no-install-missing override marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- '\$\{GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-\$\{TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-1\}\}|(INSTALL_MISSING|INSTALL_MISSING_EFFECTIVE|AUTO_INSTALL_MISSING)[[:space:]]*=[[:space:]]*"?1"?|default[^[:alnum:]]*(enable|enabled|true)[^[:alnum:]]*(install|auto[-_ ]?install)[^[:alnum:]]*missing' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected default-enabled auto-install fallback marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'if[[:space:]].*(INSTALL_MISSING|INSTALL_MISSING_EFFECTIVE|AUTO_INSTALL_MISSING|EFFECTIVE_INSTALL_MISSING).*(==[[:space:]]*"?1"?|true|enabled)' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected effective install-intent condition marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'bootstrap_args\+\=\(--install-missing\)|run_full_args\+\=\(--install-missing\)' "$LINUX_ONE_CLICK_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected bootstrap/run-full --install-missing forwarding marker in $LINUX_ONE_CLICK_SCRIPT"
+  exit 1
+fi
 if ! grep -qF 'scripts/linux/desktop_doctor.sh' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must reference linux desktop doctor script"
   exit 1

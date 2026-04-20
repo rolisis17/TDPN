@@ -311,6 +311,14 @@ bash ./scripts/linux/desktop_native_bootstrap.sh --mode run-full --desktop-launc
 bash ./scripts/linux/desktop_one_click.sh --install-missing
 ```
 
+Linux one-click auto-remediation defaults (scaffold/non-production):
+- `desktop_one_click.sh` now enables missing dependency remediation by default, equivalent to `--install-missing`, unless explicitly disabled.
+- shared env knobs: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.
+- accepted values: `1` / `true` enables, `0` / `false` disables; unset defaults to enabled.
+- CLI precedence on Linux:
+  - `--install-missing` explicitly enables remediation.
+  - `--no-install-missing` explicitly disables remediation, even when env would enable it.
+
 Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 
 ```bash
