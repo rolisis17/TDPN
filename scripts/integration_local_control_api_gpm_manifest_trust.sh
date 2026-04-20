@@ -476,7 +476,7 @@ if [[ "$prod_sig_register_code" != "502" ]]; then
 fi
 assert_json_expr \
   "$prod_sig_register_body" \
-  '.ok == false and (.error | contains("cache fallback failed")) and (.error | contains("verification key is required by policy"))' \
+  '.ok == false and (.error | contains("manifest cache read failed")) and (.error | contains("verification key is required by policy"))' \
   "expected production manifest trust to require signature verifier key for cache fallback"
 stop_local_api
 
@@ -620,7 +620,7 @@ if [[ "$cache_hmac_required_code" != "502" ]]; then
 fi
 assert_json_expr \
   "$cache_hmac_required_body" \
-  '.ok == false and (.error | contains("cache fallback failed")) and (.error | contains("missing signed payload evidence"))' \
+  '.ok == false and (.error | contains("manifest cache read failed")) and (.error | contains("missing signed payload evidence"))' \
   "expected hmac-required cache fallback to fail closed without signed payload evidence"
 stop_local_api
 
@@ -642,7 +642,7 @@ if [[ "$cache_bad_code" != "502" ]]; then
 fi
 assert_json_expr \
   "$cache_bad_body" \
-  '.ok == false and (.error | contains("cache fallback failed")) and (.error | contains("cached manifest source host mismatch")) and (.error | contains("pinned gpm main domain"))' \
+  '.ok == false and (.error | contains("manifest cache read failed")) and (.error | contains("cached manifest source host mismatch")) and (.error | contains("pinned gpm main domain"))' \
   "expected cache source-host mismatch error details"
 stop_local_api
 

@@ -686,6 +686,7 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_manifest_url":                                       strings.TrimSpace(s.gpmManifestURL),
 			"gpm_manifest_cache_path":                                strings.TrimSpace(s.gpmManifestCache),
 			"gpm_manifest_cache_max_age_sec":                         manifestCacheMaxAgeSec,
+			"gpm_manifest_resolve_policy":                            "cache_first_bounded_remote_refresh",
 			"gpm_legacy_env_aliases_active":                          legacyEnvAliasesActive,
 			"gpm_legacy_env_aliases_active_count":                    len(legacyEnvAliasesActive),
 			"gpm_legacy_env_alias_warnings":                          legacyEnvAliasWarnings,

@@ -6758,7 +6758,7 @@ func TestReadBootstrapManifestCacheRejectsOversizedFile(t *testing.T) {
 	}
 }
 
-func TestGPMClientRegisterUsesPinnedCacheFallbackWhenRemoteFetchFails(t *testing.T) {
+func TestGPMClientRegisterUsesPinnedCacheFirstWhenCacheIsFresh(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
@@ -6812,8 +6812,8 @@ func TestGPMClientRegisterUsesPinnedCacheFallbackWhenRemoteFetchFails(t *testing
 	if code != http.StatusOK {
 		t.Fatalf("register status=%d body=%v", code, payload)
 	}
-	if manifestHits == 0 {
-		t.Fatal("expected remote manifest fetch attempt before cache fallback")
+	if manifestHits != 0 {
+		t.Fatalf("expected cache-first registration to avoid remote refresh when cache is fresh, got %d hits", manifestHits)
 	}
 
 	source, _ := payload["source"].(string)
@@ -6828,6 +6828,106 @@ func TestGPMClientRegisterUsesPinnedCacheFallbackWhenRemoteFetchFails(t *testing
 	gotBootstrap, _ := profile["bootstrap_directory"].(string)
 	if gotBootstrap != bootstrapDirectory {
 		t.Fatalf("profile.bootstrap_directory=%q want=%q payload=%v", gotBootstrap, bootstrapDirectory, payload)
+	}
+}
+
+func TestResolveBootstrapManifestRefreshesRemoteWhenCacheStale(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 30 * time.Second
+
+	now := time.Now().UTC()
+	remoteBootstrapDirectory := "https://directory.remote-refresh.globalprivatemesh.example:8081"
+	var manifestHits int
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{remoteBootstrapDirectory},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	staleCache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-2 * time.Minute).Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.stale-cache.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(staleCache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal stale cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+
+	manifest, source, _, err := svc.resolveBootstrapManifest(context.Background())
+	if err != nil {
+		t.Fatalf("resolve bootstrap manifest: %v", err)
+	}
+	if source != "remote" {
+		t.Fatalf("source=%q want=remote", source)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected stale cache to trigger a bounded remote manifest refresh")
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != remoteBootstrapDirectory {
+		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{remoteBootstrapDirectory})
+	}
+
+	cachedManifest, _, err := svc.readBootstrapManifestCache()
+	if err != nil {
+		t.Fatalf("read refreshed cache: %v", err)
+	}
+	if len(cachedManifest.BootstrapDirectories) != 1 || cachedManifest.BootstrapDirectories[0] != remoteBootstrapDirectory {
+		t.Fatalf("refreshed cache bootstrap_directories=%v want=%v", cachedManifest.BootstrapDirectories, []string{remoteBootstrapDirectory})
+	}
+}
+
+func TestResolveBootstrapManifestRefreshesRemoteWhenCacheMissing(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache_missing.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+
+	now := time.Now().UTC()
+	remoteBootstrapDirectory := "https://directory.remote-missing-cache.globalprivatemesh.example:8081"
+	var manifestHits int
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{remoteBootstrapDirectory},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	manifest, source, _, err := svc.resolveBootstrapManifest(context.Background())
+	if err != nil {
+		t.Fatalf("resolve bootstrap manifest: %v", err)
+	}
+	if source != "remote" {
+		t.Fatalf("source=%q want=remote", source)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected missing cache to trigger a bounded remote manifest refresh")
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != remoteBootstrapDirectory {
+		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{remoteBootstrapDirectory})
 	}
 }
 
@@ -6886,10 +6986,10 @@ func TestGPMClientRegisterRejectsPinnedCacheFallbackWithoutSignedPayloadEvidence
 		t.Fatalf("register status=%d body=%v", code, payload)
 	}
 	if manifestHits == 0 {
-		t.Fatal("expected remote manifest fetch attempt before cache fallback")
+		t.Fatal("expected remote manifest refresh attempt when cache is invalid")
 	}
 	errMsg, _ := payload["error"].(string)
-	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "missing signed payload evidence") {
+	if !strings.Contains(errMsg, "manifest cache read failed") || !strings.Contains(errMsg, "missing signed payload evidence") {
 		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 }
@@ -6942,12 +7042,12 @@ func TestGPMClientRegisterRejectsCacheFallbackWhenSignatureRequiredButVerifierKe
 		t.Fatalf("register status=%d body=%v", code, payload)
 	}
 	errMsg, _ := payload["error"].(string)
-	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "verification key is required by policy") {
+	if !strings.Contains(errMsg, "manifest cache read failed") || !strings.Contains(errMsg, "verification key is required by policy") {
 		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 }
 
-func TestGPMClientRegisterUsesPinnedCacheFallbackWithSignedPayloadEvidenceWhenHMACRequired(t *testing.T) {
+func TestGPMClientRegisterUsesPinnedCacheFirstWithSignedPayloadEvidenceWhenHMACRequired(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
@@ -7010,8 +7110,8 @@ func TestGPMClientRegisterUsesPinnedCacheFallbackWithSignedPayloadEvidenceWhenHM
 	if code != http.StatusOK {
 		t.Fatalf("register status=%d body=%v", code, payload)
 	}
-	if manifestHits == 0 {
-		t.Fatal("expected remote manifest fetch attempt before cache fallback")
+	if manifestHits != 0 {
+		t.Fatalf("expected cache-first registration to avoid remote refresh when cache is fresh, got %d hits", manifestHits)
 	}
 
 	source, _ := payload["source"].(string)
@@ -7081,7 +7181,7 @@ func TestGPMClientRegisterRejectsPinnedCacheFallbackSourceHostMismatch(t *testin
 		t.Fatalf("register status=%d body=%v", code, payload)
 	}
 	errMsg, _ := payload["error"].(string)
-	if !strings.Contains(errMsg, "cache fallback failed") || !strings.Contains(errMsg, "cached manifest source host mismatch") {
+	if !strings.Contains(errMsg, "manifest cache read failed") || !strings.Contains(errMsg, "cached manifest source host mismatch") {
 		t.Fatalf("error=%q payload=%v", errMsg, payload)
 	}
 	if !strings.Contains(errMsg, "pinned gpm main domain") {

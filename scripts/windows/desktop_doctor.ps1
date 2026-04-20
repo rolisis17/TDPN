@@ -697,7 +697,7 @@ function Get-DependencyInstallHint {
     "Git.Git" { return "winget install --id Git.Git --exact" }
     "Microsoft.AppInstaller" { return "install App Installer from Microsoft Store" }
     "Microsoft.VisualStudio.2022.BuildTools" { return "winget install --id Microsoft.VisualStudio.2022.BuildTools --exact; then ensure MSVC v143 x64/x64 + Windows 10/11 SDK components are selected in Visual Studio Installer" }
-    "Microsoft.WindowsSDK.10.0" { return "install Windows 10/11 SDK from Visual Studio Installer (Individual components) or https://developer.microsoft.com/windows/downloads/windows-sdk/" }
+    "Microsoft.WindowsSDK.10.0" { return "winget install --id Microsoft.WindowsSDK.10.0 --exact (or install Windows 10/11 SDK from Visual Studio Installer (Individual components) or https://developer.microsoft.com/windows/downloads/windows-sdk/)" }
     "Microsoft.EdgeWebView2Runtime" { return "winget install --id Microsoft.EdgeWebView2Runtime --exact (or install from https://developer.microsoft.com/microsoft-edge/webview2/)" }
     default { return "winget install --id $PackageId --exact" }
   }
@@ -711,7 +711,6 @@ function Get-DependencyWingetPackageId {
 
   switch ($PackageId) {
     "Microsoft.AppInstaller" { return "" }
-    "Microsoft.WindowsSDK.10.0" { return "" }
     default { return $PackageId }
   }
 }
@@ -859,7 +858,8 @@ function Install-WingetPackage {
   Write-Step "installing missing dependency via winget: $PackageId"
   & $WingetPath @wingetArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "winget install failed for $PackageId (exit code $LASTEXITCODE)"
+    $fallbackHint = Get-DependencyInstallHint -PackageId $PackageId
+    throw "winget install failed for $PackageId (exit code $LASTEXITCODE). manual remediation: $fallbackHint"
   }
 }
 

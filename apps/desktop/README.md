@@ -191,7 +191,8 @@ What this solves automatically:
 - sets process execution policy bypass for this run
 - refreshes current session PATH from machine+user PATH
 - checks Go/Node/npm/Rust/Cargo/Git Bash
-- optionally installs missing dependencies via `winget` (`-InstallMissing`)
+- optionally installs missing dependencies via `winget` (`-InstallMissing`), including Windows desktop prerequisites (`Microsoft.VisualStudio.2022.BuildTools`, `Microsoft.WindowsSDK.10.0`, `Microsoft.EdgeWebView2Runtime`) when missing
+- keeps fail-safe behavior: if `winget` remediation cannot complete, output and summary `recommended_commands` still include explicit manual fallback guidance (for example Visual Studio Installer / Windows SDK link)
 - launches local API + desktop dev in one flow (`-Mode run-full`)
 - prints copy/paste remediation guidance and mirrors it in summary JSON `recommended_commands` when using `-SummaryJson` and/or `-PrintSummaryJson 1`
 
@@ -222,7 +223,8 @@ What `desktop_doctor` remediates:
 - process-scope execution policy bypass when you pass `-EnablePolicyBypass`
 - current-session PATH refresh and common tool path augmentation
 - prerequisite detection for Go/Node/npm/Rust/Cargo/Git Bash
-- optional prerequisite install via `winget` when `-InstallMissing` is passed
+- optional prerequisite install via `winget` when `-InstallMissing` is passed (including Windows SDK `Microsoft.WindowsSDK.10.0` when missing)
+- fail-safe fallback guidance when an install attempt fails or is unavailable (manual Windows SDK/Visual Studio installer path remains explicitly documented in output and summary `recommended_commands`)
 - optional summary artifact output via `-SummaryJson` and `-PrintSummaryJson 1`
 - desktop doctor now prints exact copy/paste remediation commands and writes the same guidance to summary JSON `recommended_commands` (policy bypass, `npm.cmd install`, `npm.cmd run tauri -- dev`, missing-tool `winget` installs, and one-click rerun)
 

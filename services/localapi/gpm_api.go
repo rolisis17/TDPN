@@ -2095,16 +2095,20 @@ func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapMan
 			return gpmBootstrapManifest{}, "", false, fmt.Errorf("gpm manifest url host mismatch: got %q, pinned gpm main domain host %q; update GPM_MAIN_DOMAIN or GPM_BOOTSTRAP_MANIFEST_URL", manifestHost, pinnedHost)
 		}
 	}
-	manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifest(ctx, manifestURL)
-	if err == nil {
-		_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
-		return manifest, "remote", signatureVerified, nil
-	}
+
+	// Cache-first policy: use a valid trusted cache artifact when available and only
+	// attempt a bounded remote refresh when cache is missing/stale/invalid.
 	cacheManifest, cacheSignatureVerified, cacheErr := s.readBootstrapManifestCache()
-	if cacheErr != nil {
-		return gpmBootstrapManifest{}, "", false, fmt.Errorf("manifest fetch failed (%v) and cache fallback failed (%v)", err, cacheErr)
+	if cacheErr == nil {
+		return cacheManifest, "cache", cacheSignatureVerified, nil
 	}
-	return cacheManifest, "cache", cacheSignatureVerified, nil
+
+	manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifest(ctx, manifestURL)
+	if err != nil {
+		return gpmBootstrapManifest{}, "", false, fmt.Errorf("manifest cache read failed (%v) and remote manifest refresh failed (%v)", cacheErr, err)
+	}
+	_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
+	return manifest, "remote", signatureVerified, nil
 }
 
 func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {

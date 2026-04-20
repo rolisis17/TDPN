@@ -184,6 +184,14 @@ if ! grep -qF 'Microsoft.WindowsSDK.10.0' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing Windows SDK package marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if grep -qF '"Microsoft.WindowsSDK.10.0" { return "" }' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: Windows SDK must not be hard-skipped from winget remediation"
+  exit 1
+fi
+if ! grep -qF 'winget install --id Microsoft.WindowsSDK.10.0 --exact' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing Windows SDK winget remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF 'Microsoft.EdgeWebView2Runtime' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing WebView2 runtime package marker in $SCRIPT_UNDER_TEST"
   exit 1
@@ -254,6 +262,16 @@ if ! jq -e '.recommended_commands | any(type == "string" and contains("desktop_s
 fi
 if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd run tauri -- dev"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing tauri dev remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e 'if .desktop_prerequisites.windows_sdk.installed == false then (.recommended_commands | any(type == "string" and contains("Microsoft.WindowsSDK.10.0"))) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing Windows SDK remediation command when Windows SDK is missing"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e 'if .desktop_prerequisites.windows_sdk.installed == false then (.recommended_commands | any(type == "string" and contains("windows-sdk"))) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing Windows SDK fallback guidance link when Windows SDK is missing"
   cat "$SUMMARY_JSON"
   exit 1
 fi
