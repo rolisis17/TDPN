@@ -231,11 +231,13 @@ What this path does:
 - prefers packaged desktop launch for installer-style smoke checks
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
-- packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE`, then `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+- packaged executable auto-discovery order: env overrides (`GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE` preferred, then `GPM_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
 
 Env override example (PowerShell):
 
 ```powershell
+$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
+# legacy alias still supported:
 $env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\TDPN\TDPN Desktop\TDPN Desktop.exe"; .\scripts\windows\desktop_packaged_run.ps1 -DryRun
 ```
 
@@ -285,10 +287,19 @@ bash ./scripts/linux/desktop_packaged_run.sh
 
 Dry-run and override guidance:
 - run `--dry-run` first to confirm executable discovery and local API preflight
-- executable override env (preferred): `GPM_DESKTOP_PACKAGED_EXE`
-- legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
+- executable override env auto-discovery order: `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE` (preferred), `GPM_DESKTOP_PACKAGED_EXE`, then legacy `TDPN_DESKTOP_PACKAGED_EXE`
 - optional local API tuning: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`
 - keep manual override usage support/lab-focused while this remains scaffold/non-production
+
+Linux env override example:
+
+```bash
+GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$HOME/Applications/Global Private Mesh Desktop.AppImage" \
+  bash ./scripts/linux/desktop_packaged_run.sh --dry-run
+# legacy alias still supported:
+TDPN_DESKTOP_PACKAGED_EXE="$HOME/Applications/TDPN Desktop.AppImage" \
+  bash ./scripts/linux/desktop_packaged_run.sh --dry-run
+```
 
 Linux native bootstrap and one-click usage:
 

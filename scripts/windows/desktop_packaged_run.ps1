@@ -179,6 +179,7 @@ function Resolve-DesktopPackagedExecutableAuto {
   )
 
   $envOverrides = @(
+    @{ Name = "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"; Value = [Environment]::GetEnvironmentVariable("GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE", "Process") },
     @{ Name = "GPM_DESKTOP_PACKAGED_EXE"; Value = [Environment]::GetEnvironmentVariable("GPM_DESKTOP_PACKAGED_EXE", "Process") },
     @{ Name = "TDPN_DESKTOP_PACKAGED_EXE"; Value = [Environment]::GetEnvironmentVariable("TDPN_DESKTOP_PACKAGED_EXE", "Process") }
   )

@@ -132,6 +132,13 @@ if [[ "${GPM_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
   GPM_DESKTOP_PACKAGED_EXE_ORIGINAL="$GPM_DESKTOP_PACKAGED_EXE"
 fi
 
+GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE_WAS_SET="0"
+GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE_ORIGINAL=""
+if [[ "${GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
+  GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE_WAS_SET="1"
+  GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE_ORIGINAL="$GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
+fi
+
 TDPN_DESKTOP_PACKAGED_EXE_WAS_SET="0"
 TDPN_DESKTOP_PACKAGED_EXE_ORIGINAL=""
 if [[ "${TDPN_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
@@ -139,24 +146,40 @@ if [[ "${TDPN_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
   TDPN_DESKTOP_PACKAGED_EXE_ORIGINAL="$TDPN_DESKTOP_PACKAGED_EXE"
 fi
 
+echo "[windows-desktop-packaged-run-guardrails] dry-run passes with Global Private Mesh env override and no explicit override path"
+run_expect_pass \
+  "dry_run_packaged_env_override_global_private_mesh_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+
 echo "[windows-desktop-packaged-run-guardrails] dry-run passes with env override and no explicit override path"
 run_expect_pass \
   "dry_run_packaged_env_override_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
 
 echo "[windows-desktop-packaged-run-guardrails] dry-run passes with TDPN env override and no explicit override path"
 run_expect_pass \
   "dry_run_packaged_env_override_tdpn_pass" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE='$FAKE_EXECUTABLE_PATH_PS'; & '$SCRIPT_UNDER_TEST_PS' -DryRun"
 
 echo "[windows-desktop-packaged-run-guardrails] dry-run auto-discovery passes with mocked Global Private Mesh LocalAppData candidate"
 run_expect_pass_regex \
   "dry_run_packaged_autodiscovery_global_private_mesh_pass" \
   "packaged executable auto-discovered \\(install\\): .*Global Private Mesh Desktop\\.exe|packaged executable auto-discovered \\(install\\): .*global-private-mesh-desktop\\.exe" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$tmpRoot = Join-Path \$env:TEMP ('desktop-packaged-run-guardrails-' + [Guid]::NewGuid().ToString('N')); \$fakeLocalAppData = Join-Path \$tmpRoot 'localappdata'; \$fakeExecutable = Join-Path \$fakeLocalAppData 'Programs\\Global Private Mesh Desktop\\Global Private Mesh Desktop.exe'; New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName(\$fakeExecutable)) -Force | Out-Null; Set-Content -LiteralPath \$fakeExecutable -Value 'placeholder packaged executable for auto-discovery guardrails' -Encoding UTF8; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; \$env:LOCALAPPDATA=\$fakeLocalAppData; try { & '$SCRIPT_UNDER_TEST_PS' -DryRun } finally { Remove-Item -LiteralPath \$tmpRoot -Recurse -Force -ErrorAction SilentlyContinue }"
+    "\$ErrorActionPreference='Stop'; \$tmpRoot = Join-Path \$env:TEMP ('desktop-packaged-run-guardrails-' + [Guid]::NewGuid().ToString('N')); \$fakeLocalAppData = Join-Path \$tmpRoot 'localappdata'; \$fakeExecutable = Join-Path \$fakeLocalAppData 'Programs\\Global Private Mesh Desktop\\Global Private Mesh Desktop.exe'; New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName(\$fakeExecutable)) -Force | Out-Null; Set-Content -LiteralPath \$fakeExecutable -Value 'placeholder packaged executable for auto-discovery guardrails' -Encoding UTF8; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=''; \$env:LOCALAPPDATA=\$fakeLocalAppData; try { & '$SCRIPT_UNDER_TEST_PS' -DryRun } finally { Remove-Item -LiteralPath \$tmpRoot -Recurse -Force -ErrorAction SilentlyContinue }"
+
+if [[ "$GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE_WAS_SET" == "1" ]]; then
+  if [[ "${GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE-}" != "$GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE_ORIGINAL" ]]; then
+    echo "windows desktop packaged-run guardrails failed: leaked GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE changes into caller environment"
+    exit 1
+  fi
+elif [[ "${GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
+  echo "windows desktop packaged-run guardrails failed: leaked GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE into caller environment"
+  exit 1
+fi
 
 if [[ "$GPM_DESKTOP_PACKAGED_EXE_WAS_SET" == "1" ]]; then
   if [[ "${GPM_DESKTOP_PACKAGED_EXE-}" != "$GPM_DESKTOP_PACKAGED_EXE_ORIGINAL" ]]; then
