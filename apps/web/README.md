@@ -3,7 +3,7 @@
 This folder provides the first productized web surface for **Global Private Mesh (GPM)**:
 
 - `index.html`: public marketing homepage.
-- `portal.html`: authenticated portal scaffold for wallet sign-in, client onboarding, and operator workflow.
+- `portal.html`: authenticated portal scaffold for wallet sign-in (including Keplr/Leap wallet-extension sign + verify), client onboarding, and operator workflow.
 
 ## Local Preview
 
@@ -51,7 +51,7 @@ Then open:
 - If `/v1/config` is unavailable, portal continues without hard failure and keeps compatibility override behavior available.
 - If `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host, including cache fallback source URLs. This hardening is skipped when the main domain is unset for dev compatibility, and it sits alongside existing signature verification and expiry checks.
 - Portal onboarding fields are persisted in browser `localStorage` and restored on reload, excluding sensitive session token material.
-- Wallet sign-in supports wallet-extension assisted signing for Keplr/Leap in portal (`challenge -> signArbitrary -> verify`); when wallet-assisted context still matches the active `challenge_id` and `signature`, verify also sends optional signature metadata (`signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`) and retains manual signature entry fallback for compatibility and troubleshooting.
+- Wallet sign-in support is available now for Keplr/Leap wallet-extension assisted signing in portal (`challenge -> signArbitrary -> verify`); when wallet-assisted context still matches the active `challenge_id` and `signature`, verify also sends optional signature metadata (`signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`) and retains manual signature entry fallback for compatibility and troubleshooting.
 - Optional strict auth-verify daemon policies: `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`) and `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`); both default `false` for compatibility and fail closed at `POST /v1/gpm/auth/verify` when policy requirements are not met.
 - Portal moderation UI now includes explicit `Approve Operator` and `Reject Operator` actions with a moderation reason input.
 - Rejection requires a non-empty `reason`; approval includes `reason` when provided.

@@ -32,6 +32,16 @@ require_regex_marker() {
   fi
 }
 
+require_absent_regex_marker() {
+  local file="$1"
+  local pattern="$2"
+  local description="$3"
+  if grep -qiE "$pattern" "$file"; then
+    echo "web portal contract failed: found stale ${description} marker /${pattern}/ in $file"
+    exit 1
+  fi
+}
+
 # Client-readiness UI markers in portal scaffold.
 if ! grep -qF 'id="status_banner"' "$PORTAL_HTML"; then
   echo "web portal contract failed: missing readiness banner marker id=status_banner in $PORTAL_HTML"
@@ -276,6 +286,18 @@ for pattern in "${WALLET_JS_MARKERS[@]}"; do
   require_regex_marker "$PORTAL_JS" "$pattern" "wallet-assist JS"
 done
 echo "[web-portal] wallet-extension assisted signing markers are present"
+
+require_absent_regex_marker "$PORTAL_HTML" 'wallet-?extension signing is tracked next' "wallet sign-in roadmap"
+require_absent_regex_marker "$README_FILE" 'wallet-?extension signing is tracked next' "wallet sign-in roadmap"
+if ! grep -qF 'Keplr and Leap wallet-extension sign + verify are available now.' "$PORTAL_HTML"; then
+  echo "web portal contract failed: portal copy must state Keplr/Leap wallet-extension sign + verify availability"
+  exit 1
+fi
+if ! grep -qF 'Wallet sign-in support is available now for Keplr/Leap wallet-extension assisted signing in portal' "$README_FILE"; then
+  echo "web portal contract failed: README must state wallet sign-in support is available now for Keplr/Leap"
+  exit 1
+fi
+echo "[web-portal] wallet-support copy no longer uses tracked-next language"
 
 if ! grep -qF 'client_tab_visible' "$README_FILE"; then
   echo "web portal contract failed: README must mention readiness.client_tab_visible"

@@ -445,7 +445,9 @@ if [[ ! -f "$roadmap_report_md" ]]; then
 fi
 
 selected_actions_json="$(jq -c '[ (.next_actions // [])[] | select((.id // "") | startswith("blockchain_")) | select(((.command // "") | tostring | length) > 0) ]' "$roadmap_summary_json")"
-recommended_id="$(jq -r '.blockchain_track.mainnet_activation_missing_metrics_action.id // ""' "$roadmap_summary_json")"
+recommended_id="$(jq -r '(.blockchain_track.recommended_gate_id // .blockchain_track.mainnet_activation_missing_metrics_action.id // "")' "$roadmap_summary_json")"
+recommended_reason="$(jq -r '(.blockchain_track.recommended_gate_reason // .blockchain_track.mainnet_activation_missing_metrics_action.reason // "")' "$roadmap_summary_json")"
+recommended_command="$(jq -r '(.blockchain_track.recommended_gate_command // .blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // .blockchain_track.mainnet_activation_missing_metrics_action.command // "")' "$roadmap_summary_json")"
 recommended_id_matches_selected="0"
 recommended_only_selection_state="disabled"
 recommended_only_selection_reason=""
@@ -798,6 +800,8 @@ jq -n \
   --arg roadmap_report_md "$roadmap_report_md" \
   --arg roadmap_log "$roadmap_log" \
   --arg recommended_id "$recommended_id" \
+  --arg recommended_reason "$recommended_reason" \
+  --arg recommended_command "$recommended_command" \
   --arg recommended_only_selection_state "$recommended_only_selection_state" \
   --arg recommended_only_selection_reason "$recommended_only_selection_reason" \
   --argjson ran_roadmap_report "$ran_roadmap_report" \
@@ -834,6 +838,8 @@ jq -n \
     roadmap: {
       generated_this_run: ($ran_roadmap_report == 1),
       recommended_gate_id: (if $recommended_id == "" then null else $recommended_id end),
+      recommended_gate_reason: (if $recommended_reason == "" then null else $recommended_reason end),
+      recommended_gate_command: (if $recommended_command == "" then null else $recommended_command end),
       recommended_only_selection_state: $recommended_only_selection_state,
       recommended_only_selection_reason: (if $recommended_only_selection_reason == "" then null else $recommended_only_selection_reason end),
       actions_selected_count: $actions_count,

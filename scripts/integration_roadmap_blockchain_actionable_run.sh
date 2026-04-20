@@ -12,17 +12,18 @@ for cmd in bash jq mktemp chmod mkdir cat grep timeout date; do
 done
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+ACTION_TMP_DIR="$(mktemp -d "$ROOT_DIR/scripts/.integration_roadmap_blockchain_actionable_run.XXXXXX")"
+trap 'rm -rf "$TMP_DIR" "$ACTION_TMP_DIR"' EXIT
 
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
-PASS1="$TMP_DIR/pass_action_1.sh"
-PASS2="$TMP_DIR/pass_action_2.sh"
-FAIL1="$TMP_DIR/fail_action_1.sh"
-FAIL2="$TMP_DIR/fail_action_2.sh"
-SLOW1="$TMP_DIR/slow_action_1.sh"
-SLOW2="$TMP_DIR/slow_action_2.sh"
-PREFILL="$TMP_DIR/prefill_action_1.sh"
-REFRESH="$TMP_DIR/refresh_action_1.sh"
+PASS1="$ACTION_TMP_DIR/pass_action_1.sh"
+PASS2="$ACTION_TMP_DIR/pass_action_2.sh"
+FAIL1="$ACTION_TMP_DIR/fail_action_1.sh"
+FAIL2="$ACTION_TMP_DIR/fail_action_2.sh"
+SLOW1="$ACTION_TMP_DIR/slow_action_1.sh"
+SLOW2="$ACTION_TMP_DIR/slow_action_2.sh"
+PREFILL="$ACTION_TMP_DIR/prefill_action_1.sh"
+REFRESH="$ACTION_TMP_DIR/refresh_action_1.sh"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -115,6 +116,9 @@ case "$scenario" in
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "blockchain_pass_2",
+    "recommended_gate_reason": "canonical pass recommended gate",
+    "recommended_gate_command": "ROADMAP_MISSING_METRICS_FLOW=real-evidence bash \"$PASS2\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_pass_2"
     }
@@ -132,6 +136,9 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "blockchain_mainnet_activation_refresh_evidence",
+    "recommended_gate_reason": "canonical refresh-evidence gate",
+    "recommended_gate_command": "ROADMAP_MISSING_METRICS_FLOW=stale-evidence bash \"$REFRESH\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_mainnet_activation_refresh_evidence"
     }
@@ -159,8 +166,11 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "blockchain_not_selected_canonical",
+    "recommended_gate_reason": "canonical recommended id is intentionally not selected",
+    "recommended_gate_command": "bash \"$PASS2\" --canonical-not-selected",
     "mainnet_activation_missing_metrics_action": {
-      "id": "blockchain_not_selected"
+      "id": "blockchain_not_selected_legacy"
     }
   },
   "next_actions": [
@@ -191,6 +201,9 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "blockchain_timeout_1",
+    "recommended_gate_reason": "canonical timeout-first gate",
+    "recommended_gate_command": "bash \"$SLOW1\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_timeout_1"
     }
@@ -206,6 +219,9 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "",
+    "recommended_gate_reason": "",
+    "recommended_gate_command": "",
     "mainnet_activation_missing_metrics_action": {
       "id": ""
     }
@@ -221,6 +237,9 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "blockchain_slow_2",
+    "recommended_gate_reason": "canonical parallel recommended gate",
+    "recommended_gate_command": "bash \"$SLOW2\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_slow_2"
     }
@@ -275,6 +294,9 @@ if ! jq -e '
   and .roadmap.generated_this_run == true
   and .roadmap.actions_selected_count == 3
   and .roadmap.recommended_gate_id == "blockchain_pass_2"
+  and .roadmap.recommended_gate_reason == "canonical pass recommended gate"
+  and ((.roadmap.recommended_gate_command // "") | test("real-evidence"))
+  and ((.roadmap.recommended_gate_command // "") | test("pass_action_2.sh"))
   and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
   and .summary.actions_executed == 3
   and .summary.pass == 3
@@ -308,6 +330,9 @@ if ! jq -e '
   and .rc == 0
   and .roadmap.generated_this_run == true
   and .roadmap.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
+  and .roadmap.recommended_gate_reason == "canonical refresh-evidence gate"
+  and ((.roadmap.recommended_gate_command // "") | test("stale-evidence"))
+  and ((.roadmap.recommended_gate_command // "") | test("refresh_action_1.sh"))
   and .roadmap.actions_selected_count == 1
   and .roadmap.selected_action_ids == ["blockchain_mainnet_activation_refresh_evidence"]
   and .summary.actions_executed == 1
@@ -370,6 +395,9 @@ if ! jq -e '
   and .rc == 0
   and .inputs.recommended_only == true
   and .roadmap.recommended_gate_id == "blockchain_pass_2"
+  and .roadmap.recommended_gate_reason == "canonical pass recommended gate"
+  and ((.roadmap.recommended_gate_command // "") | test("real-evidence"))
+  and ((.roadmap.recommended_gate_command // "") | test("pass_action_2.sh"))
   and .roadmap.actions_selected_count == 1
   and .roadmap.selected_action_ids == ["blockchain_pass_2"]
   and .summary.actions_executed == 1
@@ -409,6 +437,8 @@ if ! jq -e '
   and .rc == 0
   and .inputs.recommended_only == true
   and .roadmap.recommended_gate_id == null
+  and .roadmap.recommended_gate_reason == null
+  and .roadmap.recommended_gate_command == null
   and .roadmap.recommended_only_selection_state == "missing_recommended_id"
   and .roadmap.recommended_only_selection_reason == "no recommended gate id was provided"
   and .roadmap.actions_selected_count == 0
@@ -437,7 +467,7 @@ bash ./scripts/roadmap_blockchain_actionable_run.sh \
   --recommended-only 1 \
   --print-summary-json 0 >"$RECOMMENDED_NOT_SELECTED_LOG" 2>&1
 
-if ! grep -F -- "recommended-only strict mode: no actions selected; reason=recommended_id_not_selected recommended_gate_id=blockchain_not_selected" "$RECOMMENDED_NOT_SELECTED_LOG" >/dev/null; then
+if ! grep -F -- "recommended-only strict mode: no actions selected; reason=recommended_id_not_selected recommended_gate_id=blockchain_not_selected_canonical" "$RECOMMENDED_NOT_SELECTED_LOG" >/dev/null; then
   echo "recommended-only strict missing-selected-id log line missing"
   cat "$RECOMMENDED_NOT_SELECTED_LOG"
   exit 1
@@ -446,9 +476,11 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.recommended_only == true
-  and .roadmap.recommended_gate_id == "blockchain_not_selected"
+  and .roadmap.recommended_gate_id == "blockchain_not_selected_canonical"
+  and .roadmap.recommended_gate_reason == "canonical recommended id is intentionally not selected"
+  and ((.roadmap.recommended_gate_command // "") | test("canonical-not-selected"))
   and .roadmap.recommended_only_selection_state == "recommended_id_not_selected"
-  and .roadmap.recommended_only_selection_reason == "recommended gate id '\''blockchain_not_selected'\'' was not present in selected blockchain actions"
+  and .roadmap.recommended_only_selection_reason == "recommended gate id '\''blockchain_not_selected_canonical'\'' was not present in selected blockchain actions"
   and .roadmap.actions_selected_count == 0
   and .roadmap.selected_action_ids == []
   and .summary.actions_executed == 0
@@ -483,6 +515,9 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 7
+  and .roadmap.recommended_gate_id == "blockchain_fail_1"
+  and .roadmap.recommended_gate_reason == null
+  and .roadmap.recommended_gate_command == null
   and .roadmap.actions_selected_count == 2
   and .summary.actions_executed == 2
   and .summary.pass == 0
@@ -525,6 +560,9 @@ if ! jq -e '
   .status == "fail"
   and .rc == 124
   and .inputs.action_timeout_sec == 1
+  and .roadmap.recommended_gate_id == "blockchain_timeout_1"
+  and .roadmap.recommended_gate_reason == "canonical timeout-first gate"
+  and ((.roadmap.recommended_gate_command // "") | test("slow_action_1.sh"))
   and .roadmap.actions_selected_count == 2
   and .summary.actions_executed == 2
   and .summary.pass == 1
@@ -559,6 +597,9 @@ bash ./scripts/roadmap_blockchain_actionable_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .roadmap.recommended_gate_id == null
+  and .roadmap.recommended_gate_reason == null
+  and .roadmap.recommended_gate_command == null
   and .roadmap.actions_selected_count == 0
   and .roadmap.selected_action_ids == []
   and .summary.actions_executed == 0
@@ -591,6 +632,9 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .inputs.parallel == true
+  and .roadmap.recommended_gate_id == "blockchain_slow_2"
+  and .roadmap.recommended_gate_reason == "canonical parallel recommended gate"
+  and ((.roadmap.recommended_gate_command // "") | test("slow_action_2.sh"))
   and .roadmap.actions_selected_count == 2
   and .summary.actions_executed == 2
   and .summary.pass == 2
