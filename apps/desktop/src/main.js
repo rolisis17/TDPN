@@ -16,6 +16,8 @@ const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
 const walletProviderEl = byId("wallet_provider");
 const walletAddressEl = byId("wallet_address");
+const challengeIdEl = byId("challenge_id");
+const walletSignatureEl = byId("wallet_signature");
 const signatureKindEl = byId("signature_kind");
 const signaturePublicKeyEl = byId("signature_public_key");
 const signaturePublicKeyTypeEl = byId("signature_public_key_type");
@@ -42,6 +44,7 @@ const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 
 const updateBtnEl = byId("update_btn");
+const walletSignInBtnEl = byId("wallet_signin_btn");
 const setProfileBtnEl = byId("set_profile_btn");
 const serviceStartBtnEl = byId("service_start_btn");
 const serviceStopBtnEl = byId("service_stop_btn");
@@ -69,6 +72,7 @@ const OPERATOR_DECISION_CONFLICT_GUIDANCE =
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
+const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
 const COMPAT_ADVANCED_DEFAULT_HINT = "Optional legacy fields for support-only compatibility flows.";
 const COMPAT_ADVANCED_LOCKED_HINT =
   "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
@@ -100,7 +104,9 @@ const state = {
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
   operatorListNextCursor: "",
-  operatorListRequestContext: null
+  operatorListRequestContext: null,
+  walletSignatureContext: null,
+  authChallengeMessage: ""
 };
 
 function readPersistedValue(key) {
@@ -395,6 +401,381 @@ function firstDefined(...values) {
     }
   }
   return undefined;
+}
+
+function setWalletSignatureContext(context) {
+  state.walletSignatureContext = context && typeof context === "object" ? context : null;
+}
+
+function clearWalletSignatureContext() {
+  state.walletSignatureContext = null;
+}
+
+function normalizeWalletProviderValue(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return WALLET_EXTENSION_PROVIDERS.has(normalized) ? normalized : undefined;
+}
+
+function walletProviderDisplayName(value) {
+  const normalized = normalizeWalletProviderValue(value);
+  if (normalized === "leap") {
+    return "Leap";
+  }
+  if (normalized === "keplr") {
+    return "Keplr";
+  }
+  return "Wallet";
+}
+
+function challengeMessageFromPayload(payload) {
+  return (
+    nonEmptyStringOrUndefined(
+      firstDefined(
+        payload?.message,
+        payload?.challenge_message,
+        payload?.challengeMessage,
+        payload?.challenge?.message,
+        payload?.challenge?.challenge_message,
+        payload?.challenge?.challengeMessage
+      )
+    ) || ""
+  );
+}
+
+function challengeIdFromPayload(payload) {
+  return (
+    nonEmptyStringOrUndefined(
+      firstDefined(
+        payload?.challenge_id,
+        payload?.challengeId,
+        payload?.challenge?.challenge_id,
+        payload?.challenge?.challengeId
+      )
+    ) || ""
+  );
+}
+
+function applyChallengePayload(payload) {
+  const challengeId = challengeIdFromPayload(payload);
+  if (challengeId) {
+    challengeIdEl.value = challengeId;
+  }
+  state.authChallengeMessage = challengeMessageFromPayload(payload);
+  if (state.authChallengeMessage) {
+    signedMessageEl.value = state.authChallengeMessage;
+  }
+}
+
+function readWalletPayload() {
+  return {
+    wallet_address: walletAddressEl.value.trim(),
+    wallet_provider: walletProviderEl.value
+  };
+}
+
+function normalizeWalletAddressForCompare(value) {
+  return (nonEmptyStringOrUndefined(value) || "").toLowerCase();
+}
+
+function cloneJSONSerializable(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function extractSignArbitraryPublicKey(payload) {
+  const publicKey = nonEmptyStringOrUndefined(
+    firstDefined(
+      payload?.pub_key?.value,
+      payload?.pubKey?.value,
+      payload?.signature?.pub_key?.value,
+      payload?.signature?.pubKey?.value,
+      payload?.result?.pub_key?.value,
+      payload?.result?.pubKey?.value,
+      payload?.result?.signature?.pub_key?.value,
+      payload?.result?.signature?.pubKey?.value,
+      payload?.pub_key,
+      payload?.pubKey
+    )
+  );
+  const publicKeyType = nonEmptyStringOrUndefined(
+    firstDefined(
+      payload?.pub_key?.type,
+      payload?.pubKey?.type,
+      payload?.signature?.pub_key?.type,
+      payload?.signature?.pubKey?.type,
+      payload?.result?.pub_key?.type,
+      payload?.result?.pubKey?.type,
+      payload?.result?.signature?.pub_key?.type,
+      payload?.result?.signature?.pubKey?.type
+    )
+  );
+  return { publicKey, publicKeyType };
+}
+
+function extractSignArbitrarySignature(payload) {
+  return (
+    nonEmptyStringOrUndefined(
+      firstDefined(
+        payload?.signature?.signature,
+        payload?.signature,
+        payload?.result?.signature?.signature,
+        payload?.result?.signature
+      )
+    ) || ""
+  );
+}
+
+function buildWalletSignatureContext({
+  walletProvider,
+  walletAddress,
+  challengeId,
+  challengeMessage,
+  chainId,
+  signature,
+  signaturePayload
+}) {
+  const normalizedProvider = normalizeWalletProviderValue(walletProvider);
+  const normalizedWalletAddress = nonEmptyStringOrUndefined(walletAddress);
+  const normalizedChallengeId = nonEmptyStringOrUndefined(challengeId);
+  const normalizedChallengeMessage = nonEmptyStringOrUndefined(challengeMessage);
+  const normalizedChainId = nonEmptyStringOrUndefined(chainId);
+  const normalizedSignature = nonEmptyStringOrUndefined(signature);
+  if (
+    !normalizedProvider ||
+    !normalizedWalletAddress ||
+    !normalizedChallengeId ||
+    !normalizedChallengeMessage ||
+    !normalizedChainId ||
+    !normalizedSignature
+  ) {
+    return null;
+  }
+  const metadata = {
+    signature_kind: "sign_arbitrary",
+    signature_source: "wallet_extension",
+    chain_id: normalizedChainId,
+    signed_message: normalizedChallengeMessage
+  };
+  const { publicKey, publicKeyType } = extractSignArbitraryPublicKey(signaturePayload);
+  if (publicKey) {
+    metadata.signature_public_key = publicKey;
+  }
+  if (publicKeyType) {
+    metadata.signature_public_key_type = publicKeyType;
+  }
+  const signatureEnvelope = cloneJSONSerializable(signaturePayload);
+  if (signatureEnvelope !== undefined) {
+    metadata.signature_envelope = signatureEnvelope;
+  }
+  return {
+    wallet_provider: normalizedProvider,
+    wallet_address: normalizedWalletAddress,
+    challenge_id: normalizedChallengeId,
+    challenge_message: normalizedChallengeMessage,
+    chain_id: normalizedChainId,
+    signature: normalizedSignature,
+    metadata
+  };
+}
+
+function isWalletSignatureContextValidForRequest(context, request) {
+  if (!context || typeof context !== "object" || !request || typeof request !== "object") {
+    return false;
+  }
+  const requestWalletProvider = normalizeWalletProviderValue(request.wallet_provider);
+  const contextWalletProvider = normalizeWalletProviderValue(context.wallet_provider);
+  if (!requestWalletProvider || !contextWalletProvider || requestWalletProvider !== contextWalletProvider) {
+    return false;
+  }
+  if (
+    normalizeWalletAddressForCompare(request.wallet_address) !== normalizeWalletAddressForCompare(context.wallet_address)
+  ) {
+    return false;
+  }
+  const requestChallengeId = nonEmptyStringOrUndefined(request.challenge_id) || "";
+  const requestSignature = nonEmptyStringOrUndefined(request.signature) || "";
+  if (!requestChallengeId || !requestSignature) {
+    return false;
+  }
+  if (requestChallengeId !== (nonEmptyStringOrUndefined(context.challenge_id) || "")) {
+    return false;
+  }
+  if (requestSignature !== (nonEmptyStringOrUndefined(context.signature) || "")) {
+    return false;
+  }
+  const currentChallengeMessage = state.authChallengeMessage || signedMessageEl.value.trim();
+  if (currentChallengeMessage !== (nonEmptyStringOrUndefined(context.challenge_message) || "")) {
+    return false;
+  }
+  const currentChainId = signatureChainIdEl.value.trim();
+  if (currentChainId !== (nonEmptyStringOrUndefined(context.chain_id) || "")) {
+    return false;
+  }
+  return true;
+}
+
+function authVerifySignatureContext(request) {
+  if (!isWalletSignatureContextValidForRequest(state.walletSignatureContext, request)) {
+    return undefined;
+  }
+  const context = state.walletSignatureContext?.metadata;
+  return context && typeof context === "object" ? context : undefined;
+}
+
+async function readWalletAddressFromSignerFactory(source, methodName, chainId) {
+  if (!source || typeof source[methodName] !== "function") {
+    return undefined;
+  }
+  const signer = await source[methodName](chainId);
+  if (!signer || typeof signer.getAccounts !== "function") {
+    return undefined;
+  }
+  const accounts = await signer.getAccounts();
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    return undefined;
+  }
+  return (
+    nonEmptyStringOrUndefined(
+      firstDefined(accounts[0]?.address, accounts[0]?.bech32Address, accounts[0]?.wallet_address)
+    ) || undefined
+  );
+}
+
+function resolveWalletExtensionClient(walletProvider) {
+  const provider = normalizeWalletProviderValue(walletProvider);
+  if (!provider) {
+    throw new Error("wallet_provider must be keplr or leap.");
+  }
+  const view = window;
+  const candidates = provider === "keplr" ? [view.keplr] : [view.leap, view.leap?.cosmos];
+  const availableCandidates = candidates.filter((entry) => entry && typeof entry === "object");
+  if (availableCandidates.length === 0) {
+    throw new Error(`${walletProviderDisplayName(provider)} extension was not detected. Install it and reload the desktop app.`);
+  }
+  const extension = availableCandidates.find(
+    (entry) => typeof entry.enable === "function" && typeof entry.signArbitrary === "function"
+  );
+  if (!extension) {
+    throw new Error(
+      `${walletProviderDisplayName(provider)} extension is missing required enable(chainId) and signArbitrary(chainId, signer, data) methods.`
+    );
+  }
+  return { provider, extension };
+}
+
+async function resolveWalletAddressFromExtension(extension, chainId) {
+  if (typeof extension.getKey === "function") {
+    const key = await extension.getKey(chainId);
+    const bech32Address = nonEmptyStringOrUndefined(
+      firstDefined(key?.bech32Address, key?.address, key?.wallet_address)
+    );
+    if (bech32Address) {
+      return bech32Address;
+    }
+  }
+  const signerFactories = [
+    [extension, "getOfflineSignerAuto"],
+    [extension, "getOfflineSigner"],
+    [extension, "getOfflineSignerOnlyAmino"],
+    [window, "getOfflineSignerAuto"],
+    [window, "getOfflineSigner"],
+    [window, "getOfflineSignerOnlyAmino"]
+  ];
+  for (const [source, methodName] of signerFactories) {
+    try {
+      const address = await readWalletAddressFromSignerFactory(source, methodName, chainId);
+      if (address) {
+        return address;
+      }
+    } catch {
+      // Continue trying alternate signer APIs.
+    }
+  }
+  return "";
+}
+
+async function completeAuthVerifyFlow(result) {
+  setSessionToken(result?.session_token || "");
+  state.clientRegistered = inferClientRegistrationFromPayload(result);
+  setRole(parseSessionRole(result));
+  await refreshClientRegistrationStatus({ quiet: true });
+  await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
+}
+
+async function runWalletExtensionSignIn() {
+  const chainId = signatureChainIdEl.value.trim();
+  if (!chainId) {
+    throw new Error("chain_id is required for wallet-extension one-click sign-in.");
+  }
+  const { wallet_provider: walletProvider } = readWalletPayload();
+  const { extension, provider } = resolveWalletExtensionClient(walletProvider);
+  await extension.enable(chainId);
+
+  let walletAddress = walletAddressEl.value.trim();
+  if (!walletAddress) {
+    walletAddress = await resolveWalletAddressFromExtension(extension, chainId);
+    if (!walletAddress) {
+      throw new Error(
+        `Unable to resolve wallet address from ${walletProviderDisplayName(provider)} extension. Enter wallet_address and retry.`
+      );
+    }
+    walletAddressEl.value = walletAddress;
+    writePersistedValue(STORAGE_KEYS.walletAddress, walletAddress);
+  }
+
+  clearWalletSignatureContext();
+  const challengeResult = await call("gpm_auth_challenge", "control_gpm_auth_challenge", {
+    request: { wallet_address: walletAddress, wallet_provider: provider }
+  });
+  applyChallengePayload(challengeResult);
+  const challengeId = challengeIdEl.value.trim();
+  const challengeMessage = state.authChallengeMessage || signedMessageEl.value.trim();
+  if (!challengeId) {
+    throw new Error("challenge_id is required. Request challenge first.");
+  }
+  if (!challengeMessage) {
+    throw new Error("challenge message is required. Request challenge first.");
+  }
+
+  const signaturePayload = await extension.signArbitrary(chainId, walletAddress, challengeMessage);
+  const signature = extractSignArbitrarySignature(signaturePayload);
+  if (!signature) {
+    throw new Error("Wallet extension returned an empty signature for signArbitrary.");
+  }
+
+  walletSignatureEl.value = signature;
+  setWalletSignatureContext(
+    buildWalletSignatureContext({
+      walletProvider: provider,
+      walletAddress,
+      challengeId,
+      challengeMessage,
+      chainId,
+      signature,
+      signaturePayload
+    })
+  );
+
+  const request = {
+    wallet_address: walletAddress,
+    wallet_provider: provider,
+    challenge_id: challengeId,
+    signature
+  };
+  const signatureMetadata = authVerifySignatureContext(request) || readAuthVerifySignatureMetadata();
+  Object.assign(request, signatureMetadata);
+  const verifyResult = await call("gpm_auth_verify", "control_gpm_auth_verify", { request });
+  await completeAuthVerifyFlow(verifyResult);
 }
 
 const CONNECTION_HINT_KEYS = {
@@ -2140,10 +2521,26 @@ sessionTokenEl.addEventListener("input", () => {
 });
 walletProviderEl.addEventListener("change", () => {
   writePersistedValue(STORAGE_KEYS.walletProvider, walletProviderEl.value);
+  clearWalletSignatureContext();
 });
 walletAddressEl.addEventListener("input", () => {
   writePersistedValue(STORAGE_KEYS.walletAddress, walletAddressEl.value);
+  clearWalletSignatureContext();
+  state.authChallengeMessage = "";
   setSelectedApplicationUpdatedAt("");
+});
+challengeIdEl.addEventListener("input", () => {
+  clearWalletSignatureContext();
+  state.authChallengeMessage = "";
+});
+walletSignatureEl.addEventListener("input", () => {
+  clearWalletSignatureContext();
+});
+signatureChainIdEl.addEventListener("input", () => {
+  clearWalletSignatureContext();
+});
+signedMessageEl.addEventListener("input", () => {
+  clearWalletSignatureContext();
 });
 chainOperatorIdEl.addEventListener("input", () => {
   writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorIdEl.value);
@@ -2163,13 +2560,21 @@ operatorListLimitEl.addEventListener("input", () => {
 });
 
 byId("challenge_btn").addEventListener("click", async () => {
-  const wallet_address = walletAddressEl.value.trim();
-  const wallet_provider = walletProviderEl.value;
+  const { wallet_address, wallet_provider } = readWalletPayload();
+  clearWalletSignatureContext();
   const result = await call("gpm_auth_challenge", "control_gpm_auth_challenge", {
     request: { wallet_address, wallet_provider }
   });
-  if (result?.challenge_id) {
-    byId("challenge_id").value = result.challenge_id;
+  applyChallengePayload(result);
+});
+
+walletSignInBtnEl.addEventListener("click", async () => {
+  try {
+    await runWalletExtensionSignIn();
+  } catch (err) {
+    print("wallet_signin (error)", {
+      error: String(err && err.message ? err.message : err)
+    });
   }
 });
 
@@ -2177,18 +2582,18 @@ byId("signin_btn").addEventListener("click", async () => {
   const request = {
     wallet_address: walletAddressEl.value.trim(),
     wallet_provider: walletProviderEl.value,
-    challenge_id: byId("challenge_id").value.trim(),
-    signature: byId("wallet_signature").value.trim()
+    challenge_id: challengeIdEl.value.trim(),
+    signature: walletSignatureEl.value.trim()
   };
-  const signatureMetadata = readAuthVerifySignatureMetadata();
+  const contextSignatureMetadata = authVerifySignatureContext(request) || {};
+  const manualSignatureMetadata = readAuthVerifySignatureMetadata();
+  const signatureMetadata =
+    Object.keys(manualSignatureMetadata).length > 0
+      ? { ...contextSignatureMetadata, ...manualSignatureMetadata }
+      : contextSignatureMetadata;
   Object.assign(request, signatureMetadata);
   const result = await call("gpm_auth_verify", "control_gpm_auth_verify", { request });
-  setSessionToken(result?.session_token || "");
-  state.clientRegistered = inferClientRegistrationFromPayload(result);
-  setRole(parseSessionRole(result));
-  await refreshClientRegistrationStatus({ quiet: true });
-  await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
+  await completeAuthVerifyFlow(result);
 });
 
 byId("session_btn").addEventListener("click", async () => {

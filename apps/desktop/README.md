@@ -60,7 +60,12 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - Server readiness and onboarding-overview parsing now includes additive chain-binding fields: `readiness.chain_binding_status`, `readiness.chain_binding_ok`, and `readiness.chain_binding_reason` (used to explain bound vs pending/mismatch operator states, preserve backend lock reason text, and append actionable guidance such as session refresh or re-apply/re-approve when mismatch persists).
 - Desktop can also hydrate onboarding state through consolidated `POST /v1/gpm/onboarding/overview` (`session + registration + readiness`); existing `client/status` and `server/status` contracts remain supported for backward compatibility.
 - Desktop readiness parsing is API-contract compatible with both snake_case and camelCase readiness fields (while preserving legacy aliases such as `client_tab_enabled` and `client_lock_hint`).
-- Desktop sign-in keeps the same scaffold wallet/provider/challenge/signature flow; an optional advanced section can add verify metadata (`signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`) and only non-empty fields are sent with `control_gpm_auth_verify`.
+- Desktop sign-in now includes wallet-extension one-click flow for `Keplr` and `Leap`; this path requires non-empty `chain_id` (for example `cosmoshub-4`) and uses `signature_source=wallet_extension` with `control_gpm_auth_verify`.
+- Manual sign-in remains available as a fallback: request a challenge, paste the wallet signature, and click `Sign In` (use `signature_source=manual` only when policy allows manual source).
+- Expected sign-in troubleshooting text:
+  - `chain_id is required for wallet-extension one-click sign-in` -> set `chain_id` to the active wallet network and retry.
+  - `signature_source must be wallet_extension by policy` or `unsupported signature_source` -> retry with wallet-extension one-click (`Keplr`/`Leap`) or relax strict source policy for manual testing.
+  - `signed_message does not match issued challenge message` -> request a fresh challenge and re-sign the returned message without edits.
 - Operator approval (`POST /v1/gpm/onboarding/operator/approve`) now expects an admin session token (`session_token`) by default; legacy `admin_token` fallback remains supported when `GPM_APPROVAL_ADMIN_TOKEN` is configured.
 - Operator queue listing is available via `POST /v1/gpm/onboarding/operator/list`; desktop provides a “List Pending Operators” action that sends the active `session_token` with `status=pending` and a bounded `limit`.
  
