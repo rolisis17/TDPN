@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:*"
+    />
     <title>GPM Portal</title>
     <link rel="stylesheet" href="./assets/gpm.css" />
   </head>
@@ -35,7 +39,13 @@
           </label>
           <label>
             Session token
-            <input id="session_token" placeholder="session token after sign in" spellcheck="false" autocomplete="off" />
+            <input
+              id="session_token"
+              type="password"
+              placeholder="session token after sign in"
+              spellcheck="false"
+              autocomplete="off"
+            />
           </label>
           <label>
             Current role

@@ -75,8 +75,8 @@ const COMPAT_ADVANCED_LOCKED_HINT =
 const COMPAT_ADVANCED_DISABLED_HINT =
   "Legacy bootstrap/invite overrides are disabled by policy in this build.";
 const TDPN_ENV_NAME_REGEX = /\bTDPN_([A-Z0-9_]+)\b/g;
+const LEGACY_SECRET_STORAGE_KEYS = Object.freeze(["gpm.desktop.session_token"]);
 const STORAGE_KEYS = Object.freeze({
-  sessionToken: "gpm.desktop.session_token",
   role: "gpm.desktop.role",
   walletAddress: "gpm.desktop.wallet_address",
   walletProvider: "gpm.desktop.wallet_provider",
@@ -124,6 +124,87 @@ function writePersistedValue(key, value) {
   }
 }
 
+function clearLegacySecretStorage() {
+  try {
+    for (const key of LEGACY_SECRET_STORAGE_KEYS) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage failures in this scaffold-level persistence.
+  }
+}
+
+function isSensitiveFieldKey(key) {
+  if (typeof key !== "string" || !key) {
+    return false;
+  }
+  const normalized = key.trim().toLowerCase();
+  const compact = normalized.replace(/[_-]/g, "");
+  return (
+    normalized === "token" ||
+    normalized === "auth_token" ||
+    normalized === "authtoken" ||
+    normalized === "access_token" ||
+    normalized === "accesstoken" ||
+    normalized === "refresh_token" ||
+    normalized === "refreshtoken" ||
+    normalized === "secret" ||
+    normalized === "password" ||
+    normalized === "private_key" ||
+    normalized === "privatekey" ||
+    normalized === "invite_key" ||
+    normalized === "invitekey" ||
+    normalized === "bearer" ||
+    normalized === "api_key" ||
+    normalized === "apikey" ||
+    normalized === "signature" ||
+    normalized === "signature_envelope" ||
+    normalized === "signed_message" ||
+    normalized.endsWith("_token") ||
+    normalized.endsWith("_secret") ||
+    normalized.endsWith("_password") ||
+    normalized.endsWith("_private_key") ||
+    normalized.endsWith("_invite_key") ||
+    normalized.endsWith("_api_key") ||
+    normalized.endsWith("_signature") ||
+    normalized.includes("private_key") ||
+    normalized.includes("privatekey") ||
+    normalized.includes("invite_key") ||
+    normalized.includes("invitekey") ||
+    normalized.includes("bearer") ||
+    normalized.includes("signature") ||
+    normalized.includes("secret") ||
+    normalized.includes("password") ||
+    compact.endsWith("token") ||
+    compact.endsWith("secret") ||
+    compact.endsWith("apikey")
+  );
+}
+
+function sanitizePayloadForDisplay(payload, depth = 0) {
+  if (depth > 8 || payload === null || payload === undefined) {
+    return payload;
+  }
+  if (typeof payload === "string") {
+    return payload;
+  }
+  if (Array.isArray(payload)) {
+    return payload.map((entry) => sanitizePayloadForDisplay(entry, depth + 1));
+  }
+  if (typeof payload === "object") {
+    const sanitized = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (isSensitiveFieldKey(key)) {
+        sanitized[key] = "[REDACTED]";
+      } else {
+        sanitized[key] = sanitizePayloadForDisplay(value, depth + 1);
+      }
+    }
+    return sanitized;
+  }
+  return payload;
+}
+
 function restoreSelectValue(selectEl, value) {
   if (!value) {
     return;
@@ -135,7 +216,7 @@ function restoreSelectValue(selectEl, value) {
 }
 
 function formatPayloadForDisplay(payload) {
-  const normalizedPayload = normalizeLegacyEnvNameDisplayPayload(payload);
+  const normalizedPayload = normalizeLegacyEnvNameDisplayPayload(sanitizePayloadForDisplay(payload));
   const text =
     typeof normalizedPayload === "string"
       ? normalizedPayload
@@ -1612,7 +1693,7 @@ function setSessionToken(value, options = {}) {
   state.sessionToken = nextValue;
   sessionTokenEl.value = state.sessionToken;
   if (persist) {
-    writePersistedValue(STORAGE_KEYS.sessionToken, state.sessionToken);
+    clearLegacySecretStorage();
   }
   syncServerRoleLockState();
   syncOperatorListPaginationControlState();
@@ -1624,11 +1705,12 @@ function setOperatorApplicationStatus(value) {
 }
 
 function restorePersistedSessionErgonomics() {
+  clearLegacySecretStorage();
   restoreSelectValue(walletProviderEl, readPersistedValue(STORAGE_KEYS.walletProvider));
   walletAddressEl.value = readPersistedValue(STORAGE_KEYS.walletAddress) || "";
   chainOperatorIdEl.value = readPersistedValue(STORAGE_KEYS.chainOperatorId) || "";
   restoreSelectValue(pathProfileEl, readPersistedValue(STORAGE_KEYS.pathProfile));
-  setSessionToken(readPersistedValue(STORAGE_KEYS.sessionToken) || "", { persist: false });
+  setSessionToken("", { persist: false });
   setRole(readPersistedValue(STORAGE_KEYS.role) || "client", { persist: false });
   setSelectedApplicationUpdatedAt(readPersistedValue(STORAGE_KEYS.selectedApplicationUpdatedAt) || "", {
     persist: false

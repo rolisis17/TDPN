@@ -319,13 +319,80 @@ fn truncate_error_detail(text: &str) -> String {
     format!("{kept}...[truncated {omitted} chars]")
 }
 
+fn is_sensitive_error_field_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    let compact = normalized.replace(['_', '-'], "");
+    matches!(
+        normalized.as_str(),
+        "token"
+            | "auth_token"
+            | "authtoken"
+            | "access_token"
+            | "accesstoken"
+            | "refresh_token"
+            | "refreshtoken"
+            | "secret"
+            | "password"
+            | "private_key"
+            | "privatekey"
+            | "invite_key"
+            | "invitekey"
+            | "bearer"
+            | "api_key"
+            | "apikey"
+            | "signature"
+            | "signature_envelope"
+            | "signed_message"
+    ) || normalized.ends_with("_token")
+        || normalized.ends_with("_secret")
+        || normalized.ends_with("_password")
+        || normalized.ends_with("_private_key")
+        || normalized.ends_with("_invite_key")
+        || normalized.ends_with("_api_key")
+        || normalized.ends_with("_signature")
+        || normalized.contains("private_key")
+        || normalized.contains("privatekey")
+        || normalized.contains("invite_key")
+        || normalized.contains("invitekey")
+        || normalized.contains("bearer")
+        || normalized.contains("signature")
+        || normalized.contains("secret")
+        || normalized.contains("password")
+        || compact.ends_with("token")
+        || compact.ends_with("secret")
+        || compact.ends_with("apikey")
+}
+
+fn redact_sensitive_error_value(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => {
+            Value::Array(values.iter().map(redact_sensitive_error_value).collect())
+        }
+        Value::Object(object) => {
+            let mut redacted = serde_json::Map::new();
+            for (key, entry) in object {
+                if is_sensitive_error_field_key(key) {
+                    redacted.insert(key.clone(), Value::String("[REDACTED]".to_string()));
+                } else {
+                    redacted.insert(key.clone(), redact_sensitive_error_value(entry));
+                }
+            }
+            Value::Object(redacted)
+        }
+        other => other.clone(),
+    }
+}
+
 fn extract_json_error_detail(body: &str) -> Option<String> {
     let parsed: Value = serde_json::from_str(body).ok()?;
     let error_value = parsed.get("error")?;
     let raw = match error_value {
         Value::Null => return None,
         Value::String(text) => text.trim().to_string(),
-        other => serde_json::to_string(other).ok()?.trim().to_string(),
+        other => serde_json::to_string(&redact_sensitive_error_value(other))
+            .ok()?
+            .trim()
+            .to_string(),
     };
     if raw.is_empty() {
         return None;
@@ -1521,6 +1588,32 @@ mod tests {
             object_detail.contains("\"code\":\"stale\""),
             "expected object detail to preserve JSON structure: {object_detail}"
         );
+    }
+
+    #[test]
+    fn extract_json_error_detail_redacts_sensitive_fields_in_error_objects() {
+        let detail = extract_json_error_detail(
+            r#"{"error":{"code":"stale","session_token":"abc123","nested":{"invite_key":"inv-1","token_type":"bearer"}}}"#,
+        )
+        .expect("expected detail");
+        assert!(
+            detail.contains("\"code\":\"stale\""),
+            "expected non-sensitive field to remain visible: {detail}"
+        );
+        assert!(
+            detail.contains("\"session_token\":\"[REDACTED]\""),
+            "expected session token to be redacted: {detail}"
+        );
+        assert!(
+            detail.contains("\"invite_key\":\"[REDACTED]\""),
+            "expected nested invite key to be redacted: {detail}"
+        );
+        assert!(
+            detail.contains("\"token_type\":\"bearer\""),
+            "expected non-sensitive token_type field to remain visible: {detail}"
+        );
+        assert!(!detail.contains("abc123"), "raw secret leaked: {detail}");
+        assert!(!detail.contains("inv-1"), "raw invite key leaked: {detail}");
     }
 
     #[test]

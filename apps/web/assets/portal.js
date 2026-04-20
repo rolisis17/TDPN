@@ -56,9 +56,9 @@ const OPERATOR_DECISION_CONFLICT_GUIDANCE =
   "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
+const MAX_OUTPUT_CHARS = 64 * 1024;
 const PERSISTED_FIELD_IDS = [
   "api_base",
-  "session_token",
   "role",
   "wallet_address",
   "wallet_provider",
@@ -144,6 +144,14 @@ function restorePortalState() {
   }
   if (!state || typeof state !== "object") {
     return;
+  }
+  if (typeof state.session_token === "string") {
+    delete state.session_token;
+    try {
+      store.setItem(PORTAL_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // Best effort only: ignore quota or browser storage errors.
+    }
   }
   for (const id of PERSISTED_FIELD_IDS) {
     if (typeof state[id] !== "string") {
@@ -283,6 +291,85 @@ function firstDefined(...values) {
     }
   }
   return undefined;
+}
+
+function isSensitiveFieldKey(key) {
+  if (typeof key !== "string" || !key) {
+    return false;
+  }
+  const normalized = key.trim().toLowerCase();
+  const compact = normalized.replace(/[_-]/g, "");
+  return (
+    normalized === "token" ||
+    normalized === "auth_token" ||
+    normalized === "authtoken" ||
+    normalized === "access_token" ||
+    normalized === "accesstoken" ||
+    normalized === "refresh_token" ||
+    normalized === "refreshtoken" ||
+    normalized === "secret" ||
+    normalized === "password" ||
+    normalized === "private_key" ||
+    normalized === "privatekey" ||
+    normalized === "invite_key" ||
+    normalized === "invitekey" ||
+    normalized === "bearer" ||
+    normalized === "api_key" ||
+    normalized === "apikey" ||
+    normalized === "signature" ||
+    normalized === "signature_envelope" ||
+    normalized === "signed_message" ||
+    normalized.endsWith("_token") ||
+    normalized.endsWith("_secret") ||
+    normalized.endsWith("_password") ||
+    normalized.endsWith("_private_key") ||
+    normalized.endsWith("_invite_key") ||
+    normalized.endsWith("_api_key") ||
+    normalized.endsWith("_signature") ||
+    normalized.includes("private_key") ||
+    normalized.includes("privatekey") ||
+    normalized.includes("invite_key") ||
+    normalized.includes("invitekey") ||
+    normalized.includes("bearer") ||
+    normalized.includes("signature") ||
+    normalized.includes("secret") ||
+    normalized.includes("password") ||
+    compact.endsWith("token") ||
+    compact.endsWith("secret") ||
+    compact.endsWith("apikey")
+  );
+}
+
+function sanitizePayloadForDisplay(payload, depth = 0) {
+  if (depth > 8 || payload === null || payload === undefined) {
+    return payload;
+  }
+  if (typeof payload === "string") {
+    return payload;
+  }
+  if (Array.isArray(payload)) {
+    return payload.map((entry) => sanitizePayloadForDisplay(entry, depth + 1));
+  }
+  if (typeof payload === "object") {
+    const sanitized = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (isSensitiveFieldKey(key)) {
+        sanitized[key] = "[REDACTED]";
+      } else {
+        sanitized[key] = sanitizePayloadForDisplay(value, depth + 1);
+      }
+    }
+    return sanitized;
+  }
+  return payload;
+}
+
+function isLiteralLoopbackHost(hostname) {
+  if (typeof hostname !== "string") {
+    return false;
+  }
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
 }
 
 function nonEmptyString(value) {
@@ -1561,9 +1648,13 @@ function setStatus(kind, title, detail) {
 }
 
 function print(label, payload) {
-  const displayPayload = withBootstrapDirectoryFallbackHint(payload, payload);
+  const displayPayload = sanitizePayloadForDisplay(withBootstrapDirectoryFallbackHint(payload, payload));
   const text = typeof displayPayload === "string" ? displayPayload : JSON.stringify(displayPayload, null, 2);
-  outputEl.textContent = `[${new Date().toISOString()}] ${label}\n${text}`;
+  const boundedText =
+    text.length <= MAX_OUTPUT_CHARS
+      ? text
+      : `${text.slice(0, MAX_OUTPUT_CHARS)}\n...[TRUNCATED ${text.length - MAX_OUTPUT_CHARS} chars]`;
+  outputEl.textContent = `[${new Date().toISOString()}] ${label}\n${boundedText}`;
 }
 
 function apiBase() {
@@ -1579,6 +1670,20 @@ function apiBase() {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("API base URL must start with http:// or https://.");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("API base URL must not include username or password credentials.");
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error("API base URL must not include query or fragment values.");
+  }
+  if (parsed.protocol === "http:" && !isLiteralLoopbackHost(parsed.hostname)) {
+    throw new Error("HTTP API base URLs are restricted to literal loopback hosts (127.0.0.1 or [::1]).");
+  }
+  if (parsed.protocol === "https:" || isLiteralLoopbackHost(parsed.hostname)) {
+    // Allowed.
+  } else {
+    throw new Error("Non-loopback API base URLs must use https.");
   }
   const pathname = parsed.pathname.replace(/\/+$/, "");
   return pathname && pathname !== "/" ? `${parsed.origin}${pathname}` : parsed.origin;

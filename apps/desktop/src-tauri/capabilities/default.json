@@ -4,10 +4,6 @@
   "description": "Default desktop capability for Global Private Mesh (GPM) scaffold with legacy TDPN compatibility",
   "windows": ["main"],
   "permissions": [
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
-    "core:event:allow-emit",
-    "core:event:allow-emit-to",
     "core:webview:deny-internal-toggle-devtools",
     "core:window:deny-create",
     "core:window:deny-destroy",
