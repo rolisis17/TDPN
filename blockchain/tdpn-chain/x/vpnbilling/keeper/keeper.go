@@ -62,7 +62,9 @@ func (k *Keeper) CreateReservation(record types.CreditReservation) (types.Credit
 		}
 		return normalizedExisting, nil
 	}
-	if existingByBusinessKey, found := k.reservationByBusinessKeyLocked(normalized.SessionID, normalized.SponsorID, normalized.AssetDenom); found {
+	if existingByBusinessKey, found, err := k.reservationByBusinessKeyLocked(normalized.SessionID, normalized.SponsorID, normalized.AssetDenom); err != nil {
+		return types.CreditReservation{}, err
+	} else if found {
 		if existingByBusinessKey.ReservationID == normalized.ReservationID {
 			if err := k.upsertReservationLocked(existingByBusinessKey); err != nil {
 				return types.CreditReservation{}, err
@@ -92,17 +94,28 @@ func (k *Keeper) GetReservation(reservationID string) (types.CreditReservation, 
 }
 
 func (k *Keeper) ListReservations() []types.CreditReservation {
+	records, err := k.ListReservationsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListReservationsWithError() ([]types.CreditReservation, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	records := k.store.ListReservations()
+	records, err := k.listReservationsLocked()
+	if err != nil {
+		return nil, err
+	}
 	for i := range records {
 		records[i] = normalizeReservation(records[i])
 	}
 	slices.SortFunc(records, func(a, b types.CreditReservation) int {
 		return compareByID(a.ReservationID, b.ReservationID)
 	})
-	return records
+	return records, nil
 }
 
 func (k *Keeper) UpsertSettlement(record types.SettlementRecord) {
@@ -158,7 +171,11 @@ func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.Settle
 		}
 		return normalizedExisting, nil
 	}
-	for _, existingSettlement := range k.store.ListSettlements() {
+	settlements, err := k.listSettlementsLocked()
+	if err != nil {
+		return types.SettlementRecord{}, err
+	}
+	for _, existingSettlement := range settlements {
 		normalizedExistingSettlement := normalizeSettlement(existingSettlement)
 		if normalizedExistingSettlement.ReservationID == normalized.ReservationID &&
 			normalizedExistingSettlement.SettlementID != normalized.SettlementID {
@@ -203,17 +220,28 @@ func (k *Keeper) GetSettlement(settlementID string) (types.SettlementRecord, boo
 }
 
 func (k *Keeper) ListSettlements() []types.SettlementRecord {
+	records, err := k.ListSettlementsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListSettlementsWithError() ([]types.SettlementRecord, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	records := k.store.ListSettlements()
+	records, err := k.listSettlementsLocked()
+	if err != nil {
+		return nil, err
+	}
 	for i := range records {
 		records[i] = normalizeSettlement(records[i])
 	}
 	slices.SortFunc(records, func(a, b types.SettlementRecord) int {
 		return compareByID(a.SettlementID, b.SettlementID)
 	})
-	return records
+	return records, nil
 }
 
 func reservationAfterSettlement(record types.CreditReservation) types.CreditReservation {
@@ -381,17 +409,43 @@ func reservationBusinessKeyID(sessionID, sponsorID, assetDenom string) string {
 	return fmt.Sprintf("session=%q sponsor=%q asset=%q", sessionID, sponsorID, assetDenom)
 }
 
-func (k *Keeper) reservationByBusinessKeyLocked(sessionID, sponsorID, assetDenom string) (types.CreditReservation, bool) {
-	for _, existingReservation := range k.store.ListReservations() {
+func (k *Keeper) reservationByBusinessKeyLocked(sessionID, sponsorID, assetDenom string) (types.CreditReservation, bool, error) {
+	reservations, err := k.listReservationsLocked()
+	if err != nil {
+		return types.CreditReservation{}, false, err
+	}
+	for _, existingReservation := range reservations {
 		normalizedExisting := normalizeReservation(existingReservation)
 		if normalizedExisting.SessionID != sessionID ||
 			normalizedExisting.SponsorID != sponsorID ||
 			normalizedExisting.AssetDenom != assetDenom {
 			continue
 		}
-		return normalizedExisting, true
+		return normalizedExisting, true, nil
 	}
-	return types.CreditReservation{}, false
+	return types.CreditReservation{}, false, nil
+}
+
+func (k *Keeper) listReservationsLocked() ([]types.CreditReservation, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListReservationsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load reservations: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListReservations(), nil
+}
+
+func (k *Keeper) listSettlementsLocked() ([]types.SettlementRecord, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListSettlementsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load settlements: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListSettlements(), nil
 }
 
 func compareByID(a, b string) int {

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"syscall"
 	"sync"
 
 	"github.com/tdpn/tdpn-chain/internal/fsguard"
@@ -35,6 +37,13 @@ type KeeperStoreWithWriteErrors interface {
 	UpsertPolicyWithError(record types.GovernancePolicy) error
 	UpsertDecisionWithError(record types.GovernanceDecision) error
 	PutAuditActionWithError(record types.GovernanceAuditAction) error
+}
+
+// KeeperStoreWithReadErrors allows callers to fail closed when decoding persisted records.
+type KeeperStoreWithReadErrors interface {
+	ListPoliciesWithError() ([]types.GovernancePolicy, error)
+	ListDecisionsWithError() ([]types.GovernanceDecision, error)
+	ListAuditActionsWithError() ([]types.GovernanceAuditAction, error)
 }
 
 // InMemoryStore is the default keeper store implementation.
@@ -80,6 +89,10 @@ func (s *InMemoryStore) ListPolicies() []types.GovernancePolicy {
 	return records
 }
 
+func (s *InMemoryStore) ListPoliciesWithError() ([]types.GovernancePolicy, error) {
+	return s.ListPolicies(), nil
+}
+
 func (s *InMemoryStore) UpsertDecision(record types.GovernanceDecision) {
 	s.decisions[record.DecisionID] = record
 }
@@ -108,6 +121,10 @@ func (s *InMemoryStore) ListDecisions() []types.GovernanceDecision {
 	return records
 }
 
+func (s *InMemoryStore) ListDecisionsWithError() ([]types.GovernanceDecision, error) {
+	return s.ListDecisions(), nil
+}
+
 func (s *InMemoryStore) PutAuditAction(record types.GovernanceAuditAction) {
 	s.auditActions[record.ActionID] = record
 }
@@ -134,6 +151,10 @@ func (s *InMemoryStore) ListAuditActions() []types.GovernanceAuditAction {
 		records = append(records, s.auditActions[id])
 	}
 	return records
+}
+
+func (s *InMemoryStore) ListAuditActionsWithError() ([]types.GovernanceAuditAction, error) {
+	return s.ListAuditActions(), nil
 }
 
 type fileStoreSnapshot struct {
@@ -259,6 +280,10 @@ func (s *FileStore) ListPolicies() []types.GovernancePolicy {
 	return records
 }
 
+func (s *FileStore) ListPoliciesWithError() ([]types.GovernancePolicy, error) {
+	return s.ListPolicies(), nil
+}
+
 func (s *FileStore) UpsertDecision(record types.GovernanceDecision) {
 	_ = s.UpsertDecisionWithError(record)
 }
@@ -304,6 +329,10 @@ func (s *FileStore) ListDecisions() []types.GovernanceDecision {
 	return records
 }
 
+func (s *FileStore) ListDecisionsWithError() ([]types.GovernanceDecision, error) {
+	return s.ListDecisions(), nil
+}
+
 func (s *FileStore) PutAuditAction(record types.GovernanceAuditAction) {
 	_ = s.PutAuditActionWithError(record)
 }
@@ -347,6 +376,10 @@ func (s *FileStore) ListAuditActions() []types.GovernanceAuditAction {
 		records = append(records, s.audit[id])
 	}
 	return records
+}
+
+func (s *FileStore) ListAuditActionsWithError() ([]types.GovernanceAuditAction, error) {
+	return s.ListAuditActions(), nil
 }
 
 func (s *FileStore) persistLocked() error {
@@ -415,7 +448,14 @@ func syncDirectory(path string) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.EINVAL)) {
+			// Windows commonly rejects syncing directory handles even though rename succeeded.
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func buildPolicySnapshotMap(input map[string]types.GovernancePolicy) (map[string]types.GovernancePolicy, error) {

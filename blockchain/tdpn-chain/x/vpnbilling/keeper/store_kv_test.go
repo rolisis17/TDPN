@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"encoding/json"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -86,7 +87,7 @@ func TestNewKVStoreNilFallsBackToMapStore(t *testing.T) {
 	}
 }
 
-func TestKVStoreMalformedPayloadsFailSoft(t *testing.T) {
+func TestKVStoreMalformedPayloadsFailClosed(t *testing.T) {
 	t.Parallel()
 
 	backend := kvtypes.NewMapStore()
@@ -114,11 +115,11 @@ func TestKVStoreMalformedPayloadsFailSoft(t *testing.T) {
 	}
 
 	reservations := store.ListReservations()
-	if len(reservations) != 1 {
-		t.Fatalf("expected malformed reservation payload to be skipped, got %d records", len(reservations))
+	if len(reservations) != 0 {
+		t.Fatalf("expected reservation listing to fail closed, got %d records", len(reservations))
 	}
-	if reservations[0] != validReservation {
-		t.Fatalf("expected only valid reservation %+v, got %+v", validReservation, reservations[0])
+	if _, err := store.ListReservationsWithError(); err == nil {
+		t.Fatal("expected malformed reservation payload to return list decode error")
 	}
 
 	validSettlement := types.SettlementRecord{
@@ -144,10 +145,56 @@ func TestKVStoreMalformedPayloadsFailSoft(t *testing.T) {
 	}
 
 	settlements := store.ListSettlements()
-	if len(settlements) != 1 {
-		t.Fatalf("expected malformed settlement payload to be skipped, got %d records", len(settlements))
+	if len(settlements) != 0 {
+		t.Fatalf("expected settlement listing to fail closed, got %d records", len(settlements))
 	}
-	if settlements[0] != validSettlement {
-		t.Fatalf("expected only valid settlement %+v, got %+v", validSettlement, settlements[0])
+	if _, err := store.ListSettlementsWithError(); err == nil {
+		t.Fatal("expected malformed settlement payload to return list decode error")
+	}
+}
+
+func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+
+	mismatchedReservation := types.CreditReservation{
+		ReservationID: "res-other",
+		SessionID:     "sess-identity",
+		AssetDenom:    "uusdc",
+		Amount:        10,
+	}
+	reservationPayload, err := json.Marshal(mismatchedReservation)
+	if err != nil {
+		t.Fatalf("marshal mismatched reservation: %v", err)
+	}
+	backend.Set(reservationKey("res-key"), reservationPayload)
+
+	if _, ok := store.GetReservation("res-key"); ok {
+		t.Fatal("expected key/payload reservation identity mismatch to be rejected")
+	}
+	if _, err := store.ListReservationsWithError(); err == nil {
+		t.Fatal("expected reservation list identity mismatch to return decode error")
+	}
+
+	mismatchedSettlement := types.SettlementRecord{
+		SettlementID:  "set-other",
+		ReservationID: "res-key",
+		SessionID:     "sess-identity",
+		BilledAmount:  7,
+		AssetDenom:    "uusdc",
+	}
+	settlementPayload, err := json.Marshal(mismatchedSettlement)
+	if err != nil {
+		t.Fatalf("marshal mismatched settlement: %v", err)
+	}
+	backend.Set(settlementKey("set-key"), settlementPayload)
+
+	if _, ok := store.GetSettlement("set-key"); ok {
+		t.Fatal("expected key/payload settlement identity mismatch to be rejected")
+	}
+	if _, err := store.ListSettlementsWithError(); err == nil {
+		t.Fatal("expected settlement list identity mismatch to return decode error")
 	}
 }

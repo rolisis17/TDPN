@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
+	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
 
@@ -954,5 +955,63 @@ func TestKeeperFinalizeSettlementRollsBackReservationOnSettlementWriteError(t *t
 	}
 	if after.Status != chaintypes.ReconciliationPending {
 		t.Fatalf("expected reservation status rollback to %q, got %q", chaintypes.ReconciliationPending, after.Status)
+	}
+}
+
+func TestKeeperCreateReservationFailsClosedOnCorruptReservationListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	backend.Set(reservationKey("res-corrupt"), []byte("{"))
+
+	_, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-new",
+		SponsorID:     "sponsor-new",
+		SessionID:     "sess-new",
+		AssetDenom:    "uusdc",
+		Amount:        10,
+	})
+	if err == nil {
+		t.Fatal("expected create reservation to fail closed on corrupt listing")
+	}
+	if !strings.Contains(err.Error(), "load reservations") {
+		t.Fatalf("expected reservation load error context, got: %v", err)
+	}
+}
+
+func TestKeeperFinalizeSettlementFailsClosedOnCorruptSettlementListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-corrupt-settlement",
+		SessionID:     "sess-corrupt-settlement",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+	})
+	if err != nil {
+		t.Fatalf("create reservation returned unexpected error: %v", err)
+	}
+
+	backend.Set(settlementKey("set-corrupt"), []byte("{"))
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-new",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  5,
+		AssetDenom:    reservation.AssetDenom,
+	})
+	if err == nil {
+		t.Fatal("expected finalize settlement to fail closed on corrupt listing")
+	}
+	if !strings.Contains(err.Error(), "load settlements") {
+		t.Fatalf("expected settlement load error context, got: %v", err)
 	}
 }

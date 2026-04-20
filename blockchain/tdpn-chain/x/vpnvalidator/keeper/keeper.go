@@ -59,7 +59,11 @@ func (k *Keeper) CreateEligibility(record types.ValidatorEligibility) (types.Val
 		}
 	}
 
-	existingByCanonical := listEligibilityByCanonicalID(k.store.ListEligibilities(), normalized.ValidatorID)
+	existingEligibilities, err := k.listEligibilitiesLocked()
+	if err != nil {
+		return types.ValidatorEligibility{}, err
+	}
+	existingByCanonical := listEligibilityByCanonicalID(existingEligibilities, normalized.ValidatorID)
 	if len(existingByCanonical) > 0 {
 		for _, existingRecord := range existingByCanonical {
 			if !eligibilityRecordsEqual(existingRecord, normalized) {
@@ -95,7 +99,11 @@ func (k *Keeper) GetEligibility(validatorID string) (types.ValidatorEligibility,
 		}
 	}
 	if !ok {
-		record, ok = selectCompatibilityEligibilityRecord(k.store.ListEligibilities(), canonicalID)
+		records, err := k.listEligibilitiesLocked()
+		if err != nil {
+			return types.ValidatorEligibility{}, false
+		}
+		record, ok = selectCompatibilityEligibilityRecord(records, canonicalID)
 		if !ok {
 			return types.ValidatorEligibility{}, false
 		}
@@ -104,14 +112,26 @@ func (k *Keeper) GetEligibility(validatorID string) (types.ValidatorEligibility,
 }
 
 func (k *Keeper) ListEligibilities() []types.ValidatorEligibility {
+	records, err := k.ListEligibilitiesWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListEligibilitiesWithError() ([]types.ValidatorEligibility, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	records := dedupeCanonicalEligibilities(k.store.ListEligibilities())
+	records, err := k.listEligibilitiesLocked()
+	if err != nil {
+		return nil, err
+	}
+	records = dedupeCanonicalEligibilities(records)
 	slices.SortFunc(records, func(a, b types.ValidatorEligibility) int {
 		return compareByID(a.ValidatorID, b.ValidatorID)
 	})
-	return records
+	return records, nil
 }
 
 func (k *Keeper) UpsertStatusRecord(record types.ValidatorStatusRecord) {
@@ -137,7 +157,11 @@ func (k *Keeper) CreateStatusRecord(record types.ValidatorStatusRecord) (types.V
 
 	eligibility, ok := k.store.GetEligibility(normalized.ValidatorID)
 	if !ok {
-		eligibility, ok = selectCompatibilityEligibilityRecord(k.store.ListEligibilities(), normalized.ValidatorID)
+		eligibilities, err := k.listEligibilitiesLocked()
+		if err != nil {
+			return types.ValidatorStatusRecord{}, err
+		}
+		eligibility, ok = selectCompatibilityEligibilityRecord(eligibilities, normalized.ValidatorID)
 	}
 	if !ok {
 		return types.ValidatorStatusRecord{}, eligibilityNotFoundError(normalized.ValidatorID)
@@ -155,7 +179,11 @@ func (k *Keeper) CreateStatusRecord(record types.ValidatorStatusRecord) (types.V
 		}
 	}
 
-	existingByCanonical := listStatusByCanonicalID(k.store.ListStatusRecords(), normalized.StatusID)
+	existingStatuses, err := k.listStatusRecordsLocked()
+	if err != nil {
+		return types.ValidatorStatusRecord{}, err
+	}
+	existingByCanonical := listStatusByCanonicalID(existingStatuses, normalized.StatusID)
 	if len(existingByCanonical) > 0 {
 		for _, existingRecord := range existingByCanonical {
 			if !statusRecordEqual(existingRecord, normalized) {
@@ -191,7 +219,11 @@ func (k *Keeper) GetStatusRecord(statusID string) (types.ValidatorStatusRecord, 
 		}
 	}
 	if !ok {
-		record, ok = selectCompatibilityStatusRecord(k.store.ListStatusRecords(), canonicalID)
+		records, err := k.listStatusRecordsLocked()
+		if err != nil {
+			return types.ValidatorStatusRecord{}, false
+		}
+		record, ok = selectCompatibilityStatusRecord(records, canonicalID)
 		if !ok {
 			return types.ValidatorStatusRecord{}, false
 		}
@@ -200,14 +232,26 @@ func (k *Keeper) GetStatusRecord(statusID string) (types.ValidatorStatusRecord, 
 }
 
 func (k *Keeper) ListStatusRecords() []types.ValidatorStatusRecord {
+	records, err := k.ListStatusRecordsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListStatusRecordsWithError() ([]types.ValidatorStatusRecord, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	records := dedupeCanonicalStatusRecords(k.store.ListStatusRecords())
+	records, err := k.listStatusRecordsLocked()
+	if err != nil {
+		return nil, err
+	}
+	records = dedupeCanonicalStatusRecords(records)
 	slices.SortFunc(records, func(a, b types.ValidatorStatusRecord) int {
 		return compareByID(a.StatusID, b.StatusID)
 	})
-	return records
+	return records, nil
 }
 
 // SelectEpochValidators applies deterministic bootstrap policy for stable and rotating seat selection.
@@ -295,6 +339,28 @@ func (k *Keeper) upsertStatusRecordLocked(record types.ValidatorStatusRecord) er
 
 	k.store.UpsertStatusRecord(record)
 	return nil
+}
+
+func (k *Keeper) listEligibilitiesLocked() ([]types.ValidatorEligibility, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListEligibilitiesWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load eligibilities: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListEligibilities(), nil
+}
+
+func (k *Keeper) listStatusRecordsLocked() ([]types.ValidatorStatusRecord, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListStatusRecordsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load status records: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListStatusRecords(), nil
 }
 
 func listEligibilityByCanonicalID(records []types.ValidatorEligibility, canonicalValidatorID string) []types.ValidatorEligibility {

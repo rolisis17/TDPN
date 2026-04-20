@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"encoding/json"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -63,61 +64,112 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	}
 }
 
-func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
+func TestKVStoreMalformedPayloadsFailClosed(t *testing.T) {
 	t.Parallel()
 
 	backend := kvtypes.NewMapStore()
 	store := NewKVStore(backend)
 
-	store.UpsertEligibility(types.ValidatorEligibility{
-		ValidatorID:     "val-2",
-		OperatorAddress: "tdpnvaloper1kv",
-		Eligible:        true,
-		Status:          chaintypes.ReconciliationPending,
-	})
-	store.UpsertEligibility(types.ValidatorEligibility{
-		ValidatorID:     "val-1",
-		OperatorAddress: "tdpnvaloper1kv",
+	validEligibility := types.ValidatorEligibility{
+		ValidatorID:     "val-ok",
+		OperatorAddress: "tdpnvaloper1ok",
 		Eligible:        false,
 		Status:          chaintypes.ReconciliationPending,
-	})
-	backend.Set([]byte("eligibility/bad-json"), []byte("{not-valid-json"))
+	}
+	store.UpsertEligibility(validEligibility)
+	backend.Set(eligibilityKey("val-bad"), []byte("{"))
 
-	store.UpsertStatusRecord(types.ValidatorStatusRecord{
-		StatusID:        "status-2",
-		ValidatorID:     "val-2",
-		LifecycleStatus: types.ValidatorLifecycleJailed,
-		EvidenceHeight:  20,
-		Status:          chaintypes.ReconciliationSubmitted,
-	})
-	store.UpsertStatusRecord(types.ValidatorStatusRecord{
-		StatusID:        "status-1",
-		ValidatorID:     "val-1",
+	validStatusRecord := types.ValidatorStatusRecord{
+		StatusID:        "status-ok",
+		ValidatorID:     "val-ok",
 		LifecycleStatus: types.ValidatorLifecycleActive,
 		EvidenceHeight:  10,
 		Status:          chaintypes.ReconciliationSubmitted,
-	})
-	backend.Set([]byte("status/bad-json"), []byte("{not-valid-json"))
+	}
+	store.UpsertStatusRecord(validStatusRecord)
+	backend.Set(statusKey("status-bad"), []byte("{"))
+
+	if _, ok := store.GetEligibility("val-bad"); ok {
+		t.Fatal("expected malformed eligibility payload lookup to fail")
+	}
+	gotEligibility, ok := store.GetEligibility(validEligibility.ValidatorID)
+	if !ok {
+		t.Fatal("expected valid eligibility lookup to succeed")
+	}
+	if gotEligibility != validEligibility {
+		t.Fatalf("expected valid eligibility %+v, got %+v", validEligibility, gotEligibility)
+	}
 
 	eligibilities := store.ListEligibilities()
-	if len(eligibilities) != 2 {
-		t.Fatalf("expected 2 valid eligibilities, got %d", len(eligibilities))
+	if len(eligibilities) != 0 {
+		t.Fatalf("expected eligibility listing to fail closed, got %d records", len(eligibilities))
 	}
-	if eligibilities[0].ValidatorID != "val-1" || eligibilities[1].ValidatorID != "val-2" {
-		t.Fatalf("expected eligibility list ordered by key, got %+v", eligibilities)
+	if _, err := store.ListEligibilitiesWithError(); err == nil {
+		t.Fatal("expected malformed eligibility payload to return list decode error")
 	}
-	if _, ok := store.GetEligibility("bad-json"); ok {
-		t.Fatal("expected malformed eligibility payload to be rejected by GetEligibility")
+
+	if _, ok := store.GetStatusRecord("status-bad"); ok {
+		t.Fatal("expected malformed status payload lookup to fail")
+	}
+	gotStatus, ok := store.GetStatusRecord(validStatusRecord.StatusID)
+	if !ok {
+		t.Fatal("expected valid status lookup to succeed")
+	}
+	if gotStatus != validStatusRecord {
+		t.Fatalf("expected valid status %+v, got %+v", validStatusRecord, gotStatus)
 	}
 
 	statusRecords := store.ListStatusRecords()
-	if len(statusRecords) != 2 {
-		t.Fatalf("expected 2 valid status records, got %d", len(statusRecords))
+	if len(statusRecords) != 0 {
+		t.Fatalf("expected status listing to fail closed, got %d records", len(statusRecords))
 	}
-	if statusRecords[0].StatusID != "status-1" || statusRecords[1].StatusID != "status-2" {
-		t.Fatalf("expected status list ordered by key, got %+v", statusRecords)
+	if _, err := store.ListStatusRecordsWithError(); err == nil {
+		t.Fatal("expected malformed status payload to return list decode error")
 	}
-	if _, ok := store.GetStatusRecord("bad-json"); ok {
-		t.Fatal("expected malformed status payload to be rejected by GetStatusRecord")
+}
+
+func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+
+	mismatchedEligibility := types.ValidatorEligibility{
+		ValidatorID:     "val-payload",
+		OperatorAddress: "tdpnvaloper1identity",
+		Eligible:        true,
+		Status:          chaintypes.ReconciliationPending,
+	}
+	eligibilityPayload, err := json.Marshal(mismatchedEligibility)
+	if err != nil {
+		t.Fatalf("marshal mismatched eligibility: %v", err)
+	}
+	backend.Set(eligibilityKey("val-key"), eligibilityPayload)
+
+	if _, ok := store.GetEligibility("val-key"); ok {
+		t.Fatal("expected eligibility key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListEligibilitiesWithError(); err == nil {
+		t.Fatal("expected eligibility list key/payload mismatch to return decode error")
+	}
+
+	mismatchedStatus := types.ValidatorStatusRecord{
+		StatusID:        "status-payload",
+		ValidatorID:     "val-key",
+		LifecycleStatus: types.ValidatorLifecycleJailed,
+		EvidenceHeight:  9,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	statusPayload, err := json.Marshal(mismatchedStatus)
+	if err != nil {
+		t.Fatalf("marshal mismatched status: %v", err)
+	}
+	backend.Set(statusKey("status-key"), statusPayload)
+
+	if _, ok := store.GetStatusRecord("status-key"); ok {
+		t.Fatal("expected status key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListStatusRecordsWithError(); err == nil {
+		t.Fatal("expected status list key/payload mismatch to return decode error")
 	}
 }

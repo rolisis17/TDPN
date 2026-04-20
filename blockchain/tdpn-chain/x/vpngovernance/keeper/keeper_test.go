@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
+	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 )
 
@@ -1000,5 +1001,62 @@ func TestKeeperRecordAuditActionCanonicalBoundaries(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "conflicting fields") {
 		t.Fatalf("expected conflict details, got %v", err)
+	}
+}
+
+func TestKeeperCreatePolicyFailsClosedOnCorruptPolicyListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	backend.Set(policyKey("policy-corrupt"), []byte("{"))
+
+	_, err := k.CreatePolicy(types.GovernancePolicy{
+		PolicyID:        "policy-new",
+		Title:           "Policy New",
+		Version:         1,
+		ActivatedAtUnix: 1,
+	})
+	if err == nil {
+		t.Fatal("expected create policy to fail closed on corrupt listing")
+	}
+	if !strings.Contains(err.Error(), "load policies") {
+		t.Fatalf("expected policy load error context, got: %v", err)
+	}
+}
+
+func TestKeeperRecordDecisionFailsClosedOnCorruptDecisionListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	if _, err := k.CreatePolicy(types.GovernancePolicy{
+		PolicyID:        "policy-decision-corrupt",
+		Title:           "Policy Decision Corrupt",
+		Version:         1,
+		ActivatedAtUnix: 1,
+	}); err != nil {
+		t.Fatalf("create policy returned unexpected error: %v", err)
+	}
+
+	backend.Set(decisionKey("decision-corrupt"), []byte("{"))
+
+	_, err := k.RecordDecision(types.GovernanceDecision{
+		DecisionID:    "decision-new",
+		PolicyID:      "policy-decision-corrupt",
+		ProposalID:    "proposal-new",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council-new",
+		DecidedAtUnix: 1,
+	})
+	if err == nil {
+		t.Fatal("expected record decision to fail closed on corrupt listing")
+	}
+	if !strings.Contains(err.Error(), "load decisions") {
+		t.Fatalf("expected decision load error context, got: %v", err)
 	}
 }

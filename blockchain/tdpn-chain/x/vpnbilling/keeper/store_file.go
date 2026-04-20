@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"syscall"
 	"sync"
 
 	"github.com/tdpn/tdpn-chain/internal/fsguard"
@@ -101,6 +103,10 @@ func (s *FileStore) ListReservations() []types.CreditReservation {
 	return records
 }
 
+func (s *FileStore) ListReservationsWithError() ([]types.CreditReservation, error) {
+	return s.ListReservations(), nil
+}
+
 func (s *FileStore) UpsertSettlement(record types.SettlementRecord) {
 	_ = s.UpsertSettlementWithError(record)
 }
@@ -169,6 +175,10 @@ func (s *FileStore) ListSettlements() []types.SettlementRecord {
 		records = append(records, record)
 	}
 	return records
+}
+
+func (s *FileStore) ListSettlementsWithError() ([]types.SettlementRecord, error) {
+	return s.ListSettlements(), nil
 }
 
 func (s *FileStore) loadFromDisk() error {
@@ -267,7 +277,14 @@ func syncDirectory(path string) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.EINVAL)) {
+			// Windows commonly rejects syncing directory handles even though rename succeeded.
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func buildReservationSnapshotMap(records []types.CreditReservation) (map[string]types.CreditReservation, error) {

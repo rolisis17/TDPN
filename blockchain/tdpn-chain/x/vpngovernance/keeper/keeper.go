@@ -55,7 +55,10 @@ func (k *Keeper) CreatePolicy(record types.GovernancePolicy) (types.GovernancePo
 	defer k.mu.Unlock()
 
 	_, hasCanonicalKey := k.store.GetPolicy(normalized.PolicyID)
-	matches := k.findPoliciesByCanonicalIDLocked(normalized.PolicyID)
+	matches, err := k.findPoliciesByCanonicalIDLocked(normalized.PolicyID)
+	if err != nil {
+		return types.GovernancePolicy{}, err
+	}
 	if len(matches) > 0 {
 		for _, existing := range matches {
 			normalizedExisting := normalizePolicy(existing)
@@ -91,10 +94,22 @@ func (k *Keeper) GetPolicy(policyID string) (types.GovernancePolicy, bool) {
 }
 
 func (k *Keeper) ListPolicies() []types.GovernancePolicy {
+	records, err := k.ListPoliciesWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListPoliciesWithError() ([]types.GovernancePolicy, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	return dedupeAndSortPolicies(k.store.ListPolicies())
+	records, err := k.listPoliciesLocked()
+	if err != nil {
+		return nil, err
+	}
+	return dedupeAndSortPolicies(records), nil
 }
 
 func (k *Keeper) UpsertDecision(record types.GovernanceDecision) {
@@ -123,12 +138,21 @@ func (k *Keeper) RecordDecision(record types.GovernanceDecision) (types.Governan
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	if _, ok := k.store.GetPolicy(normalized.PolicyID); !ok && len(k.findPoliciesByCanonicalIDLocked(normalized.PolicyID)) == 0 {
-		return types.GovernanceDecision{}, policyNotFoundError(normalized.PolicyID)
+	if _, ok := k.store.GetPolicy(normalized.PolicyID); !ok {
+		policies, err := k.findPoliciesByCanonicalIDLocked(normalized.PolicyID)
+		if err != nil {
+			return types.GovernanceDecision{}, err
+		}
+		if len(policies) == 0 {
+			return types.GovernanceDecision{}, policyNotFoundError(normalized.PolicyID)
+		}
 	}
 
 	_, hasCanonicalKey := k.store.GetDecision(normalized.DecisionID)
-	matches := k.findDecisionsByCanonicalIDLocked(normalized.DecisionID)
+	matches, err := k.findDecisionsByCanonicalIDLocked(normalized.DecisionID)
+	if err != nil {
+		return types.GovernanceDecision{}, err
+	}
 	if len(matches) > 0 {
 		for _, existing := range matches {
 			normalizedExisting := normalizeDecision(existing)
@@ -145,7 +169,9 @@ func (k *Keeper) RecordDecision(record types.GovernanceDecision) (types.Governan
 		}
 		return normalized, nil
 	}
-	if existingByBusinessKey, found := k.decisionByPolicyProposalLocked(normalized.PolicyID, normalized.ProposalID); found {
+	if existingByBusinessKey, found, err := k.decisionByPolicyProposalLocked(normalized.PolicyID, normalized.ProposalID); err != nil {
+		return types.GovernanceDecision{}, err
+	} else if found {
 		return types.GovernanceDecision{}, decisionBusinessKeyConflictError(normalized, existingByBusinessKey.DecisionID)
 	}
 
@@ -167,10 +193,22 @@ func (k *Keeper) GetDecision(decisionID string) (types.GovernanceDecision, bool)
 }
 
 func (k *Keeper) ListDecisions() []types.GovernanceDecision {
+	records, err := k.ListDecisionsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListDecisionsWithError() ([]types.GovernanceDecision, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	return dedupeAndSortDecisions(k.store.ListDecisions())
+	records, err := k.listDecisionsLocked()
+	if err != nil {
+		return nil, err
+	}
+	return dedupeAndSortDecisions(records), nil
 }
 
 // RecordAuditAction inserts an append-only governance admin action keyed by ActionID.
@@ -185,7 +223,10 @@ func (k *Keeper) RecordAuditAction(record types.GovernanceAuditAction) (types.Go
 	defer k.mu.Unlock()
 
 	_, hasCanonicalKey := k.store.GetAuditAction(normalized.ActionID)
-	matches := k.findAuditActionsByCanonicalIDLocked(normalized.ActionID)
+	matches, err := k.findAuditActionsByCanonicalIDLocked(normalized.ActionID)
+	if err != nil {
+		return types.GovernanceAuditAction{}, err
+	}
 	if len(matches) > 0 {
 		for _, existing := range matches {
 			normalizedExisting := normalizeAuditAction(existing)
@@ -257,69 +298,94 @@ func (k *Keeper) GetAuditAction(actionID string) (types.GovernanceAuditAction, b
 }
 
 func (k *Keeper) ListAuditActions() []types.GovernanceAuditAction {
+	records, err := k.ListAuditActionsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (k *Keeper) ListAuditActionsWithError() ([]types.GovernanceAuditAction, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	return dedupeAndSortAuditActions(k.store.ListAuditActions())
+	records, err := k.listAuditActionsLocked()
+	if err != nil {
+		return nil, err
+	}
+	return dedupeAndSortAuditActions(records), nil
 }
 
-func (k *Keeper) findPoliciesByCanonicalIDLocked(policyID string) []types.GovernancePolicy {
+func (k *Keeper) findPoliciesByCanonicalIDLocked(policyID string) ([]types.GovernancePolicy, error) {
 	canonicalID := canonicalPolicyID(policyID)
 	if canonicalID == "" {
-		return nil
+		return nil, nil
 	}
 
-	records := k.store.ListPolicies()
+	records, err := k.listPoliciesLocked()
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]types.GovernancePolicy, 0, len(records))
 	for _, record := range records {
 		if normalizePolicy(record).PolicyID == canonicalID {
 			matches = append(matches, record)
 		}
 	}
-	return matches
+	return matches, nil
 }
 
-func (k *Keeper) findDecisionsByCanonicalIDLocked(decisionID string) []types.GovernanceDecision {
+func (k *Keeper) findDecisionsByCanonicalIDLocked(decisionID string) ([]types.GovernanceDecision, error) {
 	canonicalID := canonicalDecisionID(decisionID)
 	if canonicalID == "" {
-		return nil
+		return nil, nil
 	}
 
-	records := k.store.ListDecisions()
+	records, err := k.listDecisionsLocked()
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]types.GovernanceDecision, 0, len(records))
 	for _, record := range records {
 		if normalizeDecision(record).DecisionID == canonicalID {
 			matches = append(matches, record)
 		}
 	}
-	return matches
+	return matches, nil
 }
 
-func (k *Keeper) decisionByPolicyProposalLocked(policyID, proposalID string) (types.GovernanceDecision, bool) {
-	for _, record := range k.store.ListDecisions() {
+func (k *Keeper) decisionByPolicyProposalLocked(policyID, proposalID string) (types.GovernanceDecision, bool, error) {
+	records, err := k.listDecisionsLocked()
+	if err != nil {
+		return types.GovernanceDecision{}, false, err
+	}
+	for _, record := range records {
 		normalized := normalizeDecision(record)
 		if normalized.PolicyID != policyID || normalized.ProposalID != proposalID {
 			continue
 		}
-		return normalized, true
+		return normalized, true, nil
 	}
-	return types.GovernanceDecision{}, false
+	return types.GovernanceDecision{}, false, nil
 }
 
-func (k *Keeper) findAuditActionsByCanonicalIDLocked(actionID string) []types.GovernanceAuditAction {
+func (k *Keeper) findAuditActionsByCanonicalIDLocked(actionID string) ([]types.GovernanceAuditAction, error) {
 	canonicalID := canonicalAuditActionID(actionID)
 	if canonicalID == "" {
-		return nil
+		return nil, nil
 	}
 
-	records := k.store.ListAuditActions()
+	records, err := k.listAuditActionsLocked()
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]types.GovernanceAuditAction, 0, len(records))
 	for _, record := range records {
 		if normalizeAuditAction(record).ActionID == canonicalID {
 			matches = append(matches, record)
 		}
 	}
-	return matches
+	return matches, nil
 }
 
 func (k *Keeper) getPolicyByIDCompatibleLocked(rawID, canonicalID string) (types.GovernancePolicy, bool) {
@@ -337,7 +403,11 @@ func (k *Keeper) getPolicyByIDCompatibleLocked(rawID, canonicalID string) (types
 			}
 		}
 	}
-	return selectPolicyByCanonicalID(k.store.ListPolicies(), canonicalID)
+	records, err := k.listPoliciesLocked()
+	if err != nil {
+		return types.GovernancePolicy{}, false
+	}
+	return selectPolicyByCanonicalID(records, canonicalID)
 }
 
 func (k *Keeper) getDecisionByIDCompatibleLocked(rawID, canonicalID string) (types.GovernanceDecision, bool) {
@@ -355,7 +425,11 @@ func (k *Keeper) getDecisionByIDCompatibleLocked(rawID, canonicalID string) (typ
 			}
 		}
 	}
-	return selectDecisionByCanonicalID(k.store.ListDecisions(), canonicalID)
+	records, err := k.listDecisionsLocked()
+	if err != nil {
+		return types.GovernanceDecision{}, false
+	}
+	return selectDecisionByCanonicalID(records, canonicalID)
 }
 
 func (k *Keeper) getAuditActionByIDCompatibleLocked(rawID, canonicalID string) (types.GovernanceAuditAction, bool) {
@@ -373,7 +447,44 @@ func (k *Keeper) getAuditActionByIDCompatibleLocked(rawID, canonicalID string) (
 			}
 		}
 	}
-	return selectAuditActionByCanonicalID(k.store.ListAuditActions(), canonicalID)
+	records, err := k.listAuditActionsLocked()
+	if err != nil {
+		return types.GovernanceAuditAction{}, false
+	}
+	return selectAuditActionByCanonicalID(records, canonicalID)
+}
+
+func (k *Keeper) listPoliciesLocked() ([]types.GovernancePolicy, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListPoliciesWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load policies: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListPolicies(), nil
+}
+
+func (k *Keeper) listDecisionsLocked() ([]types.GovernanceDecision, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListDecisionsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load decisions: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListDecisions(), nil
+}
+
+func (k *Keeper) listAuditActionsLocked() ([]types.GovernanceAuditAction, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListAuditActionsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load audit actions: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListAuditActions(), nil
 }
 
 func dedupeAndSortPolicies(records []types.GovernancePolicy) []types.GovernancePolicy {

@@ -102,7 +102,10 @@ func (s QueryServer) ListValidatorEligibilities(_ ListValidatorEligibilitiesRequ
 		return ListValidatorEligibilitiesResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListEligibilities()
+	records, err := s.keeper.ListEligibilitiesWithError()
+	if err != nil {
+		return ListValidatorEligibilitiesResponse{}, err
+	}
 	return ListValidatorEligibilitiesResponse{
 		Eligibilities: clampEligibilities(records),
 	}, nil
@@ -113,7 +116,10 @@ func (s QueryServer) ListValidatorStatusRecords(_ ListValidatorStatusRecordsRequ
 		return ListValidatorStatusRecordsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListStatusRecords()
+	records, err := s.keeper.ListStatusRecordsWithError()
+	if err != nil {
+		return ListValidatorStatusRecordsResponse{}, err
+	}
 	return ListValidatorStatusRecordsResponse{
 		Records: clampStatusRecords(records),
 	}, nil

@@ -20,6 +20,12 @@ type KeeperStoreWithWriteErrors interface {
 	UpsertDistributionWithError(record types.DistributionRecord) error
 }
 
+// KeeperStoreWithReadErrors allows callers to fail closed when decoding persisted records.
+type KeeperStoreWithReadErrors interface {
+	ListAccrualsWithError() ([]types.RewardAccrual, error)
+	ListDistributionsWithError() ([]types.DistributionRecord, error)
+}
+
 // InMemoryStore is the default keeper store implementation.
 type InMemoryStore struct {
 	accruals      map[string]types.RewardAccrual
@@ -55,6 +61,10 @@ func (s *InMemoryStore) ListAccruals() []types.RewardAccrual {
 	return records
 }
 
+func (s *InMemoryStore) ListAccrualsWithError() ([]types.RewardAccrual, error) {
+	return s.ListAccruals(), nil
+}
+
 func (s *InMemoryStore) UpsertDistribution(record types.DistributionRecord) {
 	s.distributions[record.DistributionID] = record
 }
@@ -75,4 +85,8 @@ func (s *InMemoryStore) ListDistributions() []types.DistributionRecord {
 		records = append(records, record)
 	}
 	return records
+}
+
+func (s *InMemoryStore) ListDistributionsWithError() ([]types.DistributionRecord, error) {
+	return s.ListDistributions(), nil
 }

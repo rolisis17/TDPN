@@ -2,6 +2,8 @@ package keeper
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
@@ -10,6 +12,7 @@ import (
 const (
 	accrualPrefix      = "accrual/"
 	distributionPrefix = "distribution/"
+	maxKVPayloadBytes  = 1 << 20
 )
 
 // KVStore adapts KeeperStore onto a generic key/value backend.
@@ -26,21 +29,34 @@ func NewKVStore(store kvtypes.Store) *KVStore {
 }
 
 func (s *KVStore) UpsertAccrual(record types.RewardAccrual) {
-	payload, err := json.Marshal(record)
+	normalized := normalizeAccrual(record)
+	if err := normalized.ValidateBasic(); err != nil {
+		return
+	}
+
+	payload, err := json.Marshal(normalized)
 	if err != nil {
 		return
 	}
-	s.store.Set(accrualKey(record.AccrualID), payload)
+	s.store.Set(accrualKey(normalized.AccrualID), payload)
 }
 
 func (s *KVStore) GetAccrual(accrualID string) (types.RewardAccrual, bool) {
-	payload, ok := s.store.Get(accrualKey(accrualID))
+	canonicalAccrualID := canonicalKVToken(accrualID)
+	if canonicalAccrualID == "" {
+		return types.RewardAccrual{}, false
+	}
+
+	payload, ok := s.store.Get(accrualKey(canonicalAccrualID))
 	if !ok {
 		return types.RewardAccrual{}, false
 	}
 
-	var record types.RewardAccrual
-	if err := json.Unmarshal(payload, &record); err != nil {
+	record, err := decodeAccrual(payload)
+	if err != nil {
+		return types.RewardAccrual{}, false
+	}
+	if record.AccrualID != canonicalAccrualID {
 		return types.RewardAccrual{}, false
 	}
 
@@ -48,33 +64,71 @@ func (s *KVStore) GetAccrual(accrualID string) (types.RewardAccrual, bool) {
 }
 
 func (s *KVStore) ListAccruals() []types.RewardAccrual {
-	records := make([]types.RewardAccrual, 0)
-	s.store.IteratePrefix([]byte(accrualPrefix), func(_ []byte, value []byte) bool {
-		var record types.RewardAccrual
-		if err := json.Unmarshal(value, &record); err == nil {
-			records = append(records, record)
-		}
-		return true
-	})
+	records, err := s.ListAccrualsWithError()
+	if err != nil {
+		return nil
+	}
 	return records
 }
 
+func (s *KVStore) ListAccrualsWithError() ([]types.RewardAccrual, error) {
+	records := make([]types.RewardAccrual, 0)
+	var decodeErr error
+	s.store.IteratePrefix([]byte(accrualPrefix), func(key []byte, value []byte) bool {
+		keyID, err := parsePrefixedID(key, accrualPrefix)
+		if err != nil {
+			decodeErr = fmt.Errorf("decode accrual key %q: %w", string(key), err)
+			return false
+		}
+
+		record, err := decodeAccrual(value)
+		if err != nil {
+			decodeErr = fmt.Errorf("decode accrual %q: %w", keyID, err)
+			return false
+		}
+		if record.AccrualID != keyID {
+			decodeErr = fmt.Errorf("accrual key/value id mismatch: key=%q payload=%q", keyID, record.AccrualID)
+			return false
+		}
+
+		records = append(records, record)
+		return true
+	})
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	return records, nil
+}
+
 func (s *KVStore) UpsertDistribution(record types.DistributionRecord) {
-	payload, err := json.Marshal(record)
+	normalized := normalizeDistribution(record)
+	if err := normalized.ValidateBasic(); err != nil {
+		return
+	}
+
+	payload, err := json.Marshal(normalized)
 	if err != nil {
 		return
 	}
-	s.store.Set(distributionKey(record.DistributionID), payload)
+	s.store.Set(distributionKey(normalized.DistributionID), payload)
 }
 
 func (s *KVStore) GetDistribution(distributionID string) (types.DistributionRecord, bool) {
-	payload, ok := s.store.Get(distributionKey(distributionID))
+	canonicalDistributionID := canonicalKVToken(distributionID)
+	if canonicalDistributionID == "" {
+		return types.DistributionRecord{}, false
+	}
+
+	payload, ok := s.store.Get(distributionKey(canonicalDistributionID))
 	if !ok {
 		return types.DistributionRecord{}, false
 	}
 
-	var record types.DistributionRecord
-	if err := json.Unmarshal(payload, &record); err != nil {
+	record, err := decodeDistribution(payload)
+	if err != nil {
+		return types.DistributionRecord{}, false
+	}
+	if record.DistributionID != canonicalDistributionID {
 		return types.DistributionRecord{}, false
 	}
 
@@ -82,15 +136,40 @@ func (s *KVStore) GetDistribution(distributionID string) (types.DistributionReco
 }
 
 func (s *KVStore) ListDistributions() []types.DistributionRecord {
+	records, err := s.ListDistributionsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *KVStore) ListDistributionsWithError() ([]types.DistributionRecord, error) {
 	records := make([]types.DistributionRecord, 0)
-	s.store.IteratePrefix([]byte(distributionPrefix), func(_ []byte, value []byte) bool {
-		var record types.DistributionRecord
-		if err := json.Unmarshal(value, &record); err == nil {
-			records = append(records, record)
+	var decodeErr error
+	s.store.IteratePrefix([]byte(distributionPrefix), func(key []byte, value []byte) bool {
+		keyID, err := parsePrefixedID(key, distributionPrefix)
+		if err != nil {
+			decodeErr = fmt.Errorf("decode distribution key %q: %w", string(key), err)
+			return false
 		}
+
+		record, err := decodeDistribution(value)
+		if err != nil {
+			decodeErr = fmt.Errorf("decode distribution %q: %w", keyID, err)
+			return false
+		}
+		if record.DistributionID != keyID {
+			decodeErr = fmt.Errorf("distribution key/value id mismatch: key=%q payload=%q", keyID, record.DistributionID)
+			return false
+		}
+
+		records = append(records, record)
 		return true
 	})
-	return records
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	return records, nil
 }
 
 func accrualKey(accrualID string) []byte {
@@ -99,4 +178,64 @@ func accrualKey(accrualID string) []byte {
 
 func distributionKey(distributionID string) []byte {
 	return []byte(distributionPrefix + distributionID)
+}
+
+func decodeAccrual(payload []byte) (types.RewardAccrual, error) {
+	if len(payload) == 0 {
+		return types.RewardAccrual{}, fmt.Errorf("payload is empty")
+	}
+	if len(payload) > maxKVPayloadBytes {
+		return types.RewardAccrual{}, fmt.Errorf("payload exceeds %d bytes", maxKVPayloadBytes)
+	}
+
+	var record types.RewardAccrual
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return types.RewardAccrual{}, err
+	}
+
+	normalized := normalizeAccrual(record)
+	if err := normalized.ValidateBasic(); err != nil {
+		return types.RewardAccrual{}, err
+	}
+	return normalized, nil
+}
+
+func decodeDistribution(payload []byte) (types.DistributionRecord, error) {
+	if len(payload) == 0 {
+		return types.DistributionRecord{}, fmt.Errorf("payload is empty")
+	}
+	if len(payload) > maxKVPayloadBytes {
+		return types.DistributionRecord{}, fmt.Errorf("payload exceeds %d bytes", maxKVPayloadBytes)
+	}
+
+	var record types.DistributionRecord
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return types.DistributionRecord{}, err
+	}
+
+	normalized := normalizeDistribution(record)
+	if err := normalized.ValidateBasic(); err != nil {
+		return types.DistributionRecord{}, err
+	}
+	return normalized, nil
+}
+
+func parsePrefixedID(key []byte, prefix string) (string, error) {
+	rawKey := string(key)
+	if !strings.HasPrefix(rawKey, prefix) {
+		return "", fmt.Errorf("missing prefix %q", prefix)
+	}
+
+	suffix := canonicalKVToken(strings.TrimPrefix(rawKey, prefix))
+	if suffix == "" {
+		return "", fmt.Errorf("key id is empty")
+	}
+	if rawKey != prefix+suffix {
+		return "", fmt.Errorf("key id is not canonical")
+	}
+	return suffix, nil
+}
+
+func canonicalKVToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

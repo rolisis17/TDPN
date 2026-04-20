@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"sync"
 
 	"github.com/tdpn/tdpn-chain/internal/fsguard"
@@ -224,7 +226,14 @@ func syncDirectory(path string) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.EINVAL)) {
+			// Windows commonly rejects syncing directory handles even though rename succeeded.
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func buildAccrualSnapshotMap(input map[string]types.RewardAccrual) (map[string]types.RewardAccrual, error) {

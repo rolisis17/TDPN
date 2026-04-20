@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
+	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 )
 
@@ -657,5 +658,57 @@ func TestKeeperRecordDistributionCanonicalConflictSemantics(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "conflicting fields") {
 		t.Fatalf("expected conflict error message, got %v", err)
+	}
+}
+
+func TestKeeperListAccrualsFailsClosedOnCorruptListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	backend.Set(accrualKey("acc-corrupt"), []byte("{"))
+
+	_, err := k.ListAccrualsWithError()
+	if err == nil {
+		t.Fatal("expected list accruals to fail closed on corrupt listing")
+	}
+	if !strings.Contains(err.Error(), "load accruals") {
+		t.Fatalf("expected accrual load error context, got: %v", err)
+	}
+
+	if list := k.ListAccruals(); list != nil {
+		t.Fatalf("expected fail-closed ListAccruals fallback to return nil, got %+v", list)
+	}
+}
+
+func TestKeeperRecordDistributionFailsClosedOnCorruptDistributionListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	if _, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:  "acc-corrupt-dist",
+		ProviderID: "provider-corrupt-dist",
+		Amount:     20,
+	}); err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	backend.Set(distributionKey("dist-corrupt"), []byte("{"))
+
+	_, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-new",
+		AccrualID:      "acc-corrupt-dist",
+		PayoutRef:      "payout-new",
+	})
+	if err == nil {
+		t.Fatal("expected RecordDistribution to fail closed on corrupt distribution listing")
+	}
+	if !strings.Contains(err.Error(), "load distributions") {
+		t.Fatalf("expected distribution load error context, got: %v", err)
 	}
 }

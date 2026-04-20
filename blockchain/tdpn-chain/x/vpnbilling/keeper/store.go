@@ -20,6 +20,12 @@ type KeeperStoreWithWriteErrors interface {
 	UpsertSettlementWithError(record types.SettlementRecord) error
 }
 
+// KeeperStoreWithReadErrors allows callers to fail closed when decoding persisted records.
+type KeeperStoreWithReadErrors interface {
+	ListReservationsWithError() ([]types.CreditReservation, error)
+	ListSettlementsWithError() ([]types.SettlementRecord, error)
+}
+
 // KeeperStoreWithAtomicFinalize supports writing settlement+reservation updates
 // as one durable operation.
 type KeeperStoreWithAtomicFinalize interface {
@@ -64,6 +70,10 @@ func (s *InMemoryStore) ListReservations() []types.CreditReservation {
 	return records
 }
 
+func (s *InMemoryStore) ListReservationsWithError() ([]types.CreditReservation, error) {
+	return s.ListReservations(), nil
+}
+
 func (s *InMemoryStore) UpsertSettlement(record types.SettlementRecord) {
 	s.settlements[record.SettlementID] = record
 }
@@ -93,4 +103,8 @@ func (s *InMemoryStore) ListSettlements() []types.SettlementRecord {
 		records = append(records, record)
 	}
 	return records
+}
+
+func (s *InMemoryStore) ListSettlementsWithError() ([]types.SettlementRecord, error) {
+	return s.ListSettlements(), nil
 }

@@ -118,7 +118,10 @@ func (s QueryServer) ListPolicies(_ ListPoliciesRequest) (ListPoliciesResponse, 
 		return ListPoliciesResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListPolicies()
+	records, err := s.keeper.ListPoliciesWithError()
+	if err != nil {
+		return ListPoliciesResponse{}, err
+	}
 	return ListPoliciesResponse{Policies: clampPolicies(records)}, nil
 }
 
@@ -127,7 +130,10 @@ func (s QueryServer) ListDecisions(_ ListDecisionsRequest) (ListDecisionsRespons
 		return ListDecisionsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListDecisions()
+	records, err := s.keeper.ListDecisionsWithError()
+	if err != nil {
+		return ListDecisionsResponse{}, err
+	}
 	return ListDecisionsResponse{Decisions: clampDecisions(records)}, nil
 }
 
@@ -136,7 +142,10 @@ func (s QueryServer) ListAuditActions(_ ListAuditActionsRequest) (ListAuditActio
 		return ListAuditActionsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListAuditActions()
+	records, err := s.keeper.ListAuditActionsWithError()
+	if err != nil {
+		return ListAuditActionsResponse{}, err
+	}
 	return ListAuditActionsResponse{Actions: clampAuditActions(records)}, nil
 }
 

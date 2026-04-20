@@ -87,7 +87,10 @@ func (s QueryServer) ListReservations(_ ListReservationsRequest) (ListReservatio
 	if s.keeper == nil {
 		return ListReservationsResponse{}, ErrNilKeeper
 	}
-	records := s.keeper.ListReservations()
+	records, err := s.keeper.ListReservationsWithError()
+	if err != nil {
+		return ListReservationsResponse{}, err
+	}
 	return ListReservationsResponse{Reservations: clampReservations(records)}, nil
 }
 
@@ -95,7 +98,10 @@ func (s QueryServer) ListSettlements(_ ListSettlementsRequest) (ListSettlementsR
 	if s.keeper == nil {
 		return ListSettlementsResponse{}, ErrNilKeeper
 	}
-	records := s.keeper.ListSettlements()
+	records, err := s.keeper.ListSettlementsWithError()
+	if err != nil {
+		return ListSettlementsResponse{}, err
+	}
 	return ListSettlementsResponse{Settlements: clampSettlements(records)}, nil
 }
 

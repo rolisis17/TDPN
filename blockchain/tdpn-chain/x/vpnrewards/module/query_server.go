@@ -88,7 +88,10 @@ func (s QueryServer) ListAccruals(_ ListAccrualsRequest) (ListAccrualsResponse, 
 		return ListAccrualsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListAccruals()
+	records, err := s.keeper.ListAccrualsWithError()
+	if err != nil {
+		return ListAccrualsResponse{}, err
+	}
 	return ListAccrualsResponse{Accruals: clampAccruals(records)}, nil
 }
 
@@ -97,7 +100,10 @@ func (s QueryServer) ListDistributions(_ ListDistributionsRequest) (ListDistribu
 		return ListDistributionsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListDistributions()
+	records, err := s.keeper.ListDistributionsWithError()
+	if err != nil {
+		return ListDistributionsResponse{}, err
+	}
 	return ListDistributionsResponse{Distributions: clampDistributions(records)}, nil
 }
 

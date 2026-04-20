@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
+	"syscall"
 
 	"github.com/tdpn/tdpn-chain/internal/fsguard"
 	"github.com/tdpn/tdpn-chain/x/vpnvalidator/types"
@@ -31,6 +33,12 @@ type KeeperStore interface {
 type KeeperStoreWithWriteErrors interface {
 	UpsertEligibilityWithError(record types.ValidatorEligibility) error
 	UpsertStatusRecordWithError(record types.ValidatorStatusRecord) error
+}
+
+// KeeperStoreWithReadErrors allows callers to fail closed when decoding persisted records.
+type KeeperStoreWithReadErrors interface {
+	ListEligibilitiesWithError() ([]types.ValidatorEligibility, error)
+	ListStatusRecordsWithError() ([]types.ValidatorStatusRecord, error)
 }
 
 // InMemoryStore is the default keeper store implementation.
@@ -74,6 +82,10 @@ func (s *InMemoryStore) ListEligibilities() []types.ValidatorEligibility {
 	return records
 }
 
+func (s *InMemoryStore) ListEligibilitiesWithError() ([]types.ValidatorEligibility, error) {
+	return s.ListEligibilities(), nil
+}
+
 func (s *InMemoryStore) UpsertStatusRecord(record types.ValidatorStatusRecord) {
 	s.statusRecords[record.StatusID] = record
 }
@@ -100,6 +112,10 @@ func (s *InMemoryStore) ListStatusRecords() []types.ValidatorStatusRecord {
 		records = append(records, s.statusRecords[id])
 	}
 	return records
+}
+
+func (s *InMemoryStore) ListStatusRecordsWithError() ([]types.ValidatorStatusRecord, error) {
+	return s.ListStatusRecords(), nil
 }
 
 type fileStoreSnapshot struct {
@@ -215,6 +231,10 @@ func (s *FileStore) ListEligibilities() []types.ValidatorEligibility {
 	return records
 }
 
+func (s *FileStore) ListEligibilitiesWithError() ([]types.ValidatorEligibility, error) {
+	return s.ListEligibilities(), nil
+}
+
 func (s *FileStore) UpsertStatusRecord(record types.ValidatorStatusRecord) {
 	_ = s.UpsertStatusRecordWithError(record)
 }
@@ -258,6 +278,10 @@ func (s *FileStore) ListStatusRecords() []types.ValidatorStatusRecord {
 		records = append(records, s.statusRecords[id])
 	}
 	return records
+}
+
+func (s *FileStore) ListStatusRecordsWithError() ([]types.ValidatorStatusRecord, error) {
+	return s.ListStatusRecords(), nil
 }
 
 func (s *FileStore) persistLocked() error {
@@ -325,7 +349,14 @@ func syncDirectory(path string) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.EINVAL)) {
+			// Windows commonly rejects syncing directory handles even though rename succeeded.
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func buildEligibilitySnapshotMap(input map[string]types.ValidatorEligibility) (map[string]types.ValidatorEligibility, error) {

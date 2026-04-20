@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"encoding/json"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -78,7 +79,7 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	}
 }
 
-func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
+func TestKVStoreListFailClosedOnMalformedEntries(t *testing.T) {
 	t.Parallel()
 
 	backend := kvtypes.NewMapStore()
@@ -97,35 +98,99 @@ func TestKVStoreListOrderingAndSkipsMalformedEntries(t *testing.T) {
 	backend.Set([]byte("audit_action/bad-json"), []byte("{not-valid-json"))
 
 	policies := store.ListPolicies()
-	if len(policies) != 2 {
-		t.Fatalf("expected 2 valid policies, got %d", len(policies))
+	if len(policies) != 0 {
+		t.Fatalf("expected policy listing to fail closed, got %d records", len(policies))
 	}
-	if policies[0].PolicyID != "policy-1" || policies[1].PolicyID != "policy-2" {
-		t.Fatalf("expected policy list ordered by key, got %+v", policies)
+	if _, err := store.ListPoliciesWithError(); err == nil {
+		t.Fatal("expected malformed policy payload to return list decode error")
 	}
 	if _, ok := store.GetPolicy("bad-json"); ok {
 		t.Fatal("expected malformed policy payload to be rejected by GetPolicy")
 	}
 
 	decisions := store.ListDecisions()
-	if len(decisions) != 2 {
-		t.Fatalf("expected 2 valid decisions, got %d", len(decisions))
+	if len(decisions) != 0 {
+		t.Fatalf("expected decision listing to fail closed, got %d records", len(decisions))
 	}
-	if decisions[0].DecisionID != "decision-1" || decisions[1].DecisionID != "decision-2" {
-		t.Fatalf("expected decision list ordered by key, got %+v", decisions)
+	if _, err := store.ListDecisionsWithError(); err == nil {
+		t.Fatal("expected malformed decision payload to return list decode error")
 	}
 	if _, ok := store.GetDecision("bad-json"); ok {
 		t.Fatal("expected malformed decision payload to be rejected by GetDecision")
 	}
 
 	auditActions := store.ListAuditActions()
-	if len(auditActions) != 2 {
-		t.Fatalf("expected 2 valid audit actions, got %d", len(auditActions))
+	if len(auditActions) != 0 {
+		t.Fatalf("expected audit action listing to fail closed, got %d records", len(auditActions))
 	}
-	if auditActions[0].ActionID != "audit-1" || auditActions[1].ActionID != "audit-2" {
-		t.Fatalf("expected audit list ordered by key, got %+v", auditActions)
+	if _, err := store.ListAuditActionsWithError(); err == nil {
+		t.Fatal("expected malformed audit payload to return list decode error")
 	}
 	if _, ok := store.GetAuditAction("bad-json"); ok {
 		t.Fatal("expected malformed audit payload to be rejected by GetAuditAction")
+	}
+}
+
+func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+
+	policyPayload, err := json.Marshal(types.GovernancePolicy{
+		PolicyID:        "policy-payload",
+		Title:           "Policy Payload",
+		Version:         1,
+		ActivatedAtUnix: 1,
+		Status:          chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("marshal policy payload: %v", err)
+	}
+	backend.Set(policyKey("policy-key"), policyPayload)
+	if _, ok := store.GetPolicy("policy-key"); ok {
+		t.Fatal("expected policy key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListPoliciesWithError(); err == nil {
+		t.Fatal("expected policy key/payload mismatch to return decode error")
+	}
+
+	decisionPayload, err := json.Marshal(types.GovernanceDecision{
+		DecisionID:    "decision-payload",
+		PolicyID:      "policy-1",
+		ProposalID:    "proposal-1",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "decider-1",
+		DecidedAtUnix: 1,
+		Status:        chaintypes.ReconciliationSubmitted,
+	})
+	if err != nil {
+		t.Fatalf("marshal decision payload: %v", err)
+	}
+	backend.Set(decisionKey("decision-key"), decisionPayload)
+	if _, ok := store.GetDecision("decision-key"); ok {
+		t.Fatal("expected decision key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListDecisionsWithError(); err == nil {
+		t.Fatal("expected decision key/payload mismatch to return decode error")
+	}
+
+	auditPayload, err := json.Marshal(types.GovernanceAuditAction{
+		ActionID:        "audit-payload",
+		Action:          "admin_set_policy",
+		Actor:           "actor-1",
+		Reason:          "reason-1",
+		EvidencePointer: "ipfs://evidence-1",
+		TimestampUnix:   1,
+	})
+	if err != nil {
+		t.Fatalf("marshal audit payload: %v", err)
+	}
+	backend.Set(auditActionKey("audit-key"), auditPayload)
+	if _, ok := store.GetAuditAction("audit-key"); ok {
+		t.Fatal("expected audit action key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListAuditActionsWithError(); err == nil {
+		t.Fatal("expected audit action key/payload mismatch to return decode error")
 	}
 }

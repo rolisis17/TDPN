@@ -86,17 +86,29 @@ func (k *Keeper) GetAccrual(accrualID string) (types.RewardAccrual, bool) {
 
 // ListAccruals returns all accrual records ordered by accrual ID ascending.
 func (k *Keeper) ListAccruals() []types.RewardAccrual {
+	records, err := k.ListAccrualsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+// ListAccrualsWithError returns all accrual records ordered by accrual ID ascending.
+func (k *Keeper) ListAccrualsWithError() ([]types.RewardAccrual, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	records := k.store.ListAccruals()
+	records, err := k.listAccrualsLocked()
+	if err != nil {
+		return nil, err
+	}
 	for i := range records {
 		records[i] = normalizeAccrual(records[i])
 	}
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].AccrualID < records[j].AccrualID
 	})
-	return records
+	return records, nil
 }
 
 func (k *Keeper) UpsertDistribution(record types.DistributionRecord) {
@@ -143,7 +155,9 @@ func (k *Keeper) RecordDistribution(record types.DistributionRecord) (types.Dist
 	if _, accrualOK := k.store.GetAccrual(normalized.AccrualID); !accrualOK {
 		return types.DistributionRecord{}, accrualNotFoundError(normalized.AccrualID)
 	}
-	if byAccrual, found := k.distributionByAccrualLocked(normalized.AccrualID); found && byAccrual.DistributionID != normalized.DistributionID {
+	if byAccrual, found, err := k.distributionByAccrualLocked(normalized.AccrualID); err != nil {
+		return types.DistributionRecord{}, err
+	} else if found && byAccrual.DistributionID != normalized.DistributionID {
 		return types.DistributionRecord{}, conflictError("distribution accrual_id", normalized.AccrualID)
 	}
 
@@ -171,17 +185,29 @@ func (k *Keeper) GetDistribution(distributionID string) (types.DistributionRecor
 
 // ListDistributions returns all distribution records ordered by distribution ID ascending.
 func (k *Keeper) ListDistributions() []types.DistributionRecord {
+	records, err := k.ListDistributionsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+// ListDistributionsWithError returns all distribution records ordered by distribution ID ascending.
+func (k *Keeper) ListDistributionsWithError() ([]types.DistributionRecord, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	records := k.store.ListDistributions()
+	records, err := k.listDistributionsLocked()
+	if err != nil {
+		return nil, err
+	}
 	for i := range records {
 		records[i] = normalizeDistribution(records[i])
 	}
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].DistributionID < records[j].DistributionID
 	})
-	return records
+	return records, nil
 }
 
 func (k *Keeper) advanceAccrualForDistributionLocked(accrualID string) error {
@@ -190,7 +216,7 @@ func (k *Keeper) advanceAccrualForDistributionLocked(accrualID string) error {
 	}
 	accrual, ok := k.store.GetAccrual(accrualID)
 	if !ok {
-		return nil
+		return accrualNotFoundError(accrualID)
 	}
 
 	normalized := normalizeAccrual(accrual)
@@ -261,18 +287,44 @@ func distributionRecordsEqual(a, b types.DistributionRecord) bool {
 		a.Status == b.Status
 }
 
-func (k *Keeper) distributionByAccrualLocked(accrualID string) (types.DistributionRecord, bool) {
+func (k *Keeper) distributionByAccrualLocked(accrualID string) (types.DistributionRecord, bool, error) {
 	accrualID = strings.TrimSpace(accrualID)
 	if accrualID == "" {
-		return types.DistributionRecord{}, false
+		return types.DistributionRecord{}, false, nil
 	}
-	for _, record := range k.store.ListDistributions() {
+	records, err := k.listDistributionsLocked()
+	if err != nil {
+		return types.DistributionRecord{}, false, err
+	}
+	for _, record := range records {
 		normalized := normalizeDistribution(record)
 		if normalized.AccrualID == accrualID {
-			return normalized, true
+			return normalized, true, nil
 		}
 	}
-	return types.DistributionRecord{}, false
+	return types.DistributionRecord{}, false, nil
+}
+
+func (k *Keeper) listAccrualsLocked() ([]types.RewardAccrual, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListAccrualsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load accruals: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListAccruals(), nil
+}
+
+func (k *Keeper) listDistributionsLocked() ([]types.DistributionRecord, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListDistributionsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load distributions: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListDistributions(), nil
 }
 
 func conflictError(kind string, id string) error {

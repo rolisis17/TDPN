@@ -65,51 +65,111 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	}
 }
 
-func TestKVStoreListSkipsCorruptEntries(t *testing.T) {
+func TestKVStoreMalformedPayloadsFailClosed(t *testing.T) {
 	t.Parallel()
 
 	backend := kvtypes.NewMapStore()
 	store := NewKVStore(backend)
 
 	validAccrual := types.RewardAccrual{
-		AccrualID:      "acc-good",
+		AccrualID:      "acc-ok",
 		ProviderID:     "provider-1",
 		Amount:         9,
 		OperationState: chaintypes.ReconciliationPending,
 	}
 	store.UpsertAccrual(validAccrual)
-	backend.Set([]byte(accrualPrefix+"acc-bad"), []byte("{not-json"))
+	backend.Set(accrualKey("acc-bad"), []byte("{"))
 
 	validDistribution := types.DistributionRecord{
-		DistributionID: "dist-good",
+		DistributionID: "dist-ok",
 		AccrualID:      validAccrual.AccrualID,
-		PayoutRef:      "payout-good",
+		PayoutRef:      "payout-ok",
 		Status:         chaintypes.ReconciliationSubmitted,
 	}
 	store.UpsertDistribution(validDistribution)
-	backend.Set([]byte(distributionPrefix+"dist-bad"), []byte("{not-json"))
+	backend.Set(distributionKey("dist-bad"), []byte("{"))
+
+	if _, ok := store.GetAccrual("acc-bad"); ok {
+		t.Fatal("expected malformed accrual payload lookup to fail")
+	}
+	gotAccrual, ok := store.GetAccrual(validAccrual.AccrualID)
+	if !ok {
+		t.Fatal("expected valid accrual lookup to succeed")
+	}
+	if gotAccrual != validAccrual {
+		t.Fatalf("expected valid accrual %+v, got %+v", validAccrual, gotAccrual)
+	}
 
 	accruals := store.ListAccruals()
-	if len(accruals) != 1 {
-		t.Fatalf("expected only valid accrual to be listed, got %d entries", len(accruals))
+	if len(accruals) != 0 {
+		t.Fatalf("expected accrual listing to fail closed, got %d records", len(accruals))
 	}
-	if accruals[0] != validAccrual {
-		t.Fatalf("expected listed accrual %+v, got %+v", validAccrual, accruals[0])
+	if _, err := store.ListAccrualsWithError(); err == nil {
+		t.Fatal("expected malformed accrual payload to return list decode error")
+	}
+
+	if _, ok := store.GetDistribution("dist-bad"); ok {
+		t.Fatal("expected malformed distribution payload lookup to fail")
+	}
+	gotDistribution, ok := store.GetDistribution(validDistribution.DistributionID)
+	if !ok {
+		t.Fatal("expected valid distribution lookup to succeed")
+	}
+	if gotDistribution != validDistribution {
+		t.Fatalf("expected valid distribution %+v, got %+v", validDistribution, gotDistribution)
 	}
 
 	distributions := store.ListDistributions()
-	if len(distributions) != 1 {
-		t.Fatalf("expected only valid distribution to be listed, got %d entries", len(distributions))
+	if len(distributions) != 0 {
+		t.Fatalf("expected distribution listing to fail closed, got %d records", len(distributions))
 	}
-	if distributions[0] != validDistribution {
-		t.Fatalf("expected listed distribution %+v, got %+v", validDistribution, distributions[0])
+	if _, err := store.ListDistributionsWithError(); err == nil {
+		t.Fatal("expected malformed distribution payload to return list decode error")
+	}
+}
+
+func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+
+	mismatchedAccrual := types.RewardAccrual{
+		AccrualID:      "acc-payload",
+		ProviderID:     "provider-identity",
+		Amount:         10,
+		OperationState: chaintypes.ReconciliationPending,
+	}
+	accrualPayload, err := json.Marshal(mismatchedAccrual)
+	if err != nil {
+		t.Fatalf("marshal mismatched accrual: %v", err)
+	}
+	backend.Set(accrualKey("acc-key"), accrualPayload)
+
+	if _, ok := store.GetAccrual("acc-key"); ok {
+		t.Fatal("expected accrual key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListAccrualsWithError(); err == nil {
+		t.Fatal("expected accrual list key/payload mismatch to return decode error")
 	}
 
-	if _, ok := store.GetAccrual("acc-bad"); ok {
-		t.Fatal("expected corrupt accrual payload to be unreadable")
+	mismatchedDistribution := types.DistributionRecord{
+		DistributionID: "dist-payload",
+		AccrualID:      "acc-key",
+		PayoutRef:      "payout-identity",
+		Status:         chaintypes.ReconciliationSubmitted,
 	}
-	if _, ok := store.GetDistribution("dist-bad"); ok {
-		t.Fatal("expected corrupt distribution payload to be unreadable")
+	distributionPayload, err := json.Marshal(mismatchedDistribution)
+	if err != nil {
+		t.Fatalf("marshal mismatched distribution: %v", err)
+	}
+	backend.Set(distributionKey("dist-key"), distributionPayload)
+
+	if _, ok := store.GetDistribution("dist-key"); ok {
+		t.Fatal("expected distribution key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListDistributionsWithError(); err == nil {
+		t.Fatal("expected distribution list key/payload mismatch to return decode error")
 	}
 }
 
