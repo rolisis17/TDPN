@@ -347,6 +347,84 @@ if ! grep -qF 'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
   echo "desktop scaffold contract failed: expected execution-policy remediation marker in $WINDOWS_NATIVE_BOOTSTRAP_SCRIPT"
   exit 1
 fi
+DESKTOP_SHELL_FILES=(
+  "scripts/windows/desktop_shell.ps1"
+  "scripts/windows/desktop_shell.cmd"
+)
+for path in "${DESKTOP_SHELL_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing desktop_shell script: $path"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] desktop_shell scripts exist"
+
+DESKTOP_SHELL_PS1="scripts/windows/desktop_shell.ps1"
+DESKTOP_SHELL_CMD="scripts/windows/desktop_shell.cmd"
+
+if ! grep -qF 'function Normalize-NodeToolName' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected node tool normalization helper in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF "'^(?i)npm(?:\\.(?:cmd|ps1))?$'" "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected npm normalization matcher in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF 'return "npm.cmd"' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected npm.cmd normalization target in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF "'^(?i)npx(?:\\.(?:cmd|ps1))?$'" "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected npx normalization matcher in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF 'return "npx.cmd"' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected npx.cmd normalization target in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF 'function Refresh-SessionPath' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected PATH refresh helper in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF '[Environment]::GetEnvironmentVariable("Path", "Machine")' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected machine PATH refresh marker in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF '[Environment]::GetEnvironmentVariable("Path", "User")' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected user PATH refresh marker in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! rg -q -- '^Refresh-SessionPath$' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected Refresh-SessionPath invocation marker in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF '$commonToolDirs = @(Get-CommonToolDirectories)' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected common tool directories marker in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+if ! grep -qF 'Add-SessionPathSegments -Segments $commonToolDirs' "$DESKTOP_SHELL_PS1"; then
+  echo "desktop scaffold contract failed: expected PATH augmentation marker in $DESKTOP_SHELL_PS1"
+  exit 1
+fi
+echo "[desktop-scaffold] desktop_shell.ps1 normalization and PATH refresh markers are present"
+
+if ! grep -qF 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command' "$DESKTOP_SHELL_CMD"; then
+  echo "desktop scaffold contract failed: expected cmd wrapper policy-bypass command probe marker in $DESKTOP_SHELL_CMD"
+  exit 1
+fi
+if ! grep -qF '[&|<>^%%!]' "$DESKTOP_SHELL_CMD"; then
+  echo "desktop scaffold contract failed: expected cmd metacharacter reject marker in $DESKTOP_SHELL_CMD"
+  exit 1
+fi
+if ! grep -qF 'Unsupported cmd metacharacters in arguments.' "$DESKTOP_SHELL_CMD"; then
+  echo "desktop scaffold contract failed: expected cmd metacharacter reject message marker in $DESKTOP_SHELL_CMD"
+  exit 1
+fi
+if ! grep -qF 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*' "$DESKTOP_SHELL_CMD"; then
+  echo "desktop scaffold contract failed: expected cmd wrapper policy-bypass file execution marker in $DESKTOP_SHELL_CMD"
+  exit 1
+fi
+echo "[desktop-scaffold] desktop_shell.cmd policy-bypass and metacharacter guard markers are present"
 
 LINUX_NATIVE_BOOTSTRAP_SCRIPT="scripts/linux/desktop_native_bootstrap.sh"
 if [[ ! -f "$LINUX_NATIVE_BOOTSTRAP_SCRIPT" ]]; then
@@ -1129,6 +1207,26 @@ if ! rg -q -- 'TDPN_[A-Z0-9_]*UPDATE[A-Z0-9_]*CHANNEL[A-Z0-9_]*' "$README_FILE";
 fi
 if ! rg -qi -- 'one[^[:alnum:]]+.*window|single[^[:alnum:]]+.*window|single-window|one-window' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must describe the single-window desktop workspace model"
+  exit 1
+fi
+if ! rg -q -- 'desktop_shell\.cmd' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must document desktop_shell.cmd execution-policy-safe npm wrapper usage"
+  exit 1
+fi
+if ! rg -qi -- 'execution-policy-safe|policy-safe.*desktop_shell|desktop_shell.*policy-safe' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must explicitly describe desktop_shell as an execution-policy-safe wrapper"
+  exit 1
+fi
+if ! rg -q -- 'desktop_shell\.cmd npm install' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must include desktop_shell npm install usage guidance"
+  exit 1
+fi
+if ! rg -q -- 'desktop_shell\.cmd npm run tauri -- dev' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must include desktop_shell npm run tauri -- dev usage guidance"
+  exit 1
+fi
+if ! rg -qi -- 'npm\.ps1|npm\.cmd|npx\.cmd' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must explain npm.cmd/npx.cmd policy-safe guidance"
   exit 1
 fi
 if ! rg -qi -- 'client/server tabs|client and server tabs|client.*server.*tabs|tabs.*client.*server' "$README_FILE"; then

@@ -220,6 +220,9 @@ echo "[ci] windows desktop doctor guardrails integration"
 echo "[ci] windows desktop native bootstrap guardrails integration"
 ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
 
+echo "[ci] windows desktop shell guardrails integration"
+./scripts/integration_windows_desktop_shell_guardrails.sh
+
 echo "[ci] windows desktop dev guardrails integration"
 ./scripts/integration_windows_desktop_dev_guardrails.sh
 

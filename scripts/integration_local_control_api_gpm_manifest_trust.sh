@@ -287,6 +287,27 @@ start_local_api \
   "" \
   1
 
+echo "[local-control-api-gpm-manifest-trust] production mode /v1/config surfaces fail-closed connect policy defaults"
+prod_auth_config_json="$(api_get_json "/v1/config")"
+if ! jq -e '.ok == true and .config.connect_require_session == true and .config.allow_legacy_connect_override == false' <<<"$prod_auth_config_json" >/dev/null; then
+  echo "expected production mode /v1/config to surface connect_require_session=true and allow_legacy_connect_override=false"
+  echo "$prod_auth_config_json"
+  exit 1
+fi
+
+echo "[local-control-api-gpm-manifest-trust] production mode rejects manual connect overrides without session token"
+prod_auth_connect_manual_body="$TMP_DIR/prod_auth_connect_manual_override.json"
+prod_auth_connect_manual_code="$(curl -sS -o "$prod_auth_connect_manual_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"bootstrap_directory\":\"https://directory.prod-connect.globalprivatemesh.example:8081\",\"invite_key\":\"inv-prod-connect-manual-override\"}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$prod_auth_connect_manual_code" != "400" ]]; then
+  echo "expected production mode manual connect override without session_token to fail with 400, got $prod_auth_connect_manual_code"
+  cat "$prod_auth_connect_manual_body"
+  exit 1
+fi
+assert_json_expr \
+  "$prod_auth_connect_manual_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("manual")) and ((((.error // "") | ascii_downcase) | contains("override")) or (((.error // "") | ascii_downcase) | contains("bootstrap_directory"))) and (((.error // "") | contains("session_token")) or (((.error // "") | ascii_downcase) | contains("session token")))' \
+  "expected production mode manual connect override error to indicate overrides are disabled and session token is required"
+
 prod_auth_wallet="cosmos1prodauthstrict"
 prod_auth_challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "{\"wallet_address\":\"${prod_auth_wallet}\",\"wallet_provider\":\"keplr\"}")"
 prod_auth_challenge_id="$(jq -r '.challenge_id // ""' <<<"$prod_auth_challenge_json")"

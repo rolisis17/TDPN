@@ -14,6 +14,7 @@ Usage:
     [--dry-run [0|1]] \
     [--run-desktop-scaffold-contract [0|1]] \
     [--run-windows-desktop-native-bootstrap-guardrails [0|1]] \
+    [--run-windows-desktop-shell-guardrails [0|1]] \
     [--run-local-control-api-contract [0|1]] \
     [--run-local-api-config-defaults [0|1]] \
     [--run-easy-node-config-v1 [0|1]] \
@@ -29,15 +30,16 @@ Purpose:
   contract checks:
     1) integration_desktop_scaffold_contract.sh
     2) integration_windows_desktop_native_bootstrap_guardrails.sh
-    3) integration_local_control_api_contract.sh
-    4) integration_local_api_config_defaults.sh
-    5) integration_easy_node_config_v1.sh
-    6) integration_easy_mode_launcher_wiring.sh
-    7) integration_easy_mode_launcher_runtime.sh
-    8) integration_phase3_windows_client_beta_check.sh
-    9) integration_phase3_windows_client_beta_run.sh
-   10) integration_phase3_windows_client_beta_handoff_check.sh
-   11) integration_phase3_windows_client_beta_handoff_run.sh
+    3) integration_windows_desktop_shell_guardrails.sh
+    4) integration_local_control_api_contract.sh
+    5) integration_local_api_config_defaults.sh
+    6) integration_easy_node_config_v1.sh
+    7) integration_easy_mode_launcher_wiring.sh
+    8) integration_easy_mode_launcher_runtime.sh
+    9) integration_phase3_windows_client_beta_check.sh
+   10) integration_phase3_windows_client_beta_run.sh
+   11) integration_phase3_windows_client_beta_handoff_check.sh
+   12) integration_phase3_windows_client_beta_handoff_run.sh
 
 Dry-run mode:
   --dry-run 1 skips stage execution, records deterministic skip accounting,
@@ -117,6 +119,7 @@ dry_run="${CI_PHASE3_WINDOWS_CLIENT_BETA_DRY_RUN:-0}"
 
 run_desktop_scaffold_contract="${CI_PHASE3_WINDOWS_CLIENT_BETA_RUN_DESKTOP_SCAFFOLD_CONTRACT:-1}"
 run_windows_desktop_native_bootstrap_guardrails="${CI_PHASE3_WINDOWS_CLIENT_BETA_RUN_WINDOWS_DESKTOP_NATIVE_BOOTSTRAP_GUARDRAILS:-1}"
+run_windows_desktop_shell_guardrails="${CI_PHASE3_WINDOWS_CLIENT_BETA_RUN_WINDOWS_DESKTOP_SHELL_GUARDRAILS:-1}"
 run_local_control_api_contract="${CI_PHASE3_WINDOWS_CLIENT_BETA_RUN_LOCAL_CONTROL_API_CONTRACT:-1}"
 run_local_api_config_defaults="${CI_PHASE3_WINDOWS_CLIENT_BETA_RUN_LOCAL_API_CONFIG_DEFAULTS:-1}"
 run_easy_node_config_v1="${CI_PHASE3_WINDOWS_CLIENT_BETA_RUN_EASY_NODE_CONFIG_V1:-1}"
@@ -170,6 +173,15 @@ while [[ $# -gt 0 ]]; do
         shift 2
       else
         run_windows_desktop_native_bootstrap_guardrails="1"
+        shift
+      fi
+      ;;
+    --run-windows-desktop-shell-guardrails)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_windows_desktop_shell_guardrails="${2:-}"
+        shift 2
+      else
+        run_windows_desktop_shell_guardrails="1"
         shift
       fi
       ;;
@@ -270,6 +282,7 @@ bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
 bool_arg_or_die "--run-desktop-scaffold-contract" "$run_desktop_scaffold_contract"
 bool_arg_or_die "--run-windows-desktop-native-bootstrap-guardrails" "$run_windows_desktop_native_bootstrap_guardrails"
+bool_arg_or_die "--run-windows-desktop-shell-guardrails" "$run_windows_desktop_shell_guardrails"
 bool_arg_or_die "--run-local-control-api-contract" "$run_local_control_api_contract"
 bool_arg_or_die "--run-local-api-config-defaults" "$run_local_api_config_defaults"
 bool_arg_or_die "--run-easy-node-config-v1" "$run_easy_node_config_v1"
@@ -282,6 +295,7 @@ bool_arg_or_die "--run-phase3-windows-client-beta-handoff-run" "$run_phase3_wind
 
 desktop_scaffold_contract_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_DESKTOP_SCAFFOLD_CONTRACT_SCRIPT:-$ROOT_DIR/scripts/integration_desktop_scaffold_contract.sh}"
 windows_desktop_native_bootstrap_guardrails_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_WINDOWS_DESKTOP_NATIVE_BOOTSTRAP_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_windows_desktop_native_bootstrap_guardrails.sh}"
+windows_desktop_shell_guardrails_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_WINDOWS_DESKTOP_SHELL_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_windows_desktop_shell_guardrails.sh}"
 local_control_api_contract_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_LOCAL_CONTROL_API_CONTRACT_SCRIPT:-$ROOT_DIR/scripts/integration_local_control_api_contract.sh}"
 local_api_config_defaults_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_LOCAL_API_CONFIG_DEFAULTS_SCRIPT:-$ROOT_DIR/scripts/integration_local_api_config_defaults.sh}"
 easy_node_config_v1_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_EASY_NODE_CONFIG_V1_SCRIPT:-$ROOT_DIR/scripts/integration_easy_node_config_v1.sh}"
@@ -295,6 +309,7 @@ phase3_windows_client_beta_handoff_run_script="${CI_PHASE3_WINDOWS_CLIENT_BETA_P
 stage_ids=(
   "desktop_scaffold_contract"
   "windows_desktop_native_bootstrap_guardrails"
+  "windows_desktop_shell_guardrails"
   "local_control_api_contract"
   "local_api_config_defaults"
   "easy_node_config_v1"
@@ -309,6 +324,7 @@ stage_ids=(
 declare -A stage_script=(
   ["desktop_scaffold_contract"]="$desktop_scaffold_contract_script"
   ["windows_desktop_native_bootstrap_guardrails"]="$windows_desktop_native_bootstrap_guardrails_script"
+  ["windows_desktop_shell_guardrails"]="$windows_desktop_shell_guardrails_script"
   ["local_control_api_contract"]="$local_control_api_contract_script"
   ["local_api_config_defaults"]="$local_api_config_defaults_script"
   ["easy_node_config_v1"]="$easy_node_config_v1_script"
@@ -323,6 +339,7 @@ declare -A stage_script=(
 declare -A stage_enabled=(
   ["desktop_scaffold_contract"]="$run_desktop_scaffold_contract"
   ["windows_desktop_native_bootstrap_guardrails"]="$run_windows_desktop_native_bootstrap_guardrails"
+  ["windows_desktop_shell_guardrails"]="$run_windows_desktop_shell_guardrails"
   ["local_control_api_contract"]="$run_local_control_api_contract"
   ["local_api_config_defaults"]="$run_local_api_config_defaults"
   ["easy_node_config_v1"]="$run_easy_node_config_v1"
@@ -437,6 +454,7 @@ jq -n \
   --arg print_summary_json "$print_summary_json" \
   --arg run_desktop_scaffold_contract "$run_desktop_scaffold_contract" \
   --arg run_windows_desktop_native_bootstrap_guardrails "$run_windows_desktop_native_bootstrap_guardrails" \
+  --arg run_windows_desktop_shell_guardrails "$run_windows_desktop_shell_guardrails" \
   --arg run_local_control_api_contract "$run_local_control_api_contract" \
   --arg run_local_api_config_defaults "$run_local_api_config_defaults" \
   --arg run_easy_node_config_v1 "$run_easy_node_config_v1" \
@@ -462,6 +480,7 @@ jq -n \
       print_summary_json: ($print_summary_json == "1"),
       run_desktop_scaffold_contract: ($run_desktop_scaffold_contract == "1"),
       run_windows_desktop_native_bootstrap_guardrails: ($run_windows_desktop_native_bootstrap_guardrails == "1"),
+      run_windows_desktop_shell_guardrails: ($run_windows_desktop_shell_guardrails == "1"),
       run_local_control_api_contract: ($run_local_control_api_contract == "1"),
       run_local_api_config_defaults: ($run_local_api_config_defaults == "1"),
       run_easy_node_config_v1: ($run_easy_node_config_v1 == "1"),

@@ -144,7 +144,9 @@ Windows PowerShell policy note:
 
 PowerShell policy-safe command wrapper:
 
-Use `scripts\windows\desktop_shell.cmd` for a policy-safe desktop shell entry point when you need to run npm commands without tripping `npm.ps1` execution-policy issues.
+Use `scripts\windows\desktop_shell.cmd` for an execution-policy-safe desktop shell entry point when you need to run npm commands without tripping `npm.ps1` execution-policy issues.
+It invokes PowerShell with `-ExecutionPolicy Bypass`, refreshes PATH, and normalizes npm/npx calls to `npm.cmd`/`npx.cmd`.
+The `.cmd` wrapper also rejects unsafe cmd metacharacters; for complex quoting, call `scripts\windows\desktop_shell.ps1` directly.
 
 ```cmd
 scripts\windows\desktop_shell.cmd npm install
