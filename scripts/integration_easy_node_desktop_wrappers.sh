@@ -32,6 +32,7 @@ DOCTOR_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_doctor.sh"
 NATIVE_BOOTSTRAP_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_native_bootstrap.sh"
 ONE_CLICK_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_one_click.sh"
 DEV_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_dev.sh"
+INSTALLER_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_installer.sh"
 PACKAGED_RUN_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_packaged_run.sh"
 RELEASE_BUNDLE_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_release_bundle.sh"
 LOCAL_API_LINUX_FAKE="$TMP_DIR/fake_desktop_linux_local_api_session.sh"
@@ -41,6 +42,7 @@ NATIVE_BOOTSTRAP_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_native_bootstrap.ps
 ONE_CLICK_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_one_click.ps1"
 PACKAGED_RUN_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_packaged_run.ps1"
 DEV_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_dev.ps1"
+INSTALLER_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_installer.ps1"
 RELEASE_BUNDLE_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_release_bundle.ps1"
 LOCAL_API_WINDOWS_FAKE="$TMP_DIR/fake_desktop_windows_local_api_session.ps1"
 
@@ -294,6 +296,7 @@ run_linux_command() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
     DESKTOP_LINUX_DEV_SCRIPT="$DEV_LINUX_FAKE" \
+    DESKTOP_LINUX_INSTALLER_SCRIPT="$INSTALLER_LINUX_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
     DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
@@ -301,6 +304,7 @@ run_linux_command() {
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_WINDOWS_FAKE" \
+    DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" --platform linux "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
@@ -323,6 +327,7 @@ run_linux_direct_command() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
     DESKTOP_LINUX_DEV_SCRIPT="$DEV_LINUX_FAKE" \
+    DESKTOP_LINUX_INSTALLER_SCRIPT="$INSTALLER_LINUX_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
     DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
@@ -330,6 +335,7 @@ run_linux_direct_command() {
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_WINDOWS_FAKE" \
+    DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
     bash "$SCRIPT_UNDER_TEST" "$command_name" "${forwarded_args[@]}" >"$STDOUT_OUT" 2>"$STDERR_OUT"
@@ -357,6 +363,7 @@ run_windows_command() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
     DESKTOP_LINUX_DEV_SCRIPT="$DEV_LINUX_FAKE" \
+    DESKTOP_LINUX_INSTALLER_SCRIPT="$INSTALLER_LINUX_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
     DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
@@ -364,6 +371,7 @@ run_windows_command() {
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_WINDOWS_FAKE" \
+    DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
     PATH="$RUNTIME_DIR:$PATH" \
@@ -392,6 +400,7 @@ run_windows_direct_command() {
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
     DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
     DESKTOP_LINUX_DEV_SCRIPT="$DEV_LINUX_FAKE" \
+    DESKTOP_LINUX_INSTALLER_SCRIPT="$INSTALLER_LINUX_FAKE" \
     DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
     DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
     DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
@@ -399,6 +408,7 @@ run_windows_direct_command() {
     DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_WINDOWS_FAKE" \
+    DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
     DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
     PATH="$RUNTIME_DIR:$PATH" \
@@ -412,6 +422,7 @@ create_fake_posix_wrapper_script "$DOCTOR_LINUX_FAKE" "desktop_linux_doctor" "FA
 create_fake_posix_wrapper_script "$NATIVE_BOOTSTRAP_LINUX_FAKE" "desktop_linux_native_bootstrap" "FAKE_LINUX_NATIVE_BOOTSTRAP_RC"
 create_fake_posix_wrapper_script "$ONE_CLICK_LINUX_FAKE" "desktop_linux_one_click" "FAKE_LINUX_ONE_CLICK_RC"
 create_fake_posix_wrapper_script "$DEV_LINUX_FAKE" "desktop_linux_dev" "FAKE_LINUX_DEV_RC"
+create_fake_posix_wrapper_script "$INSTALLER_LINUX_FAKE" "desktop_linux_installer" "FAKE_LINUX_INSTALLER_RC"
 create_fake_posix_wrapper_script "$PACKAGED_RUN_LINUX_FAKE" "desktop_linux_packaged_run" "FAKE_LINUX_PACKAGED_RUN_RC"
 create_fake_posix_wrapper_script "$RELEASE_BUNDLE_LINUX_FAKE" "desktop_linux_release_bundle" "FAKE_LINUX_RELEASE_BUNDLE_RC"
 create_fake_posix_wrapper_script "$LOCAL_API_LINUX_FAKE" "desktop_linux_local_api_session" "FAKE_LINUX_LOCAL_API_SESSION_RC"
@@ -420,6 +431,7 @@ create_fake_ps1_placeholder "$NATIVE_BOOTSTRAP_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$ONE_CLICK_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$PACKAGED_RUN_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$DEV_WINDOWS_FAKE"
+create_fake_ps1_placeholder "$INSTALLER_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$RELEASE_BUNDLE_WINDOWS_FAKE"
 create_fake_ps1_placeholder "$LOCAL_API_WINDOWS_FAKE"
 create_fake_go_script "$TMP_DIR/go"
@@ -433,8 +445,11 @@ assert_help_contains "./scripts/easy_node.sh desktop-packaged-run [--platform au
 assert_help_contains "./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-linux-dev [desktop_dev args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-linux-installer [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-windows-installer [desktop_installer args...]"
 
 echo "[easy-node-desktop-wrappers] explicit linux routing"
 run_linux_command \
@@ -469,11 +484,23 @@ run_linux_command \
   "--no-install-missing" \
   "--sample-flag" "desktop dev value with spaces"
 
+run_linux_command \
+  "desktop-installer" \
+  "desktop_linux_installer" \
+  "--dry-run" \
+  "--sample-flag" "desktop installer value with spaces"
+
 run_linux_direct_command \
   "desktop-linux-dev" \
   "desktop_linux_dev" \
   "--no-install-missing" \
   "--sample-flag" "desktop linux dev direct value with spaces"
+
+run_linux_direct_command \
+  "desktop-linux-installer" \
+  "desktop_linux_installer" \
+  "--dry-run" \
+  "--sample-flag" "desktop linux installer direct value with spaces"
 
 run_linux_command \
   "desktop-release-bundle" \
@@ -522,11 +549,23 @@ run_windows_command \
   "-NoInstallMissing" \
   "--sample-flag" "desktop dev value with spaces"
 
+run_windows_command \
+  "desktop-installer" \
+  "$INSTALLER_WINDOWS_FAKE" \
+  "-DryRun" \
+  "--sample-flag" "desktop installer value with spaces"
+
 run_windows_direct_command \
   "desktop-windows-dev" \
   "$DEV_WINDOWS_FAKE" \
   "-NoInstallMissing" \
   "--sample-flag" "desktop windows dev value with spaces"
+
+run_windows_direct_command \
+  "desktop-windows-installer" \
+  "$INSTALLER_WINDOWS_FAKE" \
+  "-DryRun" \
+  "--sample-flag" "desktop windows installer direct value with spaces"
 
 run_windows_command \
   "desktop-release-bundle" \
@@ -552,6 +591,15 @@ env \
   bash "$SCRIPT_UNDER_TEST" desktop-dev --sample-flag "auto linux dev value" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 assert_single_invocation "$CAPTURE" "desktop-dev auto linux"
 assert_forwarded_exact "$CAPTURE" "desktop_linux_dev" "--sample-flag" "auto linux dev value"
+
+: >"$CAPTURE"
+env \
+  EASY_NODE_DESKTOP_PLATFORM=linux \
+  EASY_NODE_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+  DESKTOP_LINUX_INSTALLER_SCRIPT="$INSTALLER_LINUX_FAKE" \
+  bash "$SCRIPT_UNDER_TEST" desktop-installer --sample-flag "auto linux installer value" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_single_invocation "$CAPTURE" "desktop-installer auto linux"
+assert_forwarded_exact "$CAPTURE" "desktop_linux_installer" "--sample-flag" "auto linux installer value"
 
 : >"$RUNTIME_CAPTURE"
 mkdir -p "$RUNTIME_DIR"
@@ -580,6 +628,20 @@ env \
   bash "$SCRIPT_UNDER_TEST" desktop-dev --sample-flag "auto windows dev value" >"$STDOUT_OUT" 2>"$STDERR_OUT"
 assert_single_invocation "$RUNTIME_CAPTURE" "desktop-dev auto windows"
 assert_runtime_invocation "$RUNTIME_CAPTURE" "$DEV_WINDOWS_FAKE" "--sample-flag" "auto windows dev value"
+
+: >"$RUNTIME_CAPTURE"
+mkdir -p "$RUNTIME_DIR"
+create_fake_runtime_script "$RUNTIME_DIR/powershell.exe" "powershell.exe"
+create_fake_runtime_script "$RUNTIME_DIR/pwsh" "pwsh"
+create_fake_runtime_script "$RUNTIME_DIR/powershell" "powershell"
+env \
+  EASY_NODE_DESKTOP_PLATFORM=windows \
+  EASY_NODE_DESKTOP_WRAPPERS_RUNTIME_CAPTURE_FILE="$RUNTIME_CAPTURE" \
+  DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_WINDOWS_FAKE" \
+  PATH="$RUNTIME_DIR:$PATH" \
+  bash "$SCRIPT_UNDER_TEST" desktop-installer --sample-flag "auto windows installer value" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_single_invocation "$RUNTIME_CAPTURE" "desktop-installer auto windows"
+assert_runtime_invocation "$RUNTIME_CAPTURE" "$INSTALLER_WINDOWS_FAKE" "--sample-flag" "auto windows installer value"
 
 echo "[easy-node-desktop-wrappers] local-api session routing"
 : >"$GO_CAPTURE"
