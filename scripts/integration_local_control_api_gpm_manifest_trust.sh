@@ -90,6 +90,7 @@ start_local_api() {
   local require_verify_command="${4:-0}"
   local require_metadata="${5:-0}"
   local require_wallet_extension_source="${6:-0}"
+  local manifest_hmac_key="${7:-}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -105,6 +106,7 @@ start_local_api() {
     GPM_MAIN_DOMAIN="$main_domain" \
     GPM_BOOTSTRAP_MANIFEST_URL="$manifest_url" \
     GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$cache_path" \
+    GPM_BOOTSTRAP_MANIFEST_HMAC_KEY="$manifest_hmac_key" \
     GPM_AUTH_VERIFY_REQUIRE_COMMAND="$require_verify_command" \
     GPM_AUTH_VERIFY_REQUIRE_METADATA="$require_metadata" \
     GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE="$require_wallet_extension_source" \
@@ -331,6 +333,32 @@ if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
   cat "$connect_conflict_body"
   exit 1
 fi
+stop_local_api
+
+echo "[local-control-api-gpm-manifest-trust] cache fallback fails closed when hmac key is configured and cache lacks signed payload evidence"
+cache_hmac_required_path="$TMP_DIR/cache_hmac_required_missing_evidence.json"
+write_manifest_cache "$cache_hmac_required_path" "$cache_manifest_url" "$cache_bootstrap_directory" true
+start_local_api \
+  "http://127.0.0.1:1" \
+  "$cache_manifest_url" \
+  "$cache_hmac_required_path" \
+  0 \
+  0 \
+  0 \
+  "integration-manifest-hmac-key"
+
+session_token_cache_hmac_required="$(mint_session_token "cosmos1cachehmacrequired")"
+cache_hmac_required_body="$TMP_DIR/cache_hmac_required_register.json"
+cache_hmac_required_code="$(curl -sS -o "$cache_hmac_required_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_hmac_required}\",\"path_profile\":\"balanced\"}" "${LOCAL_API_BASE}/v1/gpm/onboarding/client/register")"
+if [[ "$cache_hmac_required_code" != "502" ]]; then
+  echo "expected cache fallback without signed payload evidence to fail with 502 when hmac key is configured, got $cache_hmac_required_code"
+  cat "$cache_hmac_required_body"
+  exit 1
+fi
+assert_json_expr \
+  "$cache_hmac_required_body" \
+  '.ok == false and (.error | contains("cache fallback failed")) and (.error | contains("missing signed payload evidence"))' \
+  "expected hmac-required cache fallback to fail closed without signed payload evidence"
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] cache fallback fails closed on cached source host mismatch"
