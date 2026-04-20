@@ -1054,6 +1054,34 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 			operatorApplicationStatus == "approved" &&
 			gpmOperatorChainIDsCompatible(sessionChainOperatorID, chainOperatorID))
 
+	chainBindingStatus := "not_applicable"
+	chainBindingOK := false
+	chainBindingReason := ""
+	if role == "operator" {
+		switch operatorApplicationStatus {
+		case "approved":
+			if gpmOperatorChainIDsCompatible(sessionChainOperatorID, chainOperatorID) {
+				chainBindingStatus = "bound"
+				chainBindingOK = true
+			} else {
+				chainBindingStatus = "mismatch"
+				chainBindingReason = "operator session chain_operator_id does not match approved operator application chain_operator_id"
+			}
+		case "pending":
+			chainBindingStatus = "pending_approval"
+			chainBindingReason = "operator application is pending approval"
+		case "rejected":
+			chainBindingStatus = "pending_approval"
+			chainBindingReason = "operator application is rejected; re-approval is required before chain binding"
+		case "not_submitted":
+			chainBindingStatus = "pending_approval"
+			chainBindingReason = "operator application has not been submitted"
+		default:
+			chainBindingStatus = "unknown"
+			chainBindingReason = fmt.Sprintf("unexpected operator application status %q for chain binding", operatorApplicationStatus)
+		}
+	}
+
 	lockReason := ""
 	unlockActions := []string{}
 	if !lifecycleActionsUnlocked {
@@ -1106,6 +1134,9 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 		"tab_visible":                  tabVisible,
 		"client_tab_visible":           clientTabVisible,
 		"lifecycle_actions_unlocked":   lifecycleActionsUnlocked,
+		"chain_binding_status":         chainBindingStatus,
+		"chain_binding_ok":             chainBindingOK,
+		"chain_binding_reason":         chainBindingReason,
 		"service_mutations_configured": serviceMutationsConfigured,
 		"client_lock_reason":           clientLockReason,
 		"lock_reason":                  lockReason,

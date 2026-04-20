@@ -20,6 +20,7 @@ SERVER_LOG="$TMP_DIR/local_api_server.log"
 LOCAL_API_BASE=""
 SERVER_PID=""
 LOCAL_API_AUTH_TOKEN="local-api-contract-token"
+LOCAL_API_OPERATOR_ADMIN_TOKEN="local-api-contract-admin-token"
 
 cleanup() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
@@ -114,6 +115,7 @@ start_local_api() {
     LOCAL_CONTROL_API_ALLOW_UPDATE="$allow_update" \
     LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK="1" \
     LOCAL_CONTROL_API_AUTH_TOKEN="$LOCAL_API_AUTH_TOKEN" \
+    GPM_OPERATOR_APPROVAL_TOKEN="$LOCAL_API_OPERATOR_ADMIN_TOKEN" \
     LOCAL_API_CONTRACT_CALLS_FILE="$CALLS_FILE" \
       go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
@@ -364,6 +366,57 @@ overview_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\"
 if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .registration.wallet_address == "cosmos1overviewcontract" and .registration.status == "not_registered" and .readiness.role == "client" and .readiness.session_present == true and (.readiness.lifecycle_actions_unlocked | type == "boolean")' <<<"$overview_json" >/dev/null; then
   echo "onboarding overview did not return expected consolidated payload"
   echo "$overview_json"
+  exit 1
+fi
+if ! jq -e '.ok == true and (.readiness.chain_binding_status == "not_applicable") and (.readiness.chain_binding_ok == false) and ((.readiness.chain_binding_reason // "") == "")' <<<"$overview_json" >/dev/null; then
+  echo "onboarding overview missing expected default chain-binding readiness fields"
+  echo "$overview_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] chain-binding readiness reports bound status after operator approval"
+operator_apply_bound_json="$(api_post_json "/v1/gpm/onboarding/operator/apply" "{\"session_token\":\"${overview_session_token}\",\"chain_operator_id\":\"operator-contract-a\",\"server_label\":\"contract-bound\"}")"
+if ! jq -e '.ok == true and .application.status == "pending" and .application.chain_operator_id == "operator-contract-a"' <<<"$operator_apply_bound_json" >/dev/null; then
+  echo "operator apply (bound setup) did not return expected payload"
+  echo "$operator_apply_bound_json"
+  exit 1
+fi
+operator_approve_bound_json="$(api_post_json "/v1/gpm/onboarding/operator/approve" "{\"wallet_address\":\"cosmos1overviewcontract\",\"approved\":true,\"admin_token\":\"${LOCAL_API_OPERATOR_ADMIN_TOKEN}\"}")"
+if ! jq -e '.ok == true and .decision == "approved" and .application.status == "approved"' <<<"$operator_approve_bound_json" >/dev/null; then
+  echo "operator approve (bound setup) did not return expected payload"
+  echo "$operator_approve_bound_json"
+  exit 1
+fi
+server_bound_json="$(api_post_json "/v1/gpm/onboarding/server/status" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .readiness.role == "operator" and .readiness.operator_application_status == "approved" and .readiness.chain_binding_status == "bound" and .readiness.chain_binding_ok == true and ((.readiness.chain_binding_reason // "") == "")' <<<"$server_bound_json" >/dev/null; then
+  echo "server readiness did not report expected bound chain-binding state"
+  echo "$server_bound_json"
+  exit 1
+fi
+overview_bound_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .readiness.chain_binding_status == "bound" and .readiness.chain_binding_ok == true and ((.readiness.chain_binding_reason // "") == "")' <<<"$overview_bound_json" >/dev/null; then
+  echo "onboarding overview did not report expected bound chain-binding state"
+  echo "$overview_bound_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] chain-binding readiness reports pending_approval in negative scenario"
+operator_apply_pending_json="$(api_post_json "/v1/gpm/onboarding/operator/apply" "{\"session_token\":\"${overview_session_token}\",\"chain_operator_id\":\"operator-contract-b\",\"server_label\":\"contract-pending\"}")"
+if ! jq -e '.ok == true and .application.status == "pending" and .application.chain_operator_id == "operator-contract-b"' <<<"$operator_apply_pending_json" >/dev/null; then
+  echo "operator apply (negative setup) did not return expected payload"
+  echo "$operator_apply_pending_json"
+  exit 1
+fi
+server_pending_json="$(api_post_json "/v1/gpm/onboarding/server/status" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .readiness.role == "operator" and .readiness.operator_application_status == "pending" and .readiness.chain_binding_status == "pending_approval" and .readiness.chain_binding_ok == false and (.readiness.chain_binding_reason | type == "string") and (.readiness.chain_binding_reason | contains("pending approval"))' <<<"$server_pending_json" >/dev/null; then
+  echo "server readiness did not report expected pending_approval chain-binding state"
+  echo "$server_pending_json"
+  exit 1
+fi
+overview_pending_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .readiness.operator_application_status == "pending" and .readiness.chain_binding_status == "pending_approval" and .readiness.chain_binding_ok == false and (.readiness.chain_binding_reason | contains("pending approval"))' <<<"$overview_pending_json" >/dev/null; then
+  echo "onboarding overview did not report expected pending_approval chain-binding state"
+  echo "$overview_pending_json"
   exit 1
 fi
 

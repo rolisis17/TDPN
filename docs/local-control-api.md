@@ -268,6 +268,9 @@ Success payload:
 - `readiness.tab_visible`: `true` for `operator|admin`, else `false`
 - `readiness.client_tab_visible`: `true` when the client tab is eligible/visible for the resolved role/session context
 - `readiness.lifecycle_actions_unlocked`: `true` for `admin`, or `operator` with approved application and non-conflicting chain ids
+- `readiness.chain_binding_status`: additive chain-binding state for operator sessions (`bound|pending_approval|mismatch|not_applicable|unknown`)
+- `readiness.chain_binding_ok`: additive boolean convenience flag (`true` only when chain binding is currently healthy/bound)
+- `readiness.chain_binding_reason`: additive operator-facing reason when chain binding is not healthy (for example pending approval or chain-id mismatch)
 - `readiness.service_mutations_configured`: `true` when all legacy service lifecycle commands are configured (`LOCAL_CONTROL_API_SERVICE_START_COMMAND`, `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`, `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`)
 - `readiness.lock_reason`: non-empty reason when lifecycle actions are locked
 - `readiness.client_lock_reason`: non-empty reason when the client tab is role-locked
@@ -296,6 +299,7 @@ Success payload:
 - `session`: same session shape returned by `POST /v1/gpm/session` (`wallet_address`, `wallet_provider`, `role`, `created_at_utc`, `expires_at_utc`, `bootstrap_directory`, optional `path_profile`, optional `chain_operator_id`)
 - `registration`: same registration shape as `POST /v1/gpm/onboarding/client/status`
 - `readiness`: same readiness shape as `POST /v1/gpm/onboarding/server/status`
+- `readiness` therefore includes additive chain-binding readiness keys: `chain_binding_status`, `chain_binding_ok`, `chain_binding_reason`
 
 Compatibility note:
 - `POST /v1/gpm/onboarding/client/status` and `POST /v1/gpm/onboarding/server/status` remain fully supported; `POST /v1/gpm/onboarding/overview` is an additive consolidated contract to reduce round-trips.

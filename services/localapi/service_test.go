@@ -4236,6 +4236,12 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["operator_application_status"].(string); got != "pending" {
 			t.Fatalf("operator_application_status=%q want=pending payload=%v", got, payload)
 		}
+		if got, _ := readiness["chain_binding_status"].(string); got != "pending_approval" {
+			t.Fatalf("chain_binding_status=%q want=pending_approval payload=%v", got, payload)
+		}
+		if got, _ := readiness["chain_binding_ok"].(bool); got {
+			t.Fatalf("chain_binding_ok=%v want=false payload=%v", readiness["chain_binding_ok"], payload)
+		}
 		if got, _ := readiness["tab_visible"].(bool); !got {
 			t.Fatalf("tab_visible=%v want=true payload=%v", readiness["tab_visible"], payload)
 		}
@@ -4278,6 +4284,15 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); !got {
 			t.Fatalf("lifecycle_actions_unlocked=%v want=true payload=%v", readiness["lifecycle_actions_unlocked"], payload)
 		}
+		if got, _ := readiness["chain_binding_status"].(string); got != "bound" {
+			t.Fatalf("chain_binding_status=%q want=bound payload=%v", got, payload)
+		}
+		if got, _ := readiness["chain_binding_ok"].(bool); !got {
+			t.Fatalf("chain_binding_ok=%v want=true payload=%v", readiness["chain_binding_ok"], payload)
+		}
+		if got, _ := readiness["chain_binding_reason"].(string); got != "" {
+			t.Fatalf("chain_binding_reason=%q want empty payload=%v", got, payload)
+		}
 		if got, _ := readiness["chain_operator_id"].(string); got != "operator-approved-1" {
 			t.Fatalf("chain_operator_id=%q want=operator-approved-1 payload=%v", got, payload)
 		}
@@ -4313,6 +4328,16 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
 			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
 		}
+		if got, _ := readiness["chain_binding_status"].(string); got != "mismatch" {
+			t.Fatalf("chain_binding_status=%q want=mismatch payload=%v", got, payload)
+		}
+		if got, _ := readiness["chain_binding_ok"].(bool); got {
+			t.Fatalf("chain_binding_ok=%v want=false payload=%v", readiness["chain_binding_ok"], payload)
+		}
+		chainBindingReason, _ := readiness["chain_binding_reason"].(string)
+		if !strings.Contains(chainBindingReason, "does not match") {
+			t.Fatalf("chain_binding_reason=%q want mismatch message payload=%v", chainBindingReason, payload)
+		}
 		lockReason, _ := readiness["lock_reason"].(string)
 		if !strings.Contains(lockReason, "out of sync") {
 			t.Fatalf("lock_reason=%q want out-of-sync message payload=%v", lockReason, payload)
@@ -4347,6 +4372,15 @@ func TestGPMServerStatus(t *testing.T) {
 		}
 		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
 			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		if got, _ := readiness["chain_binding_status"].(string); got != "not_applicable" {
+			t.Fatalf("chain_binding_status=%q want=not_applicable payload=%v", got, payload)
+		}
+		if got, _ := readiness["chain_binding_ok"].(bool); got {
+			t.Fatalf("chain_binding_ok=%v want=false payload=%v", readiness["chain_binding_ok"], payload)
+		}
+		if got, _ := readiness["chain_binding_reason"].(string); got != "" {
+			t.Fatalf("chain_binding_reason=%q want empty payload=%v", got, payload)
 		}
 		lockReason, _ := readiness["lock_reason"].(string)
 		if !strings.Contains(lockReason, "operator or admin required") {
@@ -4628,6 +4662,15 @@ func TestGPMOnboardingOverview(t *testing.T) {
 		}
 		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); !got {
 			t.Fatalf("readiness.lifecycle_actions_unlocked=%v want=true payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		if got, _ := readiness["chain_binding_status"].(string); got != "bound" {
+			t.Fatalf("readiness.chain_binding_status=%q want=bound payload=%v", got, payload)
+		}
+		if got, _ := readiness["chain_binding_ok"].(bool); !got {
+			t.Fatalf("readiness.chain_binding_ok=%v want=true payload=%v", readiness["chain_binding_ok"], payload)
+		}
+		if _, ok := readiness["chain_binding_reason"]; !ok {
+			t.Fatalf("readiness.chain_binding_reason missing payload=%v", payload)
 		}
 	})
 }

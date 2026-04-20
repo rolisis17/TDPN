@@ -1006,8 +1006,33 @@ function parseServerReadiness(payload) {
     operatorApplicationStatus: normalizeOperatorApplicationStatus(readiness.operator_application_status),
     lockReason: lockReason || undefined,
     clientLockReason: clientLockReason || undefined,
+    chainBindingStatus: nonEmptyString(firstDefined(readiness.chain_binding_status, readiness.chainBindingStatus)),
+    chainBindingOk: parseBooleanLike(firstDefined(readiness.chain_binding_ok, readiness.chainBindingOk)),
+    chainBindingReason: nonEmptyString(firstDefined(readiness.chain_binding_reason, readiness.chainBindingReason)),
     unlockActions
   };
+}
+
+function appendChainBindingGuidance(guidanceText, readiness) {
+  const statusRaw = nonEmptyString(readiness?.chainBindingStatus);
+  const status = statusRaw ? statusRaw.replace(/[_-]+/g, " ") : "";
+  const ok = readiness?.chainBindingOk;
+  const reason = nonEmptyString(readiness?.chainBindingReason);
+  if (!status && ok === undefined && !reason) {
+    return guidanceText;
+  }
+  let bindingHint = "";
+  if (ok === true) {
+    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: ready.";
+  } else if (ok === false) {
+    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: not ready.";
+  } else {
+    bindingHint = `Chain binding: ${status}.`;
+  }
+  if (reason) {
+    bindingHint = `${bindingHint} ${reason}`;
+  }
+  return `${guidanceText} ${bindingHint}`;
 }
 
 function setServerReadiness(value) {
@@ -1235,13 +1260,19 @@ function computeOperatorReadiness() {
         return {
           kind: "warn",
           statusText: statusLabel,
-          guidanceText: "Server role is eligible, but lifecycle commands are not configured on the daemon."
+          guidanceText: appendChainBindingGuidance(
+            "Server role is eligible, but lifecycle commands are not configured on the daemon.",
+            serverReadiness
+          )
         };
       }
       return {
         kind: "good",
         statusText: statusLabel,
-        guidanceText: "Server controls are unlocked by backend readiness policy."
+        guidanceText: appendChainBindingGuidance(
+          "Server controls are unlocked by backend readiness policy.",
+          serverReadiness
+        )
       };
     }
     const reason = serverReadiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
@@ -1252,7 +1283,7 @@ function computeOperatorReadiness() {
           ? "bad"
           : "warn",
       statusText: statusLabel,
-      guidanceText: `${reason}${nextActions}`
+      guidanceText: appendChainBindingGuidance(`${reason}${nextActions}`, serverReadiness)
     };
   }
 

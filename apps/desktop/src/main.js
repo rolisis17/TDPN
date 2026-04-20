@@ -1171,6 +1171,13 @@ function parseServerReadiness(payload) {
     clientLockReason: toDetailText(
       firstDefined(readiness.client_lock_reason, readiness.clientLockReason, readiness.client_lock_hint)
     ),
+    chainBindingStatus: toDetailText(
+      firstDefined(readiness.chain_binding_status, readiness.chainBindingStatus)
+    ),
+    chainBindingOk: toBooleanLike(firstDefined(readiness.chain_binding_ok, readiness.chainBindingOk)),
+    chainBindingReason: toDetailText(
+      firstDefined(readiness.chain_binding_reason, readiness.chainBindingReason)
+    ),
     unlockActions,
     endpointWarnings,
     endpointPosture
@@ -1313,6 +1320,28 @@ function appendReadinessDiagnosticsHint(baseHint, readiness) {
   return `${baseHint} Diagnostics: ${summarized}${suffix}`;
 }
 
+function appendChainBindingHint(baseHint, readiness) {
+  const statusRaw = typeof readiness?.chainBindingStatus === "string" ? readiness.chainBindingStatus.trim() : "";
+  const status = statusRaw ? statusRaw.replace(/[_-]+/g, " ") : "";
+  const ok = readiness?.chainBindingOk;
+  const reason = typeof readiness?.chainBindingReason === "string" ? readiness.chainBindingReason.trim() : "";
+  if (!status && ok === undefined && !reason) {
+    return baseHint;
+  }
+  let bindingHint = "";
+  if (ok === true) {
+    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: ready.";
+  } else if (ok === false) {
+    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: not ready.";
+  } else {
+    bindingHint = `Chain binding: ${status}.`;
+  }
+  if (reason) {
+    bindingHint = `${bindingHint} ${reason}`;
+  }
+  return `${baseHint} ${bindingHint}`;
+}
+
 function computeServerLockHintText() {
   if (state.serverReadiness) {
     const readiness = state.serverReadiness;
@@ -1334,7 +1363,7 @@ function computeServerLockHintText() {
         hintText = reason;
       }
     }
-    return appendReadinessDiagnosticsHint(hintText, readiness);
+    return appendReadinessDiagnosticsHint(appendChainBindingHint(hintText, readiness), readiness);
   }
   if (!state.sessionToken) {
     return "Sign in first to unlock server onboarding.";
