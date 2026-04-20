@@ -96,6 +96,7 @@ start_local_api() {
   local manifest_require_signature="${10-}"
   local connect_require_session="${11-}"
   local allow_legacy_connect_override="${12-}"
+  local manifest_remote_refresh_interval="${13-}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -115,6 +116,7 @@ start_local_api() {
       "GPM_BOOTSTRAP_MANIFEST_HMAC_KEY=$manifest_hmac_key"
       "GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=$manifest_require_https"
       "GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=$manifest_require_signature"
+      "GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC=$manifest_remote_refresh_interval"
       "GPM_PRODUCTION_MODE=$production_mode"
       "GPM_AUTH_VERIFY_REQUIRE_COMMAND=$require_verify_command"
       "GPM_AUTH_VERIFY_REQUIRE_METADATA=$require_metadata"
@@ -253,11 +255,20 @@ write_manifest_cache_with_directories() {
     }' >"$cache_path"
 }
 
+set_manifest_cache_fetched_at_utc() {
+  local cache_path="$1"
+  local fetched_at_utc="$2"
+  local tmp_path="$cache_path.tmp"
+  jq --arg fetched_at_utc "$fetched_at_utc" '.fetched_at_utc = $fetched_at_utc' "$cache_path" >"$tmp_path"
+  mv "$tmp_path" "$cache_path"
+}
+
 assert_json_expr() {
   local json_path="$1"
   local jq_expr="$2"
   local message="$3"
-  if ! jq -e "$jq_expr" "$json_path" >/dev/null; then
+  shift 3
+  if ! jq -e "$jq_expr" "$@" "$json_path" >/dev/null; then
     echo "$message"
     cat "$json_path"
     exit 1
@@ -278,8 +289,8 @@ start_local_api \
   1
 
 strict_config_json="$(api_get_json "/v1/config")"
-if ! jq -e '.ok == true and .config.gpm_auth_verify_require_metadata == true and .config.gpm_auth_verify_require_wallet_extension_source == true' <<<"$strict_config_json" >/dev/null; then
-  echo "expected /v1/config strict auth policy keys to be surfaced as true"
+if ! jq -e '.ok == true and .config.gpm_auth_verify_require_metadata == true and .config.gpm_auth_verify_require_wallet_extension_source == true and .config.gpm_manifest_resolve_policy == "cache_first_bounded_remote_refresh" and .config.gpm_manifest_remote_refresh_interval_sec == 300 and .config.gpm_manifest_remote_refresh_interval_source == "default" and ((.config.gpm_manifest_resolve_policy_detail // "") | contains("trusted cache"))' <<<"$strict_config_json" >/dev/null; then
+  echo "expected /v1/config strict auth and manifest resolve policy keys to be surfaced"
   echo "$strict_config_json"
   exit 1
 fi
@@ -596,6 +607,50 @@ if ! grep -F "client-vpn-up"$'\t'"--bootstrap-directory"$'\t'"$cache_bootstrap_d
   cat "$connect_revalidation_ok_body"
   exit 1
 fi
+stop_local_api
+
+echo "[local-control-api-gpm-manifest-trust] elapsed remote refresh interval still serves trusted cache when remote refresh fails"
+cache_refresh_elapsed_manifest_url="http://127.0.0.1:1/v1/bootstrap/manifest"
+cache_refresh_elapsed_bootstrap_directory="https://directory.cache.refresh-elapsed.globalprivatemesh.example:8081"
+cache_refresh_elapsed_path="$TMP_DIR/cache_refresh_elapsed.json"
+write_manifest_cache "$cache_refresh_elapsed_path" "$cache_refresh_elapsed_manifest_url" "$cache_refresh_elapsed_bootstrap_directory" true
+cache_refresh_elapsed_fetched_at="$(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+set_manifest_cache_fetched_at_utc "$cache_refresh_elapsed_path" "$cache_refresh_elapsed_fetched_at"
+start_local_api \
+  "http://127.0.0.1:1" \
+  "$cache_refresh_elapsed_manifest_url" \
+  "$cache_refresh_elapsed_path" \
+  0 \
+  0 \
+  0 \
+  "" \
+  0 \
+  "" \
+  "" \
+  "" \
+  "" \
+  1
+
+cache_refresh_elapsed_config_json="$(api_get_json "/v1/config")"
+if ! jq -e '.ok == true and .config.gpm_manifest_remote_refresh_interval_sec == 1 and .config.gpm_manifest_remote_refresh_interval_source == "GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC"' <<<"$cache_refresh_elapsed_config_json" >/dev/null; then
+  echo "expected refresh-interval override settings in /v1/config"
+  echo "$cache_refresh_elapsed_config_json"
+  exit 1
+fi
+
+session_token_cache_refresh_elapsed="$(mint_session_token "cosmos1cacherefreshelapsed")"
+cache_refresh_elapsed_body="$TMP_DIR/cache_refresh_elapsed_register.json"
+cache_refresh_elapsed_code="$(curl -sS -o "$cache_refresh_elapsed_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_refresh_elapsed}\",\"path_profile\":\"2hop\"}" "${LOCAL_API_BASE}/v1/gpm/onboarding/client/register")"
+if [[ "$cache_refresh_elapsed_code" != "200" ]]; then
+  echo "expected elapsed-refresh cache fallback registration to succeed with 200 when remote refresh fails, got $cache_refresh_elapsed_code"
+  cat "$cache_refresh_elapsed_body"
+  exit 1
+fi
+assert_json_expr \
+  "$cache_refresh_elapsed_body" \
+  '.ok == true and .source == "cache" and .signature_verified == true and .profile.bootstrap_directory == $expected_bootstrap' \
+  "expected elapsed-refresh fallback payload markers" \
+  --arg expected_bootstrap "$cache_refresh_elapsed_bootstrap_directory"
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] cache fallback fails closed when hmac key is configured and cache lacks signed payload evidence"

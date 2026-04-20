@@ -104,6 +104,12 @@ type gpmBootstrapManifestCacheFile struct {
 	Manifest              gpmBootstrapManifest `json:"manifest"`
 }
 
+type gpmTrustedBootstrapManifestCache struct {
+	Manifest          gpmBootstrapManifest
+	SignatureVerified bool
+	FetchedAtUTC      time.Time
+}
+
 type gpmAuthChallengeRequest struct {
 	WalletAddress  string `json:"wallet_address"`
 	WalletProvider string `json:"wallet_provider"`
@@ -2133,39 +2139,59 @@ func randomBase64URL(byteLen int) (string, error) {
 
 func (s *Service) resolveBootstrapManifest(ctx context.Context) (gpmBootstrapManifest, string, bool, error) {
 	manifestURL := strings.TrimSpace(s.gpmManifestURL)
-	if manifestURL == "" {
-		return gpmBootstrapManifest{}, "", false, errors.New("gpm manifest url is not configured")
-	}
-	pinnedHost, err := s.pinnedGPMMainDomainHost()
-	if err != nil {
-		return gpmBootstrapManifest{}, "", false, err
-	}
-	if err := s.validateManifestSourceURLPolicy(manifestURL, pinnedHost, "gpm manifest url"); err != nil {
-		return gpmBootstrapManifest{}, "", false, err
-	}
-	if pinnedHost != "" {
-		manifestHost, err := normalizeHTTPHost(manifestURL)
-		if err != nil {
-			return gpmBootstrapManifest{}, "", false, fmt.Errorf("gpm manifest url is invalid for pinned gpm main domain host %q: %w", pinnedHost, err)
-		}
-		if manifestHost != pinnedHost {
-			return gpmBootstrapManifest{}, "", false, fmt.Errorf("gpm manifest url host mismatch: got %q, pinned gpm main domain host %q; update GPM_MAIN_DOMAIN or GPM_BOOTSTRAP_MANIFEST_URL", manifestHost, pinnedHost)
-		}
-	}
-
 	// Cache-first policy: use a valid trusted cache artifact when available and only
 	// attempt a bounded remote refresh when cache is missing/stale/invalid.
-	cacheManifest, cacheSignatureVerified, cacheErr := s.readBootstrapManifestCache()
+	cacheEntry, cacheErr := s.readTrustedBootstrapManifestCache()
 	if cacheErr == nil {
-		return cacheManifest, "cache", cacheSignatureVerified, nil
+		if !s.shouldAttemptRemoteManifestRefresh(cacheEntry.FetchedAtUTC) {
+			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, nil
+		}
+		manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifestWithPolicy(ctx, manifestURL)
+		if err != nil {
+			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, nil
+		}
+		_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
+		return manifest, "remote", signatureVerified, nil
 	}
 
-	manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifest(ctx, manifestURL)
+	manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifestWithPolicy(ctx, manifestURL)
 	if err != nil {
 		return gpmBootstrapManifest{}, "", false, fmt.Errorf("manifest cache read failed (%v) and remote manifest refresh failed (%v)", cacheErr, err)
 	}
 	_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
 	return manifest, "remote", signatureVerified, nil
+}
+
+func (s *Service) shouldAttemptRemoteManifestRefresh(fetchedAt time.Time) bool {
+	refreshInterval := s.gpmManifestRemoteRefreshIntvl
+	if refreshInterval <= 0 {
+		return false
+	}
+	return time.Since(fetchedAt) >= refreshInterval
+}
+
+func (s *Service) fetchRemoteManifestWithPolicy(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {
+	manifestURL = strings.TrimSpace(manifestURL)
+	if manifestURL == "" {
+		return gpmBootstrapManifest{}, false, nil, "", errors.New("gpm manifest url is not configured")
+	}
+	pinnedHost, err := s.pinnedGPMMainDomainHost()
+	if err != nil {
+		return gpmBootstrapManifest{}, false, nil, "", err
+	}
+	if err := s.validateManifestSourceURLPolicy(manifestURL, pinnedHost, "gpm manifest url"); err != nil {
+		return gpmBootstrapManifest{}, false, nil, "", err
+	}
+	if pinnedHost != "" {
+		manifestHost, hostErr := normalizeHTTPHost(manifestURL)
+		if hostErr != nil {
+			return gpmBootstrapManifest{}, false, nil, "", fmt.Errorf("gpm manifest url is invalid for pinned gpm main domain host %q: %w", pinnedHost, hostErr)
+		}
+		if manifestHost != pinnedHost {
+			return gpmBootstrapManifest{}, false, nil, "", fmt.Errorf("gpm manifest url host mismatch: got %q, pinned gpm main domain host %q; update GPM_MAIN_DOMAIN or GPM_BOOTSTRAP_MANIFEST_URL", manifestHost, pinnedHost)
+		}
+	}
+	return s.fetchRemoteManifest(ctx, manifestURL)
 }
 
 func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {
@@ -2342,51 +2368,63 @@ func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, sig
 }
 
 func (s *Service) readBootstrapManifestCache() (gpmBootstrapManifest, bool, error) {
+	cacheEntry, err := s.readTrustedBootstrapManifestCache()
+	if err != nil {
+		return gpmBootstrapManifest{}, false, err
+	}
+	return cacheEntry.Manifest, cacheEntry.SignatureVerified, nil
+}
+
+func (s *Service) readTrustedBootstrapManifestCache() (gpmTrustedBootstrapManifestCache, error) {
 	cachePath := strings.TrimSpace(s.gpmManifestCache)
 	if cachePath == "" {
-		return gpmBootstrapManifest{}, false, errors.New("manifest cache path is empty")
+		return gpmTrustedBootstrapManifestCache{}, errors.New("manifest cache path is empty")
 	}
 	body, err := readFileWithHardLimit(cachePath, gpmManifestCacheBodyLimit)
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
 	var cache gpmBootstrapManifestCacheFile
 	if err := json.Unmarshal(body, &cache); err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
 	if err := validateBootstrapManifest(cache.Manifest); err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
 	fetchedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(cache.FetchedAtUTC))
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
 	if time.Since(fetchedAt) > s.gpmManifestMaxAge {
-		return gpmBootstrapManifest{}, false, errors.New("cached manifest is stale")
+		return gpmTrustedBootstrapManifestCache{}, errors.New("cached manifest is stale")
 	}
 	pinnedHost, err := s.pinnedGPMMainDomainHost()
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
 	if pinnedHost != "" || s.gpmManifestRequireHTTPS {
 		if err := s.validateManifestSourceURLPolicy(strings.TrimSpace(cache.SourceURL), pinnedHost, "cached manifest source url"); err != nil {
-			return gpmBootstrapManifest{}, false, err
+			return gpmTrustedBootstrapManifestCache{}, err
 		}
 	}
 	if pinnedHost != "" {
 		cacheSourceHost, hostErr := normalizeHTTPHost(strings.TrimSpace(cache.SourceURL))
 		if hostErr != nil {
-			return gpmBootstrapManifest{}, false, fmt.Errorf("cached manifest source url is invalid for pinned gpm main domain host %q: %w", pinnedHost, hostErr)
+			return gpmTrustedBootstrapManifestCache{}, fmt.Errorf("cached manifest source url is invalid for pinned gpm main domain host %q: %w", pinnedHost, hostErr)
 		}
 		if cacheSourceHost != pinnedHost {
-			return gpmBootstrapManifest{}, false, fmt.Errorf("cached manifest source host mismatch: got %q, pinned gpm main domain host %q; clear the cache or refresh it from the pinned domain", cacheSourceHost, pinnedHost)
+			return gpmTrustedBootstrapManifestCache{}, fmt.Errorf("cached manifest source host mismatch: got %q, pinned gpm main domain host %q; clear the cache or refresh it from the pinned domain", cacheSourceHost, pinnedHost)
 		}
 	}
 	signatureVerified, err := s.verifyCachedManifestSignature(cache)
 	if err != nil {
-		return gpmBootstrapManifest{}, false, err
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
-	return normalizeBootstrapManifest(cache.Manifest), signatureVerified, nil
+	return gpmTrustedBootstrapManifestCache{
+		Manifest:          normalizeBootstrapManifest(cache.Manifest),
+		SignatureVerified: signatureVerified,
+		FetchedAtUTC:      fetchedAt,
+	}, nil
 }
 
 func (s *Service) verifyCachedManifestSignature(cache gpmBootstrapManifestCacheFile) (bool, error) {

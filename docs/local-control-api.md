@@ -93,7 +93,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - strict wallet-extension-source policy: set `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`) to require explicit `signature_source=wallet_extension`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when the source requirement is not met.
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
 - `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile`, trusted `bootstrap_directories` from the signed manifest, and preferred `bootstrap_directory`; used as authoritative connect policy for session-token connects)
-- `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, preferred `bootstrap_directory`, trusted `bootstrap_directories`, and persisted `path_profile` when available)
+- `POST /v1/gpm/onboarding/client/status` (returns trust-aware registration state: `registered|not_registered|degraded`, preferred `bootstrap_directory`, trusted `bootstrap_directories`, persisted `path_profile` when available, and additive `status_reason` when registration is no longer trusted or trust revalidation fails)
 - `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and strict chain-binding checks)
 - `POST /v1/gpm/onboarding/overview` (consolidated onboarding contract for a `session_token`, returning `session + registration + readiness` in one response)
 - `POST /v1/gpm/onboarding/operator/apply`
@@ -189,6 +189,7 @@ If auth is required and missing/invalid, the API returns `401`.
     "gpm_manifest_url": "https://globalprivatemesh.net/v1/bootstrap/manifest",
     "gpm_manifest_cache_path": ".easy-node-logs/gpm_bootstrap_manifest_cache.json",
     "gpm_manifest_cache_max_age_sec": 86400,
+    "gpm_manifest_resolve_policy": "cache_first_bounded_remote_refresh",
     "gpm_legacy_env_aliases_active": [
       "TDPN_PRODUCTION_MODE"
     ],
@@ -213,6 +214,10 @@ Policy posture config hints:
 - `gpm_manifest_require_https_policy_source`: additive source for manifest HTTPS strictness (`production-default` when inherited from production mode with no explicit manifest HTTPS env override).
 - `gpm_manifest_require_signature`: whether strict manifest signature evidence policy is enabled for both remote fetch and cache fallback.
 - `gpm_manifest_require_signature_policy_source`: additive source for manifest signature strictness (`production-default` when inherited from production mode with no explicit signature-policy env override).
+- `gpm_manifest_cache_max_age_sec`: manifest cache trust max age in seconds (runtime value derived from `GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC`, legacy alias `TDPN_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC`).
+- `gpm_manifest_remote_refresh_interval_sec`: bounded periodic remote refresh interval in seconds when a trusted cache entry is still valid (runtime value derived from `GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC`, legacy alias `TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC`).
+- `gpm_manifest_remote_refresh_interval_source`: additive source describing how `gpm_manifest_remote_refresh_interval_sec` was selected (`GPM_*`, `TDPN_*`, or `default`).
+- `gpm_manifest_resolve_policy`: additive manifest resolve strategy hint (`cache_first_bounded_remote_refresh` in current daemon behavior).
 - `gpm_auth_verify_policy_mode`: additive auth-verify posture mode (`default|production`).
 - `gpm_auth_verify_policy_source`: additive source for auth-verify posture mode/defaulting (for example `GPM_PRODUCTION_MODE` or `default`).
 - `gpm_auth_verify_require_command`: whether strict external verifier command policy is enabled.
@@ -306,6 +311,34 @@ Behavior:
 - If command is unset, returns `501` with configuration guidance.
 - On command failure, returns `502` with `rc` and combined output.
 
+### `POST /v1/gpm/onboarding/client/status`
+Body:
+
+```json
+{
+  "session_token": "required session token"
+}
+```
+
+Resolution and errors:
+- uses command-read auth (`requireCommandReadAuth`)
+- missing `session_token`: `400` with `{"ok":false,"error":"session_token is required"}`
+- missing/expired session token: `404` with `{"ok":false,"error":"session not found"}`
+
+Success payload:
+- `ok`: `true`
+- `registration.wallet_address`: session wallet address
+- `registration.status`: trust-aware registration status (`registered|not_registered|degraded`)
+- `registration.bootstrap_directory`: preferred trusted bootstrap directory (empty when trust drift/hard-failure prevents trusted resolution)
+- `registration.bootstrap_directories`: trusted bootstrap candidates (empty when trust drift/hard-failure prevents trusted resolution)
+- `registration.path_profile`: persisted session profile when available
+- `registration.status_reason`: additive non-empty reason when `registration.status` is not healthy due to trust drift or trust revalidation failure
+
+Trust-aware status behavior:
+- `registered`: returned only when session bootstrap registration exists and at least one session bootstrap directory still matches the current trusted manifest set.
+- `not_registered` with `status_reason`: returned when registered session bootstrap directories drift from trust (no session directory remains trusted by the current manifest).
+- `degraded` with `status_reason`: returned when trust revalidation fails hard (for example manifest trust check/load failure), so the daemon cannot safely confirm trust.
+
 ### `POST /v1/gpm/onboarding/server/status`
 Body (either field may be supplied; at least one is required):
 
@@ -364,6 +397,7 @@ Success payload:
 - `registration`: same registration shape as `POST /v1/gpm/onboarding/client/status`
 - `readiness`: same readiness shape as `POST /v1/gpm/onboarding/server/status`
 - `readiness` therefore includes additive chain-binding readiness keys: `chain_binding_status`, `chain_binding_ok`, `chain_binding_reason`
+- trust-aware client registration readiness is mirrored via additive `readiness.client_registration_status` and `readiness.client_registration_reason`
 
 Compatibility note:
 - `POST /v1/gpm/onboarding/client/status` and `POST /v1/gpm/onboarding/server/status` remain fully supported; `POST /v1/gpm/onboarding/overview` is an additive consolidated contract to reduce round-trips.

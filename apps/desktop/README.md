@@ -459,6 +459,16 @@ Equivalent `easy_node.sh` wrapper usage (scaffold/non-production):
 ./scripts/easy_node.sh desktop-linux-packaged-run
 ```
 
+Linux installer helper (scaffold/non-production):
+
+```bash
+bash ./scripts/linux/desktop_installer.sh --dry-run
+```
+
+- `.deb` installs prefer dependency-resolving package managers (`apt install ./artifact`, then `apt-get install ./artifact`) and fall back to `dpkg -i ./artifact`.
+- `.rpm` installs prefer dependency-resolving package managers (`dnf`/`yum`/`zypper install ./artifact`) and fall back to `rpm -i ./artifact`.
+- when not root, installer commands run via `sudo` when available; otherwise the script exits with actionable remediation hints.
+
 Optional generic wrapper form (if your branch exposes it):
 
 ```bash

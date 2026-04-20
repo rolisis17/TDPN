@@ -67,6 +67,7 @@ EOF_FAKE
 chmod +x "$FAKE_SCRIPT"
 
 write_manifest_cache() {
+  local bootstrap_directory="${1:-http://127.0.0.1:8081}"
   local fetched_at=""
   local generated_at=""
   local expires_at=""
@@ -77,6 +78,7 @@ write_manifest_cache() {
     --arg fetched_at "$fetched_at" \
     --arg generated_at "$generated_at" \
     --arg expires_at "$expires_at" \
+    --arg bootstrap_directory "$bootstrap_directory" \
     '{
       version: 1,
       fetched_at_utc: $fetched_at,
@@ -87,10 +89,14 @@ write_manifest_cache() {
         generated_at_utc: $generated_at,
         expires_at_utc: $expires_at,
         bootstrap_directories: [
-          "http://127.0.0.1:8081"
+          $bootstrap_directory
         ]
       }
     }' >"$MANIFEST_CACHE"
+}
+
+write_manifest_cache_invalid() {
+  printf '{invalid-manifest-json' >"$MANIFEST_CACHE"
 }
 
 pick_port() {
@@ -375,10 +381,15 @@ fi
 diag_call="$(require_last_call "runtime-doctor")"
 assert_line_has "$diag_call" $'\t--show-json\t1' "diagnostics forwarding missing --show-json 1"
 
-echo "[local-control-api-contract] config endpoint surfaces cache-first manifest resolve policy"
+echo "[local-control-api-contract] config endpoint surfaces manifest resolve policy + refresh interval keys"
 config_json="$(api_get "/v1/config")"
-if ! jq -e '.ok == true and .config.gpm_manifest_resolve_policy == "cache_first_bounded_remote_refresh"' <<<"$config_json" >/dev/null; then
-  echo "config endpoint did not expose expected gpm_manifest_resolve_policy"
+if ! jq -e '.ok == true and (.config.gpm_manifest_resolve_policy | type == "string" and length > 0 and test("cache"; "i") and test("refresh"; "i"))' <<<"$config_json" >/dev/null; then
+  echo "config endpoint did not expose a valid gpm_manifest_resolve_policy"
+  echo "$config_json"
+  exit 1
+fi
+if ! jq -e '.ok == true and (.config.gpm_manifest_cache_max_age_sec | type == "number" and . >= 0)' <<<"$config_json" >/dev/null; then
+  echo "config endpoint did not expose a valid gpm_manifest_cache_max_age_sec refresh interval"
   echo "$config_json"
   exit 1
 fi
@@ -557,6 +568,59 @@ register_json="$(api_post_json "/v1/gpm/onboarding/client/register" "{\"session_
 if ! jq -e '.ok == true and .profile.bootstrap_directory == "http://127.0.0.1:8081" and .profile.path_profile == "2hop" and .session.bootstrap_directory == "http://127.0.0.1:8081" and .session.path_profile == "2hop"' <<<"$register_json" >/dev/null; then
   echo "client register did not return expected session-bound registration payload"
   echo "$register_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] client status reports registered only while trusted bootstrap directories still revalidate"
+client_status_registered_json="$(api_post_json "/v1/gpm/onboarding/client/status" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "registered" and (.registration.bootstrap_directories | type == "array" and length > 0) and ((.registration.status_reason // "") == "")' <<<"$client_status_registered_json" >/dev/null; then
+  echo "client status did not report expected registered trust state"
+  echo "$client_status_registered_json"
+  exit 1
+fi
+overview_registered_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "registered" and .readiness.client_registration_status == "registered" and ((.readiness.client_registration_reason // "") == "")' <<<"$overview_registered_json" >/dev/null; then
+  echo "onboarding overview did not mirror expected registered trust state"
+  echo "$overview_registered_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] trust drift reports not_registered with status_reason"
+write_manifest_cache "http://127.0.0.1:18081"
+client_status_drift_json="$(api_post_json "/v1/gpm/onboarding/client/status" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "not_registered" and (.registration.status_reason | type == "string" and length > 0) and (.registration.bootstrap_directory == "") and (.registration.bootstrap_directories | type == "array" and length == 0)' <<<"$client_status_drift_json" >/dev/null; then
+  echo "client status did not report expected trust-drift not_registered state"
+  echo "$client_status_drift_json"
+  exit 1
+fi
+overview_drift_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "not_registered" and (.registration.status_reason | type == "string" and length > 0) and .readiness.client_registration_status == "not_registered" and (.readiness.client_registration_reason | type == "string" and length > 0)' <<<"$overview_drift_json" >/dev/null; then
+  echo "onboarding overview did not mirror expected trust-drift not_registered state"
+  echo "$overview_drift_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] trust revalidation hard failure reports degraded with status_reason"
+write_manifest_cache_invalid
+client_status_degraded_json="$(api_post_json "/v1/gpm/onboarding/client/status" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "degraded" and (.registration.status_reason | type == "string" and length > 0) and (.registration.bootstrap_directory == "") and (.registration.bootstrap_directories | type == "array" and length == 0)' <<<"$client_status_degraded_json" >/dev/null; then
+  echo "client status did not report expected trust-failure degraded state"
+  echo "$client_status_degraded_json"
+  exit 1
+fi
+overview_degraded_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "degraded" and (.registration.status_reason | type == "string" and length > 0) and .readiness.client_registration_status == "degraded" and (.readiness.client_registration_reason | type == "string" and length > 0)' <<<"$overview_degraded_json" >/dev/null; then
+  echo "onboarding overview did not mirror expected trust-failure degraded state"
+  echo "$overview_degraded_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] trust recovery restores registered status once bootstrap trust is valid again"
+write_manifest_cache "http://127.0.0.1:8081"
+client_status_recovered_json="$(api_post_json "/v1/gpm/onboarding/client/status" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .registration.status == "registered" and (.registration.bootstrap_directories | type == "array" and length > 0) and ((.registration.status_reason // "") == "")' <<<"$client_status_recovered_json" >/dev/null; then
+  echo "client status did not recover to registered after trust restoration"
+  echo "$client_status_recovered_json"
   exit 1
 fi
 

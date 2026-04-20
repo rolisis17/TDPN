@@ -53,8 +53,8 @@ Behavior:
     rpm:      *.rpm
   - Auto selection preference: appimage -> deb -> rpm
   - AppImage install mode: chmod +x and execute artifact directly.
-  - DEB install mode: dpkg -i (sudo when not root).
-  - RPM install mode: rpm -i (sudo when not root).
+  - DEB install mode: apt/apt-get install ./artifact (fallback: dpkg -i ./artifact; sudo when not root).
+  - RPM install mode: dnf/yum/zypper install ./artifact (fallback: rpm -i ./artifact; sudo when not root).
   - Scaffold only; this is not a production installer/updater pipeline.
 USAGE
 }
@@ -294,42 +294,78 @@ execute_installer() {
       "$resolved_installer_path"
       ;;
     deb)
-      if ! command -v dpkg >/dev/null 2>&1; then
-        fail "install" "dpkg not found; remediation hint: install dpkg (Debian/Ubuntu package manager) or use --installer-type appimage"
+      local artifact_dir
+      local artifact_name
+      local local_artifact_ref
+      artifact_dir="$(dirname "$resolved_installer_path")"
+      artifact_name="$(basename "$resolved_installer_path")"
+      local_artifact_ref="./$artifact_name"
+
+      local deb_cmd=()
+      if command -v apt >/dev/null 2>&1; then
+        deb_cmd=(apt install -y "$local_artifact_ref")
+      elif command -v apt-get >/dev/null 2>&1; then
+        deb_cmd=(apt-get install -y "$local_artifact_ref")
+      elif command -v dpkg >/dev/null 2>&1; then
+        deb_cmd=(dpkg -i "$local_artifact_ref")
+      else
+        fail "install" "no supported DEB installer command found (apt, apt-get, dpkg); remediation hint: install apt/dpkg toolchain or use --installer-type appimage"
       fi
-      local deb_cmd=(dpkg -i "$resolved_installer_path")
+
       if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
         if command -v sudo >/dev/null 2>&1; then
           deb_cmd=(sudo "${deb_cmd[@]}")
         else
-          fail "install" "sudo is required for dpkg -i when not root"
+          fail "install" "non-root DEB install requires sudo; remediation hint: install sudo, re-run as root, or use --installer-type appimage"
         fi
       fi
       if [[ "$dry_run" == "1" ]]; then
-        log "dry-run would run: ${deb_cmd[*]}"
+        log "dry-run would run: (cd \"$artifact_dir\" && ${deb_cmd[*]})"
         return 0
       fi
-      log "running installer: ${deb_cmd[*]}"
-      "${deb_cmd[@]}"
+      log "running installer: (cd \"$artifact_dir\" && ${deb_cmd[*]})"
+      (
+        cd "$artifact_dir"
+        "${deb_cmd[@]}"
+      )
       ;;
     rpm)
-      if ! command -v rpm >/dev/null 2>&1; then
-        fail "install" "rpm not found; remediation hint: install rpm tools or use --installer-type appimage"
+      local artifact_dir
+      local artifact_name
+      local local_artifact_ref
+      artifact_dir="$(dirname "$resolved_installer_path")"
+      artifact_name="$(basename "$resolved_installer_path")"
+      local_artifact_ref="./$artifact_name"
+
+      local rpm_cmd=()
+      if command -v dnf >/dev/null 2>&1; then
+        rpm_cmd=(dnf install -y "$local_artifact_ref")
+      elif command -v yum >/dev/null 2>&1; then
+        rpm_cmd=(yum install -y "$local_artifact_ref")
+      elif command -v zypper >/dev/null 2>&1; then
+        rpm_cmd=(zypper --non-interactive install "$local_artifact_ref")
+      elif command -v rpm >/dev/null 2>&1; then
+        rpm_cmd=(rpm -i "$local_artifact_ref")
+      else
+        fail "install" "no supported RPM installer command found (dnf, yum, zypper, rpm); remediation hint: install rpm toolchain or use --installer-type appimage"
       fi
-      local rpm_cmd=(rpm -i "$resolved_installer_path")
+
       if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
         if command -v sudo >/dev/null 2>&1; then
           rpm_cmd=(sudo "${rpm_cmd[@]}")
         else
-          fail "install" "sudo is required for rpm -i when not root"
+          fail "install" "non-root RPM install requires sudo; remediation hint: install sudo, re-run as root, or use --installer-type appimage"
         fi
       fi
       if [[ "$dry_run" == "1" ]]; then
-        log "dry-run would run: ${rpm_cmd[*]}"
+        log "dry-run would run: (cd \"$artifact_dir\" && ${rpm_cmd[*]})"
         return 0
       fi
-      log "running installer: ${rpm_cmd[*]}"
-      "${rpm_cmd[@]}"
+      log "running installer: (cd \"$artifact_dir\" && ${rpm_cmd[*]})"
+      (
+        cd "$artifact_dir"
+        "${rpm_cmd[@]}"
+      )
       ;;
     *)
       fail "resolve" "unsupported installer type: $resolved_installer_type"

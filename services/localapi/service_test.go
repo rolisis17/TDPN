@@ -526,6 +526,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
@@ -598,6 +600,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmManifestRequireSigSource != "default" {
 			t.Fatalf("gpmManifestRequireSigSource=%q want=default", s.gpmManifestRequireSigSource)
 		}
+		if s.gpmManifestRemoteRefreshIntvl != 5*time.Minute {
+			t.Fatalf("gpmManifestRemoteRefreshIntvl=%s want=5m0s", s.gpmManifestRemoteRefreshIntvl)
+		}
+		if s.gpmManifestRemoteRefreshSrc != "default" {
+			t.Fatalf("gpmManifestRemoteRefreshSrc=%q want=default", s.gpmManifestRemoteRefreshSrc)
+		}
 		if s.gpmAuthVerifyPolicyMode != "default" {
 			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=default", s.gpmAuthVerifyPolicyMode)
 		}
@@ -647,6 +655,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv(maxCommandsEnv, "9")
 		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", " local-secret ")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "75")
 
 		s := New()
 		if s.addr != "0.0.0.0:9999" {
@@ -678,6 +687,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if !s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=true", s.gpmAllowLegacyConnectOverride)
+		}
+		if s.gpmManifestRemoteRefreshIntvl != 75*time.Second {
+			t.Fatalf("gpmManifestRemoteRefreshIntvl=%s want=1m15s", s.gpmManifestRemoteRefreshIntvl)
+		}
+		if s.gpmManifestRemoteRefreshSrc != "GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC" {
+			t.Fatalf("gpmManifestRemoteRefreshSrc=%q want=GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", s.gpmManifestRemoteRefreshSrc)
 		}
 
 		t.Setenv("LOCAL_CONTROL_API_COMMAND_TIMEOUT_SEC", "4")
@@ -715,6 +730,31 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.maxConcurrentCmds != maxAllowedCommands {
 			t.Fatalf("maxConcurrentCmds=%d want capped %d", s.maxConcurrentCmds, maxAllowedCommands)
 		}
+
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "bad")
+		s = New()
+		if s.gpmManifestRemoteRefreshIntvl != 5*time.Minute {
+			t.Fatalf("invalid refresh interval should fall back to default, got=%s want=5m0s", s.gpmManifestRemoteRefreshIntvl)
+		}
+		if s.gpmManifestRemoteRefreshSrc != "default" {
+			t.Fatalf("invalid refresh interval source=%q want=default", s.gpmManifestRemoteRefreshSrc)
+		}
+	})
+
+	t.Run("tdpn alias sets manifest remote refresh interval", func(t *testing.T) {
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "42")
+
+		s := New()
+		if s.gpmManifestRemoteRefreshIntvl != 42*time.Second {
+			t.Fatalf("gpmManifestRemoteRefreshIntvl=%s want=42s", s.gpmManifestRemoteRefreshIntvl)
+		}
+		if s.gpmManifestRemoteRefreshSrc != "TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC" {
+			t.Fatalf(
+				"gpmManifestRemoteRefreshSrc=%q want=TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC",
+				s.gpmManifestRemoteRefreshSrc,
+			)
+		}
 	})
 
 	t.Run("tdpn aliases enable new auth verify policies", func(t *testing.T) {
@@ -747,14 +787,17 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "1")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "1")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "61")
 
 		s := New()
 
 		wantAliases := map[string]struct{}{
-			"TDPN_MAIN_DOMAIN":                  {},
-			"TDPN_PRODUCTION_MODE":              {},
-			"TDPN_CONNECT_REQUIRE_SESSION":      {},
-			"TDPN_AUTH_VERIFY_REQUIRE_METADATA": {},
+			"TDPN_MAIN_DOMAIN":                                    {},
+			"TDPN_PRODUCTION_MODE":                                {},
+			"TDPN_CONNECT_REQUIRE_SESSION":                        {},
+			"TDPN_AUTH_VERIFY_REQUIRE_METADATA":                   {},
+			"TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC": {},
 		}
 		if got, want := len(s.gpmLegacyEnvAliasesActive), len(wantAliases); got != want {
 			t.Fatalf("gpmLegacyEnvAliasesActive len=%d want=%d aliases=%v", got, want, s.gpmLegacyEnvAliasesActive)
@@ -768,7 +811,7 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if len(wantAliases) != 0 {
 			t.Fatalf("missing expected legacy aliases: %v all=%v", wantAliases, s.gpmLegacyEnvAliasesActive)
 		}
-		if got, want := len(s.gpmLegacyEnvAliasWarnings), 4; got != want {
+		if got, want := len(s.gpmLegacyEnvAliasWarnings), 5; got != want {
 			t.Fatalf("gpmLegacyEnvAliasWarnings len=%d want=%d warnings=%v", got, want, s.gpmLegacyEnvAliasWarnings)
 		}
 		for _, warning := range s.gpmLegacyEnvAliasWarnings {
@@ -2191,6 +2234,8 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
 		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
 		svc.gpmManifestMaxAge = 2 * time.Hour
+		svc.gpmManifestRemoteRefreshIntvl = 15 * time.Minute
+		svc.gpmManifestRemoteRefreshSrc = "TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC"
 		svc.commandTimeout = 150 * time.Second
 
 		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
@@ -2271,6 +2316,22 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["gpm_manifest_cache_max_age_sec"].(float64); int(got) != 7200 {
 			t.Fatalf("gpm_manifest_cache_max_age_sec=%v want=7200", configMap["gpm_manifest_cache_max_age_sec"])
+		}
+		if got, _ := configMap["gpm_manifest_remote_refresh_interval_sec"].(float64); int(got) != 900 {
+			t.Fatalf("gpm_manifest_remote_refresh_interval_sec=%v want=900", configMap["gpm_manifest_remote_refresh_interval_sec"])
+		}
+		if got, _ := configMap["gpm_manifest_remote_refresh_interval_source"].(string); got != "TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC" {
+			t.Fatalf(
+				"gpm_manifest_remote_refresh_interval_source=%q want=%q",
+				got,
+				"TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC",
+			)
+		}
+		if got, _ := configMap["gpm_manifest_resolve_policy"].(string); got != "cache_first_bounded_remote_refresh" {
+			t.Fatalf("gpm_manifest_resolve_policy=%q want=cache_first_bounded_remote_refresh", got)
+		}
+		if got, _ := configMap["gpm_manifest_resolve_policy_detail"].(string); !strings.Contains(got, "fall back to trusted cache") {
+			t.Fatalf("gpm_manifest_resolve_policy_detail=%q want contains fallback detail", got)
 		}
 		if got, _ := configMap["gpm_legacy_env_aliases_active_count"].(float64); int(got) != 2 {
 			t.Fatalf("gpm_legacy_env_aliases_active_count=%v want=2", configMap["gpm_legacy_env_aliases_active_count"])
@@ -7042,6 +7103,119 @@ func TestGPMClientRegisterUsesPinnedCacheFirstWhenCacheIsFresh(t *testing.T) {
 	gotBootstrap, _ := profile["bootstrap_directory"].(string)
 	if gotBootstrap != bootstrapDirectory {
 		t.Fatalf("profile.bootstrap_directory=%q want=%q payload=%v", gotBootstrap, bootstrapDirectory, payload)
+	}
+}
+
+func TestResolveBootstrapManifestRefreshesRemoteWhenCacheStillValidAndRefreshIntervalElapsed(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 30 * time.Second
+
+	now := time.Now().UTC()
+	remoteBootstrapDirectory := "https://directory.remote-refresh-interval.globalprivatemesh.example:8081"
+	var manifestHits int
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{remoteBootstrapDirectory},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	validCache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-2 * time.Minute).Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.valid-cache.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(validCache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	manifest, source, _, err := svc.resolveBootstrapManifest(context.Background())
+	if err != nil {
+		t.Fatalf("resolve bootstrap manifest: %v", err)
+	}
+	if source != "remote" {
+		t.Fatalf("source=%q want=remote", source)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected valid cache with elapsed refresh interval to attempt bounded remote refresh")
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != remoteBootstrapDirectory {
+		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{remoteBootstrapDirectory})
+	}
+}
+
+func TestResolveBootstrapManifestFallsBackToTrustedCacheWhenPeriodicRefreshFails(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 30 * time.Second
+
+	now := time.Now().UTC()
+	cachedBootstrapDirectory := "https://directory.cache-refresh-fallback.globalprivatemesh.example:8081"
+	var manifestHits int
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	validCache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-2 * time.Minute).Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{cachedBootstrapDirectory},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(validCache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	manifest, source, signatureVerified, err := svc.resolveBootstrapManifest(context.Background())
+	if err != nil {
+		t.Fatalf("resolve bootstrap manifest: %v", err)
+	}
+	if source != "cache" {
+		t.Fatalf("source=%q want=cache", source)
+	}
+	if !signatureVerified {
+		t.Fatalf("signatureVerified=%t want=true", signatureVerified)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected periodic refresh to attempt remote call before falling back to cache")
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != cachedBootstrapDirectory {
+		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{cachedBootstrapDirectory})
 	}
 }
 

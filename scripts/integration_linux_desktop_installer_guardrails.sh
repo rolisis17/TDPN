@@ -96,6 +96,24 @@ do
   fi
 done
 
+echo "[linux-desktop-installer-guardrails] deb/rpm command-path markers are present"
+for marker in \
+  "apt install -y" \
+  "apt-get install -y" \
+  "dpkg -i" \
+  "dnf install -y" \
+  "yum install -y" \
+  "zypper --non-interactive install" \
+  "rpm -i" \
+  "non-root DEB install requires sudo" \
+  "non-root RPM install requires sudo"
+do
+  if ! grep -Fq -- "$marker" "$SCRIPT_UNDER_TEST"; then
+    echo "linux desktop installer guardrails failed: missing required command-path marker in script: $marker"
+    exit 1
+  fi
+done
+
 echo "[linux-desktop-installer-guardrails] --help passes and includes usage line"
 run_expect_pass \
   "help_pass" \

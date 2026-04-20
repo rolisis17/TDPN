@@ -87,6 +87,8 @@ type Service struct {
 	gpmManifestURL                string
 	gpmManifestCache              string
 	gpmManifestMaxAge             time.Duration
+	gpmManifestRemoteRefreshIntvl time.Duration
+	gpmManifestRemoteRefreshSrc   string
 	gpmManifestHMACKey            string
 	gpmRoleDefault                string
 	gpmApprovalToken              string
@@ -252,6 +254,18 @@ func New() *Service {
 		noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC", source)
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			gpmManifestMaxAgeSec = parsed
+		}
+	}
+	gpmManifestRemoteRefreshIntervalSec := 5 * 60
+	gpmManifestRemoteRefreshSource := "default"
+	if raw, source, set := preferredEnvValueWithSource(
+		"GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC",
+		"TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC",
+	); set && raw != "" {
+		noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", source)
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			gpmManifestRemoteRefreshIntervalSec = parsed
+			gpmManifestRemoteRefreshSource = source
 		}
 	}
 	gpmRoleDefaultRaw, gpmRoleDefaultSource, gpmRoleDefaultSet := preferredEnvValueWithSource(
@@ -463,6 +477,8 @@ func New() *Service {
 		gpmManifestURL:                strings.TrimSpace(gpmManifestURL),
 		gpmManifestCache:              strings.TrimSpace(gpmManifestCache),
 		gpmManifestMaxAge:             time.Duration(gpmManifestMaxAgeSec) * time.Second,
+		gpmManifestRemoteRefreshIntvl: time.Duration(gpmManifestRemoteRefreshIntervalSec) * time.Second,
+		gpmManifestRemoteRefreshSrc:   gpmManifestRemoteRefreshSource,
 		gpmManifestHMACKey:            gpmManifestHMACKey,
 		gpmRoleDefault:                gpmRoleDefault,
 		gpmApprovalToken:              gpmApprovalToken,
@@ -609,6 +625,14 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if manifestCacheMaxAgeSec < 0 {
 		manifestCacheMaxAgeSec = 0
 	}
+	manifestRemoteRefreshIntervalSec := int(s.gpmManifestRemoteRefreshIntvl / time.Second)
+	if manifestRemoteRefreshIntervalSec < 0 {
+		manifestRemoteRefreshIntervalSec = 0
+	}
+	manifestRemoteRefreshIntervalSource := strings.TrimSpace(s.gpmManifestRemoteRefreshSrc)
+	if manifestRemoteRefreshIntervalSource == "" {
+		manifestRemoteRefreshIntervalSource = "default"
+	}
 	connectPolicyMode := strings.TrimSpace(s.gpmConnectPolicyMode)
 	if connectPolicyMode == "" {
 		connectPolicyMode = "default"
@@ -686,7 +710,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_manifest_url":                                       strings.TrimSpace(s.gpmManifestURL),
 			"gpm_manifest_cache_path":                                strings.TrimSpace(s.gpmManifestCache),
 			"gpm_manifest_cache_max_age_sec":                         manifestCacheMaxAgeSec,
+			"gpm_manifest_remote_refresh_interval_sec":               manifestRemoteRefreshIntervalSec,
+			"gpm_manifest_remote_refresh_interval_source":            manifestRemoteRefreshIntervalSource,
 			"gpm_manifest_resolve_policy":                            "cache_first_bounded_remote_refresh",
+			"gpm_manifest_resolve_policy_detail":                     "serve trusted cache immediately; when refresh interval elapses for a still-valid cache, attempt remote refresh and fall back to trusted cache if refresh fails",
 			"gpm_legacy_env_aliases_active":                          legacyEnvAliasesActive,
 			"gpm_legacy_env_aliases_active_count":                    len(legacyEnvAliasesActive),
 			"gpm_legacy_env_alias_warnings":                          legacyEnvAliasWarnings,
