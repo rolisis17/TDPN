@@ -270,17 +270,14 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
    - Suggested tests:
      - CI policy check: fail when base compose enables privileged mode in default paths.
 
-5. **P3 (open): client-side trusted-key/subject loaders still use unbounded direct file reads**
+5. **P3 (resolved 2026-04-21): client-side trusted-key/subject loaders use bounded regular-file reads**
    - References:
      - `internal/app/directory_trust.go:98`
      - `internal/app/client.go:176`
-   - Why it matters:
-     - These paths still use direct `os.ReadFile` without size cap or strict `lstat/open/samefile` checks.
-     - Risk is local but can still cause memory pressure or unexpected file-read behavior in hardened deployments.
-   - Suggested fix:
-     - Reuse the bounded regular-file helper pattern already adopted in services/blockchain paths.
-   - Suggested tests:
-     - Oversized file and symlink/race rejection tests for `loadTrustedKeys` and `loadClientSubject`.
+   - Status:
+     - `loadTrustedKeys` and `loadClientSubject` now use `readAppFileBounded`, which enforces regular-file checks, symlink rejection, `lstat/open/samefile` anti-race checks, and max-byte limits.
+   - Validation:
+     - `internal/app/file_io_test.go` covers bounded read, oversize rejection, symlink rejection, and non-regular file rejection.
 
 6. **P1 (resolved in current branch): sensitive local IDE runtime artifacts removed from repo**
    - References:
