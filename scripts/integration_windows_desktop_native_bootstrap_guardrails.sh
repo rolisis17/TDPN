@@ -32,6 +32,9 @@ assert_marker_present "recommended commands (copy/paste):" "$SCRIPT_UNDER_TEST"
 assert_marker_present "desktop_one_click.ps1" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force" "$SCRIPT_UNDER_TEST"
 assert_marker_present "winget install --id" "$SCRIPT_UNDER_TEST"
+assert_marker_present "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
+assert_marker_present "GPM_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
+assert_marker_present "TDPN_DESKTOP_PACKAGED_EXE" "$SCRIPT_UNDER_TEST"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -177,6 +180,25 @@ assert_summary_recommended_commands() {
   exit 1
 }
 
+assert_summary_desktop_resolution() {
+  local json_path="$1"
+  local context_label="$2"
+  local expected_path="$3"
+  local expected_source="$4"
+  local expected_strategy="${5:-packaged}"
+  local json_path_ps
+  local expected_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  expected_path_ps="$(to_powershell_path "$expected_path")"
+  local log_path="$TMP_DIR/assert_desktop_resolution_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'desktop_launch_strategy')) { throw 'desktop_launch_strategy field missing' }; if (-not (\$summary.PSObject.Properties.Name -contains 'desktop_launch_source')) { throw 'desktop_launch_source field missing' }; if (-not (\$summary.PSObject.Properties.Name -contains 'desktop_executable_path')) { throw 'desktop_executable_path field missing' }; \$actualStrategy = [string]\$summary.desktop_launch_strategy; \$actualSource = [string]\$summary.desktop_launch_source; \$actualPath = [string]\$summary.desktop_executable_path; if (\$actualStrategy -ne $(ps_single_quote "$expected_strategy")) { throw ('desktop_launch_strategy mismatch: expected={0} actual={1}' -f $(ps_single_quote "$expected_strategy"), \$actualStrategy) }; if ([string]::IsNullOrWhiteSpace(\$actualPath)) { throw 'desktop_executable_path is empty' }; \$expectedPath = (Resolve-Path -LiteralPath $(ps_single_quote "$expected_path_ps")).Path; if (-not [string]::Equals(\$actualPath, \$expectedPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('desktop_executable_path mismatch: expected={0} actual={1}' -f \$expectedPath, \$actualPath) }; if (\$actualSource -ne $(ps_single_quote "$expected_source")) { throw ('desktop_launch_source mismatch: expected={0} actual={1}' -f $(ps_single_quote "$expected_source"), \$actualSource) }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: desktop resolution assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
 FAKE_TOOL_DIR="$TMP_DIR/fake-tools"
 mkdir -p "$FAKE_TOOL_DIR"
 
@@ -199,6 +221,18 @@ FAKE_GIT_BASH_PS="$(to_powershell_path "$FAKE_GIT_BASH")"
 FAKE_DESKTOP_EXE="$TMP_DIR/fake-desktop.exe"
 printf '%s\n' "placeholder desktop executable used by dry-run integration guardrails" >"$FAKE_DESKTOP_EXE"
 FAKE_DESKTOP_EXE_PS="$(to_powershell_path "$FAKE_DESKTOP_EXE")"
+
+FAKE_DESKTOP_EXE_ENV_GLOBAL="$TMP_DIR/fake-desktop-env-global.exe"
+printf '%s\n' "placeholder desktop executable for GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_DESKTOP_EXE_ENV_GLOBAL"
+FAKE_DESKTOP_EXE_ENV_GLOBAL_PS="$(to_powershell_path "$FAKE_DESKTOP_EXE_ENV_GLOBAL")"
+
+FAKE_DESKTOP_EXE_ENV_GPM="$TMP_DIR/fake-desktop-env-gpm.exe"
+printf '%s\n' "placeholder desktop executable for GPM_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_DESKTOP_EXE_ENV_GPM"
+FAKE_DESKTOP_EXE_ENV_GPM_PS="$(to_powershell_path "$FAKE_DESKTOP_EXE_ENV_GPM")"
+
+FAKE_DESKTOP_EXE_ENV_TDPN="$TMP_DIR/fake-desktop-env-tdpn.exe"
+printf '%s\n' "placeholder desktop executable for TDPN_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_DESKTOP_EXE_ENV_TDPN"
+FAKE_DESKTOP_EXE_ENV_TDPN_PS="$(to_powershell_path "$FAKE_DESKTOP_EXE_ENV_TDPN")"
 
 run_ps_with_fake_prereqs() {
   env \
@@ -253,6 +287,39 @@ fi
 
 SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_summary.json"
 SUMMARY_JSON_PS="$(to_powershell_path "$SUMMARY_JSON")"
+
+ENV_PRIORITY_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_env_priority_summary.json"
+ENV_PRIORITY_SUMMARY_JSON_PS="$(to_powershell_path "$ENV_PRIORITY_SUMMARY_JSON")"
+
+ENV_TDPN_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_env_tdpn_summary.json"
+ENV_TDPN_SUMMARY_JSON_PS="$(to_powershell_path "$ENV_TDPN_SUMMARY_JSON")"
+
+EXPLICIT_BEATS_ENV_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_explicit_beats_env_summary.json"
+EXPLICIT_BEATS_ENV_SUMMARY_JSON_PS="$(to_powershell_path "$EXPLICIT_BEATS_ENV_SUMMARY_JSON")"
+
+echo "[windows-desktop-native-bootstrap-guardrails] env override priority uses GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE under --dry-run"
+run_expect_pass \
+  "env_priority_dry_run_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GPM_PS"); \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_PRIORITY_SUMMARY_JSON_PS")"
+assert_json_file_is_object "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary"
+assert_summary_desktop_resolution "$ENV_PRIORITY_SUMMARY_JSON" "env_priority_summary" "$FAKE_DESKTOP_EXE_ENV_GLOBAL" "env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
+
+echo "[windows-desktop-native-bootstrap-guardrails] env override fallback uses TDPN_DESKTOP_PACKAGED_EXE under --dry-run"
+run_expect_pass \
+  "env_tdpn_dry_run_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=''; \$env:GPM_DESKTOP_PACKAGED_EXE=''; \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DryRun $SUMMARY_FLAG $(ps_single_quote "$ENV_TDPN_SUMMARY_JSON_PS")"
+assert_json_file_is_object "$ENV_TDPN_SUMMARY_JSON" "env_tdpn_summary"
+assert_summary_desktop_resolution "$ENV_TDPN_SUMMARY_JSON" "env_tdpn_summary" "$FAKE_DESKTOP_EXE_ENV_TDPN" "env:TDPN_DESKTOP_PACKAGED_EXE"
+
+echo "[windows-desktop-native-bootstrap-guardrails] explicit override path beats env overrides under --dry-run"
+run_expect_pass \
+  "explicit_override_beats_env_dry_run_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GLOBAL_PS"); \$env:GPM_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_GPM_PS"); \$env:TDPN_DESKTOP_PACKAGED_EXE=$(ps_single_quote "$FAKE_DESKTOP_EXE_ENV_TDPN_PS"); & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DesktopExecutableOverridePath $(ps_single_quote "$FAKE_DESKTOP_EXE_PS") -DryRun $SUMMARY_FLAG $(ps_single_quote "$EXPLICIT_BEATS_ENV_SUMMARY_JSON_PS")"
+assert_json_file_is_object "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary"
+assert_summary_desktop_resolution "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary" "$FAKE_DESKTOP_EXE" "override"
 
 echo "[windows-desktop-native-bootstrap-guardrails] summary json is written when requested"
 run_expect_pass \

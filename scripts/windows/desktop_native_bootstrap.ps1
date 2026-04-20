@@ -382,7 +382,25 @@ function Get-DesktopPackagedExecutableCandidates {
   return $candidates
 }
 
-function Resolve-DesktopExecutablePath {
+function Get-DesktopPackagedExecutableEnvOverrides {
+  $envVarNames = @(
+    "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE",
+    "GPM_DESKTOP_PACKAGED_EXE",
+    "TDPN_DESKTOP_PACKAGED_EXE"
+  )
+
+  $overrides = @()
+  foreach ($envVarName in $envVarNames) {
+    $overrides += [PSCustomObject]@{
+      Name = $envVarName
+      Value = [Environment]::GetEnvironmentVariable($envVarName, "Process")
+    }
+  }
+
+  return $overrides
+}
+
+function Resolve-DesktopExecutableResolution {
   param(
     [Parameter(Mandatory = $true)]
     [string]$RepoRootPath,
@@ -397,7 +415,31 @@ function Resolve-DesktopExecutablePath {
         "For a local build, try the packaged output under apps\desktop\src-tauri\target\release after building the desktop app."
       ))
     }
-    return (Resolve-Path -LiteralPath $candidateOverride).Path
+    return [PSCustomObject]@{
+      Path = (Resolve-Path -LiteralPath $candidateOverride).Path
+      Source = "override"
+    }
+  }
+
+  foreach ($envOverride in (Get-DesktopPackagedExecutableEnvOverrides)) {
+    $envValue = $envOverride.Value
+    if ([string]::IsNullOrWhiteSpace($envValue)) {
+      continue
+    }
+
+    $candidateOverride = $envValue.Trim()
+    if (-not (Test-Path -LiteralPath $candidateOverride -PathType Leaf)) {
+      throw (New-DesktopLaunchError -Headline ("desktop executable env override was not found ({0}): {1}" -f $envOverride.Name, $candidateOverride) -Hints @(
+        ("Set {0} with the full path to a packaged desktop executable." -f $envOverride.Name),
+        ("Unset {0} to allow packaged auto-discovery under apps\desktop\src-tauri\target\release." -f $envOverride.Name),
+        "You can also pass -DesktopExecutableOverridePath to force a one-off packaged executable path."
+      ))
+    }
+
+    return [PSCustomObject]@{
+      Path = (Resolve-Path -LiteralPath $candidateOverride).Path
+      Source = ("env:{0}" -f $envOverride.Name)
+    }
   }
 
   foreach ($candidate in (Get-DesktopPackagedExecutableCandidates -RepoRootPath $RepoRootPath)) {
@@ -405,11 +447,28 @@ function Resolve-DesktopExecutablePath {
       continue
     }
     if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-      return (Resolve-Path -LiteralPath $candidate).Path
+      return [PSCustomObject]@{
+        Path = (Resolve-Path -LiteralPath $candidate).Path
+        Source = "packaged-default"
+      }
     }
   }
 
-  return ""
+  return [PSCustomObject]@{
+    Path = ""
+    Source = ""
+  }
+}
+
+function Resolve-DesktopExecutablePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath,
+    [string]$DesktopExecutableOverridePath
+  )
+
+  $resolution = Resolve-DesktopExecutableResolution -RepoRootPath $RepoRootPath -DesktopExecutableOverridePath $DesktopExecutableOverridePath
+  return $resolution.Path
 }
 
 function Resolve-DesktopLaunchPlan {
@@ -431,12 +490,13 @@ function Resolve-DesktopLaunchPlan {
     }
   }
 
-  $packagedExecutablePath = Resolve-DesktopExecutablePath -RepoRootPath $RepoRootPath -DesktopExecutableOverridePath $DesktopExecutableOverridePath
+  $packagedExecutableResolution = Resolve-DesktopExecutableResolution -RepoRootPath $RepoRootPath -DesktopExecutableOverridePath $DesktopExecutableOverridePath
+  $packagedExecutablePath = $packagedExecutableResolution.Path
   if (-not [string]::IsNullOrWhiteSpace($packagedExecutablePath)) {
     return [PSCustomObject]@{
       Strategy = "packaged"
       DesktopExecutablePath = $packagedExecutablePath
-      DesktopExecutableSource = if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) { "override" } else { "packaged-default" }
+      DesktopExecutableSource = $packagedExecutableResolution.Source
       RequiresDesktopBuildTools = $false
     }
   }
@@ -445,6 +505,7 @@ function Resolve-DesktopLaunchPlan {
     throw (New-DesktopLaunchError -Headline "packaged desktop launch was requested, but no packaged executable was found." -Hints @(
       "Build the desktop app first, then rerun with -DesktopLaunchStrategy packaged.",
       "Or pass -DesktopExecutableOverridePath to point at the packaged executable directly.",
+      "Or set GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE (or GPM_DESKTOP_PACKAGED_EXE / TDPN_DESKTOP_PACKAGED_EXE) to the packaged executable path.",
       "For one-click startup, use -DesktopLaunchStrategy auto and let the script fall back to dev mode when no packaged executable exists."
     ))
   }
