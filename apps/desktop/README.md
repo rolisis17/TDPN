@@ -226,6 +226,13 @@ scripts\windows\desktop_packaged_run.cmd -DryRun
 scripts\windows\desktop_packaged_run.cmd
 ```
 
+Packaged-run remediation defaults (scaffold/non-production):
+- `desktop_packaged_run` now enables missing dependency remediation by default, equivalent to `-InstallMissing`, unless explicitly disabled.
+- shared env overrides: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.
+- accepted values: `1` / `true` enables, `0` / `false` disables; unset defaults to enabled.
+- explicit switch precedence for packaged run: `-InstallMissing` explicitly enables remediation.
+- `-InstallMissing:$false` explicitly disables remediation, even when env would enable it.
+
 What this path does:
 - prefers packaged desktop launch for installer-style smoke checks
 - still uses local API startup/health checks for desktop launch

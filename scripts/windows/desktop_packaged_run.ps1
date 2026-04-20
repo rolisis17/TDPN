@@ -226,6 +226,50 @@ function Resolve-DesktopPackagedExecutableAuto {
   return $null
 }
 
+function ConvertTo-NullableBoolean {
+  param(
+    [AllowNull()]
+    [string]$Value
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $null
+  }
+
+  $normalized = $Value.Trim()
+  if ($normalized.StartsWith("$")) {
+    $normalized = $normalized.Substring(1)
+  }
+  $normalized = $normalized.ToLowerInvariant()
+
+  if ($normalized -in @("1", "true", "yes", "on")) {
+    return $true
+  }
+
+  if ($normalized -in @("0", "false", "no", "off")) {
+    return $false
+  }
+
+  return $null
+}
+
+function Get-AutoInstallMissingEnvOverride {
+  $envVarNames = @(
+    "GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING",
+    "TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING"
+  )
+
+  foreach ($envVarName in $envVarNames) {
+    $rawValue = [Environment]::GetEnvironmentVariable($envVarName)
+    $parsedValue = ConvertTo-NullableBoolean -Value $rawValue
+    if ($null -ne $parsedValue) {
+      return [bool]$parsedValue
+    }
+  }
+
+  return $null
+}
+
 $doctorScript = Join-Path $scriptDir "desktop_doctor.ps1"
 if (-not (Test-Path -LiteralPath $doctorScript -PathType Leaf)) {
   throw "missing doctor script: $doctorScript"
@@ -241,8 +285,18 @@ if ($PSBoundParameters.ContainsKey("EnablePolicyBypass")) {
   $shouldEnablePolicyBypass = [bool]$EnablePolicyBypass
 }
 
+$installMissingIntent = $true
+if ($PSBoundParameters.ContainsKey("InstallMissing")) {
+  $installMissingIntent = [bool]$InstallMissing
+} else {
+  $envAutoInstallMissing = Get-AutoInstallMissingEnvOverride
+  if ($null -ne $envAutoInstallMissing) {
+    $installMissingIntent = [bool]$envAutoInstallMissing
+  }
+}
+
 $doctorInvokeArgs = @()
-if ($InstallMissing) {
+if ($installMissingIntent) {
   $doctorInvokeArgs += @("-Mode", "fix", "-InstallMissing")
 } else {
   $doctorInvokeArgs += @("-Mode", "check")
@@ -284,7 +338,7 @@ $bootstrapInvokeArgs = @(
 if (-not [string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
   $bootstrapInvokeArgs += @("-DesktopExecutableOverridePath", $resolvedDesktopExecutablePath)
 }
-if ($InstallMissing) {
+if ($installMissingIntent) {
   $bootstrapInvokeArgs += "-InstallMissing"
 }
 if ($DryRun) {

@@ -173,6 +173,30 @@ if ! grep -qiE 'packaged' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
   echo "desktop scaffold contract failed: expected packaged mode marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
+if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM shared auto-install env marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN shared auto-install legacy env alias marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- '\$installMissingIntent[[:space:]]*=[[:space:]]*\$true|\$\{GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-\$\{TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-1\}\}|default[^[:alnum:]]*(enable|enabled|true)[^[:alnum:]]*(install|auto[-_ ]?install)[^[:alnum:]]*missing' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected default-enabled install-intent marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'if[[:space:]]*\(\$(EffectiveInstallMissing|InstallIntent|InstallMissing|installMissingEffective|installMissingIntent)\)' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected effective install-intent condition marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'doctorInvokeArgs[[:space:]]*\+=[[:space:]]*@\([^)]*"-InstallMissing"[^)]*\)|doctorInvokeArgs[[:space:]]*\+=[[:space:]]*"-InstallMissing"' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected doctor -InstallMissing forwarding marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -q -- 'bootstrapInvokeArgs[[:space:]]*\+=[[:space:]]*"-InstallMissing"|bootstrapInvokeArgs[[:space:]]*\+=[[:space:]]*@\([^)]*"-InstallMissing"[^)]*\)' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected bootstrap -InstallMissing forwarding marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
 if ! grep -qF 'desktop_packaged_run.ps1' "$PACKAGED_RUN_CMD_SCRIPT"; then
   echo "desktop scaffold contract failed: expected PowerShell launcher reference in $PACKAGED_RUN_CMD_SCRIPT"
   exit 1
