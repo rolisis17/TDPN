@@ -17,6 +17,7 @@ TMP_DIR="$(mktemp -d)"
 FAKE_SCRIPT="$TMP_DIR/fake_easy_node.sh"
 CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
+MANIFEST_CACHE="$TMP_DIR/gpm_manifest_cache.json"
 LOCAL_API_BASE=""
 SERVER_PID=""
 LOCAL_API_AUTH_TOKEN="local-api-contract-token"
@@ -65,6 +66,33 @@ esac
 EOF_FAKE
 chmod +x "$FAKE_SCRIPT"
 
+write_manifest_cache() {
+  local fetched_at=""
+  local generated_at=""
+  local expires_at=""
+  fetched_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  generated_at="$fetched_at"
+  expires_at="$(date -u -d '+24 hour' +"%Y-%m-%dT%H:%M:%SZ")"
+  jq -n \
+    --arg fetched_at "$fetched_at" \
+    --arg generated_at "$generated_at" \
+    --arg expires_at "$expires_at" \
+    '{
+      version: 1,
+      fetched_at_utc: $fetched_at,
+      source_url: "https://globalprivatemesh.example/v1/bootstrap/manifest",
+      signature_verified: true,
+      manifest: {
+        version: 1,
+        generated_at_utc: $generated_at,
+        expires_at_utc: $expires_at,
+        bootstrap_directories: [
+          "http://127.0.0.1:8081"
+        ]
+      }
+    }' >"$MANIFEST_CACHE"
+}
+
 pick_port() {
   local candidate=""
   local i=0
@@ -108,6 +136,7 @@ start_local_api() {
     port="$(pick_port)"
     : >"$CALLS_FILE"
     : >"$SERVER_LOG"
+    write_manifest_cache
 
     LOCAL_API_BASE="http://127.0.0.1:${port}"
     LOCAL_CONTROL_API_ADDR="127.0.0.1:${port}" \
@@ -119,6 +148,10 @@ start_local_api() {
     LOCAL_CONTROL_API_SERVICE_START_COMMAND="printf gpm-service-start-ok" \
     LOCAL_CONTROL_API_SERVICE_STOP_COMMAND="printf gpm-service-stop-ok" \
     LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND="printf gpm-service-restart-ok" \
+    GPM_MAIN_DOMAIN="https://globalprivatemesh.example" \
+    GPM_BOOTSTRAP_MANIFEST_URL="https://globalprivatemesh.example/v1/bootstrap/manifest" \
+    GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$MANIFEST_CACHE" \
+    GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC="86400" \
     LOCAL_API_CONTRACT_CALLS_FILE="$CALLS_FILE" \
       go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
@@ -342,6 +375,14 @@ fi
 diag_call="$(require_last_call "runtime-doctor")"
 assert_line_has "$diag_call" $'\t--show-json\t1' "diagnostics forwarding missing --show-json 1"
 
+echo "[local-control-api-contract] config endpoint surfaces cache-first manifest resolve policy"
+config_json="$(api_get "/v1/config")"
+if ! jq -e '.ok == true and .config.gpm_manifest_resolve_policy == "cache_first_bounded_remote_refresh"' <<<"$config_json" >/dev/null; then
+  echo "config endpoint did not expose expected gpm_manifest_resolve_policy"
+  echo "$config_json"
+  exit 1
+fi
+
 echo "[local-control-api-contract] onboarding overview requires session_token"
 overview_missing_body="$TMP_DIR/onboarding_overview_missing_session_token.json"
 overview_missing_code="$(curl -sS -o "$overview_missing_body" -w '%{http_code}' -X POST -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" -H 'Content-Type: application/json' --data '{}' "${LOCAL_API_BASE}/v1/gpm/onboarding/overview")"
@@ -413,6 +454,11 @@ fi
 overview_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
 if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .registration.wallet_address == "cosmos1overviewcontract" and .registration.status == "not_registered" and .readiness.role == "client" and .readiness.session_present == true and (.readiness.lifecycle_actions_unlocked | type == "boolean")' <<<"$overview_json" >/dev/null; then
   echo "onboarding overview did not return expected consolidated payload"
+  echo "$overview_json"
+  exit 1
+fi
+if ! jq -e '.ok == true and .readiness.client_registration_status == "not_registered" and ((.readiness.client_registration_reason // "") == "")' <<<"$overview_json" >/dev/null; then
+  echo "onboarding overview missing expected client registration readiness trust fields"
   echo "$overview_json"
   exit 1
 fi
@@ -506,8 +552,16 @@ fi
 set_profile_call="$(require_last_call "config-v1-set-profile")"
 assert_line_has "$set_profile_call" $'\t--path-profile\t3hop' "set_profile forwarding missing --path-profile 3hop"
 
+echo "[local-control-api-contract] client register seeds session-bound connect secrets"
+register_json="$(api_post_json "/v1/gpm/onboarding/client/register" "{\"session_token\":\"${overview_session_token}\",\"bootstrap_directory\":\"http://127.0.0.1:8081\",\"invite_key\":\"inv-contract-2hop\",\"path_profile\":\"2hop\"}")"
+if ! jq -e '.ok == true and .profile.bootstrap_directory == "http://127.0.0.1:8081" and .profile.path_profile == "2hop" and .session.bootstrap_directory == "http://127.0.0.1:8081" and .session.path_profile == "2hop"' <<<"$register_json" >/dev/null; then
+  echo "client register did not return expected session-bound registration payload"
+  echo "$register_json"
+  exit 1
+fi
+
 echo "[local-control-api-contract] connect (2hop) forwards preflight + up contract flags"
-connect_2hop_json="$(api_post_json "/v1/connect" '{"bootstrap_directory":"http://127.0.0.1:8081","invite_key":"inv-contract-2hop","path_profile":"2hop","interface":"wgvpn0","discovery_wait_sec":17,"ready_timeout_sec":40}')"
+connect_2hop_json="$(api_post_json "/v1/connect" "{\"session_token\":\"${overview_session_token}\",\"path_profile\":\"2hop\",\"interface\":\"wgvpn0\",\"discovery_wait_sec\":17,\"ready_timeout_sec\":40}")"
 if ! jq -e '.ok == true and .stage == "connect" and .profile == "2hop"' <<<"$connect_2hop_json" >/dev/null; then
   echo "connect 2hop endpoint did not return expected payload"
   echo "$connect_2hop_json"
@@ -536,8 +590,16 @@ assert_line_has "$up_2hop_call" $'\t--issuer-quorum-check\t1' "connect up missin
 assert_line_has "$up_2hop_call" $'\t--force-restart\t1' "connect up missing force restart"
 assert_line_has "$up_2hop_call" $'\t--foreground\t0' "connect up missing detached foreground flag"
 
+echo "[local-control-api-contract] client register accepts speed-1hop alias before 1hop connect"
+register_1hop_json="$(api_post_json "/v1/gpm/onboarding/client/register" "{\"session_token\":\"${overview_session_token}\",\"bootstrap_directory\":\"http://127.0.0.1:8081\",\"invite_key\":\"inv-contract-1hop\",\"path_profile\":\"speed-1hop\"}")"
+if ! jq -e '.ok == true and .profile.path_profile == "1hop" and .session.path_profile == "1hop"' <<<"$register_1hop_json" >/dev/null; then
+  echo "client register speed-1hop alias did not normalize to 1hop"
+  echo "$register_1hop_json"
+  exit 1
+fi
+
 echo "[local-control-api-contract] connect (1hop speed-1hop alias) applies direct-exit defaults and can skip preflight"
-connect_1hop_json="$(api_post_json "/v1/connect" '{"bootstrap_directory":"http://127.0.0.1:8081","invite_key":"inv-contract-1hop","path_profile":"speed-1hop","run_preflight":false}')"
+connect_1hop_json="$(api_post_json "/v1/connect" "{\"session_token\":\"${overview_session_token}\",\"run_preflight\":false}")"
 if ! jq -e '.ok == true and .profile == "1hop"' <<<"$connect_1hop_json" >/dev/null; then
   echo "connect 1hop endpoint did not return expected profile"
   echo "$connect_1hop_json"
