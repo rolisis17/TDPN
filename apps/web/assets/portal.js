@@ -42,6 +42,8 @@ const compatOverrideHintEl = byId("compat_override_hint");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
 const registerClientBtnEl = byId("register_client_btn");
+const manualSignInBtnEl = byId("signin_btn");
+const signinPolicyHintEl = document.getElementById("signin_policy_hint");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
 const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
@@ -465,16 +467,50 @@ function refreshPolicyPostureBanner() {
 
   if (configUnavailable) {
     policyAuthVerifyEl.textContent =
-      "Auth verify strictness: policy hints unavailable from /v1/config; using compatibility defaults until runtime config is reachable.";
+      "Auth verify strictness: policy hints unavailable from /v1/config; using compatibility defaults and keeping manual verify available until runtime config is reachable.";
+    syncManualSignInAction();
     return;
   }
   const metadataRequired = authVerifyRequireMetadata ? "required" : "optional";
   const metadataSource = formatPolicySourceLabel(authVerifyRequireMetadataPolicySource);
   const walletRequired = authVerifyRequireWalletExtensionSource ? "required" : "optional";
   const walletSource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
+  const manualSignInGuidance = authVerifyRequireWalletExtensionSource
+    ? " Manual Verify + Create Session is disabled; use Sign + Verify (Wallet)."
+    : " Manual Verify + Create Session is available for compatibility.";
   policyAuthVerifyEl.textContent =
     `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
-    `wallet-extension-source ${walletRequired} (source: ${walletSource}).`;
+    `wallet-extension-source ${walletRequired} (source: ${walletSource}).${manualSignInGuidance}`;
+  syncManualSignInAction();
+}
+
+function strictWalletExtensionSourceRequired() {
+  return authVerifyRequireWalletExtensionSource === true;
+}
+
+function syncManualSignInAction() {
+  if (!manualSignInBtnEl) {
+    return;
+  }
+  const isBusy = document.body.classList.contains("is-busy");
+  const policyLocked = strictWalletExtensionSourceRequired();
+  const disabled = isBusy || policyLocked;
+  const guidance = policyLocked
+    ? "Manual verify is disabled by runtime policy. Use Sign + Verify (Wallet)."
+    : "Manual verify is available in compatibility mode.";
+
+  manualSignInBtnEl.disabled = disabled;
+  manualSignInBtnEl.setAttribute("aria-disabled", String(disabled));
+
+  if (policyLocked) {
+    manualSignInBtnEl.title = guidance;
+  } else {
+    manualSignInBtnEl.removeAttribute("title");
+  }
+
+  if (signinPolicyHintEl) {
+    signinPolicyHintEl.textContent = guidance;
+  }
 }
 
 function compatibilityOverrideEnabled() {
@@ -1922,6 +1958,7 @@ function setBusy(isBusy) {
     button.setAttribute("aria-disabled", String(isBusy));
   }
   syncOperatorListNextPageAction();
+  syncManualSignInAction();
   if (!isBusy) {
     refreshClientReadiness();
   }
@@ -2415,7 +2452,15 @@ async function requestAuthChallenge() {
   return result;
 }
 
-async function requestAuthVerify() {
+async function requestAuthVerify(options = {}) {
+  const source = nonEmptyString(options?.source)?.toLowerCase() || "manual";
+  const manualSource = source !== "wallet_extension";
+  if (manualSource && strictWalletExtensionSourceRequired()) {
+    const policySource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
+    throw new Error(
+      `Manual verify is disabled by runtime policy (wallet-extension-source required; source: ${policySource}). Use Sign + Verify (Wallet).`
+    );
+  }
   const request = {
     ...readWalletPayload(),
     challenge_id: byId("challenge_id").value.trim(),
@@ -2437,7 +2482,7 @@ async function requestAuthVerify() {
 
 async function requestWalletSignIn() {
   await signChallengeWithWalletExtension();
-  return requestAuthVerify();
+  return requestAuthVerify({ source: "wallet_extension" });
 }
 
 function sessionRoleFromResult(result) {

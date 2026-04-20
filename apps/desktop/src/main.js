@@ -44,9 +44,11 @@ const connectPolicyHintEl = document.getElementById("connect_policy_hint");
 const authVerifyPolicyHintEl = document.getElementById("auth_verify_policy_hint");
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
+const signInPolicyHintEl = document.getElementById("signin_policy_hint");
 
 const updateBtnEl = byId("update_btn");
 const walletSignInBtnEl = byId("wallet_signin_btn");
+const signInBtnEl = byId("signin_btn");
 const setProfileBtnEl = byId("set_profile_btn");
 const serviceStartBtnEl = byId("service_start_btn");
 const serviceStopBtnEl = byId("service_stop_btn");
@@ -86,6 +88,10 @@ const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
 const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
 const AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const AUTH_VERIFY_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const WALLET_SIGN_IN_LABEL_RECOMMENDED = "Wallet Sign-In (Recommended)";
+const WALLET_SIGN_IN_LABEL_REQUIRED = "Wallet Sign-In (Required)";
+const MANUAL_SIGN_IN_LABEL = "Sign In (Manual)";
+const MANUAL_SIGN_IN_LABEL_DISABLED = "Sign In (Manual Disabled)";
 const TDPN_ENV_NAME_REGEX = /\bTDPN_([A-Z0-9_]+)\b/g;
 const LEGACY_SECRET_STORAGE_KEYS = Object.freeze(["gpm.desktop.session_token"]);
 const STORAGE_KEYS = Object.freeze({
@@ -111,6 +117,7 @@ const state = {
   connectPolicyMode: CONNECT_POLICY_MODE_COMPAT_ALLOWED,
   authVerifyRequireMetadata: false,
   authVerifyRequireWalletExtensionSource: false,
+  authVerifyRuntimeRequireWalletExtensionSource: false,
   authVerifyPolicySource: AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
@@ -2620,10 +2627,44 @@ function updateConnectPolicyHint() {
   connectPolicyHintEl.classList.toggle("locked", state.connectRequireSession || !state.allowLegacyConnectOverride);
 }
 
-function updateAuthVerifyPolicyHint() {
-  if (!authVerifyPolicyHintEl) {
+function isManualSignInLockedByRuntimePolicy() {
+  return state.authVerifyRuntimeRequireWalletExtensionSource === true;
+}
+
+function syncIdentitySignInPolicyControls() {
+  const manualSignInLocked = isManualSignInLockedByRuntimePolicy();
+  walletSignInBtnEl.disabled = false;
+  walletSignInBtnEl.textContent = manualSignInLocked
+    ? WALLET_SIGN_IN_LABEL_REQUIRED
+    : WALLET_SIGN_IN_LABEL_RECOMMENDED;
+  walletSignInBtnEl.title = manualSignInLocked
+    ? "Runtime auth policy requires signature_source=wallet_extension."
+    : "Recommended sign-in path.";
+  signInBtnEl.disabled = manualSignInLocked;
+  signInBtnEl.textContent = manualSignInLocked ? MANUAL_SIGN_IN_LABEL_DISABLED : MANUAL_SIGN_IN_LABEL;
+  signInBtnEl.title = manualSignInLocked
+    ? "Manual Sign In is locked by runtime auth policy requiring signature_source=wallet_extension."
+    : "Manual fallback path when policy allows manual source.";
+  if (!signInPolicyHintEl) {
     return;
   }
+  if (manualSignInLocked) {
+    signInPolicyHintEl.textContent =
+      "Wallet Sign-In is required by runtime auth policy; manual Sign In is disabled.";
+    signInPolicyHintEl.classList.add("locked");
+    return;
+  }
+  signInPolicyHintEl.textContent =
+    "Wallet Sign-In is recommended; manual Sign In remains available when policy allows.";
+  signInPolicyHintEl.classList.remove("locked");
+}
+
+function updateAuthVerifyPolicyHint() {
+  if (!authVerifyPolicyHintEl) {
+    syncIdentitySignInPolicyControls();
+    return;
+  }
+  const manualSignInLockedByRuntimePolicy = isManualSignInLockedByRuntimePolicy();
   const modeLabel = formatAuthVerifyPolicyModeLabel(
     state.authVerifyRequireMetadata,
     state.authVerifyRequireWalletExtensionSource
@@ -2631,17 +2672,22 @@ function updateAuthVerifyPolicyHint() {
   const sourceLabel = formatAuthVerifyPolicyClientSourceLabel(state.authVerifyPolicySource);
   let postureHint = "signature metadata and signature_source checks are compatibility-optional.";
   if (state.authVerifyRequireMetadata && state.authVerifyRequireWalletExtensionSource) {
-    postureHint = "signature metadata is required and signature_source must be wallet_extension.";
+    postureHint = manualSignInLockedByRuntimePolicy
+      ? "signature metadata is required and signature_source must be wallet_extension; use Wallet Sign-In (manual Sign In is disabled)."
+      : "signature metadata is required and signature_source must be wallet_extension.";
   } else if (state.authVerifyRequireMetadata) {
     postureHint = "signature metadata is required (signature_kind, signature_source, signed_message).";
   } else if (state.authVerifyRequireWalletExtensionSource) {
-    postureHint = "signature_source must be wallet_extension.";
+    postureHint = manualSignInLockedByRuntimePolicy
+      ? "signature_source must be wallet_extension; use Wallet Sign-In (manual Sign In is disabled)."
+      : "signature_source must be wallet_extension.";
   }
   authVerifyPolicyHintEl.textContent = `Auth verify policy: ${modeLabel} from ${sourceLabel}; ${postureHint}`;
   authVerifyPolicyHintEl.classList.toggle(
     "locked",
     state.authVerifyRequireMetadata || state.authVerifyRequireWalletExtensionSource
   );
+  syncIdentitySignInPolicyControls();
 }
 
 function applyConnectModePolicy(enabled) {
@@ -3066,7 +3112,14 @@ walletSignInBtnEl.addEventListener("click", async () => {
   }
 });
 
-byId("signin_btn").addEventListener("click", async () => {
+signInBtnEl.addEventListener("click", async () => {
+  if (isManualSignInLockedByRuntimePolicy()) {
+    print(
+      "validation",
+      "Manual Sign In is disabled by runtime auth policy; use Wallet Sign-In (signature_source must be wallet_extension)."
+    );
+    return;
+  }
   const request = {
     wallet_address: walletAddressEl.value.trim(),
     wallet_provider: walletProviderEl.value,
@@ -3360,6 +3413,7 @@ async function init() {
     let connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
     let authVerifyRequireMetadata = meta.authVerifyRequireMetadata;
     let authVerifyRequireWalletExtensionSource = meta.authVerifyRequireWalletExtensionSource;
+    let authVerifyRuntimeRequireWalletExtensionSource = false;
     let authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     try {
       const runtimeCfg = await invoke("control_runtime_config");
@@ -3387,6 +3441,8 @@ async function init() {
       }
       if (runtimeAuthVerifyPolicy.authVerifyRequireWalletExtensionSource !== undefined) {
         authVerifyRequireWalletExtensionSource = runtimeAuthVerifyPolicy.authVerifyRequireWalletExtensionSource;
+        authVerifyRuntimeRequireWalletExtensionSource =
+          runtimeAuthVerifyPolicy.authVerifyRequireWalletExtensionSource === true;
       }
       if (runtimeAuthVerifyPolicy.authVerifyPolicySource) {
         authVerifyPolicySource = runtimeAuthVerifyPolicy.authVerifyPolicySource;
@@ -3399,6 +3455,7 @@ async function init() {
     } catch {
       connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
       connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
+      authVerifyRuntimeRequireWalletExtensionSource = false;
       authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     }
     state.connectPolicySource = connectPolicySource;
@@ -3406,6 +3463,7 @@ async function init() {
     state.allowLegacyConnectOverride = !!allowLegacyConnectOverride;
     state.authVerifyRequireMetadata = !!authVerifyRequireMetadata;
     state.authVerifyRequireWalletExtensionSource = !!authVerifyRequireWalletExtensionSource;
+    state.authVerifyRuntimeRequireWalletExtensionSource = authVerifyRuntimeRequireWalletExtensionSource;
     state.authVerifyPolicySource = authVerifyPolicySource;
     apiBaseEl.textContent = meta.apiLine;
     apiHintsEl.textContent = [
@@ -3434,6 +3492,7 @@ async function init() {
     state.allowLegacyConnectOverride = false;
     state.authVerifyRequireMetadata = false;
     state.authVerifyRequireWalletExtensionSource = false;
+    state.authVerifyRuntimeRequireWalletExtensionSource = false;
     state.authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     applyConnectModePolicy(false);
     updateAuthVerifyPolicyHint();

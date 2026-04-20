@@ -63,7 +63,7 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - Desktop can also hydrate onboarding state through consolidated `POST /v1/gpm/onboarding/overview` (`session + registration + readiness`); existing `client/status` and `server/status` contracts remain supported for backward compatibility.
 - Desktop readiness parsing is API-contract compatible with both snake_case and camelCase readiness fields (while preserving legacy aliases such as `client_tab_enabled` and `client_lock_hint`).
 - Desktop sign-in now includes wallet-extension one-click flow for `Keplr` and `Leap`; this path requires non-empty `chain_id` (for example `cosmoshub-4`) and uses `signature_source=wallet_extension` with `control_gpm_auth_verify`.
-- Manual sign-in remains available as a fallback: request a challenge, paste the wallet signature, and click `Sign In` (use `signature_source=manual` only when policy allows manual source).
+- Manual sign-in remains a compatibility fallback: request a challenge, paste the wallet signature, and click `Sign In (Manual)` when policy allows manual source; if runtime policy requires `signature_source=wallet_extension`, desktop locks manual sign-in and keeps `Wallet Sign-In` as the required path.
 - Expected sign-in troubleshooting text:
   - `chain_id is required for wallet-extension one-click sign-in` -> set `chain_id` to the active wallet network and retry.
   - `signature_source must be wallet_extension by policy` or `unsupported signature_source` -> retry with wallet-extension one-click (`Keplr`/`Leap`) or relax strict source policy for manual testing.
