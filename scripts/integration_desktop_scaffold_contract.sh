@@ -258,6 +258,115 @@ echo "[desktop-scaffold] linux native bootstrap script markers are present"
 
 README_FILE="apps/desktop/README.md"
 
+if ! rg -q -- 'GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE packaged executable override"
+  exit 1
+fi
+
+if ! rg -q -- 'GPM_DESKTOP_PACKAGED_EXE' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention GPM_DESKTOP_PACKAGED_EXE packaged executable override"
+  exit 1
+fi
+if ! rg -q -- 'TDPN_DESKTOP_PACKAGED_EXE' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention TDPN_DESKTOP_PACKAGED_EXE compatibility alias override"
+  exit 1
+fi
+if ! awk '
+  BEGIN { IGNORECASE = 1 }
+  {
+    has_gpm[NR] = ($0 ~ /GPM_DESKTOP_PACKAGED_EXE/)
+    has_tdpn[NR] = ($0 ~ /TDPN_DESKTOP_PACKAGED_EXE/)
+    has_alias_term[NR] = ($0 ~ /(alias|legacy|compatibility|compat)/)
+  }
+  END {
+    for (i = 1; i <= NR; i++) {
+      if (!has_gpm[i]) {
+        continue
+      }
+      start = i - 8
+      if (start < 1) {
+        start = 1
+      }
+      end = i + 8
+      if (end > NR) {
+        end = NR
+      }
+      found_tdpn = 0
+      found_alias_term = 0
+      for (j = start; j <= end; j++) {
+        if (has_tdpn[j]) {
+          found_tdpn = 1
+        }
+        if (has_alias_term[j]) {
+          found_alias_term = 1
+        }
+      }
+      if (found_tdpn && found_alias_term) {
+        print "ok"
+        exit 0
+      }
+    }
+    exit 1
+  }
+' "$README_FILE" >/dev/null; then
+  echo "desktop scaffold contract failed: README must describe GPM_DESKTOP_PACKAGED_EXE and TDPN_DESKTOP_PACKAGED_EXE as compatibility aliases"
+  exit 1
+fi
+
+if ! awk '
+  BEGIN { IGNORECASE = 1 }
+  {
+    lower = tolower($0)
+    has_packaged[NR] = (lower ~ /packaged/)
+    has_auto_discovery[NR] = (lower ~ /auto[-[:space:]]*discover(y)?/)
+    has_order[NR] = (lower ~ /order/)
+    has_env_override[NR] = (lower ~ /env(ironment(al)?)?[[:space:]]*overrides?|override[s]?[[:space:]]*env/)
+    has_packaged_env[NR] = ($0 ~ /(GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE|GPM_DESKTOP_PACKAGED_EXE|TDPN_DESKTOP_PACKAGED_EXE)/)
+  }
+  END {
+    for (i = 1; i <= NR; i++) {
+      start = i - 8
+      if (start < 1) {
+        start = 1
+      }
+      end = i + 8
+      if (end > NR) {
+        end = NR
+      }
+      found_packaged = 0
+      found_auto_discovery = 0
+      found_order = 0
+      found_env_override = 0
+      found_packaged_env = 0
+      for (j = start; j <= end; j++) {
+        if (has_packaged[j]) {
+          found_packaged = 1
+        }
+        if (has_auto_discovery[j]) {
+          found_auto_discovery = 1
+        }
+        if (has_order[j]) {
+          found_order = 1
+        }
+        if (has_env_override[j]) {
+          found_env_override = 1
+        }
+        if (has_packaged_env[j]) {
+          found_packaged_env = 1
+        }
+      }
+      if (found_packaged && found_auto_discovery && found_order && found_env_override && found_packaged_env) {
+        print "ok"
+        exit 0
+      }
+    }
+    exit 1
+  }
+' "$README_FILE" >/dev/null; then
+  echo "desktop scaffold contract failed: README must document packaged executable auto-discovery order including env overrides"
+  exit 1
+fi
+
 ONE_CLICK_LAUNCHER_FILES=(
   "scripts/windows/desktop_one_click.ps1"
   "scripts/windows/desktop_one_click.cmd"

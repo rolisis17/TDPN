@@ -215,12 +215,18 @@ What this path does:
 - prefers packaged desktop launch for installer-style smoke checks
 - still uses local API startup/health checks for desktop launch
 - still runs `desktop_doctor` preflight-style environment checks before launch
-- packaged executable auto-discovery order: env overrides (`GPM_DESKTOP_PACKAGED_EXE`, then `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
+- packaged executable auto-discovery order: env overrides (`GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`, then `GPM_DESKTOP_PACKAGED_EXE`, then `TDPN_DESKTOP_PACKAGED_EXE`), installed default paths, then local repo artifacts
 
-Env override example (PowerShell):
+Env override examples (PowerShell):
 
 ```powershell
-$env:GPM_DESKTOP_PACKAGED_EXE="C:\Program Files\GPM\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
+$env:GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
+```
+
+Legacy compatibility alias example (PowerShell):
+
+```powershell
+$env:TDPN_DESKTOP_PACKAGED_EXE="C:\Program Files\Global Private Mesh\Global Private Mesh Desktop\Global Private Mesh Desktop.exe"; scripts\windows\desktop_packaged_run.ps1 -DryRun
 ```
 
 Recommended sequence for installer testing:
@@ -260,10 +266,25 @@ Dry-run guidance:
 - always run `--dry-run` first to verify executable discovery and local API preflight before real launch.
 
 Executable override and env hints:
-- primary packaged executable override: `GPM_DESKTOP_PACKAGED_EXE`
+- preferred packaged executable override: `GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE`
+- compatibility alias: `GPM_DESKTOP_PACKAGED_EXE`
 - legacy compatibility alias: `TDPN_DESKTOP_PACKAGED_EXE`
 - local API behavior can still be tuned with `GPM_LOCAL_API_BASE_URL` and `GPM_LOCAL_API_TIMEOUT_SEC` (legacy aliases: `TDPN_LOCAL_API_BASE_URL`, `TDPN_LOCAL_API_TIMEOUT_SEC`)
 - keep manual executable overrides as support/lab usage in scaffold mode, not production defaults
+
+Env override examples (Linux):
+
+```bash
+export GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$PWD/apps/desktop/src-tauri/target/release/global-private-mesh-desktop"
+bash ./scripts/linux/desktop_packaged_run.sh --dry-run
+```
+
+Legacy compatibility alias example (Linux):
+
+```bash
+export TDPN_DESKTOP_PACKAGED_EXE="$PWD/apps/desktop/src-tauri/target/release/global-private-mesh-desktop"
+bash ./scripts/linux/desktop_packaged_run.sh --dry-run
+```
 
 Linux native bootstrap and one-click launchers:
 
