@@ -3115,12 +3115,7 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	pub, err := s.fetchPeerPubKeyForGossip(r.Context(), peerURL, now)
-	if err != nil {
-		http.Error(w, "peer pubkey unavailable", http.StatusBadGateway)
-		return
-	}
-	validated := make([]proto.RelayDescriptor, 0, len(req.Relays))
+	candidates := make([]proto.RelayDescriptor, 0, len(req.Relays))
 	for _, desc := range req.Relays {
 		if strings.TrimSpace(desc.RelayID) == "" {
 			continue
@@ -3128,10 +3123,24 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		if desc.Role != "entry" && desc.Role != "exit" {
 			continue
 		}
-		if err := crypto.VerifyRelayDescriptor(desc, pub); err != nil {
+		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
 			continue
 		}
-		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+		candidates = append(candidates, desc)
+	}
+	if len(candidates) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.RelayGossipPushResponse{Imported: 0})
+		return
+	}
+	pub, err := s.fetchPeerPubKeyForGossip(r.Context(), peerURL, now)
+	if err != nil {
+		http.Error(w, "peer pubkey unavailable", http.StatusBadGateway)
+		return
+	}
+	validated := make([]proto.RelayDescriptor, 0, len(candidates))
+	for _, desc := range candidates {
+		if err := crypto.VerifyRelayDescriptor(desc, pub); err != nil {
 			continue
 		}
 		desc.Signature = ""
@@ -3185,6 +3194,10 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if err := validateProviderRelayUpsertShape(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	token := providerTokenFromRequest(r, req.Token)
 	now := time.Now().UTC()
 	claims, err := s.verifyProviderToken(r.Context(), token, now.Unix())
@@ -3208,6 +3221,26 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(proto.ProviderRelayUpsertResponse{Accepted: true, Relay: desc})
+}
+
+func validateProviderRelayUpsertShape(req proto.ProviderRelayUpsertRequest) error {
+	role := strings.TrimSpace(strings.ToLower(req.Role))
+	if role != "entry" && role != "exit" {
+		return fmt.Errorf("provider relay role must be entry or exit")
+	}
+	if strings.TrimSpace(req.RelayID) == "" {
+		return fmt.Errorf("provider relay_id is required")
+	}
+	if normalizePeerPubKey(req.PubKey) == "" {
+		return fmt.Errorf("provider pub_key invalid")
+	}
+	if strings.TrimSpace(req.Endpoint) == "" {
+		return fmt.Errorf("provider endpoint is required")
+	}
+	if normalizeHTTPURL(req.ControlURL) == "" {
+		return fmt.Errorf("provider control_url is required")
+	}
+	return nil
 }
 
 func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
@@ -3454,10 +3487,11 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 		return fmt.Errorf("provider token proof token id and nonce are required")
 	}
 	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
+	replayStorePath := strings.TrimSpace(s.providerTokenProofStoreFile)
+	needsPersist := replayStorePath != ""
+	var snapshot map[string]time.Time
 
 	s.providerMu.Lock()
-	defer s.providerMu.Unlock()
-
 	if s.providerTokenProofSeen == nil {
 		s.providerTokenProofSeen = make(map[string]time.Time)
 	}
@@ -3469,6 +3503,7 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 
 	replayKey := tokenID + ":" + nonce
 	if seenAt, ok := s.providerTokenProofSeen[replayKey]; ok && !seenAt.Before(cutoff) {
+		s.providerMu.Unlock()
 		return fmt.Errorf("provider token proof nonce replayed")
 	}
 	removed := make(map[string]time.Time)
@@ -3509,11 +3544,24 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 		rememberRemoved(oldestKey)
 	}
 	s.providerTokenProofSeen[replayKey] = now
-	if err := s.persistProviderTokenProofReplayLocked(now); err != nil {
-		delete(s.providerTokenProofSeen, replayKey)
-		for key, seenAt := range removed {
-			s.providerTokenProofSeen[key] = seenAt
+	if needsPersist {
+		snapshot = cloneProviderTokenProofSeen(s.providerTokenProofSeen)
+	}
+	s.providerMu.Unlock()
+	if !needsPersist {
+		return nil
+	}
+	if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, snapshot); err != nil {
+		s.providerMu.Lock()
+		if seenAt, ok := s.providerTokenProofSeen[replayKey]; ok && seenAt.Equal(now) {
+			delete(s.providerTokenProofSeen, replayKey)
 		}
+		for key, seenAt := range removed {
+			if _, exists := s.providerTokenProofSeen[key]; !exists {
+				s.providerTokenProofSeen[key] = seenAt
+			}
+		}
+		s.providerMu.Unlock()
 		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
 	}
 	return nil
@@ -3589,12 +3637,24 @@ func (s *Service) persistProviderTokenProofReplayLocked(now time.Time) error {
 	if path == "" {
 		return nil
 	}
+	return persistProviderTokenProofReplayStoreSnapshot(path, now, cloneProviderTokenProofSeen(s.providerTokenProofSeen))
+}
+
+func cloneProviderTokenProofSeen(src map[string]time.Time) map[string]time.Time {
+	cloned := make(map[string]time.Time, len(src))
+	for key, seenAt := range src {
+		cloned[key] = seenAt
+	}
+	return cloned
+}
+
+func persistProviderTokenProofReplayStoreSnapshot(path string, now time.Time, seen map[string]time.Time) error {
 	snapshot := providerTokenReplayStoreSnapshot{
 		Version:     1,
 		SavedAtUnix: now.Unix(),
-		Seen:        make(map[string]int64, len(s.providerTokenProofSeen)),
+		Seen:        make(map[string]int64, len(seen)),
 	}
-	for key, seenAt := range s.providerTokenProofSeen {
+	for key, seenAt := range seen {
 		snapshot.Seen[key] = seenAt.Unix()
 	}
 	b, err := json.Marshal(snapshot)

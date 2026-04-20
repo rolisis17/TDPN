@@ -6,8 +6,9 @@ param(
   [switch]$ForceNpmInstall
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 function ConvertTo-NullableBoolean {
   param(
     [AllowNull()]

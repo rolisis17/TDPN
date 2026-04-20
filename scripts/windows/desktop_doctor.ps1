@@ -9,8 +9,9 @@ param(
   [int]$PrintSummaryJson = 0
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 function Write-Step {
   param([string]$Message)
   Write-Host "[desktop-doctor] $Message"

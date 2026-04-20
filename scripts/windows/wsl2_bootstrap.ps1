@@ -3,8 +3,9 @@ param(
   [switch]$NoAutoInstall
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 function Invoke-WSL {
   param(
     [string]$Command

@@ -17,8 +17,9 @@ param(
   [switch]$DryRun
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 function Set-Or-ClearEnv {
   param(
     [Parameter(Mandatory = $true)]

@@ -2,8 +2,9 @@ param(
   [string]$Distro = ""
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
   throw "wsl.exe not found."
 }

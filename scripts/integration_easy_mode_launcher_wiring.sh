@@ -560,8 +560,14 @@ check_cpp '--refresh-campaign ' "launcher wiring failed: option 77 refresh forwa
 check_cpp '--fail-on-no-go ' "launcher wiring failed: option 77 fail-on-no-go forwarding missing"
 check_cpp '--campaign-bootstrap-directory ' "launcher wiring failed: option 77 bootstrap forwarding missing"
 check_cpp '--campaign-discovery-wait-sec ' "launcher wiring failed: option 77 discovery wait forwarding missing"
-check_cpp '--subject \$\{CAMPAIGN_SUBJECT:-\$\{INVITE_KEY:-INVITE_KEY\}\}' \
-  "launcher wiring failed: option 77 subject placeholder forwarding missing"
+check_cpp 'std::string campaignSubject = readEnvTrimmed\("CAMPAIGN_SUBJECT"\);' \
+  "launcher wiring failed: option 77 missing campaign subject env default wiring"
+check_cpp 'campaignSubject = readEnvTrimmed\("INVITE_KEY"\);' \
+  "launcher wiring failed: option 77 missing INVITE_KEY fallback wiring"
+check_cpp 'campaignSubject = "INVITE_KEY";' \
+  "launcher wiring failed: option 77 missing literal fallback subject wiring"
+check_cpp '--subject " << shellEscape\(campaignSubject\)' \
+  "launcher wiring failed: option 77 subject forwarding missing campaignSubject shell escaping"
 check_cpp '--refresh-campaign " << \(refreshCampaign \? "1" : "0"\)' \
   "launcher wiring failed: option 77 refresh forwarding expression missing"
 check_cpp '--fail-on-no-go " << \(failOnNoGo \? "1" : "0"\)' \

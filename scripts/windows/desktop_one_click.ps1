@@ -3,8 +3,9 @@ param(
   [string[]]$BootstrapArgs
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 function Test-ArgNamePresent {
   param(
     [Parameter(Mandatory = $true)]

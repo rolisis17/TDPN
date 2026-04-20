@@ -10,8 +10,9 @@ param(
   [Nullable[int]]$PrintDoctorSummaryJson = $null
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 if ($null -ne $PrintDoctorSummaryJson -and $PrintDoctorSummaryJson -notin @(0, 1)) {
   throw "-PrintDoctorSummaryJson must be 0 or 1 when provided."
 }

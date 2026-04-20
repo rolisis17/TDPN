@@ -12,8 +12,9 @@ param(
   [string[]]$TauriArgs
 )
 
-$ErrorActionPreference = "Stop"
 
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 function Show-Usage {
   Write-Host "GPM desktop release bundle scaffold (non-production signing flow)"
   Write-Host ""

@@ -1883,9 +1883,11 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 	if exp <= nowUnix {
 		exp = nowUnix + 1
 	}
+	replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
+	needsPersist := replayStorePath != ""
+	var snapshot tokenProofReplayStoreSnapshot
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.proofNonceSeen == nil {
 		s.proofNonceSeen = make(map[string]map[string]int64)
 	}
@@ -1894,6 +1896,7 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 		if len(s.proofNonceSeen) >= tokenProofReplayMaxTokenIDs {
 			pruneExpiredProofNonceBucketsLocked(s.proofNonceSeen, nowUnix)
 			if len(s.proofNonceSeen) >= tokenProofReplayMaxTokenIDs {
+				s.mu.Unlock()
 				return errors.New("token proof replay cache saturated")
 			}
 		}
@@ -1906,17 +1909,38 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 		}
 	}
 	if _, exists := seen[nonce]; exists {
+		s.mu.Unlock()
 		return errors.New("token proof replay")
 	}
 	if len(seen) >= tokenProofReplayMaxNoncesPerToken {
+		s.mu.Unlock()
 		return errors.New("token proof replay cache saturated")
 	}
 	seen[nonce] = exp
-	if err := s.persistTokenProofReplayStoreLocked(nowUnix); err != nil {
-		delete(seen, nonce)
-		if len(seen) == 0 {
-			delete(s.proofNonceSeen, tokenID)
+	if needsPersist {
+		snapshot = tokenProofReplayStoreSnapshot{
+			Version:     1,
+			SavedAtUnix: nowUnix,
+			Buckets:     cloneProofNonceBuckets(s.proofNonceSeen),
 		}
+	}
+	s.mu.Unlock()
+
+	if !needsPersist {
+		return nil
+	}
+	if err := persistTokenProofReplayStoreSnapshot(replayStorePath, snapshot); err != nil {
+		s.mu.Lock()
+		seen = s.proofNonceSeen[tokenID]
+		if seen != nil {
+			if until, exists := seen[nonce]; exists && until == exp {
+				delete(seen, nonce)
+				if len(seen) == 0 {
+					delete(s.proofNonceSeen, tokenID)
+				}
+			}
+		}
+		s.mu.Unlock()
 		return fmt.Errorf("token proof replay persistence failed: %w", err)
 	}
 	return nil
@@ -1933,6 +1957,21 @@ func pruneExpiredProofNonceBucketsLocked(buckets map[string]map[string]int64, no
 			delete(buckets, tokenID)
 		}
 	}
+}
+
+func cloneProofNonceBuckets(src map[string]map[string]int64) map[string]map[string]int64 {
+	cloned := make(map[string]map[string]int64, len(src))
+	for tokenID, seen := range src {
+		if len(seen) == 0 {
+			continue
+		}
+		copied := make(map[string]int64, len(seen))
+		for nonce, until := range seen {
+			copied[nonce] = until
+		}
+		cloned[tokenID] = copied
+	}
+	return cloned
 }
 
 type tokenProofReplayStoreSnapshot struct {
@@ -2036,18 +2075,12 @@ func (s *Service) persistTokenProofReplayStoreLocked(nowUnix int64) error {
 	snapshot := tokenProofReplayStoreSnapshot{
 		Version:     1,
 		SavedAtUnix: nowUnix,
-		Buckets:     make(map[string]map[string]int64, len(s.proofNonceSeen)),
+		Buckets:     cloneProofNonceBuckets(s.proofNonceSeen),
 	}
-	for tokenID, seen := range s.proofNonceSeen {
-		if len(seen) == 0 {
-			continue
-		}
-		bucket := make(map[string]int64, len(seen))
-		for nonce, until := range seen {
-			bucket[nonce] = until
-		}
-		snapshot.Buckets[tokenID] = bucket
-	}
+	return persistTokenProofReplayStoreSnapshot(path, snapshot)
+}
+
+func persistTokenProofReplayStoreSnapshot(path string, snapshot tokenProofReplayStoreSnapshot) error {
 	b, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
@@ -2355,14 +2388,17 @@ func validateCapabilityTokenFormat(token string) error {
 }
 
 func (s *Service) refreshIssuerKeysForVerify(ctx context.Context) error {
-	s.verifyRefreshMu.Lock()
+	if !s.verifyRefreshMu.TryLock() {
+		return fmt.Errorf("issuer key refresh already in progress")
+	}
 	defer s.verifyRefreshMu.Unlock()
+	now := time.Now()
 	if s.verifyRefreshMinInterval > 0 && !s.verifyRefreshLast.IsZero() {
-		if time.Since(s.verifyRefreshLast) < s.verifyRefreshMinInterval {
+		if now.Sub(s.verifyRefreshLast) < s.verifyRefreshMinInterval {
 			return fmt.Errorf("issuer key refresh throttled")
 		}
 	}
-	s.verifyRefreshLast = time.Now()
+	s.verifyRefreshLast = now
 	return s.refreshIssuerKeys(ctx)
 }
 

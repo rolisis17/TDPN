@@ -93,6 +93,17 @@ bool envBoolEnabled(const char *name) {
   return v == "1" || v == "TRUE" || v == "YES" || v == "Y" || v == "ON";
 }
 
+std::string readEnvTrimmed(const char *name) {
+  if (!name || !*name) {
+    return "";
+  }
+  const char *raw = std::getenv(name);
+  if (!raw || !*raw) {
+    return "";
+  }
+  return trim(raw);
+}
+
 std::vector<std::string> splitWhitespaceArgs(const std::string &raw) {
   std::vector<std::string> out;
   std::istringstream in(raw);
@@ -176,6 +187,10 @@ std::string redactSensitiveCommandForLog(const std::string &cmd) {
   std::string out = redactFlagValue(cmd, "--admin-token");
   out = redactFlagValue(out, "--token");
   out = redactFlagValue(out, "--private-key");
+  out = redactFlagValue(out, "--anon-cred");
+  out = redactFlagValue(out, "--key");
+  out = redactFlagValue(out, "--subject");
+  out = redactFlagValue(out, "--invite-key");
   return out;
 }
 
@@ -531,7 +546,7 @@ int launchDetachedTerminalCommand(const std::string &title, const std::string &s
 
   for (const auto &candidate : candidates) {
     std::string detached = "nohup " + candidate.command + " >/dev/null 2>&1 < /dev/null &";
-    std::cout << "\n$ " << detached << "\n\n" << std::flush;
+    std::cout << "\n$ " << redactSensitiveCommandForLog(detached) << "\n\n" << std::flush;
     int rc = executeShellCommand(detached);
     if (rc == 0) {
       std::cout << "Launched " << title << " in a new terminal window.\n";
@@ -5286,6 +5301,13 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
         std::cout << "campaign bootstrap directory URL is required\n";
         continue;
       }
+      std::string campaignSubject = readEnvTrimmed("CAMPAIGN_SUBJECT");
+      if (campaignSubject.empty()) {
+        campaignSubject = readEnvTrimmed("INVITE_KEY");
+      }
+      if (campaignSubject.empty()) {
+        campaignSubject = "INVITE_KEY";
+      }
 
       std::ostringstream cmd;
       if (runWithSudo) {
@@ -5298,7 +5320,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --campaign-execution-mode docker"
           << " --campaign-bootstrap-directory " << shellEscape(bootstrapDir)
           << " --campaign-discovery-wait-sec " << shellEscape(discoveryWaitSec)
-          << " --subject ${CAMPAIGN_SUBJECT:-${INVITE_KEY:-INVITE_KEY}}"
+          << " --subject " << shellEscape(campaignSubject)
           << " --campaign-start-local-stack 0"
           << " --print-summary-json " << (printSummaryJson ? "1" : "0")
           << " --show-json " << (showJson ? "1" : "0");
