@@ -24,22 +24,98 @@
 
     <main>
       <section class="hero">
-        <div class="wrap hero__inner">
-          <span class="tag hero__eyebrow">Private overlay infrastructure</span>
-          <h1 class="hero__title">A governed private mesh for wallet-authenticated clients and approved operators.</h1>
-          <p class="hero__lede">
-            Global Private Mesh gives teams a clear way to onboard trusted users, register clients, and
-            manage operator access across resilient mesh paths with relay fallback when it is needed.
-          </p>
-          <div class="hero-actions" aria-label="Primary actions">
-            <a class="btn primary" href="./portal.html">Open the GPM Portal</a>
-            <a class="btn secondary" href="./portal.html#operator">Review operator onboarding</a>
+        <div class="wrap">
+          <div class="hero__inner hero__panel">
+            <span class="tag hero__eyebrow">Private overlay infrastructure</span>
+            <h1 class="hero__title">Two onboarding lanes, one governed private mesh.</h1>
+            <p class="hero__lede">
+              Global Private Mesh keeps client onboarding fast and self-serve, while operator onboarding
+              stays application-based and approval-gated for elevated access.
+            </p>
+            <div class="hero-actions" aria-label="Primary actions">
+              <a class="btn primary" href="./portal.html">Start client self-serve registration</a>
+              <a class="btn secondary" href="./portal.html#operator">Review operator onboarding</a>
+            </div>
+            <ul class="hero-highlights" aria-label="Platform highlights">
+              <li class="hero-highlights__item">Wallet-first authentication</li>
+              <li class="hero-highlights__item">Client lane: self-serve registration</li>
+              <li class="hero-highlights__item">Operator lane: apply, review, approve</li>
+            </ul>
           </div>
-          <ul class="hero-highlights" aria-label="Platform highlights">
-            <li class="hero-highlights__item">Wallet-first authentication</li>
-            <li class="hero-highlights__item">Client registration with policy controls</li>
-            <li class="hero-highlights__item">Operator approval and audit visibility</li>
-          </ul>
+        </div>
+      </section>
+
+      <section class="section section--lanes" aria-labelledby="onboarding-lanes-heading">
+        <div class="wrap">
+          <div class="section__header">
+            <span class="section__eyebrow">Onboarding lanes</span>
+            <h2 id="onboarding-lanes-heading">Choose the path that matches the role.</h2>
+            <p class="section-lead">
+              Both paths start with wallet sign-in. After that, clients proceed immediately while operator
+              access remains intentionally gated by application review and approval.
+            </p>
+          </div>
+          <div class="grid cols-2 lane-grid">
+            <article class="card lane-card lane-card--client">
+              <p class="lane-card__badge">Client self-serve lane</p>
+              <h3>Register and connect without waiting for manual approval.</h3>
+              <p>
+                This lane is designed for trusted clients that need to join quickly with policy-aware
+                defaults and clear registration feedback.
+              </p>
+              <ol class="lane-steps" aria-label="Client self-serve flow">
+                <li><strong>Sign in with wallet:</strong> Create or refresh an authenticated session.</li>
+                <li><strong>Register client profile:</strong> Choose path profile and submit registration.</li>
+                <li><strong>Operate as client:</strong> Continue with role-appropriate actions immediately.</li>
+              </ol>
+              <div class="lane-card__actions">
+                <a class="btn primary" href="./portal.html">Open client registration in portal</a>
+              </div>
+            </article>
+            <article class="card lane-card lane-card--operator">
+              <p class="lane-card__badge">Operator approval lane</p>
+              <h3>Apply for operator access, then continue after admin approval.</h3>
+              <p>
+                Operator privileges are permissioned by design so elevated actions only unlock after an
+                explicit application and approval decision.
+              </p>
+              <ol class="lane-steps" aria-label="Operator approval flow">
+                <li><strong>Sign in and apply:</strong> Submit operator ID and application details.</li>
+                <li><strong>Undergo review:</strong> Admins verify readiness and moderation context.</li>
+                <li><strong>Run operator actions:</strong> Approval unlocks server lifecycle controls.</li>
+              </ol>
+              <div class="lane-card__actions">
+                <a class="btn secondary" href="./portal.html#operator">Open operator workflow in portal</a>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="flow-cues-heading">
+        <div class="wrap">
+          <div class="section__header">
+            <span class="section__eyebrow">Flow cues</span>
+            <h2 id="flow-cues-heading">What users should expect in each onboarding experience.</h2>
+          </div>
+          <div class="grid cols-2 flow-grid">
+            <article class="card flow-card">
+              <h3>Client self-serve cues</h3>
+              <ul class="flow-list">
+                <li>Immediate progression from wallet sign-in to client registration.</li>
+                <li>Readiness guidance focuses on session and registration completeness.</li>
+                <li>No operator approval dependency for client-only operations.</li>
+              </ul>
+            </article>
+            <article class="card flow-card">
+              <h3>Operator approval cues</h3>
+              <ul class="flow-list">
+                <li>Application status remains visible until reviewed and approved.</li>
+                <li>Readiness messaging explains lock reasons when access is not yet eligible.</li>
+                <li>Operator lifecycle actions unlock only after successful approval state.</li>
+              </ul>
+            </article>
+          </div>
         </div>
       </section>
 
@@ -47,84 +123,49 @@
         <div class="wrap">
           <div class="section__header">
             <span class="section__eyebrow">Why GPM</span>
-            <h2 id="gpm-value-heading">Built to feel product-grade from first login to ongoing operations.</h2>
+            <h2 id="gpm-value-heading">Product-grade controls from first login to steady operations.</h2>
           </div>
           <div class="grid cols-3 feature-grid">
             <article class="card feature-card">
               <h3>Trusted access posture</h3>
               <p>
-                GPM starts with a pinned trusted domain, then extends into signed directories and local
-                cache fallback so teams can keep moving with a predictable trust model.
+                GPM starts from a pinned trusted domain, then extends into signed directories with local
+                fallback so teams keep a predictable trust model under changing conditions.
               </p>
             </article>
             <article class="card feature-card">
               <h3>Mesh transport with graceful fallback</h3>
               <p>
-                Direct mesh connectivity stays the preferred path, while managed relay routing preserves
-                continuity when peers are unreachable or network conditions change.
+                Direct mesh connectivity stays preferred while managed relay routing preserves continuity
+                when peers are unreachable.
               </p>
             </article>
             <article class="card feature-card">
               <h3>Role-aware operations</h3>
               <p>
-                Client onboarding stays self-serve, operator activation stays permissioned, and every
-                transition remains visible to the people who need to approve it.
+                Client onboarding is self-serve, operator activation is permissioned, and each transition is
+                visible to the people responsible for review.
               </p>
             </article>
             <article class="card feature-card">
               <h3>Wallet-native sign in</h3>
               <p>
-                The portal is designed around wallet-authenticated sessions, making identity handoff clear
-                without adding unnecessary credential sprawl.
+                Sessions are wallet-authenticated by default, keeping identity handoff clear without
+                credential sprawl.
               </p>
             </article>
             <article class="card feature-card">
-              <h3>One language across surfaces</h3>
+              <h3>Clear cross-surface language</h3>
               <p>
-                Desktop and web share the same product story, which keeps onboarding, support, and
-                governance workflows easier to understand at a glance.
+                Desktop and web use shared onboarding language so operators, support teams, and clients
+                stay aligned on status and next actions.
               </p>
             </article>
             <article class="card feature-card">
               <h3>Operator-grade visibility</h3>
               <p>
-                Application status, approvals, and lifecycle changes are modeled as explicit states instead
-                of hidden background steps.
-              </p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" aria-labelledby="how-it-works-heading">
-        <div class="wrap">
-          <div class="section__header">
-            <span class="section__eyebrow">How it works</span>
-            <h2 id="how-it-works-heading">A simple 3-step flow from wallet auth to operator approval.</h2>
-          </div>
-          <div class="grid cols-3 steps-grid">
-            <article class="card step-card">
-              <span class="step-card__number" aria-hidden="true">01</span>
-              <h3>Authenticate with a wallet</h3>
-              <p>
-                Users begin in the portal with wallet-based sign in, establishing a verified session
-                before they request access to network functions.
-              </p>
-            </article>
-            <article class="card step-card">
-              <span class="step-card__number" aria-hidden="true">02</span>
-              <h3>Register the client</h3>
-              <p>
-                The client is registered with a chosen path profile and bootstrap information so the mesh
-                can connect through the right operating posture.
-              </p>
-            </article>
-            <article class="card step-card">
-              <span class="step-card__number" aria-hidden="true">03</span>
-              <h3>Approve the operator</h3>
-              <p>
-                Operator onboarding is reviewed and approved separately, giving admins a clean control
-                point for elevated access and server-side responsibilities.
+                Application and approval states are explicit, reviewable, and designed to avoid hidden
+                background transitions.
               </p>
             </article>
           </div>
@@ -135,35 +176,35 @@
         <div class="wrap">
           <div class="section__header">
             <span class="section__eyebrow">Trust and governance</span>
-            <h2 id="governance-heading">Clear controls for teams that need confidence, not just connectivity.</h2>
+            <h2 id="governance-heading">Controls for teams that need confidence, not just connectivity.</h2>
           </div>
           <div class="grid cols-2 governance-grid">
             <article class="card governance-card">
               <h3>Approval trails</h3>
               <p>
-                Operator applications and state changes are designed to be reviewable, helping teams
-                understand who approved what and when.
+                Operator applications and lifecycle changes are designed to be reviewable so teams can
+                trace who approved what and when.
               </p>
             </article>
             <article class="card governance-card">
               <h3>Least-privilege role separation</h3>
               <p>
-                Client and operator workflows are intentionally separated so elevated access is granted
-                only when the right conditions are met.
+                Client and operator workflows remain separate so elevated access is granted only after the
+                right preconditions are satisfied.
               </p>
             </article>
             <article class="card governance-card">
               <h3>Secure bootstrap strategy</h3>
               <p>
-                The first trusted contact is explicit, while downstream discovery relies on signed, durable
-                directories and controlled fallback behavior.
+                Initial trust is explicit, while downstream discovery uses signed, durable directories and
+                controlled fallback behavior.
               </p>
             </article>
             <article class="card governance-card">
               <h3>Operational clarity</h3>
               <p>
-                Status messages, portal states, and product language stay consistent so support teams and
-                operators can act quickly with fewer assumptions.
+                Status messages and workflow states stay consistent so teams can act quickly with fewer
+                assumptions.
               </p>
             </article>
           </div>
@@ -178,8 +219,8 @@
               <h2 id="release-heading">Release direction</h2>
             </div>
             <p class="meta release-card__copy">
-              The current product surface centers on wallet-first sign in, client registration, operator
-              application and approval tracking, and role-gated controls for the desktop and portal flow.
+              The current surface prioritizes wallet-first sign in, self-serve client registration, operator
+              application and approval tracking, and role-gated controls across desktop and portal.
             </p>
           </div>
         </div>

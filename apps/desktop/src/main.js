@@ -40,6 +40,7 @@ const auditOrderEl = byId("audit_order");
 const pathProfileEl = byId("path_profile");
 const serverLockHintEl = byId("server_lock_hint");
 const clientLockHintEl = byId("client_lock_hint");
+const connectPolicyHintEl = document.getElementById("connect_policy_hint");
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 
@@ -78,6 +79,10 @@ const COMPAT_ADVANCED_LOCKED_HINT =
   "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
 const COMPAT_ADVANCED_DISABLED_HINT =
   "Legacy bootstrap/invite overrides are disabled by policy in this build.";
+const CONNECT_POLICY_SOURCE_ENV_DEFAULT = "env_default";
+const CONNECT_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
+const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
 const TDPN_ENV_NAME_REGEX = /\bTDPN_([A-Z0-9_]+)\b/g;
 const LEGACY_SECRET_STORAGE_KEYS = Object.freeze(["gpm.desktop.session_token"]);
 const STORAGE_KEYS = Object.freeze({
@@ -99,7 +104,8 @@ const state = {
   serviceMutationsAllowed: false,
   allowLegacyConnectOverride: false,
   connectRequireSession: false,
-  connectPolicySource: "env_default",
+  connectPolicySource: CONNECT_POLICY_SOURCE_ENV_DEFAULT,
+  connectPolicyMode: CONNECT_POLICY_MODE_COMPAT_ALLOWED,
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
@@ -1079,7 +1085,8 @@ function updateConnectionDashboard(source, payload) {
 }
 
 function readConfigBoolean(cfg, candidates) {
-  const raw = firstDefined(...candidates.map((key) => cfg[key]));
+  const source = cfg && typeof cfg === "object" ? cfg : {};
+  const raw = firstDefined(...candidates.map((key) => source[key]));
   if (typeof raw === "boolean") {
     return raw;
   }
@@ -1099,7 +1106,8 @@ function readConfigBoolean(cfg, candidates) {
 }
 
 function readConfigString(cfg, candidates) {
-  const raw = firstDefined(...candidates.map((key) => cfg[key]));
+  const source = cfg && typeof cfg === "object" ? cfg : {};
+  const raw = firstDefined(...candidates.map((key) => source[key]));
   if (typeof raw === "string") {
     const value = raw.trim();
     if (value) {
@@ -1107,6 +1115,176 @@ function readConfigString(cfg, candidates) {
     }
   }
   return undefined;
+}
+
+function readConfigObject(cfg, candidates) {
+  const source = cfg && typeof cfg === "object" ? cfg : {};
+  for (const key of candidates) {
+    const value = source[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeConnectPolicySource(value) {
+  const normalized = nonEmptyStringOrUndefined(value);
+  if (!normalized) {
+    return undefined;
+  }
+  const compact = normalized.toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    compact === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG ||
+    compact === "runtime" ||
+    compact === "runtime_policy"
+  ) {
+    return CONNECT_POLICY_SOURCE_RUNTIME_CONFIG;
+  }
+  if (
+    compact === CONNECT_POLICY_SOURCE_ENV_DEFAULT ||
+    compact === "env" ||
+    compact === "environment" ||
+    compact === "default"
+  ) {
+    return CONNECT_POLICY_SOURCE_ENV_DEFAULT;
+  }
+  return compact;
+}
+
+function normalizeConnectPolicyMode(value) {
+  const normalized = nonEmptyStringOrUndefined(value);
+  if (!normalized) {
+    return undefined;
+  }
+  const compact = normalized.toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    compact === CONNECT_POLICY_MODE_SESSION_REQUIRED ||
+    compact === "require_session" ||
+    compact === "session_only" ||
+    compact === "strict"
+  ) {
+    return CONNECT_POLICY_MODE_SESSION_REQUIRED;
+  }
+  if (
+    compact === CONNECT_POLICY_MODE_COMPAT_ALLOWED ||
+    compact === "compat" ||
+    compact === "session_optional" ||
+    compact === "legacy_allowed" ||
+    compact === "manual_override_allowed"
+  ) {
+    return CONNECT_POLICY_MODE_COMPAT_ALLOWED;
+  }
+  return compact;
+}
+
+function connectPolicyModeFromRequireSession(connectRequireSession) {
+  return connectRequireSession ? CONNECT_POLICY_MODE_SESSION_REQUIRED : CONNECT_POLICY_MODE_COMPAT_ALLOWED;
+}
+
+function formatConnectPolicyModeLabel(mode) {
+  if (mode === CONNECT_POLICY_MODE_SESSION_REQUIRED) {
+    return "session-required";
+  }
+  if (mode === CONNECT_POLICY_MODE_COMPAT_ALLOWED) {
+    return "compat";
+  }
+  return nonEmptyStringOrUndefined(mode)?.replace(/_/g, " ") || "compat";
+}
+
+function formatConnectPolicySourceLabel(source) {
+  if (source === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config";
+  }
+  if (source === CONNECT_POLICY_SOURCE_ENV_DEFAULT) {
+    return "env default";
+  }
+  return nonEmptyStringOrUndefined(source)?.replace(/_/g, " ") || "env default";
+}
+
+function formatConnectPolicyClientSourceLabel(source) {
+  if (source === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config (/v1/config)";
+  }
+  return "env defaults (GPM_CONNECT_REQUIRE_SESSION / GPM_ALLOW_LEGACY_CONNECT_OVERRIDE; legacy aliases: TDPN_CONNECT_REQUIRE_SESSION / TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE)";
+}
+
+function readRuntimeConnectPolicyMetadata(runtimeCfg) {
+  const runtime = runtimeCfg && typeof runtimeCfg === "object" ? runtimeCfg : {};
+  const rootConfig = readConfigObject(runtime, ["config"]) || {};
+  const rootData = readConfigObject(runtime, ["data"]) || {};
+  const rootDataConfig = readConfigObject(rootData, ["config"]) || {};
+  const connectPolicy =
+    readConfigObject(runtime, ["connect_policy", "connectPolicy"]) ||
+    readConfigObject(rootConfig, ["connect_policy", "connectPolicy"]) ||
+    readConfigObject(rootDataConfig, ["connect_policy", "connectPolicy"]) ||
+    {};
+  const policy =
+    readConfigObject(runtime, ["policy"]) ||
+    readConfigObject(rootConfig, ["policy"]) ||
+    readConfigObject(rootDataConfig, ["policy"]) ||
+    {};
+  const policyConnect =
+    readConfigObject(policy, ["connect_policy", "connectPolicy", "connect"]) ||
+    readConfigObject(connectPolicy, ["connect"]) ||
+    {};
+  const scopes = [runtime, rootConfig, rootDataConfig, connectPolicy, policyConnect];
+
+  const connectRequireSession = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "connect_require_session",
+        "connectRequireSession",
+        "require_session",
+        "requireSession"
+      ])
+    )
+  );
+  const allowLegacyConnectOverride = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "allow_legacy_connect_override",
+        "allowLegacyConnectOverride",
+        "allow_manual_connect_override",
+        "allowManualConnectOverride",
+        "allow_manual_bootstrap_invite",
+        "allowManualBootstrapInvite"
+      ])
+    )
+  );
+  const connectPolicySource = normalizeConnectPolicySource(
+    firstDefined(
+      ...scopes.map((scope) =>
+        readConfigString(scope, [
+          "connect_policy_source",
+          "connectPolicySource",
+          "policy_source",
+          "policySource",
+          "source"
+        ])
+      )
+    )
+  );
+  const connectPolicyMode = normalizeConnectPolicyMode(
+    firstDefined(
+      ...scopes.map((scope) =>
+        readConfigString(scope, [
+          "connect_policy_mode",
+          "connectPolicyMode",
+          "connect_mode",
+          "connectMode",
+          "mode"
+        ])
+      )
+    )
+  );
+
+  return {
+    connectRequireSession,
+    allowLegacyConnectOverride,
+    connectPolicySource,
+    connectPolicyMode
+  };
 }
 
 function formatConfigMeta(cfg) {
@@ -1172,8 +1350,8 @@ function formatConfigMeta(cfg) {
   };
 }
 
-function formatConnectPolicySourceHint(source) {
-  return source === "runtime_config" ? "connect policy: runtime config" : "connect policy: env default";
+function formatConnectPolicySourceHint(source, mode) {
+  return `connect policy: ${formatConnectPolicyModeLabel(mode)} (${formatConnectPolicySourceLabel(source)})`;
 }
 
 function normalizeOperatorApplicationStatus(value) {
@@ -2157,6 +2335,22 @@ function updateCompatOverrideHint() {
     : COMPAT_ADVANCED_DEFAULT_HINT;
 }
 
+function updateConnectPolicyHint() {
+  if (!connectPolicyHintEl) {
+    return;
+  }
+  const modeLabel = formatConnectPolicyModeLabel(state.connectPolicyMode);
+  const sourceLabel = formatConnectPolicyClientSourceLabel(state.connectPolicySource);
+  let postureHint = "manual bootstrap/invite fields are optional compatibility controls.";
+  if (state.connectRequireSession) {
+    postureHint = "manual bootstrap/invite fields are intentionally locked by production policy.";
+  } else if (!state.allowLegacyConnectOverride) {
+    postureHint = "manual bootstrap/invite fields are policy-locked in this build.";
+  }
+  connectPolicyHintEl.textContent = `Connect policy: ${modeLabel} from ${sourceLabel}; ${postureHint}`;
+  connectPolicyHintEl.classList.toggle("locked", state.connectRequireSession || !state.allowLegacyConnectOverride);
+}
+
 function applyConnectModePolicy(enabled) {
   state.connectRequireSession = !!enabled;
   syncCompatAdvancedVisibility();
@@ -2168,6 +2362,7 @@ function applyConnectModePolicy(enabled) {
     setCompatOverrideEnabled(compatEnableEl.checked);
   }
   updateCompatOverrideHint();
+  updateConnectPolicyHint();
 }
 
 function activateTab(name) {
@@ -2867,36 +3062,37 @@ async function init() {
     const meta = formatConfigMeta(cfg || {});
     let connectRequireSession = meta.connectRequireSession;
     let allowLegacyConnectOverride = meta.allowLegacyConnectOverride;
-    let connectPolicySource = "env_default";
+    let connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
+    let connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
     try {
       const runtimeCfg = await invoke("control_runtime_config");
-      const runtimeConnectRequireSession = readConfigBoolean(runtimeCfg || {}, [
-        "connect_require_session",
-        "connectRequireSession"
-      ]);
-      const runtimeAllowLegacyConnectOverride = readConfigBoolean(runtimeCfg || {}, [
-        "allow_legacy_connect_override",
-        "allowLegacyConnectOverride"
-      ]);
-      if (runtimeConnectRequireSession !== undefined) {
-        connectRequireSession = runtimeConnectRequireSession;
+      const runtimePolicy = readRuntimeConnectPolicyMetadata(runtimeCfg || {});
+      if (runtimePolicy.connectRequireSession !== undefined) {
+        connectRequireSession = runtimePolicy.connectRequireSession;
       }
-      if (runtimeAllowLegacyConnectOverride !== undefined) {
-        allowLegacyConnectOverride = runtimeAllowLegacyConnectOverride;
+      if (runtimePolicy.allowLegacyConnectOverride !== undefined) {
+        allowLegacyConnectOverride = runtimePolicy.allowLegacyConnectOverride;
       }
-      const runtimeSource = nonEmptyStringOrUndefined(runtimeCfg?.policy_source);
-      if (runtimeSource === "runtime_config" || runtimeSource === "env_default") {
-        connectPolicySource = runtimeSource;
-      } else if (runtimeConnectRequireSession !== undefined) {
-        connectPolicySource = "runtime_config";
+      if (runtimePolicy.connectPolicySource) {
+        connectPolicySource = runtimePolicy.connectPolicySource;
+      } else if (
+        runtimePolicy.connectRequireSession !== undefined ||
+        runtimePolicy.allowLegacyConnectOverride !== undefined ||
+        runtimePolicy.connectPolicyMode
+      ) {
+        connectPolicySource = CONNECT_POLICY_SOURCE_RUNTIME_CONFIG;
       }
+      connectPolicyMode =
+        runtimePolicy.connectPolicyMode || connectPolicyModeFromRequireSession(connectRequireSession);
     } catch {
-      connectPolicySource = "env_default";
+      connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
+      connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
     }
     state.connectPolicySource = connectPolicySource;
+    state.connectPolicyMode = connectPolicyMode;
     state.allowLegacyConnectOverride = !!allowLegacyConnectOverride;
     apiBaseEl.textContent = meta.apiLine;
-    apiHintsEl.textContent = [meta.hintLine, formatConnectPolicySourceHint(connectPolicySource)]
+    apiHintsEl.textContent = [meta.hintLine, formatConnectPolicySourceHint(connectPolicySource, connectPolicyMode)]
       .filter((value) => typeof value === "string" && value.trim().length > 0)
       .join(" | ");
     updateBtnEl.disabled = !meta.updateMutationsEnabled;
@@ -2908,7 +3104,8 @@ async function init() {
     apiHintsEl.textContent = "";
     updateBtnEl.disabled = true;
     state.serviceMutationsAllowed = false;
-    state.connectPolicySource = "env_default";
+    state.connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
+    state.connectPolicyMode = CONNECT_POLICY_MODE_COMPAT_ALLOWED;
     state.allowLegacyConnectOverride = false;
     applyConnectModePolicy(false);
     syncServerRoleLockState();

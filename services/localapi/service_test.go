@@ -491,6 +491,10 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv(allowInsecureHTTPEnv, "")
 		t.Setenv(maxCommandsEnv, "")
 		t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
+		t.Setenv("GPM_PRODUCTION_MODE", "")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
@@ -529,8 +533,17 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.authToken != "" {
 			t.Fatalf("authToken=%q want empty", s.authToken)
 		}
+		if s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=false", s.gpmConnectRequireSession)
+		}
 		if s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if s.gpmConnectPolicyMode != "default" {
+			t.Fatalf("gpmConnectPolicyMode=%q want=default", s.gpmConnectPolicyMode)
+		}
+		if s.gpmConnectPolicySource != "default" {
+			t.Fatalf("gpmConnectPolicySource=%q want=default", s.gpmConnectPolicySource)
 		}
 		if s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=false", s.gpmAuthVerifyRequireMetadata)
@@ -639,6 +652,51 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if !s.gpmAuthVerifyRequireWalletExt {
 			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=true", s.gpmAuthVerifyRequireWalletExt)
+		}
+	})
+
+	t.Run("production mode enforces secure connect defaults when flags unset", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+
+		s := New()
+		if !s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=true", s.gpmConnectRequireSession)
+		}
+		if s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if s.gpmConnectPolicyMode != "production" {
+			t.Fatalf("gpmConnectPolicyMode=%q want=production", s.gpmConnectPolicyMode)
+		}
+		if s.gpmConnectPolicySource != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpmConnectPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmConnectPolicySource)
+		}
+	})
+
+	t.Run("explicit connect policy flags override production defaults", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "0")
+		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+
+		s := New()
+		if s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=false", s.gpmConnectRequireSession)
+		}
+		if !s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=true", s.gpmAllowLegacyConnectOverride)
+		}
+		if s.gpmConnectPolicyMode != "production" {
+			t.Fatalf("gpmConnectPolicyMode=%q want=production", s.gpmConnectPolicyMode)
+		}
+		if s.gpmConnectPolicySource != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpmConnectPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmConnectPolicySource)
 		}
 	})
 
@@ -1642,6 +1700,8 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyRequireMetadata = true
 		svc.gpmAuthVerifyRequireWalletExt = true
 		svc.gpmAuthVerifyCommand = lifecycleSuccessCommand("verify-ok")
+		svc.gpmConnectPolicyMode = "production"
+		svc.gpmConnectPolicySource = "GPM_PRODUCTION_MODE"
 		svc.gpmMainDomain = "https://gpm.example"
 		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
 		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
@@ -1663,6 +1723,12 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["allow_legacy_connect_override"].(bool); !got {
 			t.Fatalf("allow_legacy_connect_override=%v want=true", configMap["allow_legacy_connect_override"])
+		}
+		if got, _ := configMap["connect_policy_mode"].(string); got != "production" {
+			t.Fatalf("connect_policy_mode=%q want=%q", got, "production")
+		}
+		if got, _ := configMap["connect_policy_source"].(string); got != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("connect_policy_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
 		}
 		if got, _ := configMap["gpm_auth_verify_require_command"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_command=%v want=true", configMap["gpm_auth_verify_require_command"])

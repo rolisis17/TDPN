@@ -73,6 +73,8 @@ type Service struct {
 	serviceRestart                string
 	gpmConnectRequireSession      bool
 	gpmAllowLegacyConnectOverride bool
+	gpmConnectPolicyMode          string
+	gpmConnectPolicySource        string
 	gpmMainDomain                 string
 	gpmManifestURL                string
 	gpmManifestCache              string
@@ -249,16 +251,34 @@ func New() *Service {
 		"TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
 		"",
 	), false)
-	gpmConnectRequireSession := parseBoolWithDefault(preferredEnvValue(
+	gpmConnectPolicyRaw, gpmConnectPolicySource, gpmConnectPolicySet := preferredEnvValueWithSource(
+		"GPM_PRODUCTION_MODE",
+		"TDPN_PRODUCTION_MODE",
+	)
+	gpmConnectPolicyProduction := parseBoolWithDefault(gpmConnectPolicyRaw, false)
+	gpmConnectPolicyMode := "default"
+	if gpmConnectPolicyProduction {
+		gpmConnectPolicyMode = "production"
+	}
+	if !gpmConnectPolicySet {
+		gpmConnectPolicySource = "default"
+	}
+	gpmConnectRequireSessionRaw, _, gpmConnectRequireSessionSet := preferredEnvValueWithSource(
 		"GPM_CONNECT_REQUIRE_SESSION",
 		"TDPN_CONNECT_REQUIRE_SESSION",
-		"",
-	), false)
-	gpmAllowLegacyConnectOverride := parseBoolWithDefault(preferredEnvValue(
+	)
+	gpmConnectRequireSession := parseBoolWithDefault(gpmConnectRequireSessionRaw, false)
+	if !gpmConnectRequireSessionSet && gpmConnectPolicyProduction {
+		gpmConnectRequireSession = true
+	}
+	gpmAllowLegacyConnectOverrideRaw, _, gpmAllowLegacyConnectOverrideSet := preferredEnvValueWithSource(
 		"GPM_ALLOW_LEGACY_CONNECT_OVERRIDE",
 		"TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE",
-		"",
-	), false)
+	)
+	gpmAllowLegacyConnectOverride := parseBoolWithDefault(gpmAllowLegacyConnectOverrideRaw, false)
+	if !gpmAllowLegacyConnectOverrideSet && gpmConnectPolicyProduction {
+		gpmAllowLegacyConnectOverride = false
+	}
 	gpmStateStorePath := preferredEnvValue(
 		"GPM_STATE_STORE_PATH",
 		"TDPN_STATE_STORE_PATH",
@@ -287,6 +307,8 @@ func New() *Service {
 		serviceRestart:                serviceRestart,
 		gpmConnectRequireSession:      gpmConnectRequireSession,
 		gpmAllowLegacyConnectOverride: gpmAllowLegacyConnectOverride,
+		gpmConnectPolicyMode:          gpmConnectPolicyMode,
+		gpmConnectPolicySource:        gpmConnectPolicySource,
 		gpmMainDomain:                 strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
 		gpmManifestURL:                strings.TrimSpace(gpmManifestURL),
 		gpmManifestCache:              strings.TrimSpace(gpmManifestCache),
@@ -432,12 +454,22 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if manifestCacheMaxAgeSec < 0 {
 		manifestCacheMaxAgeSec = 0
 	}
+	connectPolicyMode := strings.TrimSpace(s.gpmConnectPolicyMode)
+	if connectPolicyMode == "" {
+		connectPolicyMode = "default"
+	}
+	connectPolicySource := strings.TrimSpace(s.gpmConnectPolicySource)
+	if connectPolicySource == "" {
+		connectPolicySource = "default"
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"config": map[string]any{
 			"connect_require_session":                         s.gpmConnectRequireSession,
 			"allow_legacy_connect_override":                   s.gpmAllowLegacyConnectOverride,
+			"connect_policy_mode":                             connectPolicyMode,
+			"connect_policy_source":                           connectPolicySource,
 			"gpm_auth_verify_require_command":                 s.gpmAuthVerifyRequireCommand,
 			"gpm_auth_verify_require_metadata":                s.gpmAuthVerifyRequireMetadata,
 			"gpm_auth_verify_require_wallet_extension_source": s.gpmAuthVerifyRequireWalletExt,
@@ -1653,15 +1685,22 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func preferredEnvValue(primaryKey string, legacyKey string, fallback string) string {
+func preferredEnvValueWithSource(primaryKey string, legacyKey string) (string, string, bool) {
 	primary := strings.TrimSpace(os.Getenv(primaryKey))
 	if primary != "" {
-		return primary
+		return primary, primaryKey, true
 	}
 	legacy := strings.TrimSpace(os.Getenv(legacyKey))
 	if legacy != "" {
 		log.Printf("local control api config deprecation: %s is deprecated; migrate to %s", legacyKey, primaryKey)
-		return legacy
+		return legacy, legacyKey, true
+	}
+	return "", "default", false
+}
+
+func preferredEnvValue(primaryKey string, legacyKey string, fallback string) string {
+	if value, _, ok := preferredEnvValueWithSource(primaryKey, legacyKey); ok {
+		return value
 	}
 	return strings.TrimSpace(fallback)
 }
