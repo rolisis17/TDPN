@@ -134,6 +134,7 @@ wait_for_local_api() {
 
 start_local_api() {
   local allow_update="$1"
+  local operator_approval_require_session="${2:-0}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -151,6 +152,7 @@ start_local_api() {
     LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK="1" \
     LOCAL_CONTROL_API_AUTH_TOKEN="$LOCAL_API_AUTH_TOKEN" \
     GPM_OPERATOR_APPROVAL_TOKEN="$LOCAL_API_OPERATOR_ADMIN_TOKEN" \
+    GPM_OPERATOR_APPROVAL_REQUIRE_SESSION="$operator_approval_require_session" \
     LOCAL_CONTROL_API_SERVICE_START_COMMAND="printf gpm-service-start-ok" \
     LOCAL_CONTROL_API_SERVICE_STOP_COMMAND="printf gpm-service-stop-ok" \
     LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND="printf gpm-service-restart-ok" \
@@ -393,6 +395,16 @@ if ! jq -e '.ok == true and (.config.gpm_manifest_cache_max_age_sec | type == "n
   echo "$config_json"
   exit 1
 fi
+if ! jq -e '.ok == true and (.config.gpm_operator_approval_require_session | type == "boolean")' <<<"$config_json" >/dev/null; then
+  echo "config endpoint did not expose gpm_operator_approval_require_session as boolean"
+  echo "$config_json"
+  exit 1
+fi
+if ! jq -e '.ok == true and (.config.gpm_operator_approval_require_session_policy_source | type == "string" and length > 0)' <<<"$config_json" >/dev/null; then
+  echo "config endpoint did not expose gpm_operator_approval_require_session_policy_source"
+  echo "$config_json"
+  exit 1
+fi
 
 echo "[local-control-api-contract] onboarding overview requires session_token"
 overview_missing_body="$TMP_DIR/onboarding_overview_missing_session_token.json"
@@ -487,7 +499,7 @@ if ! jq -e '.ok == true and .application.status == "pending" and .application.ch
   exit 1
 fi
 operator_approve_bound_json="$(api_post_json "/v1/gpm/onboarding/operator/approve" "{\"wallet_address\":\"cosmos1overviewcontract\",\"approved\":true,\"admin_token\":\"${LOCAL_API_OPERATOR_ADMIN_TOKEN}\"}")"
-if ! jq -e '.ok == true and .decision == "approved" and .application.status == "approved"' <<<"$operator_approve_bound_json" >/dev/null; then
+if ! jq -e '.ok == true and .decision == "approved" and .decision_auth == "legacy_admin_token" and .application.status == "approved"' <<<"$operator_approve_bound_json" >/dev/null; then
   echo "operator approve (bound setup) did not return expected payload"
   echo "$operator_approve_bound_json"
   exit 1
@@ -707,6 +719,29 @@ fi
 if grep -q '^self-update' "$CALLS_FILE"; then
   echo "update disabled path unexpectedly executed self-update command"
   cat "$CALLS_FILE"
+  exit 1
+fi
+
+stop_local_api
+
+echo "[local-control-api-contract] strict operator approval policy disables legacy admin token fallback"
+start_local_api 0 1
+strict_config_json="$(api_get "/v1/config")"
+if ! jq -e '.ok == true and .config.gpm_operator_approval_require_session == true and (.config.gpm_operator_approval_require_session_policy_source | type == "string" and length > 0)' <<<"$strict_config_json" >/dev/null; then
+  echo "strict policy config did not expose expected operator approval policy fields"
+  echo "$strict_config_json"
+  exit 1
+fi
+strict_approve_body="$TMP_DIR/operator_approve_strict_requires_session.json"
+strict_approve_code="$(curl -sS -o "$strict_approve_body" -w '%{http_code}' -X POST -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" -H 'Content-Type: application/json' --data "{\"wallet_address\":\"cosmos1strictpolicy\",\"approved\":true,\"admin_token\":\"${LOCAL_API_OPERATOR_ADMIN_TOKEN}\"}" "${LOCAL_API_BASE}/v1/gpm/onboarding/operator/approve")"
+if [[ "$strict_approve_code" != "401" ]]; then
+  echo "expected strict operator approval policy to return 401 for admin_token fallback, got $strict_approve_code"
+  cat "$strict_approve_body"
+  exit 1
+fi
+if ! jq -e '.ok == false and (.error | contains("required by operator approval policy")) and (.error | contains("legacy admin_token fallback is disabled"))' "$strict_approve_body" >/dev/null; then
+  echo "strict operator approval policy response payload mismatch"
+  cat "$strict_approve_body"
   exit 1
 fi
 

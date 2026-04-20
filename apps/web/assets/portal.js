@@ -56,6 +56,8 @@ const registerClientBtnEl = byId("register_client_btn");
 const applyOperatorBtnEl = byId("apply_operator_btn");
 const approveOperatorBtnEl = byId("approve_operator_btn");
 const rejectOperatorBtnEl = byId("reject_operator_btn");
+const adminTokenEl = byId("admin_token");
+const operatorApprovalPolicyHintEl = byId("operator_approval_policy_hint");
 const manualSignInBtnEl = byId("signin_btn");
 const signinPolicyHintEl = document.getElementById("signin_policy_hint");
 const connectionSnapshotEl = byId("connection_snapshot");
@@ -169,6 +171,8 @@ let authVerifyRequireMetadata = false;
 let authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let authVerifyRequireWalletExtensionSource = false;
 let authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+let operatorApprovalRequireSession = false;
+let operatorApprovalRequireSessionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let legacyAliasTelemetry = {
   active: false,
   aliases: [],
@@ -525,6 +529,36 @@ function parseAuthVerifyRequireWalletExtensionPolicySourceConfig(payload) {
   return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 }
 
+function parseOperatorApprovalRequireSessionConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const parsed = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_operator_approval_require_session",
+        "gpmOperatorApprovalRequireSession",
+        "operator_approval_require_session",
+        "operatorApprovalRequireSession"
+      ])
+    )
+  );
+  return parsed === true;
+}
+
+function parseOperatorApprovalRequireSessionPolicySourceConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const source = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_operator_approval_require_session_policy_source",
+        "gpmOperatorApprovalRequireSessionPolicySource",
+        "operator_approval_require_session_policy_source",
+        "operatorApprovalRequireSessionPolicySource"
+      ])
+    )
+  );
+  return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+}
+
 function normalizeLegacyAliasName(value) {
   const text = nonEmptyString(value);
   if (!text) {
@@ -789,6 +823,50 @@ function refreshConfigEndpointHint() {
   configEndpointHintEl.classList.remove("locked");
 }
 
+function operatorApprovalAdminTokenFallbackAllowed() {
+  return configEndpointUnavailableFailClosedMode() !== true && operatorApprovalRequireSession !== true;
+}
+
+function refreshOperatorApprovalPolicyHint() {
+  if (!operatorApprovalPolicyHintEl || !adminTokenEl) {
+    return;
+  }
+
+  const isBusy = document.body.classList.contains("is-busy");
+  const configUnavailable = configEndpointUnavailableFailClosedMode();
+  const adminTokenFallbackAllowed = operatorApprovalAdminTokenFallbackAllowed();
+  const strictSessionPolicy = !configUnavailable && !adminTokenFallbackAllowed;
+  const sourceLabel = formatPolicySourceLabel(operatorApprovalRequireSessionPolicySource);
+
+  const lockByPolicy = configUnavailable || strictSessionPolicy;
+  const disabled = isBusy || lockByPolicy;
+  adminTokenEl.disabled = disabled;
+  adminTokenEl.setAttribute("aria-disabled", String(disabled));
+
+  if (configUnavailable) {
+    adminTokenEl.value = "";
+    adminTokenEl.title = failClosedMutatingActionStatusDetail();
+    operatorApprovalPolicyHintEl.classList.add("locked");
+    operatorApprovalPolicyHintEl.textContent =
+      "Operator approval auth policy is unavailable because /v1/config could not be read. Approval/rejection mutations remain fail-closed until runtime config is reachable.";
+    return;
+  }
+
+  if (strictSessionPolicy) {
+    adminTokenEl.value = "";
+    adminTokenEl.title = "Legacy admin token fallback is disabled by policy.";
+    operatorApprovalPolicyHintEl.classList.add("locked");
+    operatorApprovalPolicyHintEl.textContent =
+      `Operator approval auth policy: admin session token required (source: ${sourceLabel}); legacy admin token fallback is disabled.`;
+    return;
+  }
+
+  adminTokenEl.removeAttribute("title");
+  operatorApprovalPolicyHintEl.classList.remove("locked");
+  operatorApprovalPolicyHintEl.textContent =
+    `Operator approval auth policy: session token preferred (source: ${sourceLabel}); legacy admin token fallback is available when needed.`;
+}
+
 function refreshConnectPolicyHint() {
   if (!connectPolicyHintEl) {
     return;
@@ -828,6 +906,7 @@ function refreshPolicyPostureBanner() {
     syncManualSignInAction();
     refreshConnectPolicyHint();
     refreshConfigEndpointHint();
+    refreshOperatorApprovalPolicyHint();
     return;
   }
   policyConnectPolicyEl.textContent = `Connect policy: ${connectMode} (source: ${connectSource}; ${legacyOverride}).`;
@@ -844,6 +923,7 @@ function refreshPolicyPostureBanner() {
   syncManualSignInAction();
   refreshConnectPolicyHint();
   refreshConfigEndpointHint();
+  refreshOperatorApprovalPolicyHint();
 }
 
 function refreshLegacyAliasWarningBanner() {
@@ -983,11 +1063,14 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireMetadataPolicySource = parseAuthVerifyRequireMetadataPolicySourceConfig(config);
     authVerifyRequireWalletExtensionSource = parseAuthVerifyRequireWalletExtensionSourceConfig(config);
     authVerifyRequireWalletExtensionPolicySource = parseAuthVerifyRequireWalletExtensionPolicySourceConfig(config);
+    operatorApprovalRequireSession = parseOperatorApprovalRequireSessionConfig(config);
+    operatorApprovalRequireSessionPolicySource = parseOperatorApprovalRequireSessionPolicySourceConfig(config);
     legacyAliasTelemetry = parseLegacyAliasTelemetryConfig(config, {
       policySources: [
         connectPolicySource,
         authVerifyRequireMetadataPolicySource,
-        authVerifyRequireWalletExtensionPolicySource
+        authVerifyRequireWalletExtensionPolicySource,
+        operatorApprovalRequireSessionPolicySource
       ]
     });
     refreshCompatibilityOverrideControls();
@@ -1005,6 +1088,8 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     authVerifyRequireWalletExtensionSource = false;
     authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    operatorApprovalRequireSession = false;
+    operatorApprovalRequireSessionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     legacyAliasTelemetry = {
       active: false,
       aliases: [],
@@ -2976,6 +3061,7 @@ function syncFailClosedMutatingActionState() {
     }
     button.removeAttribute("title");
   }
+  refreshOperatorApprovalPolicyHint();
 }
 
 function syncClientRegistrationAction(readiness) {
@@ -3929,6 +4015,31 @@ function assertOperatorMutationActionAllowed(actionLabel) {
   }
 }
 
+function buildOperatorModerationAuthRequest(actionLabel) {
+  const sessionToken = byId("session_token").value.trim();
+  const adminToken = adminTokenEl.value.trim();
+
+  if (operatorApprovalRequireSession === true) {
+    if (!sessionToken) {
+      throw new Error(
+        `${actionLabel} requires session_token by policy; legacy admin_token fallback is disabled. Sign in with an admin session and retry.`
+      );
+    }
+    return {
+      session_token: sessionToken
+    };
+  }
+
+  if (!sessionToken && !adminToken) {
+    throw new Error(`${actionLabel} requires session_token or admin_token.`);
+  }
+
+  return {
+    session_token: sessionToken || undefined,
+    admin_token: adminToken || undefined
+  };
+}
+
 async function requestConnectControl() {
   const request = buildConnectRequest();
   assertConnectActionAllowed(request);
@@ -4432,18 +4543,20 @@ byId("approve_operator_btn").addEventListener("click", () =>
     "operator_approve",
     async () => {
       assertOperatorMutationActionAllowed("Operator approve");
+      const moderationAuth = buildOperatorModerationAuthRequest("Operator approve");
       const request = {
         wallet_address: byId("wallet_address").value.trim(),
-        approved: true,
-        session_token: byId("session_token").value.trim() || undefined
+        approved: true
       };
+      if (moderationAuth.session_token) {
+        request.session_token = moderationAuth.session_token;
+      }
       const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
       if (ifUpdatedAtUtc) {
         request.if_updated_at_utc = ifUpdatedAtUtc;
       }
-      const adminToken = byId("admin_token").value.trim();
-      if (adminToken) {
-        request.admin_token = adminToken;
+      if (moderationAuth.admin_token) {
+        request.admin_token = moderationAuth.admin_token;
       }
       const reason = operatorModerationReason();
       if (reason) {
@@ -4492,11 +4605,7 @@ byId("reject_operator_btn").addEventListener("click", () =>
     "operator_reject",
     async () => {
       assertOperatorMutationActionAllowed("Operator reject");
-      const sessionToken = byId("session_token").value.trim();
-      const adminToken = byId("admin_token").value.trim();
-      if (!sessionToken && !adminToken) {
-        throw new Error("session_token or admin_token is required to reject an operator.");
-      }
+      const moderationAuth = buildOperatorModerationAuthRequest("Operator reject");
       const reason = operatorModerationReason();
       if (!reason) {
         throw new Error("moderation reason is required to reject an operator.");
@@ -4506,11 +4615,11 @@ byId("reject_operator_btn").addEventListener("click", () =>
         approved: false,
         reason
       };
-      if (sessionToken) {
-        request.session_token = sessionToken;
+      if (moderationAuth.session_token) {
+        request.session_token = moderationAuth.session_token;
       }
-      if (adminToken) {
-        request.admin_token = adminToken;
+      if (moderationAuth.admin_token) {
+        request.admin_token = moderationAuth.admin_token;
       }
       const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
       if (ifUpdatedAtUtc) {

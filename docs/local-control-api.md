@@ -193,6 +193,8 @@ If auth is required and missing/invalid, the API returns `401`.
     "allow_legacy_connect_override": false,
     "connect_policy_mode": "production",
     "connect_policy_source": "GPM_PRODUCTION_MODE",
+    "gpm_operator_approval_require_session": true,
+    "gpm_operator_approval_require_session_policy_source": "production-default",
     "gpm_manifest_trust_policy_mode": "production",
     "gpm_manifest_trust_policy_source": "GPM_PRODUCTION_MODE",
     "gpm_manifest_require_https": true,
@@ -231,6 +233,8 @@ If auth is required and missing/invalid, the API returns `401`.
 Policy posture config hints:
 - `connect_policy_mode`: additive connect posture mode (`default|production` in current daemon behavior).
 - `connect_policy_source`: additive source for connect posture mode/defaulting (for example `GPM_PRODUCTION_MODE`, `GPM_CONNECT_REQUIRE_SESSION`, `TDPN_CONNECT_REQUIRE_SESSION`, or `default`).
+- `gpm_operator_approval_require_session`: whether strict operator-approval auth policy is enabled (`session_token` required for admin moderation decisions, legacy `admin_token` fallback disabled).
+- `gpm_operator_approval_require_session_policy_source`: additive source for operator-approval auth strictness (`production-default` when inherited from production mode with no explicit `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION` override).
 - `gpm_manifest_trust_policy_mode`: additive manifest-trust posture mode (`default|production`).
 - `gpm_manifest_trust_policy_source`: additive source for manifest-trust posture mode/defaulting (for example `GPM_PRODUCTION_MODE` or `default`).
 - `gpm_manifest_require_https`: whether manifest URL transport hardening is enabled.

@@ -97,6 +97,7 @@ CONNECTION_UI_MARKERS=(
   'id="panel_server"'
   'id="client_lock_hint"'
   'id="server_lock_hint"'
+  'id="operator_approval_policy_hint"'
   'id="config_endpoint_hint"'
   'id="connect_policy_hint"'
   'id="connect_interface"'
@@ -160,6 +161,9 @@ JS_MARKERS=(
   'response.status === 401 && !localApiAuthToken()'
   'Local API bearer token is missing. Set Local API auth token in the portal and retry.'
   'const token = localApiAuthToken();'
+  'const operatorApprovalPolicyHintEl = byId("operator_approval_policy_hint");'
+  'function parseOperatorApprovalRequireSessionConfig('
+  'function parseOperatorApprovalRequireSessionPolicySourceConfig('
   'function refreshServerReadinessStatus('
   'byId("register_client_btn").addEventListener'
   'assertClientRegistrationActionAllowed();'
@@ -226,12 +230,17 @@ CONNECTION_JS_MARKERS=(
   'function requestServiceLifecycle('
   'assertServiceLifecycleActionAllowed(normalizedAction);'
   'function assertOperatorMutationActionAllowed('
+  'function buildOperatorModerationAuthRequest('
   'assertOperatorMutationActionAllowed("Operator apply");'
   'assertOperatorMutationActionAllowed("Operator approve");'
   'assertOperatorMutationActionAllowed("Operator reject");'
   'Restricted fail-closed mode: /v1/config is unavailable.'
   'Connect policy: restricted fail-closed (source: unavailable; legacy override locked).'
   'Compatibility override is disabled in restricted fail-closed mode because /v1/config is unavailable.'
+  'operatorApprovalRequireSession = parseOperatorApprovalRequireSessionConfig(config);'
+  'operatorApprovalRequireSessionPolicySource = parseOperatorApprovalRequireSessionPolicySourceConfig(config);'
+  'Operator approval auth policy: admin session token required'
+  'Operator approval auth policy is unavailable because /v1/config could not be read.'
   'function updateConnectionDashboard('
   'function restoreWorkspaceTabPreference('
   'function persistWorkspaceTabPreference('
@@ -338,6 +347,22 @@ if ! grep -qiE 'register(ing|ed)? client|client registration|register-client' "$
 fi
 if ! grep -qiE '/v1/config.*(fail-closed|restricted)|fail-closed.*(/v1/config|runtime config endpoint)' "$README_FILE"; then
   echo "web portal contract failed: README must document fail-closed behavior when /v1/config is unavailable"
+  exit 1
+fi
+if ! grep -qF 'gpm_operator_approval_require_session' "$README_FILE"; then
+  echo "web portal contract failed: README must mention gpm_operator_approval_require_session"
+  exit 1
+fi
+if ! grep -qF 'gpm_operator_approval_require_session_policy_source' "$README_FILE"; then
+  echo "web portal contract failed: README must mention gpm_operator_approval_require_session_policy_source"
+  exit 1
+fi
+if ! grep -qF 'GPM_OPERATOR_APPROVAL_REQUIRE_SESSION' "$README_FILE"; then
+  echo "web portal contract failed: README must mention GPM_OPERATOR_APPROVAL_REQUIRE_SESSION override behavior"
+  exit 1
+fi
+if ! grep -qiE 'admin_token.*(disabled|fail-closed)|session_token.*(required|policy)' "$README_FILE"; then
+  echo "web portal contract failed: README must document strict operator approval auth policy behavior"
   exit 1
 fi
 if ! grep -qiE 'wallet-?extension.*(keplr|leap)|(keplr|leap).*wallet-?extension' "$README_FILE"; then
