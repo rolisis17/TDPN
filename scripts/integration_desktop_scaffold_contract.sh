@@ -1083,7 +1083,49 @@ assert_parse_readiness_fallback_pair \
   "unlockActions" \
   'readiness[[:space:]]*\.[[:space:]]*unlock_actions|readiness\[[^]]*unlock_actions[^]]*\]' \
   'readiness[[:space:]]*\.[[:space:]]*unlockActions|readiness\[[^]]*unlockActions[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "clientRegistrationStatus" \
+  'readiness[[:space:]]*\.[[:space:]]*(client_registration_status|registration_status)|readiness\[[^]]*(client_registration_status|registration_status)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(clientRegistrationStatus|registrationStatus)|readiness\[[^]]*(clientRegistrationStatus|registrationStatus)[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "registrationTrustStatus" \
+  'readiness[[:space:]]*\.[[:space:]]*(registration_trust_status|bootstrap_trust_status|session_bootstrap_trust_status|trust_status)|readiness\[[^]]*(registration_trust_status|bootstrap_trust_status|session_bootstrap_trust_status|trust_status)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(registrationTrustStatus|bootstrapTrustStatus|sessionBootstrapTrustStatus|trustStatus)|readiness\[[^]]*(registrationTrustStatus|bootstrapTrustStatus|sessionBootstrapTrustStatus|trustStatus)[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "registrationTrustDegraded" \
+  'readiness[[:space:]]*\.[[:space:]]*(registration_trust_degraded|bootstrap_trust_degraded|session_bootstrap_trust_degraded|manifest_drift_detected|trust_drift_detected|trust_degraded|bootstrap_trust_revoked|session_bootstrap_revoked)|readiness\[[^]]*(registration_trust_degraded|bootstrap_trust_degraded|session_bootstrap_trust_degraded|manifest_drift_detected|trust_drift_detected|trust_degraded|bootstrap_trust_revoked|session_bootstrap_revoked)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(registrationTrustDegraded|bootstrapTrustDegraded|sessionBootstrapTrustDegraded|manifestDriftDetected|trustDriftDetected|trustDegraded|bootstrapTrustRevoked|sessionBootstrapRevoked)|readiness\[[^]]*(registrationTrustDegraded|bootstrapTrustDegraded|sessionBootstrapTrustDegraded|manifestDriftDetected|trustDriftDetected|trustDegraded|bootstrapTrustRevoked|sessionBootstrapRevoked)[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "registrationReregisterRequired" \
+  'readiness[[:space:]]*\.[[:space:]]*(re_register_required|reregister_required|registration_refresh_required|requires_reregistration)|readiness\[[^]]*(re_register_required|reregister_required|registration_refresh_required|requires_reregistration)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(reRegisterRequired|reregisterRequired|registrationRefreshRequired|requiresReregistration)|readiness\[[^]]*(reRegisterRequired|reregisterRequired|registrationRefreshRequired|requiresReregistration)[^]]*\]'
+assert_parse_readiness_fallback_pair \
+  "registrationTrustReason" \
+  'readiness[[:space:]]*\.[[:space:]]*(registration_trust_reason|bootstrap_trust_reason|session_bootstrap_trust_reason|trust_reason|manifest_drift_reason|re_register_reason|registration_lock_reason)|readiness\[[^]]*(registration_trust_reason|bootstrap_trust_reason|session_bootstrap_trust_reason|trust_reason|manifest_drift_reason|re_register_reason|registration_lock_reason)[^]]*\]' \
+  'readiness[[:space:]]*\.[[:space:]]*(registrationTrustReason|bootstrapTrustReason|sessionBootstrapTrustReason|trustReason|manifestDriftReason|reRegisterReason|registrationLockReason)|readiness\[[^]]*(registrationTrustReason|bootstrapTrustReason|sessionBootstrapTrustReason|trustReason|manifestDriftReason|reRegisterReason|registrationLockReason)[^]]*\]'
 echo "[desktop-scaffold] parseServerReadiness fallback markers are present for snake_case and camelCase readiness fields"
+
+if ! grep -qF 'function setClientRegistrationStateFromPayload(payload, options = {}) {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing client registration trust-state merge helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'setClientRegistrationStateFromPayload({ readiness }, { allowFallback: false, preserveWhenUnknown: true });' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server-readiness trust merge marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired) {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing client trust-drift lock-hint guard marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function clientRegistrationTrustHintText() {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing client trust-drift hint helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'Re-register client profile to refresh trusted bootstrap directories before connecting.' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing re-register guidance marker for trust drift in $JS_FILE"
+  exit 1
+fi
+echo "[desktop-scaffold] client registration trust-drift readiness markers are present"
 
 JSON_FILES=(
   "apps/desktop/package.json"

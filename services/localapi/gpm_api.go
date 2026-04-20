@@ -983,10 +983,10 @@ func (s *Service) handleGPMClientStatus(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
 		return
 	}
-	registration := buildGPMClientRegistration(session)
+	registrationState := s.buildGPMClientRegistration(r.Context(), session)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
-		"registration": registration,
+		"registration": registrationState.Registration,
 	})
 }
 
@@ -1027,7 +1027,7 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address or session_token is required"})
 		return
 	}
-	readiness := s.buildGPMServerReadiness(walletAddress, session, sessionPresent)
+	readiness := s.buildGPMServerReadiness(walletAddress, session, sessionPresent, "", "")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"readiness": readiness,
@@ -1062,32 +1062,72 @@ func (s *Service) handleGPMOnboardingOverview(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address or session_token is required"})
 		return
 	}
+	registrationState := s.buildGPMClientRegistration(r.Context(), session)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"session":      serializeGPMSession(session),
-		"registration": buildGPMClientRegistration(session),
-		"readiness":    s.buildGPMServerReadiness(walletAddress, session, true),
+		"registration": registrationState.Registration,
+		"readiness": s.buildGPMServerReadiness(
+			walletAddress,
+			session,
+			true,
+			registrationState.Status,
+			registrationState.StatusReason,
+		),
 	})
 }
 
-func buildGPMClientRegistration(session gpmSession) map[string]any {
-	status := "not_registered"
-	if strings.TrimSpace(session.BootstrapDirectory) != "" && strings.TrimSpace(session.InviteKey) != "" {
-		status = "registered"
-	}
+type gpmClientRegistrationState struct {
+	Registration map[string]any
+	Status       string
+	StatusReason string
+}
+
+func (s *Service) buildGPMClientRegistration(ctx context.Context, session gpmSession) gpmClientRegistrationState {
 	registration := map[string]any{
 		"wallet_address":        session.WalletAddress,
-		"status":                status,
+		"status":                "not_registered",
 		"bootstrap_directory":   strings.TrimSpace(session.BootstrapDirectory),
 		"bootstrap_directories": sessionTrustedBootstrapDirectories(session),
 	}
 	if profile := strings.TrimSpace(session.PathProfile); profile != "" {
 		registration["path_profile"] = profile
 	}
-	return registration
+
+	state := gpmClientRegistrationState{
+		Registration: registration,
+		Status:       "not_registered",
+	}
+	if strings.TrimSpace(session.BootstrapDirectory) == "" || strings.TrimSpace(session.InviteKey) == "" {
+		return state
+	}
+
+	revalidatedBootstrapDirectories, err := s.revalidateSessionBootstrapDirectoriesForConnect(ctx, sessionConnectBootstrapDirectories(session))
+	if err != nil {
+		state.Status = "degraded"
+		state.StatusReason = "failed to revalidate session bootstrap directories against the trusted manifest"
+		registration["status"] = state.Status
+		registration["status_reason"] = state.StatusReason
+		registration["bootstrap_directory"] = ""
+		registration["bootstrap_directories"] = []string{}
+		return state
+	}
+	if len(revalidatedBootstrapDirectories) == 0 {
+		state.StatusReason = "registered bootstrap directories are no longer trusted by the current manifest; re-register the client profile"
+		registration["status_reason"] = state.StatusReason
+		registration["bootstrap_directory"] = ""
+		registration["bootstrap_directories"] = []string{}
+		return state
+	}
+
+	state.Status = "registered"
+	registration["status"] = state.Status
+	registration["bootstrap_directory"] = revalidatedBootstrapDirectories[0]
+	registration["bootstrap_directories"] = revalidatedBootstrapDirectories
+	return state
 }
 
-func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSession, sessionPresent bool) map[string]any {
+func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSession, sessionPresent bool, clientRegistrationStatusOverride string, clientRegistrationReasonOverride string) map[string]any {
 	role := "client"
 	sessionChainOperatorID := ""
 	if sessionPresent {
@@ -1111,15 +1151,30 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 	}
 
 	tabVisible := role == "operator" || role == "admin"
-	clientRegistrationReady := sessionPresent &&
-		strings.TrimSpace(session.BootstrapDirectory) != "" &&
-		strings.TrimSpace(session.InviteKey) != ""
+	clientRegistrationStatus := strings.ToLower(strings.TrimSpace(clientRegistrationStatusOverride))
+	clientRegistrationReason := strings.TrimSpace(clientRegistrationReasonOverride)
+	clientRegistrationReady := false
+	if clientRegistrationStatus == "" {
+		clientRegistrationReady = sessionPresent &&
+			strings.TrimSpace(session.BootstrapDirectory) != "" &&
+			strings.TrimSpace(session.InviteKey) != ""
+		if clientRegistrationReady {
+			clientRegistrationStatus = "registered"
+		} else {
+			clientRegistrationStatus = "not_registered"
+		}
+	} else {
+		clientRegistrationReady = clientRegistrationStatus == "registered"
+	}
 	clientTabVisible := true
 	clientLockReason := ""
 	if role == "operator" || role == "admin" {
 		clientTabVisible = clientRegistrationReady
 		if !clientTabVisible {
 			clientLockReason = "client registration is required for client tab access; complete /v1/gpm/onboarding/client/register with bootstrap_directory and invite_key"
+			if clientRegistrationReason != "" {
+				clientLockReason = clientRegistrationReason
+			}
 		}
 	}
 	serviceMutationsConfigured := strings.TrimSpace(s.serviceStart) != "" &&
@@ -1232,6 +1287,8 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 		"session_chain_operator_id":    sessionChainOperatorID,
 		"tab_visible":                  tabVisible,
 		"client_tab_visible":           clientTabVisible,
+		"client_registration_status":   clientRegistrationStatus,
+		"client_registration_reason":   clientRegistrationReason,
 		"lifecycle_actions_unlocked":   lifecycleActionsUnlocked,
 		"chain_binding_status":         chainBindingStatus,
 		"chain_binding_ok":             chainBindingOK,

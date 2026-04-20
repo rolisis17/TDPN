@@ -103,6 +103,15 @@ const STORAGE_KEYS = Object.freeze({
   selectedApplicationUpdatedAt: "gpm.desktop.selected_application_updated_at",
   pathProfile: "gpm.desktop.path_profile"
 });
+const REGISTRATION_TRUST_DRIFT_STATUS_FRAGMENTS = Object.freeze([
+  "degrad",
+  "drift",
+  "revok",
+  "stale",
+  "untrust",
+  "invalid",
+  "mismatch"
+]);
 
 const state = {
   sessionToken: "",
@@ -111,6 +120,10 @@ const state = {
   selectedApplicationUpdatedAtUtc: "",
   serverReadiness: null,
   clientRegistered: false,
+  clientRegistrationTrustDegraded: false,
+  clientRegistrationReregisterRequired: false,
+  clientRegistrationTrustReason: "",
+  clientRegistrationTrustStatus: "",
   serviceMutationsAllowed: false,
   allowLegacyConnectOverride: false,
   connectRequireSession: false,
@@ -728,7 +741,7 @@ async function resolveWalletAddressFromExtension(extension, chainId) {
 
 async function completeAuthVerifyFlow(result) {
   setSessionToken(result?.session_token || "");
-  state.clientRegistered = inferClientRegistrationFromPayload(result);
+  setClientRegistrationStateFromPayload(result, { allowFallback: true });
   setRole(parseSessionRole(result));
   await refreshClientRegistrationStatus({ quiet: true });
   await refreshOperatorApplicationStatus({ quiet: true });
@@ -2336,6 +2349,76 @@ function parseServerReadiness(payload) {
     chainBindingReason: toDetailText(
       firstDefined(readiness.chain_binding_reason, readiness.chainBindingReason)
     ),
+    clientRegistrationStatus: toDetailText(
+      firstDefined(
+        readiness.client_registration_status,
+        readiness.clientRegistrationStatus,
+        readiness.registration_status,
+        readiness.registrationStatus
+      )
+    ),
+    registrationTrustStatus: toDetailText(
+      firstDefined(
+        readiness.registration_trust_status,
+        readiness.registrationTrustStatus,
+        readiness.bootstrap_trust_status,
+        readiness.bootstrapTrustStatus,
+        readiness.session_bootstrap_trust_status,
+        readiness.sessionBootstrapTrustStatus,
+        readiness.trust_status,
+        readiness.trustStatus
+      )
+    ),
+    registrationTrustDegraded: toBooleanLike(
+      firstDefined(
+        readiness.registration_trust_degraded,
+        readiness.registrationTrustDegraded,
+        readiness.bootstrap_trust_degraded,
+        readiness.bootstrapTrustDegraded,
+        readiness.session_bootstrap_trust_degraded,
+        readiness.sessionBootstrapTrustDegraded,
+        readiness.manifest_drift_detected,
+        readiness.manifestDriftDetected,
+        readiness.trust_drift_detected,
+        readiness.trustDriftDetected,
+        readiness.trust_degraded,
+        readiness.trustDegraded,
+        readiness.bootstrap_trust_revoked,
+        readiness.bootstrapTrustRevoked,
+        readiness.session_bootstrap_revoked,
+        readiness.sessionBootstrapRevoked
+      )
+    ),
+    registrationReregisterRequired: toBooleanLike(
+      firstDefined(
+        readiness.re_register_required,
+        readiness.reRegisterRequired,
+        readiness.reregister_required,
+        readiness.reregisterRequired,
+        readiness.registration_refresh_required,
+        readiness.registrationRefreshRequired,
+        readiness.requires_reregistration,
+        readiness.requiresReregistration
+      )
+    ),
+    registrationTrustReason: toDetailText(
+      firstDefined(
+        readiness.registration_trust_reason,
+        readiness.registrationTrustReason,
+        readiness.bootstrap_trust_reason,
+        readiness.bootstrapTrustReason,
+        readiness.session_bootstrap_trust_reason,
+        readiness.sessionBootstrapTrustReason,
+        readiness.trust_reason,
+        readiness.trustReason,
+        readiness.manifest_drift_reason,
+        readiness.manifestDriftReason,
+        readiness.re_register_reason,
+        readiness.reRegisterReason,
+        readiness.registration_lock_reason,
+        readiness.registrationLockReason
+      )
+    ),
     unlockActions,
     endpointWarnings,
     endpointPosture
@@ -2346,6 +2429,9 @@ function setServerReadiness(readiness) {
   state.serverReadiness = readiness || null;
   if (readiness?.operatorApplicationStatus !== undefined) {
     state.operatorApplicationStatus = readiness.operatorApplicationStatus;
+  }
+  if (readiness) {
+    setClientRegistrationStateFromPayload({ readiness }, { allowFallback: false, preserveWhenUnknown: true });
   }
   syncServerRoleLockState();
 }
@@ -2401,19 +2487,278 @@ function inferClientRegistrationFromPayload(payload) {
   return extractBootstrapRegistrationMetadata(payload).hasBootstrapDirectory;
 }
 
-function parseClientRegistrationStatus(payload) {
-  const status = payload?.registration?.status;
-  if (typeof status !== "string") {
-    return undefined;
+function normalizeRegistrationStatusValue(value) {
+  if (typeof value !== "string") {
+    return "";
   }
-  const normalized = status.trim().toLowerCase();
-  if (normalized === "registered") {
-    return true;
-  }
-  if (normalized === "not_registered") {
+  return value.trim().toLowerCase();
+}
+
+function registrationStatusHasFragment(status, fragment) {
+  return typeof status === "string" && status.includes(fragment);
+}
+
+function isRegistrationTrustDriftStatus(status) {
+  if (!status) {
     return false;
   }
+  for (const fragment of REGISTRATION_TRUST_DRIFT_STATUS_FRAGMENTS) {
+    if (registrationStatusHasFragment(status, fragment)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseClientRegistrationStatus(payload) {
+  const status = normalizeRegistrationStatusValue(
+    firstDefined(
+      payload?.registration?.status,
+      payload?.registration?.registration_status,
+      payload?.registration?.registrationStatus,
+      payload?.registration_status,
+      payload?.registrationStatus,
+      payload?.status,
+      payload?.readiness?.client_registration_status,
+      payload?.readiness?.clientRegistrationStatus,
+      payload?.readiness?.registration_status,
+      payload?.readiness?.registrationStatus
+    )
+  );
+  if (!status) {
+    return undefined;
+  }
+  if (
+    status === "registered" ||
+    status === "ready" ||
+    status === "active" ||
+    status === "trusted" ||
+    status === "ok"
+  ) {
+    return true;
+  }
+  if (
+    status === "not_registered" ||
+    status === "not registered" ||
+    status === "unregistered" ||
+    status === "missing" ||
+    status === "registration_required" ||
+    status === "required" ||
+    status.endsWith("_required") ||
+    registrationStatusHasFragment(status, "reregister") ||
+    registrationStatusHasFragment(status, "re_register") ||
+    isRegistrationTrustDriftStatus(status)
+  ) {
+    return false;
+  }
+  if (status.endsWith("_registered") && status !== "not_registered") {
+    return true;
+  }
+  if (registrationStatusHasFragment(status, "registered")) {
+    return true;
+  }
   return undefined;
+}
+
+function parseClientRegistrationTrustState(payload) {
+  const registration = payload?.registration;
+  const readiness = payload?.readiness;
+  const registrationStatus = normalizeRegistrationStatusValue(
+    firstDefined(
+      registration?.status,
+      registration?.registration_status,
+      registration?.registrationStatus,
+      payload?.registration_status,
+      payload?.registrationStatus,
+      payload?.status,
+      readiness?.client_registration_status,
+      readiness?.clientRegistrationStatus,
+      readiness?.registration_status,
+      readiness?.registrationStatus
+    )
+  );
+  const trustStatusRaw = toDetailText(
+    firstDefined(
+      registration?.registration_trust_status,
+      registration?.registrationTrustStatus,
+      registration?.bootstrap_trust_status,
+      registration?.bootstrapTrustStatus,
+      registration?.session_bootstrap_trust_status,
+      registration?.sessionBootstrapTrustStatus,
+      registration?.trust_status,
+      registration?.trustStatus,
+      readiness?.registration_trust_status,
+      readiness?.registrationTrustStatus,
+      readiness?.bootstrap_trust_status,
+      readiness?.bootstrapTrustStatus,
+      readiness?.session_bootstrap_trust_status,
+      readiness?.sessionBootstrapTrustStatus,
+      readiness?.trust_status,
+      readiness?.trustStatus
+    )
+  );
+  const trustStatus = normalizeRegistrationStatusValue(trustStatusRaw);
+  const trustDegradedRaw = toBooleanLike(
+    firstDefined(
+      registration?.registration_trust_degraded,
+      registration?.registrationTrustDegraded,
+      registration?.bootstrap_trust_degraded,
+      registration?.bootstrapTrustDegraded,
+      registration?.session_bootstrap_trust_degraded,
+      registration?.sessionBootstrapTrustDegraded,
+      registration?.manifest_drift_detected,
+      registration?.manifestDriftDetected,
+      registration?.trust_drift_detected,
+      registration?.trustDriftDetected,
+      registration?.trust_degraded,
+      registration?.trustDegraded,
+      registration?.bootstrap_trust_revoked,
+      registration?.bootstrapTrustRevoked,
+      registration?.session_bootstrap_revoked,
+      registration?.sessionBootstrapRevoked,
+      readiness?.registration_trust_degraded,
+      readiness?.registrationTrustDegraded,
+      readiness?.bootstrap_trust_degraded,
+      readiness?.bootstrapTrustDegraded,
+      readiness?.session_bootstrap_trust_degraded,
+      readiness?.sessionBootstrapTrustDegraded,
+      readiness?.manifest_drift_detected,
+      readiness?.manifestDriftDetected,
+      readiness?.trust_drift_detected,
+      readiness?.trustDriftDetected,
+      readiness?.trust_degraded,
+      readiness?.trustDegraded,
+      readiness?.bootstrap_trust_revoked,
+      readiness?.bootstrapTrustRevoked,
+      readiness?.session_bootstrap_revoked,
+      readiness?.sessionBootstrapRevoked
+    )
+  );
+  const reRegisterRequiredRaw = toBooleanLike(
+    firstDefined(
+      registration?.re_register_required,
+      registration?.reRegisterRequired,
+      registration?.reregister_required,
+      registration?.reregisterRequired,
+      registration?.registration_refresh_required,
+      registration?.registrationRefreshRequired,
+      registration?.requires_reregistration,
+      registration?.requiresReregistration,
+      readiness?.re_register_required,
+      readiness?.reRegisterRequired,
+      readiness?.reregister_required,
+      readiness?.reregisterRequired,
+      readiness?.registration_refresh_required,
+      readiness?.registrationRefreshRequired,
+      readiness?.requires_reregistration,
+      readiness?.requiresReregistration
+    )
+  );
+  const trustReason =
+    toDetailText(
+      firstDefined(
+        registration?.registration_trust_reason,
+        registration?.registrationTrustReason,
+        registration?.bootstrap_trust_reason,
+        registration?.bootstrapTrustReason,
+        registration?.session_bootstrap_trust_reason,
+        registration?.sessionBootstrapTrustReason,
+        registration?.trust_reason,
+        registration?.trustReason,
+        registration?.manifest_drift_reason,
+        registration?.manifestDriftReason,
+        registration?.re_register_reason,
+        registration?.reRegisterReason,
+        registration?.registration_lock_reason,
+        registration?.registrationLockReason,
+        readiness?.registration_trust_reason,
+        readiness?.registrationTrustReason,
+        readiness?.bootstrap_trust_reason,
+        readiness?.bootstrapTrustReason,
+        readiness?.session_bootstrap_trust_reason,
+        readiness?.sessionBootstrapTrustReason,
+        readiness?.trust_reason,
+        readiness?.trustReason,
+        readiness?.manifest_drift_reason,
+        readiness?.manifestDriftReason,
+        readiness?.re_register_reason,
+        readiness?.reRegisterReason,
+        readiness?.registration_lock_reason,
+        readiness?.registrationLockReason,
+        registration?.client_lock_reason,
+        registration?.clientLockReason,
+        readiness?.client_lock_reason,
+        readiness?.clientLockReason
+      )
+    ) ||
+    "";
+  const statusDrift = isRegistrationTrustDriftStatus(trustStatus);
+  const registrationStatusDrift =
+    isRegistrationTrustDriftStatus(registrationStatus) ||
+    registrationStatusHasFragment(registrationStatus, "reregister") ||
+    registrationStatusHasFragment(registrationStatus, "re_register");
+  const trustDegraded = trustDegradedRaw === true || statusDrift || registrationStatusDrift;
+  const reRegisterRequired =
+    reRegisterRequiredRaw === true ||
+    trustDegraded ||
+    registrationStatusHasFragment(registrationStatus, "reregister") ||
+    registrationStatusHasFragment(registrationStatus, "re_register") ||
+    registrationStatusHasFragment(registrationStatus, "required") ||
+    registrationStatusHasFragment(trustStatus, "reregister") ||
+    registrationStatusHasFragment(trustStatus, "re_register");
+  const hasSignals =
+    registrationStatusDrift ||
+    trustStatus.length > 0 ||
+    trustDegradedRaw !== undefined ||
+    reRegisterRequiredRaw !== undefined ||
+    trustReason.length > 0;
+  return {
+    hasSignals,
+    trustDegraded,
+    reRegisterRequired,
+    trustReason,
+    trustStatus
+  };
+}
+
+function clearClientRegistrationTrustState() {
+  state.clientRegistrationTrustDegraded = false;
+  state.clientRegistrationReregisterRequired = false;
+  state.clientRegistrationTrustReason = "";
+  state.clientRegistrationTrustStatus = "";
+}
+
+function setClientRegistrationStateFromPayload(payload, options = {}) {
+  const { allowFallback = true, preserveWhenUnknown = false } = options;
+  const parsedStatus = parseClientRegistrationStatus(payload);
+  const trustState = parseClientRegistrationTrustState(payload);
+  let registrationResolved = parsedStatus;
+  if (trustState.trustDegraded || trustState.reRegisterRequired) {
+    registrationResolved = false;
+  } else if (registrationResolved === undefined && allowFallback) {
+    registrationResolved = inferClientRegistrationFromPayload(payload);
+  }
+  if (registrationResolved !== undefined) {
+    state.clientRegistered = !!registrationResolved;
+  } else if (!preserveWhenUnknown) {
+    state.clientRegistered = false;
+  }
+  if (trustState.hasSignals || !preserveWhenUnknown) {
+    state.clientRegistrationTrustDegraded = trustState.trustDegraded;
+    state.clientRegistrationReregisterRequired = trustState.reRegisterRequired;
+    state.clientRegistrationTrustReason = trustState.trustReason;
+    state.clientRegistrationTrustStatus = trustState.trustStatus;
+  }
+}
+
+function clientRegistrationTrustHintText() {
+  const baseReason =
+    state.clientRegistrationTrustReason ||
+    "Session bootstrap trust has drifted from the current trusted manifest.";
+  if (/\bre-?register\b/i.test(baseReason)) {
+    return baseReason;
+  }
+  return `${baseReason} Re-register client profile to refresh trusted bootstrap directories before connecting.`;
 }
 
 function syncDesktopOnboardingSteps() {
@@ -2585,6 +2930,9 @@ function computeServerLockHintText() {
 }
 
 function computeClientLockHintText() {
+  if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired) {
+    return clientRegistrationTrustHintText();
+  }
   if (state.serverReadiness) {
     const readiness = state.serverReadiness;
     if (readiness.clientTabVisible === false) {
@@ -2667,6 +3015,7 @@ function setSessionToken(value, options = {}) {
     setSelectedApplicationUpdatedAt("", { persist });
     state.serverReadiness = null;
     state.clientRegistered = false;
+    clearClientRegistrationTrustState();
     clearOperatorListPaginationState();
   }
   state.sessionToken = nextValue;
@@ -2957,12 +3306,7 @@ function applyOnboardingOverviewState(payload) {
   if (typeof payload?.session_token === "string" && payload.session_token.trim()) {
     setSessionToken(payload.session_token);
   }
-  const registrationStatus = parseClientRegistrationStatus(payload);
-  if (registrationStatus !== undefined) {
-    state.clientRegistered = registrationStatus;
-  } else {
-    state.clientRegistered = inferClientRegistrationFromPayload(payload);
-  }
+  setClientRegistrationStateFromPayload(payload, { allowFallback: true });
   setRole(parseSessionRole(payload));
   setServerReadiness(parseServerReadiness(payload));
 }
@@ -3099,6 +3443,7 @@ async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
   if (!state.sessionToken) {
     state.clientRegistered = false;
+    clearClientRegistrationTrustState();
     syncDesktopOnboardingSteps();
     return undefined;
   }
@@ -3110,10 +3455,7 @@ async function refreshClientRegistrationStatus(options = {}) {
     const result = quiet
       ? await invoke("control_gpm_client_status", { request })
       : await call("gpm_client_status", "control_gpm_client_status", { request });
-    const status = parseClientRegistrationStatus(result);
-    if (status !== undefined) {
-      state.clientRegistered = status;
-    }
+    setClientRegistrationStateFromPayload(result, { allowFallback: true });
     syncDesktopOnboardingSteps();
     return result;
   } catch (err) {
@@ -3150,7 +3492,7 @@ async function refreshSession(action = "status") {
     setServerReadiness(null);
     return result;
   }
-  state.clientRegistered = inferClientRegistrationFromPayload(result);
+  setClientRegistrationStateFromPayload(result, { allowFallback: true });
   setRole(parseSessionRole(result));
   const overview = await requestOnboardingOverview({ quiet: true });
   if (!overview) {
@@ -3171,7 +3513,7 @@ async function refreshSessionOnInit() {
     const result = await invoke("control_gpm_session", {
       request: { session_token: state.sessionToken, action: "status" }
     });
-    state.clientRegistered = inferClientRegistrationFromPayload(result);
+    setClientRegistrationStateFromPayload(result, { allowFallback: true });
     setRole(parseSessionRole(result));
     overview = await requestOnboardingOverview({ quiet: true });
   } catch {
@@ -3409,7 +3751,11 @@ byId("register_client_btn").addEventListener("click", async () => {
     }
   }
   const result = await call("gpm_client_register", "control_gpm_client_register", { request });
-  state.clientRegistered = inferClientRegistrationFromPayload(result) || true;
+  setClientRegistrationStateFromPayload(result, { allowFallback: true });
+  if (!state.clientRegistered) {
+    state.clientRegistered = true;
+  }
+  clearClientRegistrationTrustState();
   setRole(parseSessionRole(result));
   await refreshClientRegistrationStatus({ quiet: true });
 });

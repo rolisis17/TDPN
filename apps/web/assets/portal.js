@@ -75,6 +75,21 @@ const onboardingStepOperatorEl = document.getElementById("onboarding_step_operat
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const SERVER_ONLY_ROLES = new Set(["server", "server_only"]);
+const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set([
+  "trust_drift",
+  "registration_trust_drift",
+  "manifest_drift",
+  "degraded_trust",
+  "trust_degraded",
+  "stale",
+  "stale_readiness",
+  "stale_registration",
+  "revoked",
+  "untrusted",
+  "re_registration_required",
+  "reregister_required",
+  "re_register_required"
+]);
 const OPERATOR_LIST_STATUS_FILTERS = new Set(["pending", "approved", "rejected"]);
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
@@ -132,6 +147,8 @@ let operatorApplicationStatus = undefined;
 let selectedApplicationUpdatedAtUtc = "";
 let serverReadiness = null;
 let clientRegistered = false;
+let clientRegistrationTrustDriftDetected = false;
+let clientRegistrationTrustDriftGuidance = "";
 let connectRequireSession = false;
 let allowLegacyConnectOverride = false;
 let connectPolicyMode = CONNECT_POLICY_MODE_COMPAT_ALLOWED;
@@ -2381,19 +2398,222 @@ function syncSessionDerivedState(result) {
   clientRegistered = extractBootstrapRegistrationMetadata(result).hasBootstrapDirectory;
 }
 
-function parseClientRegistrationStatus(payload) {
-  const status = payload?.registration?.status;
-  if (typeof status !== "string") {
+function normalizeClientRegistrationStatus(value) {
+  const parsed = nonEmptyString(value);
+  if (!parsed) {
     return undefined;
   }
-  const normalized = status.trim().toLowerCase();
+  return parsed.toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function clientRegistrationStatusRequiresReregister(value) {
+  const normalized = normalizeClientRegistrationStatus(value);
+  if (!normalized) {
+    return false;
+  }
+  if (CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS.has(normalized)) {
+    return true;
+  }
+  return (
+    normalized.includes("trust_drift") ||
+    normalized.includes("manifest_drift") ||
+    normalized.includes("degraded_trust") ||
+    normalized.includes("trust_degraded") ||
+    normalized.includes("stale") ||
+    normalized.includes("revoked") ||
+    normalized.includes("untrusted") ||
+    normalized.includes("re_register") ||
+    normalized.includes("reregister")
+  );
+}
+
+function parseClientRegistrationStatus(payload) {
+  const registration = payload?.registration;
+  if (!registration || typeof registration !== "object") {
+    return undefined;
+  }
+  const normalized = normalizeClientRegistrationStatus(
+    firstDefined(registration.status, registration.registration_status, registration.registrationStatus)
+  );
+  if (!normalized) {
+    return undefined;
+  }
   if (normalized === "registered") {
     return true;
   }
   if (normalized === "not_registered") {
     return false;
   }
+  if (clientRegistrationStatusRequiresReregister(normalized)) {
+    return false;
+  }
   return undefined;
+}
+
+function collectClientRegistrationActionHints(registration, posture) {
+  const hints = [];
+  for (const scope of [registration, posture]) {
+    if (!scope || typeof scope !== "object") {
+      continue;
+    }
+    for (const key of ["next_actions", "nextActions", "unlock_actions", "unlockActions", "recovery_actions", "recoveryActions"]) {
+      const value = scope[key];
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          pushUniqueNonEmptyString(hints, entry);
+        }
+      } else {
+        pushUniqueNonEmptyString(hints, value);
+      }
+    }
+  }
+  return hints;
+}
+
+function parseClientRegistrationTrustDriftState(payload) {
+  const registration = payload?.registration;
+  if (!registration || typeof registration !== "object") {
+    return {
+      trustDrift: false,
+      guidanceText: ""
+    };
+  }
+  const postureValue = firstDefined(
+    registration.trust_posture,
+    registration.trustPosture,
+    registration.manifest_posture,
+    registration.manifestPosture,
+    registration.registration_posture,
+    registration.registrationPosture,
+    registration.posture
+  );
+  const posture = postureValue && typeof postureValue === "object" && !Array.isArray(postureValue) ? postureValue : null;
+  const normalizedStatus = normalizeClientRegistrationStatus(
+    firstDefined(
+      registration.status,
+      registration.registration_status,
+      registration.registrationStatus,
+      posture?.status,
+      posture?.registration_status,
+      posture?.registrationStatus
+    )
+  );
+  const normalizedTrustState = normalizeClientRegistrationStatus(
+    firstDefined(
+      registration.trust_state,
+      registration.trustState,
+      registration.trust_status,
+      registration.trustStatus,
+      registration.manifest_trust_state,
+      registration.manifestTrustState,
+      posture?.trust_state,
+      posture?.trustState,
+      posture?.trust_status,
+      posture?.trustStatus,
+      posture?.manifest_trust_state,
+      posture?.manifestTrustState
+    )
+  );
+  const trustDriftFlag = parseBooleanLike(
+    firstDefined(
+      registration.trust_drift,
+      registration.trustDrift,
+      registration.manifest_drift,
+      registration.manifestDrift,
+      registration.registration_drift,
+      registration.registrationDrift,
+      registration.re_registration_required,
+      registration.reRegistrationRequired,
+      registration.reregister_required,
+      registration.reregisterRequired,
+      posture?.trust_drift,
+      posture?.trustDrift,
+      posture?.manifest_drift,
+      posture?.manifestDrift,
+      posture?.re_registration_required,
+      posture?.reRegistrationRequired
+    )
+  );
+  const trustDegradedFlag = parseBooleanLike(
+    firstDefined(
+      registration.trust_degraded,
+      registration.trustDegraded,
+      registration.degraded_trust,
+      registration.degradedTrust,
+      registration.registration_trust_degraded,
+      registration.registrationTrustDegraded,
+      registration.stale_readiness,
+      registration.staleReadiness,
+      registration.registration_stale,
+      registration.registrationStale,
+      posture?.trust_degraded,
+      posture?.trustDegraded,
+      posture?.degraded_trust,
+      posture?.degradedTrust,
+      posture?.stale_readiness,
+      posture?.staleReadiness
+    )
+  );
+  const trustDrift =
+    trustDriftFlag === true ||
+    trustDegradedFlag === true ||
+    clientRegistrationStatusRequiresReregister(normalizedStatus) ||
+    clientRegistrationStatusRequiresReregister(normalizedTrustState);
+  const reason = toDetailText(
+    firstDefined(
+      registration.trust_reason,
+      registration.trustReason,
+      registration.manifest_reason,
+      registration.manifestReason,
+      registration.registration_reason,
+      registration.registrationReason,
+      registration.lock_reason,
+      registration.lockReason,
+      registration.reason,
+      registration.message,
+      posture?.trust_reason,
+      posture?.trustReason,
+      posture?.manifest_reason,
+      posture?.manifestReason,
+      posture?.registration_reason,
+      posture?.registrationReason,
+      posture?.lock_reason,
+      posture?.lockReason,
+      posture?.reason,
+      posture?.message
+    )
+  );
+  const hints = collectClientRegistrationActionHints(registration, posture);
+  const guidance = [];
+  if (reason) {
+    guidance.push(reason);
+  }
+  if (hints.length > 0) {
+    guidance.push(`Next: ${hints.join("; ")}`);
+  }
+  return {
+    trustDrift,
+    guidanceText: guidance.join(" ")
+  };
+}
+
+function setClientRegistrationTrustDriftState(trustDrift, guidanceText = "") {
+  clientRegistrationTrustDriftDetected = trustDrift === true;
+  clientRegistrationTrustDriftGuidance = clientRegistrationTrustDriftDetected
+    ? nonEmptyString(guidanceText) || ""
+    : "";
+}
+
+function applyClientRegistrationPayload(payload) {
+  const registrationStatus = parseClientRegistrationStatus(payload);
+  if (registrationStatus !== undefined) {
+    clientRegistered = registrationStatus;
+  }
+  const trustState = parseClientRegistrationTrustDriftState(payload);
+  setClientRegistrationTrustDriftState(trustState.trustDrift, trustState.guidanceText);
+  if (trustState.trustDrift) {
+    clientRegistered = false;
+  }
 }
 
 function setOperatorReadiness(kind, statusText, guidanceText) {
@@ -2440,6 +2660,13 @@ function assertClientRegistrationActionAllowed() {
   }
 }
 
+function composeClientRegistrationTrustDriftGuidance() {
+  const base = "Registration trust is stale or degraded against the current manifest.";
+  const next = "Use Register Client to re-register and refresh trusted bootstrap directories.";
+  const reason = nonEmptyString(clientRegistrationTrustDriftGuidance);
+  return reason ? `${base} ${reason} ${next}` : `${base} ${next}`;
+}
+
 function computeClientReadiness() {
   const token = byId("session_token").value.trim();
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
@@ -2465,6 +2692,15 @@ function computeClientReadiness() {
         (isServerOnlyRole(role)
           ? "This session is server-only, so the client lane is locked. Continue in Step 3 for server workflow actions."
           : "Client lane is locked for this role.")
+    };
+  }
+
+  if (clientRegistrationTrustDriftDetected) {
+    return {
+      state: "re_registration_required",
+      kind: "bad",
+      statusText: "Re-registration required",
+      guidanceText: composeClientRegistrationTrustDriftGuidance()
     };
   }
 
@@ -2647,6 +2883,7 @@ function bindReadinessListeners() {
     setOperatorApplicationStatus(undefined);
     setSelectedApplicationUpdatedAt("");
     clientRegistered = false;
+    setClientRegistrationTrustDriftState(false, "");
     setOperatorListNextCursor("");
   });
   byId("wallet_address").addEventListener("input", () => {
@@ -3244,10 +3481,7 @@ function applyOnboardingOverviewPayload(payload) {
   if (typeof role === "string" && role.trim()) {
     byId("role").value = role;
   }
-  const registrationStatus = parseClientRegistrationStatus(payload);
-  if (registrationStatus !== undefined) {
-    clientRegistered = registrationStatus;
-  }
+  applyClientRegistrationPayload(payload);
   setServerReadiness(parseServerReadiness(payload));
 }
 
@@ -3508,6 +3742,7 @@ async function refreshClientRegistrationStatus(options = {}) {
   const sessionToken = byId("session_token").value.trim();
   if (!sessionToken) {
     clientRegistered = false;
+    setClientRegistrationTrustDriftState(false, "");
     refreshClientReadiness();
     return undefined;
   }
@@ -3520,10 +3755,7 @@ async function refreshClientRegistrationStatus(options = {}) {
   }
   try {
     const result = await requestClientStatus();
-    const status = parseClientRegistrationStatus(result);
-    if (status !== undefined) {
-      clientRegistered = status;
-    }
+    applyClientRegistrationPayload(result);
     refreshClientReadiness();
     return result;
   } catch (err) {
@@ -3680,6 +3912,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
   run("session_revoke", async () => {
     const result = await requestSessionLifecycle("revoke");
     clientRegistered = false;
+    setClientRegistrationTrustDriftState(false, "");
     byId("session_token").value = "";
     byId("role").value = "client";
     setOperatorApplicationStatus(undefined);

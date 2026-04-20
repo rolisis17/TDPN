@@ -121,6 +121,10 @@ fi
 JS_MARKERS=(
   'function parseServerReadiness('
   'function parseClientRegistrationStatus('
+  'const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set(['
+  'function parseClientRegistrationTrustDriftState('
+  'function applyClientRegistrationPayload('
+  'function composeClientRegistrationTrustDriftGuidance('
   'function setClientReadiness('
   'function computeClientReadiness('
   'function assertClientRegistrationActionAllowed('
@@ -138,6 +142,11 @@ JS_MARKERS=(
   'allowLegacyConnectOverride'
   'function parseAllowLegacyConnectOverrideConfig('
   'compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;'
+  'if (clientRegistrationTrustDriftDetected) {'
+  'state: "re_registration_required",'
+  'statusText: "Re-registration required",'
+  '"Registration trust is stale or degraded against the current manifest."'
+  '"Use Register Client to re-register and refresh trusted bootstrap directories."'
   'Manual verify is disabled by active auth policy. Use Sign + Verify (Wallet).'
   'Manual verify is disabled by active auth policy (wallet-extension-source required; source:'
 )

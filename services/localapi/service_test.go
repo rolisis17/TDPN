@@ -4954,6 +4954,18 @@ func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
 	now := time.Now().UTC()
+	trustedBootstrap := "https://directory.globalprivatemesh.example:8081"
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{trustedBootstrap},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
 
 	svc.gpmState.putSession(gpmSession{
 		Token:              "gpm-client-status-registered",
@@ -4962,7 +4974,7 @@ func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
 		Role:               "client",
 		CreatedAt:          now,
 		ExpiresAt:          now.Add(time.Hour),
-		BootstrapDirectory: "https://directory.globalprivatemesh.example:8081",
+		BootstrapDirectory: trustedBootstrap,
 		InviteKey:          "inv-registered",
 		PathProfile:        "3hop",
 	})
@@ -4973,6 +4985,18 @@ func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
 		Role:           "client",
 		CreatedAt:      now,
 		ExpiresAt:      now.Add(time.Hour),
+	})
+	svc.gpmState.putSession(gpmSession{
+		Token:                "gpm-client-status-drifted",
+		WalletAddress:        "cosmos1driftedstatus",
+		WalletProvider:       "keplr",
+		Role:                 "client",
+		CreatedAt:            now,
+		ExpiresAt:            now.Add(time.Hour),
+		BootstrapDirectory:   "https://directory.revoked.globalprivatemesh.example:8081",
+		BootstrapDirectories: []string{"https://directory.revoked.globalprivatemesh.example:8081"},
+		InviteKey:            "inv-drifted",
+		PathProfile:          "2hop",
 	})
 
 	t.Run("registered", func(t *testing.T) {
@@ -4994,7 +5018,7 @@ func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
 			t.Fatalf("registration.wallet_address=%q want=cosmos1registeredstatus payload=%v", gotWallet, payload)
 		}
 		gotBootstrap, _ := registration["bootstrap_directory"].(string)
-		if gotBootstrap != "https://directory.globalprivatemesh.example:8081" {
+		if gotBootstrap != trustedBootstrap {
 			t.Fatalf("registration.bootstrap_directory=%q payload=%v", gotBootstrap, payload)
 		}
 		gotProfile, _ := registration["path_profile"].(string)
@@ -5024,6 +5048,60 @@ func TestGPMClientStatusEndpointRegistrationStates(t *testing.T) {
 		}
 		if _, ok := registration["path_profile"]; ok {
 			t.Fatalf("registration.path_profile should be omitted payload=%v", payload)
+		}
+	})
+
+	t.Run("manifest_drift_revoked", func(t *testing.T) {
+		body := `{"session_token":"gpm-client-status-drifted"}`
+		code, payload := callJSONHandler(t, svc.handleGPMClientStatus, http.MethodPost, "/v1/gpm/onboarding/client/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		registration, _ := payload["registration"].(map[string]any)
+		if registration == nil {
+			t.Fatalf("registration missing payload=%v", payload)
+		}
+		if got, _ := registration["status"].(string); got != "not_registered" {
+			t.Fatalf("registration.status=%q want=not_registered payload=%v", got, payload)
+		}
+		if got, _ := registration["status_reason"].(string); !strings.Contains(got, "no longer trusted") {
+			t.Fatalf("registration.status_reason=%q want trust-revoked guidance payload=%v", got, payload)
+		}
+		if got, _ := registration["bootstrap_directory"].(string); got != "" {
+			t.Fatalf("registration.bootstrap_directory=%q want empty payload=%v", got, payload)
+		}
+	})
+
+	t.Run("manifest_revalidation_hard_failure_is_degraded", func(t *testing.T) {
+		degradedSvc, _ := newFakeService(t, false)
+		degradedSvc.gpmState = newGPMRuntimeState()
+		degradedSvc.gpmState.putSession(gpmSession{
+			Token:                "gpm-client-status-degraded",
+			WalletAddress:        "cosmos1degradedstatus",
+			WalletProvider:       "keplr",
+			Role:                 "client",
+			CreatedAt:            now,
+			ExpiresAt:            now.Add(time.Hour),
+			BootstrapDirectory:   trustedBootstrap,
+			BootstrapDirectories: []string{trustedBootstrap},
+			InviteKey:            "inv-degraded",
+			PathProfile:          "2hop",
+		})
+
+		body := `{"session_token":"gpm-client-status-degraded"}`
+		code, payload := callJSONHandler(t, degradedSvc.handleGPMClientStatus, http.MethodPost, "/v1/gpm/onboarding/client/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		registration, _ := payload["registration"].(map[string]any)
+		if registration == nil {
+			t.Fatalf("registration missing payload=%v", payload)
+		}
+		if got, _ := registration["status"].(string); got != "degraded" {
+			t.Fatalf("registration.status=%q want=degraded payload=%v", got, payload)
+		}
+		if got, _ := registration["status_reason"].(string); !strings.Contains(got, "failed to revalidate") {
+			t.Fatalf("registration.status_reason=%q want hard-failure guidance payload=%v", got, payload)
 		}
 	})
 
@@ -5655,7 +5733,19 @@ func TestGPMOnboardingOverview(t *testing.T) {
 			sessionToken = "gpm-overview-operator-approved-token"
 			wallet       = "cosmos1overviewapproved"
 			chainID      = "operator-overview-1"
+			bootstrapDir = "https://directory.globalprivatemesh.example:8081"
 		)
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{bootstrapDir},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
 		svc.gpmState.putSession(gpmSession{
 			Token:              sessionToken,
 			WalletAddress:      wallet,
@@ -5663,7 +5753,7 @@ func TestGPMOnboardingOverview(t *testing.T) {
 			Role:               "operator",
 			CreatedAt:          now,
 			ExpiresAt:          now.Add(time.Hour),
-			BootstrapDirectory: "https://directory.globalprivatemesh.example:8081",
+			BootstrapDirectory: bootstrapDir,
 			InviteKey:          "inv-overview-approved",
 			PathProfile:        "3hop",
 			ChainOperatorID:    chainID,
@@ -5729,6 +5819,130 @@ func TestGPMOnboardingOverview(t *testing.T) {
 		}
 		if _, ok := readiness["chain_binding_reason"]; !ok {
 			t.Fatalf("readiness.chain_binding_reason missing payload=%v", payload)
+		}
+	})
+
+	t.Run("manifest drift revokes registration readiness", func(t *testing.T) {
+		svc := newOverviewService(t)
+		const (
+			sessionToken = "gpm-overview-registration-drift-token"
+			wallet       = "cosmos1overviewregistrationdrift"
+			chainID      = "operator-overview-registration-drift-1"
+		)
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{"https://directory.current-trusted.globalprivatemesh.example:8081"},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
+		svc.gpmState.putSession(gpmSession{
+			Token:                sessionToken,
+			WalletAddress:        wallet,
+			WalletProvider:       "keplr",
+			Role:                 "operator",
+			CreatedAt:            now,
+			ExpiresAt:            now.Add(time.Hour),
+			BootstrapDirectory:   "https://directory.revoked.globalprivatemesh.example:8081",
+			BootstrapDirectories: []string{"https://directory.revoked.globalprivatemesh.example:8081"},
+			InviteKey:            "inv-overview-drifted",
+			PathProfile:          "2hop",
+			ChainOperatorID:      chainID,
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   wallet,
+			ChainOperatorID: chainID,
+			Status:          "approved",
+			UpdatedAt:       now,
+		})
+
+		code, payload := callJSONHandler(
+			t,
+			svc.handleGPMOnboardingOverview,
+			http.MethodPost,
+			"/v1/gpm/onboarding/overview",
+			`{"session_token":"`+sessionToken+`"}`,
+		)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		registration, _ := payload["registration"].(map[string]any)
+		if registration == nil {
+			t.Fatalf("registration missing payload=%v", payload)
+		}
+		if got, _ := registration["status"].(string); got != "not_registered" {
+			t.Fatalf("registration.status=%q want=not_registered payload=%v", got, payload)
+		}
+		if got, _ := registration["status_reason"].(string); !strings.Contains(got, "no longer trusted") {
+			t.Fatalf("registration.status_reason=%q want trust-revoked guidance payload=%v", got, payload)
+		}
+		readiness, _ := payload["readiness"].(map[string]any)
+		if readiness == nil {
+			t.Fatalf("readiness missing payload=%v", payload)
+		}
+		if got, _ := readiness["client_registration_status"].(string); got != "not_registered" {
+			t.Fatalf("readiness.client_registration_status=%q want=not_registered payload=%v", got, payload)
+		}
+		if got, _ := readiness["client_tab_visible"].(bool); got {
+			t.Fatalf("readiness.client_tab_visible=%v want=false payload=%v", readiness["client_tab_visible"], payload)
+		}
+		if got, _ := readiness["client_lock_reason"].(string); !strings.Contains(got, "no longer trusted") {
+			t.Fatalf("readiness.client_lock_reason=%q want trust-revoked guidance payload=%v", got, payload)
+		}
+	})
+
+	t.Run("manifest revalidation hard failure reports degraded registration readiness", func(t *testing.T) {
+		svc := newOverviewService(t)
+		const sessionToken = "gpm-overview-registration-degraded-token"
+		svc.gpmState.putSession(gpmSession{
+			Token:                sessionToken,
+			WalletAddress:        "cosmos1overviewregistrationdegraded",
+			WalletProvider:       "keplr",
+			Role:                 "admin",
+			CreatedAt:            now,
+			ExpiresAt:            now.Add(time.Hour),
+			BootstrapDirectory:   "https://directory.globalprivatemesh.example:8081",
+			BootstrapDirectories: []string{"https://directory.globalprivatemesh.example:8081"},
+			InviteKey:            "inv-overview-degraded",
+			PathProfile:          "2hop",
+		})
+
+		code, payload := callJSONHandler(
+			t,
+			svc.handleGPMOnboardingOverview,
+			http.MethodPost,
+			"/v1/gpm/onboarding/overview",
+			`{"session_token":"`+sessionToken+`"}`,
+		)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		registration, _ := payload["registration"].(map[string]any)
+		if registration == nil {
+			t.Fatalf("registration missing payload=%v", payload)
+		}
+		if got, _ := registration["status"].(string); got != "degraded" {
+			t.Fatalf("registration.status=%q want=degraded payload=%v", got, payload)
+		}
+		if got, _ := registration["status_reason"].(string); !strings.Contains(got, "failed to revalidate") {
+			t.Fatalf("registration.status_reason=%q want hard-failure guidance payload=%v", got, payload)
+		}
+		readiness, _ := payload["readiness"].(map[string]any)
+		if readiness == nil {
+			t.Fatalf("readiness missing payload=%v", payload)
+		}
+		if got, _ := readiness["client_registration_status"].(string); got != "degraded" {
+			t.Fatalf("readiness.client_registration_status=%q want=degraded payload=%v", got, payload)
+		}
+		if got, _ := readiness["client_tab_visible"].(bool); got {
+			t.Fatalf("readiness.client_tab_visible=%v want=false payload=%v", readiness["client_tab_visible"], payload)
+		}
+		if got, _ := readiness["client_lock_reason"].(string); !strings.Contains(got, "failed to revalidate") {
+			t.Fatalf("readiness.client_lock_reason=%q want hard-failure guidance payload=%v", got, payload)
 		}
 	})
 
