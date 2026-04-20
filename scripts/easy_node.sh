@@ -688,6 +688,7 @@ Notes:
   - desktop-windows-native-bootstrap-guardrails runs the Windows-native bootstrap guardrail integration contract to verify dry-run mode handling, invalid-mode fail-close behavior, and summary-json output markers before operator-facing runs.
   - desktop-windows-installer-guardrails runs the Windows desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
   - desktop-linux-installer-guardrails runs the Linux desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
+  - legacy desktop platform aliases (`desktop-linux-*`, `desktop-windows-*`) remain compatible and print migration hints to unified commands; set `EASY_NODE_DESKTOP_SUPPRESS_LEGACY_HINT=1` to suppress hints in scripted environments.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
   - manual-validation-status combines live runtime-doctor output with recorded manual real-host validation receipts, points at the latest failed incident handoff when a recorded smoke/signoff run captured one, and now exposes staged roadmap progress (`BLOCKED_LOCAL`, `READY_FOR_MACHINE_C_SMOKE`, `READY_FOR_3_MACHINE_PROD_SIGNOFF`, `PRODUCTION_SIGNOFF_COMPLETE`).
   - manual-validation-report turns that readiness state into one shareable markdown + JSON handoff artifact, includes the same staged roadmap signal for single-machine operators, and can fail-close with --fail-on-not-ready=1.
@@ -8983,6 +8984,20 @@ desktop_generic_dispatch() {
   esac
 }
 
+desktop_legacy_alias_hint() {
+  local legacy_command="$1"
+  local preferred_command="$2"
+
+  if [[ "${EASY_NODE_DESKTOP_SUPPRESS_LEGACY_HINT:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -z "$legacy_command" || -z "$preferred_command" ]]; then
+    return 0
+  fi
+
+  echo "[easy-node] '$legacy_command' is a legacy desktop alias; prefer '$preferred_command'." >&2
+}
+
 vpn_rc_standard_path() {
   local rc_script="${VPN_RC_STANDARD_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_standard_path.sh}"
   "$rc_script" "$@"
@@ -16013,22 +16028,27 @@ main() {
       desktop_generic_dispatch desktop-install desktop_linux_installer desktop_windows_installer "$@"
       ;;
     desktop-linux-doctor)
+      desktop_legacy_alias_hint desktop-linux-doctor "desktop-check --platform linux"
       shift
       desktop_linux_doctor "$@"
       ;;
     desktop-linux-native-bootstrap)
+      desktop_legacy_alias_hint desktop-linux-native-bootstrap "desktop-native-bootstrap --platform linux"
       shift
       desktop_linux_native_bootstrap "$@"
       ;;
     desktop-linux-one-click)
+      desktop_legacy_alias_hint desktop-linux-one-click "desktop-start --platform linux"
       shift
       desktop_linux_one_click "$@"
       ;;
     desktop-linux-dev)
+      desktop_legacy_alias_hint desktop-linux-dev "desktop-dev --platform linux"
       shift
       desktop_linux_dev "$@"
       ;;
     desktop-linux-installer)
+      desktop_legacy_alias_hint desktop-linux-installer "desktop-install --platform linux"
       shift
       desktop_linux_installer "$@"
       ;;
@@ -16037,18 +16057,22 @@ main() {
       desktop_linux_installer_guardrails "$@"
       ;;
     desktop-linux-packaged-run)
+      desktop_legacy_alias_hint desktop-linux-packaged-run "desktop-packaged-run --platform linux"
       shift
       desktop_linux_packaged_run "$@"
       ;;
     desktop-linux-release-bundle)
+      desktop_legacy_alias_hint desktop-linux-release-bundle "desktop-release-bundle --platform linux"
       shift
       desktop_linux_release_bundle "$@"
       ;;
     desktop-windows-doctor)
+      desktop_legacy_alias_hint desktop-windows-doctor "desktop-check --platform windows"
       shift
       desktop_windows_doctor "$@"
       ;;
     desktop-windows-native-bootstrap)
+      desktop_legacy_alias_hint desktop-windows-native-bootstrap "desktop-native-bootstrap --platform windows"
       shift
       desktop_windows_native_bootstrap "$@"
       ;;
@@ -16057,18 +16081,22 @@ main() {
       desktop_windows_native_bootstrap_guardrails "$@"
       ;;
     desktop-windows-one-click)
+      desktop_legacy_alias_hint desktop-windows-one-click "desktop-start --platform windows"
       shift
       desktop_windows_one_click "$@"
       ;;
     desktop-windows-dev)
+      desktop_legacy_alias_hint desktop-windows-dev "desktop-dev --platform windows"
       shift
       desktop_windows_dev "$@"
       ;;
     desktop-windows-shell)
+      desktop_legacy_alias_hint desktop-windows-shell "desktop-shell --platform windows"
       shift
       desktop_windows_shell "$@"
       ;;
     desktop-windows-installer)
+      desktop_legacy_alias_hint desktop-windows-installer "desktop-install --platform windows"
       shift
       desktop_windows_installer "$@"
       ;;
@@ -16077,14 +16105,17 @@ main() {
       desktop_windows_installer_guardrails "$@"
       ;;
     desktop-windows-packaged-run)
+      desktop_legacy_alias_hint desktop-windows-packaged-run "desktop-packaged-run --platform windows"
       shift
       desktop_windows_packaged_run "$@"
       ;;
     desktop-windows-release-bundle)
+      desktop_legacy_alias_hint desktop-windows-release-bundle "desktop-release-bundle --platform windows"
       shift
       desktop_windows_release_bundle "$@"
       ;;
     desktop-windows-local-api-session)
+      desktop_legacy_alias_hint desktop-windows-local-api-session "desktop-api --platform windows"
       shift
       desktop_windows_local_api_session "$@"
       ;;

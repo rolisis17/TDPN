@@ -444,6 +444,11 @@ assert_help_contains "./scripts/easy_node.sh desktop-one-click [--platform auto|
 assert_help_contains "./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-check [--platform auto|linux|windows] [desktop_doctor args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-fix [--platform auto|linux|windows] [desktop_doctor args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-start [--platform auto|linux|windows] [desktop_one_click args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-api [--platform auto|linux|windows] [local_api_session args...]"
+assert_help_contains "./scripts/easy_node.sh desktop-install [--platform auto|linux|windows] [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]"
 assert_help_contains "./scripts/easy_node.sh desktop-linux-dev [desktop_dev args...]"
@@ -460,6 +465,13 @@ run_linux_command \
   "--sample-flag" "doctor value with spaces"
 
 run_linux_command \
+  "desktop-check" \
+  "desktop_linux_doctor" \
+  "--reports-dir" "$TMP_DIR/reports check with spaces" \
+  "--summary-json" "$TMP_DIR/summary check with spaces.json" \
+  "--sample-flag" "check value with spaces"
+
+run_linux_command \
   "desktop-native-bootstrap" \
   "desktop_linux_native_bootstrap" \
   "--mode" "bootstrap" \
@@ -470,6 +482,12 @@ run_linux_command \
   "desktop_linux_one_click" \
   "--no-install-missing" \
   "--sample-flag" "one click value with spaces"
+
+run_linux_command \
+  "desktop-start" \
+  "desktop_linux_one_click" \
+  "--no-install-missing" \
+  "--sample-flag" "start value with spaces"
 
 run_linux_command \
   "desktop-packaged-run" \
@@ -489,6 +507,39 @@ run_linux_command \
   "desktop_linux_installer" \
   "--dry-run" \
   "--sample-flag" "desktop installer value with spaces"
+
+run_linux_command \
+  "desktop-install" \
+  "desktop_linux_installer" \
+  "--dry-run" \
+  "--sample-flag" "desktop install value with spaces"
+
+: >"$CAPTURE"
+env \
+  EASY_NODE_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+  DESKTOP_LINUX_DOCTOR_SCRIPT="$DOCTOR_LINUX_FAKE" \
+  DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_LINUX_FAKE" \
+  DESKTOP_LINUX_ONE_CLICK_SCRIPT="$ONE_CLICK_LINUX_FAKE" \
+  DESKTOP_LINUX_DEV_SCRIPT="$DEV_LINUX_FAKE" \
+  DESKTOP_LINUX_INSTALLER_SCRIPT="$INSTALLER_LINUX_FAKE" \
+  DESKTOP_LINUX_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_LINUX_FAKE" \
+  DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_LINUX_FAKE" \
+  DESKTOP_WINDOWS_DOCTOR_SCRIPT="$DOCTOR_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_NATIVE_BOOTSTRAP_SCRIPT="$NATIVE_BOOTSTRAP_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_ONE_CLICK_SCRIPT="$ONE_CLICK_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_PACKAGED_RUN_SCRIPT="$PACKAGED_RUN_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_DEV_SCRIPT="$DEV_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_INSTALLER_SCRIPT="$INSTALLER_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_RELEASE_BUNDLE_SCRIPT="$RELEASE_BUNDLE_WINDOWS_FAKE" \
+  DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
+  bash "$SCRIPT_UNDER_TEST" desktop-fix --platform linux --sample-flag "desktop fix value with spaces" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_single_invocation "$CAPTURE" "desktop-fix"
+assert_forwarded_exact \
+  "$CAPTURE" \
+  "desktop_linux_doctor" \
+  "--mode" "fix" \
+  "--install-missing" \
+  "--sample-flag" "desktop fix value with spaces"
 
 run_linux_direct_command \
   "desktop-linux-dev" \
@@ -515,6 +566,11 @@ run_windows_command \
   "--sample-flag" "doctor value with spaces"
 
 run_windows_command \
+  "desktop-check" \
+  "$DOCTOR_WINDOWS_FAKE" \
+  "--sample-flag" "check value with spaces"
+
+run_windows_command \
   "desktop-native-bootstrap" \
   "$NATIVE_BOOTSTRAP_WINDOWS_FAKE" \
   "--sample-flag" "native bootstrap value with spaces"
@@ -530,6 +586,12 @@ run_windows_command \
   "$ONE_CLICK_WINDOWS_FAKE" \
   "-InstallMissing:\$false" \
   "--sample-flag" "one click value with spaces"
+
+run_windows_command \
+  "desktop-start" \
+  "$ONE_CLICK_WINDOWS_FAKE" \
+  "-InstallMissing:\$false" \
+  "--sample-flag" "start value with spaces"
 
 run_windows_command \
   "desktop-packaged-run" \
@@ -554,6 +616,12 @@ run_windows_command \
   "$INSTALLER_WINDOWS_FAKE" \
   "-DryRun" \
   "--sample-flag" "desktop installer value with spaces"
+
+run_windows_command \
+  "desktop-install" \
+  "$INSTALLER_WINDOWS_FAKE" \
+  "-DryRun" \
+  "--sample-flag" "desktop install value with spaces"
 
 run_windows_direct_command \
   "desktop-windows-dev" \
@@ -663,6 +731,20 @@ if ! grep -F -- "script_path: $LOCAL_API_LINUX_FAKE" "$STDOUT_OUT" >/dev/null 2>
   exit 1
 fi
 
+: >"$GO_CAPTURE"
+env \
+  EASY_NODE_DESKTOP_WRAPPERS_GO_CAPTURE_FILE="$GO_CAPTURE" \
+  PATH="$TMP_DIR:$PATH" \
+  bash "$SCRIPT_UNDER_TEST" \
+    desktop-api \
+    --platform linux \
+    --api-addr 127.0.0.1:9998 \
+    --script-path "$LOCAL_API_LINUX_FAKE" \
+    --config "$TMP_DIR/node-api.conf" \
+    --dry-run 0 \
+    --command-timeout-sec 10 >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_go_invocation "$GO_CAPTURE" run ./cmd/node --config "$TMP_DIR/node-api.conf" --local-api
+
 set +e
 : >"$GO_CAPTURE"
 env \
@@ -701,6 +783,52 @@ assert_runtime_invocation \
   "$RUNTIME_CAPTURE" \
   "$LOCAL_API_WINDOWS_FAKE" \
   "--sample-flag" "local api session value with spaces"
+
+: >"$RUNTIME_CAPTURE"
+mkdir -p "$RUNTIME_DIR"
+create_fake_runtime_script "$RUNTIME_DIR/powershell.exe" "powershell.exe"
+create_fake_runtime_script "$RUNTIME_DIR/pwsh" "pwsh"
+create_fake_runtime_script "$RUNTIME_DIR/powershell" "powershell"
+env \
+  EASY_NODE_DESKTOP_WRAPPERS_RUNTIME_CAPTURE_FILE="$RUNTIME_CAPTURE" \
+  DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT="$LOCAL_API_WINDOWS_FAKE" \
+  PATH="$RUNTIME_DIR:$PATH" \
+  bash "$SCRIPT_UNDER_TEST" \
+    desktop-api \
+    --platform windows \
+    --sample-flag "desktop api value with spaces" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_runtime_invocation \
+  "$RUNTIME_CAPTURE" \
+  "$LOCAL_API_WINDOWS_FAKE" \
+  "--sample-flag" "desktop api value with spaces"
+
+echo "[easy-node-desktop-wrappers] legacy alias migration hints"
+: >"$CAPTURE"
+env \
+  EASY_NODE_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+  DESKTOP_LINUX_DOCTOR_SCRIPT="$DOCTOR_LINUX_FAKE" \
+  bash "$SCRIPT_UNDER_TEST" desktop-linux-doctor --sample-flag "legacy alias linux" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_single_invocation "$CAPTURE" "desktop-linux-doctor legacy hint"
+assert_forwarded_exact "$CAPTURE" "desktop_linux_doctor" "--sample-flag" "legacy alias linux"
+if ! grep -F -- "desktop-linux-doctor' is a legacy desktop alias; prefer 'desktop-check --platform linux'" "$STDERR_OUT" >/dev/null 2>&1; then
+  echo "missing legacy alias migration hint for desktop-linux-doctor"
+  cat "$STDERR_OUT"
+  exit 1
+fi
+
+: >"$CAPTURE"
+env \
+  EASY_NODE_DESKTOP_SUPPRESS_LEGACY_HINT=1 \
+  EASY_NODE_DESKTOP_WRAPPERS_CAPTURE_FILE="$CAPTURE" \
+  DESKTOP_LINUX_DOCTOR_SCRIPT="$DOCTOR_LINUX_FAKE" \
+  bash "$SCRIPT_UNDER_TEST" desktop-linux-doctor --sample-flag "legacy alias linux suppressed" >"$STDOUT_OUT" 2>"$STDERR_OUT"
+assert_single_invocation "$CAPTURE" "desktop-linux-doctor legacy hint suppressed"
+assert_forwarded_exact "$CAPTURE" "desktop_linux_doctor" "--sample-flag" "legacy alias linux suppressed"
+if grep -F -- "legacy desktop alias" "$STDERR_OUT" >/dev/null 2>&1; then
+  echo "expected EASY_NODE_DESKTOP_SUPPRESS_LEGACY_HINT=1 to suppress migration hint"
+  cat "$STDERR_OUT"
+  exit 1
+fi
 
 echo "[easy-node-desktop-wrappers] exit semantics contract"
 set +e
