@@ -12,6 +12,7 @@ jobs:
   build-release:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -29,6 +30,12 @@ jobs:
         env:
           RELEASE_REQUIRE_SIGNED_TAG: ${{ vars.RELEASE_REQUIRE_SIGNED_TAG }}
           RELEASE_REQUIRE_CONTAINED_IN_REF: ${{ vars.RELEASE_REQUIRE_CONTAINED_IN_REF }}
+
+      - name: Require successful CI/security workflows on tagged commit
+        run: ./scripts/release_require_status_checks.sh --repo "${GITHUB_REPOSITORY}" --sha "${GITHUB_SHA}" --workflows "${RELEASE_REQUIRED_WORKFLOWS:-ci.yml,security.yml}"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_REQUIRED_WORKFLOWS: ${{ vars.RELEASE_REQUIRED_WORKFLOWS }}
 
       - name: Prepare release artifacts
         run: ./scripts/release_prepare.sh --version "${GITHUB_REF_NAME}" --out-dir dist --require-tag-match 1
