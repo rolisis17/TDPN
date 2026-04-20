@@ -408,8 +408,20 @@ run_windows_command \
 run_windows_command \
   "desktop-one-click" \
   "$ONE_CLICK_WINDOWS_FAKE" \
+  "-NoInstallMissing" \
+  "--sample-flag" "one click preferred disable value with spaces"
+
+run_windows_command \
+  "desktop-one-click" \
+  "$ONE_CLICK_WINDOWS_FAKE" \
   "-InstallMissing:\$false" \
   "--sample-flag" "one click value with spaces"
+
+run_windows_command \
+  "desktop-packaged-run" \
+  "$PACKAGED_RUN_WINDOWS_FAKE" \
+  "-NoInstallMissing" \
+  "--sample-flag" "packaged run preferred disable value with spaces"
 
 run_windows_command \
   "desktop-packaged-run" \

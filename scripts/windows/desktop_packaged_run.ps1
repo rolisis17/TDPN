@@ -1,6 +1,7 @@
 param(
   [string]$DesktopExecutablePath = "",
   [switch]$InstallMissing,
+  [switch]$NoInstallMissing,
   [switch]$EnablePolicyBypass,
   [switch]$DryRun,
   [string]$ApiAddr = "127.0.0.1:8095",
@@ -285,9 +286,17 @@ if ($PSBoundParameters.ContainsKey("EnablePolicyBypass")) {
   $shouldEnablePolicyBypass = [bool]$EnablePolicyBypass
 }
 
+$installMissingWasSpecified = $PSBoundParameters.ContainsKey("InstallMissing")
+$noInstallMissingWasSpecified = $PSBoundParameters.ContainsKey("NoInstallMissing")
+if ($installMissingWasSpecified -and $noInstallMissingWasSpecified) {
+  throw "conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing"
+}
+
 $installMissingIntent = $true
-if ($PSBoundParameters.ContainsKey("InstallMissing")) {
+if ($installMissingWasSpecified) {
   $installMissingIntent = [bool]$InstallMissing
+} elseif ($noInstallMissingWasSpecified) {
+  $installMissingIntent = -not [bool]$NoInstallMissing
 } else {
   $envAutoInstallMissing = Get-AutoInstallMissingEnvOverride
   if ($null -ne $envAutoInstallMissing) {

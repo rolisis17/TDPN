@@ -105,11 +105,28 @@ npm run tauri dev
 Scaffold/non-production note:
 - desktop Tauri build paths auto-generate a placeholder `apps/desktop/src-tauri/icons/icon.ico` when it is missing, to avoid hard-failing first-run scaffold builds.
 
+Windows desktop dev launcher (preferred on Windows, scaffold/non-production):
+
+```powershell
+scripts\windows\desktop_dev.ps1
+```
+
+From `cmd.exe`:
+
+```cmd
+scripts\windows\desktop_dev.cmd
+```
+
+Remediation toggle notes for Windows desktop dev launcher:
+- default behavior keeps remediation enabled for first-run scaffold ergonomics
+- `-NoInstallMissing` is the preferred explicit disable switch
+- legacy `-InstallMissing:$false` remains supported for compatibility
+
 Windows PowerShell policy note:
-- If `npm` is blocked by execution policy (`npm.ps1 cannot be loaded`), use one of:
-  - `scripts\windows\desktop_one_click.cmd`
-  - `npm.cmd install` and `npm.cmd run tauri -- dev`
-- The `.cmd` launchers already apply process-scope `ExecutionPolicy Bypass` automatically for the run.
+- prefer the `desktop_dev` launcher commands above instead of calling raw `npm` in PowerShell
+- if your branch does not yet include `desktop_dev`, use `scripts\windows\desktop_one_click.cmd`
+- the `.cmd` launchers apply process-scope `ExecutionPolicy Bypass` automatically for the run
+- direct fallback remains available: `npm.cmd install` and `npm.cmd run tauri -- dev`
 
 Windows-native local API session (no WSL shim):
 
@@ -206,7 +223,8 @@ Default remediation behavior for `desktop_one_click` (scaffold/non-production):
   - unset defaults to enabled
 - explicit switch precedence:
   - `-InstallMissing` explicitly enables remediation
-  - `-InstallMissing:$false` explicitly disables remediation, even when env would enable it
+  - `-NoInstallMissing` is the preferred explicit disable switch
+  - legacy `-InstallMissing:$false` remains supported for compatibility and explicitly disables remediation, even when env would enable it
 
 Installer-style packaged launcher flow (`desktop_packaged_run`):
 
@@ -231,7 +249,8 @@ Packaged-run remediation defaults (scaffold/non-production):
 - shared env overrides: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.
 - accepted values: `1` / `true` enables, `0` / `false` disables; unset defaults to enabled.
 - explicit switch precedence for packaged run: `-InstallMissing` explicitly enables remediation.
-- `-InstallMissing:$false` explicitly disables remediation, even when env would enable it.
+- `-NoInstallMissing` is the preferred explicit disable switch.
+- legacy `-InstallMissing:$false` remains supported for compatibility and explicitly disables remediation, even when env would enable it.
 
 What this path does:
 - prefers packaged desktop launch for installer-style smoke checks

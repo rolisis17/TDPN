@@ -172,6 +172,13 @@ run_expect_pass_regex \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing:\$false"
 
+echo "[windows-desktop-packaged-run-guardrails] explicit -NoInstallMissing overrides env enable and forces check mode"
+run_expect_pass_regex \
+  "dry_run_doctor_mode_explicit_no_install_beats_env_enable" \
+  "\\[desktop-doctor\\][[:space:]]+mode=check" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -NoInstallMissing"
+
 echo "[windows-desktop-packaged-run-guardrails] explicit -InstallMissing overrides env disable and forces fix mode"
 run_expect_pass_regex \
   "dry_run_doctor_mode_explicit_true_beats_env_disable" \

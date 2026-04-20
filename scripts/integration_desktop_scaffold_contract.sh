@@ -181,6 +181,10 @@ if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$PACKAGED_RUN_POWER
   echo "desktop scaffold contract failed: expected TDPN shared auto-install legacy env alias marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
+if ! rg -q -- '-NoInstallMissing|\$NoInstallMissing' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected -NoInstallMissing override marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+  exit 1
+fi
 if ! rg -q -- '\$installMissingIntent[[:space:]]*=[[:space:]]*\$true|\$\{GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-\$\{TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-1\}\}|default[^[:alnum:]]*(enable|enabled|true)[^[:alnum:]]*(install|auto[-_ ]?install)[^[:alnum:]]*missing' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
   echo "desktop scaffold contract failed: expected default-enabled install-intent marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
@@ -508,6 +512,10 @@ if [[ "$ONE_CLICK_LAUNCHER_PRESENT" == "1" ]]; then
     echo "desktop scaffold contract failed: expected TDPN one-click auto-install legacy env alias marker in $ONE_CLICK_POWERSHELL_SCRIPT"
     exit 1
   fi
+  if ! rg -q -- '-NoInstallMissing|\$NoInstallMissing' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected -NoInstallMissing override marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
   if ! grep -qF '@("-Mode", "fix", "-InstallMissing")' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
     echo "desktop scaffold contract failed: expected doctor fix/install remediation marker in $ONE_CLICK_POWERSHELL_SCRIPT"
     exit 1
@@ -531,6 +539,46 @@ if [[ "$ONE_CLICK_LAUNCHER_PRESENT" == "1" ]]; then
   fi
   echo "[desktop-scaffold] one-click launcher scripts and markers are present"
 fi
+
+WINDOWS_DESKTOP_DEV_LAUNCHER_FILES=(
+  "scripts/windows/desktop_dev.ps1"
+  "scripts/windows/desktop_dev.cmd"
+)
+for path in "${WINDOWS_DESKTOP_DEV_LAUNCHER_FILES[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "desktop scaffold contract failed: missing windows desktop dev launcher script: $path"
+    exit 1
+  fi
+done
+
+WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT="scripts/windows/desktop_dev.ps1"
+WINDOWS_DESKTOP_DEV_CMD_SCRIPT="scripts/windows/desktop_dev.cmd"
+
+if ! grep -qF 'desktop_native_bootstrap.ps1' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop native bootstrap launcher reference in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! grep -qiE 'run-desktop' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected run-desktop mode marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -qi -- 'DesktopLaunchStrategy[^[:cntrl:]]*dev|desktop-launch-strategy[^[:cntrl:]]*dev' "$WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected DesktopLaunchStrategy dev marker in $WINDOWS_DESKTOP_DEV_POWERSHELL_SCRIPT"
+  exit 1
+fi
+if ! rg -qi -- 'powershell(\.exe)?' "$WINDOWS_DESKTOP_DEV_CMD_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected PowerShell invocation marker in $WINDOWS_DESKTOP_DEV_CMD_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_dev.ps1' "$WINDOWS_DESKTOP_DEV_CMD_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected desktop_dev.ps1 launcher reference in $WINDOWS_DESKTOP_DEV_CMD_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'desktop_dev.ps1' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must reference the windows desktop dev launcher script"
+  exit 1
+fi
+echo "[desktop-scaffold] windows desktop dev launcher scripts and markers are present"
 
 LINUX_ONE_CLICK_SCRIPT="scripts/linux/desktop_one_click.sh"
 if [[ ! -f "$LINUX_ONE_CLICK_SCRIPT" ]]; then

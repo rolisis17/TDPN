@@ -134,6 +134,20 @@ if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
 $doctorInvokeArgs = @("-Mode", "check")
 $installMissingSpecified = Test-ArgSpecified -Args $BootstrapArgs -Name "-InstallMissing"
 $installMissingEnabled = Test-SwitchEnabled -Args $BootstrapArgs -Name "-InstallMissing"
+$noInstallMissingSpecified = Test-ArgSpecified -Args $BootstrapArgs -Name "-NoInstallMissing"
+$noInstallMissingEnabled = Test-SwitchEnabled -Args $BootstrapArgs -Name "-NoInstallMissing"
+$forwardBootstrapArgs = @()
+foreach ($arg in $BootstrapArgs) {
+  if ($arg -eq "-NoInstallMissing" -or $arg -like "-NoInstallMissing:*") {
+    continue
+  }
+  $forwardBootstrapArgs += $arg
+}
+
+if ($installMissingSpecified -and $noInstallMissingSpecified) {
+  throw "conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing"
+}
+
 $envAutoInstallMissing = Get-AutoInstallMissingEnvOverride
 $installIntent = $true
 if ($null -ne $envAutoInstallMissing) {
@@ -141,6 +155,8 @@ if ($null -ne $envAutoInstallMissing) {
 }
 if ($installMissingSpecified) {
   $installIntent = $installMissingEnabled
+} elseif ($noInstallMissingSpecified) {
+  $installIntent = -not $noInstallMissingEnabled
 }
 if ($installIntent) {
   $doctorInvokeArgs = @("-Mode", "fix", "-InstallMissing")
@@ -168,11 +184,11 @@ if (-not (Test-ArgNamePresent -Args $BootstrapArgs -Name "-Mode")) {
 if (-not (Test-ArgNamePresent -Args $BootstrapArgs -Name "-DesktopLaunchStrategy")) {
   $invokeArgs += @("-DesktopLaunchStrategy", "auto")
 }
-if ($installIntent -and -not $installMissingSpecified) {
+if ($installIntent -and -not $installMissingSpecified -and -not $noInstallMissingSpecified) {
   $invokeArgs += "-InstallMissing"
 }
 
-$invokeArgs += $BootstrapArgs
+$invokeArgs += $forwardBootstrapArgs
 
 & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrapScript @invokeArgs
 exit $LASTEXITCODE

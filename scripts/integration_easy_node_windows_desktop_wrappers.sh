@@ -271,8 +271,21 @@ run_and_assert_wrapper \
 run_and_assert_wrapper \
   "desktop-windows-one-click" \
   "desktop_windows_one_click" \
+  "-NoInstallMissing" \
+  "--sample-flag" "one click preferred disable value with spaces"
+
+run_and_assert_wrapper \
+  "desktop-windows-one-click" \
+  "desktop_windows_one_click" \
   "-InstallMissing:\$false" \
   "--sample-flag" "one click value with spaces"
+
+run_and_assert_wrapper \
+  "desktop-windows-packaged-run" \
+  "desktop_windows_packaged_run" \
+  "-NoInstallMissing" \
+  "--dry-run" \
+  "--sample-flag" "packaged run preferred disable value with spaces"
 
 run_and_assert_wrapper \
   "desktop-windows-packaged-run" \

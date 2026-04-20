@@ -140,6 +140,13 @@ run_expect_output_regex \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun' '-InstallMissing:\$false'"
 
+echo "[windows-desktop-one-click-guardrails] explicit -NoInstallMissing overrides env enable"
+run_expect_output_regex \
+  "explicit_no_install_beats_env_enable_check_dry_run" \
+  "$CHECK_MODE_REGEX" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun' '-NoInstallMissing'"
+
 echo "[windows-desktop-one-click-guardrails] explicit -InstallMissing overrides env disable"
 run_expect_pass_regex \
   "explicit_true_beats_env_disable_fix_dry_run" \
