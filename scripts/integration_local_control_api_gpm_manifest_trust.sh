@@ -556,6 +556,102 @@ if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "[local-control-api-gpm-manifest-trust] session_bootstrap_directory requires session_token and follows trusted session bootstrap selection"
+cache_session_bootstrap_selected="https://directory.cache.selected.globalprivatemesh.example:8081"
+cache_session_bootstrap_untrusted="https://directory.cache.untrusted.globalprivatemesh.example:8081"
+write_manifest_cache_with_directories \
+  "$cache_success_path" \
+  "$cache_manifest_url" \
+  true \
+  "$cache_bootstrap_directory" \
+  "$cache_session_bootstrap_selected"
+
+session_token_cache_selected="$(mint_session_token "cosmos1cacheselected")"
+cache_session_bootstrap_selected_body="$TMP_DIR/cache_session_bootstrap_selected_register.json"
+cache_session_bootstrap_selected_code="$(curl -sS -o "$cache_session_bootstrap_selected_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_selected}\",\"path_profile\":\"balanced\"}" "${LOCAL_API_BASE}/v1/gpm/onboarding/client/register")"
+if [[ "$cache_session_bootstrap_selected_code" != "200" ]]; then
+  echo "expected multi-directory cache registration to succeed with 200, got $cache_session_bootstrap_selected_code"
+  cat "$cache_session_bootstrap_selected_body"
+  exit 1
+fi
+
+: >"$CALLS_FILE"
+connect_session_bootstrap_missing_body="$TMP_DIR/connect_session_bootstrap_missing.json"
+connect_session_bootstrap_missing_code="$(curl -sS -o "$connect_session_bootstrap_missing_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_bootstrap_directory\":\"${cache_session_bootstrap_selected}\"}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_session_bootstrap_missing_code" != "400" ]]; then
+  echo "expected session_bootstrap_directory without session_token to fail with 400, got $connect_session_bootstrap_missing_code"
+  cat "$connect_session_bootstrap_missing_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_session_bootstrap_missing_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("session_bootstrap_directory requires session_token"))' \
+  "expected session_bootstrap_directory missing-session error semantics"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected missing-session session_bootstrap_directory rejection to fail closed without invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_session_bootstrap_missing_body"
+  exit 1
+fi
+
+: >"$CALLS_FILE"
+connect_session_bootstrap_conflict_body="$TMP_DIR/connect_session_bootstrap_conflict.json"
+connect_session_bootstrap_conflict_code="$(curl -sS -o "$connect_session_bootstrap_conflict_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_selected}\",\"session_bootstrap_directory\":\"${cache_session_bootstrap_selected}\",\"bootstrap_directory\":\"https://directory.manual-override.globalprivatemesh.example:8081\",\"invite_key\":\"inv-session-bootstrap-conflict\",\"run_preflight\":false}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_session_bootstrap_conflict_code" != "400" ]]; then
+  echo "expected session_bootstrap_directory plus manual overrides to fail with 400, got $connect_session_bootstrap_conflict_code"
+  cat "$connect_session_bootstrap_conflict_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_session_bootstrap_conflict_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("session_bootstrap_directory cannot be combined"))' \
+  "expected session_bootstrap_directory conflict semantics"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected session_bootstrap_directory conflict rejection to fail closed without invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_session_bootstrap_conflict_body"
+  exit 1
+fi
+
+: >"$CALLS_FILE"
+connect_session_bootstrap_untrusted_body="$TMP_DIR/connect_session_bootstrap_untrusted.json"
+connect_session_bootstrap_untrusted_code="$(curl -sS -o "$connect_session_bootstrap_untrusted_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_selected}\",\"session_bootstrap_directory\":\"${cache_session_bootstrap_untrusted}\",\"run_preflight\":false}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_session_bootstrap_untrusted_code" != "403" ]]; then
+  echo "expected untrusted session_bootstrap_directory to fail with 403, got $connect_session_bootstrap_untrusted_code"
+  cat "$connect_session_bootstrap_untrusted_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_session_bootstrap_untrusted_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("trusted bootstrap directories"))' \
+  "expected untrusted session_bootstrap_directory error semantics"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected untrusted session_bootstrap_directory rejection to fail closed without invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_session_bootstrap_untrusted_body"
+  exit 1
+fi
+
+: >"$CALLS_FILE"
+connect_session_bootstrap_ok_body="$TMP_DIR/connect_session_bootstrap_ok.json"
+connect_session_bootstrap_ok_code="$(curl -sS -o "$connect_session_bootstrap_ok_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_selected}\",\"session_bootstrap_directory\":\"${cache_session_bootstrap_selected}\",\"run_preflight\":false}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_session_bootstrap_ok_code" != "200" ]]; then
+  echo "expected trusted session_bootstrap_directory selection to succeed with 200, got $connect_session_bootstrap_ok_code"
+  cat "$connect_session_bootstrap_ok_body"
+  exit 1
+fi
+if ! jq -e --arg expected_bootstrap "$cache_session_bootstrap_selected" '.ok == true and .stage == "connect" and .bootstrap_directory == $expected_bootstrap' "$connect_session_bootstrap_ok_body" >/dev/null; then
+  echo "expected trusted session_bootstrap_directory selection response markers"
+  cat "$connect_session_bootstrap_ok_body"
+  exit 1
+fi
+if ! grep -F "client-vpn-up"$'\t'"--bootstrap-directory"$'\t'"$cache_session_bootstrap_selected" "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected trusted session_bootstrap_directory selection to invoke client-vpn-up with the selected bootstrap directory"
+  cat "$CALLS_FILE"
+  cat "$connect_session_bootstrap_ok_body"
+  exit 1
+fi
+
 echo "[local-control-api-gpm-manifest-trust] connect-time session bootstrap trust revalidation fails closed when manifest drops session directories"
 cache_revalidation_blocked_directory="https://directory.cache.revalidation.blocked.globalprivatemesh.example:8081"
 write_manifest_cache "$cache_success_path" "$cache_manifest_url" "$cache_revalidation_blocked_directory" true
