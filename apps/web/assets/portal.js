@@ -15,6 +15,7 @@ const policyPostureEl = byId("policy_posture");
 const policyPostureLineEl = byId("policy_posture_line");
 const policyConnectPolicyEl = byId("policy_connect_policy");
 const policyAuthVerifyEl = byId("policy_auth_verify");
+const configEndpointHintEl = byId("config_endpoint_hint");
 const legacyAliasWarningEl = byId("legacy_alias_warning");
 const legacyAliasWarningLineEl = byId("legacy_alias_warning_line");
 const legacyAliasWarningTitleEl = byId("legacy_alias_warning_title");
@@ -52,6 +53,9 @@ const bootstrapDirectoryEl = byId("bootstrap_directory");
 const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
 const registerClientBtnEl = byId("register_client_btn");
+const applyOperatorBtnEl = byId("apply_operator_btn");
+const approveOperatorBtnEl = byId("approve_operator_btn");
+const rejectOperatorBtnEl = byId("reject_operator_btn");
 const manualSignInBtnEl = byId("signin_btn");
 const signinPolicyHintEl = document.getElementById("signin_policy_hint");
 const connectionSnapshotEl = byId("connection_snapshot");
@@ -68,6 +72,7 @@ const serverLifecycleHintEl = byId("server_lifecycle_hint");
 const serverStartBtnEl = byId("server_start_btn");
 const serverStopBtnEl = byId("server_stop_btn");
 const serverRestartBtnEl = byId("server_restart_btn");
+const connectBtnEl = byId("connect_btn");
 const connectPolicyHintEl = byId("connect_policy_hint");
 const connectInterfaceEl = byId("connect_interface");
 const connectDiscoveryWaitSecEl = byId("connect_discovery_wait_sec");
@@ -159,7 +164,7 @@ let clientRegistrationTrustDriftGuidance = "";
 let connectRequireSession = false;
 let allowLegacyConnectOverride = false;
 let connectPolicyMode = CONNECT_POLICY_MODE_COMPAT_ALLOWED;
-let connectPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+let connectPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
 let authVerifyRequireMetadata = false;
 let authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let authVerifyRequireWalletExtensionSource = false;
@@ -761,8 +766,36 @@ function formatPolicySourceLabel(source) {
   return nonEmptyString(source) || "default";
 }
 
+function configEndpointUnavailableFailClosedMode() {
+  return connectPolicySource === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+}
+
+function failClosedMutatingActionGuidance() {
+  return "Restore the daemon config endpoint (/v1/config) first to re-enable Register Client, Connect, Operator Apply/Approve/Reject, and server lifecycle actions.";
+}
+
+function failClosedMutatingActionStatusDetail() {
+  return `Restricted fail-closed mode: /v1/config is unavailable. ${failClosedMutatingActionGuidance()} Read-only status/session/audit actions remain available.`;
+}
+
+function refreshConfigEndpointHint() {
+  if (configEndpointUnavailableFailClosedMode()) {
+    configEndpointHintEl.textContent = failClosedMutatingActionStatusDetail();
+    configEndpointHintEl.classList.add("locked");
+    return;
+  }
+  configEndpointHintEl.textContent =
+    "Runtime config endpoint /v1/config is available. Compatibility mode behavior is applied only when runtime config policy explicitly allows it.";
+  configEndpointHintEl.classList.remove("locked");
+}
+
 function refreshConnectPolicyHint() {
   if (!connectPolicyHintEl) {
+    return;
+  }
+  if (configEndpointUnavailableFailClosedMode()) {
+    connectPolicyHintEl.textContent = failClosedMutatingActionStatusDetail();
+    connectPolicyHintEl.classList.add("locked");
     return;
   }
   const mode = formatConnectPolicyModeLabel(connectPolicyMode);
@@ -778,9 +811,9 @@ function refreshConnectPolicyHint() {
 }
 
 function refreshPolicyPostureBanner() {
-  const configUnavailable = connectPolicySource === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+  const configUnavailable = configEndpointUnavailableFailClosedMode();
   const strict = connectRequireSession || authVerifyRequireMetadata || authVerifyRequireWalletExtensionSource;
-  const kind = configUnavailable ? "warn" : strict ? "warn" : "good";
+  const kind = configUnavailable ? "bad" : strict ? "warn" : "good";
   policyPostureEl.dataset.kind = kind;
   policyPostureLineEl.classList.remove("good", "warn", "bad");
   policyPostureLineEl.classList.add(kind);
@@ -788,15 +821,16 @@ function refreshPolicyPostureBanner() {
   const connectMode = formatConnectPolicyModeLabel(connectPolicyMode);
   const connectSource = formatPolicySourceLabel(connectPolicySource);
   const legacyOverride = allowLegacyConnectOverride ? "legacy override enabled" : "legacy override locked";
-  policyConnectPolicyEl.textContent = `Connect policy: ${connectMode} (source: ${connectSource}; ${legacyOverride}).`;
 
   if (configUnavailable) {
-    policyAuthVerifyEl.textContent =
-      "Auth verify strictness: policy hints unavailable from /v1/config; using compatibility defaults and keeping manual verify available until runtime config is reachable.";
+    policyConnectPolicyEl.textContent = "Connect policy: restricted fail-closed (source: unavailable; legacy override locked).";
+    policyAuthVerifyEl.textContent = failClosedMutatingActionStatusDetail();
     syncManualSignInAction();
     refreshConnectPolicyHint();
+    refreshConfigEndpointHint();
     return;
   }
+  policyConnectPolicyEl.textContent = `Connect policy: ${connectMode} (source: ${connectSource}; ${legacyOverride}).`;
   const metadataRequired = authVerifyRequireMetadata ? "required" : "optional";
   const metadataSource = formatPolicySourceLabel(authVerifyRequireMetadataPolicySource);
   const walletRequired = authVerifyRequireWalletExtensionSource ? "required" : "optional";
@@ -809,6 +843,7 @@ function refreshPolicyPostureBanner() {
     `wallet-extension-source ${walletRequired} (source: ${walletSource}).${manualSignInGuidance}`;
   syncManualSignInAction();
   refreshConnectPolicyHint();
+  refreshConfigEndpointHint();
 }
 
 function refreshLegacyAliasWarningBanner() {
@@ -874,17 +909,26 @@ function syncManualSignInAction() {
 }
 
 function compatibilityOverrideEnabled() {
-  return allowLegacyConnectOverride === true && compatOverrideEl.checked === true && connectRequireSession !== true;
+  return (
+    configEndpointUnavailableFailClosedMode() !== true &&
+    allowLegacyConnectOverride === true &&
+    compatOverrideEl.checked === true &&
+    connectRequireSession !== true
+  );
 }
 
 function refreshCompatibilityOverrideControls() {
+  const failClosed = configEndpointUnavailableFailClosedMode();
   if (!allowLegacyConnectOverride && compatOverrideEl.checked) {
+    compatOverrideEl.checked = false;
+  }
+  if (failClosed && compatOverrideEl.checked) {
     compatOverrideEl.checked = false;
   }
   if (connectRequireSession && compatOverrideEl.checked) {
     compatOverrideEl.checked = false;
   }
-  const policyLocked = connectRequireSession === true;
+  const policyLocked = connectRequireSession === true || failClosed;
   const overrideEnabled = compatibilityOverrideEnabled();
 
   const compatDisabled = !allowLegacyConnectOverride || policyLocked;
@@ -899,6 +943,12 @@ function refreshCompatibilityOverrideControls() {
 
   if (compatOverrideSectionEl) {
     compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;
+  }
+
+  if (failClosed) {
+    compatOverrideHintEl.textContent =
+      "Compatibility override is disabled in restricted fail-closed mode because /v1/config is unavailable. Restore the daemon config endpoint first.";
+    return;
   }
 
   if (!allowLegacyConnectOverride) {
@@ -943,6 +993,7 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     refreshCompatibilityOverrideControls();
     refreshPolicyPostureBanner();
     refreshLegacyAliasWarningBanner();
+    refreshClientReadiness();
     persistPortalState();
     return config;
   } catch (err) {
@@ -962,6 +1013,7 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     refreshCompatibilityOverrideControls();
     refreshPolicyPostureBanner();
     refreshLegacyAliasWarningBanner();
+    refreshClientReadiness();
     persistPortalState();
     if (!quiet) {
       throw err;
@@ -2306,6 +2358,14 @@ function computeServerLifecycleControlState() {
     };
   }
 
+  if (configEndpointUnavailableFailClosedMode()) {
+    return {
+      disabled: true,
+      locked: true,
+      hint: failClosedMutatingActionStatusDetail()
+    };
+  }
+
   if (serverReadiness?.serviceMutationsConfigured === false) {
     return {
       disabled: true,
@@ -2903,15 +2963,35 @@ function setClientReadiness(kind, statusText, guidanceText, state) {
   clientReadinessGuidanceEl.textContent = guidanceText;
 }
 
+function syncFailClosedMutatingActionState() {
+  const isBusy = document.body.classList.contains("is-busy");
+  const lockByFailClosed = configEndpointUnavailableFailClosedMode();
+  const disabled = isBusy || lockByFailClosed;
+  for (const button of [connectBtnEl, applyOperatorBtnEl, approveOperatorBtnEl, rejectOperatorBtnEl]) {
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", String(disabled));
+    if (lockByFailClosed) {
+      button.title = failClosedMutatingActionStatusDetail();
+      continue;
+    }
+    button.removeAttribute("title");
+  }
+}
+
 function syncClientRegistrationAction(readiness) {
   if (!registerClientBtnEl) {
     return;
   }
   const isBusy = document.body.classList.contains("is-busy");
+  const lockByFailClosed = configEndpointUnavailableFailClosedMode();
   const lockByState = readiness.state === "role_locked" || readiness.state === "not_signed_in";
-  const disabled = isBusy || lockByState;
+  const disabled = isBusy || lockByState || lockByFailClosed;
   registerClientBtnEl.disabled = disabled;
   registerClientBtnEl.setAttribute("aria-disabled", String(disabled));
+  if (lockByFailClosed) {
+    registerClientBtnEl.title = failClosedMutatingActionStatusDetail();
+    return;
+  }
   if (lockByState) {
     registerClientBtnEl.title = readiness.guidanceText;
     return;
@@ -2920,6 +3000,9 @@ function syncClientRegistrationAction(readiness) {
 }
 
 function assertClientRegistrationActionAllowed() {
+  if (configEndpointUnavailableFailClosedMode()) {
+    throw new Error(`Client registration is unavailable: ${failClosedMutatingActionStatusDetail()}`);
+  }
   const readiness = computeClientReadiness();
   if (readiness.state === "not_signed_in" || readiness.state === "role_locked") {
     throw new Error(`Client registration is unavailable: ${readiness.guidanceText}`);
@@ -3135,6 +3218,7 @@ function refreshClientReadiness() {
   const readiness = computeClientReadiness();
   setClientReadiness(readiness.kind, readiness.statusText, readiness.guidanceText, readiness.state);
   syncClientRegistrationAction(readiness);
+  syncFailClosedMutatingActionState();
   refreshSessionBootstrapDirectoryControls();
   refreshOnboardingSteps();
   syncWorkspaceTabLockState();
@@ -3777,6 +3861,9 @@ async function requestServerStatus() {
 }
 
 function connectValidationHint() {
+  if (configEndpointUnavailableFailClosedMode()) {
+    return failClosedMutatingActionStatusDetail();
+  }
   if (connectRequireSession) {
     return "session_token is required in session-required connect mode; sign in first";
   }
@@ -3823,6 +3910,9 @@ function buildConnectRequest() {
 }
 
 function assertConnectActionAllowed(request) {
+  if (configEndpointUnavailableFailClosedMode()) {
+    throw new Error(`Connect is unavailable: ${failClosedMutatingActionStatusDetail()}`);
+  }
   const sessionToken = typeof request?.session_token === "string" ? request.session_token.trim() : "";
   if (!sessionToken) {
     return;
@@ -3830,6 +3920,12 @@ function assertConnectActionAllowed(request) {
   const readiness = computeClientReadiness();
   if (!isClientTabVisibleRole() || readiness.state === "role_locked") {
     throw new Error(`Connect is unavailable: ${readiness.guidanceText}`);
+  }
+}
+
+function assertOperatorMutationActionAllowed(actionLabel) {
+  if (configEndpointUnavailableFailClosedMode()) {
+    throw new Error(`${actionLabel} is unavailable: ${failClosedMutatingActionStatusDetail()}`);
   }
 }
 
@@ -4243,6 +4339,7 @@ byId("register_client_btn").addEventListener("click", () =>
 
 byId("apply_operator_btn").addEventListener("click", () =>
   run("operator_apply", async () => {
+    assertOperatorMutationActionAllowed("Operator apply");
     const request = {
       session_token: byId("session_token").value.trim(),
       chain_operator_id: byId("chain_operator_id").value.trim(),
@@ -4334,6 +4431,7 @@ byId("approve_operator_btn").addEventListener("click", () =>
   run(
     "operator_approve",
     async () => {
+      assertOperatorMutationActionAllowed("Operator approve");
       const request = {
         wallet_address: byId("wallet_address").value.trim(),
         approved: true,
@@ -4393,6 +4491,7 @@ byId("reject_operator_btn").addEventListener("click", () =>
   run(
     "operator_reject",
     async () => {
+      assertOperatorMutationActionAllowed("Operator reject");
       const sessionToken = byId("session_token").value.trim();
       const adminToken = byId("admin_token").value.trim();
       if (!sessionToken && !adminToken) {

@@ -530,6 +530,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
@@ -572,6 +574,15 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmConnectRequireSession {
 			t.Fatalf("gpmConnectRequireSession=%t want=false", s.gpmConnectRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=false", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "default" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=default",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
 		}
 		if s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
@@ -830,6 +841,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
@@ -842,6 +855,15 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		s := New()
 		if !s.gpmConnectRequireSession {
 			t.Fatalf("gpmConnectRequireSession=%t want=true", s.gpmConnectRequireSession)
+		}
+		if !s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=true", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "production-default" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=production-default",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
 		}
 		if s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
@@ -899,12 +921,14 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 	t.Run("explicit connect and auth policy flags override production defaults", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "0")
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "0")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "0")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "0")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "0")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
@@ -916,6 +940,15 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		s := New()
 		if s.gpmConnectRequireSession {
 			t.Fatalf("gpmConnectRequireSession=%t want=false", s.gpmConnectRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=false", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "GPM_OPERATOR_APPROVAL_REQUIRE_SESSION" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=GPM_OPERATOR_APPROVAL_REQUIRE_SESSION",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
 		}
 		if !s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=true", s.gpmAllowLegacyConnectOverride)
@@ -998,6 +1031,62 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		s = New()
 		if s.gpmApprovalToken != "tdpn-admin-token" {
 			t.Fatalf("gpmApprovalToken=%q want TDPN admin alias", s.gpmApprovalToken)
+		}
+	})
+
+	t.Run("operator approval require session env aliases honor new-key precedence", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+
+		s := New()
+		if s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=false", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "default" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=default",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
+		}
+
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "1")
+		s = New()
+		if !s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=true", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
+		}
+
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "0")
+		s = New()
+		if s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=false", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "GPM_OPERATOR_APPROVAL_REQUIRE_SESSION" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=GPM_OPERATOR_APPROVAL_REQUIRE_SESSION",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
+		}
+
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		s = New()
+		if !s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=true", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "production-default" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=production-default",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
 		}
 	})
 
@@ -2340,6 +2429,8 @@ func TestHandleConfig(t *testing.T) {
 		svc.authToken = "cfg-secret"
 		svc.gpmConnectRequireSession = true
 		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmOperatorApprovalRequireSession = true
+		svc.gpmOperatorApprovalRequireSessionSource = "production-default"
 		svc.gpmAuthVerifyRequireCommand = true
 		svc.gpmAuthVerifyRequireMetadata = true
 		svc.gpmAuthVerifyRequireWalletExt = true
@@ -2394,6 +2485,19 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["connect_policy_source"].(string); got != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("connect_policy_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
+		}
+		if got, _ := configMap["gpm_operator_approval_require_session"].(bool); !got {
+			t.Fatalf(
+				"gpm_operator_approval_require_session=%v want=true",
+				configMap["gpm_operator_approval_require_session"],
+			)
+		}
+		if got, _ := configMap["gpm_operator_approval_require_session_policy_source"].(string); got != "production-default" {
+			t.Fatalf(
+				"gpm_operator_approval_require_session_policy_source=%q want=%q",
+				got,
+				"production-default",
+			)
 		}
 		if got, _ := configMap["gpm_manifest_trust_policy_mode"].(string); got != "production" {
 			t.Fatalf("gpm_manifest_trust_policy_mode=%q want=%q", got, "production")
@@ -6640,6 +6744,46 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 		application, _ := payload["application"].(map[string]any)
 		if got, _ := application["status"].(string); got != "approved" {
 			t.Fatalf("application.status=%q want=approved payload=%v", got, payload)
+		}
+	})
+
+	t.Run("strict mode rejects legacy admin token fallback", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmApprovalToken = "legacy-approval-token"
+		svc.gpmOperatorApprovalRequireSession = true
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"admin_token":"legacy-approval-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "required by operator approval policy") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+		if !strings.Contains(errMsg, "legacy admin_token fallback is disabled") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("strict mode still approves with admin session token", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmApprovalToken = "legacy-approval-token"
+		svc.gpmOperatorApprovalRequireSession = true
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-admin-approval-strict-token",
+			WalletAddress:  "cosmos1strictadminapprover",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      time.Now().UTC(),
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		})
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-strict-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision_auth"].(string); got != "admin_session" {
+			t.Fatalf("decision_auth=%q want=admin_session payload=%v", got, payload)
 		}
 	})
 

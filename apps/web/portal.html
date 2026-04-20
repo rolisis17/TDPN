@@ -73,13 +73,16 @@
           <div class="status-banner__label">Runtime policy posture</div>
           <div id="policy_posture_line" class="status warn">
             <strong id="policy_connect_policy">
-              Connect policy: compat (source: waiting for /v1/config).
+              Connect policy: restricted pending /v1/config policy load.
             </strong>
             <span id="policy_auth_verify">
-              Auth verify strictness: metadata optional and wallet-extension-source optional (source: waiting for /v1/config).
+              Auth verify strictness: waiting for /v1/config. Sensitive mutate actions stay fail-closed until config is available.
             </span>
           </div>
         </div>
+        <p id="config_endpoint_hint" class="helper-copy">
+          Runtime config endpoint <code>/v1/config</code> controls sensitive portal mutations. If it is unavailable, restore the daemon config endpoint first to exit restricted fail-closed mode.
+        </p>
         <div id="legacy_alias_warning" class="status-banner" data-kind="warn" role="status" aria-live="polite" hidden>
           <div class="status-banner__label">Legacy alias compatibility</div>
           <div id="legacy_alias_warning_line" class="status warn">

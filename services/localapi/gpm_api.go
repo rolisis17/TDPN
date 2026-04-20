@@ -1694,6 +1694,13 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 		decisionAuth = "admin_session"
 	}
 	if !sessionAuth {
+		if s.gpmOperatorApprovalRequireSession {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"ok":    false,
+				"error": "admin session_token is required by operator approval policy; legacy admin_token fallback is disabled",
+			})
+			return
+		}
 		if strings.TrimSpace(s.gpmApprovalToken) == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "admin session_token is required when approval admin token env is unset (GPM_APPROVAL_ADMIN_TOKEN; legacy aliases: TDPN_APPROVAL_ADMIN_TOKEN, GPM_OPERATOR_APPROVAL_TOKEN, TDPN_OPERATOR_APPROVAL_TOKEN)"})
 			return

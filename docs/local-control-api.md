@@ -38,7 +38,7 @@ Defaults:
     - auth-verify external verifier command required (`gpm_auth_verify_require_command=true`)
     - auth-verify strict metadata required (`gpm_auth_verify_require_metadata=true`)
     - auth-verify strict wallet-extension-source required (`gpm_auth_verify_require_wallet_extension_source=true`)
-  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, plus legacy `TDPN_*` aliases)
+  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, plus legacy `TDPN_*` aliases)
 - optional `/v1/connect` hardening flags (standalone or as explicit overrides):
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
@@ -46,6 +46,10 @@ Defaults:
   - optional desktop/web compatibility-control gate:
     - `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=1` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE=1`)
     - when disabled (default), UI compatibility controls for manual bootstrap/invite overrides are hidden by policy
+- strict operator-approval auth policy:
+  - `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION=1` (legacy alias: `TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION=1`)
+  - when enabled, `POST /v1/gpm/onboarding/operator/approve` requires an admin `session_token` and rejects legacy `admin_token` fallback
+  - default is `false` for compatibility mode; when `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, default becomes `true`
 - main-domain pinning for manifest trust:
   - when `GPM_MAIN_DOMAIN` (legacy alias: `TDPN_MAIN_DOMAIN`) is set, manifest URLs are trusted only when the host matches the pinned main-domain host
   - cache fallback uses the same host check against the cached manifest source URL
@@ -117,7 +121,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`), optional `search` substring filter (`wallet_address`, `chain_operator_id`, `server_label`, `status`, `reason`), optional `limit` (default `100`, clamped `1..500`), and optional cursor pagination via `cursor="<updated_at_utc>|<wallet_address>"`; response includes additive pagination metadata `total`, `has_more`, `next_cursor`, and echoed `request` fields)
-- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when an approval admin token env is configured; primary env is `GPM_APPROVAL_ADMIN_TOKEN` (legacy aliases: `TDPN_APPROVAL_ADMIN_TOKEN`, `GPM_OPERATOR_APPROVAL_TOKEN`, `TDPN_OPERATOR_APPROVAL_TOKEN`); request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
+- `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when an approval admin token env is configured; strict mode `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION=1` (legacy alias: `TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION=1`) disables that fallback and fails closed unless an admin `session_token` is provided; primary approval-token env is `GPM_APPROVAL_ADMIN_TOKEN` (legacy aliases: `TDPN_APPROVAL_ADMIN_TOKEN`, `GPM_OPERATOR_APPROVAL_TOKEN`, `TDPN_OPERATOR_APPROVAL_TOKEN`); request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
 - `GET /v1/gpm/audit/recent` (command-read auth; supports optional `limit` (default `25`, clamped `1..200`), optional `offset` (`>=0`), optional exact case-insensitive `event` filter, optional normalized `wallet_address` filter against `fields.wallet_address`, and optional `order` (`desc|asc`, default `desc`); response includes additive metadata `total`, `count`, `limit`, `offset`, `has_more`, `next_offset`, and echoed `filters`)
 
 ## Authentication
@@ -132,6 +136,7 @@ GPM server lifecycle endpoints (`POST /v1/gpm/service/start`, `POST /v1/gpm/serv
 `POST /v1/gpm/onboarding/operator/approve` also requires admin-level authorization:
 - preferred: `session_token` for a valid `admin` session.
 - compatibility fallback: `admin_token` matching `GPM_APPROVAL_ADMIN_TOKEN` (legacy aliases: `TDPN_APPROVAL_ADMIN_TOKEN`, `GPM_OPERATOR_APPROVAL_TOKEN`, `TDPN_OPERATOR_APPROVAL_TOKEN`) when configured.
+- strict policy mode: when `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION=1` (legacy alias: `TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION=1`), legacy `admin_token` fallback is disabled and requests without an admin `session_token` fail closed with a policy error.
 - if the approval admin token env is unset and no admin session token is provided, approval is rejected.
 - decision contract hardening:
   - request body fields:

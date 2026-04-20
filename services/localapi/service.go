@@ -92,6 +92,8 @@ type Service struct {
 	gpmManifestHMACKey            string
 	gpmRoleDefault                string
 	gpmApprovalToken              string
+	gpmOperatorApprovalRequireSession       bool
+	gpmOperatorApprovalRequireSessionSource string
 	gpmAuthVerifyCommand          string
 	gpmAuthVerifyRequireCommand   bool
 	gpmAuthVerifyRequireCmdSource string
@@ -318,6 +320,12 @@ func New() *Service {
 	} else if gpmOperatorApprovalTokenSet {
 		gpmApprovalToken = gpmOperatorApprovalToken
 	}
+	gpmOperatorApprovalRequireSessionRaw, gpmOperatorApprovalRequireSessionSource, gpmOperatorApprovalRequireSessionSet := preferredEnvValueWithSource(
+		"GPM_OPERATOR_APPROVAL_REQUIRE_SESSION",
+		"TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION",
+	)
+	noteLegacyAlias("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", gpmOperatorApprovalRequireSessionSource)
+	gpmOperatorApprovalRequireSession := parseBoolWithDefault(gpmOperatorApprovalRequireSessionRaw, false)
 	gpmAuthVerifyCommandRaw, gpmAuthVerifyCommandSource, gpmAuthVerifyCommandSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_COMMAND",
 		"TDPN_AUTH_VERIFY_COMMAND",
@@ -419,6 +427,13 @@ func New() *Service {
 	if !gpmConnectRequireSessionSet && gpmConnectPolicyProduction {
 		gpmConnectRequireSession = true
 	}
+	if !gpmOperatorApprovalRequireSessionSet {
+		gpmOperatorApprovalRequireSessionSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmOperatorApprovalRequireSession = true
+			gpmOperatorApprovalRequireSessionSource = "production-default"
+		}
+	}
 	gpmAllowLegacyConnectOverrideRaw, gpmAllowLegacyConnectOverrideSource, gpmAllowLegacyConnectOverrideSet := preferredEnvValueWithSource(
 		"GPM_ALLOW_LEGACY_CONNECT_OVERRIDE",
 		"TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE",
@@ -483,6 +498,8 @@ func New() *Service {
 		gpmManifestHMACKey:            gpmManifestHMACKey,
 		gpmRoleDefault:                gpmRoleDefault,
 		gpmApprovalToken:              gpmApprovalToken,
+		gpmOperatorApprovalRequireSession:       gpmOperatorApprovalRequireSession,
+		gpmOperatorApprovalRequireSessionSource: gpmOperatorApprovalRequireSessionSource,
 		gpmAuthVerifyCommand:          strings.TrimSpace(gpmAuthVerifyCommand),
 		gpmAuthVerifyRequireCommand:   gpmAuthVerifyRequireCommand,
 		gpmAuthVerifyRequireCmdSource: gpmAuthVerifyRequireCommandSource,
@@ -670,6 +687,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if authVerifyRequireWalletExtSource == "" {
 		authVerifyRequireWalletExtSource = "default"
 	}
+	operatorApprovalRequireSessionSource := strings.TrimSpace(s.gpmOperatorApprovalRequireSessionSource)
+	if operatorApprovalRequireSessionSource == "" {
+		operatorApprovalRequireSessionSource = "default"
+	}
 	manifestRequireHTTPSSource := strings.TrimSpace(s.gpmManifestRequireHTTPSSource)
 	if manifestRequireHTTPSSource == "" {
 		manifestRequireHTTPSSource = "default"
@@ -692,6 +713,8 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"allow_legacy_connect_override":                          s.gpmAllowLegacyConnectOverride,
 			"connect_policy_mode":                                    connectPolicyMode,
 			"connect_policy_source":                                  connectPolicySource,
+			"gpm_operator_approval_require_session":                  s.gpmOperatorApprovalRequireSession,
+			"gpm_operator_approval_require_session_policy_source":    operatorApprovalRequireSessionSource,
 			"gpm_manifest_trust_policy_mode":                         manifestTrustPolicyMode,
 			"gpm_manifest_trust_policy_source":                       manifestTrustPolicySource,
 			"gpm_manifest_require_https":                             s.gpmManifestRequireHTTPS,

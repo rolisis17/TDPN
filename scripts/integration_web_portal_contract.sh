@@ -97,6 +97,7 @@ CONNECTION_UI_MARKERS=(
   'id="panel_server"'
   'id="client_lock_hint"'
   'id="server_lock_hint"'
+  'id="config_endpoint_hint"'
   'id="connect_policy_hint"'
   'id="connect_interface"'
   'id="connect_discovery_wait_sec"'
@@ -204,6 +205,9 @@ CONNECTION_JS_MARKERS=(
   'const tabClientEl = byId("tab_client");'
   'const tabServerEl = byId("tab_server");'
   'function refreshConnectPolicyHint('
+  'function configEndpointUnavailableFailClosedMode('
+  'function failClosedMutatingActionStatusDetail('
+  'function syncFailClosedMutatingActionState('
   'function activateWorkspaceTab('
   'function syncWorkspaceTabLockState('
   'function buildConnectRequest('
@@ -221,6 +225,13 @@ CONNECTION_JS_MARKERS=(
   'function assertServiceLifecycleActionAllowed('
   'function requestServiceLifecycle('
   'assertServiceLifecycleActionAllowed(normalizedAction);'
+  'function assertOperatorMutationActionAllowed('
+  'assertOperatorMutationActionAllowed("Operator apply");'
+  'assertOperatorMutationActionAllowed("Operator approve");'
+  'assertOperatorMutationActionAllowed("Operator reject");'
+  'Restricted fail-closed mode: /v1/config is unavailable.'
+  'Connect policy: restricted fail-closed (source: unavailable; legacy override locked).'
+  'Compatibility override is disabled in restricted fail-closed mode because /v1/config is unavailable.'
   'function updateConnectionDashboard('
   'function restoreWorkspaceTabPreference('
   'function persistWorkspaceTabPreference('
@@ -323,6 +334,10 @@ for field in server_mode total_urls http_urls https_urls mixed_scheme has_remote
 done
 if ! grep -qiE 'register(ing|ed)? client|client registration|register-client' "$README_FILE"; then
   echo "web portal contract failed: README must describe client registration lock/readiness behavior"
+  exit 1
+fi
+if ! grep -qiE '/v1/config.*(fail-closed|restricted)|fail-closed.*(/v1/config|runtime config endpoint)' "$README_FILE"; then
+  echo "web portal contract failed: README must document fail-closed behavior when /v1/config is unavailable"
   exit 1
 fi
 if ! grep -qiE 'wallet-?extension.*(keplr|leap)|(keplr|leap).*wallet-?extension' "$README_FILE"; then
