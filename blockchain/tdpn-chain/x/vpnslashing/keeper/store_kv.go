@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"encoding/json"
+	"strings"
 
 	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/types"
@@ -38,20 +39,22 @@ func (s *KVStore) GetEvidence(evidenceID string) (types.SlashEvidence, bool) {
 	if !ok {
 		return types.SlashEvidence{}, false
 	}
-
-	var record types.SlashEvidence
-	if err := json.Unmarshal(payload, &record); err != nil {
+	record, ok := decodeEvidenceRecord(strings.TrimSpace(evidenceID), payload)
+	if !ok {
 		return types.SlashEvidence{}, false
 	}
-
 	return record, true
 }
 
 func (s *KVStore) ListEvidence() []types.SlashEvidence {
 	records := make([]types.SlashEvidence, 0)
-	s.store.IteratePrefix([]byte(evidencePrefix), func(_ []byte, value []byte) bool {
-		var record types.SlashEvidence
-		if err := json.Unmarshal(value, &record); err == nil {
+	s.store.IteratePrefix([]byte(evidencePrefix), func(key []byte, value []byte) bool {
+		evidenceID := strings.TrimSpace(strings.TrimPrefix(string(key), evidencePrefix))
+		if evidenceID == "" {
+			return true
+		}
+		record, ok := decodeEvidenceRecord(evidenceID, value)
+		if ok {
 			records = append(records, record)
 		}
 		return true
@@ -72,25 +75,70 @@ func (s *KVStore) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {
 	if !ok {
 		return types.PenaltyDecision{}, false
 	}
-
-	var record types.PenaltyDecision
-	if err := json.Unmarshal(payload, &record); err != nil {
+	record, ok := decodePenaltyRecord(strings.TrimSpace(penaltyID), payload)
+	if !ok {
 		return types.PenaltyDecision{}, false
 	}
-
+	if _, exists := s.GetEvidence(record.EvidenceID); !exists {
+		return types.PenaltyDecision{}, false
+	}
 	return record, true
 }
 
 func (s *KVStore) ListPenalties() []types.PenaltyDecision {
 	records := make([]types.PenaltyDecision, 0)
-	s.store.IteratePrefix([]byte(penaltyPrefix), func(_ []byte, value []byte) bool {
-		var record types.PenaltyDecision
-		if err := json.Unmarshal(value, &record); err == nil {
-			records = append(records, record)
+	evidenceSet := make(map[string]struct{})
+	for _, evidence := range s.ListEvidence() {
+		evidenceSet[strings.TrimSpace(evidence.EvidenceID)] = struct{}{}
+	}
+	s.store.IteratePrefix([]byte(penaltyPrefix), func(key []byte, value []byte) bool {
+		penaltyID := strings.TrimSpace(strings.TrimPrefix(string(key), penaltyPrefix))
+		if penaltyID == "" {
+			return true
 		}
+		record, ok := decodePenaltyRecord(penaltyID, value)
+		if !ok {
+			return true
+		}
+		if _, exists := evidenceSet[strings.TrimSpace(record.EvidenceID)]; !exists {
+			return true
+		}
+		records = append(records, record)
 		return true
 	})
 	return records
+}
+
+func decodeEvidenceRecord(expectedID string, payload []byte) (types.SlashEvidence, bool) {
+	var record types.SlashEvidence
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return types.SlashEvidence{}, false
+	}
+	record = normalizeEvidence(record)
+	expectedID = strings.TrimSpace(expectedID)
+	if expectedID != "" && strings.TrimSpace(record.EvidenceID) != expectedID {
+		return types.SlashEvidence{}, false
+	}
+	if err := record.ValidateBasic(); err != nil {
+		return types.SlashEvidence{}, false
+	}
+	return record, true
+}
+
+func decodePenaltyRecord(expectedID string, payload []byte) (types.PenaltyDecision, bool) {
+	var record types.PenaltyDecision
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return types.PenaltyDecision{}, false
+	}
+	record = normalizePenalty(record)
+	expectedID = strings.TrimSpace(expectedID)
+	if expectedID != "" && strings.TrimSpace(record.PenaltyID) != expectedID {
+		return types.PenaltyDecision{}, false
+	}
+	if err := record.ValidateBasic(); err != nil {
+		return types.PenaltyDecision{}, false
+	}
+	return record, true
 }
 
 func evidenceKey(evidenceID string) []byte {

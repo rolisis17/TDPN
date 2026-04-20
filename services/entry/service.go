@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1939,13 +1940,69 @@ func appendTrustedKey(path string, key string) error {
 	if _, ok := existing[key]; ok {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	keys := make([]string, 0, len(existing)+1)
+	for existingKey := range existing {
+		keys = append(keys, existingKey)
+	}
+	keys = append(keys, key)
+	sort.Strings(keys)
+
+	payload := strings.Join(keys, "\n") + "\n"
+	return writeTrustedKeysAtomic(path, []byte(payload), 0o644)
+}
+
+func writeTrustedKeysAtomic(path string, payload []byte, perm os.FileMode) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.WriteString(key + "\n")
-	return err
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if err := tmpFile.Chmod(perm); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if _, err := tmpFile.Write(payload); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(err.Error()), "access is denied") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func envIntOr(primary string, fallback string, def int) int {

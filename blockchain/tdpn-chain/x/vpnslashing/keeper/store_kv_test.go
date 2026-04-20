@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"encoding/json"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -14,12 +15,13 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	store := NewKVStore(kvtypes.NewMapStore())
 
 	evidence := types.SlashEvidence{
-		EvidenceID: "evidence-1",
-		SessionID:  "sess-1",
-		ProviderID: "provider-1",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-1"),
-		Status:     chaintypes.ReconciliationPending,
+		EvidenceID:    "evidence-1",
+		SessionID:     "sess-1",
+		ProviderID:    "provider-1",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-1"),
+		Status:        chaintypes.ReconciliationPending,
 	}
 	store.UpsertEvidence(evidence)
 
@@ -64,6 +66,92 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	}
 }
 
+func TestKVStoreRejectsKeyIDMismatchAndOrphanPenalties(t *testing.T) {
+	t.Parallel()
+
+	rawStore := kvtypes.NewMapStore()
+	store := NewKVStore(rawStore)
+
+	badEvidence := types.SlashEvidence{
+		EvidenceID:    "different-evidence-id",
+		ProviderID:    "provider-bad",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-bad"),
+		Status:        chaintypes.ReconciliationSubmitted,
+	}
+	badEvidencePayload, err := json.Marshal(badEvidence)
+	if err != nil {
+		t.Fatalf("marshal bad evidence: %v", err)
+	}
+	rawStore.Set([]byte("evidence/evidence-key"), badEvidencePayload)
+
+	if _, ok := store.GetEvidence("evidence-key"); ok {
+		t.Fatal("expected evidence key/id mismatch to be rejected")
+	}
+	if got := len(store.ListEvidence()); got != 0 {
+		t.Fatalf("expected mismatched evidence to be excluded from list, got %d", got)
+	}
+
+	goodEvidence := types.SlashEvidence{
+		EvidenceID:    "evidence-good",
+		SessionID:     "sess-good",
+		ProviderID:    "provider-good",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-good"),
+		Status:        chaintypes.ReconciliationSubmitted,
+	}
+	store.UpsertEvidence(goodEvidence)
+
+	mismatchPenalty := types.PenaltyDecision{
+		PenaltyID:       "different-penalty-id",
+		EvidenceID:      goodEvidence.EvidenceID,
+		SlashBasisPoint: 10,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	mismatchPenaltyPayload, err := json.Marshal(mismatchPenalty)
+	if err != nil {
+		t.Fatalf("marshal mismatch penalty: %v", err)
+	}
+	rawStore.Set([]byte("penalty/penalty-key"), mismatchPenaltyPayload)
+
+	orphanPenalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-orphan",
+		EvidenceID:      "evidence-missing",
+		SlashBasisPoint: 5,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	orphanPenaltyPayload, err := json.Marshal(orphanPenalty)
+	if err != nil {
+		t.Fatalf("marshal orphan penalty: %v", err)
+	}
+	rawStore.Set([]byte("penalty/penalty-orphan"), orphanPenaltyPayload)
+
+	goodPenalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-good",
+		EvidenceID:      goodEvidence.EvidenceID,
+		SlashBasisPoint: 20,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	store.UpsertPenalty(goodPenalty)
+
+	if _, ok := store.GetPenalty("penalty-key"); ok {
+		t.Fatal("expected penalty key/id mismatch to be rejected")
+	}
+	if _, ok := store.GetPenalty("penalty-orphan"); ok {
+		t.Fatal("expected orphan penalty to be rejected")
+	}
+
+	penaltyList := store.ListPenalties()
+	if len(penaltyList) != 1 {
+		t.Fatalf("expected only one valid penalty, got %d", len(penaltyList))
+	}
+	if penaltyList[0].PenaltyID != goodPenalty.PenaltyID {
+		t.Fatalf("expected listed penalty id %q, got %q", goodPenalty.PenaltyID, penaltyList[0].PenaltyID)
+	}
+}
+
 func TestKVStoreInvalidPayloadsAreSafeOnGetAndList(t *testing.T) {
 	t.Parallel()
 
@@ -81,12 +169,13 @@ func TestKVStoreInvalidPayloadsAreSafeOnGetAndList(t *testing.T) {
 	}
 
 	goodEvidence := types.SlashEvidence{
-		EvidenceID: "evidence-good",
-		SessionID:  "sess-good",
-		ProviderID: "provider-good",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-good"),
-		Status:     chaintypes.ReconciliationSubmitted,
+		EvidenceID:    "evidence-good",
+		SessionID:     "sess-good",
+		ProviderID:    "provider-good",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-good"),
+		Status:        chaintypes.ReconciliationSubmitted,
 	}
 	goodPenalty := types.PenaltyDecision{
 		PenaltyID:       "penalty-good",
@@ -120,11 +209,12 @@ func TestNewKVStoreNilFallbackAndPrefixIsolation(t *testing.T) {
 	store := NewKVStore(nil)
 
 	evidence := types.SlashEvidence{
-		EvidenceID: "evidence-fallback",
-		ProviderID: "provider-fallback",
-		Kind:       types.EvidenceKindObjective,
-		ProofHash:  testSHAProof("proof-fallback"),
-		Status:     chaintypes.ReconciliationPending,
+		EvidenceID:    "evidence-fallback",
+		ProviderID:    "provider-fallback",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-fallback"),
+		Status:        chaintypes.ReconciliationPending,
 	}
 	penalty := types.PenaltyDecision{
 		PenaltyID:       "penalty-fallback",

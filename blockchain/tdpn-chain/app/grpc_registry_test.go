@@ -13,6 +13,7 @@ import (
 	vpnslashingpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnslashing/v1"
 	vpnsponsorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnsponsor/v1"
 	vpnvalidatorpb "github.com/tdpn/tdpn-chain/proto/gen/go/tdpn/vpnvalidator/v1"
+	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -35,7 +36,15 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 	defer cancel()
 
 	scaffold := NewChainScaffold()
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(func(
+		ctx context.Context,
+		req any,
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (any, error) {
+		_ = info
+		return handler(sponsormodule.WithCurrentTimeUnix(ctx, time.Now().Unix()), req)
+	}))
 	if err := scaffold.RegisterGRPCServices(grpcServer); err != nil {
 		t.Fatalf("register grpc services: %v", err)
 	}

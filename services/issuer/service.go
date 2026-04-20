@@ -3,6 +3,7 @@ package issuer
 import (
 	"context"
 	"crypto/ed25519"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -861,7 +862,7 @@ func (s *Service) handleSponsorReserve(w http.ResponseWriter, r *http.Request) {
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.Currency = strings.TrimSpace(req.Currency)
 	if req.ReservationID == "" {
-		req.ReservationID = fmt.Sprintf("sres-%d", time.Now().UnixNano())
+		req.ReservationID = randomID("sres-", 12)
 	}
 	if err := s.validateSponsorReserveInput(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -2238,7 +2239,7 @@ func (s *Service) verifySignedAdminRequest(r *http.Request) error {
 	if ts < now-windowSec || ts > now+windowSec {
 		return fmt.Errorf("admin signature timestamp outside allowed window")
 	}
-	body, err := adminauth.ReadBodyPreserve(r)
+	body, err := adminauth.ReadBodyPreserveWithLimit(r, issueTokenRequestMaxBytes)
 	if err != nil {
 		return fmt.Errorf("read body: %w", err)
 	}
@@ -2722,7 +2723,7 @@ func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience
 		CNFEd25519: strings.TrimSpace(cnfPubKey),
 		Tier:       clampTier(tier),
 		ExpiryUnix: expires.Unix(),
-		TokenID:    fmt.Sprintf("%d", time.Now().UnixNano()),
+		TokenID:    randomID("", 18),
 		ExitScope:  exitScope,
 	}
 
@@ -2756,7 +2757,7 @@ func baseProviderClaims(issuerID string, subject string, keyEpoch int64, tier in
 		CNFEd25519: strings.TrimSpace(cnfPubKey),
 		Tier:       clampTier(tier),
 		ExpiryUnix: expires.Unix(),
-		TokenID:    fmt.Sprintf("%d", time.Now().UnixNano()),
+		TokenID:    randomID("", 18),
 	}
 	return claims
 }
@@ -3272,9 +3273,19 @@ func anonymousCredentialPresentationID(issuerID string, credentialID string, tok
 }
 
 func defaultCredentialID() string {
-	raw := fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
-	sum := sha256.Sum256([]byte(raw))
-	return base64.RawURLEncoding.EncodeToString(sum[:18])
+	return randomID("", 18)
+}
+
+func randomID(prefix string, n int) string {
+	if n <= 0 {
+		n = 16
+	}
+	buf := make([]byte, n)
+	if _, err := cryptorand.Read(buf); err != nil {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%d-%d-%s", time.Now().UnixNano(), os.Getpid(), prefix)))
+		copy(buf, sum[:])
+	}
+	return prefix + base64.RawURLEncoding.EncodeToString(buf)
 }
 
 func (s *Service) saveEpochState() error {

@@ -335,9 +335,10 @@ func TestSlashingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	}
 
 	evidence := slashingtypes.SlashEvidence{
-		EvidenceID: "ev-query-1",
-		Kind:       slashingtypes.EvidenceKindObjective,
-		ProofHash:  "sha256:98c28e7336b1709232b3cf6d5a5af8c4d0a779fe32360f37d8a1c832f03e5cbf",
+		EvidenceID:    "ev-query-1",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     "sha256:98c28e7336b1709232b3cf6d5a5af8c4d0a779fe32360f37d8a1c832f03e5cbf",
 	}
 	if _, err := msgServer.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: evidence}); err != nil {
 		t.Fatalf("expected submit evidence to succeed, got %v", err)
@@ -389,9 +390,10 @@ func TestSlashingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	}
 
 	anotherEvidence := slashingtypes.SlashEvidence{
-		EvidenceID: "ev-query-0",
-		Kind:       slashingtypes.EvidenceKindObjective,
-		ProofHash:  "sha256:8df34bb962577b90d574a51ed2ca75759f1f2a17e6f59f8adf173808261ed7e6",
+		EvidenceID:    "ev-query-0",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     "sha256:8df34bb962577b90d574a51ed2ca75759f1f2a17e6f59f8adf173808261ed7e6",
 	}
 	if _, err := msgServer.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: anotherEvidence}); err != nil {
 		t.Fatalf("expected submit second evidence to succeed, got %v", err)

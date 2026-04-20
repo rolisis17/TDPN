@@ -24,3 +24,56 @@ func TestNewFileStoreRejectsInvalidEvidenceSnapshot(t *testing.T) {
 		t.Fatalf("expected invalid evidence validation error, got: %v", err)
 	}
 }
+
+func TestNewFileStoreRejectsEvidenceKeyIDMismatch(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "vpnslashing.json")
+	payload := `{"evidence":{"evidence-key":{"EvidenceID":"different-id","ProviderID":"provider-1","Kind":"objective","ProofHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","ViolationType":"double-sign"}}}`
+	if err := os.WriteFile(storePath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write seeded snapshot: %v", err)
+	}
+
+	_, err := NewFileStore(storePath)
+	if err == nil {
+		t.Fatal("expected evidence key/id mismatch to fail")
+	}
+	if !strings.Contains(err.Error(), "does not match record id") {
+		t.Fatalf("expected key/id mismatch validation error, got: %v", err)
+	}
+}
+
+func TestNewFileStoreRejectsPenaltyReferencingMissingEvidence(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "vpnslashing.json")
+	payload := `{
+  "evidence": {
+    "evidence-1": {
+      "EvidenceID":"evidence-1",
+      "ProviderID":"provider-1",
+      "Kind":"objective",
+      "ProofHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ViolationType":"double-sign"
+    }
+  },
+  "penalties": {
+    "penalty-1": {
+      "PenaltyID":"penalty-1",
+      "EvidenceID":"evidence-missing",
+      "SlashBasisPoint":10
+    }
+  }
+}`
+	if err := os.WriteFile(storePath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write seeded snapshot: %v", err)
+	}
+
+	_, err := NewFileStore(storePath)
+	if err == nil {
+		t.Fatal("expected penalty reference to missing evidence to fail")
+	}
+	if !strings.Contains(err.Error(), "references missing evidence") {
+		t.Fatalf("expected missing evidence reference validation error, got: %v", err)
+	}
+}

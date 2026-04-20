@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -159,6 +160,9 @@ func (s *FileStore) load() error {
 		if err != nil {
 			return fmt.Errorf("validate penalty snapshot: %w", err)
 		}
+		if err := validatePenaltyEvidenceReferences(penalties, s.evidence); err != nil {
+			return fmt.Errorf("validate penalty snapshot: %w", err)
+		}
 		s.penalties = penalties
 	}
 	return nil
@@ -224,15 +228,30 @@ func syncDirectory(path string) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		// Windows commonly rejects directory Sync with access-denied; best-effort durability
+		// still holds because the temp file has already been fsynced and renamed atomically.
+		if runtime.GOOS == "windows" && errors.Is(err, os.ErrPermission) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func buildEvidenceSnapshotMap(input map[string]types.SlashEvidence) (map[string]types.SlashEvidence, error) {
 	loaded := make(map[string]types.SlashEvidence, len(input))
 	for key, record := range input {
+		expectedID := strings.TrimSpace(key)
+		if expectedID == "" {
+			return nil, fmt.Errorf("invalid evidence key: key is empty")
+		}
 		normalized := normalizeEvidence(record)
 		if err := normalized.ValidateBasic(); err != nil {
 			return nil, fmt.Errorf("invalid evidence %q: %w", key, err)
+		}
+		if strings.TrimSpace(normalized.EvidenceID) != expectedID {
+			return nil, fmt.Errorf("evidence key %q does not match record id %q", key, normalized.EvidenceID)
 		}
 		if existing, ok := loaded[normalized.EvidenceID]; ok && !slashEvidenceRecordsEqual(existing, normalized) {
 			return nil, fmt.Errorf("conflicting evidence entries for id %q", normalized.EvidenceID)
@@ -245,9 +264,16 @@ func buildEvidenceSnapshotMap(input map[string]types.SlashEvidence) (map[string]
 func buildPenaltySnapshotMap(input map[string]types.PenaltyDecision) (map[string]types.PenaltyDecision, error) {
 	loaded := make(map[string]types.PenaltyDecision, len(input))
 	for key, record := range input {
+		expectedID := strings.TrimSpace(key)
+		if expectedID == "" {
+			return nil, fmt.Errorf("invalid penalty key: key is empty")
+		}
 		normalized := normalizePenalty(record)
 		if err := normalized.ValidateBasic(); err != nil {
 			return nil, fmt.Errorf("invalid penalty %q: %w", key, err)
+		}
+		if strings.TrimSpace(normalized.PenaltyID) != expectedID {
+			return nil, fmt.Errorf("penalty key %q does not match record id %q", key, normalized.PenaltyID)
 		}
 		if existing, ok := loaded[normalized.PenaltyID]; ok && !penaltyRecordsEqual(existing, normalized) {
 			return nil, fmt.Errorf("conflicting penalty entries for id %q", normalized.PenaltyID)
@@ -255,4 +281,23 @@ func buildPenaltySnapshotMap(input map[string]types.PenaltyDecision) (map[string
 		loaded[normalized.PenaltyID] = normalized
 	}
 	return loaded, nil
+}
+
+func validatePenaltyEvidenceReferences(
+	penalties map[string]types.PenaltyDecision,
+	evidence map[string]types.SlashEvidence,
+) error {
+	if len(penalties) == 0 {
+		return nil
+	}
+	for penaltyID, penalty := range penalties {
+		evidenceID := strings.TrimSpace(penalty.EvidenceID)
+		if evidenceID == "" {
+			return fmt.Errorf("penalty %q has empty evidence id", penaltyID)
+		}
+		if _, ok := evidence[evidenceID]; !ok {
+			return fmt.Errorf("penalty %q references missing evidence %q", penaltyID, evidenceID)
+		}
+	}
+	return nil
 }

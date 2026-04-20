@@ -141,7 +141,7 @@ func TestGovernanceMsgServer_AccessorAndFlow(t *testing.T) {
 
 	action := governancetypes.GovernanceAuditAction{
 		ActionID:        "action-msg-1",
-		Action:          "policy.override",
+		Action:          "admin_set_policy",
 		Actor:           "bootstrap-multisig",
 		Reason:          "emergency rollback",
 		EvidencePointer: "obj://audit/action-msg-1",

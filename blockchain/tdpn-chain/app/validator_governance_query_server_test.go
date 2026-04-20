@@ -253,7 +253,7 @@ func TestGovernanceQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 
 	action := governancetypes.GovernanceAuditAction{
 		ActionID:        "action-query-1",
-		Action:          "policy.override",
+		Action:          "admin_set_policy",
 		Actor:           "bootstrap-multisig",
 		Reason:          "emergency rollback",
 		EvidencePointer: "obj://audit/action-query-1",

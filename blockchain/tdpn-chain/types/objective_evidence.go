@@ -25,7 +25,7 @@ func IsObjectiveEvidenceFormat(value string) bool {
 			return false
 		}
 		for _, r := range path {
-			if unicode.IsSpace(r) {
+			if unicode.IsSpace(r) || unicode.IsControl(r) || r == '\\' {
 				return false
 			}
 		}

@@ -30,6 +30,8 @@ func TestIsObjectiveEvidenceFormat(t *testing.T) {
 		{name: "invalid object uri whitespace only path", value: "obj://   \t", want: false},
 		{name: "invalid object uri contains space", value: "obj://bucket/key with-space", want: false},
 		{name: "invalid object uri contains tab", value: "obj://bucket/\tkey", want: false},
+		{name: "invalid object uri contains control character", value: "obj://bucket/key\x00suffix", want: false},
+		{name: "invalid object uri contains backslash", value: "obj://bucket\\windows-path", want: false},
 	}
 
 	for _, tc := range tests {
