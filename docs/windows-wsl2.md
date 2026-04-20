@@ -175,6 +175,16 @@ Desktop bootstrap notes:
 - uses `npm.cmd` to avoid `npm.ps1` execution policy failures
 - modes: `check`, `bootstrap`, `run-api`, `run-desktop`, `run-full`
 
+PowerShell policy-safe command wrapper:
+
+Use `scripts\windows\desktop_shell.cmd` when you want a policy-safe shell entry point for desktop npm commands.
+It keeps the command path out of PowerShell's `npm.ps1` execution-policy path while preserving the same arguments.
+
+```cmd
+scripts\windows\desktop_shell.cmd npm install
+scripts\windows\desktop_shell.cmd npm run tauri -- dev
+```
+
 Windows desktop dev launcher (preferred on Windows, scaffold/non-production):
 
 ```powershell

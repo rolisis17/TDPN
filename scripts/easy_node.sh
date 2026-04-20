@@ -239,6 +239,7 @@ Usage:
   ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
@@ -253,6 +254,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -392,6 +394,7 @@ Usage:
   ./scripts/easy_node.sh desktop-native-bootstrap [--platform auto|linux|windows] [desktop_native_bootstrap args...]
   ./scripts/easy_node.sh desktop-one-click [--platform auto|linux|windows] [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-dev [--platform auto|linux|windows] [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-shell [--platform windows] [desktop_shell args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
@@ -406,6 +409,7 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-native-bootstrap-guardrails [desktop_native_bootstrap_guardrails args...]
   ./scripts/easy_node.sh desktop-windows-one-click [desktop_one_click args...]
   ./scripts/easy_node.sh desktop-windows-dev [desktop_dev args...]
+  ./scripts/easy_node.sh desktop-windows-shell [desktop_shell args...]
   ./scripts/easy_node.sh desktop-windows-packaged-run [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
@@ -8695,6 +8699,7 @@ run_desktop_wrapper_script() {
   if [[ "$script" == *.ps1 ]]; then
     local runtime=""
     local candidate=""
+    local script_for_runtime="$script"
     for candidate in powershell.exe pwsh powershell; do
       if command -v "$candidate" >/dev/null 2>&1; then
         runtime="$candidate"
@@ -8706,7 +8711,14 @@ run_desktop_wrapper_script() {
       echo "tried: powershell.exe, pwsh, powershell"
       exit 2
     fi
-    "$runtime" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$script" "$@"
+    if [[ "$runtime" == *.exe ]] && [[ "$script_for_runtime" == /mnt/* ]] && command -v wslpath >/dev/null 2>&1; then
+      local converted=""
+      converted="$(wslpath -w "$script_for_runtime" 2>/dev/null || true)"
+      if [[ -n "$converted" ]]; then
+        script_for_runtime="$converted"
+      fi
+    fi
+    "$runtime" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$script_for_runtime" "$@"
     return
   fi
   "$script" "$@"
@@ -8780,6 +8792,48 @@ desktop_windows_release_bundle() {
 desktop_windows_local_api_session() {
   local script="${DESKTOP_WINDOWS_LOCAL_API_SESSION_SCRIPT:-$ROOT_DIR/scripts/windows/local_api_session.ps1}"
   run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_windows_shell() {
+  local script="${DESKTOP_WINDOWS_SHELL_SCRIPT:-$ROOT_DIR/scripts/windows/desktop_shell.ps1}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_shell() {
+  local platform="windows"
+  local -a forwarded=()
+  local arg=""
+
+  while (($#)); do
+    arg="$1"
+    case "$arg" in
+      --platform)
+        shift
+        if (($# == 0)); then
+          echo "desktop-shell requires --platform windows" >&2
+          return 2
+        fi
+        platform="$1"
+        ;;
+      --platform=*)
+        platform="${arg#--platform=}"
+        ;;
+      *)
+        forwarded+=("$arg")
+        ;;
+    esac
+    shift
+  done
+
+  case "${platform,,}" in
+    windows)
+      desktop_windows_shell "${forwarded[@]}"
+      ;;
+    *)
+      echo "invalid --platform value for desktop-shell: $platform; expected windows" >&2
+      return 2
+      ;;
+  esac
 }
 
 desktop_generic_platform_detect() {
@@ -15876,6 +15930,10 @@ main() {
       shift
       desktop_generic_dispatch desktop-dev desktop_linux_dev desktop_windows_dev "$@"
       ;;
+    desktop-shell)
+      shift
+      desktop_shell "$@"
+      ;;
     desktop-packaged-run)
       shift
       desktop_generic_dispatch desktop-packaged-run desktop_linux_packaged_run desktop_windows_packaged_run "$@"
@@ -15931,6 +15989,10 @@ main() {
     desktop-windows-dev)
       shift
       desktop_windows_dev "$@"
+      ;;
+    desktop-windows-shell)
+      shift
+      desktop_windows_shell "$@"
       ;;
     desktop-windows-packaged-run)
       shift

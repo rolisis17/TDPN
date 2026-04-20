@@ -141,6 +141,15 @@ Windows PowerShell policy note:
 - the `.cmd` launchers apply process-scope `ExecutionPolicy Bypass` automatically for the run
 - direct fallback remains available: `npm.cmd install` and `npm.cmd run tauri -- dev`
 
+PowerShell policy-safe command wrapper:
+
+Use `scripts\windows\desktop_shell.cmd` for a policy-safe desktop shell entry point when you need to run npm commands without tripping `npm.ps1` execution-policy issues.
+
+```cmd
+scripts\windows\desktop_shell.cmd npm install
+scripts\windows\desktop_shell.cmd npm run tauri -- dev
+```
+
 Windows-native local API session (no WSL shim):
 
 ```powershell
