@@ -924,6 +924,67 @@ if ! rg -q -- 'tab(Server|Client)El\.disabled[[:space:]]*=' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing tab disabled assignment markers in $JS_FILE"
   exit 1
 fi
+if ! grep -qF 'function requireClientControlEligibility(actionLabel)' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing client control eligibility guard helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function requireServerTabEligibility(actionLabel)' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server tab eligibility guard helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function requireServerLifecycleEligibility(actionLabel)' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server lifecycle eligibility guard helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'const reason = computeClientLockHintText();' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing client lock hint reason marker in guard helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'const reason = computeServerLockHintText();' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server lock hint reason marker in guard helper in $JS_FILE"
+  exit 1
+fi
+
+assert_handler_guard_marker() {
+  local handler_start="$1"
+  local guard_marker="$2"
+  local label="$3"
+  local handler_snippet
+  handler_snippet="$(sed -n "/$handler_start/,/^});/p" "$JS_FILE")"
+  if [[ -z "$handler_snippet" ]]; then
+    echo "desktop scaffold contract failed: missing handler block for $label in $JS_FILE"
+    exit 1
+  fi
+  if ! printf '%s\n' "$handler_snippet" | grep -qF "$guard_marker"; then
+    echo "desktop scaffold contract failed: missing handler-level lock guard marker '$guard_marker' for $label in $JS_FILE"
+    exit 1
+  fi
+}
+
+assert_handler_guard_marker \
+  'byId("register_client_btn").addEventListener("click", async () => {' \
+  'requireClientControlEligibility("Register client profile")' \
+  "register_client_btn"
+assert_handler_guard_marker \
+  'byId("connect_btn").addEventListener("click", async () => {' \
+  'requireClientControlEligibility("Connect")' \
+  "connect_btn"
+assert_handler_guard_marker \
+  'byId("service_status_btn").addEventListener("click", async () => {' \
+  'requireServerTabEligibility("Check service status")' \
+  "service_status_btn"
+assert_handler_guard_marker \
+  'byId("service_start_btn").addEventListener("click", async () => {' \
+  'requireServerLifecycleEligibility("Start service")' \
+  "service_start_btn"
+assert_handler_guard_marker \
+  'byId("service_stop_btn").addEventListener("click", async () => {' \
+  'requireServerLifecycleEligibility("Stop service")' \
+  "service_stop_btn"
+assert_handler_guard_marker \
+  'byId("service_restart_btn").addEventListener("click", async () => {' \
+  'requireServerLifecycleEligibility("Restart service")' \
+  "service_restart_btn"
 
 if grep -qF 'id="client_lock_hint"' "$DESKTOP_HTML_FILE"; then
   if ! rg -q -- 'clientLockHintEl|client_lock_hint' "$JS_FILE"; then

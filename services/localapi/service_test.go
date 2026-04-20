@@ -1644,13 +1644,25 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true
 		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{"https://dir.example:8081"},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
 		svc.gpmState.putSession(gpmSession{
 			Token:              "gpm-connect-session-token",
 			WalletAddress:      "cosmos1connectsession",
 			WalletProvider:     "keplr",
 			Role:               "client",
-			CreatedAt:          time.Now().UTC(),
-			ExpiresAt:          time.Now().UTC().Add(time.Hour),
+			CreatedAt:          now,
+			ExpiresAt:          now.Add(time.Hour),
 			BootstrapDirectory: "https://dir.example:8081",
 			InviteKey:          "wallet:cosmos1connectsession",
 		})
@@ -1678,15 +1690,27 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true
 		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
 		firstBootstrap := "https://dir-first.example:8081"
 		secondBootstrap := "https://dir-second.example:8081"
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{firstBootstrap, secondBootstrap},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
 		svc.gpmState.putSession(gpmSession{
 			Token:                "gpm-connect-session-failover-token",
 			WalletAddress:        "cosmos1connectfailover",
 			WalletProvider:       "keplr",
 			Role:                 "client",
-			CreatedAt:            time.Now().UTC(),
-			ExpiresAt:            time.Now().UTC().Add(time.Hour),
+			CreatedAt:            now,
+			ExpiresAt:            now.Add(time.Hour),
 			BootstrapDirectory:   firstBootstrap,
 			BootstrapDirectories: []string{firstBootstrap, secondBootstrap},
 			InviteKey:            "wallet:cosmos1connectfailover",
@@ -1715,6 +1739,112 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		mustFlagValue(t, cmds[2], "--bootstrap-directory", secondBootstrap)
 		mustFlagValue(t, cmds[3], "--bootstrap-directory", secondBootstrap)
 	})
+
+	t.Run("session token fails closed when manifest drift revokes all registered bootstrap directories", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
+		manifestBootstrap := "https://dir-trusted-current.example:8081"
+		manifestHits := 0
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			manifestHits++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{manifestBootstrap},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
+
+		svc.gpmState.putSession(gpmSession{
+			Token:                "gpm-connect-session-drift-token",
+			WalletAddress:        "cosmos1connectdrift",
+			WalletProvider:       "keplr",
+			Role:                 "client",
+			CreatedAt:            now,
+			ExpiresAt:            now.Add(time.Hour),
+			BootstrapDirectory:   "https://dir-revoked-primary.example:8081",
+			BootstrapDirectories: []string{"https://dir-revoked-primary.example:8081", "https://dir-revoked-secondary.example:8081"},
+			InviteKey:            "wallet:cosmos1connectdrift",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-session-drift-token"
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "no registered bootstrap_directory remains trusted") {
+			t.Fatalf("error=%q want trusted-manifest drift guidance", got)
+		}
+		if manifestHits == 0 {
+			t.Fatalf("expected manifest revalidation to be attempted")
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("manifest drift rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("session token connect succeeds when at least one registered bootstrap directory remains trusted", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
+		revokedBootstrap := "https://dir-revoked-primary.example:8081"
+		trustedBootstrap := "https://dir-trusted-secondary.example:8081"
+		manifestHits := 0
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			manifestHits++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{trustedBootstrap, "https://dir-new-third.example:8081"},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
+
+		svc.gpmState.putSession(gpmSession{
+			Token:                "gpm-connect-session-partial-trust-token",
+			WalletAddress:        "cosmos1connectpartialtrust",
+			WalletProvider:       "keplr",
+			Role:                 "client",
+			CreatedAt:            now,
+			ExpiresAt:            now.Add(time.Hour),
+			BootstrapDirectory:   revokedBootstrap,
+			BootstrapDirectories: []string{revokedBootstrap, trustedBootstrap},
+			InviteKey:            "wallet:cosmos1connectpartialtrust",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-session-partial-trust-token",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["bootstrap_directory"].(string); got != trustedBootstrap {
+			t.Fatalf("bootstrap_directory=%q want=%q payload=%v", got, trustedBootstrap, payload)
+		}
+		if manifestHits == 0 {
+			t.Fatalf("expected manifest revalidation to be attempted")
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", trustedBootstrap)
+	})
 }
 
 func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
@@ -1727,12 +1857,28 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		t.Setenv("LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT", "")
 		t.Setenv("SIMPLE_CLIENT_PROD_PROFILE_DEFAULT", "")
 	}
+	configureConnectManifest := func(t *testing.T, svc *Service, bootstrapDirectories ...string) {
+		t.Helper()
+		now := time.Now().UTC()
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": bootstrapDirectories,
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
+	}
 
 	t.Run("session-required mode rejects conflicting request path_profile", func(t *testing.T) {
 		resetConnectDefaultEnv(t)
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true
 		svc.gpmState = newGPMRuntimeState()
+		configureConnectManifest(t, svc, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
 			Token:              "gpm-connect-profile-conflict-token",
 			WalletAddress:      "cosmos1profileconflict",
@@ -1765,6 +1911,7 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		resetConnectDefaultEnv(t)
 		svc, logPath := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
+		configureConnectManifest(t, svc, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
 			Token:              "gpm-connect-profile-inherit-token",
 			WalletAddress:      "cosmos1profileinherit",
@@ -1810,6 +1957,7 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		resetConnectDefaultEnv(t)
 		svc, logPath := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
+		configureConnectManifest(t, svc, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
 			Token:              "gpm-connect-profile-compat-token",
 			WalletAddress:      "cosmos1profilecompat",

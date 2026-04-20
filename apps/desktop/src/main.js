@@ -2704,6 +2704,39 @@ function requireSessionToken(actionLabel) {
   return true;
 }
 
+function requireClientControlEligibility(actionLabel) {
+  if (isClientTabVisibleRole()) {
+    return true;
+  }
+  const reason = computeClientLockHintText();
+  print("validation", `${actionLabel} is unavailable: ${reason}`);
+  return false;
+}
+
+function requireServerTabEligibility(actionLabel) {
+  if (isServerTabVisibleRole()) {
+    return true;
+  }
+  const reason = computeServerLockHintText();
+  print("validation", `${actionLabel} is unavailable: ${reason}`);
+  return false;
+}
+
+function requireServerLifecycleEligibility(actionLabel) {
+  if (!requireServerTabEligibility(actionLabel)) {
+    return false;
+  }
+  const serviceMutationsConfigured = state.serverReadiness?.serviceMutationsConfigured !== false;
+  const mutationsEnabled =
+    state.serviceMutationsAllowed && serviceMutationsConfigured && isServerMutationRoleEligible();
+  if (mutationsEnabled) {
+    return true;
+  }
+  const reason = computeServerLockHintText();
+  print("validation", `${actionLabel} is unavailable: ${reason}`);
+  return false;
+}
+
 function operatorModerationReason() {
   return operatorReasonEl.value.trim();
 }
@@ -3354,6 +3387,9 @@ byId("audit_recent_btn").addEventListener("click", async () => {
 });
 
 byId("register_client_btn").addEventListener("click", async () => {
+  if (!requireClientControlEligibility("Register client profile")) {
+    return;
+  }
   if (!state.sessionToken) {
     print("validation", "session_token is required; sign in first");
     return;
@@ -3499,6 +3535,9 @@ byId("reject_operator_btn").addEventListener("click", async () => {
 });
 
 byId("connect_btn").addEventListener("click", async () => {
+  if (!requireClientControlEligibility("Connect")) {
+    return;
+  }
   const request = connectPayload();
   if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
     const hint = state.connectRequireSession
@@ -3547,6 +3586,9 @@ byId("health_btn").addEventListener("click", async () => {
 });
 
 byId("set_profile_btn").addEventListener("click", async () => {
+  if (!requireServerLifecycleEligibility("Set profile")) {
+    return;
+  }
   const request = { path_profile: byId("set_profile").value };
   await call("set_profile", "control_set_profile", { request });
 });
@@ -3556,10 +3598,16 @@ byId("update_btn").addEventListener("click", async () => {
 });
 
 byId("service_status_btn").addEventListener("click", async () => {
+  if (!requireServerTabEligibility("Check service status")) {
+    return;
+  }
   await call("service_status", "control_service_status");
 });
 
 byId("service_start_btn").addEventListener("click", async () => {
+  if (!requireServerLifecycleEligibility("Start service")) {
+    return;
+  }
   if (!requireSessionToken("start the service")) {
     return;
   }
@@ -3567,6 +3615,9 @@ byId("service_start_btn").addEventListener("click", async () => {
 });
 
 byId("service_stop_btn").addEventListener("click", async () => {
+  if (!requireServerLifecycleEligibility("Stop service")) {
+    return;
+  }
   if (!requireSessionToken("stop the service")) {
     return;
   }
@@ -3574,6 +3625,9 @@ byId("service_stop_btn").addEventListener("click", async () => {
 });
 
 byId("service_restart_btn").addEventListener("click", async () => {
+  if (!requireServerLifecycleEligibility("Restart service")) {
+    return;
+  }
   if (!requireSessionToken("restart the service")) {
     return;
   }

@@ -210,14 +210,35 @@ write_manifest_cache() {
   local source_url="$2"
   local bootstrap_directory="$3"
   local signature_verified="$4"
+  write_manifest_cache_with_directories "$cache_path" "$source_url" "$signature_verified" "$bootstrap_directory"
+}
+
+write_manifest_cache_with_directories() {
+  local cache_path="$1"
+  local source_url="$2"
+  local signature_verified="$3"
+  shift 3
+  local bootstrap_directories_json="[]"
+
+  if [[ "$#" -eq 0 ]]; then
+    echo "write_manifest_cache_with_directories requires at least one bootstrap directory"
+    exit 1
+  fi
+
+  bootstrap_directories_json="$(printf '%s\n' "$@" | jq -R 'select(length > 0)' | jq -s '.')"
+  if [[ -z "$bootstrap_directories_json" || "$bootstrap_directories_json" == "[]" ]]; then
+    echo "write_manifest_cache_with_directories received only empty bootstrap directories"
+    exit 1
+  fi
+
   local fetched_at_utc=""
   fetched_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   jq -n \
     --arg fetched_at_utc "$fetched_at_utc" \
     --arg source_url "$source_url" \
-    --arg bootstrap_directory "$bootstrap_directory" \
     --argjson signature_verified "$signature_verified" \
+    --argjson bootstrap_directories "$bootstrap_directories_json" \
     '{
       version: 1,
       fetched_at_utc: $fetched_at_utc,
@@ -227,7 +248,7 @@ write_manifest_cache() {
         version: 1,
         generated_at_utc: "2026-01-01T00:00:00Z",
         expires_at_utc: "2099-01-01T00:00:00Z",
-        bootstrap_directories: [$bootstrap_directory]
+        bootstrap_directories: $bootstrap_directories
       }
     }' >"$cache_path"
 }
@@ -521,6 +542,58 @@ if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
   echo "expected fail-closed connect rejection to avoid invoking client-vpn-up"
   cat "$CALLS_FILE"
   cat "$connect_conflict_body"
+  exit 1
+fi
+
+echo "[local-control-api-gpm-manifest-trust] connect-time session bootstrap trust revalidation fails closed when manifest drops session directories"
+cache_revalidation_blocked_directory="https://directory.cache.revalidation.blocked.globalprivatemesh.example:8081"
+write_manifest_cache "$cache_success_path" "$cache_manifest_url" "$cache_revalidation_blocked_directory" true
+
+: >"$CALLS_FILE"
+connect_revalidation_reject_body="$TMP_DIR/connect_revalidation_reject.json"
+connect_revalidation_reject_code="$(curl -sS -o "$connect_revalidation_reject_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_ok}\",\"run_preflight\":false}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_revalidation_reject_code" != "403" ]]; then
+  echo "expected connect-time session bootstrap trust revalidation rejection to fail with 403 when manifest drops all registered directories, got $connect_revalidation_reject_code"
+  cat "$connect_revalidation_reject_body"
+  exit 1
+fi
+assert_json_expr \
+  "$connect_revalidation_reject_body" \
+  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("no registered bootstrap_directory remains trusted by the current manifest"))' \
+  "expected connect-time session bootstrap trust revalidation rejection message when manifest drops all registered directories"
+if grep -E '^client-vpn-up(\t|$)' "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected connect-time revalidation rejection to fail closed without invoking client-vpn-up"
+  cat "$CALLS_FILE"
+  cat "$connect_revalidation_reject_body"
+  exit 1
+fi
+
+echo "[local-control-api-gpm-manifest-trust] connect-time session bootstrap trust revalidation proceeds when manifest retains at least one session directory"
+cache_revalidation_extra_directory="https://directory.cache.revalidation.extra.globalprivatemesh.example:8081"
+write_manifest_cache_with_directories \
+  "$cache_success_path" \
+  "$cache_manifest_url" \
+  true \
+  "$cache_revalidation_extra_directory" \
+  "$cache_bootstrap_directory"
+
+: >"$CALLS_FILE"
+connect_revalidation_ok_body="$TMP_DIR/connect_revalidation_ok.json"
+connect_revalidation_ok_code="$(curl -sS -o "$connect_revalidation_ok_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${LOCAL_API_BASE}" --data "{\"session_token\":\"${session_token_cache_ok}\",\"run_preflight\":false}" "${LOCAL_API_BASE}/v1/connect")"
+if [[ "$connect_revalidation_ok_code" != "200" ]]; then
+  echo "expected connect-time session bootstrap trust revalidation to proceed with 200 when manifest retains a registered directory, got $connect_revalidation_ok_code"
+  cat "$connect_revalidation_ok_body"
+  exit 1
+fi
+if ! jq -e --arg expected_bootstrap "$cache_bootstrap_directory" '.ok == true and .stage == "connect" and .bootstrap_directory == $expected_bootstrap' "$connect_revalidation_ok_body" >/dev/null; then
+  echo "expected successful connect-time revalidation response markers"
+  cat "$connect_revalidation_ok_body"
+  exit 1
+fi
+if ! grep -F "client-vpn-up"$'\t'"--bootstrap-directory"$'\t'"$cache_bootstrap_directory" "$CALLS_FILE" >/dev/null 2>&1; then
+  echo "expected successful connect-time revalidation to invoke client-vpn-up with a still-trusted session bootstrap directory"
+  cat "$CALLS_FILE"
+  cat "$connect_revalidation_ok_body"
   exit 1
 fi
 stop_local_api

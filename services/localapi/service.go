@@ -737,7 +737,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	sessionBootstrapDirectories := []string{}
 	var sessionResolveErr error
 	if in.SessionToken != "" {
-		resolvedBootstrapDirectories, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(in.SessionToken)
+		resolvedBootstrapDirectories, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(r.Context(), in.SessionToken)
 		if resolveErr == nil {
 			if in.BootstrapDirectory == "" {
 				sessionBootstrapDirectories = append(sessionBootstrapDirectories, resolvedBootstrapDirectories...)
@@ -760,6 +760,12 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(sessionResolveErr, errConnectSessionNotRegistered):
 			statusCode = http.StatusForbidden
 			errMsg = "session_token is valid but not registered for connect; register the client profile first"
+		case errors.Is(sessionResolveErr, errConnectSessionBootstrapRevoked):
+			statusCode = http.StatusForbidden
+			errMsg = "session_token is valid but no registered bootstrap_directory remains trusted by the current manifest; re-register the client profile"
+		case errors.Is(sessionResolveErr, errConnectSessionBootstrapTrustError):
+			statusCode = http.StatusBadGateway
+			errMsg = "failed to revalidate session bootstrap directories against the trusted manifest"
 		case errors.Is(sessionResolveErr, errConnectSessionTokenEmpty):
 			errMsg = "session_token is required for connect"
 		}

@@ -2433,6 +2433,13 @@ function syncClientRegistrationAction(readiness) {
   registerClientBtnEl.removeAttribute("title");
 }
 
+function assertClientRegistrationActionAllowed() {
+  const readiness = computeClientReadiness();
+  if (readiness.state === "not_signed_in" || readiness.state === "role_locked") {
+    throw new Error(`Client registration is unavailable: ${readiness.guidanceText}`);
+  }
+}
+
 function computeClientReadiness() {
   const token = byId("session_token").value.trim();
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
@@ -3293,8 +3300,20 @@ function buildConnectRequest() {
   return request;
 }
 
+function assertConnectActionAllowed(request) {
+  const sessionToken = typeof request?.session_token === "string" ? request.session_token.trim() : "";
+  if (!sessionToken) {
+    return;
+  }
+  const readiness = computeClientReadiness();
+  if (!isClientTabVisibleRole() || readiness.state === "role_locked") {
+    throw new Error(`Connect is unavailable: ${readiness.guidanceText}`);
+  }
+}
+
 async function requestConnectControl() {
   const request = buildConnectRequest();
+  assertConnectActionAllowed(request);
   if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
     throw new Error(connectValidationHint());
   }
@@ -3317,11 +3336,19 @@ async function requestServiceLifecycle(action) {
   if (!normalizedAction || !["start", "stop", "restart"].includes(normalizedAction)) {
     throw new Error("service lifecycle action must be start, stop, or restart.");
   }
+  assertServiceLifecycleActionAllowed(normalizedAction);
   const sessionToken = byId("session_token").value.trim();
   if (!sessionToken) {
     throw new Error("session_token is required for server lifecycle actions. Sign in first.");
   }
   return post(`/v1/gpm/service/${normalizedAction}`, { session_token: sessionToken });
+}
+
+function assertServiceLifecycleActionAllowed(action) {
+  const state = computeServerLifecycleControlState();
+  if (state.disabled) {
+    throw new Error(`${action} is unavailable: ${state.hint || "Server lifecycle controls are locked by policy."}`);
+  }
 }
 
 async function requestAuditRecent() {
@@ -3676,6 +3703,7 @@ byId("audit_recent_btn").addEventListener("click", () =>
 
 byId("register_client_btn").addEventListener("click", () =>
   run("client_register", async () => {
+    assertClientRegistrationActionAllowed();
     const request = {
       session_token: byId("session_token").value.trim(),
       path_profile: byId("path_profile").value

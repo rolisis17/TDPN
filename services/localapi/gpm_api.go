@@ -44,6 +44,8 @@ var (
 	errConnectSessionTokenEmpty            = errors.New("session token is empty")
 	errConnectSessionTokenInvalidOrExpired = errors.New("session token is missing or expired")
 	errConnectSessionNotRegistered         = errors.New("session is not fully registered for connect")
+	errConnectSessionBootstrapTrustError   = errors.New("session bootstrap trust revalidation failed")
+	errConnectSessionBootstrapRevoked      = errors.New("session bootstrap directories are no longer trusted")
 )
 
 type gpmRuntimeState struct {
@@ -456,7 +458,7 @@ func (s *Service) requireGPMServiceMutationAuth(w http.ResponseWriter, r *http.R
 	return true
 }
 
-func (s *Service) resolveConnectSecretsFromSession(sessionToken string) ([]string, string, string, error) {
+func (s *Service) resolveConnectSecretsFromSession(ctx context.Context, sessionToken string) ([]string, string, string, error) {
 	sessionToken = strings.TrimSpace(sessionToken)
 	if sessionToken == "" {
 		return nil, "", "", errConnectSessionTokenEmpty
@@ -466,10 +468,44 @@ func (s *Service) resolveConnectSecretsFromSession(sessionToken string) ([]strin
 		return nil, "", "", errConnectSessionTokenInvalidOrExpired
 	}
 	bootstrapDirectories := sessionConnectBootstrapDirectories(session)
-	if len(bootstrapDirectories) == 0 || strings.TrimSpace(session.InviteKey) == "" {
+	inviteKey := strings.TrimSpace(session.InviteKey)
+	if len(bootstrapDirectories) == 0 || inviteKey == "" {
 		return nil, "", "", errConnectSessionNotRegistered
 	}
-	return bootstrapDirectories, session.InviteKey, strings.TrimSpace(session.PathProfile), nil
+	revalidatedBootstrapDirectories, err := s.revalidateSessionBootstrapDirectoriesForConnect(ctx, bootstrapDirectories)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if len(revalidatedBootstrapDirectories) == 0 {
+		return nil, "", "", errConnectSessionBootstrapRevoked
+	}
+	return revalidatedBootstrapDirectories, inviteKey, strings.TrimSpace(session.PathProfile), nil
+}
+
+func (s *Service) revalidateSessionBootstrapDirectoriesForConnect(ctx context.Context, sessionBootstrapDirectories []string) ([]string, error) {
+	sessionBootstrapDirectories = normalizeBootstrapDirectories(sessionBootstrapDirectories)
+	if len(sessionBootstrapDirectories) == 0 {
+		return nil, nil
+	}
+	manifest, _, _, err := s.resolveBootstrapManifest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errConnectSessionBootstrapTrustError, err)
+	}
+	trustedDirectories := normalizeBootstrapDirectories(manifest.BootstrapDirectories)
+	if len(trustedDirectories) == 0 {
+		return nil, nil
+	}
+	trustedSet := make(map[string]struct{}, len(trustedDirectories))
+	for _, trustedDirectory := range trustedDirectories {
+		trustedSet[trustedDirectory] = struct{}{}
+	}
+	revalidated := make([]string, 0, len(sessionBootstrapDirectories))
+	for _, sessionDirectory := range sessionBootstrapDirectories {
+		if _, ok := trustedSet[sessionDirectory]; ok {
+			revalidated = append(revalidated, sessionDirectory)
+		}
+	}
+	return normalizeBootstrapDirectories(revalidated), nil
 }
 
 func (s *Service) handleGPMBootstrapManifest(w http.ResponseWriter, r *http.Request) {
