@@ -3889,6 +3889,44 @@ func TestGPMServerStatus(t *testing.T) {
 		}
 		return readiness
 	}
+	getEndpointPosture := func(t *testing.T, readiness map[string]any) map[string]any {
+		t.Helper()
+		posture, _ := readiness["endpoint_posture"].(map[string]any)
+		if posture == nil {
+			t.Fatalf("endpoint_posture missing readiness=%v", readiness)
+		}
+		return posture
+	}
+	getEndpointWarnings := func(t *testing.T, readiness map[string]any) []string {
+		t.Helper()
+		rawWarnings, _ := readiness["endpoint_warnings"].([]any)
+		out := make([]string, 0, len(rawWarnings))
+		for _, raw := range rawWarnings {
+			if message, ok := raw.(string); ok && strings.TrimSpace(message) != "" {
+				out = append(out, message)
+			}
+		}
+		return out
+	}
+	mustContainWarning := func(t *testing.T, warnings []string, needle string) {
+		t.Helper()
+		for _, warning := range warnings {
+			if strings.Contains(warning, needle) {
+				return
+			}
+		}
+		t.Fatalf("missing warning containing %q warnings=%v", needle, warnings)
+	}
+	mustFloatField := func(t *testing.T, posture map[string]any, key string, want int) {
+		t.Helper()
+		gotRaw, ok := posture[key].(float64)
+		if !ok {
+			t.Fatalf("%s type=%T want float64 posture=%v", key, posture[key], posture)
+		}
+		if int(gotRaw) != want {
+			t.Fatalf("%s=%d want=%d posture=%v", key, int(gotRaw), want, posture)
+		}
+	}
 	now := time.Now().UTC()
 
 	t.Run("admin unlocked", func(t *testing.T) {
@@ -4128,6 +4166,122 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["role"].(string); got != "client" {
 			t.Fatalf("role=%q want=client payload=%v", got, payload)
 		}
+	})
+
+	t.Run("endpoint diagnostics are additive and backward compatible", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		t.Setenv("EASY_NODE_SERVER_MODE", "")
+		t.Setenv("CORE_ISSUER_URL", "")
+		t.Setenv("ISSUER_URLS", "")
+		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "")
+
+		body := `{"wallet_address":"cosmos1diagbackcompat"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		if got, _ := readiness["operator_application_status"].(string); got != "not_submitted" {
+			t.Fatalf("operator_application_status=%q want=not_submitted payload=%v", got, payload)
+		}
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); got {
+			t.Fatalf("lifecycle_actions_unlocked=%v want=false payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+		lockReason, _ := readiness["lock_reason"].(string)
+		if !strings.Contains(lockReason, "operator or admin required") {
+			t.Fatalf("lock_reason=%q want operator/admin gate payload=%v", lockReason, payload)
+		}
+		posture := getEndpointPosture(t, readiness)
+		if got, _ := posture["server_mode"].(string); got != "" {
+			t.Fatalf("server_mode=%q want empty posture=%v", got, posture)
+		}
+		mustFloatField(t, posture, "total_urls", 0)
+		mustFloatField(t, posture, "http_urls", 0)
+		mustFloatField(t, posture, "https_urls", 0)
+		if got, _ := posture["mixed_scheme"].(bool); got {
+			t.Fatalf("mixed_scheme=%v want=false posture=%v", got, posture)
+		}
+		if got, _ := posture["has_remote_http"].(bool); got {
+			t.Fatalf("has_remote_http=%v want=false posture=%v", got, posture)
+		}
+		warnings := getEndpointWarnings(t, readiness)
+		if len(warnings) != 0 {
+			t.Fatalf("endpoint_warnings=%v want empty", warnings)
+		}
+	})
+
+	t.Run("provider mode missing issuer configuration warns", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		t.Setenv("EASY_NODE_SERVER_MODE", "provider")
+		t.Setenv("CORE_ISSUER_URL", "")
+		t.Setenv("ISSUER_URLS", "")
+		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "")
+
+		body := `{"wallet_address":"cosmos1diagprovider"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		posture := getEndpointPosture(t, readiness)
+		if got, _ := posture["server_mode"].(string); got != "provider" {
+			t.Fatalf("server_mode=%q want=provider posture=%v", got, posture)
+		}
+		warnings := getEndpointWarnings(t, readiness)
+		mustContainWarning(t, warnings, "provider mode requires CORE_ISSUER_URL")
+		mustContainWarning(t, warnings, "provider mode requires ISSUER_URLS")
+	})
+
+	t.Run("authority mode missing trust configuration warns", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		t.Setenv("EASY_NODE_SERVER_MODE", "authority")
+		t.Setenv("CORE_ISSUER_URL", "https://authority.globalprivatemesh.example:8082")
+		t.Setenv("ISSUER_URLS", "")
+		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "")
+
+		body := `{"wallet_address":"cosmos1diagauthority"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		posture := getEndpointPosture(t, readiness)
+		if got, _ := posture["server_mode"].(string); got != "authority" {
+			t.Fatalf("server_mode=%q want=authority posture=%v", got, posture)
+		}
+		warnings := getEndpointWarnings(t, readiness)
+		mustContainWarning(t, warnings, "authority mode requires ISSUER_URLS")
+		mustContainWarning(t, warnings, "authority mode requires DIRECTORY_ISSUER_TRUST_URLS")
+	})
+
+	t.Run("mixed scheme remote http and core mismatch warnings", func(t *testing.T) {
+		svc := newServerStatusService(t)
+		t.Setenv("EASY_NODE_SERVER_MODE", "provider")
+		t.Setenv("CORE_ISSUER_URL", "https://core.globalprivatemesh.example:8082")
+		t.Setenv("ISSUER_URLS", "https://issuer-a.globalprivatemesh.example:8082,http://203.0.113.20:8082")
+		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "https://issuer-b.globalprivatemesh.example:8082,http://198.51.100.21:8082")
+
+		body := `{"wallet_address":"cosmos1diagmixed"}`
+		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		readiness := getReadiness(t, payload)
+		posture := getEndpointPosture(t, readiness)
+		mustFloatField(t, posture, "total_urls", 5)
+		mustFloatField(t, posture, "http_urls", 2)
+		mustFloatField(t, posture, "https_urls", 3)
+		if got, _ := posture["mixed_scheme"].(bool); !got {
+			t.Fatalf("mixed_scheme=%v want=true posture=%v", got, posture)
+		}
+		if got, _ := posture["has_remote_http"].(bool); !got {
+			t.Fatalf("has_remote_http=%v want=true posture=%v", got, posture)
+		}
+		warnings := getEndpointWarnings(t, readiness)
+		mustContainWarning(t, warnings, "CORE_ISSUER_URL is not present in ISSUER_URLS")
+		mustContainWarning(t, warnings, "CORE_ISSUER_URL is not present in DIRECTORY_ISSUER_TRUST_URLS")
+		mustContainWarning(t, warnings, "mixed HTTP/HTTPS endpoint posture detected")
+		mustContainWarning(t, warnings, "remote HTTP endpoint detected")
 	})
 
 	t.Run("explicit invalid session token returns 404", func(t *testing.T) {

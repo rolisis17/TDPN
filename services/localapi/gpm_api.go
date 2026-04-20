@@ -1043,6 +1043,7 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 			)
 		}
 	}
+	endpointPosture, endpointWarnings := gpmServerEndpointDiagnosticsFromEnv()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
@@ -1060,8 +1061,159 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 			"client_lock_reason":           clientLockReason,
 			"lock_reason":                  lockReason,
 			"unlock_actions":               unlockActions,
+			"endpoint_posture":             endpointPosture,
+			"endpoint_warnings":            endpointWarnings,
 		},
 	})
+}
+
+type gpmEndpointDiagnosticEntry struct {
+	Scheme     string
+	Host       string
+	RemoteHTTP bool
+}
+
+func gpmServerEndpointDiagnosticsFromEnv() (map[string]any, []string) {
+	serverMode := strings.ToLower(strings.TrimSpace(os.Getenv("EASY_NODE_SERVER_MODE")))
+	coreIssuerURL := strings.TrimSpace(os.Getenv("CORE_ISSUER_URL"))
+	issuerURLs := splitCSVEnvURLs(os.Getenv("ISSUER_URLS"))
+	trustURLs := splitCSVEnvURLs(os.Getenv("DIRECTORY_ISSUER_TRUST_URLS"))
+
+	endpoints := map[string]gpmEndpointDiagnosticEntry{}
+	issuerSet := map[string]struct{}{}
+	trustSet := map[string]struct{}{}
+
+	coreKey := ""
+	if key, entry, ok := gpmEndpointDiagnosticKey(coreIssuerURL); ok {
+		coreKey = key
+		endpoints[key] = entry
+	}
+	for _, rawURL := range issuerURLs {
+		if key, entry, ok := gpmEndpointDiagnosticKey(rawURL); ok {
+			issuerSet[key] = struct{}{}
+			endpoints[key] = entry
+		}
+	}
+	for _, rawURL := range trustURLs {
+		if key, entry, ok := gpmEndpointDiagnosticKey(rawURL); ok {
+			trustSet[key] = struct{}{}
+			endpoints[key] = entry
+		}
+	}
+
+	httpCount := 0
+	httpsCount := 0
+	hasRemoteHTTP := false
+	for _, entry := range endpoints {
+		switch entry.Scheme {
+		case "http":
+			httpCount++
+			if entry.RemoteHTTP {
+				hasRemoteHTTP = true
+			}
+		case "https":
+			httpsCount++
+		}
+	}
+	mixedScheme := httpCount > 0 && httpsCount > 0
+
+	endpointPosture := map[string]any{
+		"server_mode":     serverMode,
+		"total_urls":      len(endpoints),
+		"http_urls":       httpCount,
+		"https_urls":      httpsCount,
+		"mixed_scheme":    mixedScheme,
+		"has_remote_http": hasRemoteHTTP,
+	}
+
+	warnings := make([]string, 0, 8)
+	switch serverMode {
+	case "provider":
+		if coreIssuerURL == "" {
+			warnings = append(warnings, "provider mode requires CORE_ISSUER_URL; set CORE_ISSUER_URL to the authority issuer endpoint")
+		}
+		if len(issuerURLs) == 0 {
+			warnings = append(warnings, "provider mode requires ISSUER_URLS; set ISSUER_URLS to one or more authority issuer endpoints (CSV)")
+		}
+	case "authority":
+		if len(issuerURLs) == 0 {
+			warnings = append(warnings, "authority mode requires ISSUER_URLS; set ISSUER_URLS so providers can discover issuer endpoints")
+		}
+		if len(trustURLs) == 0 {
+			warnings = append(warnings, "authority mode requires DIRECTORY_ISSUER_TRUST_URLS; set DIRECTORY_ISSUER_TRUST_URLS for provider/authority trust alignment")
+		}
+	}
+	if coreKey != "" && len(issuerSet) > 0 {
+		if _, ok := issuerSet[coreKey]; !ok {
+			warnings = append(warnings, "CORE_ISSUER_URL is not present in ISSUER_URLS; align issuer endpoints so provider/authority peering stays consistent")
+		}
+	}
+	if coreKey != "" && len(trustSet) > 0 {
+		if _, ok := trustSet[coreKey]; !ok {
+			warnings = append(warnings, "CORE_ISSUER_URL is not present in DIRECTORY_ISSUER_TRUST_URLS; align trust endpoints with CORE_ISSUER_URL")
+		}
+	}
+	if mixedScheme {
+		warnings = append(warnings, "mixed HTTP/HTTPS endpoint posture detected; use HTTPS consistently for issuer/trust endpoints")
+	}
+	if hasRemoteHTTP {
+		warnings = append(warnings, "remote HTTP endpoint detected; migrate remote issuer/trust endpoints to HTTPS")
+	}
+	return endpointPosture, warnings
+}
+
+func splitCSVEnvURLs(raw string) []string {
+	parts := strings.Split(strings.TrimSpace(raw), ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func gpmEndpointDiagnosticKey(rawURL string) (string, gpmEndpointDiagnosticEntry, bool) {
+	parsed, err := parseAbsoluteHTTPURL(rawURL)
+	if err != nil {
+		return "", gpmEndpointDiagnosticEntry{}, false
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return "", gpmEndpointDiagnosticEntry{}, false
+	}
+	port := strings.TrimSpace(parsed.Port())
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	path := strings.TrimSpace(parsed.Path)
+	path = strings.TrimSuffix(path, "/")
+	key := fmt.Sprintf("%s://%s:%s%s", scheme, host, port, path)
+	entry := gpmEndpointDiagnosticEntry{
+		Scheme:     scheme,
+		Host:       host,
+		RemoteHTTP: scheme == "http" && !isLoopbackEndpointHost(host),
+	}
+	return key, entry, true
+}
+
+func isLoopbackEndpointHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Service) handleGPMOperatorApply(w http.ResponseWriter, r *http.Request) {

@@ -265,6 +265,9 @@ Success payload:
 - `readiness.lock_reason`: non-empty reason when lifecycle actions are locked
 - `readiness.client_lock_reason`: non-empty reason when the client tab is role-locked
 - `readiness.unlock_actions`: guidance steps to unlock lifecycle actions
+- `readiness.endpoint_posture`: additive endpoint posture snapshot used for server-tab diagnostics (for example, provider/authority and HTTP/HTTPS posture hints)
+- `readiness.endpoint_warnings`: additive list of actionable warning strings derived from endpoint posture checks
+- endpoint diagnostics are advisory and non-blocking; they do not lock lifecycle actions by themselves
 
 ### `POST /v1/gpm/session`
 Body:

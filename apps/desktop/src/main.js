@@ -1066,6 +1066,19 @@ function formatAuditRecentDisplayPayload(result, request) {
   return payload;
 }
 
+function normalizeTrimmedStringArray(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter((entry) => entry.length > 0);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
+
 function parseServerReadiness(payload) {
   const readiness = payload?.readiness;
   if (!readiness || typeof readiness !== "object") {
@@ -1077,6 +1090,29 @@ function parseServerReadiness(payload) {
         .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
         .filter((entry) => entry.length > 0)
     : [];
+  const endpointPostureRaw = firstDefined(readiness.endpoint_posture, readiness.endpointPosture);
+  const endpointPosture =
+    endpointPostureRaw && typeof endpointPostureRaw === "object" && !Array.isArray(endpointPostureRaw)
+      ? endpointPostureRaw
+      : undefined;
+  const endpointWarnings = [];
+  for (const warning of normalizeTrimmedStringArray(firstDefined(readiness.endpoint_warnings, readiness.endpointWarnings))) {
+    if (!endpointWarnings.includes(warning)) {
+      endpointWarnings.push(warning);
+    }
+  }
+  for (const warning of normalizeTrimmedStringArray(
+    firstDefined(
+      endpointPosture?.endpoint_warnings,
+      endpointPosture?.endpointWarnings,
+      endpointPosture?.warnings,
+      endpointPosture?.warning
+    )
+  )) {
+    if (!endpointWarnings.includes(warning)) {
+      endpointWarnings.push(warning);
+    }
+  }
   const normalizedRole = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
   return {
     role: normalizedRole || undefined,
@@ -1097,7 +1133,9 @@ function parseServerReadiness(payload) {
     clientLockReason: toDetailText(
       firstDefined(readiness.client_lock_reason, readiness.clientLockReason, readiness.client_lock_hint)
     ),
-    unlockActions
+    unlockActions,
+    endpointWarnings,
+    endpointPosture
   };
 }
 
@@ -1226,23 +1264,39 @@ function syncServerMutationControls() {
   serviceRestartBtnEl.disabled = !mutationsEnabled;
 }
 
+function appendReadinessDiagnosticsHint(baseHint, readiness) {
+  const warnings = Array.isArray(readiness?.endpointWarnings) ? readiness.endpointWarnings : [];
+  if (warnings.length === 0) {
+    return baseHint;
+  }
+  const summarized = warnings.slice(0, 3).join("; ");
+  const remaining = warnings.length - 3;
+  const suffix = remaining > 0 ? `; +${remaining} more` : "";
+  return `${baseHint} Diagnostics: ${summarized}${suffix}`;
+}
+
 function computeServerLockHintText() {
   if (state.serverReadiness) {
     const readiness = state.serverReadiness;
+    let hintText;
     if (readiness.lifecycleActionsUnlocked === true) {
       if (!state.serviceMutationsAllowed) {
-        return "Server role is unlocked by backend readiness, but service lifecycle actions are disabled by environment policy.";
+        hintText =
+          "Server role is unlocked by backend readiness, but service lifecycle actions are disabled by environment policy.";
+      } else if (readiness.serviceMutationsConfigured === false) {
+        hintText = "Server role is unlocked, but service lifecycle commands are not configured in the daemon.";
+      } else {
+        hintText = "Server controls are unlocked by backend readiness policy.";
       }
-      if (readiness.serviceMutationsConfigured === false) {
-        return "Server role is unlocked, but service lifecycle commands are not configured in the daemon.";
+    } else {
+      const reason = readiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
+      if (readiness.unlockActions.length > 0) {
+        hintText = `${reason} Next: ${readiness.unlockActions.join("; ")}`;
+      } else {
+        hintText = reason;
       }
-      return "Server controls are unlocked by backend readiness policy.";
     }
-    const reason = readiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
-    if (readiness.unlockActions.length > 0) {
-      return `${reason} Next: ${readiness.unlockActions.join("; ")}`;
-    }
-    return reason;
+    return appendReadinessDiagnosticsHint(hintText, readiness);
   }
   if (!state.sessionToken) {
     return "Sign in first to unlock server onboarding.";
