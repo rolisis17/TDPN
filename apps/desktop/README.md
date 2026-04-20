@@ -196,6 +196,18 @@ scripts\windows\desktop_one_click.cmd
 
 This wrapper keeps the same scaffold-only, non-production posture as the rest of the desktop track and is meant for the common "bootstrap then launch" path.
 
+Default remediation behavior for `desktop_one_click` (scaffold/non-production):
+- auto-remediation is now enabled by default, equivalent to using `-InstallMissing`, unless explicitly disabled.
+- preferred env knob: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`
+- legacy compatibility alias: `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`
+- accepted values:
+  - `1` or `true` enables auto-remediation
+  - `0` or `false` disables auto-remediation
+  - unset defaults to enabled
+- explicit switch precedence:
+  - `-InstallMissing` explicitly enables remediation
+  - `-InstallMissing:$false` explicitly disables remediation, even when env would enable it
+
 Installer-style packaged launcher flow (`desktop_packaged_run`):
 
 This path is scaffold-only, non-production installer-style validation guidance.

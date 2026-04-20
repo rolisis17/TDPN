@@ -55,6 +55,67 @@ function Test-SwitchEnabled {
   return $false
 }
 
+function Test-ArgSpecified {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Args,
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  foreach ($arg in $Args) {
+    if ($arg -eq $Name -or $arg -like "${Name}:*") {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function ConvertTo-NullableBoolean {
+  param(
+    [AllowNull()]
+    [string]$Value
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $null
+  }
+
+  $normalized = $Value.Trim()
+  if ($normalized.StartsWith("$")) {
+    $normalized = $normalized.Substring(1)
+  }
+  $normalized = $normalized.ToLowerInvariant()
+
+  if ($normalized -in @("1", "true", "yes", "on")) {
+    return $true
+  }
+
+  if ($normalized -in @("0", "false", "no", "off")) {
+    return $false
+  }
+
+  return $null
+}
+
+function Get-AutoInstallMissingEnvOverride {
+  $envVarNames = @(
+    "GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING",
+    "TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING"
+  )
+
+  foreach ($envVarName in $envVarNames) {
+    $rawValue = [Environment]::GetEnvironmentVariable($envVarName)
+    $parsedValue = ConvertTo-NullableBoolean -Value $rawValue
+    if ($null -ne $parsedValue) {
+      return [bool]$parsedValue
+    }
+  }
+
+  return $null
+}
+
 $scriptDir = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($scriptDir)) {
   $scriptDir = Split-Path -Parent $PSCommandPath
@@ -71,7 +132,16 @@ if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
 }
 
 $doctorInvokeArgs = @("-Mode", "check")
-$installIntent = Test-SwitchEnabled -Args $BootstrapArgs -Name "-InstallMissing"
+$installMissingSpecified = Test-ArgSpecified -Args $BootstrapArgs -Name "-InstallMissing"
+$installMissingEnabled = Test-SwitchEnabled -Args $BootstrapArgs -Name "-InstallMissing"
+$envAutoInstallMissing = Get-AutoInstallMissingEnvOverride
+$installIntent = $true
+if ($null -ne $envAutoInstallMissing) {
+  $installIntent = [bool]$envAutoInstallMissing
+}
+if ($installMissingSpecified) {
+  $installIntent = $installMissingEnabled
+}
 if ($installIntent) {
   $doctorInvokeArgs = @("-Mode", "fix", "-InstallMissing")
 }
@@ -97,6 +167,9 @@ if (-not (Test-ArgNamePresent -Args $BootstrapArgs -Name "-Mode")) {
 }
 if (-not (Test-ArgNamePresent -Args $BootstrapArgs -Name "-DesktopLaunchStrategy")) {
   $invokeArgs += @("-DesktopLaunchStrategy", "auto")
+}
+if ($installIntent -and -not $installMissingSpecified) {
+  $invokeArgs += "-InstallMissing"
 }
 
 $invokeArgs += $BootstrapArgs

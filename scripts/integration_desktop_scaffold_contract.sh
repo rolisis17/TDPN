@@ -444,6 +444,26 @@ if [[ "$ONE_CLICK_LAUNCHER_PRESENT" == "1" ]]; then
     echo "desktop scaffold contract failed: expected launch-mode marker in $ONE_CLICK_POWERSHELL_SCRIPT"
     exit 1
   fi
+  if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected GPM one-click auto-install env marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
+  if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected TDPN one-click auto-install legacy env alias marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
+  if ! grep -qF '@("-Mode", "fix", "-InstallMissing")' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected doctor fix/install remediation marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
+  if ! rg -q -- 'invokeArgs[[:space:]]*\+=[[:space:]]*"-InstallMissing"|invokeArgs[[:space:]]*=[[:space:]]*@\([^)]*"-InstallMissing"[^)]*\)' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected bootstrap -InstallMissing invocation marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
+  if ! rg -q -- 'Test-ArgNamePresent[[:space:]]*-Args[[:space:]]*\$BootstrapArgs[[:space:]]*-Name[[:space:]]*"-InstallMissing"|Test-SwitchEnabled[[:space:]]*-Args[[:space:]]*\$BootstrapArgs[[:space:]]*-Name[[:space:]]*"-InstallMissing"' "$ONE_CLICK_POWERSHELL_SCRIPT"; then
+    echo "desktop scaffold contract failed: expected one-click default-path InstallMissing decision marker in $ONE_CLICK_POWERSHELL_SCRIPT"
+    exit 1
+  fi
   if ! grep -qF 'desktop_one_click.ps1' "$ONE_CLICK_CMD_SCRIPT"; then
     echo "desktop scaffold contract failed: expected PowerShell launcher reference in $ONE_CLICK_CMD_SCRIPT"
     exit 1
