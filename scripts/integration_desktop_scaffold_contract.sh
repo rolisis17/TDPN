@@ -297,6 +297,7 @@ WINDOWS_NATIVE_BOOTSTRAP_FILES=(
   "scripts/windows/desktop_native_bootstrap.ps1"
   "scripts/windows/desktop_native_bootstrap.cmd"
   "scripts/windows/local_api_session.ps1"
+  "scripts/windows/local_api_session.cmd"
 )
 for path in "${WINDOWS_NATIVE_BOOTSTRAP_FILES[@]}"; do
   if [[ ! -f "$path" ]]; then
@@ -753,11 +754,33 @@ fi
 echo "[desktop-scaffold] linux one-click launcher and README references are present"
 
 LOCAL_API_SESSION_SCRIPT="scripts/windows/local_api_session.ps1"
-if ! grep -qF 'windows-native' "$LOCAL_API_SESSION_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected Windows-native local API marker in $LOCAL_API_SESSION_SCRIPT"
+LOCAL_API_SESSION_CMD_SCRIPT="scripts/windows/local_api_session.cmd"
+
+if ! grep -qF 'local-api-session (windows-native):' "$LOCAL_API_SESSION_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected windows-native local API session banner marker in $LOCAL_API_SESSION_SCRIPT"
   exit 1
 fi
-echo "[desktop-scaffold] bootstrap and local API marker strings present"
+if ! grep -qF 'go run ./cmd/node --local-api' "$LOCAL_API_SESSION_SCRIPT" && \
+   {
+     ! grep -qF '$goArgs = @("run", "./cmd/node")' "$LOCAL_API_SESSION_SCRIPT" || \
+     ! grep -qF '$goArgs += @("--local-api")' "$LOCAL_API_SESSION_SCRIPT";
+   }; then
+  echo "desktop scaffold contract failed: expected local API go-run command marker in $LOCAL_API_SESSION_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'winget install --id GoLang.Go --exact' "$LOCAL_API_SESSION_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected Go install remediation marker in $LOCAL_API_SESSION_SCRIPT"
+  exit 1
+fi
+if ! grep -qF -- '-ExecutionPolicy Bypass' "$LOCAL_API_SESSION_CMD_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected cmd wrapper policy-bypass marker in $LOCAL_API_SESSION_CMD_SCRIPT"
+  exit 1
+fi
+if ! grep -qF 'Unsupported cmd metacharacters' "$LOCAL_API_SESSION_CMD_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected cmd metacharacter reject marker in $LOCAL_API_SESSION_CMD_SCRIPT"
+  exit 1
+fi
+echo "[desktop-scaffold] local API session wrappers and markers are present"
 
 DESKTOP_HTML_FILE="apps/desktop/index.html"
 JS_FILE="apps/desktop/src/main.js"
@@ -1223,6 +1246,14 @@ if ! rg -q -- 'desktop_shell\.cmd npm install' "$README_FILE"; then
 fi
 if ! rg -q -- 'desktop_shell\.cmd npm run tauri -- dev' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must include desktop_shell npm run tauri -- dev usage guidance"
+  exit 1
+fi
+if ! rg -qi -- 'scripts\\windows\\local_api_session\.cmd' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must reference scripts\\\\windows\\\\local_api_session.cmd"
+  exit 1
+fi
+if ! rg -qi -- 'powershell[[:space:]]+-NoProfile[[:space:]]+-ExecutionPolicy[[:space:]]+Bypass[[:space:]]+-File[[:space:]]+\.\\scripts\\windows\\local_api_session\.ps1[[:space:]]+-DryRun' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must include local_api_session.ps1 execution-policy bypass dry-run guidance"
   exit 1
 fi
 if ! rg -qi -- 'npm\.ps1|npm\.cmd|npx\.cmd' "$README_FILE"; then

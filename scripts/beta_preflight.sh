@@ -102,6 +102,7 @@ run_step "easy-node desktop wrappers integration" ./scripts/integration_easy_nod
 run_step "windows desktop doctor guardrails integration" ./scripts/integration_windows_desktop_doctor_guardrails.sh
 run_step "windows desktop native bootstrap guardrails integration" ./scripts/integration_windows_desktop_native_bootstrap_guardrails.sh
 run_step "windows desktop shell guardrails integration" ./scripts/integration_windows_desktop_shell_guardrails.sh
+run_step "windows local api session guardrails integration" ./scripts/integration_windows_local_api_session_guardrails.sh
 run_step "windows desktop dev guardrails integration" ./scripts/integration_windows_desktop_dev_guardrails.sh
 run_step "windows desktop packaged run guardrails integration" ./scripts/integration_windows_desktop_packaged_run_guardrails.sh
 run_step "windows desktop one-click guardrails integration" ./scripts/integration_windows_desktop_one_click_guardrails.sh

@@ -153,18 +153,21 @@ scripts\windows\desktop_shell.cmd npm install
 scripts\windows\desktop_shell.cmd npm run tauri -- dev
 ```
 
-Windows-native local API session (no WSL shim):
+Windows-native local API session (no WSL shim, preferred first step on Windows):
 
 ```powershell
 scripts\windows\local_api_session.cmd
 ```
 
 Notes:
+- Prefer `scripts\windows\local_api_session.cmd` for normal use.
+- The `.cmd` wrapper already applies process-scope `ExecutionPolicy Bypass` and is preferred to avoid local script-policy friction.
 - This launcher prefers Git for Windows `bash.exe` (not `WindowsApps\bash.exe` / WSL shim).
+- The launcher auto-detects Go; if missing, install with: `winget install --id GoLang.Go --exact`
 - Override runner explicitly when needed:
   - `scripts\windows\local_api_session.cmd -CommandRunner "C:\Program Files\Git\bin\bash.exe"`
 - `-DryRun` prints the resolved command/runner without starting the daemon.
-- If you want to call `.ps1` directly, run with process bypass:
+- Direct PowerShell fallback with process bypass:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun`
 
 Windows-native one-command bootstrap and run (recommended for client onboarding):
