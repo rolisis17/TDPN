@@ -11,6 +11,10 @@ const statusBannerEl = byId("status_banner");
 const statusTitleEl = byId("status_title");
 const statusDetailEl = byId("status_detail");
 const statusLineEl = byId("status_line");
+const policyPostureEl = byId("policy_posture");
+const policyPostureLineEl = byId("policy_posture_line");
+const policyConnectPolicyEl = byId("policy_connect_policy");
+const policyAuthVerifyEl = byId("policy_auth_verify");
 const operatorReadinessEl = byId("operator_readiness");
 const operatorReadinessLineEl = byId("operator_readiness_line");
 const operatorReadinessStatusEl = byId("operator_readiness_status");
@@ -55,6 +59,12 @@ const AUDIT_RECENT_ORDERS = new Set(["desc", "asc"]);
 const OPERATOR_DECISION_CONFLICT_GUIDANCE =
   "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
+const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
+const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
+const CONNECT_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const CONNECT_POLICY_SOURCE_ENV_DEFAULT = "env_default";
+const CONNECT_POLICY_SOURCE_LEGACY_DERIVED = "legacy_payload";
+const CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE = "config_unavailable";
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const PERSISTED_FIELD_IDS = [
@@ -83,6 +93,12 @@ let serverReadiness = null;
 let clientRegistered = false;
 let connectRequireSession = false;
 let allowLegacyConnectOverride = false;
+let connectPolicyMode = CONNECT_POLICY_MODE_COMPAT_ALLOWED;
+let connectPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+let authVerifyRequireMetadata = false;
+let authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+let authVerifyRequireWalletExtensionSource = false;
+let authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let operatorListActiveFilters = {
   status: "",
   search: "",
@@ -177,28 +193,288 @@ function bindPersistenceListeners() {
   }
 }
 
+function readConfigObject(payload, candidates) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  for (const key of candidates) {
+    const value = source[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readConfigBoolean(payload, candidates) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const raw = firstDefined(...candidates.map((key) => source[key]));
+  return parseBooleanLike(raw);
+}
+
+function readConfigString(payload, candidates) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  return nonEmptyString(firstDefined(...candidates.map((key) => source[key])));
+}
+
+function runtimeConfigScopes(payload) {
+  const root = payload && typeof payload === "object" ? payload : {};
+  const rootConfig = readConfigObject(root, ["config"]) || {};
+  const rootData = readConfigObject(root, ["data"]) || {};
+  const rootDataConfig = readConfigObject(rootData, ["config"]) || {};
+  const policy =
+    readConfigObject(root, ["policy"]) ||
+    readConfigObject(rootConfig, ["policy"]) ||
+    readConfigObject(rootDataConfig, ["policy"]) ||
+    {};
+  const connectPolicy =
+    readConfigObject(root, ["connect_policy", "connectPolicy"]) ||
+    readConfigObject(rootConfig, ["connect_policy", "connectPolicy"]) ||
+    readConfigObject(rootDataConfig, ["connect_policy", "connectPolicy"]) ||
+    readConfigObject(policy, ["connect_policy", "connectPolicy", "connect"]) ||
+    {};
+  const authVerifyPolicy =
+    readConfigObject(root, ["gpm_auth_verify_policy", "auth_verify_policy", "authVerifyPolicy"]) ||
+    readConfigObject(rootConfig, ["gpm_auth_verify_policy", "auth_verify_policy", "authVerifyPolicy"]) ||
+    readConfigObject(rootDataConfig, ["gpm_auth_verify_policy", "auth_verify_policy", "authVerifyPolicy"]) ||
+    readConfigObject(policy, ["gpm_auth_verify", "auth_verify", "authVerify"]) ||
+    {};
+  return [root, rootConfig, rootDataConfig, policy, connectPolicy, authVerifyPolicy];
+}
+
+function normalizePolicySourceValue(value) {
+  const raw = nonEmptyString(value);
+  if (!raw) {
+    return undefined;
+  }
+  const compact = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    compact === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG ||
+    compact === "runtime" ||
+    compact === "runtime_policy"
+  ) {
+    return CONNECT_POLICY_SOURCE_RUNTIME_CONFIG;
+  }
+  if (
+    compact === CONNECT_POLICY_SOURCE_ENV_DEFAULT ||
+    compact === "default" ||
+    compact === "env" ||
+    compact === "environment"
+  ) {
+    return CONNECT_POLICY_SOURCE_ENV_DEFAULT;
+  }
+  if (compact === "legacy_config" || compact === "legacy_derived" || compact === CONNECT_POLICY_SOURCE_LEGACY_DERIVED) {
+    return CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+  }
+  if (compact === "unavailable" || compact === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE) {
+    return CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+  }
+  return raw;
+}
+
+function normalizeConnectPolicyMode(value) {
+  const raw = nonEmptyString(value);
+  if (!raw) {
+    return undefined;
+  }
+  const compact = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    compact === CONNECT_POLICY_MODE_SESSION_REQUIRED ||
+    compact === "require_session" ||
+    compact === "session_only" ||
+    compact === "strict"
+  ) {
+    return CONNECT_POLICY_MODE_SESSION_REQUIRED;
+  }
+  if (
+    compact === CONNECT_POLICY_MODE_COMPAT_ALLOWED ||
+    compact === "compat" ||
+    compact === "session_optional" ||
+    compact === "legacy_allowed" ||
+    compact === "manual_override_allowed"
+  ) {
+    return CONNECT_POLICY_MODE_COMPAT_ALLOWED;
+  }
+  if (compact === "production" || compact === "default") {
+    return compact;
+  }
+  return compact;
+}
+
+function connectPolicyModeFromRequireSession(requireSession) {
+  return requireSession ? CONNECT_POLICY_MODE_SESSION_REQUIRED : CONNECT_POLICY_MODE_COMPAT_ALLOWED;
+}
+
 function parseConnectRequireSessionConfig(payload) {
-  const parsed = parseBooleanLike(
-    firstDefined(
-      payload?.config?.connect_require_session,
-      payload?.connect_require_session,
-      payload?.config?.connectRequireSession,
-      payload?.connectRequireSession
+  const scopes = runtimeConfigScopes(payload);
+  const parsed = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "connect_require_session",
+        "connectRequireSession",
+        "require_session",
+        "requireSession"
+      ])
     )
   );
   return parsed === true;
 }
 
 function parseAllowLegacyConnectOverrideConfig(payload) {
-  const parsed = parseBooleanLike(
-    firstDefined(
-      payload?.config?.allow_legacy_connect_override,
-      payload?.allow_legacy_connect_override,
-      payload?.config?.allowLegacyConnectOverride,
-      payload?.allowLegacyConnectOverride
+  const scopes = runtimeConfigScopes(payload);
+  const parsed = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "allow_legacy_connect_override",
+        "allowLegacyConnectOverride",
+        "allow_manual_connect_override",
+        "allowManualConnectOverride",
+        "allow_manual_bootstrap_invite",
+        "allowManualBootstrapInvite"
+      ])
     )
   );
   return parsed === true;
+}
+
+function parseConnectPolicyModeConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const mode = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, ["connect_policy_mode", "connectPolicyMode", "connect_mode", "connectMode", "mode"])
+    )
+  );
+  return normalizeConnectPolicyMode(mode);
+}
+
+function parseConnectPolicySourceConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const source = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, ["connect_policy_source", "connectPolicySource", "policy_source", "policySource", "source"])
+    )
+  );
+  return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+}
+
+function parseAuthVerifyRequireMetadataConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const parsed = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_auth_verify_require_metadata",
+        "gpmAuthVerifyRequireMetadata",
+        "auth_verify_require_metadata",
+        "authVerifyRequireMetadata"
+      ])
+    )
+  );
+  return parsed === true;
+}
+
+function parseAuthVerifyRequireMetadataPolicySourceConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const source = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_auth_verify_require_metadata_policy_source",
+        "gpmAuthVerifyRequireMetadataPolicySource",
+        "auth_verify_require_metadata_policy_source",
+        "authVerifyRequireMetadataPolicySource"
+      ])
+    )
+  );
+  return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+}
+
+function parseAuthVerifyRequireWalletExtensionSourceConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const parsed = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_auth_verify_require_wallet_extension_source",
+        "gpmAuthVerifyRequireWalletExtensionSource",
+        "auth_verify_require_wallet_extension_source",
+        "authVerifyRequireWalletExtensionSource",
+        "require_wallet_extension_source",
+        "requireWalletExtensionSource"
+      ])
+    )
+  );
+  return parsed === true;
+}
+
+function parseAuthVerifyRequireWalletExtensionPolicySourceConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const source = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_auth_verify_require_wallet_extension_policy_source",
+        "gpmAuthVerifyRequireWalletExtensionPolicySource",
+        "auth_verify_require_wallet_extension_policy_source",
+        "authVerifyRequireWalletExtensionPolicySource"
+      ])
+    )
+  );
+  return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+}
+
+function formatConnectPolicyModeLabel(mode) {
+  if (mode === "production") {
+    return "production";
+  }
+  if (mode === "default") {
+    return "default";
+  }
+  if (mode === CONNECT_POLICY_MODE_SESSION_REQUIRED) {
+    return "session-required";
+  }
+  if (mode === CONNECT_POLICY_MODE_COMPAT_ALLOWED) {
+    return "compat";
+  }
+  return nonEmptyString(mode)?.replace(/_/g, " ") || "compat";
+}
+
+function formatPolicySourceLabel(source) {
+  const normalized = normalizePolicySourceValue(source);
+  if (normalized === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config";
+  }
+  if (normalized === CONNECT_POLICY_SOURCE_ENV_DEFAULT) {
+    return "env default";
+  }
+  if (normalized === CONNECT_POLICY_SOURCE_LEGACY_DERIVED) {
+    return "legacy /v1/config (derived)";
+  }
+  if (normalized === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE) {
+    return "unavailable";
+  }
+  return nonEmptyString(source) || "default";
+}
+
+function refreshPolicyPostureBanner() {
+  const configUnavailable = connectPolicySource === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+  const strict = connectRequireSession || authVerifyRequireMetadata || authVerifyRequireWalletExtensionSource;
+  const kind = configUnavailable ? "warn" : strict ? "warn" : "good";
+  policyPostureEl.dataset.kind = kind;
+  policyPostureLineEl.classList.remove("good", "warn", "bad");
+  policyPostureLineEl.classList.add(kind);
+
+  const connectMode = formatConnectPolicyModeLabel(connectPolicyMode);
+  const connectSource = formatPolicySourceLabel(connectPolicySource);
+  const legacyOverride = allowLegacyConnectOverride ? "legacy override enabled" : "legacy override locked";
+  policyConnectPolicyEl.textContent = `Connect policy: ${connectMode} (source: ${connectSource}; ${legacyOverride}).`;
+
+  if (configUnavailable) {
+    policyAuthVerifyEl.textContent =
+      "Auth verify strictness: policy hints unavailable from /v1/config; using compatibility defaults until runtime config is reachable.";
+    return;
+  }
+  const metadataRequired = authVerifyRequireMetadata ? "required" : "optional";
+  const metadataSource = formatPolicySourceLabel(authVerifyRequireMetadataPolicySource);
+  const walletRequired = authVerifyRequireWalletExtensionSource ? "required" : "optional";
+  const walletSource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
+  policyAuthVerifyEl.textContent =
+    `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
+    `wallet-extension-source ${walletRequired} (source: ${walletSource}).`;
 }
 
 function compatibilityOverrideEnabled() {
@@ -254,13 +530,27 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     const config = await get("/v1/config");
     connectRequireSession = parseConnectRequireSessionConfig(config);
     allowLegacyConnectOverride = parseAllowLegacyConnectOverrideConfig(config);
+    connectPolicyMode = parseConnectPolicyModeConfig(config) || connectPolicyModeFromRequireSession(connectRequireSession);
+    connectPolicySource = parseConnectPolicySourceConfig(config);
+    authVerifyRequireMetadata = parseAuthVerifyRequireMetadataConfig(config);
+    authVerifyRequireMetadataPolicySource = parseAuthVerifyRequireMetadataPolicySourceConfig(config);
+    authVerifyRequireWalletExtensionSource = parseAuthVerifyRequireWalletExtensionSourceConfig(config);
+    authVerifyRequireWalletExtensionPolicySource = parseAuthVerifyRequireWalletExtensionPolicySourceConfig(config);
     refreshCompatibilityOverrideControls();
+    refreshPolicyPostureBanner();
     persistPortalState();
     return config;
   } catch (err) {
     connectRequireSession = false;
     allowLegacyConnectOverride = false;
+    connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
+    connectPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    authVerifyRequireMetadata = false;
+    authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    authVerifyRequireWalletExtensionSource = false;
+    authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     refreshCompatibilityOverrideControls();
+    refreshPolicyPostureBanner();
     persistPortalState();
     if (!quiet) {
       throw err;
@@ -2814,6 +3104,7 @@ function initializePortal() {
   bindOperatorListFilterListeners();
   persistPortalState();
   refreshOperatorReadiness();
+  refreshPolicyPostureBanner();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
   void refreshConnectPolicyConfigBestEffort({ quiet: true });
   void restoreSessionStatusBestEffort();

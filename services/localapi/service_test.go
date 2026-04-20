@@ -545,11 +545,23 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmConnectPolicySource != "default" {
 			t.Fatalf("gpmConnectPolicySource=%q want=default", s.gpmConnectPolicySource)
 		}
+		if s.gpmAuthVerifyPolicyMode != "default" {
+			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=default", s.gpmAuthVerifyPolicyMode)
+		}
+		if s.gpmAuthVerifyPolicySource != "default" {
+			t.Fatalf("gpmAuthVerifyPolicySource=%q want=default", s.gpmAuthVerifyPolicySource)
+		}
 		if s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=false", s.gpmAuthVerifyRequireMetadata)
 		}
 		if s.gpmAuthVerifyRequireWalletExt {
 			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=false", s.gpmAuthVerifyRequireWalletExt)
+		}
+		if s.gpmAuthVerifyMetadataSource != "default" {
+			t.Fatalf("gpmAuthVerifyMetadataSource=%q want=default", s.gpmAuthVerifyMetadataSource)
+		}
+		if s.gpmAuthVerifyWalletExtSource != "default" {
+			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=default", s.gpmAuthVerifyWalletExtSource)
 		}
 	})
 
@@ -653,15 +665,25 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if !s.gpmAuthVerifyRequireWalletExt {
 			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=true", s.gpmAuthVerifyRequireWalletExt)
 		}
+		if s.gpmAuthVerifyMetadataSource != "TDPN_AUTH_VERIFY_REQUIRE_METADATA" {
+			t.Fatalf("gpmAuthVerifyMetadataSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_METADATA", s.gpmAuthVerifyMetadataSource)
+		}
+		if s.gpmAuthVerifyWalletExtSource != "TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
+			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", s.gpmAuthVerifyWalletExtSource)
+		}
 	})
 
-	t.Run("production mode enforces secure connect defaults when flags unset", func(t *testing.T) {
+	t.Run("production mode enforces secure connect and auth defaults when flags unset", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("TDPN_PRODUCTION_MODE", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
 
 		s := New()
 		if !s.gpmConnectRequireSession {
@@ -676,14 +698,36 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmConnectPolicySource != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("gpmConnectPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmConnectPolicySource)
 		}
+		if !s.gpmAuthVerifyRequireMetadata {
+			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=true", s.gpmAuthVerifyRequireMetadata)
+		}
+		if !s.gpmAuthVerifyRequireWalletExt {
+			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=true", s.gpmAuthVerifyRequireWalletExt)
+		}
+		if s.gpmAuthVerifyPolicyMode != "production" {
+			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=production", s.gpmAuthVerifyPolicyMode)
+		}
+		if s.gpmAuthVerifyPolicySource != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpmAuthVerifyPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmAuthVerifyPolicySource)
+		}
+		if s.gpmAuthVerifyMetadataSource != "production-default" {
+			t.Fatalf("gpmAuthVerifyMetadataSource=%q want=production-default", s.gpmAuthVerifyMetadataSource)
+		}
+		if s.gpmAuthVerifyWalletExtSource != "production-default" {
+			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=production-default", s.gpmAuthVerifyWalletExtSource)
+		}
 	})
 
-	t.Run("explicit connect policy flags override production defaults", func(t *testing.T) {
+	t.Run("explicit connect and auth policy flags override production defaults", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "0")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "0")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "0")
 
 		s := New()
 		if s.gpmConnectRequireSession {
@@ -697,6 +741,24 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmConnectPolicySource != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("gpmConnectPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmConnectPolicySource)
+		}
+		if s.gpmAuthVerifyRequireMetadata {
+			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=false", s.gpmAuthVerifyRequireMetadata)
+		}
+		if s.gpmAuthVerifyRequireWalletExt {
+			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=false", s.gpmAuthVerifyRequireWalletExt)
+		}
+		if s.gpmAuthVerifyPolicyMode != "production" {
+			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=production", s.gpmAuthVerifyPolicyMode)
+		}
+		if s.gpmAuthVerifyPolicySource != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpmAuthVerifyPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmAuthVerifyPolicySource)
+		}
+		if s.gpmAuthVerifyMetadataSource != "GPM_AUTH_VERIFY_REQUIRE_METADATA" {
+			t.Fatalf("gpmAuthVerifyMetadataSource=%q want=GPM_AUTH_VERIFY_REQUIRE_METADATA", s.gpmAuthVerifyMetadataSource)
+		}
+		if s.gpmAuthVerifyWalletExtSource != "TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
+			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", s.gpmAuthVerifyWalletExtSource)
 		}
 	})
 
@@ -1702,6 +1764,10 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyCommand = lifecycleSuccessCommand("verify-ok")
 		svc.gpmConnectPolicyMode = "production"
 		svc.gpmConnectPolicySource = "GPM_PRODUCTION_MODE"
+		svc.gpmAuthVerifyPolicyMode = "production"
+		svc.gpmAuthVerifyPolicySource = "GPM_PRODUCTION_MODE"
+		svc.gpmAuthVerifyMetadataSource = "production-default"
+		svc.gpmAuthVerifyWalletExtSource = "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE"
 		svc.gpmMainDomain = "https://gpm.example"
 		svc.gpmManifestURL = "https://gpm.example/v1/bootstrap/manifest"
 		svc.gpmManifestCache = ".easy-node-logs/gpm_manifest_cache.json"
@@ -1730,14 +1796,26 @@ func TestHandleConfig(t *testing.T) {
 		if got, _ := configMap["connect_policy_source"].(string); got != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("connect_policy_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
 		}
+		if got, _ := configMap["gpm_auth_verify_policy_mode"].(string); got != "production" {
+			t.Fatalf("gpm_auth_verify_policy_mode=%q want=%q", got, "production")
+		}
+		if got, _ := configMap["gpm_auth_verify_policy_source"].(string); got != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpm_auth_verify_policy_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
+		}
 		if got, _ := configMap["gpm_auth_verify_require_command"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_command=%v want=true", configMap["gpm_auth_verify_require_command"])
 		}
 		if got, _ := configMap["gpm_auth_verify_require_metadata"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_metadata=%v want=true", configMap["gpm_auth_verify_require_metadata"])
 		}
+		if got, _ := configMap["gpm_auth_verify_require_metadata_policy_source"].(string); got != "production-default" {
+			t.Fatalf("gpm_auth_verify_require_metadata_policy_source=%q want=%q", got, "production-default")
+		}
 		if got, _ := configMap["gpm_auth_verify_require_wallet_extension_source"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_wallet_extension_source=%v want=true", configMap["gpm_auth_verify_require_wallet_extension_source"])
+		}
+		if got, _ := configMap["gpm_auth_verify_require_wallet_extension_policy_source"].(string); got != "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE" {
+			t.Fatalf("gpm_auth_verify_require_wallet_extension_policy_source=%q want=%q", got, "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE")
 		}
 		if got, _ := configMap["gpm_auth_verify_command_configured"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_command_configured=%v want=true", configMap["gpm_auth_verify_command_configured"])

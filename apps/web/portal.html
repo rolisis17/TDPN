@@ -59,6 +59,17 @@
             <span id="status_detail">Set an absolute API base, then request a challenge or refresh the session.</span>
           </div>
         </div>
+        <div id="policy_posture" class="status-banner" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Runtime policy posture</div>
+          <div id="policy_posture_line" class="status warn">
+            <strong id="policy_connect_policy">
+              Connect policy: compat (source: waiting for /v1/config).
+            </strong>
+            <span id="policy_auth_verify">
+              Auth verify strictness: metadata optional and wallet-extension-source optional (source: waiting for /v1/config).
+            </span>
+          </div>
+        </div>
       </section>
 
       <section class="card">

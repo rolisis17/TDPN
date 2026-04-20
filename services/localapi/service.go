@@ -75,6 +75,8 @@ type Service struct {
 	gpmAllowLegacyConnectOverride bool
 	gpmConnectPolicyMode          string
 	gpmConnectPolicySource        string
+	gpmAuthVerifyPolicyMode       string
+	gpmAuthVerifyPolicySource     string
 	gpmMainDomain                 string
 	gpmManifestURL                string
 	gpmManifestCache              string
@@ -86,6 +88,8 @@ type Service struct {
 	gpmAuthVerifyRequireCommand   bool
 	gpmAuthVerifyRequireMetadata  bool
 	gpmAuthVerifyRequireWalletExt bool
+	gpmAuthVerifyMetadataSource   string
+	gpmAuthVerifyWalletExtSource  string
 	gpmAuthSignatureVerifier      gpmAuthSignatureVerifier
 	gpmStateStorePath             string
 	gpmAuditLogPath               string
@@ -241,16 +245,16 @@ func New() *Service {
 		"TDPN_AUTH_VERIFY_REQUIRE_COMMAND",
 		"",
 	), false)
-	gpmAuthVerifyRequireMetadata := parseBoolWithDefault(preferredEnvValue(
+	gpmAuthVerifyRequireMetadataRaw, gpmAuthVerifyMetadataSource, gpmAuthVerifyRequireMetadataSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_METADATA",
 		"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
-		"",
-	), false)
-	gpmAuthVerifyRequireWalletExt := parseBoolWithDefault(preferredEnvValue(
+	)
+	gpmAuthVerifyRequireMetadata := parseBoolWithDefault(gpmAuthVerifyRequireMetadataRaw, false)
+	gpmAuthVerifyRequireWalletExtRaw, gpmAuthVerifyWalletExtSource, gpmAuthVerifyRequireWalletExtSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
 		"TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
-		"",
-	), false)
+	)
+	gpmAuthVerifyRequireWalletExt := parseBoolWithDefault(gpmAuthVerifyRequireWalletExtRaw, false)
 	gpmConnectPolicyRaw, gpmConnectPolicySource, gpmConnectPolicySet := preferredEnvValueWithSource(
 		"GPM_PRODUCTION_MODE",
 		"TDPN_PRODUCTION_MODE",
@@ -262,6 +266,28 @@ func New() *Service {
 	}
 	if !gpmConnectPolicySet {
 		gpmConnectPolicySource = "default"
+	}
+	gpmAuthVerifyPolicyMode := "default"
+	if gpmConnectPolicyProduction {
+		gpmAuthVerifyPolicyMode = "production"
+	}
+	gpmAuthVerifyPolicySource := "default"
+	if gpmConnectPolicySet {
+		gpmAuthVerifyPolicySource = gpmConnectPolicySource
+	}
+	if !gpmAuthVerifyRequireMetadataSet {
+		gpmAuthVerifyMetadataSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmAuthVerifyRequireMetadata = true
+			gpmAuthVerifyMetadataSource = "production-default"
+		}
+	}
+	if !gpmAuthVerifyRequireWalletExtSet {
+		gpmAuthVerifyWalletExtSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmAuthVerifyRequireWalletExt = true
+			gpmAuthVerifyWalletExtSource = "production-default"
+		}
 	}
 	gpmConnectRequireSessionRaw, _, gpmConnectRequireSessionSet := preferredEnvValueWithSource(
 		"GPM_CONNECT_REQUIRE_SESSION",
@@ -309,6 +335,8 @@ func New() *Service {
 		gpmAllowLegacyConnectOverride: gpmAllowLegacyConnectOverride,
 		gpmConnectPolicyMode:          gpmConnectPolicyMode,
 		gpmConnectPolicySource:        gpmConnectPolicySource,
+		gpmAuthVerifyPolicyMode:       gpmAuthVerifyPolicyMode,
+		gpmAuthVerifyPolicySource:     gpmAuthVerifyPolicySource,
 		gpmMainDomain:                 strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
 		gpmManifestURL:                strings.TrimSpace(gpmManifestURL),
 		gpmManifestCache:              strings.TrimSpace(gpmManifestCache),
@@ -320,6 +348,8 @@ func New() *Service {
 		gpmAuthVerifyRequireCommand:   gpmAuthVerifyRequireCommand,
 		gpmAuthVerifyRequireMetadata:  gpmAuthVerifyRequireMetadata,
 		gpmAuthVerifyRequireWalletExt: gpmAuthVerifyRequireWalletExt,
+		gpmAuthVerifyMetadataSource:   gpmAuthVerifyMetadataSource,
+		gpmAuthVerifyWalletExtSource:  gpmAuthVerifyWalletExtSource,
 		gpmAuthSignatureVerifier:      defaultGPMAuthSignatureVerifier,
 		gpmStateStorePath:             strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:               strings.TrimSpace(gpmAuditLogPath),
@@ -462,25 +492,45 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if connectPolicySource == "" {
 		connectPolicySource = "default"
 	}
+	authVerifyPolicyMode := strings.TrimSpace(s.gpmAuthVerifyPolicyMode)
+	if authVerifyPolicyMode == "" {
+		authVerifyPolicyMode = "default"
+	}
+	authVerifyPolicySource := strings.TrimSpace(s.gpmAuthVerifyPolicySource)
+	if authVerifyPolicySource == "" {
+		authVerifyPolicySource = "default"
+	}
+	authVerifyRequireMetadataSource := strings.TrimSpace(s.gpmAuthVerifyMetadataSource)
+	if authVerifyRequireMetadataSource == "" {
+		authVerifyRequireMetadataSource = "default"
+	}
+	authVerifyRequireWalletExtSource := strings.TrimSpace(s.gpmAuthVerifyWalletExtSource)
+	if authVerifyRequireWalletExtSource == "" {
+		authVerifyRequireWalletExtSource = "default"
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"config": map[string]any{
-			"connect_require_session":                         s.gpmConnectRequireSession,
-			"allow_legacy_connect_override":                   s.gpmAllowLegacyConnectOverride,
-			"connect_policy_mode":                             connectPolicyMode,
-			"connect_policy_source":                           connectPolicySource,
-			"gpm_auth_verify_require_command":                 s.gpmAuthVerifyRequireCommand,
-			"gpm_auth_verify_require_metadata":                s.gpmAuthVerifyRequireMetadata,
-			"gpm_auth_verify_require_wallet_extension_source": s.gpmAuthVerifyRequireWalletExt,
-			"gpm_auth_verify_command_configured":              strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
-			"gpm_main_domain":                                 strings.TrimSpace(s.gpmMainDomain),
-			"gpm_manifest_url":                                strings.TrimSpace(s.gpmManifestURL),
-			"gpm_manifest_cache_path":                         strings.TrimSpace(s.gpmManifestCache),
-			"gpm_manifest_cache_max_age_sec":                  manifestCacheMaxAgeSec,
-			"command_timeout_sec":                             commandTimeoutSec,
-			"allow_update":                                    s.allowUpdate,
-			"allow_remote":                                    !isLoopbackBindAddr(s.addr),
+			"connect_require_session":                                s.gpmConnectRequireSession,
+			"allow_legacy_connect_override":                          s.gpmAllowLegacyConnectOverride,
+			"connect_policy_mode":                                    connectPolicyMode,
+			"connect_policy_source":                                  connectPolicySource,
+			"gpm_auth_verify_policy_mode":                            authVerifyPolicyMode,
+			"gpm_auth_verify_policy_source":                          authVerifyPolicySource,
+			"gpm_auth_verify_require_command":                        s.gpmAuthVerifyRequireCommand,
+			"gpm_auth_verify_require_metadata":                       s.gpmAuthVerifyRequireMetadata,
+			"gpm_auth_verify_require_metadata_policy_source":         authVerifyRequireMetadataSource,
+			"gpm_auth_verify_require_wallet_extension_source":        s.gpmAuthVerifyRequireWalletExt,
+			"gpm_auth_verify_require_wallet_extension_policy_source": authVerifyRequireWalletExtSource,
+			"gpm_auth_verify_command_configured":                     strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
+			"gpm_main_domain":                                        strings.TrimSpace(s.gpmMainDomain),
+			"gpm_manifest_url":                                       strings.TrimSpace(s.gpmManifestURL),
+			"gpm_manifest_cache_path":                                strings.TrimSpace(s.gpmManifestCache),
+			"gpm_manifest_cache_max_age_sec":                         manifestCacheMaxAgeSec,
+			"command_timeout_sec":                                    commandTimeoutSec,
+			"allow_update":                                           s.allowUpdate,
+			"allow_remote":                                           !isLoopbackBindAddr(s.addr),
 		},
 	})
 }

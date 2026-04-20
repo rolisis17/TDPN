@@ -28,10 +28,18 @@ Defaults:
   - `LOCAL_CONTROL_API_SERVICE_START_COMMAND`
   - `LOCAL_CONTROL_API_SERVICE_STOP_COMMAND`
   - `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`
-- optional `/v1/connect` hardening mode (production-focused):
+- optional production policy mode (umbrella defaulting):
+  - `GPM_PRODUCTION_MODE=1` (legacy alias: `TDPN_PRODUCTION_MODE=1`)
+  - when enabled and explicit per-flag overrides are unset, daemon defaults become:
+    - `/v1/connect` session-required (`connect_require_session=true`)
+    - manual bootstrap/invite compatibility override locked (`allow_legacy_connect_override=false`)
+    - auth-verify strict metadata required (`gpm_auth_verify_require_metadata=true`)
+    - auth-verify strict wallet-extension-source required (`gpm_auth_verify_require_wallet_extension_source=true`)
+  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, plus legacy `TDPN_*` aliases)
+- optional `/v1/connect` hardening flags (standalone or as explicit overrides):
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
-  - default remains legacy-compatible unless this flag is explicitly enabled
+  - default remains legacy-compatible unless this flag (or production mode defaults) is enabled
   - optional desktop/web compatibility-control gate:
     - `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=1` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE=1`)
     - when disabled (default), UI compatibility controls for manual bootstrap/invite overrides are hidden by policy
@@ -74,8 +82,8 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/auth/verify` (uses a pluggable signature verifier hook in the daemon; default verifier enforces baseline proof-shape guardrails while full wallet-extension verification remains a follow-on milestone; request supports optional signature metadata: `signature_kind`, `signature_public_key`, `signature_public_key_type`, `signature_source`, `chain_id`, `signed_message`, `signature_envelope`; backward-compatible aliases `public_key` -> `signature_public_key` and `public_key_type` -> `signature_public_key_type` are accepted, and canonical keys take precedence when both canonical and alias values are non-empty; when provided, `signed_message` must exactly match the issued challenge message, `signature_kind` must be `sign_arbitrary` or `eip191`, `signature_source` must be `wallet_extension` or `manual`, `signature_public_key_type` must be `secp256k1` or `ed25519`, and `signature_envelope` (string or JSON payload) is normalized and capped at 16384 bytes; omitting metadata preserves existing behavior)
 - optional external verifier hook: set `GPM_AUTH_VERIFY_COMMAND` (legacy alias: `TDPN_AUTH_VERIFY_COMMAND`) to run a local command after baseline validation; the command receives context via env vars: `GPM_AUTH_VERIFY_CHALLENGE_ID`, `GPM_AUTH_VERIFY_MESSAGE`, `GPM_AUTH_VERIFY_WALLET_ADDRESS`, `GPM_AUTH_VERIFY_WALLET_PROVIDER`, `GPM_AUTH_VERIFY_SIGNATURE`, `GPM_AUTH_VERIFY_SIGNATURE_KIND`, `GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY`, `GPM_AUTH_VERIFY_SIGNATURE_PUBLIC_KEY_TYPE`, `GPM_AUTH_VERIFY_SIGNATURE_SOURCE`, `GPM_AUTH_VERIFY_CHAIN_ID`, `GPM_AUTH_VERIFY_SIGNED_MESSAGE`, `GPM_AUTH_VERIFY_SIGNATURE_ENVELOPE`
 - strict external-verifier policy: set `GPM_AUTH_VERIFY_REQUIRE_COMMAND=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_COMMAND=1`) to require `GPM_AUTH_VERIFY_COMMAND` to be configured; when enabled and the command is unset, `POST /v1/gpm/auth/verify` fails closed with a policy error.
-- strict metadata policy: set `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`) to require `signature_kind`, `signature_source`, and `signed_message`; default is `false` for compatibility, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when required metadata is missing.
-- strict wallet-extension-source policy: set `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`) to require explicit `signature_source=wallet_extension`; default is `false` for compatibility, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when the source requirement is not met.
+- strict metadata policy: set `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`) to require `signature_kind`, `signature_source`, and `signed_message`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when required metadata is missing.
+- strict wallet-extension-source policy: set `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`) to require explicit `signature_source=wallet_extension`; default is `false` for compatibility unless `GPM_PRODUCTION_MODE=1` is enabled and this flag is unset, and when enabled `POST /v1/gpm/auth/verify` fails closed with a policy error when the source requirement is not met.
 - `POST /v1/gpm/session` (`action=status|refresh|revoke`; `status`/`refresh` reconcile non-admin session role against current operator decision and include additive `session_reconciled` response metadata)
 - `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile`, trusted `bootstrap_directories` from the signed manifest, and preferred `bootstrap_directory`; used as authoritative connect policy for session-token connects)
 - `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, preferred `bootstrap_directory`, trusted `bootstrap_directories`, and persisted `path_profile` when available)
@@ -153,9 +161,15 @@ If auth is required and missing/invalid, the API returns `401`.
   "config": {
     "connect_require_session": true,
     "allow_legacy_connect_override": false,
+    "connect_policy_mode": "production",
+    "connect_policy_source": "GPM_PRODUCTION_MODE",
+    "gpm_auth_verify_policy_mode": "production",
+    "gpm_auth_verify_policy_source": "GPM_PRODUCTION_MODE",
     "gpm_auth_verify_require_command": false,
     "gpm_auth_verify_require_metadata": false,
+    "gpm_auth_verify_require_metadata_policy_source": "production-default",
     "gpm_auth_verify_require_wallet_extension_source": false,
+    "gpm_auth_verify_require_wallet_extension_policy_source": "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
     "gpm_auth_verify_command_configured": false,
     "gpm_main_domain": "https://globalprivatemesh.net",
     "gpm_manifest_url": "https://globalprivatemesh.net/v1/bootstrap/manifest",
@@ -168,11 +182,21 @@ If auth is required and missing/invalid, the API returns `401`.
 }
 ```
 
-Auth-verify policy config hints:
+Policy posture config hints:
+- `connect_policy_mode`: additive connect posture mode (`default|production` in current daemon behavior).
+- `connect_policy_source`: additive source for connect posture mode/defaulting (for example `GPM_PRODUCTION_MODE`, `GPM_CONNECT_REQUIRE_SESSION`, `TDPN_CONNECT_REQUIRE_SESSION`, or `default`).
+- `gpm_auth_verify_policy_mode`: additive auth-verify posture mode (`default|production`).
+- `gpm_auth_verify_policy_source`: additive source for auth-verify posture mode/defaulting (for example `GPM_PRODUCTION_MODE` or `default`).
 - `gpm_auth_verify_require_command`: whether strict external verifier command policy is enabled.
 - `gpm_auth_verify_require_metadata`: whether strict metadata policy is enabled (`signature_kind`, `signature_source`, and `signed_message` required at verify time).
+- `gpm_auth_verify_require_metadata_policy_source`: additive source for metadata strictness (`production-default` when inherited from production mode with no explicit metadata env override).
 - `gpm_auth_verify_require_wallet_extension_source`: whether strict wallet-extension-source policy is enabled (`signature_source=wallet_extension` required at verify time).
+- `gpm_auth_verify_require_wallet_extension_policy_source`: additive source for wallet-extension-source strictness (`production-default` when inherited from production mode with no explicit wallet-source env override).
 - `gpm_auth_verify_command_configured`: whether `GPM_AUTH_VERIFY_COMMAND` is currently configured.
+
+Backward compatibility notes:
+- These mode/source posture keys are additive observability fields; clients must treat them as optional.
+- Older daemons may return only legacy booleans (`connect_require_session`, `allow_legacy_connect_override`, and auth-verify strictness booleans); clients should continue functioning by deriving posture from those booleans when mode/source keys are absent.
 
 ### `POST /v1/connect`
 Body:
@@ -196,7 +220,7 @@ Notes:
 - use `https://` for non-loopback bootstrap hosts.
 - loopback-only developer bootstrap may use `http://127.0.0.1:...` or `http://[::1]:...` when explicitly intended.
 - `http://localhost:...` is intentionally rejected by desktop validation; use literal loopback IPs to avoid hostname/DNS ambiguity.
-- production hardening mode (`GPM_CONNECT_REQUIRE_SESSION=1`, legacy `TDPN_CONNECT_REQUIRE_SESSION=1`) requires `session_token` and rejects manual `bootstrap_directory`/`invite_key` request overrides.
+- production hardening can be enabled explicitly (`GPM_CONNECT_REQUIRE_SESSION=1`, legacy `TDPN_CONNECT_REQUIRE_SESSION=1`) or inherited by default from `GPM_PRODUCTION_MODE=1` / `TDPN_PRODUCTION_MODE=1` when connect-specific overrides are unset; in hardening mode, connect requires `session_token` and rejects manual `bootstrap_directory`/`invite_key` request overrides.
 - UI compatibility controls for manual `bootstrap_directory`/`invite_key` overrides are policy-gated by `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE`); default is hidden/disabled.
 - when hardening mode is not enabled (default), legacy `bootstrap_directory` + `invite_key` behavior remains available.
 - when connect resolves credentials from a registered `session_token`, the session-bound `path_profile` from client registration is authoritative.
