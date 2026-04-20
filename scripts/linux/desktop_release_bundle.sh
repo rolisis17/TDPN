@@ -3,17 +3,21 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DESKTOP_DIR="$ROOT_DIR/apps/desktop"
+BUNDLE_ROOT="$DESKTOP_DIR/src-tauri/target/release/bundle"
+DEFAULT_SUMMARY_JSON="$ROOT_DIR/.easy-node-logs/desktop_release_bundle_linux_summary.json"
 DOCTOR_SCRIPT="$ROOT_DIR/scripts/linux/desktop_doctor.sh"
 DOCTOR_FIX_COMMAND="./scripts/linux/desktop_doctor.sh --mode fix --install-missing"
 BUILD_REQUIRED_TOOLS=(node npm rustc cargo git bash)
 MISSING_BUILD_TOOLS=()
+SCANNED_ARTIFACTS_JSON="[]"
+SCANNED_ARTIFACTS_BY_KIND_JSON='{"appimage":[],"deb":[],"rpm":[],"tarball":[],"sig":[],"file":[]}'
 
 show_usage() {
   cat <<'USAGE'
 GPM desktop release bundle scaffold (non-production signing flow)
 
 Usage:
-  ./scripts/linux/desktop_release_bundle.sh [--help] [--channel stable|beta|canary] [--update-feed-url URL] [--signing-identity ID] [--signing-cert-path PATH] [--signing-cert-password VALUE] [--install-missing] [--skip-build] [-- <tauri args>]
+  ./scripts/linux/desktop_release_bundle.sh [--help] [--channel stable|beta|canary] [--update-feed-url URL] [--signing-identity ID] [--signing-cert-path PATH] [--signing-cert-password VALUE] [--install-missing] [--skip-build] [--summary-json PATH] [--print-summary-json [0|1]] [-- <tauri args>]
 
 Examples:
   ./scripts/linux/desktop_release_bundle.sh
@@ -84,6 +88,255 @@ run_doctor_missing_tools_remediation() {
   fi
   echo "[desktop-release-bundle] running remediation: $DOCTOR_FIX_COMMAND"
   bash "$DOCTOR_SCRIPT" --mode fix --install-missing
+}
+
+bool_to_json() {
+  local raw="$1"
+  if [[ "$raw" == "1" ]]; then
+    printf '%s' "true"
+  else
+    printf '%s' "false"
+  fi
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+json_array_from_entries() {
+  local array_name="$1"
+  local -n array_ref="$array_name"
+  local json="["
+  local index
+  for index in "${!array_ref[@]}"; do
+    if [[ "$index" -gt 0 ]]; then
+      json+=","
+    fi
+    json+="${array_ref[$index]}"
+  done
+  json+="]"
+  printf '%s' "$json"
+}
+
+artifact_extension_and_kind() {
+  local artifact_name="$1"
+  local artifact_name_lower
+  artifact_name_lower="$(to_lower "$artifact_name")"
+
+  local extension=""
+  if [[ "$artifact_name_lower" == *.tar.gz ]]; then
+    extension=".tar.gz"
+  elif [[ "$artifact_name" == *.* && "$artifact_name" != .* ]]; then
+    extension=".${artifact_name_lower##*.}"
+  fi
+
+  local kind="file"
+  case "$extension" in
+    .appimage)
+      kind="appimage"
+      ;;
+    .deb)
+      kind="deb"
+      ;;
+    .rpm)
+      kind="rpm"
+      ;;
+    .tar.gz)
+      kind="tarball"
+      ;;
+    .sig)
+      kind="sig"
+      ;;
+    *)
+      kind="file"
+      ;;
+  esac
+
+  printf '%s\t%s' "$extension" "$kind"
+}
+
+sha256_for_file() {
+  local target_file="$1"
+  local digest_output=""
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest_output="$(sha256sum "$target_file" 2>/dev/null || true)"
+    if [[ -n "$digest_output" ]]; then
+      printf '%s' "${digest_output%% *}"
+      return
+    fi
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    digest_output="$(shasum -a 256 "$target_file" 2>/dev/null || true)"
+    if [[ -n "$digest_output" ]]; then
+      printf '%s' "${digest_output%% *}"
+      return
+    fi
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    digest_output="$(openssl dgst -sha256 "$target_file" 2>/dev/null || true)"
+    if [[ "$digest_output" == *"= "* ]]; then
+      printf '%s' "${digest_output##*= }"
+      return
+    fi
+  fi
+
+  printf '%s' ""
+}
+
+size_bytes_for_file() {
+  local target_file="$1"
+  local size_value=""
+  if size_value="$(stat -c %s "$target_file" 2>/dev/null)"; then
+    printf '%s' "$size_value"
+    return
+  fi
+
+  size_value="$(wc -c <"$target_file" 2>/dev/null || true)"
+  size_value="${size_value//[[:space:]]/}"
+  if [[ -n "$size_value" ]]; then
+    printf '%s' "$size_value"
+    return
+  fi
+
+  printf '%s' "0"
+}
+
+scan_release_bundle_artifacts() {
+  local bundle_root_path="$1"
+
+  local artifacts_entries=()
+  local appimage_entries=()
+  local deb_entries=()
+  local rpm_entries=()
+  local tarball_entries=()
+  local sig_entries=()
+  local file_entries=()
+
+  if [[ -d "$bundle_root_path" ]]; then
+    local had_globstar="0"
+    local had_nullglob="0"
+    if shopt -q globstar; then
+      had_globstar="1"
+    fi
+    if shopt -q nullglob; then
+      had_nullglob="1"
+    fi
+
+    shopt -s globstar nullglob
+    local artifact_path
+    for artifact_path in "$bundle_root_path"/**; do
+      if [[ ! -f "$artifact_path" ]]; then
+        continue
+      fi
+
+      local artifact_name
+      artifact_name="${artifact_path##*/}"
+
+      local extension_kind
+      extension_kind="$(artifact_extension_and_kind "$artifact_name")"
+      local artifact_extension="${extension_kind%%$'\t'*}"
+      local artifact_kind="${extension_kind##*$'\t'}"
+
+      local artifact_size_bytes
+      artifact_size_bytes="$(size_bytes_for_file "$artifact_path")"
+
+      local artifact_sha256
+      artifact_sha256="$(sha256_for_file "$artifact_path")"
+
+      local artifact_path_json
+      artifact_path_json="\"$(json_escape "$artifact_path")\""
+      local artifact_name_json
+      artifact_name_json="\"$(json_escape "$artifact_name")\""
+      local artifact_extension_json
+      artifact_extension_json="\"$(json_escape "$artifact_extension")\""
+      local artifact_kind_json
+      artifact_kind_json="\"$(json_escape "$artifact_kind")\""
+      local artifact_sha256_json
+      artifact_sha256_json="\"$(json_escape "$artifact_sha256")\""
+
+      artifacts_entries+=("{\"path\":$artifact_path_json,\"name\":$artifact_name_json,\"extension\":$artifact_extension_json,\"kind\":$artifact_kind_json,\"size_bytes\":$artifact_size_bytes,\"sha256\":$artifact_sha256_json}")
+
+      case "$artifact_kind" in
+        appimage)
+          appimage_entries+=("$artifact_path_json")
+          ;;
+        deb)
+          deb_entries+=("$artifact_path_json")
+          ;;
+        rpm)
+          rpm_entries+=("$artifact_path_json")
+          ;;
+        tarball)
+          tarball_entries+=("$artifact_path_json")
+          ;;
+        sig)
+          sig_entries+=("$artifact_path_json")
+          ;;
+        *)
+          file_entries+=("$artifact_path_json")
+          ;;
+      esac
+    done
+
+    if [[ "$had_globstar" == "0" ]]; then
+      shopt -u globstar
+    fi
+    if [[ "$had_nullglob" == "0" ]]; then
+      shopt -u nullglob
+    fi
+  fi
+
+  SCANNED_ARTIFACTS_JSON="$(json_array_from_entries artifacts_entries)"
+  SCANNED_ARTIFACTS_BY_KIND_JSON="{\"appimage\":$(json_array_from_entries appimage_entries),\"deb\":$(json_array_from_entries deb_entries),\"rpm\":$(json_array_from_entries rpm_entries),\"tarball\":$(json_array_from_entries tarball_entries),\"sig\":$(json_array_from_entries sig_entries),\"file\":$(json_array_from_entries file_entries)}"
+}
+
+emit_success_summary_json() {
+  local generated_at_utc
+  generated_at_utc="$(printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)"
+  scan_release_bundle_artifacts "$BUNDLE_ROOT"
+
+  local summary_dir="$summary_json"
+  if [[ "$summary_dir" == */* ]]; then
+    summary_dir="${summary_json%/*}"
+    if [[ ! -d "$summary_dir" ]]; then
+      mkdir -p "$summary_dir"
+    fi
+  fi
+
+  local payload
+  payload="$(printf '%s\n' \
+    '{' \
+    '  "version": 1,' \
+    "  \"generated_at_utc\": \"$(json_escape "$generated_at_utc")\"," \
+    '  "status": "ok",' \
+    '  "rc": 0,' \
+    '  "platform": "linux",' \
+    '  "mode": "desktop_release_bundle_scaffold",' \
+    "  \"channel\": \"$(json_escape "$channel")\"," \
+    "  \"update_feed_url\": \"$(json_escape "$update_feed_url")\"," \
+    "  \"skip_build\": $(bool_to_json "$skip_build")," \
+    "  \"install_missing_requested\": $(bool_to_json "$install_missing")," \
+    "  \"bundle_root\": \"$(json_escape "$BUNDLE_ROOT")\"," \
+    "  \"artifact_hint\": \"$(json_escape "$BUNDLE_ROOT")\"," \
+    "  \"artifacts\": $SCANNED_ARTIFACTS_JSON," \
+    "  \"artifacts_by_kind\": $SCANNED_ARTIFACTS_BY_KIND_JSON" \
+    '}')"
+
+  printf '%s\n' "$payload" >"$summary_json"
+  echo "[desktop-release-bundle] summary_json=$summary_json"
+  if [[ "$print_summary_json" == "1" ]]; then
+    echo "[desktop-release-bundle] summary_json_payload:"
+    printf '%s\n' "$payload"
+  fi
 }
 
 to_lower() {
@@ -226,6 +479,8 @@ signing_cert_path=""
 signing_cert_password=""
 install_missing="0"
 skip_build="0"
+summary_json="$DEFAULT_SUMMARY_JSON"
+print_summary_json="0"
 tauri_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -282,6 +537,22 @@ while [[ $# -gt 0 ]]; do
       skip_build="1"
       shift
       ;;
+    --summary-json)
+      if [[ $# -lt 2 ]]; then
+        echo "--summary-json requires a value" >&2
+        exit 2
+      fi
+      summary_json="$2"
+      shift 2
+      ;;
+    --print-summary-json)
+      if [[ $# -lt 2 ]]; then
+        echo "--print-summary-json requires a value (0 or 1)" >&2
+        exit 2
+      fi
+      print_summary_json="$2"
+      shift 2
+      ;;
     --)
       shift
       tauri_args=("$@")
@@ -299,6 +570,14 @@ case "$channel" in
   stable|beta|canary) ;;
   *)
     echo "invalid --channel '$channel' (allowed: stable, beta, canary)" >&2
+    exit 2
+    ;;
+esac
+
+case "$print_summary_json" in
+  0|1) ;;
+  *)
+    echo "invalid --print-summary-json '$print_summary_json' (allowed: 0, 1)" >&2
     exit 2
     ;;
 esac
@@ -363,6 +642,7 @@ fi
 
 if [[ "$skip_build" == "1" ]]; then
   echo "[desktop-release-bundle] build skipped by --skip-build"
+  emit_success_summary_json
   exit 0
 fi
 
@@ -398,3 +678,4 @@ popd >/dev/null
 echo "[desktop-release-bundle] status=ok"
 echo "[desktop-release-bundle] artifact_hint=$DESKTOP_DIR/src-tauri/target/release/bundle"
 echo "[desktop-release-bundle] note=this is scaffold-only and not a production signing/release pipeline"
+emit_success_summary_json

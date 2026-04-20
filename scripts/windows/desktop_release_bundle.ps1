@@ -2,6 +2,9 @@ param(
   [ValidateSet("stable", "beta", "canary")]
   [string]$Channel = "stable",
   [string]$UpdateFeedUrl = "",
+  [string]$SummaryJson = "",
+  [ValidateSet(0, 1)]
+  [int]$PrintSummaryJson = 0,
   [string]$SigningIdentity = "",
   [string]$SigningCertPath = "",
   [string]$SigningCertPassword = "",
@@ -19,7 +22,7 @@ function Show-Usage {
   Write-Host "GPM desktop release bundle scaffold (non-production signing flow)"
   Write-Host ""
   Write-Host "Usage:"
-  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SigningIdentity ID] [-SigningCertPath PATH] [-SigningCertPassword VALUE] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
+  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SummaryJson PATH] [-PrintSummaryJson 0|1] [-SigningIdentity ID] [-SigningCertPath PATH] [-SigningCertPassword VALUE] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
   Write-Host ""
   Write-Host "Examples:"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1"
@@ -32,6 +35,7 @@ function Show-Usage {
   Write-Host "  - -InstallMissing may use winget to install missing Node.js, Rust, and Git prerequisites non-interactively."
   Write-Host "  - Sets GPM_DESKTOP_* vars and mirrors TDPN_DESKTOP_* compatibility vars for this process."
   Write-Host "  - If -UpdateFeedUrl is omitted, the script falls back to GPM_DESKTOP_UPDATE_FEED_URL then TDPN_DESKTOP_UPDATE_FEED_URL."
+  Write-Host "  - Writes summary JSON to .easy-node-logs/desktop_release_bundle_windows_summary.json by default."
   Write-Host "  - -SigningCertPassword requires -SigningCertPath."
   Write-Host "  - Validates update feed URL and signing placeholder input consistency before invoking build."
 }
@@ -346,8 +350,120 @@ function Ensure-TauriIconScaffold {
   Write-Host "[desktop-release-bundle] icon_scaffold=created ($iconPath)"
 }
 
+function Get-ArtifactKind {
+  param(
+    [string]$Extension
+  )
+
+  switch ($Extension.ToLowerInvariant()) {
+    ".msi" { return "msi" }
+    ".exe" { return "exe" }
+    ".nsis" { return "nsis" }
+    ".zip" { return "zip" }
+    ".sig" { return "sig" }
+    default { return "file" }
+  }
+}
+
+function Get-BundleArtifacts {
+  param(
+    [string]$BundleRoot
+  )
+
+  $records = @()
+  if (-not (Test-Path -LiteralPath $BundleRoot -PathType Container)) {
+    return @($records)
+  }
+
+  $files = @(Get-ChildItem -LiteralPath $BundleRoot -File -Recurse | Sort-Object -Property FullName)
+  foreach ($file in $files) {
+    $extension = ""
+    if (-not [string]::IsNullOrWhiteSpace($file.Extension)) {
+      $extension = $file.Extension.ToLowerInvariant()
+    }
+    $kind = Get-ArtifactKind -Extension $extension
+    $sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    $records += [ordered]@{
+      path = $file.FullName
+      name = $file.Name
+      extension = $extension
+      kind = $kind
+      size_bytes = [int64]$file.Length
+      sha256 = $sha256
+    }
+  }
+
+  return @($records)
+}
+
+function Get-ArtifactsByKind {
+  param(
+    [object[]]$Artifacts
+  )
+
+  $counts = [ordered]@{}
+  foreach ($artifact in $Artifacts) {
+    $kind = [string]$artifact.kind
+    if ($counts.Contains($kind)) {
+      $counts[$kind] = [int]$counts[$kind] + 1
+    } else {
+      $counts[$kind] = 1
+    }
+  }
+  return $counts
+}
+
+function Write-ReleaseBundleSummary {
+  param(
+    [string]$SummaryPath,
+    [string]$Channel,
+    [string]$UpdateFeedUrl,
+    [bool]$SkipBuild,
+    [bool]$InstallMissingRequested,
+    [string]$BundleRoot,
+    [bool]$PrintPayload
+  )
+
+  $artifacts = Get-BundleArtifacts -BundleRoot $BundleRoot
+  $artifactsByKind = Get-ArtifactsByKind -Artifacts $artifacts
+
+  $summary = [ordered]@{
+    version = 1
+    generated_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    status = "ok"
+    rc = 0
+    platform = "windows"
+    mode = "desktop_release_bundle_scaffold"
+    channel = $Channel
+    update_feed_url = if ([string]::IsNullOrWhiteSpace($UpdateFeedUrl)) { "" } else { $UpdateFeedUrl }
+    skip_build = $SkipBuild
+    install_missing_requested = $InstallMissingRequested
+    bundle_root = $BundleRoot
+    artifacts = $artifacts
+    artifacts_by_kind = $artifactsByKind
+    artifact_hint = $BundleRoot
+  }
+
+  $summaryDir = Split-Path -Parent $SummaryPath
+  if (-not [string]::IsNullOrWhiteSpace($summaryDir) -and -not (Test-Path -LiteralPath $summaryDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $summaryDir -Force | Out-Null
+  }
+
+  $summaryJsonText = $summary | ConvertTo-Json -Depth 12
+  Set-Content -LiteralPath $SummaryPath -Value $summaryJsonText -Encoding utf8
+  Write-Host "[desktop-release-bundle] summary_json=$SummaryPath"
+  if ($PrintPayload) {
+    Write-Host "[desktop-release-bundle] summary_json_payload:"
+    Write-Host $summaryJsonText
+  }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($UpdateFeedUrl)) {
   $UpdateFeedUrl = $UpdateFeedUrl.Trim()
+}
+if (-not [string]::IsNullOrWhiteSpace($SummaryJson)) {
+  $SummaryJson = $SummaryJson.Trim()
 }
 if (-not [string]::IsNullOrWhiteSpace($SigningCertPath)) {
   $SigningCertPath = $SigningCertPath.Trim()
@@ -356,6 +472,10 @@ if (-not [string]::IsNullOrWhiteSpace($SigningCertPath)) {
 if ($Help -or $TauriArgs -contains "-h" -or $TauriArgs -contains "--help" -or $TauriArgs -contains "/?") {
   Show-Usage
   exit 0
+}
+
+if ($null -eq $TauriArgs) {
+  $TauriArgs = @()
 }
 
 if ($TauriArgs.Count -gt 0 -and $TauriArgs[0] -eq "--") {
@@ -373,6 +493,13 @@ Validate-SigningPlaceholders -Identity $SigningIdentity -CertPath $SigningCertPa
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..\..")
 $desktopDir = Join-Path $repoRoot.Path "apps\desktop"
+$bundleRoot = Join-Path $desktopDir "src-tauri\target\release\bundle"
+if ([string]::IsNullOrWhiteSpace($SummaryJson)) {
+  $SummaryJson = Join-Path $repoRoot.Path ".easy-node-logs\desktop_release_bundle_windows_summary.json"
+}
+$summaryJsonPath = [System.IO.Path]::GetFullPath($SummaryJson)
+$printSummaryJsonPayload = ($PrintSummaryJson -eq 1)
+$installMissingRequested = [bool]$InstallMissing
 
 if (-not (Test-Path (Join-Path $desktopDir "package.json"))) {
   throw (New-RemediationMessage -Headline "apps/desktop/package.json not found at expected path: $desktopDir" -Hints @(
@@ -450,6 +577,7 @@ try {
   if ($SkipBuild) {
     Write-Host "[desktop-release-bundle] build skipped by -SkipBuild"
     Show-Usage
+    Write-ReleaseBundleSummary -SummaryPath $summaryJsonPath -Channel $env:GPM_DESKTOP_UPDATE_CHANNEL -UpdateFeedUrl $env:GPM_DESKTOP_UPDATE_FEED_URL -SkipBuild $true -InstallMissingRequested $installMissingRequested -BundleRoot $bundleRoot -PrintPayload $printSummaryJsonPayload
     return
   }
 
@@ -486,10 +614,11 @@ try {
     Pop-Location
   }
 
-  $bundleHint = Join-Path $desktopDir "src-tauri\target\release\bundle"
+  $bundleHint = $bundleRoot
   Write-Host "[desktop-release-bundle] status=ok"
   Write-Host "[desktop-release-bundle] artifact_hint=$bundleHint"
   Write-Host "[desktop-release-bundle] note=this is scaffold-only and not a production signing/release pipeline"
+  Write-ReleaseBundleSummary -SummaryPath $summaryJsonPath -Channel $env:GPM_DESKTOP_UPDATE_CHANNEL -UpdateFeedUrl $env:GPM_DESKTOP_UPDATE_FEED_URL -SkipBuild $false -InstallMissingRequested $installMissingRequested -BundleRoot $bundleRoot -PrintPayload $printSummaryJsonPayload
 } finally {
   Restore-ScopedEnvironment -Snapshot $scopedEnvSnapshot
 }

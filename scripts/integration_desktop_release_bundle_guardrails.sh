@@ -107,6 +107,33 @@ run_expect_pass \
     -UpdateFeedUrl "https://updates.example.invalid/gpm/beta.json" \
     -SkipBuild
 
+SUMMARY_JSON_PATH="$TMP_DIR/desktop_release_bundle_windows_summary.json"
+SUMMARY_JSON_PATH_PS="$(to_powershell_path "$SUMMARY_JSON_PATH")"
+
+echo "[desktop-release-bundle-guardrails] skip-build summary json contract"
+run_expect_pass \
+  "skip_build_summary_json_pass" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Channel beta \
+    -UpdateFeedUrl "https://updates.example.invalid/gpm/beta.json" \
+    -SummaryJson "$SUMMARY_JSON_PATH_PS" \
+    -PrintSummaryJson 1 \
+    -SkipBuild
+assert_log_contains \
+  "skip_build_summary_json_pass" \
+  "[desktop-release-bundle] summary_json="
+assert_log_contains \
+  "skip_build_summary_json_pass" \
+  "[desktop-release-bundle] summary_json_payload:"
+if [[ ! -f "$SUMMARY_JSON_PATH" ]]; then
+  echo "desktop release bundle guardrails failed: summary json not created: $SUMMARY_JSON_PATH"
+  exit 1
+fi
+run_expect_pass \
+  "skip_build_summary_json_validate" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath '$SUMMARY_JSON_PATH_PS' | ConvertFrom-Json; if (\$summary.version -ne 1) { throw 'version mismatch' }; if (\$summary.status -ne 'ok') { throw 'status mismatch' }; if (\$summary.platform -ne 'windows') { throw 'platform mismatch' }; if (-not \$summary.skip_build) { throw 'skip_build mismatch' }; if (\$summary.channel -ne 'beta') { throw 'channel mismatch' }"
+
 echo "[desktop-release-bundle-guardrails] localhost http update feed passes"
 run_expect_pass \
   "localhost_http_feed_pass" \

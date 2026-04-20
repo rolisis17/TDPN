@@ -90,6 +90,26 @@ From `cmd.exe`:
 scripts\windows\desktop_release_bundle.cmd -Channel beta
 ```
 
+Release-bundle summary JSON output (scaffold/non-production):
+
+Windows:
+
+```powershell
+./scripts/windows/desktop_release_bundle.ps1 -SummaryJson .easy-node-logs/desktop_release_bundle_windows_summary.json -PrintSummaryJson 1 -SkipBuild
+```
+
+Linux:
+
+```bash
+bash ./scripts/linux/desktop_release_bundle.sh --summary-json .easy-node-logs/desktop_release_bundle_linux_summary.json --print-summary-json 1 --skip-build
+```
+
+Summary field quick guide:
+- `status`: high-level run result.
+- `channel`: effective release channel selected for the run.
+- `skip_build`: indicates validation-only bundle checks.
+- artifact inventory (`artifacts` and/or `artifact_hint`): records produced bundle paths, or expected bundle locations in skip-build mode, for CI/operator handoff.
+
 Optional scaffold signing placeholders:
 - `-SigningIdentity`
 - `-SigningCertPath`

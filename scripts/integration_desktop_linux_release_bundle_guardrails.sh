@@ -191,7 +191,53 @@ CONSTRAINED_PATH_DIR_Q="$(printf '%q' "$CONSTRAINED_PATH_DIR")"
 echo "[desktop-linux-release-bundle-guardrails] skip-build passes with constrained PATH and still validates scaffold inputs"
 run_expect_pass \
   "skip_build_constrained_path_pass" \
-  bash -lc "set -euo pipefail; constrained_path=$CONSTRAINED_PATH_DIR_Q; fail_log=$TMP_DIR_Q/skip_build_constrained_validation_fail.log; pass_log=$TMP_DIR_Q/skip_build_constrained_validation_pass.log; PATH=\"\$constrained_path\"; if command -v node >/dev/null 2>&1 || command -v npm >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1; then echo 'expected constrained PATH to omit node/npm/rustc/cargo' >&2; exit 1; fi; if $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'ftp://updates.example.invalid/gpm/beta.json' --skip-build >\"\$fail_log\" 2>&1; then echo 'expected invalid update feed URL to fail under --skip-build' >&2; exit 1; fi; grep -F -- 'allowed schemes: http, https' \"\$fail_log\" >/dev/null; $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'https://updates.example.invalid/gpm/beta.json' --skip-build >\"\$pass_log\" 2>&1; grep -F -- '[desktop-release-bundle] mode=scaffold-non-production' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] build skipped by --skip-build' \"\$pass_log\" >/dev/null"
+  bash -lc "set -euo pipefail; constrained_path=$CONSTRAINED_PATH_DIR_Q; fail_log=$TMP_DIR_Q/skip_build_constrained_validation_fail.log; pass_log=$TMP_DIR_Q/skip_build_constrained_validation_pass.log; summary_json=$TMP_DIR_Q/skip_build_constrained_summary.json; PATH=\"\$constrained_path\"; if command -v node >/dev/null 2>&1 || command -v npm >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1 || command -v cargo >/dev/null 2>&1; then echo 'expected constrained PATH to omit node/npm/rustc/cargo' >&2; exit 1; fi; if $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'ftp://updates.example.invalid/gpm/beta.json' --skip-build >\"\$fail_log\" 2>&1; then echo 'expected invalid update feed URL to fail under --skip-build' >&2; exit 1; fi; grep -F -- 'allowed schemes: http, https' \"\$fail_log\" >/dev/null; $SCRIPT_UNDER_TEST_Q --channel beta --update-feed-url 'https://updates.example.invalid/gpm/beta.json' --summary-json \"\$summary_json\" --skip-build >\"\$pass_log\" 2>&1; grep -F -- '[desktop-release-bundle] mode=scaffold-non-production' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] build skipped by --skip-build' \"\$pass_log\" >/dev/null; grep -F -- '[desktop-release-bundle] summary_json=' \"\$pass_log\" >/dev/null; [[ -s \"\$summary_json\" ]]"
+
+SUMMARY_SKIP_BUILD_JSON="$TMP_DIR/skip_build_summary.json"
+SUMMARY_SKIP_BUILD_LOG="$TMP_DIR/skip_build_summary.log"
+echo "[desktop-linux-release-bundle-guardrails] summary-json markers and payload are emitted in skip-build mode"
+if "$SCRIPT_UNDER_TEST" \
+  --channel beta \
+  --summary-json "$SUMMARY_SKIP_BUILD_JSON" \
+  --print-summary-json 1 \
+  --skip-build >"$SUMMARY_SKIP_BUILD_LOG" 2>&1; then
+  :
+else
+  echo "desktop linux release bundle guardrails failed: expected skip-build summary-json flow to pass"
+  cat "$SUMMARY_SKIP_BUILD_LOG"
+  exit 1
+fi
+if ! grep -F -- "[desktop-release-bundle] summary_json=$SUMMARY_SKIP_BUILD_JSON" "$SUMMARY_SKIP_BUILD_LOG" >/dev/null 2>&1; then
+  echo "desktop linux release bundle guardrails failed: missing summary_json marker in skip-build output"
+  cat "$SUMMARY_SKIP_BUILD_LOG"
+  exit 1
+fi
+if ! grep -F -- "[desktop-release-bundle] summary_json_payload:" "$SUMMARY_SKIP_BUILD_LOG" >/dev/null 2>&1; then
+  echo "desktop linux release bundle guardrails failed: missing summary_json_payload marker in skip-build output"
+  cat "$SUMMARY_SKIP_BUILD_LOG"
+  exit 1
+fi
+for required_pattern in \
+  '"version": 1' \
+  '"status": "ok"' \
+  '"rc": 0' \
+  '"platform": "linux"' \
+  '"mode": "desktop_release_bundle_scaffold"' \
+  '"channel": "beta"' \
+  '"update_feed_url": ""' \
+  '"skip_build": true' \
+  '"install_missing_requested": false' \
+  '"bundle_root": "'"$ROOT_DIR"'/apps/desktop/src-tauri/target/release/bundle"' \
+  '"artifact_hint": "'"$ROOT_DIR"'/apps/desktop/src-tauri/target/release/bundle"' \
+  '"artifacts":' \
+  '"artifacts_by_kind":'
+do
+  if ! grep -F -- "$required_pattern" "$SUMMARY_SKIP_BUILD_JSON" >/dev/null 2>&1; then
+    echo "desktop linux release bundle guardrails failed: missing summary json field: $required_pattern"
+    cat "$SUMMARY_SKIP_BUILD_JSON"
+    exit 1
+  fi
+done
 
 echo "[desktop-linux-release-bundle-guardrails] --install-missing still preserves skip-build behavior"
 run_expect_pass \

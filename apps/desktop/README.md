@@ -467,6 +467,18 @@ Skip-build validation mode:
 - `--skip-build` runs scaffold validation and env-scoping checks without requiring Node.js/npm/Rust toolchain.
 - real build path (without `--skip-build`) still requires toolchain and runs the Tauri bundle build.
 
+Summary JSON output (scaffold/non-production):
+
+```bash
+bash ./scripts/linux/desktop_release_bundle.sh --summary-json .easy-node-logs/desktop_release_bundle_linux_summary.json --print-summary-json 1 --skip-build
+```
+
+Summary field quick guide:
+- `status`: high-level result for the release-bundle run.
+- `channel`: effective release channel used by the run.
+- `skip_build`: whether validation-only mode was used.
+- artifact inventory (`artifacts` and/or `artifact_hint`): records produced bundle paths, or expected bundle output locations in skip-build validation mode, for CI/operator handoff.
+
 ## Windows Release Bundle Scaffold (Non-Production)
 
 Use this only as scaffolding while we build the real signing/release pipeline.
@@ -493,6 +505,18 @@ scripts\windows\desktop_release_bundle.cmd -Channel beta
 Skip-build validation mode:
 - `-SkipBuild` runs scaffold validation and env-scoping checks without requiring Node.js/npm/Rust toolchain.
 - real build path (without `-SkipBuild`) still requires toolchain and runs the Tauri bundle build.
+
+Summary JSON output (scaffold/non-production):
+
+```powershell
+./scripts/windows/desktop_release_bundle.ps1 -SummaryJson .easy-node-logs/desktop_release_bundle_windows_summary.json -PrintSummaryJson 1 -SkipBuild
+```
+
+Summary field quick guide:
+- `status`: high-level result for the release-bundle run.
+- `channel`: effective release channel used by the run.
+- `skip_build`: whether validation-only mode was used.
+- artifact inventory (`artifacts` and/or `artifact_hint`): records produced bundle paths, or expected bundle output locations in skip-build validation mode, for CI/operator handoff.
 
 Optional scaffold-only signing placeholders:
 - `-SigningIdentity`
