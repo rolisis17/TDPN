@@ -149,6 +149,10 @@ type gpmServerStatusRequest struct {
 	WalletAddress string `json:"wallet_address,omitempty"`
 }
 
+type gpmOnboardingOverviewRequest struct {
+	SessionToken string `json:"session_token"`
+}
+
 type gpmOperatorApplyRequest struct {
 	SessionToken    string `json:"session_token"`
 	ChainOperatorID string `json:"chain_operator_id"`
@@ -903,18 +907,7 @@ func (s *Service) handleGPMClientStatus(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
 		return
 	}
-	status := "not_registered"
-	if strings.TrimSpace(session.BootstrapDirectory) != "" && strings.TrimSpace(session.InviteKey) != "" {
-		status = "registered"
-	}
-	registration := map[string]any{
-		"wallet_address":      session.WalletAddress,
-		"status":              status,
-		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
-	}
-	if profile := strings.TrimSpace(session.PathProfile); profile != "" {
-		registration["path_profile"] = profile
-	}
+	registration := buildGPMClientRegistration(session)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"registration": registration,
@@ -958,7 +951,66 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address or session_token is required"})
 		return
 	}
+	readiness := s.buildGPMServerReadiness(walletAddress, session, sessionPresent)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"readiness": readiness,
+	})
+}
 
+func (s *Service) handleGPMOnboardingOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	var in gpmOnboardingOverviewRequest
+	if err := decodeJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	sessionToken := strings.TrimSpace(in.SessionToken)
+	if sessionToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "session_token is required"})
+		return
+	}
+	session, ok := s.gpmState.getSession(sessionToken, time.Now().UTC())
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "session not found"})
+		return
+	}
+	walletAddress := normalizeWalletAddress(session.WalletAddress)
+	if walletAddress == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "wallet_address or session_token is required"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"session":      serializeGPMSession(session),
+		"registration": buildGPMClientRegistration(session),
+		"readiness":    s.buildGPMServerReadiness(walletAddress, session, true),
+	})
+}
+
+func buildGPMClientRegistration(session gpmSession) map[string]any {
+	status := "not_registered"
+	if strings.TrimSpace(session.BootstrapDirectory) != "" && strings.TrimSpace(session.InviteKey) != "" {
+		status = "registered"
+	}
+	registration := map[string]any{
+		"wallet_address":      session.WalletAddress,
+		"status":              status,
+		"bootstrap_directory": strings.TrimSpace(session.BootstrapDirectory),
+	}
+	if profile := strings.TrimSpace(session.PathProfile); profile != "" {
+		registration["path_profile"] = profile
+	}
+	return registration
+}
+
+func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSession, sessionPresent bool) map[string]any {
 	role := "client"
 	sessionChainOperatorID := ""
 	if sessionPresent {
@@ -1044,27 +1096,23 @@ func (s *Service) handleGPMServerStatus(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	endpointPosture, endpointWarnings := gpmServerEndpointDiagnosticsFromEnv()
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true,
-		"readiness": map[string]any{
-			"wallet_address":               walletAddress,
-			"role":                         role,
-			"session_present":              sessionPresent,
-			"operator_application_status":  operatorApplicationStatus,
-			"chain_operator_id":            chainOperatorID,
-			"session_chain_operator_id":    sessionChainOperatorID,
-			"tab_visible":                  tabVisible,
-			"client_tab_visible":           clientTabVisible,
-			"lifecycle_actions_unlocked":   lifecycleActionsUnlocked,
-			"service_mutations_configured": serviceMutationsConfigured,
-			"client_lock_reason":           clientLockReason,
-			"lock_reason":                  lockReason,
-			"unlock_actions":               unlockActions,
-			"endpoint_posture":             endpointPosture,
-			"endpoint_warnings":            endpointWarnings,
-		},
-	})
+	return map[string]any{
+		"wallet_address":               walletAddress,
+		"role":                         role,
+		"session_present":              sessionPresent,
+		"operator_application_status":  operatorApplicationStatus,
+		"chain_operator_id":            chainOperatorID,
+		"session_chain_operator_id":    sessionChainOperatorID,
+		"tab_visible":                  tabVisible,
+		"client_tab_visible":           clientTabVisible,
+		"lifecycle_actions_unlocked":   lifecycleActionsUnlocked,
+		"service_mutations_configured": serviceMutationsConfigured,
+		"client_lock_reason":           clientLockReason,
+		"lock_reason":                  lockReason,
+		"unlock_actions":               unlockActions,
+		"endpoint_posture":             endpointPosture,
+		"endpoint_warnings":            endpointWarnings,
+	}
 }
 
 type gpmEndpointDiagnosticEntry struct {

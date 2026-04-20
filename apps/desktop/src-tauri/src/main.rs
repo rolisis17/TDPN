@@ -20,6 +20,20 @@ struct ServiceLifecycleRequest {
     session_token: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct GPMOnboardingOverviewRequest {
+    session_token: String,
+}
+
+impl GPMOnboardingOverviewRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.session_token.trim().is_empty() {
+            return Err("session_token is required".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Serialize)]
 struct ControlConfig {
     base_url: String,
@@ -532,6 +546,19 @@ async fn control_gpm_server_status(
 }
 
 #[tauri::command]
+async fn control_gpm_onboarding_overview(
+    state: State<'_, AppState>,
+    request: GPMOnboardingOverviewRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/onboarding/overview", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
 async fn control_gpm_operator_apply(
     state: State<'_, AppState>,
     request: GPMOperatorApplyRequest,
@@ -662,6 +689,7 @@ fn main() {
             control_gpm_client_register,
             control_gpm_client_status,
             control_gpm_server_status,
+            control_gpm_onboarding_overview,
             control_gpm_operator_apply,
             control_gpm_operator_status,
             control_gpm_operator_list,

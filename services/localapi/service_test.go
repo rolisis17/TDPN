@@ -4511,6 +4511,127 @@ func TestGPMServerStatus(t *testing.T) {
 	})
 }
 
+func TestGPMOnboardingOverview(t *testing.T) {
+	newOverviewService := func(t *testing.T) *Service {
+		t.Helper()
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = lifecycleSuccessCommand("start")
+		svc.serviceStop = lifecycleSuccessCommand("stop")
+		svc.serviceRestart = lifecycleSuccessCommand("restart")
+		return svc
+	}
+
+	now := time.Now().UTC()
+
+	t.Run("method not allowed", func(t *testing.T) {
+		svc := newOverviewService(t)
+		code, payload := callJSONHandler(t, svc.handleGPMOnboardingOverview, http.MethodGet, "/v1/gpm/onboarding/overview", "")
+		if code != http.StatusMethodNotAllowed {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "method not allowed") {
+			t.Fatalf("error=%q payload=%v", got, payload)
+		}
+	})
+
+	t.Run("missing session token", func(t *testing.T) {
+		svc := newOverviewService(t)
+		code, payload := callJSONHandler(t, svc.handleGPMOnboardingOverview, http.MethodPost, "/v1/gpm/onboarding/overview", `{}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session_token is required") {
+			t.Fatalf("error=%q payload=%v", got, payload)
+		}
+	})
+
+	t.Run("invalid session", func(t *testing.T) {
+		svc := newOverviewService(t)
+		code, payload := callJSONHandler(t, svc.handleGPMOnboardingOverview, http.MethodPost, "/v1/gpm/onboarding/overview", `{"session_token":"gpm-overview-missing"}`)
+		if code != http.StatusNotFound {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session not found") {
+			t.Fatalf("error=%q payload=%v", got, payload)
+		}
+	})
+
+	t.Run("happy path returns session registration and readiness", func(t *testing.T) {
+		svc := newOverviewService(t)
+		const (
+			sessionToken = "gpm-overview-operator-approved-token"
+			wallet       = "cosmos1overviewapproved"
+			chainID      = "operator-overview-1"
+		)
+		svc.gpmState.putSession(gpmSession{
+			Token:              sessionToken,
+			WalletAddress:      wallet,
+			WalletProvider:     "keplr",
+			Role:               "operator",
+			CreatedAt:          now,
+			ExpiresAt:          now.Add(time.Hour),
+			BootstrapDirectory: "https://directory.globalprivatemesh.example:8081",
+			InviteKey:          "inv-overview-approved",
+			PathProfile:        "3hop",
+			ChainOperatorID:    chainID,
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   wallet,
+			ChainOperatorID: chainID,
+			Status:          "approved",
+			UpdatedAt:       now,
+		})
+
+		code, payload := callJSONHandler(
+			t,
+			svc.handleGPMOnboardingOverview,
+			http.MethodPost,
+			"/v1/gpm/onboarding/overview",
+			`{"session_token":"`+sessionToken+`"}`,
+		)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if ok, _ := payload["ok"].(bool); !ok {
+			t.Fatalf("ok=%v payload=%v", payload["ok"], payload)
+		}
+
+		sessionPayload, _ := payload["session"].(map[string]any)
+		if sessionPayload == nil {
+			t.Fatalf("session missing payload=%v", payload)
+		}
+		if got, _ := sessionPayload["wallet_address"].(string); got != wallet {
+			t.Fatalf("session.wallet_address=%q want=%q payload=%v", got, wallet, payload)
+		}
+
+		registration, _ := payload["registration"].(map[string]any)
+		if registration == nil {
+			t.Fatalf("registration missing payload=%v", payload)
+		}
+		if got, _ := registration["status"].(string); got != "registered" {
+			t.Fatalf("registration.status=%q want=registered payload=%v", got, payload)
+		}
+		if got, _ := registration["wallet_address"].(string); got != wallet {
+			t.Fatalf("registration.wallet_address=%q want=%q payload=%v", got, wallet, payload)
+		}
+
+		readiness, _ := payload["readiness"].(map[string]any)
+		if readiness == nil {
+			t.Fatalf("readiness missing payload=%v", payload)
+		}
+		if got, _ := readiness["role"].(string); got != "operator" {
+			t.Fatalf("readiness.role=%q want=operator payload=%v", got, payload)
+		}
+		if got, _ := readiness["operator_application_status"].(string); got != "approved" {
+			t.Fatalf("readiness.operator_application_status=%q want=approved payload=%v", got, payload)
+		}
+		if got, _ := readiness["lifecycle_actions_unlocked"].(bool); !got {
+			t.Fatalf("readiness.lifecycle_actions_unlocked=%v want=true payload=%v", readiness["lifecycle_actions_unlocked"], payload)
+		}
+	})
+}
+
 func TestGPMOperatorList(t *testing.T) {
 	newOperatorListService := func(t *testing.T) *Service {
 		t.Helper()

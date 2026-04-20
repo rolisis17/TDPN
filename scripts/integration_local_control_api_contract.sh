@@ -321,6 +321,52 @@ fi
 diag_call="$(require_last_call "runtime-doctor")"
 assert_line_has "$diag_call" $'\t--show-json\t1' "diagnostics forwarding missing --show-json 1"
 
+echo "[local-control-api-contract] onboarding overview requires session_token"
+overview_missing_body="$TMP_DIR/onboarding_overview_missing_session_token.json"
+overview_missing_code="$(curl -sS -o "$overview_missing_body" -w '%{http_code}' -X POST -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" -H 'Content-Type: application/json' --data '{}' "${LOCAL_API_BASE}/v1/gpm/onboarding/overview")"
+if [[ "$overview_missing_code" != "400" ]]; then
+  echo "expected /v1/gpm/onboarding/overview to return 400 for missing session_token, got $overview_missing_code"
+  cat "$overview_missing_body"
+  exit 1
+fi
+if ! jq -e '.ok == false and (.error | contains("session_token is required"))' "$overview_missing_body" >/dev/null; then
+  echo "overview missing-session response payload mismatch"
+  cat "$overview_missing_body"
+  exit 1
+fi
+
+echo "[local-control-api-contract] onboarding overview returns consolidated session + registration + readiness"
+challenge_json="$(api_post_json "/v1/gpm/auth/challenge" '{"wallet_address":"cosmos1overviewcontract","wallet_provider":"keplr"}')"
+if ! jq -e '.ok == true and (.challenge_id | type == "string" and length > 0) and (.message | type == "string" and length > 0)' <<<"$challenge_json" >/dev/null; then
+  echo "auth challenge did not return expected payload"
+  echo "$challenge_json"
+  exit 1
+fi
+challenge_id="$(jq -r '.challenge_id // ""' <<<"$challenge_json")"
+if [[ -z "$challenge_id" ]]; then
+  echo "auth challenge missing challenge_id"
+  echo "$challenge_json"
+  exit 1
+fi
+verify_json="$(api_post_json "/v1/gpm/auth/verify" "{\"wallet_address\":\"cosmos1overviewcontract\",\"wallet_provider\":\"keplr\",\"challenge_id\":\"${challenge_id}\",\"signature\":\"sig-contract-overview-123\"}")"
+if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .session.role == "client" and (.session_token | type == "string" and length > 0)' <<<"$verify_json" >/dev/null; then
+  echo "auth verify did not return expected session payload"
+  echo "$verify_json"
+  exit 1
+fi
+overview_session_token="$(jq -r '.session_token // ""' <<<"$verify_json")"
+if [[ -z "$overview_session_token" ]]; then
+  echo "auth verify missing session_token"
+  echo "$verify_json"
+  exit 1
+fi
+overview_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
+if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .registration.wallet_address == "cosmos1overviewcontract" and .registration.status == "not_registered" and .readiness.role == "client" and .readiness.session_present == true and (.readiness.lifecycle_actions_unlocked | type == "boolean")' <<<"$overview_json" >/dev/null; then
+  echo "onboarding overview did not return expected consolidated payload"
+  echo "$overview_json"
+  exit 1
+fi
+
 echo "[local-control-api-contract] set_profile normalizes alias and forwards config-v1-set-profile"
 set_profile_json="$(api_post_json "/v1/set_profile" '{"path_profile":"private"}')"
 if ! jq -e '.ok == true and .path_profile == "3hop"' <<<"$set_profile_json" >/dev/null; then

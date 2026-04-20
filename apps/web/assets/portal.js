@@ -1917,6 +1917,27 @@ async function requestClientStatus() {
   return post("/v1/gpm/onboarding/client/status", request);
 }
 
+function applyOnboardingOverviewPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+  syncSessionDerivedState(payload);
+  const role = sessionRoleFromResult(payload);
+  if (typeof role === "string" && role.trim()) {
+    byId("role").value = role;
+  }
+  const registrationStatus = parseClientRegistrationStatus(payload);
+  if (registrationStatus !== undefined) {
+    clientRegistered = registrationStatus;
+  }
+  setServerReadiness(parseServerReadiness(payload));
+}
+
+async function requestOverview() {
+  const sessionToken = byId("session_token").value.trim();
+  return post("/v1/gpm/onboarding/overview", { session_token: sessionToken });
+}
+
 async function requestServerStatus() {
   const request = {
     session_token: byId("session_token").value.trim() || undefined,
@@ -2079,10 +2100,18 @@ async function reconcileSessionAfterModerationDecision() {
 
 async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
-  if (!byId("session_token").value.trim()) {
+  const sessionToken = byId("session_token").value.trim();
+  if (!sessionToken) {
     clientRegistered = false;
     refreshClientReadiness();
     return undefined;
+  }
+  try {
+    const overview = await requestOverview();
+    applyOnboardingOverviewPayload(overview);
+    return overview;
+  } catch {
+    // Fallback to legacy per-endpoint status refresh for compatibility.
   }
   try {
     const result = await requestClientStatus();
@@ -2126,6 +2155,15 @@ async function refreshServerReadinessStatus(options = {}) {
   if (!sessionToken && !walletAddress) {
     setServerReadiness(null);
     return undefined;
+  }
+  if (sessionToken) {
+    try {
+      const overview = await requestOverview();
+      applyOnboardingOverviewPayload(overview);
+      return overview;
+    } catch {
+      // Fallback to legacy per-endpoint status refresh for compatibility.
+    }
   }
   try {
     const result = await requestServerStatus();

@@ -1583,6 +1583,45 @@ function parseSessionRole(payload) {
   );
 }
 
+function applyOnboardingOverviewState(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+  if (typeof payload?.session_token === "string" && payload.session_token.trim()) {
+    setSessionToken(payload.session_token);
+  }
+  const registrationStatus = parseClientRegistrationStatus(payload);
+  if (registrationStatus !== undefined) {
+    state.clientRegistered = registrationStatus;
+  } else {
+    state.clientRegistered = inferClientRegistrationFromPayload(payload);
+  }
+  setRole(parseSessionRole(payload));
+  setServerReadiness(parseServerReadiness(payload));
+}
+
+async function requestOnboardingOverview(options = {}) {
+  const { quiet = true } = options;
+  if (!state.sessionToken) {
+    return undefined;
+  }
+  const request = {
+    session_token: state.sessionToken
+  };
+  try {
+    const result = quiet
+      ? await invoke("control_gpm_onboarding_overview", { request })
+      : await call("gpm_onboarding_overview", "control_gpm_onboarding_overview", { request });
+    applyOnboardingOverviewState(result);
+    return result;
+  } catch (err) {
+    if (quiet) {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
 async function call(label, command, args = {}, options = {}) {
   const { formatResultForDisplay } = options;
   try {
@@ -1743,9 +1782,12 @@ async function refreshSession(action = "status") {
   }
   state.clientRegistered = inferClientRegistrationFromPayload(result);
   setRole(parseSessionRole(result));
-  await refreshClientRegistrationStatus({ quiet: true });
+  const overview = await requestOnboardingOverview({ quiet: true });
+  if (!overview) {
+    await refreshClientRegistrationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
+  }
   await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
   return result;
 }
 
@@ -1754,18 +1796,22 @@ async function refreshSessionOnInit() {
     setServerReadiness(null);
     return;
   }
+  let overview;
   try {
     const result = await invoke("control_gpm_session", {
       request: { session_token: state.sessionToken, action: "status" }
     });
     state.clientRegistered = inferClientRegistrationFromPayload(result);
     setRole(parseSessionRole(result));
+    overview = await requestOnboardingOverview({ quiet: true });
   } catch {
     // Startup status refresh is best-effort and should not block the scaffold.
   }
-  await refreshClientRegistrationStatus({ quiet: true });
+  if (!overview) {
+    await refreshClientRegistrationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
+  }
   await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
 }
 
 async function loadNextPendingOperator() {

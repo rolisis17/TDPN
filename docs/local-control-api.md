@@ -80,6 +80,7 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/onboarding/client/register` (persists a session-bound `path_profile` that is used as authoritative connect policy for session-token connects)
 - `POST /v1/gpm/onboarding/client/status` (returns `registered|not_registered`, `bootstrap_directory`, and persisted `path_profile` when available)
 - `POST /v1/gpm/onboarding/server/status` (returns server-tab/lifecycle readiness derived from role, operator approval state, and chain-id sync hints)
+- `POST /v1/gpm/onboarding/overview` (consolidated onboarding contract for a `session_token`, returning `session + registration + readiness` in one response)
 - `POST /v1/gpm/onboarding/operator/apply`
 - `POST /v1/gpm/onboarding/operator/status`
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`), optional `search` substring filter (`wallet_address`, `chain_operator_id`, `server_label`, `status`, `reason`), optional `limit` (default `100`, clamped `1..500`), and optional cursor pagination via `cursor="<updated_at_utc>|<wallet_address>"`; response includes additive pagination metadata `total`, `has_more`, `next_cursor`, and echoed `request` fields)
@@ -274,6 +275,30 @@ Success payload:
 - `readiness.endpoint_posture`: additive endpoint posture snapshot used for server-tab diagnostics (for example, provider/authority and HTTP/HTTPS posture hints)
 - `readiness.endpoint_warnings`: additive list of actionable warning strings derived from endpoint posture checks
 - endpoint diagnostics are advisory and non-blocking; they do not lock lifecycle actions by themselves
+
+### `POST /v1/gpm/onboarding/overview`
+Body:
+
+```json
+{
+  "session_token": "required session token"
+}
+```
+
+Resolution and errors:
+- uses command-read auth (`requireCommandReadAuth`)
+- missing `session_token`: `400` with `{"ok":false,"error":"session_token is required"}`
+- missing/expired session token: `404` with `{"ok":false,"error":"session not found"}`
+- unresolved/invalid session wallet identity: `400` with `wallet_address or session_token is required`
+
+Success payload:
+- `ok`: `true`
+- `session`: same session shape returned by `POST /v1/gpm/session` (`wallet_address`, `wallet_provider`, `role`, `created_at_utc`, `expires_at_utc`, `bootstrap_directory`, optional `path_profile`, optional `chain_operator_id`)
+- `registration`: same registration shape as `POST /v1/gpm/onboarding/client/status`
+- `readiness`: same readiness shape as `POST /v1/gpm/onboarding/server/status`
+
+Compatibility note:
+- `POST /v1/gpm/onboarding/client/status` and `POST /v1/gpm/onboarding/server/status` remain fully supported; `POST /v1/gpm/onboarding/overview` is an additive consolidated contract to reduce round-trips.
 
 ### `POST /v1/gpm/session`
 Body:
