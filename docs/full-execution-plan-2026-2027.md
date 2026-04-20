@@ -205,5 +205,5 @@ Operator note (April 16, 2026 non-blockchain hardening):
 - `1hop` is never a silent fallback.
 - pre-readiness defer mode is never a silent success: root-only defer may continue selected runbooks with warning, but readiness stays non-ready until privileged reruns clear the gate.
 
-Near-term non-blockchain pending item:
-- expand server preflight/session operator diagnostics so provider/authority peering mismatches (including HTTPS-vs-HTTP endpoint posture) are surfaced consistently across simple and expert entrypoints.
+Near-term non-blockchain update (completed):
+- server preflight/session now surfaces provider/authority endpoint posture and mismatch diagnostics (including HTTPS-vs-HTTP and peer/authority mismatch) consistently across simple and expert entrypoints.

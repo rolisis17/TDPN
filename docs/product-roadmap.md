@@ -112,8 +112,8 @@ What this means for operators:
   - `sudo ./scripts/easy_node.sh pre-real-host-readiness --strict-beta 1 --print-summary-json 1`
 - then rerun your pilot wrapper as root for final signoff evidence.
 
-Pending (documented, not yet complete):
-- continue improving server provider/authority operator diagnostics in wrapper UX (preflight/session surfaces) so HTTPS-vs-HTTP and peer/authority mismatch causes are surfaced even earlier in simple operator paths.
+Completed in this slice:
+- server preflight/session diagnostics now surface provider/authority endpoint posture and mismatch signals (including HTTPS-vs-HTTP and peer/authority set mismatch) across simple and expert operator paths.
 
 ## Phase 1: Stable Linux Beta (Current Priority)
 
