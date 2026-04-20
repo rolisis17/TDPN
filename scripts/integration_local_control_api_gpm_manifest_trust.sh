@@ -396,8 +396,8 @@ start_local_api \
 
 echo "[local-control-api-gpm-manifest-trust] production mode /v1/config surfaces fail-closed connect policy defaults"
 prod_auth_config_json="$(api_get_json "/v1/config")"
-if ! jq -e '.ok == true and .config.connect_require_session == true and .config.allow_legacy_connect_override == false' <<<"$prod_auth_config_json" >/dev/null; then
-  echo "expected production mode /v1/config to surface connect_require_session=true and allow_legacy_connect_override=false"
+if ! jq -e '.ok == true and .config.connect_require_session == true and .config.allow_legacy_connect_override == false and .config.gpm_production_mode == true and .config.gpm_production_mode_source == "GPM_PRODUCTION_MODE"' <<<"$prod_auth_config_json" >/dev/null; then
+  echo "expected production mode /v1/config to surface connect fail-closed defaults and production-mode telemetry fields"
   echo "$prod_auth_config_json"
   exit 1
 fi

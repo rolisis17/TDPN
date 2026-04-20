@@ -177,6 +177,7 @@ let connectRequireSession = false;
 let allowLegacyConnectOverride = false;
 let connectPolicyMode = CONNECT_POLICY_MODE_COMPAT_ALLOWED;
 let connectPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+let gpmProductionMode = false;
 let authVerifyRequireMetadata = false;
 let authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let authVerifyRequireWalletExtensionSource = false;
@@ -426,6 +427,21 @@ function connectPolicyModeFromRequireSession(requireSession) {
   return requireSession ? CONNECT_POLICY_MODE_SESSION_REQUIRED : CONNECT_POLICY_MODE_COMPAT_ALLOWED;
 }
 
+function deriveGpmProductionModeFromPolicyHints(mode, source) {
+  const normalizedMode = normalizeConnectPolicyMode(mode);
+  const normalizedSource = normalizePolicySourceValue(source);
+  if (normalizedMode === "production") {
+    return true;
+  }
+  if (
+    normalizedSource === CONNECT_POLICY_SOURCE_ENV_DEFAULT &&
+    (normalizedMode === CONNECT_POLICY_MODE_SESSION_REQUIRED || normalizedMode === "default")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function parseConnectRequireSessionConfig(payload) {
   const scopes = runtimeConfigScopes(payload);
   const parsed = firstDefined(
@@ -476,6 +492,22 @@ function parseConnectPolicySourceConfig(payload) {
     )
   );
   return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+}
+
+function parseGpmProductionModeConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  return firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_production_mode",
+        "gpmProductionMode",
+        "production_mode",
+        "productionMode",
+        "tdpn_production_mode",
+        "tdpnProductionMode"
+      ])
+    )
+  );
 }
 
 function parseAuthVerifyRequireMetadataConfig(payload) {
@@ -890,13 +922,15 @@ function refreshConnectPolicyHint() {
   const mode = formatConnectPolicyModeLabel(connectPolicyMode);
   const source = formatPolicySourceLabel(connectPolicySource);
   let posture = "manual bootstrap/invite fields are optional compatibility controls.";
-  if (connectRequireSession) {
+  if (gpmProductionMode) {
+    posture = "manual bootstrap/invite overrides are disabled in production mode.";
+  } else if (connectRequireSession) {
     posture = "manual bootstrap/invite overrides are locked by session-required policy.";
   } else if (!allowLegacyConnectOverride) {
     posture = "manual bootstrap/invite overrides are disabled by policy.";
   }
   connectPolicyHintEl.textContent = `Connect policy: ${mode} (source: ${source}); ${posture}`;
-  connectPolicyHintEl.classList.toggle("locked", connectRequireSession || !allowLegacyConnectOverride);
+  connectPolicyHintEl.classList.toggle("locked", gpmProductionMode || connectRequireSession || !allowLegacyConnectOverride);
 }
 
 function refreshPolicyPostureBanner() {
@@ -925,9 +959,11 @@ function refreshPolicyPostureBanner() {
   const metadataSource = formatPolicySourceLabel(authVerifyRequireMetadataPolicySource);
   const walletRequired = authVerifyRequireWalletExtensionSource ? "required" : "optional";
   const walletSource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
-  const manualSignInGuidance = authVerifyRequireWalletExtensionSource
-    ? " Manual Verify + Create Session is disabled; use Sign + Verify (Wallet)."
-    : " Manual Verify + Create Session is available for compatibility.";
+  const manualSignInGuidance = gpmProductionMode
+    ? " Manual Verify + Create Session is disabled in production mode; use Sign + Verify (Wallet)."
+    : authVerifyRequireWalletExtensionSource
+      ? " Manual Verify + Create Session is disabled; use Sign + Verify (Wallet)."
+      : " Manual Verify + Create Session is available for compatibility.";
   policyAuthVerifyEl.textContent =
     `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
     `wallet-extension-source ${walletRequired} (source: ${walletSource}).${manualSignInGuidance}`;
@@ -979,11 +1015,15 @@ function syncManualSignInAction() {
     return;
   }
   const isBusy = document.body.classList.contains("is-busy");
-  const policyLocked = strictWalletExtensionSourceRequired();
+  const productionLocked = gpmProductionMode === true;
+  const authPolicyLocked = strictWalletExtensionSourceRequired();
+  const policyLocked = productionLocked || authPolicyLocked;
   const disabled = isBusy || policyLocked;
-  const guidance = policyLocked
-    ? "Manual verify is disabled by active auth policy. Use Sign + Verify (Wallet)."
-    : "Manual verify is available in compatibility mode.";
+  const guidance = productionLocked
+    ? "Manual verify is disabled in production mode. Use Sign + Verify (Wallet)."
+    : authPolicyLocked
+      ? "Manual verify is disabled by active auth policy. Use Sign + Verify (Wallet)."
+      : "Manual verify is available in compatibility mode.";
 
   manualSignInBtnEl.disabled = disabled;
   manualSignInBtnEl.setAttribute("aria-disabled", String(disabled));
@@ -1001,6 +1041,7 @@ function syncManualSignInAction() {
 
 function compatibilityOverrideEnabled() {
   return (
+    gpmProductionMode !== true &&
     configEndpointUnavailableFailClosedMode() !== true &&
     allowLegacyConnectOverride === true &&
     compatOverrideEl.checked === true &&
@@ -1010,7 +1051,11 @@ function compatibilityOverrideEnabled() {
 
 function refreshCompatibilityOverrideControls() {
   const failClosed = configEndpointUnavailableFailClosedMode();
+  const productionLocked = gpmProductionMode === true;
   if (!allowLegacyConnectOverride && compatOverrideEl.checked) {
+    compatOverrideEl.checked = false;
+  }
+  if (productionLocked && compatOverrideEl.checked) {
     compatOverrideEl.checked = false;
   }
   if (failClosed && compatOverrideEl.checked) {
@@ -1019,26 +1064,34 @@ function refreshCompatibilityOverrideControls() {
   if (connectRequireSession && compatOverrideEl.checked) {
     compatOverrideEl.checked = false;
   }
-  const policyLocked = connectRequireSession === true || failClosed;
+  const policyLocked = connectRequireSession === true || failClosed || productionLocked;
   const overrideEnabled = compatibilityOverrideEnabled();
 
   const compatDisabled = !allowLegacyConnectOverride || policyLocked;
   compatOverrideEl.disabled = compatDisabled;
   compatOverrideEl.setAttribute("aria-disabled", String(compatDisabled));
 
-  bootstrapDirectoryEl.disabled = !allowLegacyConnectOverride || !overrideEnabled;
+  bootstrapDirectoryEl.disabled = productionLocked || !allowLegacyConnectOverride || !overrideEnabled;
   bootstrapDirectoryEl.setAttribute("aria-disabled", String(!overrideEnabled));
-  inviteKeyEl.disabled = !allowLegacyConnectOverride || !overrideEnabled;
+  inviteKeyEl.disabled = productionLocked || !allowLegacyConnectOverride || !overrideEnabled;
   inviteKeyEl.setAttribute("aria-disabled", String(!overrideEnabled));
   refreshSessionBootstrapDirectoryControls();
 
   if (compatOverrideSectionEl) {
     compatOverrideSectionEl.hidden = !allowLegacyConnectOverride;
+    if (gpmProductionMode) {
+      compatOverrideSectionEl.hidden = true;
+    }
   }
 
   if (failClosed) {
     compatOverrideHintEl.textContent =
       "Compatibility override is disabled in restricted fail-closed mode because /v1/config is unavailable. Restore the daemon config endpoint first.";
+    return;
+  }
+
+  if (gpmProductionMode) {
+    compatOverrideHintEl.textContent = "Compatibility override is disabled in production mode. Use session-based registration.";
     return;
   }
 
@@ -1070,6 +1123,11 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     allowLegacyConnectOverride = parseAllowLegacyConnectOverrideConfig(config);
     connectPolicyMode = parseConnectPolicyModeConfig(config) || connectPolicyModeFromRequireSession(connectRequireSession);
     connectPolicySource = parseConnectPolicySourceConfig(config);
+    const parsedGpmProductionMode = parseGpmProductionModeConfig(config);
+    gpmProductionMode =
+      parsedGpmProductionMode !== undefined
+        ? parsedGpmProductionMode
+        : deriveGpmProductionModeFromPolicyHints(connectPolicyMode, connectPolicySource);
     authVerifyRequireMetadata = parseAuthVerifyRequireMetadataConfig(config);
     authVerifyRequireMetadataPolicySource = parseAuthVerifyRequireMetadataPolicySourceConfig(config);
     authVerifyRequireWalletExtensionSource = parseAuthVerifyRequireWalletExtensionSourceConfig(config);
@@ -1095,6 +1153,7 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     allowLegacyConnectOverride = false;
     connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
     connectPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    gpmProductionMode = false;
     authVerifyRequireMetadata = false;
     authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     authVerifyRequireWalletExtensionSource = false;
@@ -4409,6 +4468,9 @@ async function requestAuthChallenge() {
 async function requestAuthVerify(options = {}) {
   const source = nonEmptyString(options?.source)?.toLowerCase() || "manual";
   const manualSource = source !== "wallet_extension";
+  if (manualSource && gpmProductionMode) {
+    throw new Error("Manual verify is disabled in production mode. Use Sign + Verify (Wallet).");
+  }
   if (manualSource && strictWalletExtensionSourceRequired()) {
     const policySource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
     throw new Error(
@@ -4496,6 +4558,9 @@ async function requestServerStatus() {
 function connectValidationHint() {
   if (configEndpointUnavailableFailClosedMode()) {
     return failClosedMutatingActionStatusDetail();
+  }
+  if (gpmProductionMode) {
+    return "sign in and register the client profile before connecting (production mode)";
   }
   if (connectRequireSession) {
     return "session_token is required in session-required connect mode; sign in first";

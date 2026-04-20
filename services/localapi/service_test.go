@@ -2594,6 +2594,12 @@ func TestHandleConfig(t *testing.T) {
 		if got, _ := configMap["allow_legacy_connect_override"].(bool); !got {
 			t.Fatalf("allow_legacy_connect_override=%v want=true", configMap["allow_legacy_connect_override"])
 		}
+		if got, _ := configMap["gpm_production_mode"].(bool); !got {
+			t.Fatalf("gpm_production_mode=%v want=true", configMap["gpm_production_mode"])
+		}
+		if got, _ := configMap["gpm_production_mode_source"].(string); got != "GPM_PRODUCTION_MODE" {
+			t.Fatalf("gpm_production_mode_source=%q want=%q", got, "GPM_PRODUCTION_MODE")
+		}
 		if got, _ := configMap["connect_policy_mode"].(string); got != "production" {
 			t.Fatalf("connect_policy_mode=%q want=%q", got, "production")
 		}
@@ -2744,6 +2750,36 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if _, exists := configMap["gpm_manifest_hmac_key"]; exists {
 			t.Fatalf("gpm_manifest_hmac_key must not be exposed: %v", configMap)
+		}
+	})
+
+	t.Run("default payload reports production mode telemetry with defaults", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.authToken = "cfg-default-secret"
+		svc.gpmConnectPolicyMode = ""
+		svc.gpmConnectPolicySource = ""
+
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
+			"Authorization": "Bearer cfg-default-secret",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		configMap, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("config payload missing map: %v", payload)
+		}
+		if got, _ := configMap["gpm_production_mode"].(bool); got {
+			t.Fatalf("gpm_production_mode=%v want=false", configMap["gpm_production_mode"])
+		}
+		if got, _ := configMap["gpm_production_mode_source"].(string); got != "default" {
+			t.Fatalf("gpm_production_mode_source=%q want=%q", got, "default")
+		}
+		if got, _ := configMap["connect_policy_mode"].(string); got != "default" {
+			t.Fatalf("connect_policy_mode=%q want=%q", got, "default")
+		}
+		if got, _ := configMap["connect_policy_source"].(string); got != "default" {
+			t.Fatalf("connect_policy_source=%q want=%q", got, "default")
 		}
 	})
 

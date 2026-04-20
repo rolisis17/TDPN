@@ -672,6 +672,7 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if connectPolicySource == "" {
 		connectPolicySource = "default"
 	}
+	gpmProductionMode := strings.EqualFold(connectPolicyMode, "production")
 	manifestTrustPolicyMode := strings.TrimSpace(s.gpmManifestTrustPolicyMode)
 	if manifestTrustPolicyMode == "" {
 		manifestTrustPolicyMode = "default"
@@ -728,6 +729,8 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"config": map[string]any{
 			"connect_require_session":                                s.gpmConnectRequireSession,
 			"allow_legacy_connect_override":                          s.gpmAllowLegacyConnectOverride,
+			"gpm_production_mode":                                    gpmProductionMode,
+			"gpm_production_mode_source":                             connectPolicySource,
 			"connect_policy_mode":                                    connectPolicyMode,
 			"connect_policy_source":                                  connectPolicySource,
 			"gpm_operator_approval_require_session":                  s.gpmOperatorApprovalRequireSession,

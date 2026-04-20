@@ -199,6 +199,8 @@ If auth is required and missing/invalid, the API returns `401`.
   "config": {
     "connect_require_session": true,
     "allow_legacy_connect_override": false,
+    "gpm_production_mode": true,
+    "gpm_production_mode_source": "GPM_PRODUCTION_MODE",
     "connect_policy_mode": "production",
     "connect_policy_source": "GPM_PRODUCTION_MODE",
     "gpm_operator_approval_require_session": true,
@@ -241,6 +243,8 @@ If auth is required and missing/invalid, the API returns `401`.
 ```
 
 Policy posture config hints:
+- `gpm_production_mode`: additive umbrella production-policy posture boolean derived from runtime production mode resolution.
+- `gpm_production_mode_source`: additive source for `gpm_production_mode` selection (`GPM_PRODUCTION_MODE`, `TDPN_PRODUCTION_MODE`, or `default` when unset).
 - `connect_policy_mode`: additive connect posture mode (`default|production` in current daemon behavior).
 - `connect_policy_source`: additive source for connect posture mode/defaulting (for example `GPM_PRODUCTION_MODE`, `GPM_CONNECT_REQUIRE_SESSION`, `TDPN_CONNECT_REQUIRE_SESSION`, or `default`).
 - `gpm_operator_approval_require_session`: whether strict operator-approval auth policy is enabled (`session_token` required for admin moderation decisions, legacy `admin_token` fallback disabled).

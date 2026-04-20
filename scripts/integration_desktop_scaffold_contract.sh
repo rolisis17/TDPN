@@ -847,6 +847,10 @@ if ! grep -qF 'id="legacy_compat_section"' "$DESKTOP_HTML_FILE"; then
   echo "desktop scaffold contract failed: missing legacy compatibility section marker in $DESKTOP_HTML_FILE"
   exit 1
 fi
+if ! grep -qF 'id="legacy_compat_hint"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing legacy compatibility hint marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
 
 client_hint_marker_present="0"
 if grep -qF 'id="client_lock_hint"' "$DESKTOP_HTML_FILE"; then
@@ -997,12 +1001,44 @@ if ! grep -qF 'state.allowLegacyConnectOverride' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing allowLegacyConnectOverride policy-state marker in $JS_FILE"
   exit 1
 fi
+if ! grep -qF 'state.productionMode' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing productionMode policy-state marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function readRuntimeProductionModeMetadata(runtimeCfg, runtimeConnectPolicy, runtimeAuthVerifyPolicy) {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing runtime production-mode metadata parser in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF '"gpm_production_mode"' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing gpm_production_mode runtime telemetry marker in $JS_FILE"
+  exit 1
+fi
 if ! grep -qF 'function syncCompatAdvancedVisibility()' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing compat advanced visibility policy marker in $JS_FILE"
   exit 1
 fi
+if ! grep -qF 'const visible = state.allowLegacyConnectOverride && !state.productionMode;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing production-mode compat visibility lock marker in $JS_FILE"
+  exit 1
+fi
 if ! grep -qF 'compatAdvancedSectionEl.hidden = !visible;' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing compat advanced hide-by-policy marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'const productionModeLocked = state.productionMode === true;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing production-mode compat toggle lock marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'Production mode is active; Wallet Sign-In is required and manual Sign In is disabled.' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing production-mode wallet-signin guidance marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'Manual Sign In is disabled by production mode; use Wallet Sign-In.' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing production-mode manual-signin disabled marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'state.productionMode = productionMode === true;' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing init-time production-mode state assignment marker in $JS_FILE"
   exit 1
 fi
 if ! grep -qF 'if (!tabServerEl.disabled) {' "$JS_FILE"; then

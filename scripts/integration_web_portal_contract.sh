@@ -202,6 +202,21 @@ for marker in "${JS_MARKERS[@]}"; do
 done
 echo "[web-portal] portal JS readiness compute/render/gating markers are present"
 
+# Production-mode lock markers (config telemetry + UX gating).
+PRODUCTION_LOCK_JS_MARKERS=(
+  'function[[:space:]]+parseGpmProductionModeConfig[[:space:]]*\('
+  'gpm_production_mode'
+  'function[[:space:]]+deriveGpmProductionModeFromPolicyHints[[:space:]]*\('
+  'parsedGpmProductionMode[[:space:]]*!==[[:space:]]*undefined'
+  'manualSource[[:space:]]*&&[[:space:]]*gpmProductionMode'
+  'Compatibility override is disabled in production mode\. Use session-based registration\.'
+  'Manual verify is disabled in production mode\. Use Sign \+ Verify \(Wallet\)\.'
+)
+for pattern in "${PRODUCTION_LOCK_JS_MARKERS[@]}"; do
+  require_regex_marker "$PORTAL_JS" "$pattern" "production-lock JS"
+done
+echo "[web-portal] production-mode lock markers are present"
+
 # Bootstrap trust telemetry parse/render markers.
 BOOTSTRAP_TRUST_JS_MARKERS=(
   'const[[:space:]]+bootstrapTrustStatusEl[[:space:]]*=[[:space:]]*byId\("bootstrap_trust_status"\)'
@@ -427,6 +442,18 @@ if ! grep -qF 'gpm_operator_approval_require_session_policy_source' "$README_FIL
 fi
 if ! grep -qF 'GPM_OPERATOR_APPROVAL_REQUIRE_SESSION' "$README_FILE"; then
   echo "web portal contract failed: README must mention GPM_OPERATOR_APPROVAL_REQUIRE_SESSION override behavior"
+  exit 1
+fi
+if ! grep -qF 'gpm_production_mode' "$README_FILE"; then
+  echo "web portal contract failed: README must mention gpm_production_mode config telemetry"
+  exit 1
+fi
+if ! grep -qiE 'production mode.*compatibility override.*(disabled|locked)|compatibility override.*production mode' "$README_FILE"; then
+  echo "web portal contract failed: README must explain production-mode compatibility override lock"
+  exit 1
+fi
+if ! grep -qiE 'production mode.*manual.*(wallet|Sign \\+ Verify)|manual.*production mode.*wallet' "$README_FILE"; then
+  echo "web portal contract failed: README must explain production-mode manual verify wallet-only guidance"
   exit 1
 fi
 if ! grep -qiE 'admin_token.*(disabled|fail-closed)|session_token.*(required|policy)' "$README_FILE"; then

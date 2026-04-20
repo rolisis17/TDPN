@@ -175,7 +175,7 @@
             <button id="audit_recent_btn" class="secondary">Recent Audit</button>
           </div>
           <p id="signin_policy_hint" class="hint">
-            Wallet Sign-In is recommended; manual Sign In remains available when policy allows.
+            Wallet Sign-In is recommended; production mode requires Wallet Sign-In and disables manual Sign In.
           </p>
 
           <div class="grid grid-2">
@@ -285,7 +285,7 @@
                 Client controls are available for client-capable roles.
               </p>
               <p id="connect_policy_hint" class="hint">
-                Connect policy: compat from env defaults; manual bootstrap/invite fields are policy-gated.
+                Connect policy: compat from env defaults; production mode may hide and lock manual bootstrap/invite fields.
               </p>
               <div class="grid grid-2">
                 <label>
@@ -334,7 +334,7 @@
 
               <details id="legacy_compat_section" class="advanced" hidden>
                 <summary>Advanced (Legacy TDPN compatibility)</summary>
-                <p>Optional legacy fields for support-only compatibility flows.</p>
+                <p id="legacy_compat_hint">Optional legacy fields for support-only compatibility flows.</p>
                 <label class="check">
                   <input id="compat_enable" type="checkbox" />
                   Enable manual bootstrap/invite override
