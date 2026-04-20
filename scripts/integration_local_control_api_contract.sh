@@ -116,6 +116,9 @@ start_local_api() {
     LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK="1" \
     LOCAL_CONTROL_API_AUTH_TOKEN="$LOCAL_API_AUTH_TOKEN" \
     GPM_OPERATOR_APPROVAL_TOKEN="$LOCAL_API_OPERATOR_ADMIN_TOKEN" \
+    LOCAL_CONTROL_API_SERVICE_START_COMMAND="printf gpm-service-start-ok" \
+    LOCAL_CONTROL_API_SERVICE_STOP_COMMAND="printf gpm-service-stop-ok" \
+    LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND="printf gpm-service-restart-ok" \
     LOCAL_API_CONTRACT_CALLS_FILE="$CALLS_FILE" \
       go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
@@ -353,6 +356,20 @@ if ! jq -e '.ok == false and (.error | contains("session_token is required"))' "
   exit 1
 fi
 
+echo "[local-control-api-contract] gpm service start requires session_token (fail-closed)"
+gpm_start_missing_body="$TMP_DIR/gpm_service_start_missing_session_token.json"
+gpm_start_missing_code="$(curl -sS -o "$gpm_start_missing_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{}' "${LOCAL_API_BASE}/v1/gpm/service/start")"
+if [[ "$gpm_start_missing_code" != "401" ]]; then
+  echo "expected /v1/gpm/service/start to return 401 for missing session_token, got $gpm_start_missing_code"
+  cat "$gpm_start_missing_body"
+  exit 1
+fi
+if ! jq -e '.ok == false and (.error | contains("session token is required"))' "$gpm_start_missing_body" >/dev/null; then
+  echo "gpm service start missing-session response payload mismatch"
+  cat "$gpm_start_missing_body"
+  exit 1
+fi
+
 echo "[local-control-api-contract] onboarding overview returns consolidated session + registration + readiness"
 challenge_json="$(api_post_json "/v1/gpm/auth/challenge" '{"wallet_address":"cosmos1overviewcontract","wallet_provider":"keplr"}')"
 if ! jq -e '.ok == true and (.challenge_id | type == "string" and length > 0) and (.message | type == "string" and length > 0)' <<<"$challenge_json" >/dev/null; then
@@ -378,6 +395,21 @@ if [[ -z "$overview_session_token" ]]; then
   echo "$verify_json"
   exit 1
 fi
+
+echo "[local-control-api-contract] gpm service start rejects client session role (fail-closed)"
+gpm_start_client_body="$TMP_DIR/gpm_service_start_client_forbidden.json"
+gpm_start_client_code="$(curl -sS -o "$gpm_start_client_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data "{\"session_token\":\"${overview_session_token}\"}" "${LOCAL_API_BASE}/v1/gpm/service/start")"
+if [[ "$gpm_start_client_code" != "403" ]]; then
+  echo "expected /v1/gpm/service/start to return 403 for client session role, got $gpm_start_client_code"
+  cat "$gpm_start_client_body"
+  exit 1
+fi
+if ! jq -e '.ok == false and (.error | contains("session role")) and (.error | contains("operator or admin"))' "$gpm_start_client_body" >/dev/null; then
+  echo "gpm service start client-role response payload mismatch"
+  cat "$gpm_start_client_body"
+  exit 1
+fi
+
 overview_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
 if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .registration.wallet_address == "cosmos1overviewcontract" and .registration.status == "not_registered" and .readiness.role == "client" and .readiness.session_present == true and (.readiness.lifecycle_actions_unlocked | type == "boolean")' <<<"$overview_json" >/dev/null; then
   echo "onboarding overview did not return expected consolidated payload"
@@ -416,6 +448,20 @@ if ! jq -e '.ok == true and .readiness.chain_binding_status == "bound" and .read
   exit 1
 fi
 
+echo "[local-control-api-contract] gpm service start succeeds for approved operator session"
+gpm_start_approved_body="$TMP_DIR/gpm_service_start_operator_approved_success.json"
+gpm_start_approved_code="$(curl -sS -o "$gpm_start_approved_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data "{\"session_token\":\"${overview_session_token}\"}" "${LOCAL_API_BASE}/v1/gpm/service/start")"
+if [[ "$gpm_start_approved_code" != "200" ]]; then
+  echo "expected /v1/gpm/service/start to return 200 for approved operator session, got $gpm_start_approved_code"
+  cat "$gpm_start_approved_body"
+  exit 1
+fi
+if ! jq -e '.ok == true and .action == "start"' "$gpm_start_approved_body" >/dev/null; then
+  echo "gpm service start did not return expected success payload for approved operator session"
+  cat "$gpm_start_approved_body"
+  exit 1
+fi
+
 echo "[local-control-api-contract] chain-binding readiness reports pending_approval in negative scenario"
 operator_apply_pending_json="$(api_post_json "/v1/gpm/onboarding/operator/apply" "{\"session_token\":\"${overview_session_token}\",\"chain_operator_id\":\"operator-contract-b\",\"server_label\":\"contract-pending\"}")"
 if ! jq -e '.ok == true and .application.status == "pending" and .application.chain_operator_id == "operator-contract-b"' <<<"$operator_apply_pending_json" >/dev/null; then
@@ -433,6 +479,20 @@ overview_pending_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session
 if ! jq -e '.ok == true and .readiness.operator_application_status == "pending" and .readiness.chain_binding_status == "pending_approval" and .readiness.chain_binding_ok == false and (.readiness.chain_binding_reason | contains("pending approval"))' <<<"$overview_pending_json" >/dev/null; then
   echo "onboarding overview did not report expected pending_approval chain-binding state"
   echo "$overview_pending_json"
+  exit 1
+fi
+
+echo "[local-control-api-contract] gpm service start fails closed for pending operator status"
+gpm_start_pending_body="$TMP_DIR/gpm_service_start_pending_forbidden.json"
+gpm_start_pending_code="$(curl -sS -o "$gpm_start_pending_body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data "{\"session_token\":\"${overview_session_token}\"}" "${LOCAL_API_BASE}/v1/gpm/service/start")"
+if [[ "$gpm_start_pending_code" != "403" ]]; then
+  echo "expected /v1/gpm/service/start to return 403 for pending operator status, got $gpm_start_pending_code"
+  cat "$gpm_start_pending_body"
+  exit 1
+fi
+if ! jq -e '.ok == false and ((.error | contains("not approved")) or (.error | contains("pending")))' "$gpm_start_pending_body" >/dev/null; then
+  echo "gpm service start pending-operator response payload mismatch"
+  cat "$gpm_start_pending_body"
   exit 1
 fi
 

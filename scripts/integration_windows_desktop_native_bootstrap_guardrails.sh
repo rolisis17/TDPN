@@ -40,6 +40,11 @@ assert_marker_present "Microsoft.WindowsSDK.10.0" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Microsoft.EdgeWebView2Runtime" "$SCRIPT_UNDER_TEST"
 assert_marker_present "developer.microsoft.com/windows/downloads/windows-sdk/" "$SCRIPT_UNDER_TEST"
 assert_marker_present "developer.microsoft.com/microsoft-edge/webview2/" "$SCRIPT_UNDER_TEST"
+assert_marker_present "Ensure-DesktopIconAsset" "$SCRIPT_UNDER_TEST"
+assert_marker_present "icon.ico" "$SCRIPT_UNDER_TEST"
+assert_marker_present "Resolve-ToolPath \"npm.cmd\"" "$SCRIPT_UNDER_TEST"
+assert_marker_present "npm.cmd install" "$SCRIPT_UNDER_TEST"
+assert_marker_present "npm.cmd run tauri -- dev" "$SCRIPT_UNDER_TEST"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
