@@ -887,7 +887,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			sessionResolveErr = resolveErr
 		}
 	}
-	if in.SessionToken != "" && sessionResolveErr != nil && (s.gpmConnectRequireSession || !manualOverridesProvided) {
+	if in.SessionToken != "" && sessionResolveErr != nil {
 		statusCode := http.StatusBadRequest
 		errMsg := "failed to resolve session_token for connect"
 		switch {

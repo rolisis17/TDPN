@@ -1820,6 +1820,29 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
 	})
 
+	t.Run("manual overrides fail closed when an explicitly provided session token is invalid", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmState = newGPMRuntimeState()
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-missing-token",
+			"bootstrap_directory":"https://dir.example:8081",
+			"invite_key":"inv-manual-invalid-session",
+			"run_preflight":false
+		}`)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); got != "invalid or expired session_token" {
+			t.Fatalf("error=%q want invalid-or-expired-session-token", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("invalid session rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
 	t.Run("manual overrides are rejected", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true
