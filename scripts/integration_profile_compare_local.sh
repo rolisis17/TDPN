@@ -158,6 +158,17 @@ if ! jq -e '
   and .summary.selection_policy.exit_exploration_pct == 10
   and .summary.selection_policy.path_profile == "2hop"
   and .decision.recommended_default_profile == "balanced"
+  and .summary.m4_micro_relay_evidence.available == true
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.available == true
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.sample_runs == 8
+  and (.summary.m4_micro_relay_evidence.micro_relay_quality.quality_score | type == "number")
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == true
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_signal_count == 0
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_signal_count == 7
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate == false
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_candidate == true
+  and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
+  and (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.reason | type == "string")
   and ([.profiles[] | select(.profile == "speed-1hop")][0].direct_exit_forced_runs == 2)
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "summary json missing expected fields"
@@ -248,6 +259,53 @@ if ! jq -e '
 ' "$SPEED_1HOP_DEFAULT_SUMMARY_JSON" >/dev/null; then
   echo "speed-1hop summary json missing expected selection policy defaults"
   cat "$SPEED_1HOP_DEFAULT_SUMMARY_JSON"
+  exit 1
+fi
+
+M4_UNAVAILABLE_SUMMARY_JSON="$TMP_DIR/profile_compare_m4_unavailable_summary.json"
+M4_UNAVAILABLE_REPORT_MD="$TMP_DIR/profile_compare_m4_unavailable_report.md"
+M4_UNAVAILABLE_RUN_LOG="$TMP_DIR/profile_compare_m4_unavailable_run.log"
+
+echo "[profile-compare-local] m4 evidence explicit unavailable shape when no runs execute"
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles speed-1hop \
+  --rounds 1 \
+  --beta-profile 1 \
+  --prod-profile 0 \
+  --execution-mode local \
+  --directory-urls http://dir-m4-none:8081 \
+  --issuer-url http://issuer-m4-none:8082 \
+  --entry-url http://entry-m4-none:8083 \
+  --exit-url http://exit-m4-none:8084 \
+  --summary-json "$M4_UNAVAILABLE_SUMMARY_JSON" \
+  --report-md "$M4_UNAVAILABLE_REPORT_MD" \
+  --print-summary-json 0 >"$M4_UNAVAILABLE_RUN_LOG"
+m4_unavailable_rc=$?
+set -e
+if [[ "$m4_unavailable_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when all runs are skipped"
+  cat "$M4_UNAVAILABLE_RUN_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .summary.runs_executed == 0
+  and .summary.m4_micro_relay_evidence.available == false
+  and (.summary.m4_micro_relay_evidence.reason | type == "string")
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.available == false
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.quality_score == null
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == false
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate == null
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_candidate == null
+  and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
+  and (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.reason | type == "string")
+' "$M4_UNAVAILABLE_SUMMARY_JSON" >/dev/null; then
+  echo "m4 unavailable summary missing explicit unavailable evidence fields"
+  cat "$M4_UNAVAILABLE_SUMMARY_JSON"
   exit 1
 fi
 

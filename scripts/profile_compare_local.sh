@@ -1113,6 +1113,155 @@ token_proof_invalid_failures_total="$(jq '[.[] | (.token_proof_invalid_failures 
 unknown_exit_failures_total="$(jq '[.[] | (.unknown_exit_failures // 0)] | add // 0' <<<"$runs_json")"
 directory_trust_failures_total="$(jq '[.[] | (.directory_trust_failures // 0)] | add // 0' <<<"$runs_json")"
 
+m4_logs_scanned=0
+m4_adaptive_wiring_signal_hits=0
+m4_trust_tier_wiring_signal_hits=0
+while IFS= read -r m4_log_path; do
+  m4_log_path="$(trim "$m4_log_path")"
+  [[ -z "$m4_log_path" ]] && continue
+  if [[ -f "$m4_log_path" ]]; then
+    m4_logs_scanned=$((m4_logs_scanned + 1))
+    m4_adaptive_wiring_signal_hits=$((m4_adaptive_wiring_signal_hits + $(count_matches 'demotion|promotion|quarantine|eligibility' "$m4_log_path")))
+    m4_trust_tier_wiring_signal_hits=$((m4_trust_tier_wiring_signal_hits + $(count_matches 'trust[- ]tier|port[ _-]?unlock|allow[- ]list|tier[[:space:]]*[123]' "$m4_log_path")))
+  fi
+done < <(jq -r '
+  [.[] | select(.status != "skip") | (.client_log // ""), (.output_log // "")]
+  | map(select(type == "string" and length > 0))
+  | unique[]
+' <<<"$runs_json")
+
+m4_quality_score_json="null"
+m4_quality_band=""
+m4_quality_reason="no executed profile runs were available"
+if ((runs_executed > 0)); then
+  m4_quality_score_json="$(awk \
+    -v tm="$transport_mismatch_failures_total" \
+    -v tp="$token_proof_invalid_failures_total" \
+    -v ue="$unknown_exit_failures_total" \
+    -v dt="$directory_trust_failures_total" \
+    -v runs="$runs_executed" '
+    BEGIN {
+      penalty = ((tm * 4.0) + (tp * 8.0) + (ue * 8.0) + (dt * 6.0)) / runs;
+      if (penalty < 0) penalty = 0;
+      if (penalty > 100) penalty = 100;
+      score = 100.0 - penalty;
+      if (score < 0) score = 0;
+      if (score > 100) score = 100;
+      printf "%.2f", score;
+    }'
+  )"
+  m4_quality_band="$(awk -v score="$m4_quality_score_json" '
+    BEGIN {
+      if (score >= 95) {
+        print "excellent";
+      } else if (score >= 85) {
+        print "good";
+      } else if (score >= 70) {
+        print "degraded";
+      } else {
+        print "poor";
+      }
+    }'
+  )"
+  m4_quality_reason=""
+fi
+
+m4_demotion_signal_count=$((transport_mismatch_failures_total + token_proof_invalid_failures_total + unknown_exit_failures_total + directory_trust_failures_total))
+m4_promotion_signal_count="$(jq '[.[] | select(.status == "pass" and ((.transport_mismatch_failures // 0) == 0) and ((.token_proof_invalid_failures // 0) == 0) and ((.unknown_exit_failures // 0) == 0) and ((.directory_trust_failures // 0) == 0))] | length' <<<"$runs_json")"
+
+m4_adaptive_available="false"
+m4_adaptive_reason="adaptive demotion/promotion evidence is unavailable because no runs executed"
+m4_demotion_candidate_json="null"
+m4_promotion_candidate_json="null"
+if ((runs_executed > 0)); then
+  m4_adaptive_available="true"
+  if ((m4_demotion_signal_count > 0)); then
+    m4_adaptive_reason="quality degradations were observed; demotion signals are present"
+    m4_demotion_candidate_json="true"
+    m4_promotion_candidate_json="false"
+  elif ((m4_promotion_signal_count > 0)); then
+    m4_adaptive_reason="clean pass evidence observed; promotion signals are present"
+    m4_demotion_candidate_json="false"
+    m4_promotion_candidate_json="true"
+  else
+    m4_adaptive_reason="no clean pass evidence available for promotion"
+    m4_demotion_candidate_json="false"
+    m4_promotion_candidate_json="false"
+  fi
+fi
+
+m4_trust_tier_wiring_present="false"
+if ((m4_trust_tier_wiring_signal_hits > 0)); then
+  m4_trust_tier_wiring_present="true"
+fi
+m4_trust_tier_reason="trust-tier port-unlock wiring evidence unavailable in run logs"
+if [[ "$m4_trust_tier_wiring_present" == "true" ]]; then
+  m4_trust_tier_reason=""
+elif ((runs_executed == 0)); then
+  m4_trust_tier_reason="trust-tier port-unlock wiring evidence unavailable because no runs executed"
+fi
+
+m4_micro_relay_evidence_json="$(jq -nc \
+  --argjson runs_executed "$runs_executed" \
+  --argjson runs_pass "$runs_pass" \
+  --argjson runs_fail "$runs_fail" \
+  --argjson transport_mismatch_failures_total "$transport_mismatch_failures_total" \
+  --argjson token_proof_invalid_failures_total "$token_proof_invalid_failures_total" \
+  --argjson unknown_exit_failures_total "$unknown_exit_failures_total" \
+  --argjson directory_trust_failures_total "$directory_trust_failures_total" \
+  --argjson quality_score "$m4_quality_score_json" \
+  --arg quality_band "$m4_quality_band" \
+  --arg quality_reason "$m4_quality_reason" \
+  --arg adaptive_available "$m4_adaptive_available" \
+  --argjson demotion_signal_count "$m4_demotion_signal_count" \
+  --argjson promotion_signal_count "$m4_promotion_signal_count" \
+  --argjson demotion_candidate "$m4_demotion_candidate_json" \
+  --argjson promotion_candidate "$m4_promotion_candidate_json" \
+  --arg adaptive_reason "$m4_adaptive_reason" \
+  --argjson logs_scanned "$m4_logs_scanned" \
+  --argjson adaptive_wiring_signal_hits "$m4_adaptive_wiring_signal_hits" \
+  --arg trust_tier_wiring_present "$m4_trust_tier_wiring_present" \
+  --argjson trust_tier_wiring_signal_hits "$m4_trust_tier_wiring_signal_hits" \
+  --arg trust_tier_reason "$m4_trust_tier_reason" \
+  '{
+    schema_version: 1,
+    available: ($runs_executed > 0),
+    reason: (if ($runs_executed > 0) then null else "no executed profile runs were available" end),
+    micro_relay_quality: {
+      available: ($runs_executed > 0),
+      sample_runs: $runs_executed,
+      quality_score: (if ($runs_executed > 0) then $quality_score else null end),
+      quality_score_avg: (if ($runs_executed > 0) then $quality_score else null end),
+      quality_band: (if ($runs_executed > 0) then (if ($quality_band == "") then null else $quality_band end) else null end),
+      score_formula: "100 - min(100, ((transport*4)+(token*8)+(unknown_exit*8)+(directory_trust*6))/runs_executed)",
+      signals: {
+        runs_pass: $runs_pass,
+        runs_fail: $runs_fail,
+        transport_mismatch_failures_total: $transport_mismatch_failures_total,
+        token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
+        unknown_exit_failures_total: $unknown_exit_failures_total,
+        directory_trust_failures_total: $directory_trust_failures_total
+      },
+      reason: (if ($quality_reason == "") then null else $quality_reason end)
+    },
+    adaptive_demotion_promotion: {
+      available: ($adaptive_available == "true"),
+      demotion_signal_count: $demotion_signal_count,
+      promotion_signal_count: $promotion_signal_count,
+      wiring_present: ($adaptive_wiring_signal_hits > 0),
+      demotion_candidate: (if ($adaptive_available == "true") then $demotion_candidate else null end),
+      promotion_candidate: (if ($adaptive_available == "true") then $promotion_candidate else null end),
+      reason: (if ($adaptive_reason == "") then null else $adaptive_reason end)
+    },
+    trust_tier_port_unlock_wiring: {
+      evaluated: ($logs_scanned > 0),
+      present: ($trust_tier_wiring_present == "true"),
+      evidence_hits: $trust_tier_wiring_signal_hits,
+      reason: (if ($trust_tier_reason == "") then null else $trust_tier_reason end)
+    }
+  }'
+)"
+
 best_non_experimental_profile="$(jq -r '
   map(select(.profile != "speed-1hop" and .runs_executed > 0))
   | sort_by([.runs_fail, (-.pass_rate_pct), .avg_duration_sec, .profile])
@@ -1227,6 +1376,7 @@ jq -n \
   --argjson token_proof_invalid_failures_total "$token_proof_invalid_failures_total" \
   --argjson unknown_exit_failures_total "$unknown_exit_failures_total" \
   --argjson directory_trust_failures_total "$directory_trust_failures_total" \
+  --argjson m4_micro_relay_evidence "$m4_micro_relay_evidence_json" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -1278,7 +1428,8 @@ jq -n \
       token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
       unknown_exit_failures_total: $unknown_exit_failures_total,
       directory_trust_failures_total: $directory_trust_failures_total,
-      selection_policy: $selection_policy
+      selection_policy: $selection_policy,
+      m4_micro_relay_evidence: $m4_micro_relay_evidence
     },
     decision: {
       recommended_default_profile: $recommended_default_profile,
@@ -1319,6 +1470,33 @@ if ! jq -e '
         and has("path_profile")))] | all
 ' "$summary_json" >/dev/null; then
   echo "profile-compare-local: run-level selection_policy evidence fields are missing"
+  exit 1
+fi
+
+if ! jq -e '
+  .summary.m4_micro_relay_evidence
+  and (.summary.m4_micro_relay_evidence | type == "object")
+  and (.summary.m4_micro_relay_evidence.micro_relay_quality | type == "object")
+  and (.summary.m4_micro_relay_evidence.adaptive_demotion_promotion | type == "object")
+  and (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring | type == "object")
+  and ((.summary.m4_micro_relay_evidence.available | type) == "boolean")
+  and (
+    if .summary.m4_micro_relay_evidence.available
+    then ((.summary.m4_micro_relay_evidence.micro_relay_quality.quality_score | type) == "number")
+    else (.summary.m4_micro_relay_evidence.micro_relay_quality.quality_score == null)
+    end
+  )
+  and (
+    if .summary.m4_micro_relay_evidence.available
+    then ((.summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate | type) == "boolean")
+    else (.summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate == null)
+    end
+  )
+  and (
+    (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present | type) == "boolean"
+  )
+' "$summary_json" >/dev/null; then
+  echo "profile-compare-local: summary m4_micro_relay_evidence fields are missing"
   exit 1
 fi
 

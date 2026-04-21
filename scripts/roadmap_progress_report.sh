@@ -494,6 +494,383 @@ profile_default_gate_campaign_summary_from_signoff() {
   printf '%s' ""
 }
 
+micro_relay_m4_state_from_summary_json() {
+  local summary_json_path="$1"
+  local state=""
+  if [[ ! -f "$summary_json_path" ]] || ! jq -e . "$summary_json_path" >/dev/null 2>&1; then
+    printf 'false\x1fnull\x1ffalse\x1ffalse\x1ffalse'
+    return
+  fi
+  state="$(jq -r '
+    def scalar:
+      if type == "array" then (.[0] // null) else . end;
+    def to_boolish:
+      scalar
+      | if . == null then null
+        elif type == "boolean" then .
+        elif type == "number" then (. != 0)
+        elif type == "string" then
+          (. | ascii_downcase) as $text
+          | if ($text == "1" or $text == "true" or $text == "yes" or $text == "pass" or $text == "ok" or $text == "go" or $text == "healthy" or $text == "enabled") then true
+            elif ($text == "0" or $text == "false" or $text == "no" or $text == "fail" or $text == "warn" or $text == "disabled") then false
+            else null
+            end
+        else null
+        end;
+    def first_non_null($values):
+      reduce $values[] as $value (null; if . == null and $value != null then $value else . end);
+    def first_boolish($values):
+      first_non_null($values | map(to_boolish));
+    def canonical_m4_evidence:
+      first_non_null([
+        .summary.m4_micro_relay_evidence,
+        .m4_micro_relay_evidence,
+        .summary.m4.micro_relay_evidence,
+        .m4.micro_relay_evidence
+      ]);
+    def candidate_present($candidate):
+      if $candidate == null then null
+      elif ($candidate | type) == "object" then
+        if ($candidate.available? != null) then (($candidate.available // false) | to_boolish)
+        elif ($candidate.present? != null) then (($candidate.present // false) | to_boolish)
+        else true
+        end
+      elif ($candidate | type) == "array" then (($candidate | length) > 0)
+      else
+        ($candidate | to_boolish)
+      end;
+    def signal_present($candidate):
+      if $candidate == null then null
+      elif ($candidate | type) == "boolean" then $candidate
+      elif ($candidate | type) == "number" then ($candidate != 0)
+      elif ($candidate | type) == "string" then
+        ($candidate | to_boolish) as $boolish
+        | if $boolish != null then $boolish else (($candidate | length) > 0) end
+      elif ($candidate | type) == "array" then (($candidate | length) > 0)
+      elif ($candidate | type) == "object" then
+        if ($candidate.available? != null) then (($candidate.available // false) | to_boolish)
+        elif ($candidate.present? != null) then (($candidate.present // false) | to_boolish)
+        elif ($candidate.evidence_hits? != null and (($candidate.evidence_hits | type) == "number")) then (($candidate.evidence_hits // 0) > 0)
+        else true
+        end
+      else true
+      end;
+    def quality_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .micro_relay_quality else null end),
+        canonical_m4_evidence,
+        .decision.micro_relay_quality_evidence,
+        .decision.micro_relay_evidence.quality,
+        .decision.micro_relay_evidence,
+        .observed.micro_relay_quality_evidence,
+        .observed.micro_relay_evidence.quality,
+        .observed.micro_relay_evidence,
+        .summary.micro_relay_quality_evidence,
+        .summary.micro_relay_quality,
+        .summary.m4.micro_relay_quality_evidence,
+        .summary.m4.micro_relay_quality,
+        .summary.m4.quality_scoring,
+        .m4.micro_relay_quality_evidence,
+        .m4.micro_relay_quality,
+        .micro_relay_quality_evidence,
+        .micro_relay_quality
+      ]);
+    def quality_status_from_candidate($candidate):
+      if $candidate == null then null
+      elif ($candidate | type) == "object" then
+        first_boolish([
+          $candidate.status_pass,
+          $candidate.pass,
+          $candidate.quality_ok,
+          $candidate.healthy,
+          (
+            ($candidate.quality_band // "" | tostring | ascii_downcase) as $quality_band
+            | if ($quality_band == "excellent" or $quality_band == "good" or $quality_band == "pass" or $quality_band == "ok" or $quality_band == "healthy") then true
+              elif ($quality_band == "degraded" or $quality_band == "poor" or $quality_band == "warn" or $quality_band == "fail") then false
+              else null
+              end
+          ),
+          (
+            ($candidate.quality_score // null) as $quality_score
+            | if ($quality_score | type) == "number" then ($quality_score >= 85) else null end
+          ),
+          $candidate.quality_status,
+          $candidate.status
+        ])
+      else
+        ($candidate | to_boolish)
+      end;
+    def quality_status_direct:
+      first_boolish([
+        .decision.micro_relay_quality_status_pass,
+        .decision.micro_relay_quality_evidence.status_pass,
+        .decision.micro_relay_quality_evidence.pass,
+        .decision.micro_relay_policy_evidence.quality_status_pass,
+        .decision.micro_relay_evidence.quality_status_pass,
+        .observed.micro_relay_quality_status_pass,
+        .observed.micro_relay_quality_evidence.status_pass,
+        .observed.micro_relay_quality_evidence.pass,
+        .observed.micro_relay_policy_evidence.quality_status_pass,
+        .observed.micro_relay_evidence.quality_status_pass,
+        .summary.m4.micro_relay_quality_status_pass,
+        .summary.micro_relay_quality_status_pass,
+        .m4.micro_relay_quality_status_pass
+      ]);
+    def demotion_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .adaptive_demotion_promotion else null end),
+        .decision.micro_relay_demotion_policy,
+        .decision.micro_relay_policy_evidence.demotion_policy_present,
+        .decision.micro_relay_evidence.demotion_policy_present,
+        .observed.micro_relay_demotion_policy,
+        .observed.micro_relay_policy_evidence.demotion_policy_present,
+        .observed.micro_relay_evidence.demotion_policy_present,
+        .summary.micro_relay_demotion_policy,
+        .summary.m4.micro_relay_demotion_policy,
+        .summary.m4.demotion_policy,
+        .summary.micro_relay_policy.demotion,
+        .summary.relay_policy.demotion,
+        .m4.micro_relay_demotion_policy,
+        .m4.demotion_policy
+      ]);
+    def promotion_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .adaptive_demotion_promotion else null end),
+        .decision.micro_relay_promotion_policy,
+        .decision.micro_relay_policy_evidence.promotion_policy_present,
+        .decision.micro_relay_evidence.promotion_policy_present,
+        .observed.micro_relay_promotion_policy,
+        .observed.micro_relay_policy_evidence.promotion_policy_present,
+        .observed.micro_relay_evidence.promotion_policy_present,
+        .summary.micro_relay_promotion_policy,
+        .summary.m4.micro_relay_promotion_policy,
+        .summary.m4.promotion_policy,
+        .summary.micro_relay_policy.promotion,
+        .summary.relay_policy.promotion,
+        .m4.micro_relay_promotion_policy,
+        .m4.promotion_policy
+      ]);
+    def trust_tier_port_unlock_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .trust_tier_port_unlock_wiring else null end),
+        .decision.trust_tier_port_unlock_policy,
+        .decision.micro_relay_policy_evidence.trust_tier_port_unlock_policy_present,
+        .decision.micro_relay_evidence.trust_tier_port_unlock_policy_present,
+        .observed.trust_tier_port_unlock_policy,
+        .observed.micro_relay_policy_evidence.trust_tier_port_unlock_policy_present,
+        .observed.micro_relay_evidence.trust_tier_port_unlock_policy_present,
+        .summary.trust_tier_port_unlock_policy,
+        .summary.m4.trust_tier_port_unlock_policy,
+        .summary.port_unlock_policy,
+        .summary.port_unlock.trust_tier_policy,
+        .summary.exit_policy.trust_tier_port_unlock_policy,
+        .m4.trust_tier_port_unlock_policy
+      ]);
+    (quality_candidate) as $quality_candidate
+    | (quality_status_direct) as $quality_status_direct
+    | (demotion_candidate) as $demotion_candidate
+    | (promotion_candidate) as $promotion_candidate
+    | (trust_tier_port_unlock_candidate) as $trust_tier_port_unlock_candidate
+    | (if $quality_status_direct != null then $quality_status_direct else quality_status_from_candidate($quality_candidate) end) as $quality_status_pass
+    | (
+        [
+          $quality_status_direct,
+          candidate_present($quality_candidate),
+          signal_present($demotion_candidate),
+          signal_present($promotion_candidate),
+          signal_present($trust_tier_port_unlock_candidate)
+        ] | any(. == true)
+      ) as $evidence_available
+    | [
+        (if $evidence_available then "true" else "false" end),
+        (if $quality_status_pass == null then "null" elif $quality_status_pass then "true" else "false" end),
+        (if (signal_present($demotion_candidate) == null) then "false" elif signal_present($demotion_candidate) then "true" else "false" end),
+        (if (signal_present($promotion_candidate) == null) then "false" elif signal_present($promotion_candidate) then "true" else "false" end),
+        (if (signal_present($trust_tier_port_unlock_candidate) == null) then "false" elif signal_present($trust_tier_port_unlock_candidate) then "true" else "false" end)
+      ]
+    | join("\u001f")
+  ' "$summary_json_path" 2>/dev/null || true)"
+  if [[ "$state" != *$'\x1f'* ]]; then
+    printf 'false\x1fnull\x1ffalse\x1ffalse\x1ffalse'
+    return
+  fi
+  printf '%s' "$state"
+}
+
+profile_default_gate_micro_relay_evidence_from_signoff() {
+  local signoff_summary_path="$1"
+  local state=""
+  local available="false"
+  local quality_status_pass="null"
+  local demotion_policy_present="false"
+  local promotion_policy_present="false"
+  local trust_tier_port_unlock_policy_present="false"
+  local fallback_state=""
+  local fallback_available="false"
+  local fallback_quality_status_pass="null"
+  local fallback_demotion_policy_present="false"
+  local fallback_promotion_policy_present="false"
+  local fallback_trust_tier_port_unlock_policy_present="false"
+  local campaign_check_summary_path=""
+  local campaign_summary_path=""
+
+  if [[ ! -f "$signoff_summary_path" ]] || ! jq -e . "$signoff_summary_path" >/dev/null 2>&1; then
+    printf 'false\x1fnull\x1ffalse\x1ffalse\x1ffalse'
+    return
+  fi
+
+  state="$(micro_relay_m4_state_from_summary_json "$signoff_summary_path")"
+  if [[ "$state" == *$'\x1f'* ]]; then
+    available="${state%%$'\x1f'*}"
+    state="${state#*$'\x1f'}"
+    quality_status_pass="${state%%$'\x1f'*}"
+    state="${state#*$'\x1f'}"
+    demotion_policy_present="${state%%$'\x1f'*}"
+    state="${state#*$'\x1f'}"
+    promotion_policy_present="${state%%$'\x1f'*}"
+    trust_tier_port_unlock_policy_present="${state#*$'\x1f'}"
+  fi
+
+  campaign_check_summary_path="$(profile_default_gate_campaign_check_summary_from_signoff "$signoff_summary_path")"
+  if [[ "$(json_file_valid_01 "$campaign_check_summary_path")" == "1" ]]; then
+    fallback_state="$(micro_relay_m4_state_from_summary_json "$campaign_check_summary_path")"
+    if [[ "$fallback_state" == *$'\x1f'* ]]; then
+      fallback_available="${fallback_state%%$'\x1f'*}"
+      fallback_state="${fallback_state#*$'\x1f'}"
+      fallback_quality_status_pass="${fallback_state%%$'\x1f'*}"
+      fallback_state="${fallback_state#*$'\x1f'}"
+      fallback_demotion_policy_present="${fallback_state%%$'\x1f'*}"
+      fallback_state="${fallback_state#*$'\x1f'}"
+      fallback_promotion_policy_present="${fallback_state%%$'\x1f'*}"
+      fallback_trust_tier_port_unlock_policy_present="${fallback_state#*$'\x1f'}"
+      if [[ "$available" != "true" && "$fallback_available" == "true" ]]; then
+        available="$fallback_available"
+        quality_status_pass="$fallback_quality_status_pass"
+        demotion_policy_present="$fallback_demotion_policy_present"
+        promotion_policy_present="$fallback_promotion_policy_present"
+        trust_tier_port_unlock_policy_present="$fallback_trust_tier_port_unlock_policy_present"
+      else
+        if [[ "$quality_status_pass" == "null" && "$fallback_quality_status_pass" != "null" ]]; then
+          quality_status_pass="$fallback_quality_status_pass"
+        fi
+        if [[ "$fallback_demotion_policy_present" == "true" ]]; then
+          demotion_policy_present="true"
+        fi
+        if [[ "$fallback_promotion_policy_present" == "true" ]]; then
+          promotion_policy_present="true"
+        fi
+        if [[ "$fallback_trust_tier_port_unlock_policy_present" == "true" ]]; then
+          trust_tier_port_unlock_policy_present="true"
+        fi
+      fi
+    fi
+  fi
+
+  campaign_summary_path="$(profile_default_gate_campaign_summary_from_signoff "$signoff_summary_path")"
+  if [[ "$(json_file_valid_01 "$campaign_summary_path")" == "1" ]]; then
+    fallback_state="$(micro_relay_m4_state_from_summary_json "$campaign_summary_path")"
+    if [[ "$fallback_state" == *$'\x1f'* ]]; then
+      fallback_available="${fallback_state%%$'\x1f'*}"
+      fallback_state="${fallback_state#*$'\x1f'}"
+      fallback_quality_status_pass="${fallback_state%%$'\x1f'*}"
+      fallback_state="${fallback_state#*$'\x1f'}"
+      fallback_demotion_policy_present="${fallback_state%%$'\x1f'*}"
+      fallback_state="${fallback_state#*$'\x1f'}"
+      fallback_promotion_policy_present="${fallback_state%%$'\x1f'*}"
+      fallback_trust_tier_port_unlock_policy_present="${fallback_state#*$'\x1f'}"
+      if [[ "$available" != "true" && "$fallback_available" == "true" ]]; then
+        available="$fallback_available"
+        quality_status_pass="$fallback_quality_status_pass"
+        demotion_policy_present="$fallback_demotion_policy_present"
+        promotion_policy_present="$fallback_promotion_policy_present"
+        trust_tier_port_unlock_policy_present="$fallback_trust_tier_port_unlock_policy_present"
+      else
+        if [[ "$quality_status_pass" == "null" && "$fallback_quality_status_pass" != "null" ]]; then
+          quality_status_pass="$fallback_quality_status_pass"
+        fi
+        if [[ "$fallback_demotion_policy_present" == "true" ]]; then
+          demotion_policy_present="true"
+        fi
+        if [[ "$fallback_promotion_policy_present" == "true" ]]; then
+          promotion_policy_present="true"
+        fi
+        if [[ "$fallback_trust_tier_port_unlock_policy_present" == "true" ]]; then
+          trust_tier_port_unlock_policy_present="true"
+        fi
+      fi
+    fi
+  fi
+
+  case "$available" in
+    true|false) ;;
+    *) available="false" ;;
+  esac
+  case "$quality_status_pass" in
+    true|false|null) ;;
+    *) quality_status_pass="null" ;;
+  esac
+  case "$demotion_policy_present" in
+    true|false) ;;
+    *) demotion_policy_present="false" ;;
+  esac
+  case "$promotion_policy_present" in
+    true|false) ;;
+    *) promotion_policy_present="false" ;;
+  esac
+  case "$trust_tier_port_unlock_policy_present" in
+    true|false) ;;
+    *) trust_tier_port_unlock_policy_present="false" ;;
+  esac
+
+  if [[ "$available" != "true" ]]; then
+    quality_status_pass="null"
+  fi
+
+  printf '%s\x1f%s\x1f%s\x1f%s\x1f%s' \
+    "$available" \
+    "$quality_status_pass" \
+    "$demotion_policy_present" \
+    "$promotion_policy_present" \
+    "$trust_tier_port_unlock_policy_present"
+}
+
+profile_default_gate_micro_relay_evidence_note_text() {
+  local available="$1"
+  local quality_status_pass="$2"
+  local demotion_policy_present="$3"
+  local promotion_policy_present="$4"
+  local trust_tier_port_unlock_policy_present="$5"
+  local issues=()
+  local joined=""
+
+  if [[ "$available" != "true" ]]; then
+    printf '%s' "micro-relay M4 evidence unavailable from profile-compare campaign signoff summary; verify summary path and rerun profile-compare-campaign-signoff with --refresh-campaign 1"
+    return
+  fi
+
+  if [[ "$quality_status_pass" == "null" ]]; then
+    issues+=("quality status/pass indicator unavailable")
+  elif [[ "$quality_status_pass" != "true" ]]; then
+    issues+=("quality status/pass is not pass")
+  fi
+  if [[ "$demotion_policy_present" != "true" ]]; then
+    issues+=("demotion policy evidence missing")
+  fi
+  if [[ "$promotion_policy_present" != "true" ]]; then
+    issues+=("promotion policy evidence missing")
+  fi
+  if [[ "$trust_tier_port_unlock_policy_present" != "true" ]]; then
+    issues+=("trust-tier port-unlock policy evidence missing")
+  fi
+  if ((${#issues[@]} == 0)); then
+    printf '%s' ""
+    return
+  fi
+  joined="$(printf '%s; ' "${issues[@]}")"
+  joined="${joined%"; "}"
+  printf '%s' "$joined"
+}
+
 profile_default_gate_selection_policy_evidence_from_signoff() {
   local signoff_summary_path="$1"
   local present="null"
@@ -7280,6 +7657,53 @@ case "$profile_default_gate_selection_policy_evidence_valid_json" in
   true|false|null) ;;
   *) profile_default_gate_selection_policy_evidence_valid_json="null" ;;
 esac
+profile_default_gate_micro_relay_evidence_available_json="false"
+profile_default_gate_micro_relay_quality_status_pass_json="null"
+profile_default_gate_micro_relay_demotion_policy_present_json="false"
+profile_default_gate_micro_relay_promotion_policy_present_json="false"
+profile_default_gate_trust_tier_port_unlock_policy_present_json="false"
+profile_default_gate_micro_relay_evidence_note=""
+profile_default_gate_micro_relay_evidence_resolution="$(
+  profile_default_gate_micro_relay_evidence_from_signoff "$profile_compare_signoff_summary_json"
+)"
+if [[ "$profile_default_gate_micro_relay_evidence_resolution" == *$'\x1f'* ]]; then
+  profile_default_gate_micro_relay_evidence_available_json="${profile_default_gate_micro_relay_evidence_resolution%%$'\x1f'*}"
+  profile_default_gate_micro_relay_evidence_resolution="${profile_default_gate_micro_relay_evidence_resolution#*$'\x1f'}"
+  profile_default_gate_micro_relay_quality_status_pass_json="${profile_default_gate_micro_relay_evidence_resolution%%$'\x1f'*}"
+  profile_default_gate_micro_relay_evidence_resolution="${profile_default_gate_micro_relay_evidence_resolution#*$'\x1f'}"
+  profile_default_gate_micro_relay_demotion_policy_present_json="${profile_default_gate_micro_relay_evidence_resolution%%$'\x1f'*}"
+  profile_default_gate_micro_relay_evidence_resolution="${profile_default_gate_micro_relay_evidence_resolution#*$'\x1f'}"
+  profile_default_gate_micro_relay_promotion_policy_present_json="${profile_default_gate_micro_relay_evidence_resolution%%$'\x1f'*}"
+  profile_default_gate_trust_tier_port_unlock_policy_present_json="${profile_default_gate_micro_relay_evidence_resolution#*$'\x1f'}"
+fi
+case "$profile_default_gate_micro_relay_evidence_available_json" in
+  true|false) ;;
+  *) profile_default_gate_micro_relay_evidence_available_json="false" ;;
+esac
+case "$profile_default_gate_micro_relay_quality_status_pass_json" in
+  true|false|null) ;;
+  *) profile_default_gate_micro_relay_quality_status_pass_json="null" ;;
+esac
+case "$profile_default_gate_micro_relay_demotion_policy_present_json" in
+  true|false) ;;
+  *) profile_default_gate_micro_relay_demotion_policy_present_json="false" ;;
+esac
+case "$profile_default_gate_micro_relay_promotion_policy_present_json" in
+  true|false) ;;
+  *) profile_default_gate_micro_relay_promotion_policy_present_json="false" ;;
+esac
+case "$profile_default_gate_trust_tier_port_unlock_policy_present_json" in
+  true|false) ;;
+  *) profile_default_gate_trust_tier_port_unlock_policy_present_json="false" ;;
+esac
+profile_default_gate_micro_relay_evidence_note="$(
+  profile_default_gate_micro_relay_evidence_note_text \
+    "$profile_default_gate_micro_relay_evidence_available_json" \
+    "$profile_default_gate_micro_relay_quality_status_pass_json" \
+    "$profile_default_gate_micro_relay_demotion_policy_present_json" \
+    "$profile_default_gate_micro_relay_promotion_policy_present_json" \
+    "$profile_default_gate_trust_tier_port_unlock_policy_present_json"
+)"
 profile_default_gate_next_command_host_a_effective="$(trim "${A_HOST:-}")"
 profile_default_gate_next_command_host_b_effective="$(trim "${B_HOST:-}")"
 if [[ -n "$profile_default_gate_next_command_host_a_effective" ]] \
@@ -7985,6 +8409,12 @@ summary_payload="$(jq -n \
   --argjson profile_default_gate_selection_policy_evidence_present "$profile_default_gate_selection_policy_evidence_present_json" \
   --argjson profile_default_gate_selection_policy_evidence_valid "$profile_default_gate_selection_policy_evidence_valid_json" \
   --arg profile_default_gate_selection_policy_evidence_note "$profile_default_gate_selection_policy_evidence_note" \
+  --argjson profile_default_gate_micro_relay_evidence_available "$profile_default_gate_micro_relay_evidence_available_json" \
+  --argjson profile_default_gate_micro_relay_quality_status_pass "$profile_default_gate_micro_relay_quality_status_pass_json" \
+  --argjson profile_default_gate_micro_relay_demotion_policy_present "$profile_default_gate_micro_relay_demotion_policy_present_json" \
+  --argjson profile_default_gate_micro_relay_promotion_policy_present "$profile_default_gate_micro_relay_promotion_policy_present_json" \
+  --argjson profile_default_gate_trust_tier_port_unlock_policy_present "$profile_default_gate_trust_tier_port_unlock_policy_present_json" \
+  --arg profile_default_gate_micro_relay_evidence_note "$profile_default_gate_micro_relay_evidence_note" \
   --arg profile_default_gate_stability_summary_json "$profile_default_gate_stability_summary_json" \
   --argjson profile_default_gate_stability_summary_available "$profile_default_gate_stability_summary_available_json" \
   --arg profile_default_gate_stability_status "$profile_default_gate_stability_status_json" \
@@ -8246,7 +8676,13 @@ summary_payload="$(jq -n \
         cycle_failure_reason: (if $profile_default_gate_stability_cycle_failure_reason == "" then null else $profile_default_gate_stability_cycle_failure_reason end),
         selection_policy_evidence_present: $profile_default_gate_selection_policy_evidence_present,
         selection_policy_evidence_valid: $profile_default_gate_selection_policy_evidence_valid,
-        selection_policy_evidence_note: (if $profile_default_gate_selection_policy_evidence_note == "" then null else $profile_default_gate_selection_policy_evidence_note end)
+        selection_policy_evidence_note: (if $profile_default_gate_selection_policy_evidence_note == "" then null else $profile_default_gate_selection_policy_evidence_note end),
+        micro_relay_evidence_available: $profile_default_gate_micro_relay_evidence_available,
+        micro_relay_quality_status_pass: $profile_default_gate_micro_relay_quality_status_pass,
+        micro_relay_demotion_policy_present: $profile_default_gate_micro_relay_demotion_policy_present,
+        micro_relay_promotion_policy_present: $profile_default_gate_micro_relay_promotion_policy_present,
+        trust_tier_port_unlock_policy_present: $profile_default_gate_trust_tier_port_unlock_policy_present,
+        micro_relay_evidence_note: (if $profile_default_gate_micro_relay_evidence_note == "" then null else $profile_default_gate_micro_relay_evidence_note end)
       },
       optional_gate_status: {
         profile_default_gate: $profile_default_gate_status,
@@ -8559,6 +8995,12 @@ cat >"$report_tmp" <<EOF_MD
 - Profile gate selection-policy evidence present: $(jq -r '.vpn_track.profile_default_gate.selection_policy_evidence_present | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate selection-policy evidence valid: $(jq -r '.vpn_track.profile_default_gate.selection_policy_evidence_valid | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate selection-policy evidence note: $(jq -r '.vpn_track.profile_default_gate.selection_policy_evidence_note // "none"' "$summary_json")
+- Profile gate micro-relay evidence available: $(jq -r '.vpn_track.profile_default_gate.micro_relay_evidence_available | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate micro-relay quality status pass: $(jq -r '.vpn_track.profile_default_gate.micro_relay_quality_status_pass | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate micro-relay demotion policy present: $(jq -r '.vpn_track.profile_default_gate.micro_relay_demotion_policy_present | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate micro-relay promotion policy present: $(jq -r '.vpn_track.profile_default_gate.micro_relay_promotion_policy_present | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate trust-tier port-unlock policy present: $(jq -r '.vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate micro-relay evidence note: $(jq -r '.vpn_track.profile_default_gate.micro_relay_evidence_note // "none"' "$summary_json")
 - Profile gate stability summary: $(jq -r '.vpn_track.profile_default_gate.stability_summary_json // "none"' "$summary_json")
 - Profile gate stability available: $(jq -r '.vpn_track.profile_default_gate.stability_summary_available | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate stability status: $(jq -r '.vpn_track.profile_default_gate.stability_status // "none"' "$summary_json")
@@ -8764,6 +9206,7 @@ echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_selection_policy_evidence_present=$profile_default_gate_selection_policy_evidence_present_json selection_policy_evidence_valid=$profile_default_gate_selection_policy_evidence_valid_json selection_policy_evidence_note=${profile_default_gate_selection_policy_evidence_note:-}"
+echo "[roadmap-progress-report] profile_default_gate_micro_relay_evidence_available=$profile_default_gate_micro_relay_evidence_available_json micro_relay_quality_status_pass=$profile_default_gate_micro_relay_quality_status_pass_json micro_relay_demotion_policy_present=$profile_default_gate_micro_relay_demotion_policy_present_json micro_relay_promotion_policy_present=$profile_default_gate_micro_relay_promotion_policy_present_json trust_tier_port_unlock_policy_present=$profile_default_gate_trust_tier_port_unlock_policy_present_json micro_relay_evidence_note=${profile_default_gate_micro_relay_evidence_note:-}"
 echo "[roadmap-progress-report] profile_default_gate_stability_summary_json=${profile_default_gate_stability_summary_json:-} stability_summary_available=$profile_default_gate_stability_summary_available_json stability_status=${profile_default_gate_stability_status_json:-} stability_rc=$profile_default_gate_stability_rc_json stability_runs_requested=$profile_default_gate_stability_runs_requested_json stability_runs_completed=$profile_default_gate_stability_runs_completed_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_selection_policy_present_all=$profile_default_gate_stability_selection_policy_present_all_json stability_consistent_selection_policy=$profile_default_gate_stability_consistent_selection_policy_json stability_ok=$profile_default_gate_stability_ok_json stability_recommended_profile_counts=$profile_default_gate_stability_recommended_profile_counts_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_check_summary_json=${profile_default_gate_stability_check_summary_json:-} stability_check_summary_available=$profile_default_gate_stability_check_summary_available_json stability_check_decision=${profile_default_gate_stability_check_decision_json:-} stability_check_status=${profile_default_gate_stability_check_status_json:-} stability_check_rc=$profile_default_gate_stability_check_rc_json stability_check_modal_recommended_profile=${profile_default_gate_stability_check_modal_recommended_profile_json:-} stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct_json"

@@ -379,6 +379,120 @@ selection_policy_summary_json="$(jq '
   }
 ' <<<"$reports_json")"
 
+selection_policy_source="$(jq -r '
+  def valid_selection_policy:
+    type == "object"
+    and (.sticky_pair_sec | type == "number")
+    and (.entry_rotation_sec | type == "number")
+    and (.entry_rotation_jitter_pct | type == "number")
+    and (.exit_exploration_pct | type == "number")
+    and (.path_profile | type == "string")
+    and ((.path_profile | length) > 0);
+  if ([ .[]
+        | select((.status // "") != "skip")
+        | .summary.selection_policy?
+        | select(valid_selection_policy)
+      ] | length) > 0
+  then "source-summary"
+  else "fallback-default"
+  end
+' <<<"$reports_json")"
+
+m4_micro_relay_evidence_summary_json="$(jq '
+  def num_or_zero:
+    if type == "number" then . else 0 end;
+  def score_band($score):
+    if $score == null then null
+    elif $score >= 95 then "excellent"
+    elif $score >= 85 then "good"
+    elif $score >= 70 then "degraded"
+    else "poor"
+    end;
+
+  . as $reports
+  | ($reports | length) as $reports_total
+  | [$reports[] | .summary.m4_micro_relay_evidence? | select(type == "object")] as $evidence_all
+  | [$evidence_all[] | select((.available // false) == true)] as $evidence
+  | [$evidence[] | .micro_relay_quality? | select(type == "object")] as $quality
+  | [$evidence[] | .adaptive_demotion_promotion? | select(type == "object" and ((.available // true) == true))] as $adaptive
+  | [$evidence[] | .trust_tier_port_unlock_wiring? | select(type == "object" and ((.present // false) == true or (.evidence_hits // 0) > 0))] as $trust
+  | [$quality[] | .quality_score? | select(type == "number")] as $quality_scores
+  | ($quality_scores | if length > 0 then (add / length) else null end) as $quality_score_avg
+  | ($quality | map(.signals.transport_mismatch_failures_total // 0 | num_or_zero) | add // 0) as $transport_total
+  | ($quality | map(.signals.token_proof_invalid_failures_total // 0 | num_or_zero) | add // 0) as $token_total
+  | ($quality | map(.signals.unknown_exit_failures_total // 0 | num_or_zero) | add // 0) as $unknown_total
+  | ($quality | map(.signals.directory_trust_failures_total // 0 | num_or_zero) | add // 0) as $directory_total
+  | ($quality | map(.sample_runs // 0 | num_or_zero) | add // 0) as $sample_runs_total
+  | ($adaptive | map(.demotion_signal_count // 0 | num_or_zero) | add // 0) as $demotion_signal_count_total
+  | ($adaptive | map(.promotion_signal_count // 0 | num_or_zero) | add // 0) as $promotion_signal_count_total
+  | (($adaptive | map(select((.wiring_present // false) == true)) | length) > 0) as $adaptive_wiring_present
+  | ($trust | map(.evidence_hits // 0 | num_or_zero) | add // 0) as $trust_evidence_hits_total
+  | (($trust | map(select((.present // false) == true)) | length) > 0) as $trust_present
+  | {
+      schema_version: 1,
+      available: (($evidence | length) > 0),
+      reason: (
+        if ($evidence | length) > 0 then null
+        else "source summaries did not expose summary.m4_micro_relay_evidence"
+        end
+      ),
+      source_reports_total: $reports_total,
+      source_reports_with_evidence: ($evidence | length),
+      micro_relay_quality: {
+        available: (($quality | length) > 0),
+        reports_with_quality: ($quality | length),
+        sample_runs_total: $sample_runs_total,
+        quality_score: $quality_score_avg,
+        quality_score_avg: $quality_score_avg,
+        quality_band: score_band($quality_score_avg),
+        signals: {
+          transport_mismatch_failures_total: $transport_total,
+          token_proof_invalid_failures_total: $token_total,
+          unknown_exit_failures_total: $unknown_total,
+          directory_trust_failures_total: $directory_total
+        },
+        reason: (
+          if ($quality | length) > 0 then null
+          else "micro-relay quality evidence missing in source summaries"
+          end
+        )
+      },
+      adaptive_demotion_promotion: {
+        available: (($adaptive | length) > 0),
+        reports_with_adaptive: ($adaptive | length),
+        demotion_signal_count_total: $demotion_signal_count_total,
+        promotion_signal_count_total: $promotion_signal_count_total,
+        wiring_present: $adaptive_wiring_present,
+        demotion_candidate: (
+          if ($adaptive | length) > 0 then ($demotion_signal_count_total > 0)
+          else null
+          end
+        ),
+        promotion_candidate: (
+          if ($adaptive | length) > 0 then ($demotion_signal_count_total == 0 and $promotion_signal_count_total > 0)
+          else null
+          end
+        ),
+        reason: (
+          if ($adaptive | length) > 0 then null
+          else "adaptive demotion/promotion evidence missing in source summaries"
+          end
+        )
+      },
+      trust_tier_port_unlock_wiring: {
+        evaluated_reports: ($trust | length),
+        present: $trust_present,
+        evidence_hits_total: $trust_evidence_hits_total,
+        reason: (
+          if ($trust | length) > 0 and $trust_present then null
+          elif ($trust | length) > 0 then "no trust-tier port-unlock wiring markers were found in source evidence"
+          else "trust-tier port-unlock wiring evidence missing in source summaries"
+          end
+        )
+      }
+    }
+' <<<"$reports_json")"
+
 reports_total="$(jq 'length' <<<"$reports_json")"
 pass_reports="$(jq '[.[] | select(.status == "pass")] | length' <<<"$reports_json")"
 warn_reports="$(jq '[.[] | select(.status == "warn")] | length' <<<"$reports_json")"
@@ -517,6 +631,8 @@ jq -n \
   --argjson profiles "$profile_aggregate_json" \
   --argjson reliable_profiles "$reliable_profiles_json" \
   --argjson selection_policy "$selection_policy_summary_json" \
+  --arg selection_policy_source "$selection_policy_source" \
+  --argjson m4_micro_relay_evidence "$m4_micro_relay_evidence_summary_json" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -541,7 +657,9 @@ jq -n \
       fail_reports: $fail_reports,
       top_vote_profile: $top_vote_profile,
       top_vote_count: $top_vote_count,
-      selection_policy: $selection_policy
+      selection_policy: $selection_policy,
+      selection_policy_source: $selection_policy_source,
+      m4_micro_relay_evidence: $m4_micro_relay_evidence
     },
     decision: {
       recommended_default_profile: $recommended_default_profile,

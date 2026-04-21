@@ -108,6 +108,50 @@ case "$diag_mode" in
     ;;
 esac
 
+demotion_signal_count=$((transport_mismatch_failures + token_proof_invalid_failures + unknown_exit_failures + directory_trust_failures))
+promotion_signal_count=0
+if [[ "$status" == "pass" && "$demotion_signal_count" -eq 0 ]]; then
+  promotion_signal_count=4
+fi
+quality_score="$(awk \
+  -v tm="$transport_mismatch_failures" \
+  -v tp="$token_proof_invalid_failures" \
+  -v ue="$unknown_exit_failures" \
+  -v dt="$directory_trust_failures" '
+  BEGIN {
+    penalty = ((tm * 4.0) + (tp * 8.0) + (ue * 8.0) + (dt * 6.0)) / 4.0;
+    if (penalty < 0) penalty = 0;
+    if (penalty > 100) penalty = 100;
+    score = 100.0 - penalty;
+    if (score < 0) score = 0;
+    if (score > 100) score = 100;
+    printf "%.2f", score;
+  }'
+)"
+quality_band="$(awk -v score="$quality_score" '
+  BEGIN {
+    if (score >= 95) {
+      print "excellent";
+    } else if (score >= 85) {
+      print "good";
+    } else if (score >= 70) {
+      print "degraded";
+    } else {
+      print "poor";
+    }
+  }'
+)"
+m4_quality_reason=""
+m4_adaptive_reason=""
+if [[ "$status" != "pass" ]]; then
+  m4_adaptive_reason="quality degradations were observed; demotion signals are present"
+elif ((demotion_signal_count > 0)); then
+  m4_adaptive_reason="quality degradations were observed; demotion signals are present"
+else
+  m4_adaptive_reason="clean pass evidence observed; promotion signals are present"
+fi
+m4_trust_tier_reason="trust-tier port-unlock wiring evidence unavailable in run logs"
+
 cat >"$summary_json" <<EOF_SUMMARY
 {
   "version": 1,
@@ -123,6 +167,43 @@ cat >"$summary_json" <<EOF_SUMMARY
       "entry_rotation_jitter_pct": $selection_policy_entry_rotation_jitter_pct,
       "exit_exploration_pct": $selection_policy_exit_exploration_pct,
       "path_profile": "$selection_policy_path_profile"
+    },
+    "m4_micro_relay_evidence": {
+      "schema_version": 1,
+      "available": true,
+      "reason": null,
+      "micro_relay_quality": {
+        "available": true,
+        "sample_runs": 4,
+        "quality_score": $quality_score,
+        "quality_score_avg": $quality_score,
+        "quality_band": "$quality_band",
+        "score_formula": "100 - min(100, ((transport*4)+(token*8)+(unknown_exit*8)+(directory_trust*6))/runs_executed)",
+        "signals": {
+          "runs_pass": $((4 - rc)),
+          "runs_fail": $rc,
+          "transport_mismatch_failures_total": $transport_mismatch_failures,
+          "token_proof_invalid_failures_total": $token_proof_invalid_failures,
+          "unknown_exit_failures_total": $unknown_exit_failures,
+          "directory_trust_failures_total": $directory_trust_failures
+        },
+        "reason": $(if [[ -n "$m4_quality_reason" ]]; then printf '"%s"' "$m4_quality_reason"; else printf 'null'; fi)
+      },
+      "adaptive_demotion_promotion": {
+        "available": true,
+        "demotion_signal_count": $demotion_signal_count,
+        "promotion_signal_count": $promotion_signal_count,
+        "wiring_present": false,
+        "demotion_candidate": $(if ((demotion_signal_count > 0)); then printf 'true'; else printf 'false'; fi),
+        "promotion_candidate": $(if ((demotion_signal_count == 0 && promotion_signal_count > 0)); then printf 'true'; else printf 'false'; fi),
+        "reason": $(if [[ -n "$m4_adaptive_reason" ]]; then printf '"%s"' "$m4_adaptive_reason"; else printf 'null'; fi)
+      },
+      "trust_tier_port_unlock_wiring": {
+        "evaluated": true,
+        "present": false,
+        "evidence_hits": 0,
+        "reason": "$m4_trust_tier_reason"
+      }
     }
   },
   "decision": {
@@ -258,6 +339,51 @@ if [[ "${FAKE_TREND_INCLUDE_SELECTION_POLICY:-1}" == "1" ]]; then
   mv "$trend_summary_tmp" "$summary_json"
 fi
 
+if [[ "${FAKE_TREND_INCLUDE_M4_EVIDENCE:-1}" == "1" ]]; then
+  trend_summary_tmp="${summary_json}.m4.tmp"
+  jq '
+    .summary.m4_micro_relay_evidence = {
+      schema_version: 1,
+      available: true,
+      reason: null,
+      source_reports_total: (.summary.reports_total // 0),
+      source_reports_with_evidence: (.summary.reports_total // 0),
+      micro_relay_quality: {
+        available: true,
+        reports_with_quality: (.summary.reports_total // 0),
+        sample_runs_total: ((.summary.reports_total // 0) * 4),
+        quality_score: 92.50,
+        quality_score_avg: 92.50,
+        quality_band: "good",
+        signals: {
+          transport_mismatch_failures_total: 1,
+          token_proof_invalid_failures_total: 2,
+          unknown_exit_failures_total: 3,
+          directory_trust_failures_total: 0
+        },
+        reason: null
+      },
+      adaptive_demotion_promotion: {
+        available: true,
+        reports_with_adaptive: (.summary.reports_total // 0),
+        demotion_signal_count_total: 6,
+        promotion_signal_count_total: 6,
+        wiring_present: false,
+        demotion_candidate: true,
+        promotion_candidate: false,
+        reason: null
+      },
+      trust_tier_port_unlock_wiring: {
+        evaluated_reports: (.summary.reports_total // 0),
+        present: false,
+        evidence_hits_total: 0,
+        reason: "no trust-tier port-unlock wiring markers were found in source evidence"
+      }
+    }
+  ' "$summary_json" >"$trend_summary_tmp"
+  mv "$trend_summary_tmp" "$summary_json"
+fi
+
 cat >"$report_md" <<EOF_REPORT
 # Fake Trend Report
 EOF_REPORT
@@ -342,6 +468,13 @@ if ! jq -e '
   and .summary.selection_policy.entry_rotation_jitter_pct == 11
   and .summary.selection_policy.exit_exploration_pct == 24
   and .summary.selection_policy.path_profile == "3hop"
+  and .summary.m4_micro_relay_evidence_source == "trend"
+  and .summary.m4_micro_relay_evidence.available == true
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.available == true
+  and (.summary.m4_micro_relay_evidence.micro_relay_quality.quality_score | type == "number")
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == true
+  and (.summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate | type == "boolean")
+  and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
   and (.selected_summaries | length) == 3
   and .trend.status == "pass"
   and .inputs.compare.explicit_remote_endpoints == true
@@ -389,6 +522,38 @@ if ! jq -e '
 ' "$SELECTION_POLICY_FALLBACK_JSON" >/dev/null 2>&1; then
   echo "campaign selection policy fallback summary missing expected local values"
   cat "$SELECTION_POLICY_FALLBACK_JSON"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] m4 evidence fallback from local summaries"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+M4_FALLBACK_JSON="$TMP_DIR/campaign_m4_fallback.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+FAKE_TREND_INCLUDE_M4_EVIDENCE=0 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --summary-json "$M4_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_m4_fallback.log 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and (.summary.m4_micro_relay_evidence_source | startswith("compare:"))
+  and .summary.m4_micro_relay_evidence.available == true
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.available == true
+  and (.summary.m4_micro_relay_evidence.micro_relay_quality.quality_score | type == "number")
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == true
+  and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
+' "$M4_FALLBACK_JSON" >/dev/null 2>&1; then
+  echo "campaign m4 fallback summary missing expected local evidence values"
+  cat "$M4_FALLBACK_JSON"
   exit 1
 fi
 

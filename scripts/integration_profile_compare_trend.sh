@@ -135,6 +135,18 @@ if ! jq -e '
   and .summary.fail_reports == 0
   and .decision.recommended_default_profile == "balanced"
   and .decision.experimental_non_default_profiles == ["speed-1hop"]
+  and .summary.m4_micro_relay_evidence.available == false
+  and (.summary.m4_micro_relay_evidence.reason | type == "string")
+  and .summary.m4_micro_relay_evidence.source_reports_total == 3
+  and .summary.m4_micro_relay_evidence.source_reports_with_evidence == 0
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.available == false
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.quality_score == null
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.quality_score_avg == null
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == false
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate == null
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_candidate == null
+  and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
+  and (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.reason | type == "string")
   and (.summary.selection_policy.sticky_pair_sec | type == "number")
   and (.summary.selection_policy.entry_rotation_sec | type == "number")
   and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
@@ -208,7 +220,12 @@ if ! rg -q 'profile-compare-trend: status=fail' /tmp/integration_profile_compare
   exit 1
 fi
 if ! jq -e '
-  .summary.selection_policy.sticky_pair_sec == 60
+  .summary.m4_micro_relay_evidence.available == false
+  and .summary.m4_micro_relay_evidence.source_reports_with_evidence == 0
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.available == false
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == false
+  and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
+  and .summary.selection_policy.sticky_pair_sec == 60
   and .summary.selection_policy.entry_rotation_sec == 30
   and .summary.selection_policy.entry_rotation_jitter_pct == 25
   and .summary.selection_policy.exit_exploration_pct == 12

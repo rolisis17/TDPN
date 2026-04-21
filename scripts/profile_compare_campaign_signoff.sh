@@ -589,6 +589,12 @@ set_subject_alias_or_die() {
   local alias_flag="$1"
   local alias_value="$2"
 
+  alias_value="$(trim "$alias_value")"
+  if [[ -z "$alias_value" ]]; then
+    echo "$alias_flag requires a non-empty value"
+    exit 2
+  fi
+
   if [[ -z "$subject_alias_flag" ]]; then
     subject_alias="$alias_value"
     subject_alias_flag="$alias_flag"
@@ -608,6 +614,18 @@ require_flag_value_or_die() {
     echo "$flag requires a value"
     exit 2
   fi
+}
+
+require_non_empty_value_or_die() {
+  local flag="$1"
+  local value="${2:-}"
+
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "$flag requires a non-empty value"
+    exit 2
+  fi
+  printf '%s' "$value"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -771,22 +789,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-subject)
       require_flag_value_or_die "$1" "${2:-}"
-      campaign_subject="${2:-}"
+      campaign_subject="$(require_non_empty_value_or_die "$1" "${2:-}")"
       campaign_subject_cli_provided="1"
       shift 2
       ;;
     --campaign-subject=*)
-      campaign_subject="${1#--campaign-subject=}"
+      campaign_subject="$(require_non_empty_value_or_die "--campaign-subject" "${1#--campaign-subject=}")"
       campaign_subject_cli_provided="1"
       shift
       ;;
     --campaign-anon-cred)
       require_flag_value_or_die "$1" "${2:-}"
-      campaign_anon_cred="${2:-}"
+      campaign_anon_cred="$(require_non_empty_value_or_die "$1" "${2:-}")"
       shift 2
       ;;
     --campaign-anon-cred=*)
-      campaign_anon_cred="${1#--campaign-anon-cred=}"
+      campaign_anon_cred="$(require_non_empty_value_or_die "--campaign-anon-cred" "${1#--campaign-anon-cred=}")"
       shift
       ;;
     --subject)
@@ -824,11 +842,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --anon-cred)
       require_flag_value_or_die "$1" "${2:-}"
-      anon_cred_alias="${2:-}"
+      anon_cred_alias="$(require_non_empty_value_or_die "$1" "${2:-}")"
       shift 2
       ;;
     --anon-cred=*)
-      anon_cred_alias="${1#--anon-cred=}"
+      anon_cred_alias="$(require_non_empty_value_or_die "--anon-cred" "${1#--anon-cred=}")"
       shift
       ;;
     --campaign-start-local-stack)

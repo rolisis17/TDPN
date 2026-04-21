@@ -800,6 +800,12 @@ if ! jq -e '
   and (((.next_actions // []) | any(.id == "blockchain_mainnet_activation_missing_metrics")) | not)
   and (.vpn_track.profile_default_gate | has("selection_policy_evidence_present"))
   and (.vpn_track.profile_default_gate | has("selection_policy_evidence_valid"))
+  and (.vpn_track.profile_default_gate | has("micro_relay_evidence_available"))
+  and (.vpn_track.profile_default_gate | has("micro_relay_quality_status_pass"))
+  and (.vpn_track.profile_default_gate | has("micro_relay_demotion_policy_present"))
+  and (.vpn_track.profile_default_gate | has("micro_relay_promotion_policy_present"))
+  and (.vpn_track.profile_default_gate | has("trust_tier_port_unlock_policy_present"))
+  and (.vpn_track.profile_default_gate | has("micro_relay_evidence_note"))
   and (
     (.vpn_track.profile_default_gate.selection_policy_evidence_present == null)
     or ((.vpn_track.profile_default_gate.selection_policy_evidence_present | type) == "boolean")
@@ -807,6 +813,18 @@ if ! jq -e '
   and (
     (.vpn_track.profile_default_gate.selection_policy_evidence_valid == null)
     or ((.vpn_track.profile_default_gate.selection_policy_evidence_valid | type) == "boolean")
+  )
+  and ((.vpn_track.profile_default_gate.micro_relay_evidence_available | type) == "boolean")
+  and (
+    (.vpn_track.profile_default_gate.micro_relay_quality_status_pass == null)
+    or ((.vpn_track.profile_default_gate.micro_relay_quality_status_pass | type) == "boolean")
+  )
+  and ((.vpn_track.profile_default_gate.micro_relay_demotion_policy_present | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.micro_relay_promotion_policy_present | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present | type) == "boolean")
+  and (
+    (.vpn_track.profile_default_gate.micro_relay_evidence_note == null)
+    or ((.vpn_track.profile_default_gate.micro_relay_evidence_note | type) == "string")
   )
   and .refresh.manual_validation_report.status == "pass"
   and .refresh.manual_validation_report.timed_out == false
@@ -4076,9 +4094,84 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
+  and .vpn_track.profile_default_gate.micro_relay_evidence_available == false
+  and .vpn_track.profile_default_gate.micro_relay_quality_status_pass == null
+  and .vpn_track.profile_default_gate.micro_relay_demotion_policy_present == false
+  and .vpn_track.profile_default_gate.micro_relay_promotion_policy_present == false
+  and .vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present == false
+  and ((.vpn_track.profile_default_gate.micro_relay_evidence_note // "") | test("micro-relay M4 evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" >/dev/null; then
   echo "NO-GO profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate surfaces micro-relay M4 evidence when present in signoff summary"
+PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON="$TMP_DIR/profile_compare_campaign_signoff_m4_present.json"
+cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT'
+{
+  "version": 1,
+  "status": "ok",
+  "final_rc": 0,
+  "decision": {
+    "decision": "NO-GO",
+    "go": false,
+    "recommended_profile": "balanced"
+  },
+  "summary": {
+    "m4_micro_relay_evidence": {
+      "available": true,
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "good",
+        "quality_score": 92
+      },
+      "adaptive_demotion_promotion": {
+        "available": true,
+        "demotion_candidate": false,
+        "promotion_candidate": true
+      },
+      "trust_tier_port_unlock_wiring": {
+        "present": true,
+        "evidence_hits": 2
+      }
+    }
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" \
+  --profile-compare-signoff-summary-json "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_m4_present_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_m4_present_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log 2>&1; then
+  echo "expected success when profile default gate signoff summary includes micro-relay M4 evidence"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" '
+  .vpn_track.optional_gate_status.profile_default_gate == "warn"
+  and .artifacts.profile_compare_signoff_summary_json == $src
+  and .vpn_track.profile_default_gate.micro_relay_evidence_available == true
+  and .vpn_track.profile_default_gate.micro_relay_quality_status_pass == true
+  and .vpn_track.profile_default_gate.micro_relay_demotion_policy_present == true
+  and .vpn_track.profile_default_gate.micro_relay_promotion_policy_present == true
+  and .vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present == true
+  and .vpn_track.profile_default_gate.micro_relay_evidence_note == null
+' "$TMP_DIR/roadmap_progress_profile_default_gate_m4_present_summary.json" >/dev/null; then
+  echo "micro-relay evidence profile default gate summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_m4_present_summary.json"
+  exit 1
+fi
+if ! grep -q '\[roadmap-progress-report\] profile_default_gate_micro_relay_evidence_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log; then
+  echo "expected micro-relay evidence stdout line not found"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log
   exit 1
 fi
 
@@ -4146,6 +4239,12 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" '
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
+  and .vpn_track.profile_default_gate.micro_relay_evidence_available == false
+  and .vpn_track.profile_default_gate.micro_relay_quality_status_pass == null
+  and .vpn_track.profile_default_gate.micro_relay_demotion_policy_present == false
+  and .vpn_track.profile_default_gate.micro_relay_promotion_policy_present == false
+  and .vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present == false
+  and ((.vpn_track.profile_default_gate.micro_relay_evidence_note // "") | test("micro-relay M4 evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json" >/dev/null; then
   echo "NO-GO insufficient evidence profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json"

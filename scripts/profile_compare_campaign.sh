@@ -329,6 +329,18 @@ extract_selection_policy_json() {
   ' "$summary_json_path" 2>/dev/null || true
 }
 
+extract_m4_micro_relay_evidence_json() {
+  local summary_json_path="$1"
+  jq -c '
+    [
+      (.summary.m4_micro_relay_evidence // empty),
+      (.m4_micro_relay_evidence // empty)
+    ]
+    | map(select(type == "object"))
+    | .[0] // empty
+  ' "$summary_json_path" 2>/dev/null || true
+}
+
 count_log_pattern() {
   local log_path="$1"
   local pattern="$2"
@@ -1048,7 +1060,15 @@ selection_policy_source=""
 if [[ -f "$trend_summary_json" ]]; then
   selection_policy_json="$(extract_selection_policy_json "$trend_summary_json")"
   if [[ -n "$selection_policy_json" ]]; then
-    selection_policy_source="trend"
+    trend_selection_policy_source="$(jq -r '.summary.selection_policy_source // ""' "$trend_summary_json" 2>/dev/null || printf '%s' "")"
+    case "$trend_selection_policy_source" in
+      fallback-default|synthetic-default|none)
+        selection_policy_json=""
+        ;;
+      *)
+        selection_policy_source="trend"
+        ;;
+    esac
   fi
 fi
 if [[ -z "$selection_policy_json" ]]; then
@@ -1074,6 +1094,69 @@ if [[ -z "$selection_policy_json" ]]; then
   selection_policy_source="fallback-default"
 fi
 campaign_log_event "stage=selection-policy source=$selection_policy_source elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
+
+m4_micro_relay_evidence_json=""
+m4_micro_relay_evidence_source=""
+if [[ -f "$trend_summary_json" ]]; then
+  m4_micro_relay_evidence_json="$(extract_m4_micro_relay_evidence_json "$trend_summary_json")"
+  if [[ -n "$m4_micro_relay_evidence_json" ]]; then
+    m4_micro_relay_evidence_source="trend"
+  fi
+fi
+if [[ -z "$m4_micro_relay_evidence_json" ]]; then
+  m4_source_summary=""
+  for m4_source_summary in "${compare_summary_paths[@]}"; do
+    m4_micro_relay_evidence_json="$(extract_m4_micro_relay_evidence_json "$m4_source_summary")"
+    if [[ -n "$m4_micro_relay_evidence_json" ]]; then
+      m4_micro_relay_evidence_source="compare:$m4_source_summary"
+      break
+    fi
+  done
+fi
+if [[ -z "$m4_micro_relay_evidence_json" ]]; then
+  m4_micro_relay_evidence_json="$(jq -nc '
+    {
+      schema_version: 1,
+      available: false,
+      reason: "m4 micro-relay evidence not present in trend/local summaries",
+      source_reports_total: 0,
+      source_reports_with_evidence: 0,
+      micro_relay_quality: {
+        available: false,
+        reports_with_quality: 0,
+        sample_runs_total: 0,
+        quality_score: null,
+        quality_score_avg: null,
+        quality_band: null,
+        signals: {
+          transport_mismatch_failures_total: 0,
+          token_proof_invalid_failures_total: 0,
+          unknown_exit_failures_total: 0,
+          directory_trust_failures_total: 0
+        },
+        reason: "micro-relay quality evidence is unavailable"
+      },
+      adaptive_demotion_promotion: {
+        available: false,
+        reports_with_adaptive: 0,
+        demotion_signal_count_total: 0,
+        promotion_signal_count_total: 0,
+        wiring_present: false,
+        demotion_candidate: null,
+        promotion_candidate: null,
+        reason: "adaptive demotion/promotion evidence is unavailable"
+      },
+      trust_tier_port_unlock_wiring: {
+        evaluated_reports: 0,
+        present: false,
+        evidence_hits_total: 0,
+        reason: "trust-tier port-unlock wiring evidence is unavailable"
+      }
+    }
+  ')"
+  m4_micro_relay_evidence_source="fallback-unavailable"
+fi
+campaign_log_event "stage=m4-evidence source=$m4_micro_relay_evidence_source elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
 
 runs_json="$(jq -s '.' "$rows_file")"
 runs_total="$(jq 'length' <<<"$runs_json")"
@@ -1127,9 +1210,11 @@ for summary_path in "${compare_summary_paths[@]}"; do
   root_required_failures=$((root_required_failures + $(extract_diagnostic_count "$summary_path" "root_required_failures")))
   endpoint_unreachable_failures=$((endpoint_unreachable_failures + $(extract_diagnostic_count "$summary_path" "endpoint_unreachable_failures")))
 
-  if ! has_diagnostic_key "$summary_path" "root_required_failures" || ! has_diagnostic_key "$summary_path" "endpoint_unreachable_failures"; then
-    run_log_path="$(trim "$(log_path_for_summary "$summary_path" "$runs_json")")"
+  run_log_path="$(trim "$(log_path_for_summary "$summary_path" "$runs_json")")"
+  if ! has_diagnostic_key "$summary_path" "root_required_failures"; then
     root_required_failures=$((root_required_failures + $(count_log_pattern "$run_log_path" 'requires root|must be root|run with sudo|permission denied|operation not permitted')))
+  fi
+  if ! has_diagnostic_key "$summary_path" "endpoint_unreachable_failures"; then
     endpoint_unreachable_failures=$((endpoint_unreachable_failures + $(count_log_pattern "$run_log_path" 'connection refused|no route to host|network is unreachable|could not resolve host|temporary failure in name resolution|name or service not known|context deadline exceeded|i/o timeout|timed out|dial tcp: lookup .*: no such host')))
   fi
 done
@@ -1221,6 +1306,7 @@ jq -n \
   --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
   --arg likely_primary_failure "$likely_primary_failure" \
   --arg operator_hint "$operator_hint" \
+  --arg m4_micro_relay_evidence_source "$m4_micro_relay_evidence_source" \
   --argjson rc "$rc" \
   --argjson campaign_runs "$campaign_runs" \
   --argjson campaign_pause_sec "$campaign_pause_sec" \
@@ -1251,7 +1337,9 @@ jq -n \
   --argjson runs_missing_summary "$runs_missing_summary" \
   --argjson runs "$runs_json" \
   --argjson selected_summaries "$selected_summaries_json" \
+  --arg selection_policy_source "$selection_policy_source" \
   --argjson selection_policy "$selection_policy_json" \
+  --argjson m4_micro_relay_evidence "$m4_micro_relay_evidence_json" \
   --argjson transport_mismatch_failures "$transport_mismatch_failures" \
   --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
   --argjson unknown_exit_failures "$unknown_exit_failures" \
@@ -1324,7 +1412,10 @@ jq -n \
       runs_fail: $runs_fail,
       runs_with_summary: $runs_with_summary,
       runs_missing_summary: $runs_missing_summary,
-      selection_policy: $selection_policy
+      selection_policy: $selection_policy,
+      selection_policy_source: $selection_policy_source,
+      m4_micro_relay_evidence_source: $m4_micro_relay_evidence_source,
+      m4_micro_relay_evidence: $m4_micro_relay_evidence
     },
     aggregated_diagnostics: {
       transport_mismatch_failures: $transport_mismatch_failures,

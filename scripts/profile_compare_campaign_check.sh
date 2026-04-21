@@ -24,6 +24,11 @@ Usage:
     [--require-trend-source CSV] \
     [--require-selection-policy-present [0|1]] \
     [--require-selection-policy-valid [0|1]] \
+    [--require-micro-relay-quality-evidence [0|1]] \
+    [--require-micro-relay-quality-status-pass [0|1]] \
+    [--require-micro-relay-demotion-policy [0|1]] \
+    [--require-micro-relay-promotion-policy [0|1]] \
+    [--require-trust-tier-port-unlock-policy [0|1]] \
     [--fail-on-no-go [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -124,6 +129,161 @@ csv_contains() {
   return 1
 }
 
+extract_m4_policy_signals_from_summary() {
+  local summary_path="$1"
+  local parsed=""
+  local quality_present quality_status_pass demotion_present promotion_present trust_tier_port_unlock_present
+
+  if [[ -z "$summary_path" || ! -f "$summary_path" ]]; then
+    echo "0 0 0 0 0"
+    return
+  fi
+
+  parsed="$(jq -r '
+    def first_non_null($values):
+      reduce $values[] as $value (null; if . == null and $value != null then $value else . end);
+    def boolish_true:
+      if type == "boolean" then .
+      elif type == "number" then . != 0
+      elif type == "string" then
+        ((ascii_downcase) as $text |
+          ($text == "1" or
+           $text == "true" or
+           $text == "yes" or
+           $text == "pass" or
+           $text == "ok" or
+           $text == "go" or
+           $text == "healthy" or
+           $text == "enabled"))
+      else false
+      end;
+    def canonical_m4_evidence:
+      first_non_null([
+        .summary.m4_micro_relay_evidence,
+        .m4_micro_relay_evidence,
+        .summary.m4.micro_relay_evidence,
+        .m4.micro_relay_evidence
+      ]);
+    def quality_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .micro_relay_quality else null end),
+        canonical_m4_evidence,
+        .summary.micro_relay_quality_evidence,
+        .summary.micro_relay_quality,
+        .summary.m4.micro_relay_quality,
+        .summary.m4.quality_scoring,
+        .m4.micro_relay_quality_evidence,
+        .m4.micro_relay_quality
+      ]);
+    def demotion_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .adaptive_demotion_promotion else null end),
+        .summary.micro_relay_demotion_policy,
+        .summary.m4.micro_relay_demotion_policy,
+        .summary.m4.demotion_policy,
+        .summary.micro_relay_policy.demotion,
+        .summary.relay_policy.demotion,
+        .m4.micro_relay_demotion_policy,
+        .m4.demotion_policy
+      ]);
+    def promotion_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .adaptive_demotion_promotion else null end),
+        .summary.micro_relay_promotion_policy,
+        .summary.m4.micro_relay_promotion_policy,
+        .summary.m4.promotion_policy,
+        .summary.micro_relay_policy.promotion,
+        .summary.relay_policy.promotion,
+        .m4.micro_relay_promotion_policy,
+        .m4.promotion_policy
+      ]);
+    def trust_tier_port_unlock_candidate:
+      first_non_null([
+        (canonical_m4_evidence | if type == "object" then .trust_tier_port_unlock_wiring else null end),
+        .summary.trust_tier_port_unlock_policy,
+        .summary.m4.trust_tier_port_unlock_policy,
+        .summary.port_unlock_policy,
+        .summary.port_unlock.trust_tier_policy,
+        .summary.exit_policy.trust_tier_port_unlock_policy,
+        .m4.trust_tier_port_unlock_policy
+      ]);
+    def candidate_present($candidate):
+      if $candidate == null then false
+      elif ($candidate | type) == "object" then
+        if ($candidate.available? != null) then (($candidate.available // false) | boolish_true)
+        elif ($candidate.present? != null) then (($candidate.present // false) | boolish_true)
+        else true
+        end
+      else
+        ($candidate | boolish_true)
+      end;
+    def adaptive_signal_present($candidate; $field):
+      if $candidate == null then false
+      elif ($candidate | type) == "object" then
+        if ($candidate[$field]? != null) then true
+        elif ($candidate.available? != null) then (($candidate.available // false) | boolish_true)
+        elif ($candidate.present? != null) then (($candidate.present // false) | boolish_true)
+        else true
+        end
+      else
+        ($candidate | boolish_true)
+      end;
+    def trust_signal_present($candidate):
+      if $candidate == null then false
+      elif ($candidate | type) == "object" then
+        if ($candidate.present? != null) then (($candidate.present // false) | boolish_true)
+        elif ($candidate.evidence_hits? != null and (($candidate.evidence_hits | type) == "number")) then (($candidate.evidence_hits // 0) > 0)
+        elif ($candidate.available? != null) then (($candidate.available // false) | boolish_true)
+        else true
+        end
+      else
+        ($candidate | boolish_true)
+      end;
+    def quality_pass:
+      if (candidate_present(quality_candidate) | not) then false
+      elif (quality_candidate | type) == "object" then
+        (((quality_candidate.status // "" | tostring | ascii_downcase) as $status |
+            ($status == "pass" or $status == "ok" or $status == "go" or $status == "healthy")) or
+         ((quality_candidate.quality_status // "" | tostring | ascii_downcase) as $quality_status |
+            ($quality_status == "pass" or $quality_status == "ok" or $quality_status == "go" or $quality_status == "healthy")) or
+         ((quality_candidate.pass // false) | boolish_true) or
+         ((quality_candidate.quality_ok // false) | boolish_true) or
+         ((quality_candidate.status_pass // false) | boolish_true) or
+         ((quality_candidate.healthy // false) | boolish_true) or
+         ((quality_candidate.quality_band // "" | tostring | ascii_downcase) as $quality_band |
+            ($quality_band == "excellent" or $quality_band == "good" or $quality_band == "pass" or $quality_band == "ok" or $quality_band == "healthy")) or
+         ((quality_candidate.quality_score // null) as $quality_score |
+            if ($quality_score | type) == "number" then ($quality_score >= 85) else false end))
+      else
+        (quality_candidate | boolish_true)
+      end;
+    [
+      candidate_present(quality_candidate),
+      quality_pass,
+      adaptive_signal_present(demotion_candidate; "demotion_candidate"),
+      adaptive_signal_present(promotion_candidate; "promotion_candidate"),
+      trust_signal_present(trust_tier_port_unlock_candidate)
+    ]
+    | map(if . then 1 else 0 end)
+    | @tsv
+  ' "$summary_path" 2>/dev/null || true)"
+
+  if [[ -z "$parsed" ]]; then
+    echo "0 0 0 0 0"
+    return
+  fi
+
+  IFS=$'\t' read -r quality_present quality_status_pass demotion_present promotion_present trust_tier_port_unlock_present <<<"$parsed"
+  for value in "$quality_present" "$quality_status_pass" "$demotion_present" "$promotion_present" "$trust_tier_port_unlock_present"; do
+    if [[ "$value" != "0" && "$value" != "1" ]]; then
+      echo "0 0 0 0 0"
+      return
+    fi
+  done
+
+  echo "$quality_present $quality_status_pass $demotion_present $promotion_present $trust_tier_port_unlock_present"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd find
@@ -145,6 +305,11 @@ disallow_experimental_default="${PROFILE_COMPARE_CAMPAIGN_CHECK_DISALLOW_EXPERIM
 require_trend_source="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TREND_SOURCE:-policy_reliability_latency,vote_fallback,safe_default_fallback}"
 require_selection_policy_present="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_PRESENT:-0}"
 require_selection_policy_valid="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_VALID:-0}"
+require_micro_relay_quality_evidence="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_QUALITY_EVIDENCE:-0}"
+require_micro_relay_quality_status_pass="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_QUALITY_STATUS_PASS:-0}"
+require_micro_relay_demotion_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-0}"
+require_micro_relay_promotion_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-0}"
+require_trust_tier_port_unlock_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-0}"
 fail_on_no_go="${PROFILE_COMPARE_CAMPAIGN_CHECK_FAIL_ON_NO_GO:-1}"
 show_json="${PROFILE_COMPARE_CAMPAIGN_CHECK_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_CHECK_PRINT_SUMMARY_JSON:-0}"
@@ -241,6 +406,51 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-micro-relay-quality-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_quality_evidence="${2:-}"
+        shift 2
+      else
+        require_micro_relay_quality_evidence="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-quality-status-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_quality_status_pass="${2:-}"
+        shift 2
+      else
+        require_micro_relay_quality_status_pass="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-demotion-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_demotion_policy="${2:-}"
+        shift 2
+      else
+        require_micro_relay_demotion_policy="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-promotion-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_promotion_policy="${2:-}"
+        shift 2
+      else
+        require_micro_relay_promotion_policy="1"
+        shift
+      fi
+      ;;
+    --require-trust-tier-port-unlock-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trust_tier_port_unlock_policy="${2:-}"
+        shift 2
+      else
+        require_trust_tier_port_unlock_policy="1"
+        shift
+      fi
+      ;;
     --fail-on-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_no_go="${2:-}"
@@ -289,6 +499,11 @@ bool_arg_or_die "--require-trend-status-pass" "$require_trend_status_pass"
 bool_arg_or_die "--disallow-experimental-default" "$disallow_experimental_default"
 bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
 bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
+bool_arg_or_die "--require-micro-relay-quality-evidence" "$require_micro_relay_quality_evidence"
+bool_arg_or_die "--require-micro-relay-quality-status-pass" "$require_micro_relay_quality_status_pass"
+bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro_relay_demotion_policy"
+bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
+bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -356,28 +571,45 @@ if [[ -n "$trend_summary_json" && -f "$trend_summary_json" ]] &&
 fi
 
 campaign_status="$(jq -r '.status // ""' "$campaign_summary_json")"
-campaign_rc="$(jq -r '.rc // 1' "$campaign_summary_json")"
-runs_total="$(jq -r '.summary.runs_total // 0' "$campaign_summary_json")"
-runs_pass="$(jq -r '.summary.runs_pass // 0' "$campaign_summary_json")"
-runs_warn="$(jq -r '.summary.runs_warn // 0' "$campaign_summary_json")"
-runs_fail="$(jq -r '.summary.runs_fail // 0' "$campaign_summary_json")"
-runs_with_summary="$(jq -r '.summary.runs_with_summary // 0' "$campaign_summary_json")"
+campaign_rc="$(jq -r '(.rc | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
+runs_total="$(jq -r '(.summary.runs_total | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
+runs_pass="$(jq -r '(.summary.runs_pass | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
+runs_warn="$(jq -r '(.summary.runs_warn | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
+runs_fail="$(jq -r '(.summary.runs_fail | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
+runs_with_summary="$(jq -r '(.summary.runs_with_summary | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
 recommended_profile="$(normalize_profile "$(jq -r '.decision.recommended_default_profile // ""' "$campaign_summary_json")")"
 decision_source="$(jq -r '.decision.source // ""' "$campaign_summary_json")"
 trend_status="$(jq -r '.trend.status // ""' "$campaign_summary_json")"
-trend_rc="$(jq -r '.trend.rc // 1' "$campaign_summary_json")"
+trend_rc="$(jq -r '(.trend.rc | tonumber?) // "__INVALID__"' "$campaign_summary_json")"
 
 support_rate_pct="0"
 trend_source_value="$decision_source"
 if [[ "$trend_summary_present" == "1" ]]; then
-  support_rate_pct="$(jq -r '.decision.recommendation_support_rate_pct // 0' "$trend_summary_json")"
+  support_rate_pct="$(jq -r '(.decision.recommendation_support_rate_pct | tonumber?) // "__INVALID__"' "$trend_summary_json")"
   trend_source_value="$(jq -r '.decision.source // ""' "$trend_summary_json")"
   if [[ -z "$decision_source" ]]; then
     decision_source="$trend_source_value"
   fi
 fi
 
+numeric_validation_issues=()
+if ! [[ "$campaign_rc" =~ ^-?[0-9]+$ ]]; then
+  numeric_validation_issues+=("campaign_rc")
+  campaign_rc="1"
+fi
+for metric_name in runs_total runs_pass runs_warn runs_fail runs_with_summary; do
+  metric_value="${!metric_name}"
+  if ! [[ "$metric_value" =~ ^[0-9]+$ ]]; then
+    numeric_validation_issues+=("$metric_name")
+    printf -v "$metric_name" '%s' "0"
+  fi
+done
+if ! [[ "$trend_rc" =~ ^-?[0-9]+$ ]]; then
+  numeric_validation_issues+=("trend_rc")
+  trend_rc="1"
+fi
 if ! is_non_negative_decimal "$support_rate_pct"; then
+  numeric_validation_issues+=("recommendation_support_rate_pct")
   support_rate_pct="0"
 fi
 
@@ -387,6 +619,13 @@ fi
 
 campaign_selection_policy_present=0
 campaign_selection_policy_valid=0
+campaign_selection_policy_source="$(jq -r '.summary.selection_policy_source // ""' "$campaign_summary_json" 2>/dev/null || printf '%s' "")"
+campaign_selection_policy_synthetic_default=0
+case "$campaign_selection_policy_source" in
+  fallback-default|synthetic-default|none)
+    campaign_selection_policy_synthetic_default=1
+    ;;
+esac
 if jq -e '.summary.selection_policy | type == "object"' "$campaign_summary_json" >/dev/null 2>&1; then
   campaign_selection_policy_present=1
 fi
@@ -398,8 +637,21 @@ if jq -e '
   and (.summary.selection_policy.exit_exploration_pct | type == "number")
   and (.summary.selection_policy.path_profile | type == "string")
 ' "$campaign_summary_json" >/dev/null 2>&1; then
-  campaign_selection_policy_valid=1
+  if ((campaign_selection_policy_synthetic_default == 0)); then
+    campaign_selection_policy_valid=1
+  fi
 fi
+
+campaign_micro_relay_quality_evidence_present=0
+campaign_micro_relay_quality_status_pass=0
+campaign_micro_relay_demotion_policy_present=0
+campaign_micro_relay_promotion_policy_present=0
+campaign_trust_tier_port_unlock_policy_present=0
+read -r campaign_micro_relay_quality_evidence_present \
+  campaign_micro_relay_quality_status_pass \
+  campaign_micro_relay_demotion_policy_present \
+  campaign_micro_relay_promotion_policy_present \
+  campaign_trust_tier_port_unlock_policy_present < <(extract_m4_policy_signals_from_summary "$campaign_summary_json")
 
 selection_policy_selected_summaries_total="$(jq -r '[.selected_summaries[]? | select(type == "string" and length > 0)] | length' "$campaign_summary_json" 2>/dev/null || printf '0')"
 if ! [[ "$selection_policy_selected_summaries_total" =~ ^[0-9]+$ ]]; then
@@ -408,6 +660,11 @@ fi
 selection_policy_selected_summaries_found=0
 selection_policy_selected_summaries_present_count=0
 selection_policy_selected_summaries_valid_count=0
+m4_selected_summaries_quality_evidence_present_count=0
+m4_selected_summaries_quality_status_pass_count=0
+m4_selected_summaries_demotion_policy_present_count=0
+m4_selected_summaries_promotion_policy_present_count=0
+m4_selected_summaries_trust_tier_port_unlock_policy_present_count=0
 while IFS= read -r selected_summary_path; do
   selected_summary_path="$(abs_path "$selected_summary_path")"
   if [[ -z "$selected_summary_path" || ! -f "$selected_summary_path" ]]; then
@@ -426,6 +683,26 @@ while IFS= read -r selected_summary_path; do
     and (.summary.selection_policy.path_profile | type == "string")
   ' "$selected_summary_path" >/dev/null 2>&1; then
     selection_policy_selected_summaries_valid_count=$((selection_policy_selected_summaries_valid_count + 1))
+  fi
+  read -r m4_selected_quality_present \
+    m4_selected_quality_status_pass \
+    m4_selected_demotion_present \
+    m4_selected_promotion_present \
+    m4_selected_trust_tier_port_unlock_present < <(extract_m4_policy_signals_from_summary "$selected_summary_path")
+  if [[ "$m4_selected_quality_present" == "1" ]]; then
+    m4_selected_summaries_quality_evidence_present_count=$((m4_selected_summaries_quality_evidence_present_count + 1))
+  fi
+  if [[ "$m4_selected_quality_status_pass" == "1" ]]; then
+    m4_selected_summaries_quality_status_pass_count=$((m4_selected_summaries_quality_status_pass_count + 1))
+  fi
+  if [[ "$m4_selected_demotion_present" == "1" ]]; then
+    m4_selected_summaries_demotion_policy_present_count=$((m4_selected_summaries_demotion_policy_present_count + 1))
+  fi
+  if [[ "$m4_selected_promotion_present" == "1" ]]; then
+    m4_selected_summaries_promotion_policy_present_count=$((m4_selected_summaries_promotion_policy_present_count + 1))
+  fi
+  if [[ "$m4_selected_trust_tier_port_unlock_present" == "1" ]]; then
+    m4_selected_summaries_trust_tier_port_unlock_policy_present_count=$((m4_selected_summaries_trust_tier_port_unlock_policy_present_count + 1))
   fi
 done < <(jq -r '.selected_summaries[]? | select(type == "string" and length > 0)' "$campaign_summary_json" 2>/dev/null || true)
 
@@ -449,7 +726,38 @@ elif ((selection_policy_selected_summaries_total > 0 && selection_policy_selecte
   selection_policy_evidence_valid=1
 fi
 
+micro_relay_quality_evidence_present=0
+if ((campaign_micro_relay_quality_evidence_present == 1 || m4_selected_summaries_quality_evidence_present_count > 0)); then
+  micro_relay_quality_evidence_present=1
+fi
+
+micro_relay_quality_status_pass=0
+if ((campaign_micro_relay_quality_status_pass == 1)); then
+  micro_relay_quality_status_pass=1
+elif ((selection_policy_selected_summaries_total > 0 && m4_selected_summaries_quality_status_pass_count == selection_policy_selected_summaries_total)); then
+  micro_relay_quality_status_pass=1
+fi
+
+micro_relay_demotion_policy_present=0
+if ((campaign_micro_relay_demotion_policy_present == 1 || m4_selected_summaries_demotion_policy_present_count > 0)); then
+  micro_relay_demotion_policy_present=1
+fi
+
+micro_relay_promotion_policy_present=0
+if ((campaign_micro_relay_promotion_policy_present == 1 || m4_selected_summaries_promotion_policy_present_count > 0)); then
+  micro_relay_promotion_policy_present=1
+fi
+
+trust_tier_port_unlock_policy_present=0
+if ((campaign_trust_tier_port_unlock_policy_present == 1 || m4_selected_summaries_trust_tier_port_unlock_policy_present_count > 0)); then
+  trust_tier_port_unlock_policy_present=1
+fi
+
 declare -a errors=()
+if ((${#numeric_validation_issues[@]} > 0)); then
+  errors+=("campaign/trend numeric fields invalid or non-numeric: $(IFS=,; echo "${numeric_validation_issues[*]}")")
+fi
+declare -a m4_policy_issues=()
 
 if [[ "$require_status_pass" == "1" ]] && [[ "$campaign_status" != "pass" ]]; then
   errors+=("campaign status must be pass (actual=${campaign_status:-unset})")
@@ -508,6 +816,26 @@ fi
 if [[ "$require_selection_policy_valid" == "1" && "$selection_policy_evidence_valid" != "1" ]]; then
   errors+=("selection policy evidence is required to be valid (valid_summaries=$selection_policy_selected_summaries_valid_count total_summaries=$selection_policy_selected_summaries_total)")
 fi
+if [[ "$require_micro_relay_quality_evidence" == "1" && "$micro_relay_quality_evidence_present" != "1" ]]; then
+  errors+=("micro-relay quality evidence is required but not present")
+  m4_policy_issues+=("missing_micro_relay_quality_evidence")
+fi
+if [[ "$require_micro_relay_quality_status_pass" == "1" && "$micro_relay_quality_status_pass" != "1" ]]; then
+  errors+=("micro-relay quality status must be pass (campaign_pass=$campaign_micro_relay_quality_status_pass selected_pass_count=$m4_selected_summaries_quality_status_pass_count total_summaries=$selection_policy_selected_summaries_total)")
+  m4_policy_issues+=("micro_relay_quality_status_not_pass")
+fi
+if [[ "$require_micro_relay_demotion_policy" == "1" && "$micro_relay_demotion_policy_present" != "1" ]]; then
+  errors+=("micro-relay demotion policy evidence is required but not present")
+  m4_policy_issues+=("missing_micro_relay_demotion_policy")
+fi
+if [[ "$require_micro_relay_promotion_policy" == "1" && "$micro_relay_promotion_policy_present" != "1" ]]; then
+  errors+=("micro-relay promotion policy evidence is required but not present")
+  m4_policy_issues+=("missing_micro_relay_promotion_policy")
+fi
+if [[ "$require_trust_tier_port_unlock_policy" == "1" && "$trust_tier_port_unlock_policy_present" != "1" ]]; then
+  errors+=("trust-tier port-unlock policy evidence is required but not present")
+  m4_policy_issues+=("missing_trust_tier_port_unlock_policy")
+fi
 
 decision="GO"
 status="ok"
@@ -536,6 +864,10 @@ mkdir -p "$(dirname "$summary_json")"
 errors_json='[]'
 if ((${#errors[@]} > 0)); then
   errors_json="$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s '.')"
+fi
+m4_policy_issues_json='[]'
+if ((${#m4_policy_issues[@]} > 0)); then
+  m4_policy_issues_json="$(printf '%s\n' "${m4_policy_issues[@]}" | jq -R . | jq -s '.')"
 fi
 
 jq -n \
@@ -572,19 +904,42 @@ jq -n \
   --arg require_trend_source "$require_trend_source" \
   --argjson require_selection_policy_present "$require_selection_policy_present" \
   --argjson require_selection_policy_valid "$require_selection_policy_valid" \
+  --argjson require_micro_relay_quality_evidence "$require_micro_relay_quality_evidence" \
+  --argjson require_micro_relay_quality_status_pass "$require_micro_relay_quality_status_pass" \
+  --argjson require_micro_relay_demotion_policy "$require_micro_relay_demotion_policy" \
+  --argjson require_micro_relay_promotion_policy "$require_micro_relay_promotion_policy" \
+  --argjson require_trust_tier_port_unlock_policy "$require_trust_tier_port_unlock_policy" \
   --argjson selection_policy_evidence_present "$selection_policy_evidence_present" \
   --argjson selection_policy_evidence_valid "$selection_policy_evidence_valid" \
   --argjson campaign_selection_policy_present "$campaign_selection_policy_present" \
   --argjson campaign_selection_policy_valid "$campaign_selection_policy_valid" \
+  --arg campaign_selection_policy_source "$campaign_selection_policy_source" \
+  --argjson campaign_selection_policy_synthetic_default "$campaign_selection_policy_synthetic_default" \
   --argjson selection_policy_selected_summaries_total "$selection_policy_selected_summaries_total" \
   --argjson selection_policy_selected_summaries_found "$selection_policy_selected_summaries_found" \
   --argjson selection_policy_selected_summaries_present_count "$selection_policy_selected_summaries_present_count" \
   --argjson selection_policy_selected_summaries_valid_count "$selection_policy_selected_summaries_valid_count" \
   --argjson selection_policy_selected_summaries_missing_or_unreadable_count "$selection_policy_selected_summaries_missing_or_unreadable_count" \
   --argjson selection_policy_selected_summaries_invalid_or_missing_policy_count "$selection_policy_selected_summaries_invalid_or_missing_policy_count" \
+  --argjson micro_relay_quality_evidence_present "$micro_relay_quality_evidence_present" \
+  --argjson micro_relay_quality_status_pass "$micro_relay_quality_status_pass" \
+  --argjson micro_relay_demotion_policy_present "$micro_relay_demotion_policy_present" \
+  --argjson micro_relay_promotion_policy_present "$micro_relay_promotion_policy_present" \
+  --argjson trust_tier_port_unlock_policy_present "$trust_tier_port_unlock_policy_present" \
+  --argjson campaign_micro_relay_quality_evidence_present "$campaign_micro_relay_quality_evidence_present" \
+  --argjson campaign_micro_relay_quality_status_pass "$campaign_micro_relay_quality_status_pass" \
+  --argjson campaign_micro_relay_demotion_policy_present "$campaign_micro_relay_demotion_policy_present" \
+  --argjson campaign_micro_relay_promotion_policy_present "$campaign_micro_relay_promotion_policy_present" \
+  --argjson campaign_trust_tier_port_unlock_policy_present "$campaign_trust_tier_port_unlock_policy_present" \
+  --argjson m4_selected_summaries_quality_evidence_present_count "$m4_selected_summaries_quality_evidence_present_count" \
+  --argjson m4_selected_summaries_quality_status_pass_count "$m4_selected_summaries_quality_status_pass_count" \
+  --argjson m4_selected_summaries_demotion_policy_present_count "$m4_selected_summaries_demotion_policy_present_count" \
+  --argjson m4_selected_summaries_promotion_policy_present_count "$m4_selected_summaries_promotion_policy_present_count" \
+  --argjson m4_selected_summaries_trust_tier_port_unlock_policy_present_count "$m4_selected_summaries_trust_tier_port_unlock_policy_present_count" \
   --argjson fail_on_no_go "$fail_on_no_go" \
   --argjson rc "$rc" \
   --argjson errors "$errors_json" \
+  --argjson m4_policy_issues "$m4_policy_issues_json" \
   --arg summary_json "$summary_json" \
   '{
     version: 1,
@@ -610,6 +965,11 @@ jq -n \
         require_trend_source: $require_trend_source,
         require_selection_policy_present: ($require_selection_policy_present == 1),
         require_selection_policy_valid: ($require_selection_policy_valid == 1),
+        require_micro_relay_quality_evidence: ($require_micro_relay_quality_evidence == 1),
+        require_micro_relay_quality_status_pass: ($require_micro_relay_quality_status_pass == 1),
+        require_micro_relay_demotion_policy: ($require_micro_relay_demotion_policy == 1),
+        require_micro_relay_promotion_policy: ($require_micro_relay_promotion_policy == 1),
+        require_trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1),
         fail_on_no_go: ($fail_on_no_go == 1)
       }
     },
@@ -633,12 +993,43 @@ jq -n \
         valid: ($selection_policy_evidence_valid == 1),
         campaign_summary_present: ($campaign_selection_policy_present == 1),
         campaign_summary_valid: ($campaign_selection_policy_valid == 1),
+        campaign_summary_source: (if $campaign_selection_policy_source == "" then null else $campaign_selection_policy_source end),
+        campaign_summary_synthetic_default: ($campaign_selection_policy_synthetic_default == 1),
         selected_summaries_total: $selection_policy_selected_summaries_total,
         selected_summaries_found: $selection_policy_selected_summaries_found,
         selected_summaries_with_policy_present: $selection_policy_selected_summaries_present_count,
         selected_summaries_with_policy_valid: $selection_policy_selected_summaries_valid_count,
         selected_summaries_missing_or_unreadable: $selection_policy_selected_summaries_missing_or_unreadable_count,
         selected_summaries_invalid_or_missing_policy: $selection_policy_selected_summaries_invalid_or_missing_policy_count
+      },
+      micro_relay_policy_evidence: {
+        quality_evidence_present: ($micro_relay_quality_evidence_present == 1),
+        quality_status_pass: ($micro_relay_quality_status_pass == 1),
+        demotion_policy_present: ($micro_relay_demotion_policy_present == 1),
+        promotion_policy_present: ($micro_relay_promotion_policy_present == 1),
+        trust_tier_port_unlock_policy_present: ($trust_tier_port_unlock_policy_present == 1),
+        campaign_summary_quality_evidence_present: ($campaign_micro_relay_quality_evidence_present == 1),
+        campaign_summary_quality_status_pass: ($campaign_micro_relay_quality_status_pass == 1),
+        campaign_summary_demotion_policy_present: ($campaign_micro_relay_demotion_policy_present == 1),
+        campaign_summary_promotion_policy_present: ($campaign_micro_relay_promotion_policy_present == 1),
+        campaign_summary_trust_tier_port_unlock_policy_present: ($campaign_trust_tier_port_unlock_policy_present == 1),
+        selected_summaries_with_quality_evidence_present: $m4_selected_summaries_quality_evidence_present_count,
+        selected_summaries_with_quality_status_pass: $m4_selected_summaries_quality_status_pass_count,
+        selected_summaries_with_demotion_policy_present: $m4_selected_summaries_demotion_policy_present_count,
+        selected_summaries_with_promotion_policy_present: $m4_selected_summaries_promotion_policy_present_count,
+        selected_summaries_with_trust_tier_port_unlock_policy_present: $m4_selected_summaries_trust_tier_port_unlock_policy_present_count
+      }
+    },
+    decision_diagnostics: {
+      m4_policy: {
+        required: {
+          quality_evidence: ($require_micro_relay_quality_evidence == 1),
+          quality_status_pass: ($require_micro_relay_quality_status_pass == 1),
+          demotion_policy: ($require_micro_relay_demotion_policy == 1),
+          promotion_policy: ($require_micro_relay_promotion_policy == 1),
+          trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1)
+        },
+        unmet_requirements: $m4_policy_issues
       }
     },
     errors: $errors,
