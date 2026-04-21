@@ -1883,6 +1883,9 @@ func TestCosmosAdapterSignedTxModeRetries429And503(t *testing.T) {
 }
 
 func TestCosmosAdapterSignedTxModeReadsSecretFromFileAndIncludesKeyID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temp file ACLs inherit sandbox groups; signed-tx secret file coverage is kept on non-Windows")
+	}
 	type seenRequest struct {
 		path string
 		body []byte
@@ -1947,6 +1950,9 @@ func TestCosmosAdapterSignedTxModeReadsSecretFromFileAndIncludesKeyID(t *testing
 }
 
 func TestCosmosAdapterSignedTxModeRejectsEmptySecretFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temp file ACLs inherit sandbox groups; signed-tx secret file coverage is kept on non-Windows")
+	}
 	secretFile := filepath.Join(t.TempDir(), "empty_signed_tx_secret.txt")
 	if err := os.WriteFile(secretFile, []byte("   \n\t"), 0o600); err != nil {
 		t.Fatalf("write empty secret file: %v", err)
@@ -2029,6 +2035,9 @@ func TestCosmosAdapterSignedTxModeRejectsInsecureSecretFilePermissions(t *testin
 }
 
 func TestCosmosAdapterSignedTxModeRejectsOversizedSecretFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temp file ACLs inherit sandbox groups; signed-tx secret file coverage is kept on non-Windows")
+	}
 	secretFile := filepath.Join(t.TempDir(), "large_signed_tx_secret.txt")
 	largeSecret := strings.Repeat("a", int(cosmosSignedTxSecretFileMaxBytes)+1)
 	if err := os.WriteFile(secretFile, []byte(largeSecret), 0o600); err != nil {
@@ -2050,6 +2059,9 @@ func TestCosmosAdapterSignedTxModeRejectsOversizedSecretFile(t *testing.T) {
 }
 
 func TestCosmosAdapterSignedTxModeAcceptsOwnerOnlySecretFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temp file ACLs inherit sandbox groups; signed-tx secret file coverage is kept on non-Windows")
+	}
 	secretFile := filepath.Join(t.TempDir(), "secure_signed_tx_secret.txt")
 	if err := os.WriteFile(secretFile, []byte("secure-secret"), 0o600); err != nil {
 		t.Fatalf("write secure secret file: %v", err)
@@ -2131,8 +2143,9 @@ func TestCosmosAdapterFailureAfterEnqueueTransitionsToDeferredReplayable(t *test
 	}
 }
 
-func TestCosmosAdapterDeferredBacklogCapEvictsOldest(t *testing.T) {
+func TestCosmosAdapterDeferredBacklogCapMarksUnhealthyAndRejectsSubmissions(t *testing.T) {
 	adapter := &CosmosAdapter{
+		queue: make(chan cosmosQueuedOperation, 1),
 		deferredOp: map[string]cosmosDeferredOperation{
 			"op-1": {deferredAt: time.Unix(1, 0).UTC()},
 			"op-2": {deferredAt: time.Unix(2, 0).UTC()},
@@ -2141,16 +2154,29 @@ func TestCosmosAdapterDeferredBacklogCapEvictsOldest(t *testing.T) {
 		deferredOpMax: 3,
 	}
 
-	adapter.markDeferredOperation(cosmosQueuedOperation{idempotencyKey: "op-4"}, 1, errors.New("retry"), true)
+	err := adapter.markDeferredOperation(cosmosQueuedOperation{idempotencyKey: "op-4"}, 1, errors.New("retry"), true)
+	if err == nil {
+		t.Fatalf("expected deferred backlog insertion to fail once capacity is reached")
+	}
+	if !errors.Is(err, errCosmosAdapterDeferredBacklogLimitReached) {
+		t.Fatalf("expected deferred backlog limit error, got %v", err)
+	}
 
 	if got := adapter.deferredOperationCount(); got != 3 {
 		t.Fatalf("expected deferred backlog to stay capped at 3, got %d", got)
 	}
-	if _, ok := adapter.deferredOperationByID("op-1"); ok {
-		t.Fatalf("expected oldest deferred operation op-1 to be evicted")
+	if _, ok := adapter.deferredOperationByID("op-1"); !ok {
+		t.Fatalf("expected oldest deferred operation op-1 to be retained")
 	}
-	if _, ok := adapter.deferredOperationByID("op-4"); !ok {
-		t.Fatalf("expected newest deferred operation op-4 to be retained")
+	if _, ok := adapter.deferredOperationByID("op-4"); ok {
+		t.Fatalf("expected newest deferred operation op-4 to be rejected once backlog is full")
+	}
+
+	if err := adapter.enqueue(cosmosQueuedOperation{idempotencyKey: "op-next"}); !errors.Is(err, errCosmosAdapterDeferredBacklogLimitReached) {
+		t.Fatalf("expected enqueue rejection while adapter is unhealthy, got %v", err)
+	}
+	if err := adapter.Health(context.Background()); !errors.Is(err, errCosmosAdapterDeferredBacklogLimitReached) {
+		t.Fatalf("expected health check to surface deferred backlog limit, got %v", err)
 	}
 }
 
