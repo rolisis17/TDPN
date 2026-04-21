@@ -33,11 +33,21 @@ PROFILE_STALE_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_
 PROFILE_INVALID_SUMMARY_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_invalid_summary.log"
 INVALID_STATUS_PAYLOAD_LOG="$TMP_DIR/integration_manual_validation_report_invalid_status_payload.log"
 TIMEOUT_STATUS_PAYLOAD_LOG="$TMP_DIR/integration_manual_validation_report_timeout_status.log"
+STABILITY_VALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_stability_valid.log"
+STABILITY_INVALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_stability_invalid.log"
+STABILITY_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_stability_default_missing.log"
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
 FAKE_STATUS_TIMEOUT="$TMP_DIR/fake_manual_validation_status_timeout.sh"
 FAKE_STATUS_ROOT_DEFER="$TMP_DIR/fake_manual_validation_status_root_defer.sh"
+FAKE_STATUS_STABILITY_VALID="$TMP_DIR/fake_manual_validation_status_stability_valid.sh"
+FAKE_STATUS_STABILITY_INVALID="$TMP_DIR/fake_manual_validation_status_stability_invalid.sh"
+FAKE_STATUS_STABILITY_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_stability_default_missing.sh"
+STABILITY_VALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_valid.json"
+STABILITY_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_invalid.json"
+STABILITY_DEFAULT_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary_default.json"
+STABILITY_DEFAULT_EXPECTED_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary.json"
 
 cat >"$FAKE_DOCTOR" <<'EOF_DOCTOR'
 #!/usr/bin/env bash
@@ -860,6 +870,326 @@ if ! printf '%s\n' "$profile_invalid_summary_report_json" | jq -e '
 ' >/dev/null; then
   echo "manual validation report profile-invalid-summary JSON missing expected profile_default_gate fields"
   printf '%s\n' "$profile_invalid_summary_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default stability-check fields (valid summary)"
+cat >"$STABILITY_VALID_SUMMARY_JSON" <<'EOF_STABILITY_VALID_SUMMARY'
+{
+  "version": 1,
+  "decision": "GO",
+  "status": "pass",
+  "rc": 0,
+  "observed": {
+    "modal_recommended_profile": "balanced",
+    "modal_support_rate_pct": 66.67
+  }
+}
+EOF_STABILITY_VALID_SUMMARY
+cat >"$FAKE_STATUS_STABILITY_VALID" <<EOF_STATUS_STABILITY_VALID
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_stability_valid.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {
+        "profile_default_gate_stability_check_summary_json": "$STABILITY_VALID_SUMMARY_JSON"
+      }
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_STABILITY_VALID
+chmod +x "$FAKE_STATUS_STABILITY_VALID"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_STABILITY_VALID" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/stability_valid_summary.json" \
+  --report-md "$TMP_DIR/stability_valid_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$STABILITY_VALID_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_stability_check_summary_available=true' "$STABILITY_VALID_REPORT_LOG"; then
+  echo "manual validation report valid-stability run missing stability available=true line"
+  cat "$STABILITY_VALID_REPORT_LOG"
+  exit 1
+fi
+stability_valid_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$STABILITY_VALID_REPORT_LOG")"
+if [[ -z "$stability_valid_report_json" ]]; then
+  echo "manual validation report valid-stability run missing JSON payload"
+  cat "$STABILITY_VALID_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$stability_valid_report_json" | jq -e --arg stability "$STABILITY_VALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.stability_check_summary_json == $stability
+  and .summary.profile_default_gate.artifacts.profile_default_gate_stability_check_summary_json == $stability
+  and .summary.profile_default_gate.stability_check_summary_available == true
+  and .summary.profile_default_gate.stability_check_decision == "GO"
+  and .summary.profile_default_gate.stability_check_status == "pass"
+  and .summary.profile_default_gate.stability_check_rc == 0
+  and .summary.profile_default_gate.stability_check_modal_recommended_profile == "balanced"
+  and .summary.profile_default_gate.stability_check_modal_support_rate_pct == 66.67
+' >/dev/null; then
+  echo "manual validation report valid-stability JSON missing expected fields"
+  printf '%s\n' "$stability_valid_report_json"
+  exit 1
+fi
+if ! rg -q 'Stability-check summary available: `true`' "$TMP_DIR/stability_valid_report.md"; then
+  echo "manual validation report valid-stability markdown missing availability line"
+  cat "$TMP_DIR/stability_valid_report.md"
+  exit 1
+fi
+if ! rg -q 'Stability-check decision/status: decision=`GO`, status=`pass`' "$TMP_DIR/stability_valid_report.md"; then
+  echo "manual validation report valid-stability markdown missing decision/status line"
+  cat "$TMP_DIR/stability_valid_report.md"
+  exit 1
+fi
+if ! rg -q 'Stability-check rc/modal: rc=`0`, modal_profile=`balanced`, modal_support_rate_pct=`66.67`' "$TMP_DIR/stability_valid_report.md"; then
+  echo "manual validation report valid-stability markdown missing rc/modal line"
+  cat "$TMP_DIR/stability_valid_report.md"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default stability-check fields (invalid summary fail-closed)"
+cat >"$STABILITY_INVALID_SUMMARY_JSON" <<'EOF_STABILITY_INVALID_SUMMARY'
+{
+  "version": 1,
+  "decision": "GO",
+  "status": "pass",
+  "rc": "0",
+  "observed": {
+    "modal_recommended_profile": "balanced",
+    "modal_support_rate_pct": "66.67"
+  }
+}
+EOF_STABILITY_INVALID_SUMMARY
+cat >"$FAKE_STATUS_STABILITY_INVALID" <<EOF_STATUS_STABILITY_INVALID
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_stability_invalid.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {
+        "profile_default_gate_stability_check_summary_json": "$STABILITY_INVALID_SUMMARY_JSON"
+      }
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_STABILITY_INVALID
+chmod +x "$FAKE_STATUS_STABILITY_INVALID"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_STABILITY_INVALID" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/stability_invalid_summary.json" \
+  --report-md "$TMP_DIR/stability_invalid_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$STABILITY_INVALID_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_stability_check_summary_available=false' "$STABILITY_INVALID_REPORT_LOG"; then
+  echo "manual validation report invalid-stability run missing stability available=false line"
+  cat "$STABILITY_INVALID_REPORT_LOG"
+  exit 1
+fi
+stability_invalid_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$STABILITY_INVALID_REPORT_LOG")"
+if [[ -z "$stability_invalid_report_json" ]]; then
+  echo "manual validation report invalid-stability run missing JSON payload"
+  cat "$STABILITY_INVALID_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$stability_invalid_report_json" | jq -e --arg stability "$STABILITY_INVALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.stability_check_summary_json == $stability
+  and .summary.profile_default_gate.artifacts.profile_default_gate_stability_check_summary_json == $stability
+  and .summary.profile_default_gate.stability_check_summary_available == false
+  and .summary.profile_default_gate.stability_check_decision == null
+  and .summary.profile_default_gate.stability_check_status == null
+  and .summary.profile_default_gate.stability_check_rc == null
+  and .summary.profile_default_gate.stability_check_modal_recommended_profile == null
+  and .summary.profile_default_gate.stability_check_modal_support_rate_pct == null
+' >/dev/null; then
+  echo "manual validation report invalid-stability JSON missing expected fail-closed fields"
+  printf '%s\n' "$stability_invalid_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default stability-check fields (missing default artifact path)"
+printf '%s\n' '{"version":1,"status":"ok"}' >"$STABILITY_DEFAULT_SIGNOFF_SUMMARY_JSON"
+rm -f "$STABILITY_DEFAULT_EXPECTED_SUMMARY_JSON"
+cat >"$FAKE_STATUS_STABILITY_DEFAULT_MISSING" <<EOF_STATUS_STABILITY_DEFAULT_MISSING
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_stability_default_missing.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$STABILITY_DEFAULT_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {}
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_STABILITY_DEFAULT_MISSING
+chmod +x "$FAKE_STATUS_STABILITY_DEFAULT_MISSING"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_STABILITY_DEFAULT_MISSING" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/stability_default_missing_summary.json" \
+  --report-md "$TMP_DIR/stability_default_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$STABILITY_DEFAULT_MISSING_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_stability_check_summary_available=false' "$STABILITY_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report missing-default-stability run missing stability available=false line"
+  cat "$STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q "\[manual-validation-report\] profile_default_gate_stability_check_summary_json=${STABILITY_DEFAULT_EXPECTED_SUMMARY_JSON}" "$STABILITY_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report missing-default-stability run missing default summary path line"
+  cat "$STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+stability_default_missing_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$STABILITY_DEFAULT_MISSING_REPORT_LOG")"
+if [[ -z "$stability_default_missing_report_json" ]]; then
+  echo "manual validation report missing-default-stability run missing JSON payload"
+  cat "$STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$stability_default_missing_report_json" | jq -e --arg expected "$STABILITY_DEFAULT_EXPECTED_SUMMARY_JSON" '
+  .summary.profile_default_gate.stability_check_summary_json == $expected
+  and .summary.profile_default_gate.artifacts.profile_default_gate_stability_check_summary_json == $expected
+  and .summary.profile_default_gate.stability_check_summary_available == false
+  and .summary.profile_default_gate.stability_check_decision == null
+  and .summary.profile_default_gate.stability_check_status == null
+  and .summary.profile_default_gate.stability_check_rc == null
+  and .summary.profile_default_gate.stability_check_modal_recommended_profile == null
+  and .summary.profile_default_gate.stability_check_modal_support_rate_pct == null
+' >/dev/null; then
+  echo "manual validation report missing-default-stability JSON missing expected fail-closed fields"
+  printf '%s\n' "$stability_default_missing_report_json"
   exit 1
 fi
 

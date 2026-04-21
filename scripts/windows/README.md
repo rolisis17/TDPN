@@ -33,55 +33,20 @@ Expected healthy output at the end:
 - each tool line says `PASS`
 - the summary line says `summary: pass=5 fail=0`
 
-## Troubleshooting
+## Troubleshooting (Copy/Paste)
 
-### Execution policy blocks `.ps1` files
+### 1) PowerShell blocks `npm.ps1` (`PSSecurityException`)
 
-Run the process-scope bypass once in the current shell:
+Symptoms:
+- `npm : File ...\\npm.ps1 cannot be loaded because running scripts is disabled`
+
+Fix in current shell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 ```
 
-Expected output:
-- the command returns to the prompt without changing machine or user policy
-- `Get-ExecutionPolicy -Scope Process` prints `Bypass`
-
-If you want to rerun setup immediately with the bypass baked in:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both -InstallMissing -NonInteractive -EnablePolicyBypass
-```
-
-Expected output:
-- `execution policy: effective=...`
-- `final verification:`
-- `summary: pass=5 fail=0` when all tools are installed and reachable
-
-### Go, Node, npm, Rust, or cargo still look missing after install
-
-Run the setup again so it refreshes the current session `PATH` from machine/user entries and the common install directories:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both -InstallMissing -EnablePolicyBypass
-```
-
-Then confirm the commands resolve from the current shell:
-
-```powershell
-Get-Command go,node,npm,npm.cmd,rustc,cargo | Select-Object Name,Source
-```
-
-Expected output:
-- `go.exe` from `C:\Program Files\Go\bin\go.exe`
-- `node.exe` from `C:\Program Files\nodejs\node.exe`
-- `npm.cmd` from `C:\Program Files\nodejs\npm.cmd`
-- `rustc.exe` from `C:\Users\<you>\.cargo\bin\rustc.exe`
-- `cargo.exe` from `C:\Users\<you>\.cargo\bin\cargo.exe`
-
-### `npm.ps1` is blocked by execution policy
-
-Use the policy-safe wrapper so Node package commands route to `npm.cmd` instead of the PowerShell shim:
+Then run Node commands through the wrapper (avoid direct `npm` in locked shells):
 
 ```powershell
 scripts\windows\desktop_node.cmd npm -v
@@ -89,32 +54,49 @@ scripts\windows\desktop_node.cmd npm install
 scripts\windows\desktop_node.cmd npm run tauri -- dev
 ```
 
-Expected output:
-- the wrapper runs without a PowerShell execution-policy error
-- `npm -v` prints a version number
-- install and `tauri -- dev` commands flow through `npm.cmd`
+### 2) `go` / `node` / `npm` / `rustc` / `cargo` not found in PowerShell
 
-## Follow-on scripts
-
-After setup succeeds, common next steps are:
+Use the bootstrap wrapper to install missing tools (when available) and refresh PATH for this session:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode bootstrap -InstallMissing -EnablePolicyBypass
+```
+
+Verify from wrappers (not manual PATH guessing):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode check -EnablePolicyBypass
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_dev.ps1 -DryRun
 ```
 
-## Policy-safe npm and npx wrapper
+### 3) Tauri build fails with missing `icons/icon.ico`
 
-If PowerShell blocks `npm.ps1`, use the Node wrapper below instead of raw `npm`:
+Symptoms:
+- `icons/icon.ico not found; required for generating a Windows Resource file during tauri-build`
+
+Use the desktop bootstrap wrapper; it scaffolds a placeholder icon when missing:
 
 ```powershell
-scripts\windows\desktop_node.cmd npm install
-scripts\windows\desktop_node.cmd npm run tauri -- dev
-scripts\windows\desktop_node.cmd npx --yes create-vite@latest
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode run-desktop -InstallMissing -EnablePolicyBypass
 ```
 
-Notes:
-- defaults to `npm` when you omit the tool token:
-  - `scripts\windows\desktop_node.cmd install`
-- always runs with process-scope `ExecutionPolicy Bypass`
-- routes through `desktop_shell` so `npm`/`npx` resolve to `npm.cmd`/`npx.cmd`
+If you only want to regenerate the icon and rerun dev via wrapper:
+
+```powershell
+scripts\windows\desktop_node.cmd npm run generate:windows-icon
+scripts\windows\desktop_node.cmd npm run tauri -- dev
+```
+
+## Wrapper-First Flow
+
+End-to-end desktop + local API with policy-safe defaults:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1 -InstallMissing -EnablePolicyBypass
+```
+
+Local API only:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1
+```

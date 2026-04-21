@@ -541,6 +541,55 @@ if printf '%s\n' "$status_json_payload" | jq -e '(.summary.next_action_check_id 
   readiness_status="READY"
 fi
 
+profile_default_gate_summary_json_from_status="$(printf '%s\n' "$status_json_payload" | jq -r '.summary.profile_default_gate.summary_json // ""')"
+profile_default_gate_stability_check_summary_json="$(printf '%s\n' "$status_json_payload" | jq -r '.summary.profile_default_gate.artifacts.profile_default_gate_stability_check_summary_json // ""')"
+profile_default_gate_summary_json_from_status="$(abs_path "$profile_default_gate_summary_json_from_status")"
+profile_default_gate_stability_check_summary_json="$(abs_path "$profile_default_gate_stability_check_summary_json")"
+if [[ -z "$profile_default_gate_stability_check_summary_json" ]]; then
+  profile_default_gate_stability_check_default_dir="$ROOT_DIR/.easy-node-logs"
+  if [[ -n "$profile_default_gate_summary_json_from_status" ]]; then
+    profile_default_gate_stability_check_default_dir="$(dirname "$profile_default_gate_summary_json_from_status")"
+  fi
+  profile_default_gate_stability_check_summary_json="$(abs_path "$profile_default_gate_stability_check_default_dir/profile_default_gate_stability_check_summary.json")"
+fi
+profile_default_gate_stability_check_summary_available_json="false"
+profile_default_gate_stability_check_decision_json=""
+profile_default_gate_stability_check_status_json=""
+profile_default_gate_stability_check_rc_json="null"
+profile_default_gate_stability_check_modal_recommended_profile_json=""
+profile_default_gate_stability_check_modal_support_rate_pct_json="null"
+if [[ -f "$profile_default_gate_stability_check_summary_json" ]] \
+   && jq -e . "$profile_default_gate_stability_check_summary_json" >/dev/null 2>&1; then
+  if jq -e '
+    (.version == 1)
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and ((.rc | type) == "number")
+    and ((.observed | type) == "object")
+  ' "$profile_default_gate_stability_check_summary_json" >/dev/null 2>&1; then
+    profile_default_gate_stability_check_summary_available_json="true"
+    profile_default_gate_stability_check_decision_json="$(jq -r '
+      if (.decision | type) == "string" then .decision else "" end
+    ' "$profile_default_gate_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_default_gate_stability_check_status_json="$(jq -r '
+      if (.status | type) == "string" then .status else "" end
+    ' "$profile_default_gate_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_default_gate_stability_check_rc_json="$(jq -r '
+      if (.rc | type) == "number" then .rc else "null" end
+    ' "$profile_default_gate_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+    profile_default_gate_stability_check_modal_recommended_profile_json="$(jq -r '
+      if (.observed.modal_recommended_profile | type) == "string" then .observed.modal_recommended_profile
+      else ""
+      end
+    ' "$profile_default_gate_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_default_gate_stability_check_modal_support_rate_pct_json="$(jq -r '
+      if (.observed.modal_support_rate_pct | type) == "number" then .observed.modal_support_rate_pct
+      else "null"
+      end
+    ' "$profile_default_gate_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  fi
+fi
+
 report_json="$(
   printf '%s\n' "$status_json_payload" | jq \
     --arg summary_json "$summary_json" \
@@ -552,11 +601,44 @@ report_json="$(
     --argjson source_status_timeout_sec "$status_timeout_sec" \
     --argjson source_status_timeout_guard_available "$status_timeout_guard_available" \
     --argjson source_status_payload_synthesized "$status_payload_synthesized" \
+    --arg profile_default_gate_stability_check_summary_json "$profile_default_gate_stability_check_summary_json" \
+    --argjson profile_default_gate_stability_check_summary_available "$profile_default_gate_stability_check_summary_available_json" \
+    --arg profile_default_gate_stability_check_decision "$profile_default_gate_stability_check_decision_json" \
+    --arg profile_default_gate_stability_check_status "$profile_default_gate_stability_check_status_json" \
+    --argjson profile_default_gate_stability_check_rc "$profile_default_gate_stability_check_rc_json" \
+    --arg profile_default_gate_stability_check_modal_recommended_profile "$profile_default_gate_stability_check_modal_recommended_profile_json" \
+    --argjson profile_default_gate_stability_check_modal_support_rate_pct "$profile_default_gate_stability_check_modal_support_rate_pct_json" \
     '.schema = {
       id: "manual_validation_readiness_summary",
       major: 1,
       minor: 0
     }
+    | .summary.profile_default_gate = (
+      (.summary.profile_default_gate // {})
+      | .artifacts = (
+          (.artifacts // {})
+          | .profile_default_gate_stability_check_summary_json = $profile_default_gate_stability_check_summary_json
+        )
+      | .stability_check_summary_json = $profile_default_gate_stability_check_summary_json
+      | .stability_check_summary_available = $profile_default_gate_stability_check_summary_available
+      | .stability_check_decision = (
+          if $profile_default_gate_stability_check_decision == "" then null
+          else $profile_default_gate_stability_check_decision
+          end
+        )
+      | .stability_check_status = (
+          if $profile_default_gate_stability_check_status == "" then null
+          else $profile_default_gate_stability_check_status
+          end
+        )
+      | .stability_check_rc = $profile_default_gate_stability_check_rc
+      | .stability_check_modal_recommended_profile = (
+          if $profile_default_gate_stability_check_modal_recommended_profile == "" then null
+          else $profile_default_gate_stability_check_modal_recommended_profile
+          end
+        )
+      | .stability_check_modal_support_rate_pct = $profile_default_gate_stability_check_modal_support_rate_pct
+    )
     | .report = {
       readiness_status: $readiness_status,
       ready: $ready,
@@ -606,6 +688,13 @@ profile_default_gate_notes="$(printf '%s\n' "$report_json" | jq -r '.summary.pro
 profile_default_gate_docker_hint_available="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.docker_rehearsal_hint_available // false')"
 profile_default_gate_docker_hint_source="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.docker_rehearsal_hint_source // ""')"
 profile_default_gate_campaign_check_summary_json_resolved="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved // ""')"
+profile_default_gate_stability_check_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_summary_json // ""')"
+profile_default_gate_stability_check_summary_available="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_summary_available // false')"
+profile_default_gate_stability_check_decision="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_decision // ""')"
+profile_default_gate_stability_check_status="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_status // ""')"
+profile_default_gate_stability_check_rc="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_rc // ""')"
+profile_default_gate_stability_check_modal_recommended_profile="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_modal_recommended_profile // ""')"
+profile_default_gate_stability_check_modal_support_rate_pct="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.stability_check_modal_support_rate_pct // ""')"
 profile_default_gate_docker_matrix_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json // ""')"
 profile_default_gate_docker_profile_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json // ""')"
 docker_rehearsal_status="$(printf '%s\n' "$report_json" | jq -r '.summary.docker_rehearsal_gate.status // ""')"
@@ -721,6 +810,16 @@ report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
   fi
   if [[ -n "$profile_default_gate_campaign_check_summary_json_resolved" ]]; then
     printf -- '- Campaign-check summary (resolved): `%s`\n' "$profile_default_gate_campaign_check_summary_json_resolved"
+  fi
+  if [[ -n "$profile_default_gate_stability_check_summary_json" ]]; then
+    printf -- '- Stability-check summary JSON: `%s`\n' "$profile_default_gate_stability_check_summary_json"
+  fi
+  printf -- '- Stability-check summary available: `%s`\n' "$profile_default_gate_stability_check_summary_available"
+  if [[ -n "$profile_default_gate_stability_check_decision" || -n "$profile_default_gate_stability_check_status" ]]; then
+    printf -- '- Stability-check decision/status: decision=`%s`, status=`%s`\n' "${profile_default_gate_stability_check_decision:-none}" "${profile_default_gate_stability_check_status:-none}"
+  fi
+  if [[ -n "$profile_default_gate_stability_check_rc" || -n "$profile_default_gate_stability_check_modal_recommended_profile" || -n "$profile_default_gate_stability_check_modal_support_rate_pct" ]]; then
+    printf -- '- Stability-check rc/modal: rc=`%s`, modal_profile=`%s`, modal_support_rate_pct=`%s`\n' "${profile_default_gate_stability_check_rc:-null}" "${profile_default_gate_stability_check_modal_recommended_profile:-none}" "${profile_default_gate_stability_check_modal_support_rate_pct:-null}"
   fi
   if [[ -n "$profile_default_gate_docker_matrix_summary_json" ]]; then
     printf -- '- Docker matrix summary JSON: `%s`\n' "$profile_default_gate_docker_matrix_summary_json"
@@ -842,6 +941,25 @@ if [[ -n "$profile_default_gate_docker_hint_source" ]]; then
 fi
 if [[ -n "$profile_default_gate_campaign_check_summary_json_resolved" ]]; then
   echo "[manual-validation-report] profile_default_gate_campaign_check_summary_json_resolved=$profile_default_gate_campaign_check_summary_json_resolved"
+fi
+if [[ -n "$profile_default_gate_stability_check_summary_json" ]]; then
+  echo "[manual-validation-report] profile_default_gate_stability_check_summary_json=$profile_default_gate_stability_check_summary_json"
+fi
+echo "[manual-validation-report] profile_default_gate_stability_check_summary_available=$profile_default_gate_stability_check_summary_available"
+if [[ -n "$profile_default_gate_stability_check_decision" ]]; then
+  echo "[manual-validation-report] profile_default_gate_stability_check_decision=$profile_default_gate_stability_check_decision"
+fi
+if [[ -n "$profile_default_gate_stability_check_status" ]]; then
+  echo "[manual-validation-report] profile_default_gate_stability_check_status=$profile_default_gate_stability_check_status"
+fi
+if [[ -n "$profile_default_gate_stability_check_rc" ]]; then
+  echo "[manual-validation-report] profile_default_gate_stability_check_rc=$profile_default_gate_stability_check_rc"
+fi
+if [[ -n "$profile_default_gate_stability_check_modal_recommended_profile" ]]; then
+  echo "[manual-validation-report] profile_default_gate_stability_check_modal_recommended_profile=$profile_default_gate_stability_check_modal_recommended_profile"
+fi
+if [[ -n "$profile_default_gate_stability_check_modal_support_rate_pct" ]]; then
+  echo "[manual-validation-report] profile_default_gate_stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct"
 fi
 if [[ -n "$profile_default_gate_docker_matrix_summary_json" ]]; then
   echo "[manual-validation-report] profile_default_gate_docker_matrix_summary_json=$profile_default_gate_docker_matrix_summary_json"
