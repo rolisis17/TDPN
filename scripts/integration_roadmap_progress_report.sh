@@ -3915,6 +3915,161 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] profile default gate stability-check summary defaults to reports_dir artifact"
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_REPORTS_DIR="$TMP_DIR/profile_default_gate_stability_check_reports"
+mkdir -p "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_REPORTS_DIR"
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_SUMMARY_JSON="$PROFILE_DEFAULT_GATE_STABILITY_CHECK_REPORTS_DIR/profile_default_gate_stability_check_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_SUMMARY'
+{
+  "version": 1,
+  "decision": "GO",
+  "status": "ok",
+  "rc": 0,
+  "observed": {
+    "modal_recommended_profile": "balanced",
+    "modal_support_rate_pct": 66.67
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_SUMMARY
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_gate_stability_check_default_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_MANUAL_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_MANUAL_SUMMARY'
+{
+  "version": 1,
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": [],
+    "profile_default_gate": {
+      "status": "pending",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1"
+    },
+    "docker_rehearsal_gate": {
+      "status": "pending"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pending"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_MANUAL_SUMMARY
+if ! EASY_NODE_LOG_DIR="$PROFILE_DEFAULT_GATE_STABILITY_CHECK_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_default_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_default_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log 2>&1; then
+  echo "expected success when profile default gate stability-check summary exists at reports_dir default artifact path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_SUMMARY_JSON" '
+  .vpn_track.profile_default_gate.stability_check_summary_json == $src
+  and .vpn_track.profile_default_gate.stability_check_summary_available == true
+  and .vpn_track.profile_default_gate.stability_check_decision == "GO"
+  and .vpn_track.profile_default_gate.stability_check_status == "ok"
+  and .vpn_track.profile_default_gate.stability_check_rc == 0
+  and .vpn_track.profile_default_gate.stability_check_modal_recommended_profile == "balanced"
+  and .vpn_track.profile_default_gate.stability_check_modal_support_rate_pct == 66.67
+' "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_default_summary.json" >/dev/null; then
+  echo "profile default gate stability-check default-artifact summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_default_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_check_summary_json=.*stability_check_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log; then
+  echo "expected profile default gate stability-check availability log line in default-artifact scenario"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default gate stability-check summary explicit invalid artifact is fail-closed/null-safe"
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_DIR="$TMP_DIR/profile_default_gate_stability_check_explicit_invalid"
+mkdir -p "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_DIR/artifacts"
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_REL_PATH="artifacts/profile_default_gate_stability_check_summary_invalid.json"
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_JSON="$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_DIR/$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_REL_PATH"
+cat >"$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_JSON" <<'EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID'
+{
+  "version": 1,
+  "status": "ok",
+  "rc": 0,
+  "observed": {
+    "modal_recommended_profile": "balanced",
+    "modal_support_rate_pct": 66.67
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_MANUAL_SUMMARY_JSON="$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_DIR/manual_validation_profile_default_gate_stability_check_invalid_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_MANUAL_SUMMARY_JSON" <<EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_MANUAL_SUMMARY
+{
+  "version": 1,
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": [],
+    "profile_default_gate": {
+      "status": "pending",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "artifacts": {
+        "profile_default_gate_stability_check_summary_json": "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_REL_PATH"
+      }
+    },
+    "docker_rehearsal_gate": {
+      "status": "pending"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pending"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_MANUAL_SUMMARY
+if ! EASY_NODE_LOG_DIR="$PROFILE_DEFAULT_GATE_STABILITY_CHECK_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_explicit_invalid_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_explicit_invalid_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log 2>&1; then
+  echo "expected success when explicit profile default gate stability-check summary path is invalid"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_JSON" '
+  .vpn_track.profile_default_gate.stability_check_summary_json == $src
+  and .vpn_track.profile_default_gate.stability_check_summary_available == false
+  and .vpn_track.profile_default_gate.stability_check_decision == null
+  and .vpn_track.profile_default_gate.stability_check_status == null
+  and .vpn_track.profile_default_gate.stability_check_rc == null
+  and .vpn_track.profile_default_gate.stability_check_modal_recommended_profile == null
+  and .vpn_track.profile_default_gate.stability_check_modal_support_rate_pct == null
+' "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_explicit_invalid_summary.json" >/dev/null; then
+  echo "profile default gate stability-check explicit-invalid summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_explicit_invalid_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_check_summary_json=.*stability_check_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log; then
+  echo "expected profile default gate stability-check availability log line in explicit-invalid scenario"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] manual refresh invalid summary restore path"
 RESTORE_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_restore_target.json"
 RESTORE_MANUAL_REPORT_MD="$TMP_DIR/manual_validation_restore_target.md"
