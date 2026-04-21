@@ -458,6 +458,7 @@ mkdir -p "$profile_compare_campaign_signoff_reports_dir"
 profile_compare_campaign_signoff_summary_json="$(abs_path "${profile_compare_campaign_signoff_summary_json:-$profile_compare_campaign_signoff_reports_dir/profile_compare_campaign_signoff_summary.json}")"
 mkdir -p "$(dirname "$profile_compare_campaign_signoff_summary_json")"
 profile_compare_campaign_summary_json="$profile_compare_campaign_signoff_reports_dir/profile_compare_campaign_summary.json"
+profile_default_gate_stability_summary_json="$(abs_path "$profile_compare_campaign_signoff_reports_dir/profile_default_gate_stability_summary.json")"
 
 manual_validation_report_summary_json="$(abs_path "${manual_validation_report_summary_json:-${SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SUMMARY_JSON:-$log_dir/manual_validation_readiness_summary.json}}")"
 manual_validation_report_md="$(abs_path "${manual_validation_report_md:-${SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_MD:-$log_dir/manual_validation_readiness_report.md}}")"
@@ -993,6 +994,15 @@ profile_default_gate_available="false"
 profile_default_gate_decision=""
 profile_default_gate_recommended_profile=""
 profile_default_gate_next_command=""
+profile_default_gate_stability_summary_available="0"
+profile_default_gate_stability_status=""
+profile_default_gate_stability_rc=""
+profile_default_gate_stability_runs_requested=""
+profile_default_gate_stability_runs_completed=""
+profile_default_gate_stability_selection_policy_present_all=""
+profile_default_gate_stability_consistent_selection_policy=""
+profile_default_gate_stability_ok=""
+profile_default_gate_stability_recommended_profile_counts_json='null'
 next_action_check_id=""
 next_action_command=""
 
@@ -1017,8 +1027,35 @@ if [[ "$manual_report_available" == "1" ]]; then
   profile_default_gate_decision="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.profile_default_gate.decision // ""')"
   profile_default_gate_recommended_profile="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.profile_default_gate.recommended_profile // ""')"
   profile_default_gate_next_command="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.profile_default_gate.next_command // ""')"
+  profile_default_gate_stability_summary_json_from_manual="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.profile_default_gate.artifacts.profile_default_gate_stability_summary_json // ""')"
+  if [[ -n "$profile_default_gate_stability_summary_json_from_manual" ]]; then
+    profile_default_gate_stability_summary_json="$(abs_path "$profile_default_gate_stability_summary_json_from_manual")"
+  fi
   next_action_check_id="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.next_action_check_id // ""')"
   next_action_command="$(printf '%s\n' "$manual_report_json" | jq -r '.summary.next_action_command // ""')"
+fi
+
+if [[ -f "$profile_default_gate_stability_summary_json" ]] && jq -e . "$profile_default_gate_stability_summary_json" >/dev/null 2>&1; then
+  if jq -e '. | type == "object" and (.schema.id // "") == "profile_default_gate_stability_summary"' "$profile_default_gate_stability_summary_json" >/dev/null 2>&1; then
+    profile_default_gate_stability_summary_available="1"
+    profile_default_gate_stability_status="$(jq -r '.status // ""' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_rc="$(jq -r '.rc // ""' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_runs_requested="$(jq -r 'if (.runs_requested | type) == "number" then .runs_requested elif (.inputs.runs_requested | type) == "number" then .inputs.runs_requested else "" end' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_runs_completed="$(jq -r 'if (.runs_completed | type) == "number" then .runs_completed else "" end' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_selection_policy_present_all="$(jq -r 'if (.selection_policy_present_all | type) == "boolean" then (if .selection_policy_present_all then "1" else "0" end) else "" end' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_consistent_selection_policy="$(jq -r 'if (.consistent_selection_policy | type) == "boolean" then (if .consistent_selection_policy then "1" else "0" end) else "" end' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_ok="$(jq -r 'if (.stability_ok | type) == "boolean" then (if .stability_ok then "1" else "0" end) else "" end' "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_stability_recommended_profile_counts_json="$(jq -c 'if (.recommended_profile_counts | type) == "object" then .recommended_profile_counts else null end' "$profile_default_gate_stability_summary_json")"
+    if [[ -n "$profile_default_gate_stability_rc" && ! "$profile_default_gate_stability_rc" =~ ^-?[0-9]+$ ]]; then
+      profile_default_gate_stability_rc=""
+    fi
+    if [[ -n "$profile_default_gate_stability_runs_requested" && ! "$profile_default_gate_stability_runs_requested" =~ ^-?[0-9]+$ ]]; then
+      profile_default_gate_stability_runs_requested=""
+    fi
+    if [[ -n "$profile_default_gate_stability_runs_completed" && ! "$profile_default_gate_stability_runs_completed" =~ ^-?[0-9]+$ ]]; then
+      profile_default_gate_stability_runs_completed=""
+    fi
+  fi
 fi
 
 pending_multi_count="$(printf '%s\n' "$pending_multi_machine_json" | jq -r 'length')"
@@ -1138,6 +1175,15 @@ summary_payload="$({
     --arg profile_compare_campaign_signoff_selection_policy_evidence_available "$profile_compare_campaign_signoff_selection_policy_evidence_available" \
     --arg profile_compare_campaign_signoff_selection_policy_evidence_present "$profile_compare_campaign_signoff_selection_policy_evidence_present" \
     --arg profile_compare_campaign_signoff_selection_policy_evidence_valid "$profile_compare_campaign_signoff_selection_policy_evidence_valid" \
+    --arg profile_default_gate_stability_summary_json "$profile_default_gate_stability_summary_json" \
+    --arg profile_default_gate_stability_summary_available "$profile_default_gate_stability_summary_available" \
+    --arg profile_default_gate_stability_status "$profile_default_gate_stability_status" \
+    --arg profile_default_gate_stability_rc "$profile_default_gate_stability_rc" \
+    --arg profile_default_gate_stability_runs_requested "$profile_default_gate_stability_runs_requested" \
+    --arg profile_default_gate_stability_runs_completed "$profile_default_gate_stability_runs_completed" \
+    --arg profile_default_gate_stability_selection_policy_present_all "$profile_default_gate_stability_selection_policy_present_all" \
+    --arg profile_default_gate_stability_consistent_selection_policy "$profile_default_gate_stability_consistent_selection_policy" \
+    --arg profile_default_gate_stability_ok "$profile_default_gate_stability_ok" \
     --arg real_wg_privileged_matrix_step_status "$real_wg_privileged_matrix_step_status" \
     --argjson rc "$overall_rc" \
     --argjson steps_failed "$steps_failed" \
@@ -1161,6 +1207,7 @@ summary_payload="$({
     --argjson local_gate "$local_gate_json" \
     --argjson real_host_gate "$real_host_gate_json" \
     --argjson profile_default_gate "$profile_default_gate_json" \
+    --argjson profile_default_gate_stability_recommended_profile_counts "$profile_default_gate_stability_recommended_profile_counts_json" \
     '{
       version: 1,
       schema: {
@@ -1303,7 +1350,20 @@ summary_payload="$({
           ready: ($real_wg_privileged_matrix_step_status == "pass" or $real_wg_privileged_matrix_step_status == "skip"),
           non_blocking: true
         },
-        profile_default_gate: $profile_default_gate,
+        profile_default_gate: (
+          (if ($profile_default_gate | type) == "object" then $profile_default_gate else {} end) + {
+            stability_summary_json: $profile_default_gate_stability_summary_json,
+            stability_summary_available: ($profile_default_gate_stability_summary_available == "1"),
+            stability_status: (if $profile_default_gate_stability_status == "" then null else $profile_default_gate_stability_status end),
+            stability_rc: (if $profile_default_gate_stability_rc == "" then null else ($profile_default_gate_stability_rc | tonumber) end),
+            stability_runs_requested: (if $profile_default_gate_stability_runs_requested == "" then null else ($profile_default_gate_stability_runs_requested | tonumber) end),
+            stability_runs_completed: (if $profile_default_gate_stability_runs_completed == "" then null else ($profile_default_gate_stability_runs_completed | tonumber) end),
+            stability_selection_policy_present_all: (if $profile_default_gate_stability_selection_policy_present_all == "" then null else ($profile_default_gate_stability_selection_policy_present_all == "1") end),
+            stability_consistent_selection_policy: (if $profile_default_gate_stability_consistent_selection_policy == "" then null else ($profile_default_gate_stability_consistent_selection_policy == "1") end),
+            stability_ok: (if $profile_default_gate_stability_ok == "" then null else ($profile_default_gate_stability_ok == "1") end),
+            stability_recommended_profile_counts: $profile_default_gate_stability_recommended_profile_counts
+          }
+        ),
         profile_default_ready: ($profile_default_ready == "true"),
         local_gate: $local_gate,
         real_host_gate: $real_host_gate
@@ -1358,6 +1418,12 @@ if [[ -n "$profile_default_gate_recommended_profile" ]]; then
 fi
 if [[ -n "$profile_default_gate_next_command" ]]; then
   echo "[single-machine-prod-readiness] profile_default_gate_next_command=$profile_default_gate_next_command"
+fi
+if [[ "$profile_default_gate_stability_summary_available" == "1" ]]; then
+  echo "[single-machine-prod-readiness] profile_default_gate_stability_available=true"
+  echo "[single-machine-prod-readiness] profile_default_gate_stability_status=$profile_default_gate_stability_status rc=${profile_default_gate_stability_rc:-unset} runs_completed=${profile_default_gate_stability_runs_completed:-unset}/${profile_default_gate_stability_runs_requested:-unset}"
+else
+  echo "[single-machine-prod-readiness] profile_default_gate_stability_available=false"
 fi
 
 if [[ "$print_summary_json" == "1" ]]; then
