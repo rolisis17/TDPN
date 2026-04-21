@@ -166,6 +166,7 @@ Guardrails:
 
 Track docs:
 - `docs/global-privacy-mesh-track.md`
+- `docs/gpm-productization-status.md`
 - `docs/exit-node-safety-baseline-v1.md`
 - `docs/exit-node-safety-guide.md`
 - `docs/client-safety-guide.md`
