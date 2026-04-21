@@ -462,6 +462,9 @@ echo "[ci] compose privilege guardrails integration"
 echo "[ci] tokenpop redaction guardrails integration"
 ./scripts/integration_tokenpop_redaction_guardrails.sh
 
+echo "[ci] replay shared-mode guardrails integration"
+./scripts/integration_replay_shared_mode_guardrails.sh
+
 echo "[ci] easy-node server-up auto-invite integration"
 ./scripts/integration_easy_node_server_up_auto_invite.sh
 

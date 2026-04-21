@@ -126,6 +126,7 @@ run_step "incident snapshot summary tooling" ./scripts/integration_incident_snap
 run_step "easy-node prod authority env wiring" ./scripts/integration_easy_node_prod_server_env.sh
 run_step "compose privilege guardrails integration" ./scripts/integration_compose_privilege_guardrails.sh
 run_step "tokenpop redaction guardrails integration" ./scripts/integration_tokenpop_redaction_guardrails.sh
+run_step "replay shared-mode guardrails integration" ./scripts/integration_replay_shared_mode_guardrails.sh
 run_step "easy-node server-up auto invite" ./scripts/integration_easy_node_server_up_auto_invite.sh
 run_step "easy-node server federation status" ./scripts/integration_easy_node_server_federation_status.sh
 run_step "easy-node server federation wait" ./scripts/integration_easy_node_server_federation_wait.sh

@@ -232,7 +232,7 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
    - Validation:
      - `internal/app/outbound_dial_policy_test.go` covers mixed-answer rejection in default mode and all-loopback acceptance.
 
-2. **P2 (open): replay guards are persistent per instance, but not yet shared across replicas**
+2. **P2 (open): replay guards are partially shared, but full multi-region durability is still pending**
    - References:
      - `services/exit/service.go:341`
      - `services/exit/service.go:597`
@@ -241,12 +241,16 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
      - `services/directory/service.go:549`
      - `services/directory/service.go:3307`
    - Why it matters:
-     - Restart durability is now present (file-backed stores), but active/active deployments without shared replay storage can still accept cross-instance replays.
+      - Restart durability is present (file-backed stores), but active/active deployments can still accept cross-instance replays when instances do not share replay state safely.
+      - Directory shared-file mode is an opt-in mitigation for same-volume replicas, but it still depends on shared filesystem lock semantics.
+      - Full multi-region/high-availability replay protection still needs a distributed durable backend.
    - Suggested fix:
-     - Back replay keys with shared durable state (for example Redis/DB) keyed by `(token_id, nonce)` with TTL.
-     - Keep local file/cache as fast-path only.
+      - Back replay keys with shared durable state (for example Redis/DB) keyed by `(token_id, nonce)` with TTL.
+      - Keep local file/cache as fast-path only.
+      - Treat shared-file mode as an interim same-volume deployment option, not the long-term HA endpoint.
    - Progress update (2026-04-21):
-     - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings that file-backed replay persistence is instance-local.
+      - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings when replay persistence is instance-local.
+      - Directory provider replay guard now supports opt-in shared-file mode via `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
    - Suggested tests:
      - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
 

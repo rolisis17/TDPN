@@ -42,6 +42,16 @@ Notes:
 - Base `deploy/docker-compose.yml` keeps `entry-exit` non-privileged by default.
 - Privileged `entry-exit` runtime is gated behind a dedicated override compose file; `easy_node.sh` auto-includes that override when `ENTRY_EXIT_PRIVILEGED=true`.
 
+Replay guard storage modes (directory provider token proofs):
+- Default file-backed mode is instance-local persistence:
+  - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE` (default `data/directory_provider_token_proof_replay.json`)
+- Opt-in shared file mode is available for same-volume multi-replica deployments:
+  - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1`
+  - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default `5`)
+- Residual risk remains:
+  - Shared-file mode depends on correct shared filesystem lock semantics and does not replace a distributed durable replay backend for full multi-region HA.
+  - `exit` replay persistence is still instance-local file-backed (`EXIT_TOKEN_PROOF_REPLAY_STORE_FILE`) unless backed by a separate shared durable replay store design.
+
 ## 2) Easy installer + launcher (for simple testing)
 
 Current direction (March 17, 2026):
