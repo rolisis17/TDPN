@@ -534,6 +534,12 @@ echo "[ci] profile compare campaign signoff integration"
 echo "[ci] profile default gate run integration"
 ./scripts/integration_profile_default_gate_run.sh
 
+echo "[ci] profile default gate stability run integration"
+./scripts/integration_profile_default_gate_stability_run.sh
+
+echo "[ci] easy-node profile default gate stability run integration"
+./scripts/integration_easy_node_profile_default_gate_stability_run.sh
+
 echo "[ci] incident snapshot integration"
 ./scripts/integration_incident_snapshot.sh
 
