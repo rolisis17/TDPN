@@ -59,6 +59,71 @@ read_env_value() {
   ' "$file"
 }
 
+resolve_path_for_match() {
+  local target="$1"
+  if [[ -z "$target" ]]; then
+    printf '%s' "$target"
+    return 0
+  fi
+
+  if [[ -d "$target" ]]; then
+    local resolved_dir
+    if resolved_dir="$(cd "$target" >/dev/null 2>&1 && pwd -P)"; then
+      printf '%s' "$resolved_dir"
+      return 0
+    fi
+    printf '%s' "$target"
+    return 0
+  fi
+
+  local parent
+  parent="$(dirname "$target")"
+  local base
+  base="$(basename "$target")"
+  if [[ -d "$parent" ]]; then
+    local resolved_parent
+    if resolved_parent="$(cd "$parent" >/dev/null 2>&1 && pwd -P)"; then
+      printf '%s/%s' "$resolved_parent" "$base"
+      return 0
+    fi
+  fi
+
+  printf '%s' "$target"
+}
+
+read_process_cmdline() {
+  local pid="$1"
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+$//'
+    return 0
+  fi
+  ps -p "$pid" -o args= 2>/dev/null | sed 's/[[:space:]]\+$//' || true
+}
+
+pid_matches_expected_tdpnd() {
+  local pid="$1"
+  local state_dir="$2"
+  local cmdline
+  cmdline="$(read_process_cmdline "$pid")"
+  if [[ -z "$cmdline" ]]; then
+    return 1
+  fi
+
+  local resolved_state_dir
+  resolved_state_dir="$(resolve_path_for_match "$state_dir")"
+
+  if [[ "$cmdline" != *"tdpnd"* ]]; then
+    return 1
+  fi
+  if [[ "$cmdline" != *"--state-dir"* ]]; then
+    return 1
+  fi
+  if [[ "$cmdline" != *"$state_dir"* && "$cmdline" != *"$resolved_state_dir"* ]]; then
+    return 1
+  fi
+  return 0
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --testnet-dir)
@@ -176,6 +241,16 @@ stop_node() {
     fi
     rm -f "$pid_file"
     echo "${NODE_ID} stale pid ${pid} removed (mode=${runtime_mode})"
+    return 0
+  fi
+
+  if ! pid_matches_expected_tdpnd "$pid" "$STATE_DIR"; then
+    if [[ "$DRY_RUN" == "1" ]]; then
+      echo "[dry-run] ${NODE_ID}: mode=${runtime_mode} pid ${pid} does not match expected tdpnd --state-dir ${STATE_DIR}; would remove stale pid file without signaling"
+      return 0
+    fi
+    rm -f "$pid_file"
+    echo "${NODE_ID} stale pid ${pid} does not match expected tdpnd state dir; pid file removed"
     return 0
   fi
 

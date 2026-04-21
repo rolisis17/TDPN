@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // EpochSelectionPolicy defines deterministic validator-set policy inputs for an epoch.
@@ -201,10 +202,11 @@ func rankEligibleCandidates(policy EpochSelectionPolicy, candidates []EpochValid
 		if err := candidate.ValidateBasic(); err != nil {
 			return nil, fmt.Errorf("candidate %q: %w", candidate.ValidatorID, err)
 		}
-		if _, exists := seenValidatorIDs[candidate.ValidatorID]; exists {
+		canonicalValidatorID := canonicalSelectionIdentity(candidate.ValidatorID)
+		if _, exists := seenValidatorIDs[canonicalValidatorID]; exists {
 			return nil, fmt.Errorf("duplicate validator id %q", candidate.ValidatorID)
 		}
-		seenValidatorIDs[candidate.ValidatorID] = struct{}{}
+		seenValidatorIDs[canonicalValidatorID] = struct{}{}
 		validated = append(validated, candidate)
 	}
 
@@ -262,10 +264,28 @@ func compareCandidateRank(a, b EpochValidatorCandidate) int {
 	case a.Score < b.Score:
 		return 1
 	}
+
+	aValidatorID := canonicalSelectionIdentity(a.ValidatorID)
+	bValidatorID := canonicalSelectionIdentity(b.ValidatorID)
+	switch {
+	case aValidatorID < bValidatorID:
+		return -1
+	case aValidatorID > bValidatorID:
+		return 1
+	}
 	switch {
 	case a.ValidatorID < b.ValidatorID:
 		return -1
 	case a.ValidatorID > b.ValidatorID:
+		return 1
+	}
+
+	aOperatorID := canonicalSelectionIdentity(a.OperatorID)
+	bOperatorID := canonicalSelectionIdentity(b.OperatorID)
+	switch {
+	case aOperatorID < bOperatorID:
+		return -1
+	case aOperatorID > bOperatorID:
 		return 1
 	}
 	switch {
@@ -274,10 +294,28 @@ func compareCandidateRank(a, b EpochValidatorCandidate) int {
 	case a.OperatorID > b.OperatorID:
 		return 1
 	}
+
+	aASN := canonicalSelectionIdentity(a.ASN)
+	bASN := canonicalSelectionIdentity(b.ASN)
+	switch {
+	case aASN < bASN:
+		return -1
+	case aASN > bASN:
+		return 1
+	}
 	switch {
 	case a.ASN < b.ASN:
 		return -1
 	case a.ASN > b.ASN:
+		return 1
+	}
+
+	aRegion := canonicalSelectionIdentity(a.Region)
+	bRegion := canonicalSelectionIdentity(b.Region)
+	switch {
+	case aRegion < bRegion:
+		return -1
+	case aRegion > bRegion:
 		return 1
 	}
 	switch {
@@ -305,22 +343,29 @@ func makeSelectionTracker() *selectionTracker {
 }
 
 func (t *selectionTracker) canSelect(policy EpochSelectionPolicy, candidate EpochValidatorCandidate) bool {
-	if exceedsCap(policy.MaxSeatsPerOperator, t.byOperator[candidate.OperatorID]) {
+	operatorID := canonicalSelectionIdentity(candidate.OperatorID)
+	if exceedsCap(policy.MaxSeatsPerOperator, t.byOperator[operatorID]) {
 		return false
 	}
-	if exceedsCap(policy.MaxSeatsPerASN, t.byASN[candidate.ASN]) {
+	asn := canonicalSelectionIdentity(candidate.ASN)
+	if exceedsCap(policy.MaxSeatsPerASN, t.byASN[asn]) {
 		return false
 	}
-	if exceedsCap(policy.MaxSeatsPerRegion, t.byRegion[candidate.Region]) {
+	region := canonicalSelectionIdentity(candidate.Region)
+	if exceedsCap(policy.MaxSeatsPerRegion, t.byRegion[region]) {
 		return false
 	}
 	return true
 }
 
 func (t *selectionTracker) noteSelected(candidate EpochValidatorCandidate) {
-	t.byOperator[candidate.OperatorID]++
-	t.byASN[candidate.ASN]++
-	t.byRegion[candidate.Region]++
+	operatorID := canonicalSelectionIdentity(candidate.OperatorID)
+	asn := canonicalSelectionIdentity(candidate.ASN)
+	region := canonicalSelectionIdentity(candidate.Region)
+
+	t.byOperator[operatorID]++
+	t.byASN[asn]++
+	t.byRegion[region]++
 }
 
 func exceedsCap(capValue int, selectedCount int) bool {
@@ -343,14 +388,15 @@ func selectWithConcentrationCaps(
 		if len(selected) == limit {
 			break
 		}
-		if _, exists := alreadySelected[candidate.ValidatorID]; exists {
+		canonicalValidatorID := canonicalSelectionIdentity(candidate.ValidatorID)
+		if _, exists := alreadySelected[canonicalValidatorID]; exists {
 			continue
 		}
 		if !tracker.canSelect(policy, candidate) {
 			continue
 		}
 
-		alreadySelected[candidate.ValidatorID] = struct{}{}
+		alreadySelected[canonicalValidatorID] = struct{}{}
 		tracker.noteSelected(candidate)
 		selected = append(selected, candidate)
 	}
@@ -360,12 +406,17 @@ func selectWithConcentrationCaps(
 func remainingCandidates(ranked []EpochValidatorCandidate, alreadySelected map[string]struct{}) []EpochValidatorCandidate {
 	remaining := make([]EpochValidatorCandidate, 0, len(ranked))
 	for _, candidate := range ranked {
-		if _, exists := alreadySelected[candidate.ValidatorID]; exists {
+		canonicalValidatorID := canonicalSelectionIdentity(candidate.ValidatorID)
+		if _, exists := alreadySelected[canonicalValidatorID]; exists {
 			continue
 		}
 		remaining = append(remaining, candidate)
 	}
 	return remaining
+}
+
+func canonicalSelectionIdentity(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func min(a int, b int) int {

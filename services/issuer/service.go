@@ -134,6 +134,7 @@ const (
 	allowInsecureTokenAuthPublicBind     = "ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND"
 	allowInsecurePublicIssueNoPayment    = "ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF"
 	allowDangerousDevAdminTokenFallback  = "ISSUER_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
+	allowDangerousCosmosAdapterFallback  = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
 	issuerPrivateKeyFileMaxBytes         = int64(16 * 1024)
 	issuerAdminKeysFileMaxBytes          = int64(1 * 1024 * 1024)
 	issuerPreviousPubKeysFileMaxBytes    = int64(1 * 1024 * 1024)
@@ -380,8 +381,8 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.loadSubjects(); err != nil {
 		log.Printf("issuer subjects load warning: %v", err)
 	}
-	if err := s.loadRevocations(); err != nil {
-		log.Printf("issuer revocations load warning: %v", err)
+	if err := s.handleCriticalStartupLoadError("revocations", s.loadRevocations()); err != nil {
+		return err
 	}
 	if err := s.loadAnonRevocations(); err != nil {
 		log.Printf("issuer anonymous credential revocations load warning: %v", err)
@@ -392,8 +393,8 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.loadAudit(); err != nil {
 		log.Printf("issuer audit load warning: %v", err)
 	}
-	if err := s.loadOrCreateEpochState(); err != nil {
-		log.Printf("issuer epoch state load warning: %v", err)
+	if err := s.handleCriticalStartupLoadError("epoch state", s.loadOrCreateEpochState()); err != nil {
+		return err
 	}
 	pub, priv, err := s.loadOrCreateKeypair()
 	if err != nil {
@@ -482,6 +483,17 @@ func (s *Service) Run(ctx context.Context) error {
 			s.reconcileSettlement(ctx)
 		}
 	}
+}
+
+func (s *Service) handleCriticalStartupLoadError(component string, loadErr error) error {
+	if loadErr == nil {
+		return nil
+	}
+	if s.betaStrict || s.prodStrict {
+		return fmt.Errorf("issuer %s load failed in strict mode: %w", component, loadErr)
+	}
+	log.Printf("issuer %s load warning: %v", component, loadErr)
+	return nil
 }
 
 func (s *Service) reconcileSettlement(ctx context.Context) {
@@ -2662,11 +2674,21 @@ func newSettlementServiceFromEnv() settlement.Service {
 	}
 
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SETTLEMENT_CHAIN_ADAPTER")), "cosmos") {
+		allowDangerousCosmosFallback := envEnabled(allowDangerousCosmosAdapterFallback)
+		failCosmosInit := func(format string, args ...any) {
+			message := fmt.Sprintf(format, args...)
+			if allowDangerousCosmosFallback {
+				log.Printf("%s; continuing in dangerous memory-only compatibility mode because %s=1", message, allowDangerousCosmosAdapterFallback)
+				return
+			}
+			panic(fmt.Sprintf("%s; refusing startup (set %s=1 only for dangerous compatibility fallback)", message, allowDangerousCosmosAdapterFallback))
+		}
+
 		adapter, endpoint, err := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_")
 		if endpoint == "" {
-			log.Printf("issuer settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty; running memory-only mode")
+			failCosmosInit("issuer settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty")
 		} else if err != nil {
-			log.Printf("issuer settlement: cosmos adapter init failed (%v); running memory-only mode", err)
+			failCosmosInit("issuer settlement: cosmos adapter init failed (%v)", err)
 		} else {
 			opts = append(opts, settlement.WithChainAdapter(adapter))
 			log.Printf("issuer settlement: cosmos adapter enabled endpoint=%s", redactEndpointForLog(endpoint))
@@ -2675,7 +2697,11 @@ func newSettlementServiceFromEnv() settlement.Service {
 		shadowAdapter, shadowEndpoint, shadowErr := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_SHADOW_")
 		if shadowEndpoint != "" {
 			if shadowErr != nil {
-				log.Printf("issuer settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter", shadowErr)
+				if allowDangerousCosmosFallback {
+					log.Printf("issuer settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter because %s=1", shadowErr, allowDangerousCosmosAdapterFallback)
+				} else {
+					panic(fmt.Sprintf("issuer settlement: cosmos shadow adapter init failed (%v); refusing startup (set %s=1 only for dangerous compatibility fallback)", shadowErr, allowDangerousCosmosAdapterFallback))
+				}
 			} else {
 				opts = append(opts, settlement.WithShadowChainAdapter(shadowAdapter))
 				log.Printf("issuer settlement: cosmos shadow adapter enabled endpoint=%s", redactEndpointForLog(shadowEndpoint))

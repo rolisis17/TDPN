@@ -69,9 +69,9 @@ Use this before making the repository public.
 4. Use the release runbook and artifact generator:
    ```bash
    ./scripts/release_verify_tag.sh --version vX.Y.Z --require-head-match 1
-   ./scripts/release_policy_gate.sh --version vX.Y.Z --release-dir dist/vX.Y.Z --require-tag-exists 1 --require-tag-notes 1
-   ./scripts/release_generate_sbom.sh --version vX.Y.Z
    ./scripts/release_prepare.sh --version vX.Y.Z
+   ./scripts/release_generate_sbom.sh --version vX.Y.Z
+   ./scripts/release_policy_gate.sh --version vX.Y.Z --release-dir dist/vX.Y.Z --require-tag-exists 1 --require-tag-notes 1
    ```
 
 ## 7) Post-publication

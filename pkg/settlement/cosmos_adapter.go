@@ -68,6 +68,7 @@ type CosmosAdapter struct {
 	closed        bool
 	deferredOp    map[string]cosmosDeferredOperation
 	deferredOpMax int
+	backlogFull   bool
 
 	workerCtx    context.Context
 	workerCancel context.CancelFunc
@@ -230,6 +231,7 @@ func (e *cosmosRetryableError) Unwrap() error {
 }
 
 var errCosmosAdapterClosedWithBacklog = errors.New("cosmos adapter closed with backlog")
+var errCosmosAdapterDeferredBacklogLimitReached = errors.New("cosmos adapter deferred backlog limit reached")
 
 func NewCosmosAdapter(cfg CosmosAdapterConfig) (*CosmosAdapter, error) {
 	endpoint, err := normalizeCosmosAdapterEndpoint(cfg.Endpoint, cfg.AllowInsecureHTTP)
@@ -656,6 +658,15 @@ func (a *CosmosAdapter) SubmitSlashEvidence(_ context.Context, evidence SlashEvi
 }
 
 func (a *CosmosAdapter) Health(ctx context.Context) error {
+	a.stateMu.Lock()
+	if a.backlogFull || a.deferredBacklogLimitReachedLocked() {
+		a.backlogFull = true
+		err := a.deferredBacklogLimitErrorLocked()
+		a.stateMu.Unlock()
+		return err
+	}
+	a.stateMu.Unlock()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.endpoint+"/health", nil)
 	if err != nil {
 		return err
@@ -718,11 +729,36 @@ func (a *CosmosAdapter) Close() {
 	})
 }
 
+func (a *CosmosAdapter) deferredOperationLimit() int {
+	limit := a.deferredOpMax
+	if limit <= 0 {
+		limit = cosmosDeferredOperationDefaultMax
+	}
+	return limit
+}
+
+func (a *CosmosAdapter) deferredBacklogLimitReachedLocked() bool {
+	limit := a.deferredOperationLimit()
+	return limit > 0 && len(a.deferredOp) >= limit
+}
+
+func (a *CosmosAdapter) deferredBacklogLimitErrorLocked() error {
+	return fmt.Errorf("%w: limit=%d current=%d", errCosmosAdapterDeferredBacklogLimitReached, a.deferredOperationLimit(), len(a.deferredOp))
+}
+
+func (a *CosmosAdapter) updateBacklogHealthLocked() {
+	a.backlogFull = a.deferredBacklogLimitReachedLocked()
+}
+
 func (a *CosmosAdapter) enqueue(op cosmosQueuedOperation) error {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	if a.closed {
 		return fmt.Errorf("cosmos adapter closed")
+	}
+	if a.backlogFull || a.deferredBacklogLimitReachedLocked() {
+		a.backlogFull = true
+		return a.deferredBacklogLimitErrorLocked()
 	}
 	select {
 	case a.queue <- op:
@@ -752,7 +788,7 @@ func (a *CosmosAdapter) runWorker() {
 func (a *CosmosAdapter) processQueuedOperation(ctx context.Context, op cosmosQueuedOperation) {
 	attempts, err := a.submitWithRetryCount(ctx, op)
 	if err != nil {
-		a.markDeferredOperation(op, attempts, err, cosmosSubmitErrorRetryable(err))
+		_ = a.markDeferredOperation(op, attempts, err, cosmosSubmitErrorRetryable(err))
 		return
 	}
 	a.clearDeferredOperation(op.idempotencyKey)
@@ -772,7 +808,7 @@ func (a *CosmosAdapter) drainQueuedOperationsToDeferred(err error) {
 	for {
 		select {
 		case op := <-a.queue:
-			a.markDeferredOperation(op, 0, err, false)
+			_ = a.markDeferredOperation(op, 0, err, false)
 		default:
 			return
 		}
@@ -789,13 +825,16 @@ func (a *CosmosAdapter) replayInterval() time.Duration {
 	return a.baseBackoff
 }
 
-func (a *CosmosAdapter) markDeferredOperation(op cosmosQueuedOperation, attempts int, submitErr error, replayable bool) {
+func (a *CosmosAdapter) markDeferredOperation(op cosmosQueuedOperation, attempts int, submitErr error, replayable bool) error {
 	now := time.Now().UTC()
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	entry, ok := a.deferredOp[op.idempotencyKey]
 	if !ok {
-		a.enforceDeferredOperationLimitLocked()
+		if a.deferredBacklogLimitReachedLocked() {
+			a.backlogFull = true
+			return a.deferredBacklogLimitErrorLocked()
+		}
 		entry = cosmosDeferredOperation{
 			operation:  op,
 			deferredAt: now,
@@ -812,37 +851,15 @@ func (a *CosmosAdapter) markDeferredOperation(op cosmosQueuedOperation, attempts
 		entry.lastError = submitErr.Error()
 	}
 	a.deferredOp[op.idempotencyKey] = entry
-}
-
-func (a *CosmosAdapter) enforceDeferredOperationLimitLocked() {
-	limit := a.deferredOpMax
-	if limit <= 0 {
-		limit = cosmosDeferredOperationDefaultMax
-	}
-	if limit <= 0 {
-		return
-	}
-	for len(a.deferredOp) >= limit {
-		oldestKey := ""
-		var oldestAt time.Time
-		for key, entry := range a.deferredOp {
-			if oldestKey == "" || entry.deferredAt.Before(oldestAt) ||
-				(entry.deferredAt.Equal(oldestAt) && key < oldestKey) {
-				oldestKey = key
-				oldestAt = entry.deferredAt
-			}
-		}
-		if oldestKey == "" {
-			return
-		}
-		delete(a.deferredOp, oldestKey)
-	}
+	a.updateBacklogHealthLocked()
+	return nil
 }
 
 func (a *CosmosAdapter) clearDeferredOperation(idempotencyKey string) {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	delete(a.deferredOp, idempotencyKey)
+	a.updateBacklogHealthLocked()
 }
 
 func (a *CosmosAdapter) snapshotReplayableDeferredOperations() []cosmosQueuedOperation {

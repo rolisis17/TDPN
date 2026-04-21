@@ -339,3 +339,43 @@ func TestSlashEvidenceValidateBasicAllowsTerminalLifecycleStatuses(t *testing.T)
 		})
 	}
 }
+
+func TestCanonicalObjectiveEvidenceIdentity(t *testing.T) {
+	t.Parallel()
+
+	base := SlashEvidence{
+		EvidenceID:    "evidence-identity-base",
+		Kind:          EvidenceKindObjective,
+		ProviderID:    "Provider-Case-1",
+		SessionID:     "Session-Case-1",
+		ViolationType: "  DOUBLE-SIGN ",
+		ProofHash:     "obj://Bucket/Case/Path",
+	}
+
+	caseVariant := SlashEvidence{
+		EvidenceID:    "evidence-identity-variant",
+		Kind:          " OBJECTIVE ",
+		ProviderID:    "provider-case-1",
+		SessionID:     " session-case-1 ",
+		ViolationType: "double-sign",
+		ProofHash:     " obj://bucket/case/path ",
+	}
+
+	if CanonicalObjectiveEvidenceIdentity(base) != CanonicalObjectiveEvidenceIdentity(caseVariant) {
+		t.Fatalf(
+			"expected canonical identity equality for case/whitespace variants: base=%q variant=%q",
+			CanonicalObjectiveEvidenceIdentity(base),
+			CanonicalObjectiveEvidenceIdentity(caseVariant),
+		)
+	}
+
+	other := base
+	other.ProofHash = "obj://bucket/case/path/other"
+	if CanonicalObjectiveEvidenceIdentity(base) == CanonicalObjectiveEvidenceIdentity(other) {
+		t.Fatalf(
+			"expected canonical identity to differ when objective proof reference changes: base=%q other=%q",
+			CanonicalObjectiveEvidenceIdentity(base),
+			CanonicalObjectiveEvidenceIdentity(other),
+		)
+	}
+}

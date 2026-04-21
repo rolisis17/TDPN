@@ -30,6 +30,29 @@ require_cmds() {
   done
 }
 
+resolve_ref_commit() {
+  local ref="$1"
+  local commit=""
+
+  if commit="$(git rev-parse -q --verify "${ref}^{commit}" 2>/dev/null)"; then
+    printf '%s' "$commit"
+    return 0
+  fi
+
+  if [[ "$ref" == origin/* ]]; then
+    local remote_branch="${ref#origin/}"
+    if ! git fetch --no-tags origin "${remote_branch}:refs/remotes/origin/${remote_branch}" >/dev/null 2>&1; then
+      return 1
+    fi
+    if commit="$(git rev-parse -q --verify "${ref}^{commit}" 2>/dev/null)"; then
+      printf '%s' "$commit"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 version=""
 require_head_match=0
 require_signature=0
@@ -103,25 +126,34 @@ fi
 
 tag_commit="$(git rev-list -n 1 "$version")"
 head_commit="$(git rev-parse HEAD)"
-if [[ "$require_head_match" == "1" && "$tag_commit" != "$head_commit" ]]; then
-  echo "tag ${version} points to ${tag_commit}, current HEAD is ${head_commit}"
-  exit 1
-fi
+
+required_ref_commit=""
 
 if [[ -n "$require_contained_in_ref" ]]; then
-  if ! git rev-parse -q --verify "${require_contained_in_ref}^{commit}" >/dev/null 2>&1; then
-    if [[ "$require_contained_in_ref" == origin/* ]]; then
-      remote_branch="${require_contained_in_ref#origin/}"
-      git fetch --no-tags origin "${remote_branch}:refs/remotes/origin/${remote_branch}" >/dev/null 2>&1 || true
-    fi
-  fi
-  required_ref_commit="$(git rev-parse -q --verify "${require_contained_in_ref}^{commit}" 2>/dev/null || true)"
-  if [[ -z "$required_ref_commit" ]]; then
+  if ! required_ref_commit="$(resolve_ref_commit "$require_contained_in_ref")"; then
     echo "required ref not found: ${require_contained_in_ref}"
     exit 1
   fi
   if ! git merge-base --is-ancestor "$tag_commit" "$required_ref_commit"; then
     echo "tag ${version} commit ${tag_commit} is not contained in ${require_contained_in_ref} (${required_ref_commit})"
+    exit 1
+  fi
+fi
+
+head_match_ref="HEAD"
+head_match_commit="$head_commit"
+# In CI, compare tag commit against the protected branch tip when one is configured.
+if [[ "$require_head_match" == "1" ]]; then
+  if [[ -n "$require_contained_in_ref" ]]; then
+    head_match_ref="$require_contained_in_ref"
+    head_match_commit="$required_ref_commit"
+  fi
+  if [[ "$tag_commit" != "$head_match_commit" ]]; then
+    if [[ "$head_match_ref" == "HEAD" ]]; then
+      echo "tag ${version} points to ${tag_commit}, current HEAD is ${head_match_commit}"
+    else
+      echo "tag ${version} points to ${tag_commit}, ${head_match_ref} tip is ${head_match_commit}"
+    fi
     exit 1
   fi
 fi
@@ -136,5 +168,5 @@ if [[ "$require_signature" == "1" ]]; then
   fi
 fi
 
-echo "[release-verify-tag] version=${version} annotated=1 commit=${tag_commit} head=${head_commit} require_signature=${require_signature} contained_in_ref=${require_contained_in_ref:-none}"
+echo "[release-verify-tag] version=${version} annotated=1 commit=${tag_commit} head=${head_commit} head_match_ref=${head_match_ref} require_signature=${require_signature} contained_in_ref=${require_contained_in_ref:-none}"
 echo "[release-verify-tag] ok"

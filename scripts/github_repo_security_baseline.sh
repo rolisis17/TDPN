@@ -170,28 +170,118 @@ if ! gh auth status >/dev/null 2>&1; then
 fi
 
 apply_baseline() {
-  local checks_json_file bp_json_file repo_patch_file
+  local checks_json_file bp_json_file repo_patch_file existing_bp_json_file
   checks_json_file="$(mktemp)"
   bp_json_file="$(mktemp)"
   repo_patch_file="$(mktemp)"
-  trap 'rm -f "$checks_json_file" "$bp_json_file" "$repo_patch_file"' RETURN
+  existing_bp_json_file="$(mktemp)"
+  trap 'rm -f "$checks_json_file" "$bp_json_file" "$repo_patch_file" "$existing_bp_json_file"' RETURN
 
   printf '%s\n' "${required_checks[@]}" | jq -R . | jq -s . >"$checks_json_file"
+
+  # Preserve non-baseline protection controls so apply mode does not weaken stricter repositories.
+  if ! gh api \
+    -H "Accept: application/vnd.github+json" \
+    "repos/${repo}/branches/${branch}/protection" >"$existing_bp_json_file" 2>/dev/null; then
+    printf '{}\n' >"$existing_bp_json_file"
+  fi
 
   jq -n \
     --argjson approvals "$required_approvals" \
     --argjson checks "$(cat "$checks_json_file")" \
-    '{
+    --argjson existing "$(cat "$existing_bp_json_file")" \
+    '
+    def scalar_bool:
+      if type == "boolean" then .
+      elif type == "object" then (.enabled // false)
+      else false
+      end;
+
+    def principal_list($value; $field):
+      if ($value | type) == "array" then
+        [
+          $value[]
+          | if type == "string" then . else .[$field] // empty end
+          | select(type == "string" and length > 0)
+        ] | unique
+      else
+        []
+      end;
+
+    def normalize_allowances($obj):
+      if ($obj | type) == "object" then
+        {
+          users: principal_list($obj.users; "login"),
+          teams: principal_list($obj.teams; "slug"),
+          apps: principal_list($obj.apps; "slug")
+        }
+      else
+        { users: [], teams: [], apps: [] }
+      end;
+
+    def normalize_restrictions($obj):
+      if ($obj | type) == "object" then
+        {
+          users: principal_list($obj.users; "login"),
+          teams: principal_list($obj.teams; "slug"),
+          apps: principal_list($obj.apps; "slug")
+        }
+      else
+        null
+      end;
+
+    def existing_checks:
+      if ($existing.required_status_checks.checks | type) == "array" then
+        [
+          $existing.required_status_checks.checks[]
+          | {
+              context: (.context // ""),
+              app_id: (if has("app_id") then .app_id else null end)
+            }
+          | select(.context != "")
+        ]
+      elif ($existing.required_status_checks.contexts | type) == "array" then
+        [
+          $existing.required_status_checks.contexts[]
+          | select(type == "string" and length > 0)
+          | { context: ., app_id: null }
+        ]
+      else
+        []
+      end;
+
+    def merged_checks:
+      (existing_checks + ($checks | map({ context: ., app_id: null })))
+      | unique_by(.context)
+      | sort_by(.context);
+
+    {
       required_status_checks: {
         strict: true,
-        contexts: $checks
+        checks: merged_checks
       },
       enforce_admins: true,
       required_pull_request_reviews: {
         dismiss_stale_reviews: true,
-        required_approving_review_count: $approvals
+        require_code_owner_reviews: ($existing.required_pull_request_reviews.require_code_owner_reviews // false),
+        require_last_push_approval: ($existing.required_pull_request_reviews.require_last_push_approval // false),
+        required_approving_review_count: (
+          [
+            ($existing.required_pull_request_reviews.required_approving_review_count // 0),
+            $approvals
+          ] | map(tonumber? // 0) | max
+        ),
+        dismissal_restrictions: normalize_allowances($existing.required_pull_request_reviews.dismissal_restrictions),
+        bypass_pull_request_allowances: normalize_allowances($existing.required_pull_request_reviews.bypass_pull_request_allowances)
       },
-      restrictions: null
+      restrictions: normalize_restrictions($existing.restrictions),
+      required_linear_history: (($existing.required_linear_history // false) | scalar_bool),
+      allow_force_pushes: (($existing.allow_force_pushes // false) | scalar_bool),
+      allow_deletions: (($existing.allow_deletions // false) | scalar_bool),
+      block_creations: (($existing.block_creations // false) | scalar_bool),
+      required_conversation_resolution: (($existing.required_conversation_resolution // false) | scalar_bool),
+      lock_branch: (($existing.lock_branch // false) | scalar_bool),
+      allow_fork_syncing: (($existing.allow_fork_syncing // false) | scalar_bool)
     }' >"$bp_json_file"
 
   echo "[repo-security] applying branch protection repo=${repo} branch=${branch}"

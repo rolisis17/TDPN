@@ -215,6 +215,7 @@ const serverMaxHeaderBytes = 1 << 20
 const remoteResponseMaxBodyBytes int64 = 1 << 20
 const defaultVerifyRefreshMinInterval = 2 * time.Second
 const allowDangerousIssuerKeysetReplacement = "EXIT_ALLOW_DANGEROUS_ISSUER_KEYSET_REPLACEMENT"
+const allowDangerousCosmosAdapterFallback = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
 
 var (
 	egressChainPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -624,11 +625,21 @@ func newSettlementServiceFromEnv() settlement.Service {
 		return adapter, endpoint, nil
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SETTLEMENT_CHAIN_ADAPTER")), "cosmos") {
+		allowDangerousCosmosFallback := envEnabled(allowDangerousCosmosAdapterFallback)
+		failCosmosInit := func(format string, args ...any) {
+			message := fmt.Sprintf(format, args...)
+			if allowDangerousCosmosFallback {
+				log.Printf("%s; continuing in dangerous memory-only compatibility mode because %s=1", message, allowDangerousCosmosAdapterFallback)
+				return
+			}
+			panic(fmt.Sprintf("%s; refusing startup (set %s=1 only for dangerous compatibility fallback)", message, allowDangerousCosmosAdapterFallback))
+		}
+
 		adapter, endpoint, err := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_")
 		if endpoint == "" {
-			log.Printf("exit settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty; running memory-only mode")
+			failCosmosInit("exit settlement: cosmos adapter requested but COSMOS_SETTLEMENT_ENDPOINT is empty")
 		} else if err != nil {
-			log.Printf("exit settlement: cosmos adapter init failed (%v); running memory-only mode", err)
+			failCosmosInit("exit settlement: cosmos adapter init failed (%v)", err)
 		} else {
 			opts = append(opts, settlement.WithChainAdapter(adapter))
 			log.Printf("exit settlement: cosmos adapter enabled endpoint=%s", endpoint)
@@ -637,7 +648,11 @@ func newSettlementServiceFromEnv() settlement.Service {
 		shadowAdapter, shadowEndpoint, shadowErr := newCosmosAdapterFromEnv("COSMOS_SETTLEMENT_SHADOW_")
 		if shadowEndpoint != "" {
 			if shadowErr != nil {
-				log.Printf("exit settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter", shadowErr)
+				if allowDangerousCosmosFallback {
+					log.Printf("exit settlement: cosmos shadow adapter init failed (%v); continuing without shadow adapter because %s=1", shadowErr, allowDangerousCosmosAdapterFallback)
+				} else {
+					panic(fmt.Sprintf("exit settlement: cosmos shadow adapter init failed (%v); refusing startup (set %s=1 only for dangerous compatibility fallback)", shadowErr, allowDangerousCosmosAdapterFallback))
+				}
 			} else {
 				opts = append(opts, settlement.WithShadowChainAdapter(shadowAdapter))
 				log.Printf("exit settlement: cosmos shadow adapter enabled endpoint=%s", shadowEndpoint)

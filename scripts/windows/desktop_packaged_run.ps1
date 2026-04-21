@@ -389,7 +389,7 @@ if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
   throw "missing bootstrap script: $bootstrapScript"
 }
 
-$shouldEnablePolicyBypass = $true
+$shouldEnablePolicyBypass = $false
 if ($PSBoundParameters.ContainsKey("EnablePolicyBypass")) {
   $shouldEnablePolicyBypass = [bool]$EnablePolicyBypass
 }
@@ -446,7 +446,14 @@ if ($null -ne $PrintDoctorSummaryJson) {
   $doctorInvokeArgs += @("-PrintSummaryJson", ([string]$PrintDoctorSummaryJson))
 }
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $doctorScript @doctorInvokeArgs
+$doctorLaunchArgs = @("-NoLogo", "-NoProfile")
+if ($shouldEnablePolicyBypass) {
+  $doctorLaunchArgs += @("-ExecutionPolicy", "Bypass")
+}
+$doctorLaunchArgs += @("-File", $doctorScript)
+$doctorLaunchArgs += $doctorInvokeArgs
+
+& powershell.exe @doctorLaunchArgs
 $doctorExitCode = [int]$LASTEXITCODE
 $doctorStep.status = if ($doctorExitCode -eq 0) { "pass" } else { "fail" }
 $doctorStep.rc = $doctorExitCode
@@ -502,7 +509,14 @@ if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
   $bootstrapInvokeArgs += @("-CommandRunner", $CommandRunner)
 }
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrapScript @bootstrapInvokeArgs
+$bootstrapLaunchArgs = @("-NoLogo", "-NoProfile")
+if ($shouldEnablePolicyBypass) {
+  $bootstrapLaunchArgs += @("-ExecutionPolicy", "Bypass")
+}
+$bootstrapLaunchArgs += @("-File", $bootstrapScript)
+$bootstrapLaunchArgs += $bootstrapInvokeArgs
+
+& powershell.exe @bootstrapLaunchArgs
 $bootstrapExitCode = [int]$LASTEXITCODE
 $bootstrapStep.status = if ($bootstrapExitCode -eq 0) { "pass" } else { "fail" }
 $bootstrapStep.rc = $bootstrapExitCode

@@ -139,20 +139,20 @@ func (k *Keeper) RecordDistribution(record types.DistributionRecord) (types.Dist
 		if !distributionRecordsEqual(normalizedExisting, normalized) {
 			return types.DistributionRecord{}, conflictError("distribution", normalized.DistributionID)
 		}
-		if _, accrualOK := k.store.GetAccrual(normalizedExisting.AccrualID); !accrualOK {
+		accrual, accrualOK := k.store.GetAccrual(normalizedExisting.AccrualID)
+		if !accrualOK {
 			return types.DistributionRecord{}, accrualNotFoundError(normalizedExisting.AccrualID)
 		}
+		normalizedAccrual := normalizeAccrual(accrual)
 		// Normalize legacy records persisted via compatibility upserts.
-		if err := k.upsertDistributionLocked(normalizedExisting); err != nil {
-			return types.DistributionRecord{}, err
-		}
-		if err := k.advanceAccrualForDistributionLocked(normalizedExisting.AccrualID); err != nil {
+		if err := k.persistDistributionWithAccrualAdvanceLocked(normalizedExisting, normalizedAccrual); err != nil {
 			return types.DistributionRecord{}, err
 		}
 		return normalizedExisting, nil
 	}
 
-	if _, accrualOK := k.store.GetAccrual(normalized.AccrualID); !accrualOK {
+	accrual, accrualOK := k.store.GetAccrual(normalized.AccrualID)
+	if !accrualOK {
 		return types.DistributionRecord{}, accrualNotFoundError(normalized.AccrualID)
 	}
 	if byAccrual, found, err := k.distributionByAccrualLocked(normalized.AccrualID); err != nil {
@@ -161,10 +161,7 @@ func (k *Keeper) RecordDistribution(record types.DistributionRecord) (types.Dist
 		return types.DistributionRecord{}, conflictError("distribution accrual_id", normalized.AccrualID)
 	}
 
-	if err := k.upsertDistributionLocked(normalized); err != nil {
-		return types.DistributionRecord{}, err
-	}
-	if err := k.advanceAccrualForDistributionLocked(normalized.AccrualID); err != nil {
+	if err := k.persistDistributionWithAccrualAdvanceLocked(normalized, normalizeAccrual(accrual)); err != nil {
 		return types.DistributionRecord{}, err
 	}
 	return normalized, nil
@@ -210,23 +207,36 @@ func (k *Keeper) ListDistributionsWithError() ([]types.DistributionRecord, error
 	return records, nil
 }
 
-func (k *Keeper) advanceAccrualForDistributionLocked(accrualID string) error {
-	if accrualID == "" {
-		return nil
-	}
-	accrual, ok := k.store.GetAccrual(accrualID)
-	if !ok {
-		return accrualNotFoundError(accrualID)
+func (k *Keeper) persistDistributionWithAccrualAdvanceLocked(
+	distribution types.DistributionRecord,
+	accrualBefore types.RewardAccrual,
+) error {
+	accrualAfter := advanceAccrualStateForDistribution(accrualBefore)
+	accrualChanged := !accrualRecordsEqual(accrualBefore, accrualAfter)
+
+	if accrualChanged {
+		if err := k.upsertAccrualLocked(accrualAfter); err != nil {
+			return err
+		}
 	}
 
-	normalized := normalizeAccrual(accrual)
-	if normalized.OperationState == chaintypes.ReconciliationPending || normalized.OperationState == chaintypes.ReconciliationSubmitted {
-		normalized.OperationState = chaintypes.ReconciliationConfirmed
-	}
-	if err := k.upsertAccrualLocked(normalized); err != nil {
+	if err := k.upsertDistributionLocked(distribution); err != nil {
+		if accrualChanged {
+			if rollbackErr := k.upsertAccrualLocked(accrualBefore); rollbackErr != nil {
+				return fmt.Errorf("%w; rollback accrual %q failed: %v", err, accrualBefore.AccrualID, rollbackErr)
+			}
+		}
 		return err
 	}
 	return nil
+}
+
+func advanceAccrualStateForDistribution(record types.RewardAccrual) types.RewardAccrual {
+	normalized := normalizeAccrual(record)
+	if normalized.OperationState == chaintypes.ReconciliationPending || normalized.OperationState == chaintypes.ReconciliationSubmitted {
+		normalized.OperationState = chaintypes.ReconciliationConfirmed
+	}
+	return normalized
 }
 
 func (k *Keeper) upsertAccrualLocked(record types.RewardAccrual) error {

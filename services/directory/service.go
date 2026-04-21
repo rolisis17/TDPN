@@ -191,6 +191,7 @@ const allowInsecureAdminPublicBind = "DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_P
 const allowDangerousDevAdminTokenFallback = "DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
 const allowDangerousIssuerTrustWithoutAnchors = "DIRECTORY_ALLOW_DANGEROUS_ISSUER_TRUST_WITHOUT_ANCHORS"
 const allowDangerousOutboundPrivateDNS = "DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
+const allowDangerousProviderTokenBypass = "DIRECTORY_ALLOW_DANGEROUS_PROVIDER_RELAY_TOKEN_BYPASS"
 const defaultIssuerTrustedKeysFile = "data/directory_issuer_trusted_keys.txt"
 const directoryPrivateKeyMaxBytes int64 = 16 * 1024
 const directoryTrustedKeysFileMaxBytes int64 = 1 * 1024 * 1024
@@ -3445,10 +3446,10 @@ func validateProviderTokenClaims(claims crypto.CapabilityClaims, nowUnix int64) 
 func (s *Service) validateProviderTokenCNFBinding(claims crypto.CapabilityClaims, relayPubKey string) error {
 	cnf := strings.TrimSpace(claims.CNFEd25519)
 	if cnf == "" {
-		if s.betaStrict || s.prodStrict {
-			return fmt.Errorf("provider token cnf_ed25519 missing in strict mode")
+		if envEnabled(allowDangerousProviderTokenBypass) {
+			return nil
 		}
-		return nil
+		return fmt.Errorf("provider token cnf_ed25519 missing")
 	}
 	normalizedCNF, err := crypto.NormalizeEd25519PublicKey(cnf)
 	if err != nil {
@@ -3474,17 +3475,20 @@ func (s *Service) validateProviderTokenProof(
 	now time.Time,
 ) error {
 	cnf := strings.TrimSpace(claims.CNFEd25519)
-	requireProof := cnf != "" || s.betaStrict || s.prodStrict
-	if !requireProof {
-		return nil
-	}
+	allowDangerousBypass := envEnabled(allowDangerousProviderTokenBypass)
 	if cnf == "" {
+		if allowDangerousBypass {
+			return nil
+		}
 		return fmt.Errorf("provider token cnf_ed25519 missing")
 	}
 
 	nonce := strings.TrimSpace(req.TokenProofNonce)
 	proof := strings.TrimSpace(req.TokenProof)
 	if nonce == "" || proof == "" {
+		if allowDangerousBypass {
+			return nil
+		}
 		return fmt.Errorf("provider token proof and token_proof_nonce are required")
 	}
 	if len(nonce) > providerRelayUpsertProofNonceMaxLen {

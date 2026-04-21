@@ -2,6 +2,7 @@ package types
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -206,6 +207,41 @@ func TestSelectEpochValidatorsAppliesConcentrationCaps(t *testing.T) {
 	}
 }
 
+func TestSelectEpochValidatorsAppliesConcentrationCapsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	policy := baselineEpochSelectionPolicy()
+	policy.StableSeatCount = 0
+	policy.RotatingSeatCount = 3
+	policy.MaxSeatsPerOperator = 1
+	policy.MaxSeatsPerASN = 1
+	policy.MaxSeatsPerRegion = 1
+
+	allowedTop := newCandidate("allowed-top", "Operator-A", "ASN-A", "US", 100)
+	blockedByOperatorCase := newCandidate("blocked-op-case", "operator-a", "asn-b", "eu", 99)
+	blockedByASNCase := newCandidate("blocked-asn-case", "operator-b", "asn-a", "apac", 98)
+	blockedByRegionCase := newCandidate("blocked-region-case", "operator-c", "asn-c", "us", 97)
+	allowedSecond := newCandidate("allowed-second", "operator-d", "asn-d", "apac", 96)
+	allowedThird := newCandidate("allowed-third", "operator-e", "asn-e", "latam", 95)
+
+	result, err := SelectEpochValidators(policy, []EpochValidatorCandidate{
+		allowedThird,
+		blockedByRegionCase,
+		blockedByASNCase,
+		blockedByOperatorCase,
+		allowedTop,
+		allowedSecond,
+	})
+	if err != nil {
+		t.Fatalf("SelectEpochValidators returned unexpected error: %v", err)
+	}
+
+	expected := []string{"allowed-top", "allowed-second", "allowed-third"}
+	if !reflect.DeepEqual(result.SelectedValidatorIDs(), expected) {
+		t.Fatalf("expected case-insensitive cap-compliant selected validators %v, got %v", expected, result.SelectedValidatorIDs())
+	}
+}
+
 func TestSelectEpochValidatorsRejectsDuplicateValidatorIDs(t *testing.T) {
 	t.Parallel()
 
@@ -218,6 +254,22 @@ func TestSelectEpochValidatorsRejectsDuplicateValidatorIDs(t *testing.T) {
 		t.Fatal("expected duplicate validator id error")
 	}
 	if err.Error() != `duplicate validator id "dup"` {
+		t.Fatalf("expected duplicate id error, got %v", err)
+	}
+}
+
+func TestSelectEpochValidatorsRejectsDuplicateValidatorIDsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	policy := baselineEpochSelectionPolicy()
+	duplicateA := newCandidate("Dup-Validator", "op-a", "asn-a", "us", 100)
+	duplicateB := newCandidate(" dup-validator ", "op-b", "asn-b", "eu", 90)
+
+	_, err := SelectEpochValidators(policy, []EpochValidatorCandidate{duplicateA, duplicateB})
+	if err == nil {
+		t.Fatal("expected duplicate validator id error for case/whitespace variant")
+	}
+	if !strings.Contains(err.Error(), "duplicate validator id") {
 		t.Fatalf("expected duplicate id error, got %v", err)
 	}
 }

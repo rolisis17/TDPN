@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -8,6 +9,73 @@ import (
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 )
+
+type failSafePenaltyStore struct {
+	evidence  map[string]types.SlashEvidence
+	penalties map[string]types.PenaltyDecision
+
+	failEvidenceUpserts int
+	failPenaltyUpserts  int
+}
+
+func newFailSafePenaltyStore() *failSafePenaltyStore {
+	return &failSafePenaltyStore{
+		evidence:  make(map[string]types.SlashEvidence),
+		penalties: make(map[string]types.PenaltyDecision),
+	}
+}
+
+func (s *failSafePenaltyStore) UpsertEvidence(record types.SlashEvidence) {
+	s.evidence[record.EvidenceID] = record
+}
+
+func (s *failSafePenaltyStore) UpsertEvidenceWithError(record types.SlashEvidence) error {
+	if s.failEvidenceUpserts > 0 {
+		s.failEvidenceUpserts--
+		return errors.New("forced evidence write failure")
+	}
+	s.UpsertEvidence(record)
+	return nil
+}
+
+func (s *failSafePenaltyStore) GetEvidence(evidenceID string) (types.SlashEvidence, bool) {
+	record, ok := s.evidence[evidenceID]
+	return record, ok
+}
+
+func (s *failSafePenaltyStore) ListEvidence() []types.SlashEvidence {
+	out := make([]types.SlashEvidence, 0, len(s.evidence))
+	for _, record := range s.evidence {
+		out = append(out, record)
+	}
+	return out
+}
+
+func (s *failSafePenaltyStore) UpsertPenalty(record types.PenaltyDecision) {
+	s.penalties[record.PenaltyID] = record
+}
+
+func (s *failSafePenaltyStore) UpsertPenaltyWithError(record types.PenaltyDecision) error {
+	if s.failPenaltyUpserts > 0 {
+		s.failPenaltyUpserts--
+		return errors.New("forced penalty write failure")
+	}
+	s.UpsertPenalty(record)
+	return nil
+}
+
+func (s *failSafePenaltyStore) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {
+	record, ok := s.penalties[penaltyID]
+	return record, ok
+}
+
+func (s *failSafePenaltyStore) ListPenalties() []types.PenaltyDecision {
+	out := make([]types.PenaltyDecision, 0, len(s.penalties))
+	for _, record := range s.penalties {
+		out = append(out, record)
+	}
+	return out
+}
 
 func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	t.Parallel()
@@ -253,6 +321,37 @@ func TestSubmitEvidenceRejectsEquivalentIncidentUnderDifferentEvidenceID(t *test
 	}
 }
 
+func TestSubmitEvidenceRejectsEquivalentIncidentCaseVariantReplay(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	base := types.SlashEvidence{
+		EvidenceID:    "evidence-submit-case-variant-a",
+		Kind:          types.EvidenceKindObjective,
+		ProviderID:    "Provider-Case-Variant",
+		SessionID:     "Session-Case-Variant",
+		ViolationType: "DOUBLE-SIGN",
+		ProofHash:     "obj://Bucket/Replay/Case-Variant",
+	}
+	if _, err := k.SubmitEvidence(base); err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+
+	caseVariant := base
+	caseVariant.EvidenceID = "evidence-submit-case-variant-b"
+	caseVariant.ProviderID = "provider-case-variant"
+	caseVariant.SessionID = " session-case-variant "
+	caseVariant.ViolationType = " double-sign "
+	caseVariant.ProofHash = " obj://bucket/replay/case-variant "
+	_, err := k.SubmitEvidence(caseVariant)
+	if err == nil {
+		t.Fatal("expected case-variant duplicate incident submit to fail")
+	}
+	if !strings.Contains(err.Error(), "duplicates already-recorded evidence") {
+		t.Fatalf("expected duplicate incident error, got %v", err)
+	}
+}
+
 func TestSubmitEvidenceConflictOnViolationTypeChange(t *testing.T) {
 	t.Parallel()
 
@@ -470,6 +569,96 @@ func TestApplyPenaltyDefaultsAndEvidenceAdvance(t *testing.T) {
 	}
 	if evidenceAfter.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf("expected evidence status %q after penalty, got %q", chaintypes.ReconciliationConfirmed, evidenceAfter.Status)
+	}
+}
+
+func TestApplyPenaltyFailsSafeWhenEvidenceAdvanceWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := newFailSafePenaltyStore()
+	evidenceID := "evidence-penalty-failsafe-evidence-write"
+	store.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    evidenceID,
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-failsafe-evidence-write"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
+	})
+
+	k := NewKeeperWithStore(store)
+	store.failEvidenceUpserts = 1
+
+	_, err := k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       "penalty-failsafe-evidence-write",
+		EvidenceID:      evidenceID,
+		SlashBasisPoint: 50,
+	})
+	if err == nil {
+		t.Fatal("expected apply penalty to fail when evidence advancement write fails")
+	}
+	if !strings.Contains(err.Error(), "persist evidence") {
+		t.Fatalf("expected evidence persistence failure, got %v", err)
+	}
+
+	if _, ok := k.GetPenalty("penalty-failsafe-evidence-write"); ok {
+		t.Fatal("expected no penalty to be persisted when evidence advancement write fails")
+	}
+
+	evidenceAfter, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to remain available", evidenceID)
+	}
+	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected evidence status %q to remain unchanged after failed apply, got %q",
+			chaintypes.ReconciliationPending,
+			evidenceAfter.Status,
+		)
+	}
+}
+
+func TestApplyPenaltyRollsBackEvidenceAdvanceWhenPenaltyWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := newFailSafePenaltyStore()
+	evidenceID := "evidence-penalty-failsafe-penalty-write"
+	store.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    evidenceID,
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-failsafe-penalty-write"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
+	})
+
+	k := NewKeeperWithStore(store)
+	store.failPenaltyUpserts = 1
+
+	_, err := k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       "penalty-failsafe-penalty-write",
+		EvidenceID:      evidenceID,
+		SlashBasisPoint: 50,
+	})
+	if err == nil {
+		t.Fatal("expected apply penalty to fail when penalty write fails")
+	}
+	if !strings.Contains(err.Error(), "persist penalty") {
+		t.Fatalf("expected penalty persistence failure, got %v", err)
+	}
+
+	if _, ok := k.GetPenalty("penalty-failsafe-penalty-write"); ok {
+		t.Fatal("expected failed penalty write to leave no stored penalty")
+	}
+
+	evidenceAfter, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to remain available", evidenceID)
+	}
+	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected evidence status %q after rollback, got %q",
+			chaintypes.ReconciliationPending,
+			evidenceAfter.Status,
+		)
 	}
 }
 

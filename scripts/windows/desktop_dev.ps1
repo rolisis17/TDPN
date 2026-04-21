@@ -63,7 +63,7 @@ if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
   throw "missing bootstrap script: $bootstrapScript"
 }
 
-$shouldEnablePolicyBypass = $true
+$shouldEnablePolicyBypass = $false
 if ($PSBoundParameters.ContainsKey("EnablePolicyBypass")) {
   $shouldEnablePolicyBypass = [bool]$EnablePolicyBypass
 }
@@ -104,5 +104,12 @@ if ($shouldEnablePolicyBypass) {
   $invokeArgs += "-EnablePolicyBypass"
 }
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrapScript @invokeArgs
+$bootstrapLaunchArgs = @("-NoLogo", "-NoProfile")
+if ($shouldEnablePolicyBypass) {
+  $bootstrapLaunchArgs += @("-ExecutionPolicy", "Bypass")
+}
+$bootstrapLaunchArgs += @("-File", $bootstrapScript)
+$bootstrapLaunchArgs += $invokeArgs
+
+& powershell.exe @bootstrapLaunchArgs
 exit $LASTEXITCODE

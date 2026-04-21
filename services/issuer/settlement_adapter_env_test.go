@@ -3,6 +3,7 @@ package issuer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +56,20 @@ func assertNoObservedCosmosRequest(t *testing.T, ch <-chan observedCosmosRequest
 		t.Fatalf("expected no cosmos adapter request, got path=%s", got.path)
 	case <-time.After(wait):
 	}
+}
+
+func assertPanicContains(t *testing.T, want string, fn func()) {
+	t.Helper()
+	defer func() {
+		got := recover()
+		if got == nil {
+			t.Fatalf("expected panic containing %q", want)
+		}
+		if want != "" && !strings.Contains(fmt.Sprint(got), want) {
+			t.Fatalf("expected panic containing %q, got %v", want, got)
+		}
+	}()
+	fn()
 }
 
 func TestNewSettlementServiceFromEnvCosmosDefaultSubmitModeHTTP(t *testing.T) {
@@ -112,12 +127,8 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxModeForwardsEnv(t *testing.T) 
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_BROADCAST_PATH", "/custom/txs")
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "tdpn-1")
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "issuer-signer")
-	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
-	secretFile := filepath.Join(t.TempDir(), "issuer_signed_tx_secret.txt")
-	if err := os.WriteFile(secretFile, []byte(" issuer-secret \n"), 0o600); err != nil {
-		t.Fatalf("write signed-tx secret file: %v", err)
-	}
-	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", secretFile)
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "issuer-secret")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", "")
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "issuer-kms-key-1")
 
 	svc := newSettlementServiceFromEnv()
@@ -163,7 +174,7 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxModeForwardsEnv(t *testing.T) 
 	}
 }
 
-func TestNewSettlementServiceFromEnvCosmosSignedTxSecretFileInvalidOrEmptyFallsBack(t *testing.T) {
+func TestNewSettlementServiceFromEnvCosmosSignedTxSecretFileInvalidOrEmptyPanicsByDefault(t *testing.T) {
 	cases := []struct {
 		name       string
 		secretFile string
@@ -186,15 +197,7 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxSecretFileInvalidOrEmptyFallsB
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reqCh := make(chan observedCosmosRequest, 1)
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				b, _ := io.ReadAll(r.Body)
-				_ = r.Body.Close()
-				reqCh <- observedCosmosRequest{
-					path:    r.URL.Path,
-					auth:    r.Header.Get("Authorization"),
-					payload: b,
-				}
 				w.WriteHeader(http.StatusOK)
 			}))
 			defer ts.Close()
@@ -207,26 +210,32 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxSecretFileInvalidOrEmptyFallsB
 			t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
 			t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET_FILE", tc.secretFile)
 			t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_KEY_ID", "issuer-kms-key-1")
-
-			svc := newSettlementServiceFromEnv()
-			reservation := reserveSponsorCreditsForAdapterTest(t, svc, "sres-fallback-"+strings.ReplaceAll(tc.name, " ", "-"))
-			if reservation.Status != settlement.OperationStatusConfirmed {
-				t.Fatalf("expected confirmed reservation in memory-only fallback mode, got %s", reservation.Status)
-			}
-			if reservation.AdapterSubmitted {
-				t.Fatalf("expected no adapter submission in fallback mode")
-			}
-
-			select {
-			case got := <-reqCh:
-				t.Fatalf("expected no cosmos request in fallback mode, got path=%s", got.path)
-			case <-time.After(200 * time.Millisecond):
-			}
+			assertPanicContains(t, "refusing startup", func() {
+				_ = newSettlementServiceFromEnv()
+			})
 		})
 	}
 }
 
-func TestNewSettlementServiceFromEnvCosmosSignedTxMissingCredentialsFallsBack(t *testing.T) {
+func TestNewSettlementServiceFromEnvCosmosSignedTxMissingCredentialsPanicsByDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", ts.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "signed-tx")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "tdpn-1")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+
+	assertPanicContains(t, "refusing startup", func() {
+		_ = newSettlementServiceFromEnv()
+	})
+}
+
+func TestNewSettlementServiceFromEnvCosmosSignedTxMissingCredentialsFallsBackWithDangerousOverride(t *testing.T) {
 	reqCh := make(chan observedCosmosRequest, 1)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -246,21 +255,17 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxMissingCredentialsFallsBack(t 
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_CHAIN_ID", "tdpn-1")
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SIGNER", "")
 	t.Setenv("COSMOS_SETTLEMENT_SIGNED_TX_SECRET", "")
+	t.Setenv(allowDangerousCosmosAdapterFallback, "1")
 
 	svc := newSettlementServiceFromEnv()
-	reservation := reserveSponsorCreditsForAdapterTest(t, svc, "sres-fallback")
+	reservation := reserveSponsorCreditsForAdapterTest(t, svc, "sres-fallback-dangerous")
 	if reservation.Status != settlement.OperationStatusConfirmed {
-		t.Fatalf("expected confirmed reservation in memory-only fallback mode, got %s", reservation.Status)
+		t.Fatalf("expected confirmed reservation in dangerous memory-only fallback mode, got %s", reservation.Status)
 	}
 	if reservation.AdapterSubmitted {
-		t.Fatalf("expected no adapter submission in fallback mode")
+		t.Fatalf("expected no adapter submission in dangerous fallback mode")
 	}
-
-	select {
-	case got := <-reqCh:
-		t.Fatalf("expected no cosmos request in fallback mode, got path=%s", got.path)
-	case <-time.After(200 * time.Millisecond):
-	}
+	assertNoObservedCosmosRequest(t, reqCh, 200*time.Millisecond)
 }
 
 func TestNewSettlementServiceFromEnvCosmosQueueFullDefersWithoutBlocking(t *testing.T) {
@@ -440,7 +445,31 @@ func TestNewSettlementServiceFromEnvCosmosShadowMirrorsSponsorReservationToPrima
 	}
 }
 
-func TestNewSettlementServiceFromEnvCosmosShadowInitFailureDoesNotBreakPrimary(t *testing.T) {
+func TestNewSettlementServiceFromEnvCosmosShadowInitFailurePanicsByDefault(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primaryServer.Close()
+
+	shadowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer shadowServer.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primaryServer.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "primary-api")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowServer.URL)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", "signed-tx")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+
+	assertPanicContains(t, "refusing startup", func() {
+		_ = newSettlementServiceFromEnv()
+	})
+}
+
+func TestNewSettlementServiceFromEnvCosmosShadowInitFailureWithDangerousOverrideDoesNotBreakPrimary(t *testing.T) {
 	primaryReqCh := make(chan observedCosmosRequest, 1)
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -474,6 +503,7 @@ func TestNewSettlementServiceFromEnvCosmosShadowInitFailureDoesNotBreakPrimary(t
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE", "signed-tx")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
+	t.Setenv(allowDangerousCosmosAdapterFallback, "1")
 
 	svc := newSettlementServiceFromEnv()
 	reservation := reserveSponsorCreditsForAdapterTest(t, svc, "sres-shadow-fail-open")
@@ -535,11 +565,6 @@ func TestNewSettlementServiceFromEnvCosmosShadowSignedTxModeUsesShadowEnv(t *tes
 	}))
 	defer shadowServer.Close()
 
-	shadowSecretFile := filepath.Join(t.TempDir(), "shadow_signed_tx_secret.txt")
-	if err := os.WriteFile(shadowSecretFile, []byte(" shadow-secret \n"), 0o600); err != nil {
-		t.Fatalf("write shadow signed-tx secret file: %v", err)
-	}
-
 	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
 	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primaryServer.URL)
 	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "primary-api")
@@ -551,8 +576,8 @@ func TestNewSettlementServiceFromEnvCosmosShadowSignedTxModeUsesShadowEnv(t *tes
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_BROADCAST_PATH", "/shadow/custom/txs")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_CHAIN_ID", "tdpn-shadow-1")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SIGNER", "shadow-signer-1")
-	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "")
-	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", shadowSecretFile)
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET", "shadow-secret")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_SECRET_FILE", "")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_SIGNED_TX_KEY_ID", "shadow-kms-key-1")
 
 	svc := newSettlementServiceFromEnv()

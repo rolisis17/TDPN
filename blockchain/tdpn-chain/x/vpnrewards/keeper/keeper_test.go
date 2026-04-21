@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,6 +9,73 @@ import (
 	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 )
+
+type failSafeDistributionStore struct {
+	accruals      map[string]types.RewardAccrual
+	distributions map[string]types.DistributionRecord
+
+	failAccrualUpserts      int
+	failDistributionUpserts int
+}
+
+func newFailSafeDistributionStore() *failSafeDistributionStore {
+	return &failSafeDistributionStore{
+		accruals:      make(map[string]types.RewardAccrual),
+		distributions: make(map[string]types.DistributionRecord),
+	}
+}
+
+func (s *failSafeDistributionStore) UpsertAccrual(record types.RewardAccrual) {
+	s.accruals[record.AccrualID] = record
+}
+
+func (s *failSafeDistributionStore) UpsertAccrualWithError(record types.RewardAccrual) error {
+	if s.failAccrualUpserts > 0 {
+		s.failAccrualUpserts--
+		return errors.New("forced accrual write failure")
+	}
+	s.UpsertAccrual(record)
+	return nil
+}
+
+func (s *failSafeDistributionStore) GetAccrual(accrualID string) (types.RewardAccrual, bool) {
+	record, ok := s.accruals[accrualID]
+	return record, ok
+}
+
+func (s *failSafeDistributionStore) ListAccruals() []types.RewardAccrual {
+	records := make([]types.RewardAccrual, 0, len(s.accruals))
+	for _, record := range s.accruals {
+		records = append(records, record)
+	}
+	return records
+}
+
+func (s *failSafeDistributionStore) UpsertDistribution(record types.DistributionRecord) {
+	s.distributions[record.DistributionID] = record
+}
+
+func (s *failSafeDistributionStore) UpsertDistributionWithError(record types.DistributionRecord) error {
+	if s.failDistributionUpserts > 0 {
+		s.failDistributionUpserts--
+		return errors.New("forced distribution write failure")
+	}
+	s.UpsertDistribution(record)
+	return nil
+}
+
+func (s *failSafeDistributionStore) GetDistribution(distributionID string) (types.DistributionRecord, bool) {
+	record, ok := s.distributions[distributionID]
+	return record, ok
+}
+
+func (s *failSafeDistributionStore) ListDistributions() []types.DistributionRecord {
+	records := make([]types.DistributionRecord, 0, len(s.distributions))
+	for _, record := range s.distributions {
+		records = append(records, record)
+	}
+	return records
+}
 
 func TestKeeperAccrualUpsertAndGet(t *testing.T) {
 	t.Parallel()
@@ -286,6 +354,102 @@ func TestKeeperRecordDistributionDefaultsAndIdempotency(t *testing.T) {
 	}
 	if idempotent != recorded {
 		t.Fatalf("expected explicit submitted result to match recorded distribution, got %+v vs %+v", idempotent, recorded)
+	}
+}
+
+func TestKeeperRecordDistributionFailsSafeWhenAccrualAdvanceWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := newFailSafeDistributionStore()
+	k := NewKeeperWithStore(store)
+
+	accrual, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "acc-failsafe-accrual-write",
+		SessionID:      "sess-failsafe-accrual-write",
+		ProviderID:     "provider-failsafe-accrual-write",
+		Amount:         20,
+		OperationState: chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	store.failAccrualUpserts = 1
+
+	_, err = k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-failsafe-accrual-write",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-failsafe-accrual-write",
+	})
+	if err == nil {
+		t.Fatal("expected RecordDistribution to fail when accrual advancement write fails")
+	}
+	if !strings.Contains(err.Error(), "persist accrual") {
+		t.Fatalf("expected accrual persistence failure, got %v", err)
+	}
+
+	if _, ok := k.GetDistribution("dist-failsafe-accrual-write"); ok {
+		t.Fatal("expected no distribution to be persisted when accrual advancement write fails")
+	}
+
+	accrualAfter, ok := k.GetAccrual(accrual.AccrualID)
+	if !ok {
+		t.Fatalf("expected accrual %q to remain available", accrual.AccrualID)
+	}
+	if accrualAfter.OperationState != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected accrual state %q to remain unchanged after failed record, got %q",
+			chaintypes.ReconciliationPending,
+			accrualAfter.OperationState,
+		)
+	}
+}
+
+func TestKeeperRecordDistributionRollsBackAccrualAdvanceWhenDistributionWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := newFailSafeDistributionStore()
+	k := NewKeeperWithStore(store)
+
+	accrual, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "acc-failsafe-distribution-write",
+		SessionID:      "sess-failsafe-distribution-write",
+		ProviderID:     "provider-failsafe-distribution-write",
+		Amount:         20,
+		OperationState: chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	store.failDistributionUpserts = 1
+
+	_, err = k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-failsafe-distribution-write",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-failsafe-distribution-write",
+	})
+	if err == nil {
+		t.Fatal("expected RecordDistribution to fail when distribution write fails")
+	}
+	if !strings.Contains(err.Error(), "persist distribution") {
+		t.Fatalf("expected distribution persistence failure, got %v", err)
+	}
+
+	if _, ok := k.GetDistribution("dist-failsafe-distribution-write"); ok {
+		t.Fatal("expected failed distribution write to leave no stored distribution")
+	}
+
+	accrualAfter, ok := k.GetAccrual(accrual.AccrualID)
+	if !ok {
+		t.Fatalf("expected accrual %q to remain available", accrual.AccrualID)
+	}
+	if accrualAfter.OperationState != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected accrual state %q after rollback, got %q",
+			chaintypes.ReconciliationPending,
+			accrualAfter.OperationState,
+		)
 	}
 }
 

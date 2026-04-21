@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -246,6 +247,26 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingPaymentProofRequirement(t 
 	}
 	if err.Error() != "BETA_STRICT_MODE requires ISSUER_REQUIRE_PAYMENT_PROOF=1" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHandleCriticalStartupLoadErrorFailsClosedInStrictMode(t *testing.T) {
+	s := &Service{betaStrict: true}
+	loadErr := errors.New("read failed")
+	err := s.handleCriticalStartupLoadError("revocations", loadErr)
+	if err == nil {
+		t.Fatalf("expected strict startup load failure")
+	}
+	if !strings.Contains(err.Error(), "strict mode") {
+		t.Fatalf("expected strict mode error, got %v", err)
+	}
+}
+
+func TestHandleCriticalStartupLoadErrorWarnsOutsideStrictMode(t *testing.T) {
+	s := &Service{}
+	loadErr := errors.New("read failed")
+	if err := s.handleCriticalStartupLoadError("revocations", loadErr); err != nil {
+		t.Fatalf("expected non-strict startup load warning path, got %v", err)
 	}
 }
 

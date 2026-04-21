@@ -112,9 +112,11 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	if _, ok := k.store.GetEvidence(normalized.EvidenceID); !ok {
+	evidence, ok := k.store.GetEvidence(normalized.EvidenceID)
+	if !ok {
 		return types.PenaltyDecision{}, missingEvidenceError(normalized.EvidenceID)
 	}
+	normalizedEvidence := normalizeEvidence(evidence)
 
 	existing, ok := k.store.GetPenalty(normalized.PenaltyID)
 	if ok {
@@ -122,10 +124,7 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		if !penaltyRecordsEqual(normalizedExisting, normalized) {
 			return types.PenaltyDecision{}, conflictError("penalty", normalized.PenaltyID)
 		}
-		if err := k.upsertPenaltyLocked(normalizedExisting); err != nil {
-			return types.PenaltyDecision{}, err
-		}
-		if err := k.advanceEvidenceForPenaltyLocked(normalizedExisting.EvidenceID); err != nil {
+		if err := k.persistPenaltyWithEvidenceAdvanceLocked(normalizedExisting, normalizedEvidence); err != nil {
 			return types.PenaltyDecision{}, err
 		}
 		return normalizedExisting, nil
@@ -135,10 +134,7 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		return types.PenaltyDecision{}, penaltyEvidenceConflictError(normalized.EvidenceID, conflictingPenalty.PenaltyID)
 	}
 
-	if err := k.upsertPenaltyLocked(normalized); err != nil {
-		return types.PenaltyDecision{}, err
-	}
-	if err := k.advanceEvidenceForPenaltyLocked(normalized.EvidenceID); err != nil {
+	if err := k.persistPenaltyWithEvidenceAdvanceLocked(normalized, normalizedEvidence); err != nil {
 		return types.PenaltyDecision{}, err
 	}
 	return normalized, nil
@@ -161,20 +157,36 @@ func (k *Keeper) ListPenalties() []types.PenaltyDecision {
 	return penalties
 }
 
-func (k *Keeper) advanceEvidenceForPenaltyLocked(evidenceID string) error {
-	evidence, ok := k.store.GetEvidence(evidenceID)
-	if !ok {
-		return nil
+func (k *Keeper) persistPenaltyWithEvidenceAdvanceLocked(
+	penalty types.PenaltyDecision,
+	evidenceBefore types.SlashEvidence,
+) error {
+	evidenceAfter := advanceEvidenceStatusForPenalty(evidenceBefore)
+	evidenceChanged := !slashEvidenceRecordsEqual(evidenceBefore, evidenceAfter)
+
+	if evidenceChanged {
+		if err := k.upsertEvidenceLocked(evidenceAfter); err != nil {
+			return err
+		}
 	}
 
-	normalized := normalizeEvidence(evidence)
-	if normalized.Status == chaintypes.ReconciliationPending || normalized.Status == chaintypes.ReconciliationSubmitted {
-		normalized.Status = chaintypes.ReconciliationConfirmed
-	}
-	if err := k.upsertEvidenceLocked(normalized); err != nil {
+	if err := k.upsertPenaltyLocked(penalty); err != nil {
+		if evidenceChanged {
+			if rollbackErr := k.upsertEvidenceLocked(evidenceBefore); rollbackErr != nil {
+				return fmt.Errorf("%w; rollback evidence %q failed: %v", err, evidenceBefore.EvidenceID, rollbackErr)
+			}
+		}
 		return err
 	}
 	return nil
+}
+
+func advanceEvidenceStatusForPenalty(record types.SlashEvidence) types.SlashEvidence {
+	normalized := normalizeEvidence(record)
+	if normalized.Status == chaintypes.ReconciliationPending || normalized.Status == chaintypes.ReconciliationSubmitted {
+		normalized.Status = chaintypes.ReconciliationConfirmed
+	}
+	return normalized
 }
 
 func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyDecision, bool) {
@@ -251,11 +263,7 @@ func slashEvidenceRecordsEqual(a, b types.SlashEvidence) bool {
 }
 
 func evidenceIncidentEqual(a, b types.SlashEvidence) bool {
-	return a.Kind == b.Kind &&
-		a.ViolationType == b.ViolationType &&
-		a.ProviderID == b.ProviderID &&
-		a.SessionID == b.SessionID &&
-		a.ProofHash == b.ProofHash
+	return types.CanonicalObjectiveEvidenceIdentity(a) == types.CanonicalObjectiveEvidenceIdentity(b)
 }
 
 func penaltyRecordsEqual(a, b types.PenaltyDecision) bool {

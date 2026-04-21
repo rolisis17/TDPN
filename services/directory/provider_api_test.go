@@ -53,6 +53,8 @@ func TestVerifyProviderTokenCachesIssuerPubKeysOnRepeatedFailures(t *testing.T) 
 }
 
 func TestHandleProviderRelayUpsertAcceptsProviderToken(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("directory keygen: %v", err)
@@ -286,6 +288,8 @@ func TestHandleProviderRelayUpsertRejectsUnanchoredNonLocalIssuerURL(t *testing.
 }
 
 func TestHandleProviderRelayUpsertAcceptsAnchoredProviderIssuerKey(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("directory keygen: %v", err)
@@ -552,6 +556,137 @@ func TestHandleProviderRelayUpsertRejectsMismatchedCNFBinding(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "cnf_ed25519") {
 		t.Fatalf("expected cnf binding error, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertRequiresCNFByDefault(t *testing.T) {
+	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("directory keygen: %v", err)
+	}
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	issuerID := "issuer-local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  issuerID,
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+
+	s := &Service{
+		operatorID:          "op-local",
+		pubKey:              dirPub,
+		privKey:             dirPriv,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:      []string{"127.0.0.1:51820"},
+		endpointRotateSec:   30,
+		providerIssuerURLs:  []string{issuerURL},
+		providerRelayMaxTTL: 3 * time.Minute,
+		providerRelays:      make(map[string]proto.RelayDescriptor),
+		issuerTrustedKeys:   []ed25519.PublicKey{issuerPub},
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     issuerID,
+		Audience:   "provider",
+		Subject:    "provider-op-missing-cnf",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-missing-cnf",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:    "exit-provider-missing-cnf",
+		Role:       "exit",
+		PubKey:     base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:   "127.0.0.1:52821",
+		ControlURL: "http://127.0.0.1:9284",
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing provider token cnf_ed25519, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "cnf_ed25519 missing") {
+		t.Fatalf("expected missing cnf error, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertDangerousOverrideAllowsMissingCNFAndProof(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("directory keygen: %v", err)
+	}
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	issuerID := "issuer-local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  issuerID,
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+
+	s := &Service{
+		operatorID:          "op-local",
+		pubKey:              dirPub,
+		privKey:             dirPriv,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:      []string{"127.0.0.1:51820"},
+		endpointRotateSec:   30,
+		providerIssuerURLs:  []string{issuerURL},
+		providerRelayMaxTTL: 3 * time.Minute,
+		providerRelays:      make(map[string]proto.RelayDescriptor),
+		issuerTrustedKeys:   []ed25519.PublicKey{issuerPub},
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     issuerID,
+		Audience:   "provider",
+		Subject:    "provider-op-dangerous-bypass",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-dangerous-bypass",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:    "exit-provider-dangerous-bypass",
+		Role:       "exit",
+		PubKey:     base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:   "127.0.0.1:52821",
+		ControlURL: "http://127.0.0.1:9284",
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected dangerous override to allow missing cnf/proof, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -987,6 +1122,8 @@ func TestHandleProviderRelayUpsertRejectsLowTierExitProvider(t *testing.T) {
 }
 
 func TestHandleProviderRelayUpsertAllowsTier1EntryProvider(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("issuer keygen: %v", err)
@@ -1042,6 +1179,8 @@ func TestHandleProviderRelayUpsertAllowsTier1EntryProvider(t *testing.T) {
 }
 
 func TestHandleProviderRelayUpsertRejectsOverOperatorRelayLimit(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("issuer keygen: %v", err)
@@ -1119,6 +1258,8 @@ func TestHandleProviderRelayUpsertRejectsOverOperatorRelayLimit(t *testing.T) {
 }
 
 func TestHandleProviderRelayUpsertRejectsDualRoleWhenSplitRolesEnabled(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("issuer keygen: %v", err)
@@ -1199,6 +1340,8 @@ func TestHandleProviderRelayUpsertRejectsDualRoleWhenSplitRolesEnabled(t *testin
 }
 
 func TestHandleProviderRelayUpsertRejectsTakeoverByDifferentOperator(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("issuer keygen: %v", err)
@@ -1291,6 +1434,8 @@ func TestHandleProviderRelayUpsertRejectsTakeoverByDifferentOperator(t *testing.
 }
 
 func TestHandleProviderRelayUpsertAllowsSameOwnerUpdate(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("issuer keygen: %v", err)

@@ -14,6 +14,7 @@ CI_LOCAL_STATE_DIR="$(mktemp -d)"
 declare -a CI_LOCAL_TRACKED_STATE_FILES=()
 CI_LOCAL_DEMO_LOG=""
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  ci_local_tracked_state_listing="$(git ls-files 'data/issuer*.json' 'deploy/data/issuer*.json' 2>/dev/null)"
   while IFS= read -r rel; do
     [[ -z "$rel" ]] && continue
     [[ -f "$rel" ]] || continue
@@ -21,7 +22,7 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
     CI_LOCAL_TRACKED_STATE_FILES+=("$rel")
     mkdir -p "$CI_LOCAL_STATE_DIR/orig/$(dirname "$rel")"
     cp -p "$rel" "$CI_LOCAL_STATE_DIR/orig/$rel"
-  done < <(git ls-files 'data/issuer*.json' 'deploy/data/issuer*.json' 2>/dev/null || true)
+  done <<<"$ci_local_tracked_state_listing"
 fi
 
 ci_local_restore_tracked_state() {
@@ -361,7 +362,15 @@ echo "[ci] wg-only stack wiring integration"
 
 echo "[ci] internal topology smoke"
 CI_LOCAL_DEMO_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_demo.XXXXXX.log")"
-DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >"$CI_LOCAL_DEMO_LOG" 2>&1 || true
+set +e
+DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >"$CI_LOCAL_DEMO_LOG" 2>&1
+ci_local_demo_rc=$?
+set -e
+if [[ "$ci_local_demo_rc" -ne 0 && "$ci_local_demo_rc" -ne 124 && "$ci_local_demo_rc" -ne 137 ]]; then
+  echo "[ci] internal topology smoke failed with unexpected exit code: ${ci_local_demo_rc}"
+  cat "$CI_LOCAL_DEMO_LOG"
+  exit "$ci_local_demo_rc"
+fi
 if ! rg -q "exit accepted opaque packet" "$CI_LOCAL_DEMO_LOG"; then
   echo "[ci] missing expected packet acceptance log"
   cat "$CI_LOCAL_DEMO_LOG"

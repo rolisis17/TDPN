@@ -31,6 +31,24 @@ func NormalizeViolationType(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+// CanonicalObjectiveEvidenceIdentity returns a canonical identity key for
+// machine-verifiable incidents so equivalent case/whitespace variants
+// cannot be replayed under a different EvidenceID.
+func CanonicalObjectiveEvidenceIdentity(record SlashEvidence) string {
+	parts := []string{
+		canonicalObjectiveIdentityToken(record.Kind),
+		canonicalObjectiveIdentityToken(record.ProviderID),
+		canonicalObjectiveIdentityToken(record.SessionID),
+		canonicalObjectiveIdentityToken(NormalizeViolationType(record.ViolationType)),
+		canonicalObjectiveIdentityToken(record.ProofHash),
+	}
+	return strings.Join(parts, "|")
+}
+
+func canonicalObjectiveIdentityToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 // SlashEvidence represents objective evidence submitted for deterministic slashing.
 type SlashEvidence struct {
 	EvidenceID      string

@@ -821,7 +821,7 @@ function Get-RecommendedCommands {
     }
   }
 
-  Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
+  Add-UniqueValue -List $commands -Value "powershell -NoProfile -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm install"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npx --yes create-vite@latest"
@@ -829,7 +829,7 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_shell.cmd npm run tauri -- dev"
   Add-UniqueValue -List $commands -Value "npm.cmd install"
   Add-UniqueValue -List $commands -Value "npm.cmd run tauri -- dev"
-  Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
+  Add-UniqueValue -List $commands -Value "powershell -NoProfile -File .\scripts\windows\desktop_one_click.ps1 -EnablePolicyBypass"
 
   return @($commands.ToArray())
 }
