@@ -2722,7 +2722,12 @@ func (s *Service) fetchRemoteManifestWithPolicy(ctx context.Context, manifestURL
 }
 
 func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {
-	client := &http.Client{Timeout: gpmManifestHTTPTimeout}
+	client := &http.Client{
+		Timeout: gpmManifestHTTPTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return errors.New("manifest endpoint redirect is not allowed")
+		},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return gpmBootstrapManifest{}, false, nil, "", err
@@ -2752,12 +2757,11 @@ func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (
 	manifest = normalizeBootstrapManifest(manifest)
 	signatureVerified := false
 	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
+	ed25519PublicKey := strings.TrimSpace(s.gpmManifestEd25519PublicKey)
 	requireSignature := s.gpmManifestRequireSignature
-	if requireSignature && hmacKey == "" {
-		return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest signature verification key is required by policy")
-	}
-	receivedSignature := strings.TrimSpace(resp.Header.Get("X-GPM-Signature"))
+
 	if hmacKey != "" {
+		receivedSignature := strings.TrimSpace(resp.Header.Get("X-GPM-Signature"))
 		if receivedSignature == "" {
 			return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest signature header missing")
 		}
@@ -2766,8 +2770,23 @@ func (s *Service) fetchRemoteManifest(ctx context.Context, manifestURL string) (
 			return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest signature verification failed")
 		}
 		signatureVerified = true
+		return manifest, signatureVerified, body, receivedSignature, nil
 	}
-	return manifest, signatureVerified, body, receivedSignature, nil
+	if ed25519PublicKey != "" {
+		receivedSignature := manifestEd25519SignatureFromHeaders(resp.Header)
+		if receivedSignature == "" {
+			return gpmBootstrapManifest{}, false, nil, "", errors.New("manifest ed25519 signature header missing (expected X-GPM-Signature-Ed25519 or X-GPM-Signature)")
+		}
+		if err := verifyManifestEd25519Signature(body, receivedSignature, ed25519PublicKey); err != nil {
+			return gpmBootstrapManifest{}, false, nil, "", err
+		}
+		signatureVerified = true
+		return manifest, signatureVerified, body, receivedSignature, nil
+	}
+	if requireSignature {
+		return gpmBootstrapManifest{}, false, nil, "", manifestSignatureVerifierKeyRequiredError()
+	}
+	return manifest, signatureVerified, body, "", nil
 }
 
 func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
@@ -2861,6 +2880,109 @@ func computeManifestHMAC(body []byte, secret string) string {
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
+func (s *Service) hasManifestHMACVerifierConfigured() bool {
+	return strings.TrimSpace(s.gpmManifestHMACKey) != ""
+}
+
+func (s *Service) hasManifestEd25519VerifierConfigured() bool {
+	return strings.TrimSpace(s.gpmManifestEd25519PublicKey) != ""
+}
+
+func (s *Service) hasManifestSignatureVerifierConfigured() bool {
+	return s.hasManifestHMACVerifierConfigured() || s.hasManifestEd25519VerifierConfigured()
+}
+
+func (s *Service) manifestSignatureVerifierTelemetry() (string, string) {
+	if s.hasManifestHMACVerifierConfigured() {
+		return "hmac", normalizeManifestSignatureVerifierSource(s.gpmManifestHMACKeySource)
+	}
+	if s.hasManifestEd25519VerifierConfigured() {
+		return "ed25519", normalizeManifestSignatureVerifierSource(s.gpmManifestEd25519PublicKeySource)
+	}
+	if s.gpmManifestRequireSignature {
+		return "required_unconfigured", "none"
+	}
+	return "compatibility", "none"
+}
+
+func normalizeManifestSignatureVerifierSource(raw string) string {
+	source := strings.TrimSpace(raw)
+	if source == "" || source == "default" {
+		return "configured"
+	}
+	return source
+}
+
+func manifestSignatureVerifierKeyRequiredError() error {
+	return errors.New(
+		"manifest signature verification key is required by policy (set GPM_BOOTSTRAP_MANIFEST_HMAC_KEY or GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY; legacy aliases: TDPN_BOOTSTRAP_MANIFEST_HMAC_KEY, TDPN_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY)",
+	)
+}
+
+func manifestEd25519SignatureFromHeaders(headers http.Header) string {
+	if headers == nil {
+		return ""
+	}
+	signature := strings.TrimSpace(headers.Get("X-GPM-Signature-Ed25519"))
+	if signature != "" {
+		return signature
+	}
+	return strings.TrimSpace(headers.Get("X-GPM-Signature"))
+}
+
+func decodeManifestProofMaterialStrict(raw string, expectedLen int, fieldName string) ([]byte, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, fmt.Errorf("%s is required", fieldName)
+	}
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return nil, fmt.Errorf("%s contains invalid whitespace/control characters", fieldName)
+		}
+	}
+	return decodeGPMAuthProofMaterial(value, expectedLen, fieldName)
+}
+
+func decodeManifestEd25519PublicKey(raw string) (ed25519.PublicKey, error) {
+	decoded, err := decodeManifestProofMaterialStrict(raw, ed25519.PublicKeySize, "manifest ed25519 public key")
+	if err != nil {
+		return nil, err
+	}
+	return ed25519.PublicKey(decoded), nil
+}
+
+func decodeManifestEd25519Signature(raw string) ([]byte, error) {
+	return decodeManifestProofMaterialStrict(raw, ed25519.SignatureSize, "manifest signature")
+}
+
+func verifyManifestEd25519Signature(manifestBody []byte, signatureRaw string, publicKeyRaw string) error {
+	publicKey, err := decodeManifestEd25519PublicKey(publicKeyRaw)
+	if err != nil {
+		return err
+	}
+	signature, err := decodeManifestEd25519Signature(signatureRaw)
+	if err != nil {
+		return err
+	}
+	if !ed25519.Verify(publicKey, manifestBody, signature) {
+		return errors.New("manifest ed25519 signature verification failed")
+	}
+	return nil
+}
+
+func decodeCachedManifestSignedPayloadEvidence(cache gpmBootstrapManifestCacheFile) ([]byte, string, error) {
+	payloadBase64 := strings.TrimSpace(cache.ManifestPayloadBase64)
+	signature := strings.TrimSpace(cache.ManifestSignature)
+	if payloadBase64 == "" || signature == "" {
+		return nil, "", errors.New("cached manifest is missing signed payload evidence")
+	}
+	payload, err := base64.StdEncoding.DecodeString(payloadBase64)
+	if err != nil {
+		return nil, "", fmt.Errorf("cached manifest payload decode failed: %w", err)
+	}
+	return payload, signature, nil
+}
+
 func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, signatureVerified bool, manifestBody []byte, manifestSignature string) error {
 	cachePath := strings.TrimSpace(s.gpmManifestCache)
 	if cachePath == "" {
@@ -2879,11 +3001,10 @@ func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, sig
 		SignatureVerified: signatureVerified,
 		Manifest:          manifest,
 	}
-	if strings.TrimSpace(s.gpmManifestHMACKey) == "" && !s.gpmManifestRequireSignature {
+	if !s.hasManifestSignatureVerifierConfigured() && !s.gpmManifestRequireSignature {
 		cache.SignatureVerified = true
 	}
-	hmacKeyConfigured := strings.TrimSpace(s.gpmManifestHMACKey) != ""
-	if hmacKeyConfigured && signatureVerified && len(manifestBody) > 0 && strings.TrimSpace(manifestSignature) != "" {
+	if s.hasManifestSignatureVerifierConfigured() && signatureVerified && len(manifestBody) > 0 && strings.TrimSpace(manifestSignature) != "" {
 		cache.ManifestPayloadBase64 = base64.StdEncoding.EncodeToString(manifestBody)
 		cache.ManifestSignature = strings.TrimSpace(manifestSignature)
 	}
@@ -2957,25 +3078,27 @@ func (s *Service) readTrustedBootstrapManifestCache() (gpmTrustedBootstrapManife
 
 func (s *Service) verifyCachedManifestSignature(cache gpmBootstrapManifestCacheFile) (bool, error) {
 	hmacKey := strings.TrimSpace(s.gpmManifestHMACKey)
-	if hmacKey == "" {
+	ed25519PublicKey := strings.TrimSpace(s.gpmManifestEd25519PublicKey)
+	if hmacKey == "" && ed25519PublicKey == "" {
 		if s.gpmManifestRequireSignature {
-			return false, errors.New("manifest signature verification key is required by policy")
+			return false, manifestSignatureVerifierKeyRequiredError()
 		}
 		return cache.SignatureVerified, nil
 	}
 
-	payloadBase64 := strings.TrimSpace(cache.ManifestPayloadBase64)
-	signature := strings.TrimSpace(cache.ManifestSignature)
-	if payloadBase64 == "" || signature == "" {
-		return false, errors.New("cached manifest is missing signed payload evidence")
-	}
-	payload, err := base64.StdEncoding.DecodeString(payloadBase64)
+	payload, signature, err := decodeCachedManifestSignedPayloadEvidence(cache)
 	if err != nil {
-		return false, fmt.Errorf("cached manifest payload decode failed: %w", err)
+		return false, err
 	}
-	expected := computeManifestHMAC(payload, hmacKey)
-	if !subtleEqual(signature, expected) {
-		return false, errors.New("cached manifest signature verification failed")
+	if hmacKey != "" {
+		expected := computeManifestHMAC(payload, hmacKey)
+		if !subtleEqual(signature, expected) {
+			return false, errors.New("cached manifest signature verification failed")
+		}
+	} else {
+		if err := verifyManifestEd25519Signature(payload, signature, ed25519PublicKey); err != nil {
+			return false, fmt.Errorf("cached manifest signature verification failed: %w", err)
+		}
 	}
 
 	var payloadManifest gpmBootstrapManifest

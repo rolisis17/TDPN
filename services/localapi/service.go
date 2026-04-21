@@ -90,6 +90,9 @@ type Service struct {
 	gpmManifestRemoteRefreshIntvl           time.Duration
 	gpmManifestRemoteRefreshSrc             string
 	gpmManifestHMACKey                      string
+	gpmManifestHMACKeySource                string
+	gpmManifestEd25519PublicKey             string
+	gpmManifestEd25519PublicKeySource       string
 	gpmRoleDefault                          string
 	gpmApprovalToken                        string
 	gpmOperatorApprovalRequireSession       bool
@@ -293,6 +296,15 @@ func New() *Service {
 	gpmManifestHMACKey := gpmManifestHMACKeyRaw
 	if !gpmManifestHMACKeySet {
 		gpmManifestHMACKey = ""
+	}
+	gpmManifestEd25519PublicKeyRaw, gpmManifestEd25519PublicKeySource, gpmManifestEd25519PublicKeySet := preferredEnvValueWithSource(
+		"GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY",
+		"TDPN_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY",
+	)
+	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY", gpmManifestEd25519PublicKeySource)
+	gpmManifestEd25519PublicKey := gpmManifestEd25519PublicKeyRaw
+	if !gpmManifestEd25519PublicKeySet {
+		gpmManifestEd25519PublicKey = ""
 	}
 	gpmManifestRequireHTTPSRaw, gpmManifestRequireHTTPSSource, gpmManifestRequireHTTPSSet := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS",
@@ -511,6 +523,9 @@ func New() *Service {
 		gpmManifestRemoteRefreshIntvl:           time.Duration(gpmManifestRemoteRefreshIntervalSec) * time.Second,
 		gpmManifestRemoteRefreshSrc:             gpmManifestRemoteRefreshSource,
 		gpmManifestHMACKey:                      gpmManifestHMACKey,
+		gpmManifestHMACKeySource:                strings.TrimSpace(gpmManifestHMACKeySource),
+		gpmManifestEd25519PublicKey:             gpmManifestEd25519PublicKey,
+		gpmManifestEd25519PublicKeySource:       strings.TrimSpace(gpmManifestEd25519PublicKeySource),
 		gpmRoleDefault:                          gpmRoleDefault,
 		gpmApprovalToken:                        gpmApprovalToken,
 		gpmOperatorApprovalRequireSession:       gpmOperatorApprovalRequireSession,
@@ -725,6 +740,7 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if manifestRequireSigSource == "" {
 		manifestRequireSigSource = "default"
 	}
+	manifestSignatureMode, manifestSignatureKeySource := s.manifestSignatureVerifierTelemetry()
 	legacyEnvAliasesActive := append([]string{}, s.gpmLegacyEnvAliasesActive...)
 	legacyEnvAliasWarnings := append([]string{}, s.gpmLegacyEnvAliasWarnings...)
 	legacyEnvAliasWarning := ""
@@ -749,6 +765,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_manifest_require_https_policy_source":               manifestRequireHTTPSSource,
 			"gpm_manifest_require_signature":                         s.gpmManifestRequireSignature,
 			"gpm_manifest_require_signature_policy_source":           manifestRequireSigSource,
+			"gpm_manifest_signature_mode":                            manifestSignatureMode,
+			"gpm_manifest_signature_key_source":                      manifestSignatureKeySource,
+			"gpm_manifest_hmac_key_configured":                       strings.TrimSpace(s.gpmManifestHMACKey) != "",
+			"gpm_manifest_ed25519_public_key_configured":             strings.TrimSpace(s.gpmManifestEd25519PublicKey) != "",
 			"gpm_auth_verify_policy_mode":                            authVerifyPolicyMode,
 			"gpm_auth_verify_policy_source":                          authVerifyPolicySource,
 			"gpm_auth_verify_require_command":                        s.gpmAuthVerifyRequireCommand,

@@ -7786,6 +7786,297 @@ func TestGPMClientRegisterRejectsPinnedManifestHTTPURLWhenHTTPSRequired(t *testi
 	}
 }
 
+func TestFetchRemoteManifestSucceedsWithEd25519Signature(t *testing.T) {
+	now := time.Now().UTC()
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{"https://directory.ed25519.globalprivatemesh.example:8081"},
+	}
+	manifestBody, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("ed25519 keygen: %v", err)
+	}
+	signature := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, manifestBody))
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GPM-Signature-Ed25519", signature)
+		_, _ = w.Write(manifestBody)
+	}))
+	t.Cleanup(manifestServer.Close)
+
+	svc := &Service{
+		gpmManifestEd25519PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+	}
+	gotManifest, signatureVerified, _, _, err := svc.fetchRemoteManifest(context.Background(), manifestServer.URL)
+	if err != nil {
+		t.Fatalf("fetchRemoteManifest: %v", err)
+	}
+	if !signatureVerified {
+		t.Fatalf("signatureVerified=%t want=true", signatureVerified)
+	}
+	if len(gotManifest.BootstrapDirectories) != 1 || gotManifest.BootstrapDirectories[0] != manifest.BootstrapDirectories[0] {
+		t.Fatalf("bootstrap_directories=%v want=%v", gotManifest.BootstrapDirectories, manifest.BootstrapDirectories)
+	}
+}
+
+func TestFetchRemoteManifestFailsClosedWithEd25519SignatureMissingOrInvalid(t *testing.T) {
+	now := time.Now().UTC()
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{"https://directory.ed25519-fail.globalprivatemesh.example:8081"},
+	}
+	manifestBody, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("ed25519 keygen: %v", err)
+	}
+	invalidSignature := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(`{"tampered":true}`)))
+
+	tests := []struct {
+		name          string
+		headerName    string
+		headerValue   string
+		wantErrSubstr string
+	}{
+		{
+			name:          "missing signature header",
+			wantErrSubstr: "manifest ed25519 signature header missing",
+		},
+		{
+			name:          "invalid signature header",
+			headerName:    "X-GPM-Signature-Ed25519",
+			headerValue:   invalidSignature,
+			wantErrSubstr: "manifest ed25519 signature verification failed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.headerName != "" {
+					w.Header().Set(tc.headerName, tc.headerValue)
+				}
+				_, _ = w.Write(manifestBody)
+			}))
+			t.Cleanup(manifestServer.Close)
+
+			svc := &Service{
+				gpmManifestEd25519PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+			}
+			_, _, _, _, err := svc.fetchRemoteManifest(context.Background(), manifestServer.URL)
+			if err == nil {
+				t.Fatalf("expected ed25519 signature validation failure")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Fatalf("error=%q want contains %q", err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
+}
+
+func TestReadBootstrapManifestCacheSucceedsWithEd25519SignedPayloadEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{"https://directory.cache-ed25519-ok.globalprivatemesh.example:8081"},
+	}
+	manifestPayload, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("ed25519 keygen: %v", err)
+	}
+	manifestSignature := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, manifestPayload))
+
+	cache := gpmBootstrapManifestCacheFile{
+		Version:               1,
+		FetchedAtUTC:          now.Format(time.RFC3339),
+		SourceURL:             "https://bootstrap-cache-ed25519.globalprivatemesh.example/v1/bootstrap/manifest",
+		SignatureVerified:     false,
+		ManifestSignature:     manifestSignature,
+		ManifestPayloadBase64: base64.StdEncoding.EncodeToString(manifestPayload),
+		Manifest:              manifest,
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	cachePath := filepath.Join(t.TempDir(), "manifest_cache_ed25519_ok.json")
+	if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	svc := &Service{
+		gpmManifestCache:            cachePath,
+		gpmManifestMaxAge:           24 * time.Hour,
+		gpmManifestEd25519PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+	}
+	gotManifest, signatureVerified, err := svc.readBootstrapManifestCache()
+	if err != nil {
+		t.Fatalf("readBootstrapManifestCache: %v", err)
+	}
+	if !signatureVerified {
+		t.Fatalf("signatureVerified=%t want=true", signatureVerified)
+	}
+	if len(gotManifest.BootstrapDirectories) != 1 || gotManifest.BootstrapDirectories[0] != manifest.BootstrapDirectories[0] {
+		t.Fatalf("bootstrap_directories=%v want=%v", gotManifest.BootstrapDirectories, manifest.BootstrapDirectories)
+	}
+}
+
+func TestReadBootstrapManifestCacheFailsClosedWithEd25519MissingOrMismatchedSignedPayloadEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{"https://directory.cache-ed25519-fail.globalprivatemesh.example:8081"},
+	}
+	manifestPayload, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("ed25519 keygen: %v", err)
+	}
+
+	newService := func(t *testing.T) *Service {
+		t.Helper()
+		return &Service{
+			gpmManifestCache:            filepath.Join(t.TempDir(), "manifest_cache_ed25519_fail.json"),
+			gpmManifestMaxAge:           24 * time.Hour,
+			gpmManifestEd25519PublicKey: base64.StdEncoding.EncodeToString(publicKey),
+		}
+	}
+	writeCache := func(t *testing.T, cachePath string, cache gpmBootstrapManifestCacheFile) {
+		t.Helper()
+		cacheBody, err := json.MarshalIndent(cache, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal cache: %v", err)
+		}
+		if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+			t.Fatalf("write cache: %v", err)
+		}
+	}
+
+	t.Run("missing signed payload evidence", func(t *testing.T) {
+		svc := newService(t)
+		cache := gpmBootstrapManifestCacheFile{
+			Version:           1,
+			FetchedAtUTC:      now.Format(time.RFC3339),
+			SourceURL:         "https://bootstrap-cache-ed25519.globalprivatemesh.example/v1/bootstrap/manifest",
+			SignatureVerified: true,
+			Manifest:          manifest,
+		}
+		writeCache(t, svc.gpmManifestCache, cache)
+
+		_, _, err := svc.readBootstrapManifestCache()
+		if err == nil {
+			t.Fatal("expected missing signed payload evidence error")
+		}
+		if !strings.Contains(err.Error(), "missing signed payload evidence") {
+			t.Fatalf("error=%q want missing signed payload evidence", err.Error())
+		}
+	})
+
+	t.Run("signature mismatch", func(t *testing.T) {
+		svc := newService(t)
+		_, otherPrivateKey, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			t.Fatalf("ed25519 keygen(other): %v", err)
+		}
+		cache := gpmBootstrapManifestCacheFile{
+			Version:               1,
+			FetchedAtUTC:          now.Format(time.RFC3339),
+			SourceURL:             "https://bootstrap-cache-ed25519.globalprivatemesh.example/v1/bootstrap/manifest",
+			SignatureVerified:     false,
+			ManifestSignature:     base64.StdEncoding.EncodeToString(ed25519.Sign(otherPrivateKey, manifestPayload)),
+			ManifestPayloadBase64: base64.StdEncoding.EncodeToString(manifestPayload),
+			Manifest:              manifest,
+		}
+		writeCache(t, svc.gpmManifestCache, cache)
+
+		_, _, err = svc.readBootstrapManifestCache()
+		if err == nil {
+			t.Fatal("expected signature mismatch error")
+		}
+		if !strings.Contains(err.Error(), "cached manifest signature verification failed") {
+			t.Fatalf("error=%q want cached manifest signature verification failed", err.Error())
+		}
+	})
+
+	t.Run("payload body mismatch", func(t *testing.T) {
+		svc := newService(t)
+		signature := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, manifestPayload))
+		cache := gpmBootstrapManifestCacheFile{
+			Version:               1,
+			FetchedAtUTC:          now.Format(time.RFC3339),
+			SourceURL:             "https://bootstrap-cache-ed25519.globalprivatemesh.example/v1/bootstrap/manifest",
+			SignatureVerified:     false,
+			ManifestSignature:     signature,
+			ManifestPayloadBase64: base64.StdEncoding.EncodeToString(manifestPayload),
+			Manifest: gpmBootstrapManifest{
+				Version:              1,
+				GeneratedAtUTC:       manifest.GeneratedAtUTC,
+				ExpiresAtUTC:         manifest.ExpiresAtUTC,
+				BootstrapDirectories: []string{"https://directory.cache-ed25519-mismatch.globalprivatemesh.example:8081"},
+			},
+		}
+		writeCache(t, svc.gpmManifestCache, cache)
+
+		_, _, err := svc.readBootstrapManifestCache()
+		if err == nil {
+			t.Fatal("expected payload/body mismatch error")
+		}
+		if !strings.Contains(err.Error(), "cached manifest payload does not match cached manifest body") {
+			t.Fatalf("error=%q want payload/body mismatch", err.Error())
+		}
+	})
+}
+
+func TestFetchRemoteManifestFailsClosedWhenSignatureRequiredWithoutVerifierKey(t *testing.T) {
+	now := time.Now().UTC()
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{"https://directory.required-key.globalprivatemesh.example:8081"},
+	}
+	manifestBody, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestBody)
+	}))
+	t.Cleanup(manifestServer.Close)
+
+	svc := &Service{
+		gpmManifestRequireSignature: true,
+	}
+	_, _, _, _, err = svc.fetchRemoteManifest(context.Background(), manifestServer.URL)
+	if err == nil {
+		t.Fatal("expected signature-required policy to fail closed without a verifier key")
+	}
+	if !strings.Contains(err.Error(), "verification key is required by policy") {
+		t.Fatalf("error=%q want no verifier key guidance", err.Error())
+	}
+}
+
 func TestReadBootstrapManifestCacheWithHMACKeyReverification(t *testing.T) {
 	now := time.Now().UTC()
 
