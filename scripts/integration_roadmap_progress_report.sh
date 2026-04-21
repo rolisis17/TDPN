@@ -2990,6 +2990,110 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] profile default live-wrapper rewrite preserves anon credential flags and keeps key behavior intact"
+PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_live_anon_cred_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "live-wrapper rewrite should preserve anon credential flags while retaining existing key behavior",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --campaign-anon-cred CAMPAIGN_ANON_TOKEN --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir .easy-node-logs --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --key INVITE_KEY --anon-cred ANON_TOKEN --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY
+
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_anon_cred.log 2>&1; then
+  echo "expected success when profile default live-wrapper rewrite preserves anon credential flags"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_anon_cred.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_campaign_anon_cred($cmd):
+    (($cmd // "") | test("(^| )--campaign-anon-cred CAMPAIGN_ANON_TOKEN( |$)"));
+  def has_anon_cred($cmd):
+    (($cmd // "") | test("(^| )--anon-cred ANON_TOKEN( |$)"));
+  def has_key_placeholder($cmd):
+    (($cmd // "") | test("(^| )--key INVITE_KEY( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_live_non_sudo_cmd(.command)
+    and has_hosts(.command)
+    and has_campaign_anon_cred(.command)
+    and ((has_subject_placeholder(.command)) | not)
+  ))
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts(.vpn_track.profile_default_gate.next_command)
+  and has_hosts(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_campaign_anon_cred(.vpn_track.profile_default_gate.next_command)
+  and has_key_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_anon_cred(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((has_subject_placeholder(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+' "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json" >/dev/null; then
+  echo "profile default live-wrapper anon credential summary JSON missing expected credential preservation fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] profile default gate preserves sudo-required command-source from manual summary"
 PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_sudo_source_summary.json"
 cat >"$PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_SUDO_SUMMARY'
@@ -3190,6 +3294,112 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_profile_default_docker_source_live_wrapper_summary.json" >/dev/null; then
   echo "profile default docker-source live-wrapper summary JSON missing expected host-aware conversion fields"
   cat "$TMP_DIR/roadmap_progress_profile_default_docker_source_live_wrapper_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default docker source live wrapper preserves quoted arg values"
+PROFILE_DEFAULT_GATE_MANUAL_DOCKER_QUOTED_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_quoted_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_QUOTED_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_QUOTED_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "docker source localhost run should preserve quoted reports-dir/summary-json values through live-wrapper rewrite",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-run --reports-dir './quoted reports dir' --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --subject INVITE_KEY --summary-json './quoted summary dir/profile compare campaign signoff summary.json' --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-run --reports-dir './quoted reports dir' --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --campaign-issuer-url http://127.0.0.1:18082 --campaign-entry-url http://127.0.0.1:18083 --campaign-exit-url http://127.0.0.1:18084 --subject INVITE_KEY --summary-json './quoted summary dir/profile compare campaign signoff summary.json' --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_QUOTED_SUMMARY
+
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_QUOTED_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_quoted_live_wrapper_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_quoted_live_wrapper_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_quoted_live_wrapper.log 2>&1; then
+  echo "expected success when docker localhost profile-default command with quoted args is converted to live wrapper"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_quoted_live_wrapper.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  def has_quoted_reports($cmd):
+    (($cmd // "") | contains("--reports-dir ./quoted\\ reports\\ dir"));
+  def has_quoted_summary($cmd):
+    (($cmd // "") | contains("--summary-json ./quoted\\ summary\\ dir/profile\\ compare\\ campaign\\ signoff\\ summary.json"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_live_non_sudo_cmd(.command)
+    and has_hosts(.command)
+    and has_subject_placeholder(.command)
+    and has_quoted_reports(.command)
+    and has_quoted_summary(.command)
+  ))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts(.vpn_track.profile_default_gate.next_command)
+  and has_hosts(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_quoted_reports(.vpn_track.profile_default_gate.next_command)
+  and has_quoted_reports(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_quoted_summary(.vpn_track.profile_default_gate.next_command)
+  and has_quoted_summary(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_quoted_live_wrapper_summary.json" >/dev/null; then
+  echo "profile default docker localhost quoted live-wrapper summary JSON missing expected quoted-arg preservation"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_quoted_live_wrapper_summary.json"
   exit 1
 fi
 
@@ -3526,6 +3736,122 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_live_wrapper_summary.json" >/dev/null; then
   echo "profile default docker-signoff live-wrapper summary JSON missing expected host-aware conversion fields"
   cat "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_live_wrapper_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default docker signoff source derives live wrapper hosts from campaign-directory-urls and bootstrap fallback when A_HOST/B_HOST are unset"
+PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_signoff_source_no_env_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "docker signoff hint should derive hosts from campaign-directory-urls with bootstrap fallback for host-a when env hosts are unset",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --campaign-directory-urls 'https://198.51.100.31:8081,https://198.51.100.32:8081' --campaign-anon-cred SIGNOFF_CAMPAIGN_ANON --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --campaign-directory-urls ',https://203.0.113.42:8081' --campaign-bootstrap-directory https://203.0.113.41:8081 --anon-cred SIGNOFF_ANON --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec 901 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "docker_rehearsal_artifacts",
+      "docker_rehearsal_hint_available": true
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY
+
+if ! A_HOST="" B_HOST="" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_signoff_source_no_env_live_wrapper.log 2>&1; then
+  echo "expected success when docker signoff hint is converted to live wrapper without A_HOST/B_HOST using campaign-directory-urls and bootstrap fallback"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_signoff_source_no_env_live_wrapper.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_live_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def is_profile_gate_live_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_hosts_from_directory_urls($cmd):
+    (($cmd // "") | test("(^| )--host-a 198\\.51\\.100\\.31( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 198\\.51\\.100\\.32( |$)"));
+  def has_hosts_with_bootstrap_fallback($cmd):
+    (($cmd // "") | test("(^| )--host-a 203\\.0\\.113\\.41( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 203\\.0\\.113\\.42( |$)"));
+  def has_campaign_anon_cred($cmd):
+    (($cmd // "") | test("(^| )--campaign-anon-cred SIGNOFF_CAMPAIGN_ANON( |$)"));
+  def has_anon_cred($cmd):
+    (($cmd // "") | test("(^| )--anon-cred SIGNOFF_ANON( |$)"));
+  def has_refresh_campaign($cmd):
+    (($cmd // "") | test("(^| )--refresh-campaign 1( |$)"));
+  def has_fail_on_no_go($cmd):
+    (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
+  def has_campaign_timeout($cmd):
+    (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_live_non_sudo_cmd(.command)
+    and has_hosts_from_directory_urls(.command)
+    and has_campaign_anon_cred(.command)
+    and has_refresh_campaign(.command)
+    and has_fail_on_no_go(.command)
+    and has_campaign_timeout(.command)
+  ))
+  and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
+  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_hosts_from_directory_urls(.vpn_track.profile_default_gate.next_command)
+  and has_hosts_with_bootstrap_fallback(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_campaign_anon_cred(.vpn_track.profile_default_gate.next_command)
+  and has_anon_cred(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command)
+  and has_refresh_campaign(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command)
+  and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command)
+  and has_campaign_timeout(.vpn_track.profile_default_gate.next_command_sudo)
+' "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_summary.json" >/dev/null; then
+  echo "profile default docker-signoff no-env live-wrapper summary JSON missing expected campaign-directory-urls and bootstrap host extraction fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_summary.json"
   exit 1
 fi
 

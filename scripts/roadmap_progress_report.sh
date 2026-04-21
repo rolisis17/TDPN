@@ -110,6 +110,39 @@ path_arg_or_die() {
   esac
 }
 
+value_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    echo "$name requires a value"
+    exit 2
+  fi
+  case "$value" in
+    -*)
+      echo "$name requires a value, got flag-like token: $value"
+      exit 2
+      ;;
+  esac
+}
+
+optional_path_arg_or_die() {
+  local name="$1"
+  local argc="${2:-0}"
+  local value="$3"
+  if (( argc < 2 )); then
+    echo "$name requires a value"
+    exit 2
+  fi
+  value="$(trim "$value")"
+  case "$value" in
+    -*)
+      echo "$name requires a path value, got flag-like token: $value"
+      exit 2
+      ;;
+  esac
+}
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing required command: $1"
@@ -804,26 +837,76 @@ profile_default_gate_command_with_subject_placeholder() {
   printf '%s --subject INVITE_KEY' "$cmd"
 }
 
+command_string_to_argv() {
+  local command_text="${1:-}"
+  COMMAND_STRING_ARGV=()
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! mapfile -d '' -t COMMAND_STRING_ARGV < <(
+    python3 - "$command_text" <<'PY'
+import shlex
+import sys
+
+try:
+    for token in shlex.split(sys.argv[1], posix=True):
+        sys.stdout.write(token)
+        sys.stdout.write("\0")
+except ValueError:
+    sys.exit(1)
+PY
+  ); then
+    COMMAND_STRING_ARGV=()
+    return 1
+  fi
+  return 0
+}
+
+profile_default_gate_command_from_argv() {
+  local token
+  local out=""
+  for token in "$@"; do
+    out="${out}${out:+ }$(printf '%q' "$token")"
+  done
+  printf '%s' "$out"
+}
+
 profile_default_gate_extract_arg_value_from_cmd() {
   local cmd
   local opt
-  local value=""
+  local token
+  local idx=0
+  local next_token=""
   cmd="$(trim "${1:-}")"
   opt="${2:-}"
   if [[ -z "$cmd" || -z "$opt" ]]; then
     printf '%s' ""
     return
   fi
-  if [[ "$cmd" =~ (^|[[:space:]])${opt}[[:space:]]+([^[:space:]]+) ]]; then
-    value="${BASH_REMATCH[2]}"
-    printf '%s' "$value"
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' ""
     return
   fi
-  if [[ "$cmd" =~ (^|[[:space:]])${opt}=([^[:space:]]+) ]]; then
-    value="${BASH_REMATCH[2]}"
-    printf '%s' "$value"
-    return
-  fi
+  for token in "${COMMAND_STRING_ARGV[@]}"; do
+    if [[ "$token" == "$opt" ]]; then
+      if (( idx + 1 < ${#COMMAND_STRING_ARGV[@]} )); then
+        next_token="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+        if [[ "$next_token" == --* ]]; then
+          printf '%s' ""
+        else
+          printf '%s' "$next_token"
+        fi
+      else
+        printf '%s' ""
+      fi
+      return
+    fi
+    if [[ "$token" == "$opt="* ]]; then
+      printf '%s' "${token#"$opt="}"
+      return
+    fi
+    idx=$((idx + 1))
+  done
   printf '%s' ""
 }
 
@@ -883,6 +966,80 @@ profile_default_gate_extract_directory_host_from_cmd() {
   profile_default_gate_host_from_directory_arg_value "$directory_value"
 }
 
+profile_default_gate_extract_host_from_directory_urls_value() {
+  local raw_value
+  local value
+  local index
+  local candidate=""
+  local -a directory_urls_parts=()
+  raw_value="$(trim "${1:-}")"
+  index="$(trim "${2:-0}")"
+  if [[ -z "$raw_value" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! [[ "$index" =~ ^[0-9]+$ ]]; then
+    index="0"
+  fi
+  value="$raw_value"
+  if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  fi
+  IFS=',' read -r -a directory_urls_parts <<< "$value"
+  if (( index >= ${#directory_urls_parts[@]} )); then
+    printf '%s' ""
+    return
+  fi
+  candidate="$(trim "${directory_urls_parts[$index]}")"
+  profile_default_gate_host_from_directory_arg_value "$candidate"
+}
+
+profile_default_gate_extract_live_wrapper_host_from_cmd() {
+  local cmd
+  local lane
+  local host=""
+  local directory_urls_value=""
+  local bootstrap_directory_value=""
+  cmd="$(trim "${1:-}")"
+  lane="$(trim "${2:-}")"
+  if [[ -z "$cmd" || -z "$lane" ]]; then
+    printf '%s' ""
+    return
+  fi
+  case "$lane" in
+    a)
+      host="$(profile_default_gate_extract_directory_host_from_cmd "$cmd" "--host-a")"
+      if [[ -z "$host" ]]; then
+        host="$(profile_default_gate_extract_directory_host_from_cmd "$cmd" "--directory-a")"
+      fi
+      if [[ -z "$host" ]]; then
+        directory_urls_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-directory-urls")"
+        host="$(profile_default_gate_extract_host_from_directory_urls_value "$directory_urls_value" "0")"
+      fi
+      if [[ -z "$host" ]]; then
+        bootstrap_directory_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-bootstrap-directory")"
+        host="$(profile_default_gate_host_from_directory_arg_value "$bootstrap_directory_value")"
+      fi
+      ;;
+    b)
+      host="$(profile_default_gate_extract_directory_host_from_cmd "$cmd" "--host-b")"
+      if [[ -z "$host" ]]; then
+        host="$(profile_default_gate_extract_directory_host_from_cmd "$cmd" "--directory-b")"
+      fi
+      if [[ -z "$host" ]]; then
+        directory_urls_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-directory-urls")"
+        host="$(profile_default_gate_extract_host_from_directory_urls_value "$directory_urls_value" "1")"
+      fi
+      ;;
+    *)
+      host=""
+      ;;
+  esac
+  printf '%s' "$host"
+}
+
 profile_default_gate_host_is_non_localhost_01() {
   local host
   host="$(trim "${1:-}")"
@@ -902,9 +1059,34 @@ profile_default_gate_host_is_non_localhost_01() {
 
 profile_default_gate_command_is_localhost_profile_default_run_01() {
   local cmd
+  local token
+  local has_profile_default_gate_run="0"
+  local directory_a=""
+  local directory_b=""
   cmd="$(trim "${1:-}")"
   if [[ -z "$cmd" ]]; then
     printf '%s' "0"
+    return
+  fi
+  if command_string_to_argv "$cmd"; then
+    for token in "${COMMAND_STRING_ARGV[@]}"; do
+      if [[ "$token" == "profile-default-gate-run" ]]; then
+        has_profile_default_gate_run="1"
+        break
+      fi
+    done
+    if [[ "$has_profile_default_gate_run" != "1" ]]; then
+      printf '%s' "0"
+      return
+    fi
+    directory_a="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--directory-a")"
+    directory_b="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--directory-b")"
+    if [[ "$directory_a" =~ ^https?://127\.0\.0\.1:[0-9]+$ \
+       && "$directory_b" =~ ^https?://127\.0\.0\.1:[0-9]+$ ]]; then
+      printf '%s' "1"
+    else
+      printf '%s' "0"
+    fi
     return
   fi
   if [[ ! "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+profile-default-gate-run([[:space:]]|$) ]]; then
@@ -953,7 +1135,7 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   local host_b
   local cmd_source
   local docker_hint_available
-  local sudo_prefix=""
+  local -a rebuilt_argv=()
   local reports_dir=""
   local summary_json=""
   local print_summary_json=""
@@ -963,12 +1145,14 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   local fail_on_no_go=""
   local campaign_execution_mode=""
   local campaign_start_local_stack=""
-  local credential_flag=""
-  local credential_value=""
+  local primary_credential_flag=""
+  local primary_credential_value=""
+  local campaign_anon_cred_value=""
+  local anon_cred_value=""
   local convert_localhost_run="0"
   local convert_signoff="0"
   local convert_allowed="0"
-  local supported_credential_flags=("--campaign-subject" "--subject" "--key" "--invite-key")
+  local supported_primary_credential_flags=("--campaign-subject" "--subject" "--key" "--invite-key")
   local flag=""
   local rebuilt=""
   cmd="$(trim "${1:-}")"
@@ -1006,8 +1190,12 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
     printf '%s' "$cmd"
     return
   fi
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' "$cmd"
+    return
+  fi
   if [[ "$cmd" =~ ^sudo[[:space:]]+ ]]; then
-    sudo_prefix="sudo "
+    rebuilt_argv+=("sudo")
   fi
   reports_dir="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--reports-dir")"
   summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--summary-json")"
@@ -1018,44 +1206,53 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   fail_on_no_go="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--fail-on-no-go")"
   campaign_execution_mode="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-execution-mode")"
   campaign_start_local_stack="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-start-local-stack")"
-  for flag in "${supported_credential_flags[@]}"; do
-    credential_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$flag")"
-    if [[ -n "$credential_value" ]]; then
-      credential_flag="$flag"
+  for flag in "${supported_primary_credential_flags[@]}"; do
+    primary_credential_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$flag")"
+    if [[ -n "$primary_credential_value" ]]; then
+      primary_credential_flag="$flag"
       break
     fi
   done
-  rebuilt="${sudo_prefix}./scripts/easy_node.sh profile-default-gate-live --host-a ${host_a} --host-b ${host_b}"
+  campaign_anon_cred_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-anon-cred")"
+  anon_cred_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--anon-cred")"
+  rebuilt_argv+=("./scripts/easy_node.sh" "profile-default-gate-live" "--host-a" "$host_a" "--host-b" "$host_b")
   if [[ -n "$reports_dir" ]]; then
-    rebuilt+=" --reports-dir ${reports_dir}"
+    rebuilt_argv+=("--reports-dir" "$reports_dir")
   fi
   if [[ -n "$campaign_timeout_sec" ]]; then
-    rebuilt+=" --campaign-timeout-sec ${campaign_timeout_sec}"
+    rebuilt_argv+=("--campaign-timeout-sec" "$campaign_timeout_sec")
   fi
   if [[ -n "$heartbeat_interval_sec" ]]; then
-    rebuilt+=" --heartbeat-interval-sec ${heartbeat_interval_sec}"
+    rebuilt_argv+=("--heartbeat-interval-sec" "$heartbeat_interval_sec")
   fi
   if [[ -n "$summary_json" ]]; then
-    rebuilt+=" --summary-json ${summary_json}"
+    rebuilt_argv+=("--summary-json" "$summary_json")
   fi
   if [[ -n "$print_summary_json" ]]; then
-    rebuilt+=" --print-summary-json ${print_summary_json}"
+    rebuilt_argv+=("--print-summary-json" "$print_summary_json")
   fi
   if [[ -n "$refresh_campaign" ]]; then
-    rebuilt+=" --refresh-campaign ${refresh_campaign}"
+    rebuilt_argv+=("--refresh-campaign" "$refresh_campaign")
   fi
   if [[ -n "$fail_on_no_go" ]]; then
-    rebuilt+=" --fail-on-no-go ${fail_on_no_go}"
+    rebuilt_argv+=("--fail-on-no-go" "$fail_on_no_go")
   fi
   if [[ -n "$campaign_execution_mode" ]]; then
-    rebuilt+=" --campaign-execution-mode ${campaign_execution_mode}"
+    rebuilt_argv+=("--campaign-execution-mode" "$campaign_execution_mode")
   fi
   if [[ -n "$campaign_start_local_stack" ]]; then
-    rebuilt+=" --campaign-start-local-stack ${campaign_start_local_stack}"
+    rebuilt_argv+=("--campaign-start-local-stack" "$campaign_start_local_stack")
   fi
-  if [[ -n "$credential_flag" && -n "$credential_value" ]]; then
-    rebuilt+=" ${credential_flag} ${credential_value}"
+  if [[ -n "$primary_credential_flag" && -n "$primary_credential_value" ]]; then
+    rebuilt_argv+=("$primary_credential_flag" "$primary_credential_value")
   fi
+  if [[ -n "$campaign_anon_cred_value" ]]; then
+    rebuilt_argv+=("--campaign-anon-cred" "$campaign_anon_cred_value")
+  fi
+  if [[ -n "$anon_cred_value" ]]; then
+    rebuilt_argv+=("--anon-cred" "$anon_cred_value")
+  fi
+  rebuilt="$(profile_default_gate_command_from_argv "${rebuilt_argv[@]}")"
   printf '%s' "$rebuilt"
 }
 
@@ -3940,81 +4137,88 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --manual-validation-summary-json)
+      optional_path_arg_or_die "--manual-validation-summary-json" "$#" "${2:-}"
       manual_validation_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --manual-refresh-timeout-sec)
+      value_arg_or_die "--manual-refresh-timeout-sec" "${2:-}"
       manual_refresh_timeout_sec="${2:-}"
       shift 2
       ;;
     --single-machine-refresh-timeout-sec)
+      value_arg_or_die "--single-machine-refresh-timeout-sec" "${2:-}"
       single_machine_refresh_timeout_sec="${2:-}"
       shift 2
       ;;
     --manual-validation-report-md)
+      optional_path_arg_or_die "--manual-validation-report-md" "$#" "${2:-}"
       manual_validation_report_md="$(abs_path "${2:-}")"
       shift 2
       ;;
     --profile-compare-signoff-summary-json)
+      optional_path_arg_or_die "--profile-compare-signoff-summary-json" "$#" "${2:-}"
       profile_compare_signoff_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --single-machine-summary-json)
+      optional_path_arg_or_die "--single-machine-summary-json" "$#" "${2:-}"
       single_machine_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase0-summary-json)
+      optional_path_arg_or_die "--phase0-summary-json" "$#" "${2:-}"
       phase0_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase1-resilience-handoff-summary-json)
+      optional_path_arg_or_die "--phase1-resilience-handoff-summary-json" "$#" "${2:-}"
       phase1_resilience_handoff_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --vpn-rc-resilience-summary-json)
+      optional_path_arg_or_die "--vpn-rc-resilience-summary-json" "$#" "${2:-}"
       vpn_rc_resilience_summary_json="$(abs_path "${2:-}")"
       vpn_rc_resilience_summary_explicit_01="1"
       shift 2
       ;;
     --phase2-linux-prod-candidate-summary-json)
+      optional_path_arg_or_die "--phase2-linux-prod-candidate-summary-json" "$#" "${2:-}"
       phase2_linux_prod_candidate_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase3-windows-client-beta-summary-json)
+      optional_path_arg_or_die "--phase3-windows-client-beta-summary-json" "$#" "${2:-}"
       phase3_windows_client_beta_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase4-windows-full-parity-summary-json)
+      optional_path_arg_or_die "--phase4-windows-full-parity-summary-json" "$#" "${2:-}"
       phase4_windows_full_parity_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase5-settlement-layer-summary-json)
+      optional_path_arg_or_die "--phase5-settlement-layer-summary-json" "$#" "${2:-}"
       phase5_settlement_layer_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase6-cosmos-l1-summary-json)
+      optional_path_arg_or_die "--phase6-cosmos-l1-summary-json" "$#" "${2:-}"
       phase6_cosmos_l1_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --phase7-mainnet-cutover-summary-json)
-      if [[ $# -lt 2 ]]; then
-        echo "--phase7-mainnet-cutover-summary-json requires a value"
-        exit 2
-      fi
-      if [[ -n "${2:-}" && "${2:-}" == -* ]]; then
-        echo "--phase7-mainnet-cutover-summary-json requires a path value, got flag-like token: ${2:-}"
-        exit 2
-      fi
+      optional_path_arg_or_die "--phase7-mainnet-cutover-summary-json" "$#" "${2:-}"
       phase7_mainnet_cutover_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --blockchain-mainnet-activation-gate-summary-json)
-      path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "${2:-}"
+      optional_path_arg_or_die "--blockchain-mainnet-activation-gate-summary-json" "$#" "${2:-}"
       blockchain_mainnet_activation_gate_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --blockchain-bootstrap-governance-graduation-gate-summary-json)
-      path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "${2:-}"
+      optional_path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$#" "${2:-}"
       blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
@@ -4024,6 +4228,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --report-md)
+      path_arg_or_die "--report-md" "${2:-}"
       report_md="$(abs_path "${2:-}")"
       shift 2
       ;;
@@ -6939,15 +7144,23 @@ case "$profile_default_gate_selection_policy_evidence_valid_json" in
 esac
 profile_default_gate_next_command_host_a_effective="$(trim "${A_HOST:-}")"
 profile_default_gate_next_command_host_b_effective="$(trim "${B_HOST:-}")"
+if [[ -n "$profile_default_gate_next_command_host_a_effective" ]] \
+   && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_a_effective")" != "1" ]]; then
+  profile_default_gate_next_command_host_a_effective=""
+fi
+if [[ -n "$profile_default_gate_next_command_host_b_effective" ]] \
+   && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_b_effective")" != "1" ]]; then
+  profile_default_gate_next_command_host_b_effective=""
+fi
 if [[ -z "$profile_default_gate_next_command_host_a_effective" ]]; then
-  profile_default_gate_next_command_host_a_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command" "--directory-a")"
+  profile_default_gate_next_command_host_a_extracted="$(profile_default_gate_extract_live_wrapper_host_from_cmd "$profile_default_gate_next_command" "a")"
   if [[ -n "$profile_default_gate_next_command_host_a_extracted" ]] \
      && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_a_extracted")" == "1" ]]; then
     profile_default_gate_next_command_host_a_effective="$profile_default_gate_next_command_host_a_extracted"
   fi
 fi
 if [[ -z "$profile_default_gate_next_command_host_b_effective" ]]; then
-  profile_default_gate_next_command_host_b_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command" "--directory-b")"
+  profile_default_gate_next_command_host_b_extracted="$(profile_default_gate_extract_live_wrapper_host_from_cmd "$profile_default_gate_next_command" "b")"
   if [[ -n "$profile_default_gate_next_command_host_b_extracted" ]] \
      && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_b_extracted")" == "1" ]]; then
     profile_default_gate_next_command_host_b_effective="$profile_default_gate_next_command_host_b_extracted"
@@ -6963,15 +7176,23 @@ profile_default_gate_next_command="$(
 )"
 profile_default_gate_next_command_sudo_host_a_effective="$(trim "${A_HOST:-}")"
 profile_default_gate_next_command_sudo_host_b_effective="$(trim "${B_HOST:-}")"
+if [[ -n "$profile_default_gate_next_command_sudo_host_a_effective" ]] \
+   && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_a_effective")" != "1" ]]; then
+  profile_default_gate_next_command_sudo_host_a_effective=""
+fi
+if [[ -n "$profile_default_gate_next_command_sudo_host_b_effective" ]] \
+   && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_b_effective")" != "1" ]]; then
+  profile_default_gate_next_command_sudo_host_b_effective=""
+fi
 if [[ -z "$profile_default_gate_next_command_sudo_host_a_effective" ]]; then
-  profile_default_gate_next_command_sudo_host_a_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command_sudo" "--directory-a")"
+  profile_default_gate_next_command_sudo_host_a_extracted="$(profile_default_gate_extract_live_wrapper_host_from_cmd "$profile_default_gate_next_command_sudo" "a")"
   if [[ -n "$profile_default_gate_next_command_sudo_host_a_extracted" ]] \
      && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_a_extracted")" == "1" ]]; then
     profile_default_gate_next_command_sudo_host_a_effective="$profile_default_gate_next_command_sudo_host_a_extracted"
   fi
 fi
 if [[ -z "$profile_default_gate_next_command_sudo_host_b_effective" ]]; then
-  profile_default_gate_next_command_sudo_host_b_extracted="$(profile_default_gate_extract_directory_host_from_cmd "$profile_default_gate_next_command_sudo" "--directory-b")"
+  profile_default_gate_next_command_sudo_host_b_extracted="$(profile_default_gate_extract_live_wrapper_host_from_cmd "$profile_default_gate_next_command_sudo" "b")"
   if [[ -n "$profile_default_gate_next_command_sudo_host_b_extracted" ]] \
      && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_b_extracted")" == "1" ]]; then
     profile_default_gate_next_command_sudo_host_b_effective="$profile_default_gate_next_command_sudo_host_b_extracted"

@@ -1196,7 +1196,8 @@ function Get-RecommendedCommands {
   param(
     [AllowEmptyCollection()]
     [string[]]$MissingPackageIds = @(),
-    [string]$SelectedMode = "bootstrap"
+    [string]$SelectedMode = "bootstrap",
+    [switch]$KeepApiRunningIntent
   )
 
   $commands = New-Object System.Collections.ArrayList
@@ -1204,9 +1205,13 @@ function Get-RecommendedCommands {
   if ([string]::IsNullOrWhiteSpace($normalizedMode)) {
     $normalizedMode = "bootstrap"
   }
+  $keepApiRunningArg = ""
+  if ($KeepApiRunningIntent -and $normalizedMode -eq "run-full") {
+    $keepApiRunningArg = " -KeepApiRunning"
+  }
 
   Add-UniqueValue -List $commands -Value "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
-  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0}" -f $normalizedMode)
+  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0}{1}" -f $normalizedMode, $keepApiRunningArg)
   foreach ($packageId in $MissingPackageIds) {
     foreach ($dependencyCommand in @(Get-DependencyRecommendedCommands -PackageId $packageId)) {
       Add-UniqueValue -List $commands -Value $dependencyCommand
@@ -1220,7 +1225,7 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm install"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npx --yes create-vite@latest"
-  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0} -InstallMissing -EnablePolicyBypass" -f $normalizedMode)
+  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0}{1} -InstallMissing -EnablePolicyBypass" -f $normalizedMode, $keepApiRunningArg)
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
 
   return @($commands.ToArray())
@@ -1712,11 +1717,21 @@ function Invoke-DesktopPackaged {
     return
   }
 
-  Write-Step "running packaged desktop: $DesktopExecutablePath"
-  & $DesktopExecutablePath
-  if ($LASTEXITCODE -ne 0) {
-    throw "packaged desktop executable exited with code $LASTEXITCODE"
+  Write-Step "running packaged desktop (wait): $DesktopExecutablePath"
+  $desktopProc = $null
+  try {
+    $desktopProc = Start-Process -FilePath $DesktopExecutablePath -PassThru -Wait
+  } catch {
+    throw "failed to launch packaged desktop executable: $DesktopExecutablePath ($($_.Exception.Message))"
   }
+  if ($null -eq $desktopProc) {
+    throw "packaged desktop launch did not return a process handle"
+  }
+  $desktopExitCode = [int]$desktopProc.ExitCode
+  if ($desktopExitCode -ne 0) {
+    throw "packaged desktop process exited with code $desktopExitCode"
+  }
+  Write-Step "packaged desktop exited cleanly (exit_code=0)"
 }
 
 function Ensure-DesktopIconAsset {
@@ -1934,7 +1949,7 @@ try {
   if (-not [string]::IsNullOrWhiteSpace($script:BootstrapErrorMessage)) {
     $script:BootstrapSummary.error = $script:BootstrapErrorMessage
   }
-  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -SelectedMode $Mode)
+  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($script:BootstrapSummary.missing_package_ids) -SelectedMode $Mode -KeepApiRunningIntent:$KeepApiRunning)
   $nextCommand = Resolve-NextCommand -RecommendedCommands $recommendedCommands -MissingPackageIds @($script:BootstrapSummary.missing_package_ids)
   $script:BootstrapSummary.next_command = $nextCommand
   $script:BootstrapSummary.recommended_commands = @($recommendedCommands)

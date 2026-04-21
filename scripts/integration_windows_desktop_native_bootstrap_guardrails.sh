@@ -29,6 +29,10 @@ assert_marker_present() {
 assert_marker_present "recommended_commands" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Get-RecommendedCommands" "$SCRIPT_UNDER_TEST"
 assert_marker_present "recommended commands (copy/paste):" "$SCRIPT_UNDER_TEST"
+assert_marker_present 'running packaged desktop (wait):' "$SCRIPT_UNDER_TEST"
+assert_marker_present 'Start-Process -FilePath $DesktopExecutablePath -PassThru -Wait' "$SCRIPT_UNDER_TEST"
+assert_marker_present "packaged desktop process exited with code" "$SCRIPT_UNDER_TEST"
+assert_marker_present "packaged desktop exited cleanly (exit_code=0)" "$SCRIPT_UNDER_TEST"
 assert_marker_present "desktop_one_click.ps1" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force" "$SCRIPT_UNDER_TEST"
 assert_marker_present "winget install --id" "$SCRIPT_UNDER_TEST"
@@ -199,6 +203,36 @@ assert_json_file_is_object() {
   exit 1
 }
 
+assert_summary_keep_api_running() {
+  local json_path="$1"
+  local context_label="$2"
+  local expected_value="$3"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  local log_path="$TMP_DIR/assert_keep_api_running_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'keep_api_running')) { throw 'keep_api_running field missing' }; \$actual = [bool]\$summary.keep_api_running; \$expected = [System.Convert]::ToBoolean($(ps_single_quote "$expected_value")); if (\$actual -ne \$expected) { throw ('keep_api_running mismatch: expected={0} actual={1}' -f \$expected, \$actual) }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: keep_api_running assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
+assert_summary_run_full_recommended_keep_api_running() {
+  local json_path="$1"
+  local context_label="$2"
+  local expected_value="$3"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  local log_path="$TMP_DIR/assert_run_full_recommended_keep_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; \$recommended = @(); if (\$summary.PSObject.Properties.Name -contains 'recommended_commands' -and \$null -ne \$summary.recommended_commands) { \$recommended = @(\$summary.recommended_commands) }; \$runFullCommands = @(\$recommended | Where-Object { \$_.ToString() -like '*desktop_native_bootstrap.ps1*' -and \$_.ToString() -like '*-Mode run-full*' }); if (\$runFullCommands.Count -lt 1) { throw 'missing run-full desktop_native_bootstrap recommended commands' }; \$expected = [System.Convert]::ToBoolean($(ps_single_quote "$expected_value")); \$runFullWithKeep = @(\$runFullCommands | Where-Object { \$_.ToString() -like '*-KeepApiRunning*' }); if (\$expected) { if (\$runFullWithKeep.Count -lt \$runFullCommands.Count) { throw 'expected all run-full bootstrap recommended commands to include -KeepApiRunning' } } else { if (\$runFullWithKeep.Count -gt 0) { throw 'unexpected -KeepApiRunning in run-full bootstrap recommended commands' } }; \$nextCommand = [string]\$summary.next_command; if (-not [string]::IsNullOrWhiteSpace(\$nextCommand) -and \$nextCommand -like '*desktop_native_bootstrap.ps1*' -and \$nextCommand -like '*-Mode run-full*') { if (\$expected -and \$nextCommand -notlike '*-KeepApiRunning*') { throw 'next_command missing -KeepApiRunning for run-full keep intent' }; if (-not \$expected -and \$nextCommand -like '*-KeepApiRunning*') { throw 'next_command unexpectedly includes -KeepApiRunning without keep intent' } }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: run-full recommended keep-api assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
 assert_summary_recommended_commands() {
   local json_path="$1"
   local context_label="$2"
@@ -300,6 +334,12 @@ cat >"$FAKE_JQ" <<'EOF_FAKE_JQ'
 exit 0
 EOF_FAKE_JQ
 chmod +x "$FAKE_JQ"
+
+FAKE_JQ_CMD="$FAKE_TOOL_DIR/jq.cmd"
+cat >"$FAKE_JQ_CMD" <<'EOF_FAKE_JQ_CMD'
+@echo off
+exit /b 0
+EOF_FAKE_JQ_CMD
 
 FAKE_GO_NO_JQ="$FAKE_TOOL_DIR_NO_JQ/go"
 cat >"$FAKE_GO_NO_JQ" <<'EOF_FAKE_GO_NO_JQ'
@@ -418,6 +458,11 @@ RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON_PS="$(to_powershell_path "$RUN_DESKTOP_P
 JQ_MISSING_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_jq_missing_summary.json"
 JQ_MISSING_SUMMARY_JSON_PS="$(to_powershell_path "$JQ_MISSING_SUMMARY_JSON")"
 
+RUN_FULL_DEFAULT_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_run_full_default_summary.json"
+RUN_FULL_DEFAULT_SUMMARY_JSON_PS="$(to_powershell_path "$RUN_FULL_DEFAULT_SUMMARY_JSON")"
+RUN_FULL_KEEP_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_run_full_keep_summary.json"
+RUN_FULL_KEEP_SUMMARY_JSON_PS="$(to_powershell_path "$RUN_FULL_KEEP_SUMMARY_JSON")"
+
 echo "[windows-desktop-native-bootstrap-guardrails] env override priority uses GPM_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \
   "env_priority_dry_run_pass" \
@@ -489,6 +534,37 @@ run_expect_pass \
 assert_json_file_is_object "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
 assert_summary_recommended_commands "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
 assert_summary_jq_missing_remediation "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
+
+echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run default keeps keep_api_running=false in summary/log output"
+run_expect_fail_regex \
+  "run_full_dry_run_default_cleanup_summary" \
+  "jqlang\\.jq|required dependencies missing|missing prerequisites" \
+  run_ps_with_fake_prereqs_no_jq \
+    -Mode run-full \
+    -DesktopLaunchStrategy packaged \
+    -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
+    -DryRun \
+    "$SUMMARY_FLAG" "$RUN_FULL_DEFAULT_SUMMARY_JSON_PS"
+assert_json_file_is_object "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary"
+assert_summary_keep_api_running "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary" "false"
+assert_summary_run_full_recommended_keep_api_running "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary" "false"
+assert_marker_present "keep_api_running=false" "$TMP_DIR/run_full_dry_run_default_cleanup_summary.log"
+
+echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run with -KeepApiRunning sets keep_api_running=true in summary/log output"
+run_expect_fail_regex \
+  "run_full_dry_run_keep_api_running_summary" \
+  "jqlang\\.jq|required dependencies missing|missing prerequisites" \
+  run_ps_with_fake_prereqs_no_jq \
+    -Mode run-full \
+    -DesktopLaunchStrategy packaged \
+    -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
+    -KeepApiRunning \
+    -DryRun \
+    "$SUMMARY_FLAG" "$RUN_FULL_KEEP_SUMMARY_JSON_PS"
+assert_json_file_is_object "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary"
+assert_summary_keep_api_running "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary" "true"
+assert_summary_run_full_recommended_keep_api_running "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary" "true"
+assert_marker_present "keep_api_running=true" "$TMP_DIR/run_full_dry_run_keep_api_running_summary.log"
 
 echo "[windows-desktop-native-bootstrap-guardrails] summary json is written when requested"
 run_expect_pass \
