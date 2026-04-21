@@ -89,6 +89,8 @@ type Service struct {
 	gpmManifestMaxAge                       time.Duration
 	gpmManifestRemoteRefreshIntvl           time.Duration
 	gpmManifestRemoteRefreshSrc             string
+	gpmManifestRefreshFailureMaxCacheAge    time.Duration
+	gpmManifestRefreshFailureMaxCacheAgeSrc string
 	gpmManifestHMACKey                      string
 	gpmManifestHMACKeySource                string
 	gpmManifestEd25519PublicKey             string
@@ -274,6 +276,18 @@ func New() *Service {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			gpmManifestRemoteRefreshIntervalSec = parsed
 			gpmManifestRemoteRefreshSource = source
+		}
+	}
+	gpmManifestRefreshFailureMaxCacheAgeSec := 0
+	gpmManifestRefreshFailureMaxCacheAgeSource := "default"
+	if raw, source, set := preferredEnvValueWithSource(
+		"GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC",
+		"TDPN_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC",
+	); set && raw != "" {
+		noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", source)
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			gpmManifestRefreshFailureMaxCacheAgeSec = parsed
+			gpmManifestRefreshFailureMaxCacheAgeSource = source
 		}
 	}
 	gpmRoleDefaultRaw, gpmRoleDefaultSource, gpmRoleDefaultSet := preferredEnvValueWithSource(
@@ -522,6 +536,8 @@ func New() *Service {
 		gpmManifestMaxAge:                       time.Duration(gpmManifestMaxAgeSec) * time.Second,
 		gpmManifestRemoteRefreshIntvl:           time.Duration(gpmManifestRemoteRefreshIntervalSec) * time.Second,
 		gpmManifestRemoteRefreshSrc:             gpmManifestRemoteRefreshSource,
+		gpmManifestRefreshFailureMaxCacheAge:    time.Duration(gpmManifestRefreshFailureMaxCacheAgeSec) * time.Second,
+		gpmManifestRefreshFailureMaxCacheAgeSrc: gpmManifestRefreshFailureMaxCacheAgeSource,
 		gpmManifestHMACKey:                      gpmManifestHMACKey,
 		gpmManifestHMACKeySource:                strings.TrimSpace(gpmManifestHMACKeySource),
 		gpmManifestEd25519PublicKey:             gpmManifestEd25519PublicKey,
@@ -687,6 +703,18 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if manifestRemoteRefreshIntervalSource == "" {
 		manifestRemoteRefreshIntervalSource = "default"
 	}
+	manifestRefreshFailureMaxCacheAgeSec := int(s.gpmManifestRefreshFailureMaxCacheAge / time.Second)
+	if manifestRefreshFailureMaxCacheAgeSec < 0 {
+		manifestRefreshFailureMaxCacheAgeSec = 0
+	}
+	manifestRefreshFailureMaxCacheAgeSource := strings.TrimSpace(s.gpmManifestRefreshFailureMaxCacheAgeSrc)
+	if manifestRefreshFailureMaxCacheAgeSource == "" {
+		manifestRefreshFailureMaxCacheAgeSource = "default"
+	}
+	manifestResolvePolicyDetail := "serve trusted cache immediately; when refresh interval elapses for a still-valid cache, attempt remote refresh and fall back to trusted cache if refresh fails"
+	if manifestRefreshFailureMaxCacheAgeSec > 0 {
+		manifestResolvePolicyDetail = "serve trusted cache immediately; when refresh interval elapses for a still-valid cache, attempt remote refresh and fall back to trusted cache if refresh fails only while cache age stays within the configured refresh-failure fallback max age"
+	}
 	connectPolicyMode := strings.TrimSpace(s.gpmConnectPolicyMode)
 	if connectPolicyMode == "" {
 		connectPolicyMode = "default"
@@ -786,8 +814,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_manifest_cache_max_age_sec":                         manifestCacheMaxAgeSec,
 			"gpm_manifest_remote_refresh_interval_sec":               manifestRemoteRefreshIntervalSec,
 			"gpm_manifest_remote_refresh_interval_source":            manifestRemoteRefreshIntervalSource,
+			"gpm_manifest_refresh_failure_max_cache_age_sec":         manifestRefreshFailureMaxCacheAgeSec,
+			"gpm_manifest_refresh_failure_max_cache_age_source":      manifestRefreshFailureMaxCacheAgeSource,
 			"gpm_manifest_resolve_policy":                            "cache_first_bounded_remote_refresh",
-			"gpm_manifest_resolve_policy_detail":                     "serve trusted cache immediately; when refresh interval elapses for a still-valid cache, attempt remote refresh and fall back to trusted cache if refresh fails",
+			"gpm_manifest_resolve_policy_detail":                     manifestResolvePolicyDetail,
 			"gpm_legacy_env_aliases_active":                          legacyEnvAliasesActive,
 			"gpm_legacy_env_aliases_active_count":                    len(legacyEnvAliasesActive),
 			"gpm_legacy_env_alias_warnings":                          legacyEnvAliasWarnings,

@@ -7809,6 +7809,83 @@ func TestGPMClientRegisterRejectsPinnedManifestHTTPURLWhenHTTPSRequired(t *testi
 	}
 }
 
+func TestValidateManifestSourceURLPolicyRejectsUserinfoQueryAndFragment(t *testing.T) {
+	svc := &Service{}
+	tests := []struct {
+		name          string
+		sourceURL     string
+		wantErrSubstr string
+	}{
+		{
+			name:          "userinfo is rejected",
+			sourceURL:     "https://operator:secret@bootstrap.globalprivatemesh.example/v1/bootstrap/manifest",
+			wantErrSubstr: "userinfo",
+		},
+		{
+			name:          "query is rejected",
+			sourceURL:     "https://bootstrap.globalprivatemesh.example/v1/bootstrap/manifest?trace=1",
+			wantErrSubstr: "query is not allowed",
+		},
+		{
+			name:          "fragment is rejected",
+			sourceURL:     "https://bootstrap.globalprivatemesh.example/v1/bootstrap/manifest#v2",
+			wantErrSubstr: "fragment is not allowed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := svc.validateManifestSourceURLPolicy(tc.sourceURL, "", "cached manifest source url")
+			if err == nil {
+				t.Fatalf("expected source url %q to be rejected", tc.sourceURL)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Fatalf("error=%q want contains %q", err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
+}
+
+func TestReadBootstrapManifestCacheEnforcesSourceURLPolicyWithoutPinnedOrHTTPSRequirements(t *testing.T) {
+	now := time.Now().UTC()
+	cachePath := filepath.Join(t.TempDir(), "manifest_cache_source_policy.json")
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Format(time.RFC3339),
+		SourceURL:         "ftp://bootstrap-cache.globalprivatemesh.example/v1/bootstrap/manifest",
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache-source-policy.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	svc := &Service{
+		gpmMainDomain:           "",
+		gpmManifestURL:          "https://bootstrap.globalprivatemesh.example/v1/bootstrap/manifest",
+		gpmManifestCache:        cachePath,
+		gpmManifestMaxAge:       24 * time.Hour,
+		gpmManifestRequireHTTPS: false,
+	}
+	_, _, err = svc.readBootstrapManifestCache()
+	if err == nil {
+		t.Fatal("expected cached source_url policy enforcement without pinned host/https requirements")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "cached manifest source url") || !strings.Contains(errMsg, "unsupported url scheme") {
+		t.Fatalf("error=%q want cached source url scheme validation failure", errMsg)
+	}
+}
+
 func TestFetchRemoteManifestSucceedsWithEd25519Signature(t *testing.T) {
 	now := time.Now().UTC()
 	manifest := gpmBootstrapManifest{
@@ -8525,6 +8602,162 @@ func TestResolveBootstrapManifestRefreshesRemoteWhenCacheStillValidAndRefreshInt
 	}
 	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != remoteBootstrapDirectory {
 		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{remoteBootstrapDirectory})
+	}
+}
+
+func TestResolveBootstrapManifestUsesConfiguredManifestURLWhenCachedSourceURLEmpty(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmMainDomain = ""
+	svc.gpmManifestURL = "https://bootstrap-fallback.globalprivatemesh.example/v1/bootstrap/manifest"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache_empty_source_url.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 0
+
+	now := time.Now().UTC()
+	const cachedBootstrapDirectory = "https://directory.cache-empty-source-url.globalprivatemesh.example:8081"
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-15 * time.Second).Format(time.RFC3339),
+		SourceURL:         "",
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{cachedBootstrapDirectory},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	manifest, source, signatureVerified, manifestSourceURL, remoteRefreshWarning, err := svc.resolveBootstrapManifestWithTelemetry(context.Background())
+	if err != nil {
+		t.Fatalf("resolve bootstrap manifest: %v", err)
+	}
+	if source != "cache" {
+		t.Fatalf("source=%q want=cache", source)
+	}
+	if !signatureVerified {
+		t.Fatalf("signatureVerified=%t want=true", signatureVerified)
+	}
+	if manifestSourceURL != svc.gpmManifestURL {
+		t.Fatalf("manifestSourceURL=%q want=%q", manifestSourceURL, svc.gpmManifestURL)
+	}
+	if strings.TrimSpace(remoteRefreshWarning) != "" {
+		t.Fatalf("remoteRefreshWarning=%q want empty", remoteRefreshWarning)
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != cachedBootstrapDirectory {
+		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{cachedBootstrapDirectory})
+	}
+}
+
+func TestResolveBootstrapManifestFailsClosedWhenPeriodicRefreshFailsAndCacheAgeExceedsFallbackThreshold(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache_threshold_fail_closed.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 30 * time.Second
+	svc.gpmManifestRefreshFailureMaxCacheAge = time.Minute
+
+	now := time.Now().UTC()
+	const cachedBootstrapDirectory = "https://directory.cache-threshold-fail-closed.globalprivatemesh.example:8081"
+	var manifestHits int
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-2 * time.Minute).Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{cachedBootstrapDirectory},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	_, _, _, err = svc.resolveBootstrapManifest(context.Background())
+	if err == nil {
+		t.Fatal("expected periodic refresh failure with cache older than fallback threshold to fail closed")
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected periodic refresh to attempt remote call before fail-closed decision")
+	}
+}
+
+func TestResolveBootstrapManifestFallsBackToTrustedCacheWhenPeriodicRefreshFailsWithinFallbackThreshold(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache_threshold_fallback.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+	svc.gpmManifestRemoteRefreshIntvl = 30 * time.Second
+	svc.gpmManifestRefreshFailureMaxCacheAge = 2 * time.Minute
+
+	now := time.Now().UTC()
+	const cachedBootstrapDirectory = "https://directory.cache-threshold-fallback.globalprivatemesh.example:8081"
+	var manifestHits int
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manifestHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(-90 * time.Second).Format(time.RFC3339),
+		SourceURL:         manifestServer.URL,
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{cachedBootstrapDirectory},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(svc.gpmManifestCache, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	manifest, source, signatureVerified, err := svc.resolveBootstrapManifest(context.Background())
+	if err != nil {
+		t.Fatalf("resolve bootstrap manifest: %v", err)
+	}
+	if source != "cache" {
+		t.Fatalf("source=%q want=cache", source)
+	}
+	if !signatureVerified {
+		t.Fatalf("signatureVerified=%t want=true", signatureVerified)
+	}
+	if manifestHits == 0 {
+		t.Fatal("expected periodic refresh to attempt remote call before cache fallback")
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != cachedBootstrapDirectory {
+		t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{cachedBootstrapDirectory})
 	}
 }
 

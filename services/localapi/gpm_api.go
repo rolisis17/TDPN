@@ -2675,6 +2675,14 @@ func (s *Service) resolveBootstrapManifestWithTelemetry(ctx context.Context) (gp
 		}
 		manifest, signatureVerified, manifestBody, manifestSignature, err := s.fetchRemoteManifestWithPolicy(ctx, manifestURL)
 		if err != nil {
+			if failClosed, cacheAge, maxAllowedCacheAge := s.shouldFailClosedOnManifestRefreshFailure(cacheEntry.FetchedAtUTC); failClosed {
+				return gpmBootstrapManifest{}, "", false, cacheSourceURL, "", fmt.Errorf(
+					"periodic remote manifest refresh failed and cached manifest age (%ds) exceeds configured refresh-failure fallback max cache age (%ds): %w",
+					int64(cacheAge/time.Second),
+					int64(maxAllowedCacheAge/time.Second),
+					err,
+				)
+			}
 			return cacheEntry.Manifest, "cache", cacheEntry.SignatureVerified, cacheSourceURL, "periodic remote refresh failed; serving last trusted cached manifest", nil
 		}
 		_ = s.writeBootstrapManifestCache(manifest, signatureVerified, manifestBody, manifestSignature)
@@ -2695,6 +2703,18 @@ func (s *Service) shouldAttemptRemoteManifestRefresh(fetchedAt time.Time) bool {
 		return false
 	}
 	return time.Since(fetchedAt) >= refreshInterval
+}
+
+func (s *Service) shouldFailClosedOnManifestRefreshFailure(fetchedAt time.Time) (bool, time.Duration, time.Duration) {
+	maxAllowedCacheAge := s.gpmManifestRefreshFailureMaxCacheAge
+	if maxAllowedCacheAge <= 0 {
+		return false, 0, maxAllowedCacheAge
+	}
+	cacheAge := time.Since(fetchedAt)
+	if cacheAge < 0 {
+		cacheAge = 0
+	}
+	return cacheAge > maxAllowedCacheAge, cacheAge, maxAllowedCacheAge
 }
 
 func (s *Service) fetchRemoteManifestWithPolicy(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {
@@ -3050,13 +3070,15 @@ func (s *Service) readTrustedBootstrapManifestCache() (gpmTrustedBootstrapManife
 	if err != nil {
 		return gpmTrustedBootstrapManifestCache{}, err
 	}
-	if pinnedHost != "" || s.gpmManifestRequireHTTPS {
-		if err := s.validateManifestSourceURLPolicy(strings.TrimSpace(cache.SourceURL), pinnedHost, "cached manifest source url"); err != nil {
-			return gpmTrustedBootstrapManifestCache{}, err
-		}
+	cacheSourceURL := strings.TrimSpace(cache.SourceURL)
+	if cacheSourceURL == "" {
+		cacheSourceURL = strings.TrimSpace(s.gpmManifestURL)
+	}
+	if err := s.validateManifestSourceURLPolicy(cacheSourceURL, pinnedHost, "cached manifest source url"); err != nil {
+		return gpmTrustedBootstrapManifestCache{}, err
 	}
 	if pinnedHost != "" {
-		cacheSourceHost, hostErr := normalizeHTTPHost(strings.TrimSpace(cache.SourceURL))
+		cacheSourceHost, hostErr := normalizeHTTPHost(cacheSourceURL)
 		if hostErr != nil {
 			return gpmTrustedBootstrapManifestCache{}, fmt.Errorf("cached manifest source url is invalid for pinned gpm main domain host %q: %w", pinnedHost, hostErr)
 		}
@@ -3072,7 +3094,7 @@ func (s *Service) readTrustedBootstrapManifestCache() (gpmTrustedBootstrapManife
 		Manifest:          normalizeBootstrapManifest(cache.Manifest),
 		SignatureVerified: signatureVerified,
 		FetchedAtUTC:      fetchedAt,
-		SourceURL:         strings.TrimSpace(cache.SourceURL),
+		SourceURL:         cacheSourceURL,
 	}, nil
 }
 
@@ -3125,7 +3147,7 @@ func (s *Service) pinnedGPMMainDomainHost() (string, error) {
 }
 
 func (s *Service) validateManifestSourceURLPolicy(rawURL string, pinnedHost string, sourceLabel string) error {
-	parsed, err := parseAbsoluteHTTPURL(rawURL)
+	parsed, err := parseManifestSourceURL(rawURL)
 	if err != nil {
 		return fmt.Errorf("%s is invalid: %w", sourceLabel, err)
 	}
@@ -3142,6 +3164,24 @@ func (s *Service) validateManifestSourceURLPolicy(rawURL string, pinnedHost stri
 		}
 	}
 	return nil
+}
+
+func parseManifestSourceURL(raw string) (*urlpkg.URL, error) {
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := parseAbsoluteHTTPURL(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.User != nil {
+		return nil, errors.New("url userinfo is not allowed")
+	}
+	if parsed.ForceQuery || strings.TrimSpace(parsed.RawQuery) != "" {
+		return nil, errors.New("url query is not allowed")
+	}
+	if strings.Contains(trimmed, "#") || strings.TrimSpace(parsed.Fragment) != "" {
+		return nil, errors.New("url fragment is not allowed")
+	}
+	return parsed, nil
 }
 
 func readFileWithHardLimit(path string, maxBytes int64) ([]byte, error) {
