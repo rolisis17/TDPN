@@ -277,9 +277,45 @@ function Resolve-ToolPath {
   return ""
 }
 
+function Get-ExecutionPolicySnapshot {
+  $scopes = @("Process", "CurrentUser", "LocalMachine")
+  $snapshot = [ordered]@{}
+
+  foreach ($scope in $scopes) {
+    try {
+      $snapshot[$scope] = [string](Get-ExecutionPolicy -Scope $scope)
+    } catch {
+      $snapshot[$scope] = "Unavailable"
+    }
+  }
+
+  return [pscustomobject]@{
+    effective = [string](Get-ExecutionPolicy)
+    scopes = $snapshot
+  }
+}
+
+function Show-ExecutionPolicyStatus {
+  $snapshot = Get-ExecutionPolicySnapshot
+  Write-Step ("execution policy: effective={0}; process={1}; current_user={2}; local_machine={3}" -f $snapshot.effective, $snapshot.scopes.Process, $snapshot.scopes.CurrentUser, $snapshot.scopes.LocalMachine)
+
+  if ($snapshot.effective -notin @("Bypass", "Unrestricted")) {
+    Write-Step "execution policy risk detected: effective_policy=$($snapshot.effective)"
+    Write-Step "rerun in this shell with process-scope bypass:"
+    Write-Host "  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+  }
+}
+
 function Ensure-PolicyBypassProcess {
+  Show-ExecutionPolicyStatus
+
   if (-not $EnablePolicyBypass) {
     Write-Step "execution policy left unchanged (pass -EnablePolicyBypass to opt in)"
+    return
+  }
+
+  if ($DryRun) {
+    Write-Step "dry-run: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
     return
   }
 

@@ -2,9 +2,9 @@
 
 ## One-shot prerequisite setup/remediation
 
-Use `setup_windows_native.ps1` to verify and optionally remediate common Windows-native blockers for desktop/local API workflows.
+Use `setup_windows_native.ps1` to verify and optionally remediate common Windows-native blockers for desktop and local API workflows.
 
-Check-only (safe default):
+Check-only, safe default:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both
@@ -16,22 +16,83 @@ Dry-run remediation preview:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both -InstallMissing -DryRun
 ```
 
-Unattended remediation (no prompts):
+Unattended remediation:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both -InstallMissing -NonInteractive -EnablePolicyBypass
 ```
 
-Workflow options:
-- `-Workflow desktop`: prioritize `node`, `npm.cmd`, `rustc`, `cargo`; Git Bash is advisory.
-- `-Workflow local-api`: prioritize `go` and Git Bash (`bash.exe` from Git for Windows).
-- `-Workflow both` (default): union of both workflows.
+What the script does:
+- detects and reports current execution policy
+- prints the one-command process-scope bypass if the shell is locked down: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force`
+- refreshes the session `PATH` from machine/user values and common install locations
+- routes child script launches through `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ...`
+- finishes with a verification block for `go version`, `node -v`, `npm -v`, `rustc -V`, and `cargo -V`
 
-Behavior highlights:
-- non-destructive by default (`-InstallMissing` is required for installs)
-- process-only execution policy bypass (`-EnablePolicyBypass`)
-- session PATH refresh from machine/user PATH (+ common tool directories)
-- deterministic follow-up commands (`next command:` output)
+Expected healthy output at the end:
+- each tool line says `PASS`
+- the summary line says `summary: pass=5 fail=0`
+
+## Troubleshooting
+
+### Execution policy blocks `.ps1` files
+
+Run the process-scope bypass once in the current shell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+```
+
+Expected output:
+- the command returns to the prompt without changing machine or user policy
+- `Get-ExecutionPolicy -Scope Process` prints `Bypass`
+
+If you want to rerun setup immediately with the bypass baked in:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both -InstallMissing -NonInteractive -EnablePolicyBypass
+```
+
+Expected output:
+- `execution policy: effective=...`
+- `final verification:`
+- `summary: pass=5 fail=0` when all tools are installed and reachable
+
+### Go, Node, npm, Rust, or cargo still look missing after install
+
+Run the setup again so it refreshes the current session `PATH` from machine/user entries and the common install directories:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow both -InstallMissing -EnablePolicyBypass
+```
+
+Then confirm the commands resolve from the current shell:
+
+```powershell
+Get-Command go,node,npm,npm.cmd,rustc,cargo | Select-Object Name,Source
+```
+
+Expected output:
+- `go.exe` from `C:\Program Files\Go\bin\go.exe`
+- `node.exe` from `C:\Program Files\nodejs\node.exe`
+- `npm.cmd` from `C:\Program Files\nodejs\npm.cmd`
+- `rustc.exe` from `C:\Users\<you>\.cargo\bin\rustc.exe`
+- `cargo.exe` from `C:\Users\<you>\.cargo\bin\cargo.exe`
+
+### `npm.ps1` is blocked by execution policy
+
+Use the policy-safe wrapper so Node package commands route to `npm.cmd` instead of the PowerShell shim:
+
+```powershell
+scripts\windows\desktop_node.cmd npm -v
+scripts\windows\desktop_node.cmd npm install
+scripts\windows\desktop_node.cmd npm run tauri -- dev
+```
+
+Expected output:
+- the wrapper runs without a PowerShell execution-policy error
+- `npm -v` prints a version number
+- install and `tauri -- dev` commands flow through `npm.cmd`
 
 ## Follow-on scripts
 

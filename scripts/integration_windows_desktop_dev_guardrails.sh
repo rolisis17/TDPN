@@ -12,6 +12,12 @@ for cmd in grep mktemp; do
 done
 
 SCRIPT_UNDER_TEST="${DESKTOP_WINDOWS_DEV_SCRIPT_UNDER_TEST:-$ROOT_DIR/scripts/windows/desktop_dev.ps1}"
+DESKTOP_ROOT="$ROOT_DIR/apps/desktop"
+WINDOWS_ICON_HELPER="$DESKTOP_ROOT/scripts/ensure-windows-icon.mjs"
+WINDOWS_ICON_SOURCE="$DESKTOP_ROOT/src-tauri/icons/icon.svg"
+WINDOWS_ICON_OUTPUT="$DESKTOP_ROOT/src-tauri/icons/icon.ico"
+DESKTOP_PACKAGE_JSON="$DESKTOP_ROOT/package.json"
+
 if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
   echo "windows desktop dev guardrails failed: missing script: $SCRIPT_UNDER_TEST"
   exit 1
@@ -25,6 +31,15 @@ elif command -v powershell.exe >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell.exe"
 else
   echo "windows desktop dev guardrails failed: missing powershell/pwsh/powershell.exe"
+  exit 2
+fi
+
+if command -v node >/dev/null 2>&1; then
+  NODE_BIN="node"
+elif command -v node.exe >/dev/null 2>&1; then
+  NODE_BIN="node.exe"
+else
+  echo "windows desktop dev guardrails failed: missing node/node.exe"
   exit 2
 fi
 
@@ -60,6 +75,11 @@ ps_single_quote() {
   value="${value//\'/\'\'}"
   printf "'%s'" "$value"
 }
+
+NODE_BIN_PS="$(to_powershell_path "$NODE_BIN")"
+WINDOWS_ICON_HELPER_PS="$(to_powershell_path "$WINDOWS_ICON_HELPER")"
+WINDOWS_ICON_SOURCE_PS="$(to_powershell_path "$WINDOWS_ICON_SOURCE")"
+WINDOWS_ICON_OUTPUT_PS="$(to_powershell_path "$WINDOWS_ICON_OUTPUT")"
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -109,6 +129,56 @@ run_expect_fail_regex() {
 INSTALL_ON_REGEX='rerun (with|in this shell with) process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -InstallMissing -DryRun -ApiAddr'
 INSTALL_OFF_REGEX='rerun (with|in this shell with) process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -DryRun -ApiAddr'
 CONFLICT_REGEX='conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing'
+PACKAGE_PRETAURI_REGEX='"pretauri"[[:space:]]*:[[:space:]]*"npm run generate:windows-icon"'
+ICON_HELPER_DRY_RUN_REGEX='desktop icon prebuild: would generate .*icon\.ico .*icon\.svg|manual command -> cd apps/desktop && npm run generate:windows-icon'
+ICON_HELPER_GENERATED_REGEX='desktop icon prebuild: generated .*icon\.ico from .*icon\.svg'
+
+if [[ ! -f "$WINDOWS_ICON_SOURCE" ]]; then
+  echo "windows desktop dev guardrails failed: missing icon source asset: $WINDOWS_ICON_SOURCE"
+  exit 1
+fi
+
+if [[ ! -f "$WINDOWS_ICON_OUTPUT" ]]; then
+  echo "windows desktop dev guardrails failed: missing generated icon artifact: $WINDOWS_ICON_OUTPUT"
+  exit 1
+fi
+
+if [[ ! -f "$WINDOWS_ICON_HELPER" ]]; then
+  echo "windows desktop dev guardrails failed: missing icon helper: $WINDOWS_ICON_HELPER"
+  exit 1
+fi
+
+if [[ ! -f "$DESKTOP_PACKAGE_JSON" ]]; then
+  echo "windows desktop dev guardrails failed: missing package.json: $DESKTOP_PACKAGE_JSON"
+  exit 1
+fi
+
+if ! grep -Eq -- "$PACKAGE_PRETAURI_REGEX" "$DESKTOP_PACKAGE_JSON"; then
+  echo "windows desktop dev guardrails failed: package.json is missing the Windows icon prebuild hook"
+  exit 1
+fi
+
+TMP_ICON_DIR="$TMP_DIR/windows-icon-test"
+mkdir -p "$TMP_ICON_DIR"
+
+echo "[windows-desktop-dev-guardrails] icon helper dry-run shows the remediation command"
+run_expect_pass_regex \
+  "windows_icon_helper_dry_run" \
+  "$ICON_HELPER_DRY_RUN_REGEX" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ICON_SOURCE_PATH='$(printf "%s" "$WINDOWS_ICON_SOURCE_PS")'; \$env:GPM_DESKTOP_ICON_OUTPUT_PATH='$(printf "%s" "$(to_powershell_path "$TMP_ICON_DIR/icon.ico")")'; \$env:GPM_DESKTOP_ICON_PREBUILD_DRY_RUN='1'; & '$(printf "%s" "$NODE_BIN_PS")' '$(printf "%s" "$WINDOWS_ICON_HELPER_PS")'"
+
+echo "[windows-desktop-dev-guardrails] icon helper generates a valid temp icon"
+run_expect_pass_regex \
+  "windows_icon_helper_generate" \
+  "$ICON_HELPER_GENERATED_REGEX" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ICON_SOURCE_PATH='$(printf "%s" "$WINDOWS_ICON_SOURCE_PS")'; \$env:GPM_DESKTOP_ICON_OUTPUT_PATH='$(printf "%s" "$(to_powershell_path "$TMP_ICON_DIR/icon.ico")")'; & '$(printf "%s" "$NODE_BIN_PS")' '$(printf "%s" "$WINDOWS_ICON_HELPER_PS")'"
+
+if [[ ! -f "$TMP_ICON_DIR/icon.ico" ]]; then
+  echo "windows desktop dev guardrails failed: icon helper did not produce $TMP_ICON_DIR/icon.ico"
+  exit 1
+fi
 
 echo "[windows-desktop-dev-guardrails] default dry-run uses install intent enabled path"
 run_expect_pass_regex \

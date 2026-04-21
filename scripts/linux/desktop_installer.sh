@@ -36,6 +36,54 @@ log() {
   echo "[desktop-installer-linux] $*"
 }
 
+command_available() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+availability_label() {
+  local command_name="$1"
+  if command_available "$command_name"; then
+    printf '%s' "yes"
+  else
+    printf '%s' "no"
+  fi
+}
+
+build_package_manager_remediation_hints() {
+  local sudo_prefix=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    sudo_prefix="sudo "
+  fi
+
+  cat <<EOF
+- Debian/Ubuntu: ${sudo_prefix}apt-get update && ${sudo_prefix}apt-get install -y apt dpkg
+- Fedora/RHEL: ${sudo_prefix}dnf install -y dnf rpm
+- Arch: ${sudo_prefix}pacman -Syu --needed pacman
+- openSUSE: ${sudo_prefix}zypper install -y zypper rpm
+EOF
+}
+
+build_installer_first_run_hints() {
+  local artifact_type="$1"
+  local install_label="$2"
+  cat <<EOF
+- run ./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1
+- run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
+- install source package-manager tooling for the host distro, then rerun the installer
+EOF
+  if [[ -n "$artifact_type" ]]; then
+    cat <<EOF
+- selected installer type: $artifact_type
+- installer command path: $install_label
+EOF
+  fi
+  build_package_manager_remediation_hints
+}
+
+log_installer_package_manager_availability() {
+  log "preflight package-manager availability: apt=$(availability_label apt) apt-get=$(availability_label apt-get) dpkg=$(availability_label dpkg) dnf=$(availability_label dnf) yum=$(availability_label yum) zypper=$(availability_label zypper) rpm=$(availability_label rpm) sudo=$(availability_label sudo)"
+}
+
 show_usage() {
   cat <<'USAGE'
 GPM Linux desktop installer scaffold (non-production helper)
@@ -441,21 +489,32 @@ execute_installer() {
       local_artifact_ref="./$artifact_name"
 
       local deb_cmd=()
-      if command -v apt >/dev/null 2>&1; then
+      if command_available apt; then
         deb_cmd=(apt install -y "$local_artifact_ref")
-      elif command -v apt-get >/dev/null 2>&1; then
+      elif command_available apt-get; then
         deb_cmd=(apt-get install -y "$local_artifact_ref")
-      elif command -v dpkg >/dev/null 2>&1; then
+      elif command_available dpkg; then
         deb_cmd=(dpkg -i "$local_artifact_ref")
       else
-        fail "install" "no supported DEB installer command found (apt, apt-get, dpkg); remediation hint: install apt/dpkg toolchain or use --installer-type appimage"
+        fail "install" "$(cat <<EOF
+no supported DEB installer command found (apt, apt-get, dpkg)
+- run ./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1
+- run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
+$(build_installer_first_run_hints "deb" "$resolved_installer_path")
+EOF
+)"
       fi
 
       if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-        if command -v sudo >/dev/null 2>&1; then
+        if command_available sudo; then
           deb_cmd=(sudo "${deb_cmd[@]}")
         else
-          fail "install" "non-root DEB install requires sudo; remediation hint: install sudo, re-run as root, or use --installer-type appimage"
+          fail "install" "$(cat <<EOF
+non-root DEB install requires sudo
+- re-run the installer as root, or install sudo and try again
+$(build_installer_first_run_hints "deb" "$resolved_installer_path")
+EOF
+)"
         fi
       fi
       if [[ "$dry_run" == "1" ]]; then
@@ -478,23 +537,34 @@ execute_installer() {
       local_artifact_ref="./$artifact_name"
 
       local rpm_cmd=()
-      if command -v dnf >/dev/null 2>&1; then
+      if command_available dnf; then
         rpm_cmd=(dnf install -y "$local_artifact_ref")
-      elif command -v yum >/dev/null 2>&1; then
+      elif command_available yum; then
         rpm_cmd=(yum install -y "$local_artifact_ref")
-      elif command -v zypper >/dev/null 2>&1; then
+      elif command_available zypper; then
         rpm_cmd=(zypper --non-interactive install "$local_artifact_ref")
-      elif command -v rpm >/dev/null 2>&1; then
+      elif command_available rpm; then
         rpm_cmd=(rpm -i "$local_artifact_ref")
       else
-        fail "install" "no supported RPM installer command found (dnf, yum, zypper, rpm); remediation hint: install rpm toolchain or use --installer-type appimage"
+        fail "install" "$(cat <<EOF
+no supported RPM installer command found (dnf, yum, zypper, rpm)
+- run ./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1
+- run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing
+$(build_installer_first_run_hints "rpm" "$resolved_installer_path")
+EOF
+)"
       fi
 
       if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-        if command -v sudo >/dev/null 2>&1; then
+        if command_available sudo; then
           rpm_cmd=(sudo "${rpm_cmd[@]}")
         else
-          fail "install" "non-root RPM install requires sudo; remediation hint: install sudo, re-run as root, or use --installer-type appimage"
+          fail "install" "$(cat <<EOF
+non-root RPM install requires sudo
+- re-run the installer as root, or install sudo and try again
+$(build_installer_first_run_hints "rpm" "$resolved_installer_path")
+EOF
+)"
         fi
       fi
       if [[ "$dry_run" == "1" ]]; then
@@ -668,6 +738,7 @@ if [[ -n "$resolved_installed_executable" ]]; then
   log "installed_executable=$resolved_installed_executable"
 fi
 log "build_if_missing=$build_if_missing build_triggered=$build_triggered dry_run=$dry_run"
+log_installer_package_manager_availability
 
 if ! execute_installer; then
   fail "install" "installer command failed"

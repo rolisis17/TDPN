@@ -12,6 +12,9 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 PACKAGED_DEFAULT_CREATED="0"
+SYSTEM_BASH="$(command -v bash)"
+SYSTEM_DIRNAME="$(command -v dirname)"
+SYSTEM_BASENAME="$(command -v basename)"
 cleanup() {
   if [[ "$PACKAGED_DEFAULT_CREATED" == "1" ]]; then
     rm -f "${FAKE_PACKAGED_DEFAULT:-}"
@@ -19,6 +22,50 @@ cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+make_exec_wrapper() {
+  local target_path="$1"
+  local target_command="$2"
+  cat >"$target_path" <<EOF
+#!/bin/sh
+exec "$target_command" "\$@"
+EOF
+  chmod +x "$target_path"
+}
+
+make_exit_zero_wrapper() {
+  local target_path="$1"
+  cat >"$target_path" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  chmod +x "$target_path"
+}
+
+make_pkg_config_stub() {
+  local target_path="$1"
+  cat >"$target_path" <<'EOF'
+#!/bin/sh
+if [ "$1" = "--exists" ]; then
+  case "$2" in
+    gtk+-3.0|webkit2gtk-4.1|webkit2gtk-4.0|libsoup-3.0|javascriptcoregtk-4.1|javascriptcoregtk-4.0)
+      exit 0
+      ;;
+  esac
+fi
+exit 1
+EOF
+  chmod +x "$target_path"
+}
+
+make_pkg_config_fail_stub() {
+  local target_path="$1"
+  cat >"$target_path" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+  chmod +x "$target_path"
+}
 
 assert_script_marker() {
   local marker="$1"
@@ -69,12 +116,21 @@ assert_script_marker "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
 assert_script_marker "GPM_DESKTOP_PACKAGED_EXE"
 assert_script_marker "TDPN_DESKTOP_PACKAGED_EXE"
 assert_script_marker "assert_native_desktop_prerequisites_for_dev"
+assert_script_marker "assert_runtime_toolchain_prerequisites_for_dev"
+assert_script_marker "assert_go_runtime_prerequisite_for_api"
+assert_script_marker "runtime_tool_label"
+assert_script_marker "runtime_tool_install_hint"
+assert_script_marker "build_linux_desktop_first_run_distro_hints"
 assert_script_marker "missing native Linux desktop prerequisites required for Tauri dev mode"
 assert_script_marker "pkg-config"
 assert_script_marker "libgtk-3-dev"
 assert_script_marker "libwebkit2gtk-4.1-dev"
 assert_script_marker "libsoup-3.0-dev"
 assert_script_marker "libjavascriptcoregtk-4.1-dev"
+assert_script_marker "Debian/Ubuntu:"
+assert_script_marker "Fedora/RHEL:"
+assert_script_marker "Arch:"
+assert_script_marker "openSUSE:"
 
 echo "[linux-desktop-native-bootstrap-guardrails] check --dry-run passes"
 run_expect_pass \
@@ -98,31 +154,60 @@ run_expect_pass \
     --desktop-launch-strategy auto \
     --dry-run
 
-FAKE_BIN_DIR="$TMP_DIR/fake-bin"
-mkdir -p "$FAKE_BIN_DIR"
-FAKE_PKG_CONFIG="$FAKE_BIN_DIR/pkg-config"
-cat >"$FAKE_PKG_CONFIG" <<'EOF_FAKE_PKG_CONFIG'
-#!/usr/bin/env bash
-exit 1
-EOF_FAKE_PKG_CONFIG
-chmod +x "$FAKE_PKG_CONFIG"
+FAKE_RUNTIME_BIN_DIR="$TMP_DIR/fake-runtime-bin"
+mkdir -p "$FAKE_RUNTIME_BIN_DIR"
+make_exec_wrapper "$FAKE_RUNTIME_BIN_DIR/bash" "$SYSTEM_BASH"
+make_exec_wrapper "$FAKE_RUNTIME_BIN_DIR/dirname" "$SYSTEM_DIRNAME"
+make_exec_wrapper "$FAKE_RUNTIME_BIN_DIR/basename" "$SYSTEM_BASENAME"
 
-echo "[linux-desktop-native-bootstrap-guardrails] run-desktop dev fails fast when native prerequisites are missing"
+echo "[linux-desktop-native-bootstrap-guardrails] run-desktop dev fails fast when runtime toolchain is missing"
 run_expect_fail_regex \
-  "run_desktop_dev_missing_native_fail" \
-  "missing native Linux desktop prerequisites required for Tauri dev mode|desktop_doctor\\.sh --mode fix --install-missing|libgtk-3-dev" \
+  "run_desktop_dev_missing_runtime_fail" \
+  "missing Linux runtime prerequisites for desktop dev launch|Node\\.js command 'node' is missing|npm command 'npm' is missing|Debian/Ubuntu: .*apt-get install -y .*nodejs" \
   env \
-    PATH="$FAKE_BIN_DIR:$PATH" \
+    PATH="$FAKE_RUNTIME_BIN_DIR" \
     bash "$SCRIPT_UNDER_TEST" \
       --mode run-desktop \
       --desktop-launch-strategy dev
 
-echo "[linux-desktop-native-bootstrap-guardrails] run-full dev fails before API startup when native prerequisites are missing"
+FAKE_DEV_BIN_DIR="$TMP_DIR/fake-dev-bin"
+mkdir -p "$FAKE_DEV_BIN_DIR"
+make_exec_wrapper "$FAKE_DEV_BIN_DIR/bash" "$SYSTEM_BASH"
+make_exec_wrapper "$FAKE_DEV_BIN_DIR/dirname" "$SYSTEM_DIRNAME"
+make_exec_wrapper "$FAKE_DEV_BIN_DIR/basename" "$SYSTEM_BASENAME"
+make_exit_zero_wrapper "$FAKE_DEV_BIN_DIR/node"
+make_exit_zero_wrapper "$FAKE_DEV_BIN_DIR/npm"
+make_exit_zero_wrapper "$FAKE_DEV_BIN_DIR/rustc"
+make_exit_zero_wrapper "$FAKE_DEV_BIN_DIR/cargo"
+make_pkg_config_fail_stub "$FAKE_DEV_BIN_DIR/pkg-config"
+
+echo "[linux-desktop-native-bootstrap-guardrails] run-desktop dev fails on missing native prerequisites after runtime toolchain passes"
 run_expect_fail_regex \
-  "run_full_dev_missing_native_fail" \
-  "missing native Linux desktop prerequisites required for Tauri dev mode|desktop_doctor\\.sh --mode fix --install-missing|libsoup-3.0-dev" \
+  "run_desktop_dev_missing_native_fail" \
+  "missing native Linux desktop prerequisites required for Tauri dev mode|desktop_doctor\\.sh --mode fix --install-missing|libsoup-3\\.0-dev" \
   env \
-    PATH="$FAKE_BIN_DIR:$PATH" \
+    PATH="$FAKE_DEV_BIN_DIR" \
+    bash "$SCRIPT_UNDER_TEST" \
+      --mode run-desktop \
+      --desktop-launch-strategy dev
+
+FAKE_FULL_BIN_DIR="$TMP_DIR/fake-full-bin"
+mkdir -p "$FAKE_FULL_BIN_DIR"
+make_exec_wrapper "$FAKE_FULL_BIN_DIR/bash" "$SYSTEM_BASH"
+make_exec_wrapper "$FAKE_FULL_BIN_DIR/dirname" "$SYSTEM_DIRNAME"
+make_exec_wrapper "$FAKE_FULL_BIN_DIR/basename" "$SYSTEM_BASENAME"
+make_exit_zero_wrapper "$FAKE_FULL_BIN_DIR/node"
+make_exit_zero_wrapper "$FAKE_FULL_BIN_DIR/npm"
+make_exit_zero_wrapper "$FAKE_FULL_BIN_DIR/rustc"
+make_exit_zero_wrapper "$FAKE_FULL_BIN_DIR/cargo"
+make_pkg_config_stub "$FAKE_FULL_BIN_DIR/pkg-config"
+
+echo "[linux-desktop-native-bootstrap-guardrails] run-full dev fails with explicit Go remediation when API startup prerequisites are missing"
+run_expect_fail_regex \
+  "run_full_missing_go_fail" \
+  "missing Go runtime prerequisite for local API startup|Go toolchain command 'go' is missing|Debian/Ubuntu: .*apt-get install -y golang-go" \
+  env \
+    PATH="$FAKE_FULL_BIN_DIR" \
     bash "$SCRIPT_UNDER_TEST" \
       --mode run-full \
       --desktop-launch-strategy dev \

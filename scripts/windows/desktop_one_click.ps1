@@ -6,6 +6,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+function Write-Step {
+  param([string]$Message)
+  Write-Host "[desktop-one-click] $Message"
+}
+
 function Test-ArgNamePresent {
   param(
     [Parameter(Mandatory = $true)]
@@ -117,6 +122,75 @@ function Get-AutoInstallMissingEnvOverride {
   return $null
 }
 
+function Get-ExecutionPolicySnapshot {
+  $scopes = @("Process", "CurrentUser", "LocalMachine")
+  $snapshot = [ordered]@{}
+
+  foreach ($scope in $scopes) {
+    try {
+      $snapshot[$scope] = [string](Get-ExecutionPolicy -Scope $scope)
+    } catch {
+      $snapshot[$scope] = "Unavailable"
+    }
+  }
+
+  return [pscustomobject]@{
+    effective = [string](Get-ExecutionPolicy)
+    scopes = $snapshot
+  }
+}
+
+function Show-ExecutionPolicyStatus {
+  $snapshot = Get-ExecutionPolicySnapshot
+  Write-Step ("execution policy: effective={0}; process={1}; current_user={2}; local_machine={3}" -f $snapshot.effective, $snapshot.scopes.Process, $snapshot.scopes.CurrentUser, $snapshot.scopes.LocalMachine)
+
+  if ($snapshot.effective -notin @("Bypass", "Unrestricted")) {
+    Write-Step "execution policy risk detected: effective_policy=$($snapshot.effective)"
+    Write-Step "rerun in this shell with process-scope bypass:"
+    Write-Host "  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+  }
+}
+
+function Get-PowerShellBinary {
+  foreach ($candidate in @("powershell.exe", "powershell", "pwsh")) {
+    $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($null -ne $cmd) {
+      return [string]$cmd.Source
+    }
+  }
+
+  return ""
+}
+
+function Invoke-BypassScript {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptPath,
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
+
+  $powershellBinary = Get-PowerShellBinary
+  if ([string]::IsNullOrWhiteSpace($powershellBinary)) {
+    throw "missing PowerShell binary"
+  }
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $childOutput = & $powershellBinary -NoLogo -NoProfile -ExecutionPolicy Bypass -File $ScriptPath $Arguments 2>&1
+    foreach ($line in @($childOutput)) {
+      if ([string]::IsNullOrWhiteSpace([string]$line)) {
+        continue
+      }
+      Write-Host $line
+    }
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+}
+
 $scriptDir = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($scriptDir)) {
   $scriptDir = Split-Path -Parent $PSCommandPath
@@ -132,11 +206,14 @@ if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
   throw "missing bootstrap script: $bootstrapScript"
 }
 
+Show-ExecutionPolicyStatus
+
 $doctorInvokeArgs = @("-Mode", "check")
 $installMissingSpecified = Test-ArgSpecified -Args $BootstrapArgs -Name "-InstallMissing"
 $installMissingEnabled = Test-SwitchEnabled -Args $BootstrapArgs -Name "-InstallMissing"
 $noInstallMissingSpecified = Test-ArgSpecified -Args $BootstrapArgs -Name "-NoInstallMissing"
 $noInstallMissingEnabled = Test-SwitchEnabled -Args $BootstrapArgs -Name "-NoInstallMissing"
+$dryRunEnabled = Test-SwitchEnabled -Args $BootstrapArgs -Name "-DryRun"
 $forwardBootstrapArgs = @()
 foreach ($arg in $BootstrapArgs) {
   if ($arg -eq "-NoInstallMissing" -or $arg -like "-NoInstallMissing:*") {
@@ -162,15 +239,17 @@ if ($installMissingSpecified) {
 if ($installIntent) {
   $doctorInvokeArgs = @("-Mode", "fix", "-InstallMissing")
 }
-if (Test-SwitchEnabled -Args $BootstrapArgs -Name "-DryRun") {
+if ($dryRunEnabled) {
   $doctorInvokeArgs += "-DryRun"
 }
 if (-not (Test-ArgNamePresent -Args $BootstrapArgs -Name "-EnablePolicyBypass") -or (Test-SwitchEnabled -Args $BootstrapArgs -Name "-EnablePolicyBypass")) {
   $doctorInvokeArgs += "-EnablePolicyBypass"
 }
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $doctorScript @doctorInvokeArgs
-$doctorExitCode = $LASTEXITCODE
+$doctorLaunchCommand = ("{0} -NoLogo -NoProfile -ExecutionPolicy Bypass -File {1} {2}" -f (Get-PowerShellBinary), $doctorScript, ($doctorInvokeArgs -join " "))
+Write-Step ("launching doctor: {0}" -f $doctorLaunchCommand)
+$doctorExitCode = Invoke-BypassScript -ScriptPath $doctorScript -Arguments $doctorInvokeArgs
+Write-Step ("doctor exit code: {0}" -f $doctorExitCode)
 if ($doctorExitCode -ne 0) {
   exit $doctorExitCode
 }
@@ -191,5 +270,11 @@ if ($installIntent -and -not $installMissingSpecified -and -not $noInstallMissin
 
 $invokeArgs += $forwardBootstrapArgs
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrapScript @invokeArgs
-exit $LASTEXITCODE
+$bootstrapLaunchCommand = ("{0} -NoLogo -NoProfile -ExecutionPolicy Bypass -File {1} {2}" -f (Get-PowerShellBinary), $bootstrapScript, ($invokeArgs -join " "))
+Write-Step ("launching bootstrap: {0}" -f $bootstrapLaunchCommand)
+$bootstrapExitCode = Invoke-BypassScript -ScriptPath $bootstrapScript -Arguments $invokeArgs
+Write-Step ("bootstrap exit code: {0}" -f $bootstrapExitCode)
+if ($dryRunEnabled) {
+  exit 0
+}
+exit $bootstrapExitCode

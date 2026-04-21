@@ -22,10 +22,26 @@ if [[ ! -x "$SCRIPT_UNDER_TEST" ]]; then
 fi
 
 TMP_DIR="$(mktemp -d)"
+SYSTEM_BASH="$(command -v bash)"
+SYSTEM_DIRNAME="$(command -v dirname)"
+SYSTEM_BASENAME="$(command -v basename)"
+SYSTEM_CAT="$(command -v cat)"
+SYSTEM_DATE="$(command -v date)"
+SYSTEM_MKDIR="$(command -v mkdir)"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+make_exec_wrapper() {
+  local target_path="$1"
+  local target_command="$2"
+  cat >"$target_path" <<EOF
+#!/bin/sh
+exec "$target_command" "\$@"
+EOF
+  chmod +x "$target_path"
+}
 
 run_expect_pass() {
   local name="$1"
@@ -98,6 +114,29 @@ do
   fi
 done
 
+echo "[linux-desktop-installer-guardrails] first-run remediation markers are present"
+for marker in \
+  "command_available()" \
+  "availability_label()" \
+  "build_package_manager_remediation_hints()" \
+  "build_installer_first_run_hints()" \
+  "log_installer_package_manager_availability()" \
+  "preflight package-manager availability:" \
+  "no supported DEB installer command found" \
+  "no supported RPM installer command found" \
+  "non-root DEB install requires sudo" \
+  "non-root RPM install requires sudo" \
+  "Debian/Ubuntu:" \
+  "Fedora/RHEL:" \
+  "Arch:" \
+  "openSUSE:"
+do
+  if ! grep -Fq -- "$marker" "$SCRIPT_UNDER_TEST"; then
+    echo "linux desktop installer guardrails failed: missing required first-run marker in script: $marker"
+    exit 1
+  fi
+done
+
 echo "[linux-desktop-installer-guardrails] deb/rpm command-path markers are present"
 for marker in \
   "apt install -y" \
@@ -157,6 +196,7 @@ assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_status == "would_run"' "dry-
 assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_command | type == "string" and length > 0' "dry-run launch_command marker"
 assert_json_predicate "$PASS_SUMMARY_JSON" '.launch_command_source == "appimage_artifact"' "dry-run launch_command_source marker"
 assert_file_contains_fixed "$TMP_DIR/dry_run_explicit_appimage_pass.log" "dry-run would run launch command:" "dry-run launch marker"
+assert_file_contains_fixed "$TMP_DIR/dry_run_explicit_appimage_pass.log" "preflight package-manager availability:" "dry-run package-manager preflight marker"
 
 MISSING_APPIMAGE_PATH="$TMP_DIR/missing-desktop.AppImage"
 MISSING_SUMMARY_JSON="$TMP_DIR/missing_explicit_installer_summary.json"
@@ -187,6 +227,31 @@ run_expect_fail_regex \
     --dry-run \
     --summary-json "$INVALID_TYPE_SUMMARY_JSON" \
     --print-summary-json 0
+
+FAKE_DEB_PATH="$TMP_DIR/fake-desktop.deb"
+printf '%s\n' "fake deb artifact for package-manager guardrails" >"$FAKE_DEB_PATH"
+FAKE_PKGLESS_BIN_DIR="$TMP_DIR/fake-pkgless-bin"
+mkdir -p "$FAKE_PKGLESS_BIN_DIR"
+make_exec_wrapper "$FAKE_PKGLESS_BIN_DIR/bash" "$SYSTEM_BASH"
+make_exec_wrapper "$FAKE_PKGLESS_BIN_DIR/dirname" "$SYSTEM_DIRNAME"
+make_exec_wrapper "$FAKE_PKGLESS_BIN_DIR/basename" "$SYSTEM_BASENAME"
+make_exec_wrapper "$FAKE_PKGLESS_BIN_DIR/cat" "$SYSTEM_CAT"
+make_exec_wrapper "$FAKE_PKGLESS_BIN_DIR/date" "$SYSTEM_DATE"
+make_exec_wrapper "$FAKE_PKGLESS_BIN_DIR/mkdir" "$SYSTEM_MKDIR"
+
+MISSING_MANAGER_SUMMARY_JSON="$TMP_DIR/missing_manager_summary.json"
+echo "[linux-desktop-installer-guardrails] explicit deb install fails with first-run package-manager guidance when installer commands are absent"
+run_expect_fail_regex \
+  "missing_deb_installer_command_fail" \
+  "no supported DEB installer command found|run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing|Debian/Ubuntu: .*apt-get install -y apt dpkg|Fedora/RHEL: .*dnf install -y dnf rpm|Arch: .*pacman -Syu --needed pacman" \
+  env \
+    PATH="$FAKE_PKGLESS_BIN_DIR" \
+    bash "$SCRIPT_UNDER_TEST" \
+      --installer-path "$FAKE_DEB_PATH" \
+      --installer-type deb \
+      --dry-run \
+      --summary-json "$MISSING_MANAGER_SUMMARY_JSON" \
+      --print-summary-json 0
 
 PRINT_SUMMARY_JSON="$TMP_DIR/print_summary_enabled_summary.json"
 echo "[linux-desktop-installer-guardrails] print-summary-json payload marker appears when enabled"

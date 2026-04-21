@@ -14,11 +14,13 @@ done
 REQUIRED_FILES=(
   "apps/desktop/README.md"
   "apps/desktop/package.json"
+  "apps/desktop/scripts/ensure-windows-icon.mjs"
   "apps/desktop/index.html"
   "apps/desktop/src/main.js"
   "apps/desktop/src-tauri/Cargo.toml"
   "apps/desktop/src-tauri/build.rs"
   "apps/desktop/src-tauri/build_support/icon_scaffold.rs"
+  "apps/desktop/src-tauri/icons/icon.svg"
   "apps/desktop/src-tauri/src/main.rs"
   "apps/desktop/src-tauri/src/local_api.rs"
   "apps/desktop/src-tauri/tests/icon_scaffold_contract.rs"
@@ -38,10 +40,12 @@ BUILD_RS_FILE="apps/desktop/src-tauri/build.rs"
 BUILD_RS_ICON_PREFLIGHT_MARKERS=(
   '#[path = "build_support/icon_scaffold.rs"]'
   'mod icon_scaffold;'
-  'fn icon_path_from_manifest_dir()'
-  'icon_scaffold::ensure_scaffold_icon'
-  'desktop icon preflight:'
-  'desktop icon validation'
+  'CARGO_CFG_TARGET_OS'
+  'icon_scaffold::windows_icon_output_path'
+  'icon_scaffold::windows_icon_source_path'
+  'icon_scaffold::inspect_windows_icon'
+  'desktop icon preflight passed'
+  'icon_scaffold::windows_icon_failure_message'
   'tauri_build::build()'
 )
 for marker in "${BUILD_RS_ICON_PREFLIGHT_MARKERS[@]}"; do
@@ -50,26 +54,20 @@ for marker in "${BUILD_RS_ICON_PREFLIGHT_MARKERS[@]}"; do
     exit 1
   fi
 done
-if ! grep -qF -- 'IconScaffoldStatus::AlreadyValid' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs IconScaffoldStatus::AlreadyValid handling marker in $BUILD_RS_FILE"
-  exit 1
-fi
-if ! grep -qF -- 'IconScaffoldStatus::CreatedFromEmbeddedBytes' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs IconScaffoldStatus::CreatedFromEmbeddedBytes handling marker in $BUILD_RS_FILE"
-  exit 1
-fi
-if ! grep -qF -- 'IconScaffoldStatus::ReplacedInvalidFile' "$BUILD_RS_FILE"; then
-  echo "desktop scaffold contract failed: missing build.rs IconScaffoldStatus::ReplacedInvalidFile handling marker in $BUILD_RS_FILE"
-  exit 1
-fi
 echo "[desktop-scaffold] build.rs icon preflight markers are present"
 
 ICON_SCAFFOLD_MODULE="apps/desktop/src-tauri/build_support/icon_scaffold.rs"
 ICON_SCAFFOLD_MARKERS=(
   'pub enum IconScaffoldStatus'
+  'pub enum WindowsIconPreflightStatus'
   'pub fn placeholder_ico_bytes()'
   'pub fn ico_bytes_are_valid'
   'pub fn ensure_scaffold_icon'
+  'pub fn windows_icon_source_path'
+  'pub fn windows_icon_output_path'
+  'pub fn windows_icon_prebuild_command'
+  'pub fn inspect_windows_icon'
+  'pub fn windows_icon_failure_message'
 )
 for marker in "${ICON_SCAFFOLD_MARKERS[@]}"; do
   if ! grep -qF -- "$marker" "$ICON_SCAFFOLD_MODULE"; then
@@ -84,6 +82,8 @@ ICON_SCAFFOLD_TEST_MARKERS=(
   'placeholder_icon_payload_is_valid_ico'
   'ensure_scaffold_icon_generates_missing_icon'
   'ensure_scaffold_icon_replaces_invalid_icon'
+  'windows_icon_paths_and_command_are_stable'
+  'windows_icon_preflight_reports_missing_and_invalid_states'
 )
 for marker in "${ICON_SCAFFOLD_TEST_MARKERS[@]}"; do
   if ! grep -qF -- "$marker" "$ICON_SCAFFOLD_TEST"; then

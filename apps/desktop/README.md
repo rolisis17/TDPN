@@ -126,8 +126,11 @@ npm run tauri dev
 ```
 
 Scaffold/non-production note:
-- desktop Tauri build paths auto-generate a placeholder `apps/desktop/src-tauri/icons/icon.ico` when it is missing, to avoid hard-failing first-run scaffold builds.
-- icon preflight is deterministic and local-only: `apps/desktop/src-tauri/build.rs` now validates ICO structure and, when missing/invalid, writes a minimal embedded fallback icon with explicit cargo warning logs.
+- desktop Windows Tauri builds now preflight the icon pipeline instead of failing late in `tauri-build`.
+- `apps/desktop/src-tauri/icons/icon.svg` is the committed source asset for the Windows icon.
+- `npm run generate:windows-icon` regenerates `apps/desktop/src-tauri/icons/icon.ico` deterministically from that source asset.
+- `npm run tauri` runs the `pretauri` hook on Windows first, so first-run dev builds self-remediate before Tauri packaging starts.
+- `apps/desktop/src-tauri/build.rs` still validates the Windows `.ico` and fails with an explicit remediation command if the prebuild step did not run.
 - icon readiness contract check is available via:
   - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test icon_scaffold_contract`
 

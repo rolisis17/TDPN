@@ -24,6 +24,7 @@ SUMMARY_STATUS="ok"
 SUMMARY_ERROR=""
 RECOMMENDED_COMMANDS=()
 NATIVE_DESKTOP_PREREQS_ASSERTED="0"
+RUNTIME_TOOLCHAIN_PREREQS_ASSERTED="0"
 
 log() {
   echo "[desktop-native-bootstrap] $*"
@@ -126,6 +127,123 @@ require_command() {
 - install hint: $install_hint"
 }
 
+runtime_tool_label() {
+  local tool_name="$1"
+  case "$tool_name" in
+    go)
+      printf '%s' "Go toolchain command 'go' is missing"
+      ;;
+    node)
+      printf '%s' "Node.js command 'node' is missing"
+      ;;
+    npm)
+      printf '%s' "npm command 'npm' is missing"
+      ;;
+    rustc)
+      printf '%s' "Rust compiler command 'rustc' is missing"
+      ;;
+    cargo)
+      printf '%s' "Cargo command 'cargo' is missing"
+      ;;
+    curl)
+      printf '%s' "curl command 'curl' is missing"
+      ;;
+    *)
+      printf '%s' "$tool_name command is missing"
+      ;;
+  esac
+}
+
+runtime_tool_install_hint() {
+  local tool_name="$1"
+  case "$tool_name" in
+    go)
+      printf '%s' "Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y golang-go"
+      ;;
+    node)
+      printf '%s' "Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y nodejs"
+      ;;
+    npm)
+      printf '%s' "Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y npm"
+      ;;
+    rustc|cargo)
+      printf '%s' "Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y rustc cargo"
+      ;;
+    curl)
+      printf '%s' "Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y curl"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+build_linux_desktop_first_run_distro_hints() {
+  local sudo_prefix=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    sudo_prefix="sudo "
+  fi
+
+  cat <<EOF
+- Debian/Ubuntu: ${sudo_prefix}apt-get update && ${sudo_prefix}apt-get install -y golang-go nodejs npm rustc cargo pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+- Fedora/RHEL: ${sudo_prefix}dnf install -y golang nodejs npm rust cargo pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel libsoup3-devel javascriptcoregtk4.1-devel
+- Arch: ${sudo_prefix}pacman -Syu --needed go nodejs npm rust pkgconf gtk3 webkit2gtk-4.1 libsoup3
+- openSUSE: ${sudo_prefix}zypper install -y go nodejs npm rust pkgconf-pkg-config gtk3-devel webkit2gtk3-devel libsoup-3_0-devel javascriptcoregtk-4_1-devel
+EOF
+}
+
+assert_runtime_toolchain_prerequisites_for_dev() {
+  if [[ "$RUNTIME_TOOLCHAIN_PREREQS_ASSERTED" == "1" ]]; then
+    return 0
+  fi
+
+  local missing_lines=()
+  local tool_name
+  for tool_name in node npm rustc cargo; do
+    if ! command -v "$tool_name" >/dev/null 2>&1; then
+      missing_lines+=("$(runtime_tool_label "$tool_name")")
+    fi
+  done
+
+  if [[ "${#missing_lines[@]}" -eq 0 ]]; then
+    RUNTIME_TOOLCHAIN_PREREQS_ASSERTED="1"
+    return 0
+  fi
+
+  local guidance_lines=()
+  guidance_lines+=("missing Linux runtime prerequisites for desktop dev launch:")
+  local line
+  for line in "${missing_lines[@]}"; do
+    guidance_lines+=("- $line")
+  done
+  guidance_lines+=("- run ./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1")
+  guidance_lines+=("- run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
+
+  while IFS= read -r line; do
+    guidance_lines+=("$line")
+  done < <(build_linux_desktop_first_run_distro_hints)
+
+  die "$(printf '%s\n' "${guidance_lines[@]}")"
+}
+
+assert_go_runtime_prerequisite_for_api() {
+  if command -v go >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local guidance_lines=()
+  guidance_lines+=("missing Go runtime prerequisite for local API startup:")
+  guidance_lines+=("- $(runtime_tool_label go)")
+  guidance_lines+=("- run ./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1")
+  guidance_lines+=("- run ./scripts/linux/desktop_doctor.sh --mode fix --install-missing")
+  guidance_lines+=("- $(runtime_tool_install_hint go)")
+  while IFS= read -r line; do
+    guidance_lines+=("$line")
+  done < <(build_linux_desktop_first_run_distro_hints)
+
+  die "$(printf '%s\n' "${guidance_lines[@]}")"
+}
+
 absolute_path() {
   local candidate="$1"
   if command -v realpath >/dev/null 2>&1; then
@@ -147,6 +265,8 @@ assert_native_desktop_prerequisites_for_dev() {
   if [[ "$NATIVE_DESKTOP_PREREQS_ASSERTED" == "1" ]]; then
     return 0
   fi
+
+  assert_runtime_toolchain_prerequisites_for_dev
 
   local missing_lines=()
   local pkg_config_missing="0"
@@ -225,6 +345,10 @@ build_recommended_commands() {
   RECOMMENDED_COMMANDS=(
     "./scripts/linux/desktop_doctor.sh --mode check --print-summary-json 1"
     "./scripts/linux/desktop_doctor.sh --mode fix --install-missing"
+    "Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y golang-go nodejs npm rustc cargo pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev"
+    "Fedora/RHEL: sudo dnf install -y golang nodejs npm rust cargo pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel libsoup3-devel javascriptcoregtk4.1-devel"
+    "Arch: sudo pacman -Syu --needed go nodejs npm rust pkgconf gtk3 webkit2gtk-4.1 libsoup3"
+    "openSUSE: sudo zypper install -y go nodejs npm rust pkgconf-pkg-config gtk3-devel webkit2gtk3-devel libsoup-3_0-devel javascriptcoregtk-4_1-devel"
     "sudo apt-get install -y pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev"
     "sudo dnf install -y pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel libsoup3-devel javascriptcoregtk4.1-devel"
     "sudo pacman -Sy --needed pkgconf gtk3 webkit2gtk-4.1 libsoup3"
@@ -504,7 +628,7 @@ run_local_api_foreground() {
     return 0
   fi
 
-  require_command go "install Go and ensure 'go' is on PATH"
+  assert_go_runtime_prerequisite_for_api
   pushd "$ROOT_DIR" >/dev/null
   go run ./cmd/node --local-api
   popd >/dev/null
@@ -722,23 +846,26 @@ if [[ "$MODE" == "run-desktop" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" == "run-full" ]]; then
-  resolve_local_api_health_endpoint "$API_ADDR"
+  if [[ "$MODE" == "run-full" ]]; then
+    resolve_local_api_health_endpoint "$API_ADDR"
 
-  if [[ "$RESOLVED_DESKTOP_STRATEGY" == "dev" && "$DRY_RUN" != "1" ]]; then
-    log "validating native Linux desktop prerequisites for dev launch"
-    assert_native_desktop_prerequisites_for_dev
-  fi
+    if [[ "$RESOLVED_DESKTOP_STRATEGY" == "dev" && "$DRY_RUN" != "1" ]]; then
+      log "validating native Linux desktop prerequisites for dev launch"
+      assert_native_desktop_prerequisites_for_dev
+    fi
 
-  if [[ "$DRY_RUN" == "1" ]]; then
-    log "dry-run: would start local API in background from repo root: go run ./cmd/node --local-api"
-    log "dry-run: would wait for health endpoint: $API_HEALTH_ENDPOINT"
-    run_desktop_by_plan
-    exit 0
-  fi
+    if [[ "$DRY_RUN" != "1" ]]; then
+      assert_go_runtime_prerequisite_for_api
+    fi
 
-  require_command go "install Go and ensure 'go' is on PATH"
-  require_command curl "install curl and ensure it is on PATH"
+    if [[ "$DRY_RUN" == "1" ]]; then
+      log "dry-run: would start local API in background from repo root: go run ./cmd/node --local-api"
+      log "dry-run: would wait for health endpoint: $API_HEALTH_ENDPOINT"
+      run_desktop_by_plan
+      exit 0
+    fi
+
+    require_command curl "$(runtime_tool_install_hint curl)"
 
   trap cleanup_background_api EXIT
   (

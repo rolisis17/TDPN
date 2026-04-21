@@ -4,64 +4,52 @@ use std::path::PathBuf;
 #[path = "build_support/icon_scaffold.rs"]
 mod icon_scaffold;
 
-fn icon_path_from_manifest_dir() -> Option<PathBuf> {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").ok()?;
-    Some(PathBuf::from(manifest_dir).join("icons").join("icon.ico"))
-}
-
 fn main() {
-    if let Some(icon_path) = icon_path_from_manifest_dir() {
-        match icon_scaffold::ensure_scaffold_icon(&icon_path) {
-            Ok(result) => match result.status {
-                icon_scaffold::IconScaffoldStatus::AlreadyValid => {
-                    println!(
-                        "cargo:warning=desktop icon preflight: icon is present and valid at {}",
-                        result.icon_path.display()
-                    );
-                }
-                icon_scaffold::IconScaffoldStatus::CreatedFromEmbeddedBytes
-                | icon_scaffold::IconScaffoldStatus::ReplacedInvalidFile => {
-                    println!(
-                        "cargo:warning=desktop icon preflight: wrote deterministic fallback icon at {} ({})",
-                        result.icon_path.display(),
-                        result.reason
-                    );
-                }
-            },
-            Err(err) => {
-                println!(
-                    "cargo:warning=desktop icon preflight failed at {}: {}",
-                    icon_path.display(),
-                    err
-                );
-            }
-        }
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build_support/icon_scaffold.rs");
+    println!("cargo:rerun-if-changed=icons/icon.svg");
+    println!("cargo:rerun-if-changed=icons/icon.ico");
 
-        match icon_scaffold::icon_file_is_valid(&icon_path) {
-            Ok(true) => {
+    let is_windows_target = env::var("CARGO_CFG_TARGET_OS")
+        .ok()
+        .as_deref()
+        == Some("windows");
+
+    if is_windows_target {
+        let manifest_dir = PathBuf::from(
+            env::var("CARGO_MANIFEST_DIR")
+                .expect("CARGO_MANIFEST_DIR should be available in build scripts"),
+        );
+        let icon_path = icon_scaffold::windows_icon_output_path(&manifest_dir);
+        let source_icon_path = icon_scaffold::windows_icon_source_path(&manifest_dir);
+
+        match icon_scaffold::inspect_windows_icon(&icon_path, &source_icon_path) {
+            Ok(icon_scaffold::WindowsIconPreflightStatus::Ready) => {
                 println!(
-                    "cargo:warning=desktop icon validation passed for {}",
+                    "cargo:warning=desktop icon preflight passed for {}",
                     icon_path.display()
                 );
             }
-            Ok(false) => {
-                println!(
-                    "cargo:warning=desktop icon validation failed for {} (tauri build may fail without a valid .ico)",
-                    icon_path.display()
+            Ok(status) => {
+                panic!(
+                    "{}",
+                    icon_scaffold::windows_icon_failure_message(
+                        &icon_path,
+                        &source_icon_path,
+                        status
+                    )
                 );
             }
             Err(err) => {
-                println!(
-                    "cargo:warning=desktop icon validation could not read {}: {}",
+                panic!(
+                    "desktop icon preflight failed to read {}: {}",
                     icon_path.display(),
                     err
                 );
             }
         }
     } else {
-        println!(
-            "cargo:warning=desktop icon preflight skipped: CARGO_MANIFEST_DIR was unavailable"
-        );
+        println!("cargo:warning=desktop icon preflight skipped: target os is not windows");
     }
 
     tauri_build::build()

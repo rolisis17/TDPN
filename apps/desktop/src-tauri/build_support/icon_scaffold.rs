@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -106,6 +108,87 @@ pub fn ico_bytes_are_valid(bytes: &[u8]) -> bool {
 pub fn icon_file_is_valid(icon_path: &Path) -> io::Result<bool> {
     let bytes = fs::read(icon_path)?;
     Ok(ico_bytes_are_valid(&bytes))
+}
+
+pub const WINDOWS_ICON_SOURCE_RELATIVE_PATH: &str = "icons/icon.svg";
+pub const WINDOWS_ICON_OUTPUT_RELATIVE_PATH: &str = "icons/icon.ico";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsIconPreflightStatus {
+    Ready,
+    MissingIcon,
+    InvalidIcon,
+    MissingSourceIcon,
+}
+
+pub fn windows_icon_source_path(manifest_dir: &Path) -> PathBuf {
+    manifest_dir.join(WINDOWS_ICON_SOURCE_RELATIVE_PATH)
+}
+
+pub fn windows_icon_output_path(manifest_dir: &Path) -> PathBuf {
+    manifest_dir.join(WINDOWS_ICON_OUTPUT_RELATIVE_PATH)
+}
+
+pub fn windows_icon_prebuild_command() -> &'static str {
+    "npm run generate:windows-icon"
+}
+
+pub fn inspect_windows_icon(
+    icon_path: &Path,
+    source_icon_path: &Path,
+) -> io::Result<WindowsIconPreflightStatus> {
+    let source_exists = source_icon_path.exists();
+    let icon_exists = icon_path.exists();
+
+    if !source_exists {
+        return Ok(WindowsIconPreflightStatus::MissingSourceIcon);
+    }
+
+    if !icon_exists {
+        return Ok(WindowsIconPreflightStatus::MissingIcon);
+    }
+
+    match icon_file_is_valid(icon_path) {
+        Ok(true) => Ok(WindowsIconPreflightStatus::Ready),
+        Ok(false) => Ok(WindowsIconPreflightStatus::InvalidIcon),
+        Err(err) => Err(err),
+    }
+}
+
+pub fn windows_icon_failure_message(
+    icon_path: &Path,
+    source_icon_path: &Path,
+    status: WindowsIconPreflightStatus,
+) -> String {
+    let remediation = windows_icon_prebuild_command();
+    match status {
+        WindowsIconPreflightStatus::Ready => format!(
+            "desktop icon guardrail is already satisfied at {}",
+            icon_path.display()
+        ),
+        WindowsIconPreflightStatus::MissingSourceIcon => format!(
+            "desktop Windows icon source is missing: {}\n\
+             Restore the source asset or regenerate it before building.\n\
+             Manual remediation: cd apps/desktop && {}\n\
+             If the generator reports missing tooling, run `npm install` in apps/desktop first.",
+            source_icon_path.display(),
+            remediation
+        ),
+        WindowsIconPreflightStatus::MissingIcon => format!(
+            "desktop Windows icon is missing: {}\n\
+             Manual remediation: cd apps/desktop && {}\n\
+             If the generator reports missing tooling, run `npm install` in apps/desktop first.",
+            icon_path.display(),
+            remediation
+        ),
+        WindowsIconPreflightStatus::InvalidIcon => format!(
+            "desktop Windows icon is invalid: {}\n\
+             Manual remediation: cd apps/desktop && {}\n\
+             If the generator reports missing tooling, run `npm install` in apps/desktop first.",
+            icon_path.display(),
+            remediation
+        ),
+    }
 }
 
 pub fn ensure_scaffold_icon(icon_path: &Path) -> io::Result<IconScaffoldResult> {

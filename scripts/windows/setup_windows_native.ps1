@@ -258,6 +258,150 @@ function Resolve-ToolPath {
   return ""
 }
 
+function Get-ExecutionPolicySnapshot {
+  $scopes = @("Process", "CurrentUser", "LocalMachine")
+  $snapshot = [ordered]@{}
+
+  foreach ($scope in $scopes) {
+    try {
+      $snapshot[$scope] = [string](Get-ExecutionPolicy -Scope $scope)
+    } catch {
+      $snapshot[$scope] = "Unavailable"
+    }
+  }
+
+  return [pscustomobject]@{
+    effective = [string](Get-ExecutionPolicy)
+    scopes = $snapshot
+  }
+}
+
+function Show-ExecutionPolicyStatus {
+  $snapshot = Get-ExecutionPolicySnapshot
+  Write-Step ("execution policy: effective={0}; process={1}; current_user={2}; local_machine={3}" -f $snapshot.effective, $snapshot.scopes.Process, $snapshot.scopes.CurrentUser, $snapshot.scopes.LocalMachine)
+
+  if ($snapshot.effective -notin @("Bypass", "Unrestricted")) {
+    Write-Step "execution policy risk detected: effective_policy=$($snapshot.effective)"
+    Write-Step "rerun in this shell with process-scope bypass:"
+    Write-Host "  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+  }
+}
+
+function Get-VersionCheckSpecs {
+  return @(
+    [pscustomobject]@{
+      label = "go version"
+      tool = "go"
+      args = @("version")
+      fallback_tool = ""
+    },
+    [pscustomobject]@{
+      label = "node -v"
+      tool = "node"
+      args = @("-v")
+      fallback_tool = ""
+    },
+    [pscustomobject]@{
+      label = "npm -v"
+      tool = "npm"
+      args = @("-v")
+      fallback_tool = "npm.cmd"
+    },
+    [pscustomobject]@{
+      label = "rustc -V"
+      tool = "rustc"
+      args = @("-V")
+      fallback_tool = ""
+    },
+    [pscustomobject]@{
+      label = "cargo -V"
+      tool = "cargo"
+      args = @("-V")
+      fallback_tool = ""
+    }
+  )
+}
+
+function Invoke-VersionCheck {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Spec
+  )
+
+  $toolPath = Resolve-ToolPath -Name $Spec.tool
+  $toolName = $Spec.tool
+  if ([string]::IsNullOrWhiteSpace($toolPath) -and -not [string]::IsNullOrWhiteSpace([string]$Spec.fallback_tool)) {
+    $toolPath = Resolve-ToolPath -Name ([string]$Spec.fallback_tool)
+    $toolName = [string]$Spec.fallback_tool
+  }
+
+  if ([string]::IsNullOrWhiteSpace($toolPath)) {
+    return [pscustomobject]@{
+      label = [string]$Spec.label
+      status = "fail"
+      detail = "missing"
+      command = ("{0} {1}" -f $toolName, (($Spec.args -join " ").Trim()))
+    }
+  }
+
+  $output = @()
+  $exitCode = 0
+  try {
+    $versionArgs = @($Spec.args)
+    $output = & $toolPath @versionArgs 2>&1
+    $exitCode = $LASTEXITCODE
+  } catch {
+    $exitCode = 1
+    $output = @($_.Exception.Message)
+  }
+
+  $detail = ""
+  foreach ($line in @($output)) {
+    $text = [string]$line
+    if ([string]::IsNullOrWhiteSpace($text)) {
+      continue
+    }
+    $detail = $text.Trim()
+    break
+  }
+
+  if ([string]::IsNullOrWhiteSpace($detail)) {
+    $detail = ("resolved={0}" -f $toolPath)
+  }
+
+  return [pscustomobject]@{
+    label = [string]$Spec.label
+    status = $(if ($exitCode -eq 0) { "pass" } else { "fail" })
+    detail = $detail
+    command = ("{0} {1}" -f $toolName, (($Spec.args -join " ").Trim()))
+  }
+}
+
+function Show-VersionVerificationSummary {
+  $checks = @(Get-VersionCheckSpecs)
+  $passCount = 0
+  $failCount = 0
+
+  Write-Step "final verification:"
+  foreach ($check in $checks) {
+    $result = Invoke-VersionCheck -Spec $check
+    if ($result.status -eq "pass") {
+      $passCount++
+      Write-Host ("  - {0}: PASS ({1})" -f $result.label, $result.detail)
+    } else {
+      $failCount++
+      Write-Host ("  - {0}: FAIL ({1})" -f $result.label, $result.detail)
+      Write-Host ("    command: {0}" -f $result.command)
+    }
+  }
+
+  Write-Host ("  summary: pass={0} fail={1}" -f $passCount, $failCount)
+  return [pscustomobject]@{
+    pass = $passCount
+    fail = $failCount
+  }
+}
+
 function Add-UniqueCommand {
   param(
     [Parameter(Mandatory = $true)]
@@ -630,7 +774,15 @@ Write-Step ("install_missing={0}" -f ($(if ($InstallMissing) { "true" } else { "
 Write-Step ("non_interactive={0}" -f ($(if ($NonInteractive) { "true" } else { "false" })))
 Write-Step ("dry_run={0}" -f ($(if ($DryRun) { "true" } else { "false" })))
 
-Ensure-ProcessExecutionPolicy
+Show-ExecutionPolicyStatus
+if ($EnablePolicyBypass) {
+  if ($DryRun) {
+    Write-Step "dry-run: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+  } else {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+    Write-Step "execution policy set to Bypass for current process"
+  }
+}
 
 if (-not $SkipPathRefresh) {
   Refresh-SessionPath
@@ -685,9 +837,13 @@ if (-not [string]::IsNullOrWhiteSpace($nextCommand)) {
   Write-Step ("next command: {0}" -f $nextCommand)
 }
 
+$verificationResult = Show-VersionVerificationSummary
+
 $status = "ok"
 if ($finalMissingRequiredReports.Count -gt 0) {
   $status = "missing"
+} elseif ($verificationResult.fail -gt 0) {
+  $status = "verification-failed"
 } elseif ($DryRun) {
   $status = "dry-run"
 }
@@ -695,4 +851,8 @@ Write-Step ("status={0} required_missing={1} optional_missing={2}" -f $status, $
 
 if ($finalMissingRequiredReports.Count -gt 0) {
   throw "missing required prerequisites remain for workflow '$Workflow'"
+}
+
+if ($verificationResult.fail -gt 0 -and $finalMissingRequiredReports.Count -eq 0) {
+  throw "version verification failed for workflow '$Workflow'"
 }
