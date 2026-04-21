@@ -44,6 +44,7 @@ PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG="$TMP_DIR/integration_manual_validat
 PROFILE_MULTI_VM_STABILITY_CHECK_VALID_LOG="$TMP_DIR/integration_manual_validation_status_profile_multi_vm_stability_check_valid.log"
 PROFILE_MULTI_VM_STABILITY_CYCLE_FALLBACK_LOG="$TMP_DIR/integration_manual_validation_status_profile_multi_vm_stability_cycle_fallback.log"
 PROFILE_MULTI_VM_STABILITY_MISSING_DEFAULT_LOG="$TMP_DIR/integration_manual_validation_status_profile_multi_vm_stability_missing_default.log"
+PROFILE_PENDING_READINESS_DOWNGRADE_LOG="$TMP_DIR/integration_manual_validation_status_profile_pending_readiness_downgrade.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
 UNREADABLE_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_unreadable_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
@@ -94,6 +95,28 @@ cat <<'OUT'
 OUT
 EOF
 chmod +x "$FAKE_DOCTOR"
+
+FAKE_DOCTOR_OK="$TMP_DIR/fake_runtime_doctor_ok.sh"
+cat >"$FAKE_DOCTOR_OK" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[runtime-doctor] status=OK findings=0 warnings=0 failures=0
+[runtime-doctor] summary_json_payload:
+{
+  "version": 1,
+  "generated_at_utc": "2026-03-14T15:05:00Z",
+  "status": "OK",
+  "summary": {
+    "findings_total": 0,
+    "warnings_total": 0,
+    "failures_total": 0
+  },
+  "findings": []
+}
+OUT
+EOF
+chmod +x "$FAKE_DOCTOR_OK"
 
 FAKE_DOCTOR_INVALID="$TMP_DIR/fake_runtime_doctor_invalid_json.sh"
 cat >"$FAKE_DOCTOR_INVALID" <<'EOF'
@@ -1017,6 +1040,88 @@ if ! printf '%s\n' "$profile_blocked_json" | jq -e '
   exit 1
 fi
 
+echo "[manual-validation] readiness fail-closed with profile-default gate pending"
+READY_STATE_DIR="$TMP_DIR/manual-validation-ready-state"
+READY_PROFILE_PENDING_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_pending_for_readiness.json"
+mkdir -p "$READY_STATE_DIR"
+cat >"$READY_PROFILE_PENDING_SUMMARY_JSON" <<'EOF_READY_PROFILE_PENDING'
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": false
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_READY_PROFILE_PENDING
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$READY_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id wg_only_stack_selftest \
+  --status pass \
+  --notes "wg-only stack pass for readiness downgrade test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$READY_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id machine_c_vpn_smoke \
+  --status pass \
+  --notes "machine-c smoke pass for readiness downgrade test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$READY_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id three_machine_prod_signoff \
+  --status pass \
+  --notes "three-machine signoff pass for readiness downgrade test" \
+  --show-json 0 >/dev/null
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$READY_STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$READY_PROFILE_PENDING_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR_OK" \
+./scripts/manual_validation_status.sh --show-json 1 >"$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"
+
+if ! rg -q '\[manual-validation-status\] readiness_status=NOT_READY' "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"; then
+  echo "profile-pending readiness run missing readiness_status=NOT_READY"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] readiness_downgraded_by_profile_default_gate=true' "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"; then
+  echo "profile-pending readiness run missing readiness_downgraded_by_profile_default_gate=true"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] readiness_reasons=profile_default_gate_status:pending' "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"; then
+  echo "profile-pending readiness run missing expected readiness reason"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"
+  exit 1
+fi
+profile_pending_readiness_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG")"
+if [[ -z "$profile_pending_readiness_json" ]]; then
+  echo "profile-pending readiness run missing JSON payload"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$profile_pending_readiness_json" | jq -e '
+  .summary.next_action_check_id == ""
+  and .summary.local_gate.ready == true
+  and .summary.real_host_gate.ready == true
+  and .summary.profile_default_gate.status == "pending"
+  and .summary.readiness.ready == false
+  and .summary.readiness.status == "NOT_READY"
+  and .summary.readiness.base_ready == true
+  and .summary.readiness.downgraded_by_profile_default_gate == true
+  and .summary.readiness.profile_default_gate_status == "pending"
+  and (.summary.readiness.reasons | index("profile_default_gate_status:pending")) != null
+' >/dev/null; then
+  echo "profile-pending readiness JSON missing fail-closed readiness fields"
+  printf '%s\n' "$profile_pending_readiness_json"
+  exit 1
+fi
+
 echo "[manual-validation] profile-default stale non-refreshed summary"
 cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<'EOF_PROFILE_SIGNOFF_STALE'
 {
@@ -1316,7 +1421,7 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e '
   exit 1
 fi
 
-echo "[manual-validation] profile-default no-go advisory mapping (sufficient-evidence/no-artifact)"
+echo "[manual-validation] profile-default no-go fail-closed mapping (missing campaign-check artifact)"
 cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<'EOF_PROFILE_SIGNOFF_NO_GO'
 {
   "version": 1,
@@ -1338,8 +1443,8 @@ MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY
 RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
 ./scripts/manual_validation_status.sh --show-json 1 >$PROFILE_NO_GO_LOG
 
-if ! rg -q '\[manual-validation-status\] profile_default_gate_status=warn' $PROFILE_NO_GO_LOG; then
-  echo "profile-no-go status missing profile_default_gate_status=warn line"
+if ! rg -q '\[manual-validation-status\] profile_default_gate_status=pending' $PROFILE_NO_GO_LOG; then
+  echo "profile-no-go status missing profile_default_gate_status=pending line"
   cat $PROFILE_NO_GO_LOG
   exit 1
 fi
@@ -1350,7 +1455,7 @@ if [[ -z "$profile_no_go_json" ]]; then
   exit 1
 fi
 if ! printf '%s\n' "$profile_no_go_json" | jq -e '
-  .summary.profile_default_gate.status == "warn"
+  .summary.profile_default_gate.status == "pending"
   and .summary.profile_default_gate.decision == "NO-GO"
   and .summary.profile_default_gate.available == true
   and .summary.profile_default_gate.valid_json == true
@@ -1358,11 +1463,11 @@ if ! printf '%s\n' "$profile_no_go_json" | jq -e '
   and .summary.profile_default_gate.non_root_refresh_blocked == false
   and .summary.profile_default_gate.stale_non_refreshed == false
   and .summary.profile_default_gate.refresh_campaign == true
-  and .summary.profile_default_gate.insufficient_evidence == false
+  and .summary.profile_default_gate.insufficient_evidence == true
   and .summary.profile_default_gate.final_rc == 1
-  and (.summary.profile_default_gate.notes | contains("decision is NO-GO"))
+  and (.summary.profile_default_gate.notes | contains("evidence is insufficient/unstable"))
 ' >/dev/null; then
-  echo "profile-no-go status JSON missing expected advisory mapping fields"
+  echo "profile-no-go status JSON missing expected fail-closed mapping fields"
   printf '%s\n' "$profile_no_go_json"
   exit 1
 fi

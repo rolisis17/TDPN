@@ -2620,6 +2620,51 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] ready core gates + pending profile default gate downgrades top-level status to warn"
+READY_SIGNOFF_PROFILE_PENDING_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_ready_signoff_profile_pending_summary.json"
+jq '
+  .summary.profile_default_gate = {
+    status: "pending",
+    next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+    next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+    next_command_source: "default_non_sudo",
+    notes: "profile compare campaign signoff decision is NO-GO but campaign-check evidence is insufficient/unstable; rerun with refresh-campaign=1",
+    decision: "NO-GO",
+    recommended_profile: "balanced"
+  }
+' "$READY_SIGNOFF_MANUAL_SUMMARY_JSON" >"$READY_SIGNOFF_PROFILE_PENDING_MANUAL_SUMMARY_JSON"
+
+READY_SIGNOFF_PROFILE_PENDING_SUMMARY_JSON="$TMP_DIR/roadmap_progress_ready_signoff_profile_pending_summary.json"
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$READY_SIGNOFF_EMPTY_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$READY_SIGNOFF_PROFILE_PENDING_MANUAL_SUMMARY_JSON" \
+    --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+    --phase1-resilience-handoff-summary-json "$MISSING_READY_SIGNOFF_PHASE1_SUMMARY_JSON" \
+    --vpn-rc-resilience-summary-json "$READY_SIGNOFF_RESILIENCE_PASS_JSON" \
+    --summary-json "$READY_SIGNOFF_PROFILE_PENDING_SUMMARY_JSON" \
+    --report-md "$TMP_DIR/roadmap_progress_ready_signoff_profile_pending_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_profile_pending.log 2>&1; then
+  echo "expected success for READY signoff with pending profile-default gate path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ready_signoff_profile_pending.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .vpn_track.readiness_status == "READY"
+  and .vpn_track.optional_gate_status.profile_default_gate == "pending"
+  and .vpn_track.profile_default_gate.needs_attention == true
+  and ((.notes // "") | test("optional profile-default gate still needs attention"))
+  and ((.next_actions // []) | any(.id == "profile_default_gate"))
+' "$READY_SIGNOFF_PROFILE_PENDING_SUMMARY_JSON" >/dev/null; then
+  echo "READY signoff + pending profile-default gate summary missing warn semantics"
+  cat "$READY_SIGNOFF_PROFILE_PENDING_SUMMARY_JSON"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] optional gate command fallback path"
 OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_optional_gate_fallback_summary.json"
 cat >"$OPTIONAL_FALLBACK_MANUAL_SUMMARY_JSON" <<'EOF_OPTIONAL_FALLBACK_SUMMARY'
@@ -4060,7 +4105,7 @@ fi
 
 : >"$CAPTURE"
 
-echo "[roadmap-progress-report] profile default gate derives warn from NO-GO signoff summary"
+echo "[roadmap-progress-report] profile default gate fails closed to pending from NO-GO signoff without campaign-check evidence"
 PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON="$TMP_DIR/profile_compare_campaign_signoff_no_go.json"
 cat >"$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" <<'EOF_PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO'
 {
@@ -4089,7 +4134,7 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
-  .vpn_track.optional_gate_status.profile_default_gate == "warn"
+  .vpn_track.optional_gate_status.profile_default_gate == "pending"
   and .artifacts.profile_compare_signoff_summary_json == $src
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
@@ -4156,7 +4201,7 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" '
-  .vpn_track.optional_gate_status.profile_default_gate == "warn"
+  .vpn_track.optional_gate_status.profile_default_gate == "pending"
   and .artifacts.profile_compare_signoff_summary_json == $src
   and .vpn_track.profile_default_gate.micro_relay_evidence_available == true
   and .vpn_track.profile_default_gate.micro_relay_quality_status_pass == true

@@ -71,6 +71,31 @@ need_cmd() {
   fi
 }
 
+validate_manual_validation_status_summary_for_readiness_01() {
+  local payload="$1"
+  printf '%s\n' "$payload" | jq -e '
+    (. | type) == "object"
+    and ((.summary | type) == "object")
+    and (
+      (.summary.next_action_check_id == null)
+      or ((.summary.next_action_check_id | type) == "string")
+    )
+    and ((.summary.profile_default_gate | type) == "object")
+    and (
+      (.summary.profile_default_gate.status == null)
+      or ((.summary.profile_default_gate.status | type) == "string")
+    )
+    and (
+      (.summary.profile_default_gate.enabled == null)
+      or ((.summary.profile_default_gate.enabled | type) == "boolean")
+    )
+    and (
+      (.summary.profile_default_gate.readiness_exception == null)
+      or ((.summary.profile_default_gate.readiness_exception | type) == "boolean")
+    )
+  ' >/dev/null 2>&1
+}
+
 run_with_optional_timeout() {
   local timeout_sec="$1"
   shift
@@ -597,12 +622,68 @@ if ! printf '%s\n' "$status_json_payload" | jq -e . >/dev/null 2>&1; then
 fi
 rm -f "$status_log"
 
+readiness_payload_schema_valid_json="false"
+if validate_manual_validation_status_summary_for_readiness_01 "$status_json_payload"; then
+  readiness_payload_schema_valid_json="true"
+fi
+
+status_next_action_check_id_for_readiness=""
+profile_default_gate_status_for_readiness=""
+profile_default_gate_enabled_for_readiness="true"
+profile_default_gate_readiness_exception_for_readiness="false"
+if [[ "$readiness_payload_schema_valid_json" == "true" ]]; then
+  status_next_action_check_id_for_readiness="$(printf '%s\n' "$status_json_payload" | jq -r '.summary.next_action_check_id // ""')"
+  profile_default_gate_status_for_readiness="$(printf '%s\n' "$status_json_payload" | jq -r '.summary.profile_default_gate.status // ""')"
+  profile_default_gate_enabled_for_readiness="$(printf '%s\n' "$status_json_payload" | jq -r '
+    if (.summary.profile_default_gate.enabled | type) == "boolean" then .summary.profile_default_gate.enabled
+    else true
+    end
+  ')"
+  profile_default_gate_readiness_exception_for_readiness="$(printf '%s\n' "$status_json_payload" | jq -r '
+    if (.summary.profile_default_gate.readiness_exception | type) == "boolean" then .summary.profile_default_gate.readiness_exception
+    else false
+    end
+  ')"
+fi
+
+readiness_base_ready_json="false"
+readiness_profile_default_gate_blocks_json="false"
+readiness_downgraded_by_profile_default_gate_json="false"
 ready_json="false"
 readiness_status="NOT_READY"
-if printf '%s\n' "$status_json_payload" | jq -e '(.summary.next_action_check_id // "") == ""' >/dev/null 2>&1; then
+readiness_reason_schema_invalid=""
+readiness_reason_next_action=""
+readiness_reason_profile_default_gate=""
+if [[ "$readiness_payload_schema_valid_json" != "true" ]]; then
+  readiness_reason_schema_invalid="status_payload_schema_invalid_for_readiness"
+elif [[ -z "$status_next_action_check_id_for_readiness" ]]; then
+  readiness_base_ready_json="true"
+fi
+if [[ "$profile_default_gate_enabled_for_readiness" == "true" ]] \
+   && [[ "$profile_default_gate_readiness_exception_for_readiness" != "true" ]] \
+   && [[ "$profile_default_gate_status_for_readiness" != "pass" ]]; then
+  readiness_profile_default_gate_blocks_json="true"
+fi
+if [[ "$readiness_base_ready_json" == "true" ]] && [[ "$readiness_profile_default_gate_blocks_json" == "false" ]]; then
   ready_json="true"
   readiness_status="READY"
 fi
+if [[ "$readiness_base_ready_json" != "true" ]]; then
+  readiness_reason_next_action="next_action_required:${status_next_action_check_id_for_readiness:-unknown}"
+fi
+if [[ "$readiness_profile_default_gate_blocks_json" == "true" ]]; then
+  readiness_reason_profile_default_gate="profile_default_gate_status:${profile_default_gate_status_for_readiness:-missing}"
+fi
+if [[ "$readiness_base_ready_json" == "true" ]] && [[ "$readiness_profile_default_gate_blocks_json" == "true" ]]; then
+  readiness_downgraded_by_profile_default_gate_json="true"
+fi
+readiness_reasons_json="$(
+  jq -n \
+    --arg schema "$readiness_reason_schema_invalid" \
+    --arg next "$readiness_reason_next_action" \
+    --arg profile "$readiness_reason_profile_default_gate" \
+    '[ $schema, $next, $profile ] | map(select(length > 0))'
+)"
 
 profile_default_gate_summary_json_from_status="$(printf '%s\n' "$status_json_payload" | jq -r '.summary.profile_default_gate.summary_json // ""')"
 profile_default_gate_stability_check_summary_json="$(printf '%s\n' "$status_json_payload" | jq -r '.summary.profile_default_gate.artifacts.profile_default_gate_stability_check_summary_json // ""')"
@@ -843,6 +924,12 @@ report_json="$(
     --argjson source_status_timeout_sec "$status_timeout_sec" \
     --argjson source_status_timeout_guard_available "$status_timeout_guard_available" \
     --argjson source_status_payload_synthesized "$status_payload_synthesized" \
+    --argjson readiness_base_ready "$readiness_base_ready_json" \
+    --argjson readiness_schema_valid "$readiness_payload_schema_valid_json" \
+    --argjson readiness_profile_default_gate_blocks "$readiness_profile_default_gate_blocks_json" \
+    --argjson readiness_downgraded_by_profile_default_gate "$readiness_downgraded_by_profile_default_gate_json" \
+    --argjson readiness_reasons "$readiness_reasons_json" \
+    --arg readiness_profile_default_gate_status "$profile_default_gate_status_for_readiness" \
     --arg profile_default_gate_stability_check_summary_json "$profile_default_gate_stability_check_summary_json" \
     --argjson profile_default_gate_stability_check_summary_available "$profile_default_gate_stability_check_summary_available_json" \
     --arg profile_default_gate_stability_check_decision "$profile_default_gate_stability_check_decision_json" \
@@ -1059,9 +1146,35 @@ report_json="$(
           end
         )
     )
+    | .summary.readiness = (
+        (.summary.readiness // {})
+        | .ready = $ready
+        | .status = $readiness_status
+        | .reasons = $readiness_reasons
+        | .base_ready = $readiness_base_ready
+        | .schema_valid = $readiness_schema_valid
+        | .schema_invalid = ($readiness_schema_valid | not)
+        | .profile_default_gate_blocks = $readiness_profile_default_gate_blocks
+        | .downgraded_by_profile_default_gate = $readiness_downgraded_by_profile_default_gate
+        | .profile_default_gate_status = (
+            if $readiness_profile_default_gate_status == "" then null
+            else $readiness_profile_default_gate_status
+            end
+          )
+      )
     | .report = {
       readiness_status: $readiness_status,
       ready: $ready,
+      readiness_reasons: $readiness_reasons,
+      readiness_base_ready: $readiness_base_ready,
+      readiness_schema_valid: $readiness_schema_valid,
+      readiness_profile_default_gate_blocks: $readiness_profile_default_gate_blocks,
+      readiness_downgraded_by_profile_default_gate: $readiness_downgraded_by_profile_default_gate,
+      readiness_profile_default_gate_status: (
+        if $readiness_profile_default_gate_status == "" then null
+        else $readiness_profile_default_gate_status
+        end
+      ),
       summary_json: $summary_json,
       report_md: $report_md,
       source_status_exit_code: $source_status_exit_code,
@@ -1161,6 +1274,9 @@ real_wg_privileged_status="$(printf '%s\n' "$report_json" | jq -r '.summary.real
 real_wg_privileged_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.ready // false')"
 real_wg_privileged_command="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.command // ""')"
 real_wg_privileged_notes="$(printf '%s\n' "$report_json" | jq -r '.summary.real_wg_privileged_gate.notes // ""')"
+readiness_reasons_csv="$(printf '%s\n' "$report_json" | jq -r '(.summary.readiness.reasons // []) | if length == 0 then "none" else join(",") end')"
+readiness_downgraded_by_profile_default_gate="$(printf '%s\n' "$report_json" | jq -r '.summary.readiness.downgraded_by_profile_default_gate // false')"
+readiness_profile_default_gate_status="$(printf '%s\n' "$report_json" | jq -r '.summary.readiness.profile_default_gate_status // ""')"
 latest_failed_incident_check_id="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.check_id // ""')"
 latest_failed_incident_summary_json="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.summary_json.path // ""')"
 latest_failed_incident_report_md="$(printf '%s\n' "$report_json" | jq -r '.summary.latest_failed_incident.report_md.path // ""')"
@@ -1202,6 +1318,10 @@ report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
   printf '# Manual Validation Readiness Report\n\n'
   printf -- '- Generated at (UTC): `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.generated_at_utc // ""')"
   printf -- '- Readiness: `%s`\n' "$readiness_status"
+  printf -- '- Readiness reasons: `%s`\n' "$readiness_reasons_csv"
+  if [[ "$readiness_downgraded_by_profile_default_gate" == "true" ]]; then
+    printf -- '- Readiness downgraded by profile default gate: `true` (status=`%s`)\n' "${readiness_profile_default_gate_status:-missing}"
+  fi
   printf -- '- State dir: `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.state_dir // ""')"
   printf -- '- Status JSON path: `%s`\n' "$(printf '%s\n' "$report_json" | jq -r '.status_json // ""')"
   printf -- '- Report JSON path: `%s`\n' "$summary_json"
@@ -1404,6 +1524,10 @@ echo "[manual-validation-report] source_status_timed_out=$status_timed_out"
 echo "[manual-validation-report] source_status_timeout_sec=$status_timeout_sec"
 echo "[manual-validation-report] source_status_timeout_guard_available=$status_timeout_guard_available"
 echo "[manual-validation-report] source_status_payload_synthesized=$status_payload_synthesized"
+echo "[manual-validation-report] readiness_ready=$ready_json"
+echo "[manual-validation-report] readiness_schema_valid=$readiness_payload_schema_valid_json"
+echo "[manual-validation-report] readiness_reasons=$readiness_reasons_csv"
+echo "[manual-validation-report] readiness_downgraded_by_profile_default_gate=$readiness_downgraded_by_profile_default_gate"
 echo "[manual-validation-report] machine_c_smoke_ready=$machine_c_smoke_ready"
 echo "[manual-validation-report] machine_c_smoke_blockers=$machine_c_smoke_blockers"
 if [[ -n "$machine_c_smoke_blocker_class" ]]; then

@@ -963,45 +963,53 @@ profile_default_gate_selection_policy_evidence_note_text() {
 profile_default_gate_no_go_insufficient_evidence_01() {
   local signoff_summary_path="$1"
   local campaign_check_summary_path=""
+  local insufficient_evidence="0"
   if [[ "$(profile_default_gate_signoff_decision_no_go_01 "$signoff_summary_path")" != "1" ]]; then
     printf '0'
     return
   fi
   campaign_check_summary_path="$(profile_default_gate_campaign_check_summary_from_signoff "$signoff_summary_path")"
   if [[ -z "$campaign_check_summary_path" ]] || [[ "$(json_file_valid_01 "$campaign_check_summary_path")" != "1" ]]; then
-    printf '0'
+    # Fail closed for NO-GO decisions when campaign-check evidence is missing/invalid.
+    printf '1'
     return
   fi
-  if jq -e '
-    def to_bool:
-      if type == "boolean" then .
-      elif type == "number" then . != 0
-      elif type == "string" then ((ascii_downcase == "true") or (. == "1"))
-      else false
-      end;
-    def to_num:
-      if type == "number" then .
-      elif type == "string" then (if test("^-?[0-9]+(\\.[0-9]+)?$") then tonumber else null end)
-      else null
-      end;
-    (.inputs.policy // {}) as $policy
-    | (.observed // {}) as $observed
-    | ($policy.require_status_pass | to_bool) as $require_campaign_status_pass
-    | ($policy.require_trend_status_pass | to_bool) as $require_trend_status_pass
-    | ($policy.require_min_runs_total | to_num) as $min_runs_total
-    | ($policy.require_min_runs_with_summary | to_num) as $min_runs_with_summary
-    | ($observed.runs_total | to_num) as $runs_total
-    | ($observed.runs_with_summary | to_num) as $runs_with_summary
-    | (if $require_campaign_status_pass then (($observed.campaign_status // "") | ascii_downcase) == "pass" else true end) as $campaign_status_ok
-    | (if $require_trend_status_pass then (($observed.trend_status // "") | ascii_downcase) == "pass" else true end) as $trend_status_ok
-    | (if $min_runs_total == null then true else ($runs_total != null and $runs_total >= $min_runs_total) end) as $runs_total_ok
-    | (if $min_runs_with_summary == null then true else ($runs_with_summary != null and $runs_with_summary >= $min_runs_with_summary) end) as $runs_with_summary_ok
-    | (($campaign_status_ok and $trend_status_ok and $runs_total_ok and $runs_with_summary_ok) | not)
-  ' "$campaign_check_summary_path" >/dev/null 2>&1; then
-    printf '1'
-  else
-    printf '0'
-  fi
+  insufficient_evidence="$(
+    jq -r '
+      def to_bool:
+        if type == "boolean" then .
+        elif type == "number" then . != 0
+        elif type == "string" then ((ascii_downcase == "true") or (. == "1"))
+        else false
+        end;
+      def to_num:
+        if type == "number" then .
+        elif type == "string" then (if test("^-?[0-9]+(\\.[0-9]+)?$") then tonumber else null end)
+        else null
+        end;
+      try (
+        (.inputs.policy // {}) as $policy
+        | (.observed // {}) as $observed
+        | ($policy.require_status_pass | to_bool) as $require_campaign_status_pass
+        | ($policy.require_trend_status_pass | to_bool) as $require_trend_status_pass
+        | ($policy.require_min_runs_total | to_num) as $min_runs_total
+        | ($policy.require_min_runs_with_summary | to_num) as $min_runs_with_summary
+        | ($observed.runs_total | to_num) as $runs_total
+        | ($observed.runs_with_summary | to_num) as $runs_with_summary
+        | (if $require_campaign_status_pass then (($observed.campaign_status // "") | ascii_downcase) == "pass" else true end) as $campaign_status_ok
+        | (if $require_trend_status_pass then (($observed.trend_status // "") | ascii_downcase) == "pass" else true end) as $trend_status_ok
+        | (if $min_runs_total == null then true else ($runs_total != null and $runs_total >= $min_runs_total) end) as $runs_total_ok
+        | (if $min_runs_with_summary == null then true else ($runs_with_summary != null and $runs_with_summary >= $min_runs_with_summary) end) as $runs_with_summary_ok
+        | (($campaign_status_ok and $trend_status_ok and $runs_total_ok and $runs_with_summary_ok) | not)
+      ) catch true
+      | if . then "1" else "0" end
+    ' "$campaign_check_summary_path" 2>/dev/null || echo 1
+  )"
+  case "$insufficient_evidence" in
+    1|0) ;;
+    *) insufficient_evidence="1" ;;
+  esac
+  printf '%s' "$insufficient_evidence"
 }
 
 resolve_profile_default_gate_signoff_status() {
@@ -7274,12 +7282,18 @@ blockchain_mainnet_activation_refresh_evidence_command=""
 blockchain_mainnet_activation_refresh_evidence_reason=""
 if [[ "$blockchain_mainnet_activation_gate_available_json" == "true" ]] \
   && [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "phase7-mainnet-cutover-signal" ]] \
-  && [[ "$blockchain_mainnet_activation_gate_go_json" == "true" ]] \
-  && [[ "$blockchain_mainnet_activation_gate_summary_stale_json" == "true" ]]; then
-  blockchain_mainnet_activation_refresh_evidence_available_json="true"
-  blockchain_mainnet_activation_refresh_evidence_id_json="blockchain_mainnet_activation_refresh_evidence"
-  blockchain_mainnet_activation_refresh_evidence_command="./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
-  blockchain_mainnet_activation_refresh_evidence_reason="stale activation evidence (age=${blockchain_mainnet_activation_gate_summary_age_sec_json:-null}s, max_age=${blockchain_mainnet_activation_gate_summary_max_age_sec_json}s); operator action required: refresh real evidence before trusting the GO signal"
+  && [[ "$blockchain_mainnet_activation_gate_go_json" == "true" ]]; then
+  if [[ "$blockchain_mainnet_activation_gate_summary_stale_json" == "true" ]] \
+     || [[ "$blockchain_mainnet_activation_gate_summary_stale_json" != "false" ]]; then
+    blockchain_mainnet_activation_refresh_evidence_available_json="true"
+    blockchain_mainnet_activation_refresh_evidence_id_json="blockchain_mainnet_activation_refresh_evidence"
+    blockchain_mainnet_activation_refresh_evidence_command="./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
+    if [[ "$blockchain_mainnet_activation_gate_summary_stale_json" == "true" ]]; then
+      blockchain_mainnet_activation_refresh_evidence_reason="stale activation evidence (age=${blockchain_mainnet_activation_gate_summary_age_sec_json:-null}s, max_age=${blockchain_mainnet_activation_gate_summary_max_age_sec_json}s); operator action required: refresh real evidence before trusting the GO signal"
+    else
+      blockchain_mainnet_activation_refresh_evidence_reason="activation evidence freshness is unknown; operator action required: refresh real evidence before trusting the GO signal"
+    fi
+  fi
 fi
 
 blockchain_mainnet_activation_missing_metrics_action_available_json="false"
@@ -7561,7 +7575,21 @@ if [[ "$vpn_rc_done_for_phase" == "true" \
   vpn_rc_done_for_phase="false"
 fi
 
-profile_default_gate_status="$(jq -r '.summary.profile_default_gate.status // "pending"' "$manual_validation_summary_json")"
+profile_default_gate_status_manual_raw="$(jq -r '
+  if (.summary.profile_default_gate.status | type) == "string" then .summary.profile_default_gate.status
+  else ""
+  end
+' "$manual_validation_summary_json")"
+profile_default_gate_status_manual_present="0"
+case "$profile_default_gate_status_manual_raw" in
+  pass|warn|fail|pending|skip)
+    profile_default_gate_status="$profile_default_gate_status_manual_raw"
+    profile_default_gate_status_manual_present="1"
+    ;;
+  *)
+    profile_default_gate_status="pending"
+    ;;
+esac
 profile_default_gate_next_command="$(jq -r '
   .summary.profile_default_gate.next_command
   // .summary.profile_default_gate.command
@@ -7836,13 +7864,13 @@ profile_default_gate_signoff_source=""
 if [[ "$profile_default_gate_signoff_resolution" == *$'\x1f'* ]]; then
   profile_default_gate_signoff_source="${profile_default_gate_signoff_resolution#*$'\x1f'}"
 fi
-if [[ -n "$profile_default_gate_signoff_status" ]]; then
+if [[ -n "$profile_default_gate_signoff_status" && "$profile_default_gate_status_manual_present" != "1" ]]; then
   profile_default_gate_status="$profile_default_gate_signoff_status"
-  if [[ -n "$profile_default_gate_signoff_source" ]]; then
-    profile_compare_signoff_summary_json="$profile_default_gate_signoff_source"
-  elif [[ -n "$profile_default_gate_summary_json_manual" ]]; then
-    profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
-  fi
+fi
+if [[ -n "$profile_default_gate_signoff_source" ]]; then
+  profile_compare_signoff_summary_json="$profile_default_gate_signoff_source"
+elif [[ -n "$profile_default_gate_summary_json_manual" ]]; then
+  profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
 fi
 profile_default_gate_selection_policy_evidence_present_json="null"
 profile_default_gate_selection_policy_evidence_valid_json="null"
@@ -8403,6 +8431,9 @@ elif [[ "$manual_refresh_status" == "warn" || "$single_machine_refresh_status" =
 elif [[ "$readiness_status" != "READY" ]]; then
   final_status="warn"
   notes="VPN production signoff is still pending external real-host gates."
+elif [[ "$profile_default_gate_needs_attention_json" == "true" ]]; then
+  final_status="warn"
+  notes="Core roadmap gates are healthy, but optional profile-default gate still needs attention."
 fi
 
 summary_payload="$(jq -n \
@@ -8599,6 +8630,7 @@ summary_payload="$(jq -n \
   --arg blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command "$blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command" \
   --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" \
   --arg profile_default_gate_status "$profile_default_gate_status" \
+  --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" \
   --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
   --arg profile_default_gate_next_command_sudo "$profile_default_gate_next_command_sudo" \
   --arg profile_default_gate_next_command_source "$profile_default_gate_next_command_source" \
@@ -8860,6 +8892,7 @@ summary_payload="$(jq -n \
       },
       profile_default_gate: {
         status: $profile_default_gate_status,
+        needs_attention: $profile_default_gate_needs_attention,
         next_command: (if $profile_default_gate_next_command == "" then null else $profile_default_gate_next_command end),
         next_command_sudo: (if $profile_default_gate_next_command_sudo == "" then null else $profile_default_gate_next_command_sudo end),
         next_command_source: (if $profile_default_gate_next_command_source == "" then null else $profile_default_gate_next_command_source end),

@@ -32,6 +32,10 @@ AUTO_REFRESH_SUMMARY="$TMP_DIR/auto_refresh_summary.json"
 AUTO_REFRESH_LOG="$TMP_DIR/auto_refresh.log"
 AUTO_REFRESH_DOCKER_SUMMARY="$TMP_DIR/auto_refresh_docker_summary.json"
 AUTO_REFRESH_DOCKER_LOG="$TMP_DIR/auto_refresh_docker.log"
+AUTO_REFRESH_STALE_GO_SUMMARY="$TMP_DIR/auto_refresh_stale_go_summary.json"
+AUTO_REFRESH_STALE_GO_LOG="$TMP_DIR/auto_refresh_stale_go.log"
+AUTO_REUSE_FRESH_SUMMARY="$TMP_DIR/auto_reuse_fresh_summary.json"
+AUTO_REUSE_FRESH_LOG="$TMP_DIR/auto_reuse_fresh.log"
 AUTO_REFRESH_STALE_SIGNOFF_SUMMARY="$TMP_DIR/auto_refresh_stale_signoff_summary.json"
 AUTO_REFRESH_STALE_SIGNOFF_LOG="$TMP_DIR/auto_refresh_stale_signoff.log"
 AUTO_REFRESH_NON_ROOT_SKIP_SUMMARY="$TMP_DIR/auto_refresh_non_root_skip_summary.json"
@@ -1739,6 +1743,165 @@ for expected in \
     exit 1
   fi
 done
+
+echo "[single-machine-prod-readiness] auto refresh stale GO signoff summary uses generated_at freshness"
+rm -rf "$TMP_DIR/auto_refresh_stale_go_reports"
+mkdir -p "$TMP_DIR/auto_refresh_stale_go_reports"
+cat >"$TMP_DIR/auto_refresh_stale_go_reports/profile_compare_campaign_signoff_summary.json" <<'EOF_STALE_GO_SIGNOFF'
+{
+  "version": 1,
+  "generated_at_utc": "2020-01-01T00:00:00Z",
+  "status": "ok",
+  "final_rc": 0,
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_STALE_GO_SIGNOFF
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="bash" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_STATUS="pass" \
+FAKE_THREE_MACHINE_DOCKER_READINESS_RC=0 \
+FAKE_THREE_MACHINE_DOCKER_READINESS_EXIT_RC=0 \
+FAKE_PROFILE_SIGNOFF_RC=0 \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 1 \
+  --run-profile-compare-campaign-signoff auto \
+  --profile-compare-campaign-signoff-refresh-campaign 0 \
+  --profile-compare-campaign-signoff-summary-max-age-sec 60 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/auto_refresh_stale_go_reports" \
+  --profile-compare-campaign-signoff-summary-json "$TMP_DIR/auto_refresh_stale_go_reports/profile_compare_campaign_signoff_summary.json" \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$AUTO_REFRESH_STALE_GO_SUMMARY" \
+  --print-summary-json 0 >"$AUTO_REFRESH_STALE_GO_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.profile_compare_campaign_signoff_summary_max_age_sec == 60
+  and .inputs.profile_compare_campaign_signoff_refresh_campaign == false
+  and .inputs.profile_compare_campaign_signoff_refresh_effective == true
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed == true
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed_via_docker == true
+  and ((.inputs.profile_compare_campaign_signoff_auto_refresh_reason // "") | startswith("stale signoff summary artifact (source=generated_at_utc "))
+  and .inputs.profile_compare_campaign_signoff_existing_summary.available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.valid_json == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.status == "ok"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.decision == "GO"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.refresh_campaign == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.generated_at_utc == "2020-01-01T00:00:00Z"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_source == "generated_at_utc"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.fresh == false
+  and ((.inputs.profile_compare_campaign_signoff_existing_summary.age_sec | type) == "number")
+  and .inputs.profile_compare_campaign_signoff_existing_summary.requires_refresh == true
+  and (.steps[] | select(.step_id == "profile_compare_campaign_signoff") | .status == "pass")
+' "$AUTO_REFRESH_STALE_GO_SUMMARY" >/dev/null; then
+  echo "auto refresh stale GO signoff summary JSON missing freshness fields"
+  cat "$AUTO_REFRESH_STALE_GO_LOG"
+  cat "$AUTO_REFRESH_STALE_GO_SUMMARY"
+  exit 1
+fi
+if ! rg -q -- '--refresh-campaign 1' "$PROFILE_SIGNOFF_ARGS_LOG"; then
+  echo "stale GO signoff freshness path did not force --refresh-campaign 1"
+  cat "$PROFILE_SIGNOFF_ARGS_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] auto reuse fresh signoff summary via mtime fallback"
+rm -rf "$TMP_DIR/auto_reuse_fresh_reports"
+mkdir -p "$TMP_DIR/auto_reuse_fresh_reports"
+cat >"$TMP_DIR/auto_reuse_fresh_reports/profile_compare_campaign_signoff_summary.json" <<'EOF_FRESH_SIGNOFF'
+{
+  "version": 1,
+  "status": "ok",
+  "final_rc": 0,
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_FRESH_SIGNOFF
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+FAKE_PROFILE_SIGNOFF_RC=0 \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff auto \
+  --profile-compare-campaign-signoff-refresh-campaign 0 \
+  --profile-compare-campaign-signoff-summary-max-age-sec 3600 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/auto_reuse_fresh_reports" \
+  --profile-compare-campaign-signoff-summary-json "$TMP_DIR/auto_reuse_fresh_reports/profile_compare_campaign_signoff_summary.json" \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$AUTO_REUSE_FRESH_SUMMARY" \
+  --print-summary-json 0 >"$AUTO_REUSE_FRESH_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.profile_compare_campaign_signoff_summary_max_age_sec == 3600
+  and .inputs.profile_compare_campaign_signoff_refresh_campaign == false
+  and .inputs.profile_compare_campaign_signoff_refresh_effective == false
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed == false
+  and .inputs.profile_compare_campaign_signoff_existing_summary.available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.valid_json == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.status == "ok"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.decision == "GO"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.refresh_campaign == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.generated_at_utc == null
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_source == "mtime"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.fresh == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.requires_refresh == false
+  and .inputs.profile_compare_campaign_signoff_existing_summary.refresh_reason == null
+  and (.steps[] | select(.step_id == "profile_compare_campaign_signoff") | .status == "pass")
+' "$AUTO_REUSE_FRESH_SUMMARY" >/dev/null; then
+  echo "auto reuse fresh signoff summary JSON missing freshness fallback fields"
+  cat "$AUTO_REUSE_FRESH_LOG"
+  cat "$AUTO_REUSE_FRESH_SUMMARY"
+  exit 1
+fi
+if ! rg -q -- '--refresh-campaign 0' "$PROFILE_SIGNOFF_ARGS_LOG"; then
+  echo "fresh signoff reuse path did not keep --refresh-campaign 0"
+  cat "$PROFILE_SIGNOFF_ARGS_LOG"
+  exit 1
+fi
 
 echo "[single-machine-prod-readiness] auto refresh stale signoff summary via docker rehearsal endpoints"
 rm -rf "$TMP_DIR/auto_refresh_stale_signoff_reports"

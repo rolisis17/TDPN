@@ -885,11 +885,13 @@ profile_signoff_insufficient_evidence_01() {
 
   resolved_campaign_check_summary_json="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_check_summary_json")"
   if [[ -z "$resolved_campaign_check_summary_json" || ! -f "$resolved_campaign_check_summary_json" ]]; then
-    printf '0'
+    # Fail closed for NO-GO decisions when campaign-check evidence is absent.
+    printf '1'
     return
   fi
   if ! jq -e . "$resolved_campaign_check_summary_json" >/dev/null 2>&1; then
-    printf '0'
+    # Fail closed for NO-GO decisions when campaign-check evidence is invalid.
+    printf '1'
     return
   fi
 
@@ -914,11 +916,12 @@ profile_signoff_insufficient_evidence_01() {
           )
         )
       | if . then "1" else "0" end
-    ' "$resolved_campaign_check_summary_json" 2>/dev/null || echo 0
+    ' "$resolved_campaign_check_summary_json" 2>/dev/null || echo 1
   )"
-  if [[ "$insufficient_evidence" != "1" ]]; then
-    insufficient_evidence="0"
-  fi
+  case "$insufficient_evidence" in
+    1|0) ;;
+    *) insufficient_evidence="1" ;;
+  esac
   printf '%s' "$insufficient_evidence"
 }
 
@@ -2349,6 +2352,60 @@ combined_json="$(
         )
       | .summary.profile_default_gate = $profile_default_gate
       | .summary.profile_default_ready = ((.summary.profile_default_gate.status // "") == "pass")
+      | . as $summary_root
+      | .summary.readiness = (
+          ($summary_root.summary.next_action_check_id // "") as $next_action_check_id
+          | ($summary_root.summary.profile_default_gate.status // "") as $profile_default_gate_status
+          | (
+              (($summary_root.summary.profile_default_gate.enabled // true) | not)
+              or ($summary_root.summary.profile_default_gate.readiness_exception // false)
+            ) as $profile_default_gate_exception
+          | (($next_action_check_id == "")) as $base_ready
+          | ((($profile_default_gate_exception | not) and ($profile_default_gate_status != "pass"))) as $profile_default_gate_blocks
+          | (($base_ready and ($profile_default_gate_blocks | not))) as $ready
+          | {
+              ready: $ready,
+              status: (if $ready then "READY" else "NOT_READY" end),
+              reasons: (
+                []
+                + (
+                    if $base_ready then
+                      []
+                    else
+                      [
+                        (
+                          "next_action_required:"
+                          + (if $next_action_check_id == "" then "unknown" else $next_action_check_id end)
+                        )
+                      ]
+                    end
+                  )
+                + (
+                    if $profile_default_gate_blocks then
+                      [
+                        (
+                          "profile_default_gate_status:"
+                          + (if $profile_default_gate_status == "" then "missing" else $profile_default_gate_status end)
+                        )
+                      ]
+                    else
+                      []
+                    end
+                  )
+              ),
+              base_ready: $base_ready,
+              profile_default_gate_status: (
+                if $profile_default_gate_status == "" then
+                  null
+                else
+                  $profile_default_gate_status
+                end
+              ),
+              profile_default_gate_exception: $profile_default_gate_exception,
+              profile_default_gate_blocks: $profile_default_gate_blocks,
+              downgraded_by_profile_default_gate: ($base_ready and $profile_default_gate_blocks)
+            }
+        )
       | .summary.docker_rehearsal_gate = (
           {
             check_id: "three_machine_docker_readiness",
@@ -2502,6 +2559,10 @@ docker_rehearsal_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.doc
 real_wg_privileged_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_wg_privileged_gate.status // ""')"
 real_wg_privileged_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_wg_privileged_gate.ready // false')"
 real_wg_privileged_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_wg_privileged_gate.command // ""')"
+readiness_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.readiness.status // "NOT_READY"')"
+readiness_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.readiness.ready // false')"
+readiness_downgraded_by_profile_default_gate="$(printf '%s\n' "$combined_json" | jq -r '.summary.readiness.downgraded_by_profile_default_gate // false')"
+readiness_reasons="$(printf '%s\n' "$combined_json" | jq -r '(.summary.readiness.reasons // []) | if length == 0 then "none" else join(",") end')"
 echo "[manual-validation-status] machine_c_smoke_ready=$machine_c_smoke_ready"
 echo "[manual-validation-status] machine_c_smoke_blockers=$machine_c_smoke_blockers"
 if [[ -n "$machine_c_smoke_next_command" ]]; then
@@ -2516,6 +2577,10 @@ echo "[manual-validation-status] real_host_gate_blockers=$real_host_gate_blocker
 if [[ -n "$real_host_gate_next_command" ]]; then
   echo "[manual-validation-status] real_host_gate_next_command=$real_host_gate_next_command"
 fi
+echo "[manual-validation-status] readiness_status=$readiness_status"
+echo "[manual-validation-status] readiness_ready=$readiness_ready"
+echo "[manual-validation-status] readiness_downgraded_by_profile_default_gate=$readiness_downgraded_by_profile_default_gate"
+echo "[manual-validation-status] readiness_reasons=$readiness_reasons"
 if [[ -n "$profile_default_gate_status" ]]; then
   echo "[manual-validation-status] profile_default_gate_status=$profile_default_gate_status"
 fi

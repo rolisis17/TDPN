@@ -42,6 +42,7 @@ CYCLE_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_
 MULTI_VM_STABILITY_VALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_multi_vm_stability_valid.log"
 MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_multi_vm_stability_cycle_fallback.log"
 MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_multi_vm_stability_default_missing.log"
+PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_profile_pending_readiness_downgrade.log"
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
@@ -56,6 +57,7 @@ FAKE_STATUS_CYCLE_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_cycle_
 FAKE_STATUS_MULTI_VM_STABILITY_VALID="$TMP_DIR/fake_manual_validation_status_multi_vm_stability_valid.sh"
 FAKE_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK="$TMP_DIR/fake_manual_validation_status_multi_vm_stability_cycle_fallback.sh"
 FAKE_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_multi_vm_stability_default_missing.sh"
+FAKE_STATUS_PROFILE_PENDING_READY="$TMP_DIR/fake_manual_validation_status_profile_pending_ready.sh"
 STABILITY_VALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_valid.json"
 STABILITY_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_invalid.json"
 STABILITY_DEFAULT_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary_default.json"
@@ -1893,6 +1895,119 @@ if ! printf '%s\n' "$multi_vm_stability_default_missing_report_json" | jq -e --a
 ' >/dev/null; then
   echo "manual validation report multi-vm missing-default JSON missing expected fail-closed fields"
   printf '%s\n' "$multi_vm_stability_default_missing_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] readiness fail-closed when profile-default gate remains pending"
+cat >"$FAKE_STATUS_PROFILE_PENDING_READY" <<EOF_STATUS_PROFILE_PENDING_READY
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_profile_pending_ready.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pending",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "notes": "profile compare campaign signoff pending evidence refresh",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --reports-dir .easy-node-logs --campaign-timeout-sec 2400 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --reports-dir .easy-node-logs --campaign-timeout-sec 2400 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {}
+    },
+    "profile_default_ready": false,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_PROFILE_PENDING_READY
+chmod +x "$FAKE_STATUS_PROFILE_PENDING_READY"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_PROFILE_PENDING_READY" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/profile_pending_readiness_downgrade_summary.json" \
+  --report-md "$TMP_DIR/profile_pending_readiness_downgrade_report.md" \
+  --print-report 1 \
+  --print-summary-json 1 >"$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] readiness_status=NOT_READY' "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"; then
+  echo "manual validation report profile-pending run missing readiness_status=NOT_READY"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-report\] readiness_downgraded_by_profile_default_gate=true' "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"; then
+  echo "manual validation report profile-pending run missing readiness_downgraded_by_profile_default_gate=true"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-report\] readiness_reasons=profile_default_gate_status:pending' "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"; then
+  echo "manual validation report profile-pending run missing readiness_reasons profile gate downgrade"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q -- '- Readiness downgraded by profile default gate: `true` \(status=`pending`\)' "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"; then
+  echo "manual validation report profile-pending markdown missing downgrade reason line"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"
+  exit 1
+fi
+profile_pending_readiness_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG")"
+if [[ -z "$profile_pending_readiness_report_json" ]]; then
+  echo "manual validation report profile-pending run missing JSON payload"
+  cat "$PROFILE_PENDING_READINESS_DOWNGRADE_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$profile_pending_readiness_report_json" | jq -e '
+  .summary.next_action_check_id == ""
+  and .summary.profile_default_gate.status == "pending"
+  and .summary.readiness.ready == false
+  and .summary.readiness.status == "NOT_READY"
+  and .summary.readiness.base_ready == true
+  and .summary.readiness.profile_default_gate_blocks == true
+  and .summary.readiness.downgraded_by_profile_default_gate == true
+  and .summary.readiness.profile_default_gate_status == "pending"
+  and (.summary.readiness.reasons | index("profile_default_gate_status:pending")) != null
+  and .report.ready == false
+  and .report.readiness_status == "NOT_READY"
+  and .report.readiness_base_ready == true
+  and .report.readiness_profile_default_gate_blocks == true
+  and .report.readiness_downgraded_by_profile_default_gate == true
+  and .report.readiness_profile_default_gate_status == "pending"
+  and (.report.readiness_reasons | index("profile_default_gate_status:pending")) != null
+' >/dev/null; then
+  echo "manual validation report profile-pending JSON missing fail-closed readiness downgrade fields"
+  printf '%s\n' "$profile_pending_readiness_report_json"
   exit 1
 fi
 

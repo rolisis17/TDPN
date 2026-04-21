@@ -31,6 +31,7 @@ Usage:
     [--profile-compare-campaign-signoff-require-selection-policy-valid 0|1] \
     [--profile-compare-campaign-signoff-reports-dir PATH] \
     [--profile-compare-campaign-signoff-summary-json PATH] \
+    [--profile-compare-campaign-signoff-summary-max-age-sec N] \
     [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] \
     [--profile-compare-campaign-signoff-campaign-directory-urls URL[,URL...]] \
     [--profile-compare-campaign-signoff-campaign-bootstrap-directory URL] \
@@ -142,6 +143,32 @@ validate_manual_validation_report_summary_payload() {
   return 0
 }
 
+file_mtime_epoch() {
+  local path="$1"
+  local raw=""
+  if raw="$(stat -c %Y "$path" 2>/dev/null)"; then
+    :
+  elif raw="$(stat -f %m "$path" 2>/dev/null)"; then
+    :
+  else
+    printf '%s' ""
+    return 0
+  fi
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$raw"
+  else
+    printf '%s' ""
+  fi
+}
+
+iso8601_to_epoch() {
+  local ts="$1"
+  if [[ -z "$ts" ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$ts" 'try ($ts | fromdateiso8601) catch empty'
+}
+
 run_ci_local="1"
 run_beta_preflight="1"
 run_deep_suite="1"
@@ -165,6 +192,7 @@ profile_compare_campaign_signoff_require_selection_policy_present="${SINGLE_MACH
 profile_compare_campaign_signoff_require_selection_policy_valid="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_VALID:-1}"
 profile_compare_campaign_signoff_reports_dir="$ROOT_DIR/.easy-node-logs"
 profile_compare_campaign_signoff_summary_json=""
+profile_compare_campaign_signoff_summary_max_age_sec="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SUMMARY_MAX_AGE_SEC:-21600}"
 profile_compare_campaign_signoff_campaign_execution_mode="auto"
 profile_compare_campaign_signoff_campaign_directory_urls=""
 profile_compare_campaign_signoff_campaign_bootstrap_directory=""
@@ -273,6 +301,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profile-compare-campaign-signoff-summary-json)
       profile_compare_campaign_signoff_summary_json="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-summary-max-age-sec)
+      profile_compare_campaign_signoff_summary_max_age_sec="${2:-}"
       shift 2
       ;;
     --profile-compare-campaign-signoff-campaign-execution-mode)
@@ -397,6 +429,14 @@ bool_arg_or_die "--profile-compare-campaign-signoff-refresh-campaign" "$profile_
 bool_arg_or_die "--profile-compare-campaign-signoff-fail-on-no-go" "$profile_compare_campaign_signoff_fail_on_no_go"
 bool_arg_or_die "--profile-compare-campaign-signoff-require-selection-policy-present" "$profile_compare_campaign_signoff_require_selection_policy_present"
 bool_arg_or_die "--profile-compare-campaign-signoff-require-selection-policy-valid" "$profile_compare_campaign_signoff_require_selection_policy_valid"
+if ! [[ "$profile_compare_campaign_signoff_summary_max_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--profile-compare-campaign-signoff-summary-max-age-sec must be an integer"
+  exit 2
+fi
+if (( profile_compare_campaign_signoff_summary_max_age_sec < 1 )); then
+  echo "--profile-compare-campaign-signoff-summary-max-age-sec must be >= 1"
+  exit 2
+fi
 case "$profile_compare_campaign_signoff_campaign_execution_mode" in
   auto|docker|local) ;;
   *)
@@ -713,11 +753,24 @@ profile_compare_campaign_signoff_existing_summary_decision=""
 profile_compare_campaign_signoff_existing_summary_refresh_campaign="0"
 profile_compare_campaign_signoff_existing_summary_final_rc="0"
 profile_compare_campaign_signoff_existing_summary_failure_stage=""
+profile_compare_campaign_signoff_existing_summary_generated_at_utc=""
+profile_compare_campaign_signoff_existing_summary_freshness_source=""
+profile_compare_campaign_signoff_existing_summary_freshness_available="0"
+profile_compare_campaign_signoff_existing_summary_fresh="0"
+profile_compare_campaign_signoff_existing_summary_age_sec=""
 profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
 profile_compare_campaign_signoff_existing_summary_refresh_reason=""
+current_epoch_utc="$(date -u +%s)"
 if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
   profile_compare_campaign_signoff_existing_summary_available="1"
   if jq -e . "$profile_compare_campaign_signoff_summary_json" >/dev/null 2>&1; then
+    summary_reference_epoch=""
+    summary_generated_at_epoch=""
+    summary_mtime_epoch=""
+    current_epoch_value="$current_epoch_utc"
+    if ! [[ "$current_epoch_value" =~ ^[0-9]+$ ]]; then
+      current_epoch_value="$(jq -nr 'now | floor')"
+    fi
     profile_compare_campaign_signoff_existing_summary_valid="1"
     profile_compare_campaign_signoff_existing_summary_status="$(jq -r '.status // ""' "$profile_compare_campaign_signoff_summary_json")"
     profile_compare_campaign_signoff_existing_summary_decision="$(jq -r '.decision.decision // ""' "$profile_compare_campaign_signoff_summary_json")"
@@ -727,11 +780,49 @@ if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
       profile_compare_campaign_signoff_existing_summary_final_rc="0"
     fi
     profile_compare_campaign_signoff_existing_summary_failure_stage="$(jq -r '.failure_stage // ""' "$profile_compare_campaign_signoff_summary_json")"
-    if [[ "$profile_compare_campaign_signoff_existing_summary_status" == "ok" && "$profile_compare_campaign_signoff_existing_summary_decision" == "GO" ]]; then
-      profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
-    elif [[ "$profile_compare_campaign_signoff_existing_summary_refresh_campaign" == "1" ]]; then
-      profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
-    else
+    profile_compare_campaign_signoff_existing_summary_generated_at_utc="$(jq -r '.generated_at_utc // ""' "$profile_compare_campaign_signoff_summary_json")"
+    if [[ -n "$profile_compare_campaign_signoff_existing_summary_generated_at_utc" ]]; then
+      summary_generated_at_epoch="$(iso8601_to_epoch "$profile_compare_campaign_signoff_existing_summary_generated_at_utc" 2>/dev/null || true)"
+      if [[ "$summary_generated_at_epoch" =~ ^[0-9]+$ ]]; then
+        summary_reference_epoch="$summary_generated_at_epoch"
+        profile_compare_campaign_signoff_existing_summary_freshness_source="generated_at_utc"
+      fi
+    fi
+    if [[ -z "$summary_reference_epoch" ]]; then
+      summary_mtime_epoch="$(file_mtime_epoch "$profile_compare_campaign_signoff_summary_json")"
+      if [[ "$summary_mtime_epoch" =~ ^[0-9]+$ ]]; then
+        summary_reference_epoch="$summary_mtime_epoch"
+        profile_compare_campaign_signoff_existing_summary_freshness_source="mtime"
+      fi
+    fi
+    if [[ "$summary_reference_epoch" =~ ^[0-9]+$ && "$current_epoch_value" =~ ^[0-9]+$ ]]; then
+      profile_compare_campaign_signoff_existing_summary_freshness_available="1"
+      profile_compare_campaign_signoff_existing_summary_age_sec="$((current_epoch_value - summary_reference_epoch))"
+      if (( profile_compare_campaign_signoff_existing_summary_age_sec < 0 )); then
+        profile_compare_campaign_signoff_existing_summary_age_sec="0"
+      fi
+      if (( profile_compare_campaign_signoff_existing_summary_age_sec <= profile_compare_campaign_signoff_summary_max_age_sec )); then
+        profile_compare_campaign_signoff_existing_summary_fresh="1"
+      fi
+    fi
+    profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
+    profile_compare_campaign_signoff_existing_summary_refresh_reason=""
+    if [[ "$profile_compare_campaign_signoff_existing_summary_status" != "ok" || "$profile_compare_campaign_signoff_existing_summary_decision" != "GO" ]]; then
+      if [[ "$profile_compare_campaign_signoff_existing_summary_refresh_campaign" != "1" ]]; then
+        profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
+        profile_compare_campaign_signoff_existing_summary_refresh_reason="stale non-refreshed signoff summary (status=${profile_compare_campaign_signoff_existing_summary_status:-unknown} decision=${profile_compare_campaign_signoff_existing_summary_decision:-unknown})"
+      fi
+    fi
+    if [[ "$profile_compare_campaign_signoff_existing_summary_requires_refresh" != "1" ]]; then
+      if [[ "$profile_compare_campaign_signoff_existing_summary_freshness_available" != "1" ]]; then
+        profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
+        profile_compare_campaign_signoff_existing_summary_refresh_reason="signoff summary freshness unavailable (missing/invalid generated_at_utc and mtime)"
+      elif [[ "$profile_compare_campaign_signoff_existing_summary_fresh" != "1" ]]; then
+        profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
+        profile_compare_campaign_signoff_existing_summary_refresh_reason="stale signoff summary artifact (source=${profile_compare_campaign_signoff_existing_summary_freshness_source:-unknown} age_sec=${profile_compare_campaign_signoff_existing_summary_age_sec:-unknown} max_age_sec=${profile_compare_campaign_signoff_summary_max_age_sec})"
+      fi
+    fi
+    if [[ "$profile_compare_campaign_signoff_existing_summary_requires_refresh" == "1" && -z "$profile_compare_campaign_signoff_existing_summary_refresh_reason" ]]; then
       profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
       profile_compare_campaign_signoff_existing_summary_refresh_reason="stale non-refreshed signoff summary (status=${profile_compare_campaign_signoff_existing_summary_status:-unknown} decision=${profile_compare_campaign_signoff_existing_summary_decision:-unknown})"
     fi
@@ -942,11 +1033,12 @@ if [[ "$three_machine_docker_readiness_step_status" != "skip" && -f "$three_mach
 fi
 profile_compare_campaign_signoff_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.[] | select(.step_id == "profile_compare_campaign_signoff") | .status][0] // "skip"')"
 real_wg_privileged_matrix_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.[] | select(.step_id == "real_wg_privileged_matrix") | .status][0] // "skip"')"
+manual_validation_report_step_status="$(printf '%s\n' "$steps_json" | jq -r '[.[] | select(.step_id == "manual_validation_report") | .status][0] // "skip"')"
 
 manual_report_available="0"
 manual_report_json='{}'
 manual_report_validation_error=""
-if [[ -f "$manual_validation_report_summary_json" ]]; then
+if [[ "$manual_validation_report_step_status" == "pass" && -f "$manual_validation_report_summary_json" ]]; then
   if jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
     manual_report_json_candidate="$(cat "$manual_validation_report_summary_json")"
     if validate_manual_validation_report_summary_payload "$manual_report_json_candidate"; then
@@ -958,6 +1050,9 @@ if [[ -f "$manual_validation_report_summary_json" ]]; then
   else
     manual_report_validation_error="manual validation readiness summary JSON is invalid"
   fi
+elif [[ "$manual_validation_report_step_status" != "pass" && -f "$manual_validation_report_summary_json" ]]; then
+  # Fail closed: do not reuse potentially stale report artifacts from prior runs.
+  manual_report_validation_error="manual validation readiness summary exists but current manual_validation_report step status is ${manual_validation_report_step_status}; ignoring stale artifact"
 fi
 
 profile_compare_campaign_signoff_available="0"
@@ -1223,6 +1318,7 @@ summary_payload="$({
     --arg three_machine_docker_readiness_final_rc "$three_machine_docker_readiness_final_rc" \
     --arg run_profile_compare_campaign_signoff "$run_profile_compare_campaign_signoff" \
     --arg profile_compare_campaign_signoff_refresh_campaign "$profile_compare_campaign_signoff_refresh_campaign" \
+    --arg profile_compare_campaign_signoff_summary_max_age_sec "$profile_compare_campaign_signoff_summary_max_age_sec" \
     --arg profile_compare_campaign_signoff_refresh_effective "$profile_compare_campaign_signoff_refresh_effective" \
     --arg profile_compare_campaign_signoff_auto_refresh_reason "$profile_compare_campaign_signoff_auto_refresh_reason" \
     --arg profile_compare_campaign_signoff_fail_on_no_go "$profile_compare_campaign_signoff_fail_on_no_go" \
@@ -1238,6 +1334,11 @@ summary_payload="$({
     --arg profile_compare_campaign_signoff_existing_summary_refresh_campaign "$profile_compare_campaign_signoff_existing_summary_refresh_campaign" \
     --arg profile_compare_campaign_signoff_existing_summary_final_rc "$profile_compare_campaign_signoff_existing_summary_final_rc" \
     --arg profile_compare_campaign_signoff_existing_summary_failure_stage "$profile_compare_campaign_signoff_existing_summary_failure_stage" \
+    --arg profile_compare_campaign_signoff_existing_summary_generated_at_utc "$profile_compare_campaign_signoff_existing_summary_generated_at_utc" \
+    --arg profile_compare_campaign_signoff_existing_summary_freshness_source "$profile_compare_campaign_signoff_existing_summary_freshness_source" \
+    --arg profile_compare_campaign_signoff_existing_summary_freshness_available "$profile_compare_campaign_signoff_existing_summary_freshness_available" \
+    --arg profile_compare_campaign_signoff_existing_summary_fresh "$profile_compare_campaign_signoff_existing_summary_fresh" \
+    --arg profile_compare_campaign_signoff_existing_summary_age_sec "$profile_compare_campaign_signoff_existing_summary_age_sec" \
     --arg profile_compare_campaign_signoff_existing_summary_requires_refresh "$profile_compare_campaign_signoff_existing_summary_requires_refresh" \
     --arg profile_compare_campaign_signoff_existing_summary_refresh_reason "$profile_compare_campaign_signoff_existing_summary_refresh_reason" \
     --arg profile_compare_campaign_signoff_campaign_execution_mode "$profile_compare_campaign_signoff_campaign_execution_mode" \
@@ -1354,6 +1455,7 @@ summary_payload="$({
         three_machine_docker_readiness_keep_stacks: ($three_machine_docker_readiness_keep_stacks == "1"),
         run_profile_compare_campaign_signoff: $run_profile_compare_campaign_signoff,
         profile_compare_campaign_signoff_refresh_campaign: ($profile_compare_campaign_signoff_refresh_campaign == "1"),
+        profile_compare_campaign_signoff_summary_max_age_sec: ($profile_compare_campaign_signoff_summary_max_age_sec | tonumber),
         profile_compare_campaign_signoff_refresh_effective: ($profile_compare_campaign_signoff_refresh_effective == "1"),
         profile_compare_campaign_signoff_auto_refresh_reason: (if $profile_compare_campaign_signoff_auto_refresh_reason == "" then null else $profile_compare_campaign_signoff_auto_refresh_reason end),
         profile_compare_campaign_signoff_auto_refreshed: ($profile_compare_campaign_signoff_auto_refreshed == 1),
@@ -1373,6 +1475,11 @@ summary_payload="$({
           refresh_campaign: ($profile_compare_campaign_signoff_existing_summary_refresh_campaign == "1"),
           final_rc: ($profile_compare_campaign_signoff_existing_summary_final_rc | tonumber),
           failure_stage: $profile_compare_campaign_signoff_existing_summary_failure_stage,
+          generated_at_utc: (if $profile_compare_campaign_signoff_existing_summary_generated_at_utc == "" then null else $profile_compare_campaign_signoff_existing_summary_generated_at_utc end),
+          freshness_source: (if $profile_compare_campaign_signoff_existing_summary_freshness_source == "" then null else $profile_compare_campaign_signoff_existing_summary_freshness_source end),
+          freshness_available: ($profile_compare_campaign_signoff_existing_summary_freshness_available == "1"),
+          fresh: (if $profile_compare_campaign_signoff_existing_summary_freshness_available == "1" then ($profile_compare_campaign_signoff_existing_summary_fresh == "1") else null end),
+          age_sec: (if $profile_compare_campaign_signoff_existing_summary_freshness_available == "1" and $profile_compare_campaign_signoff_existing_summary_age_sec != "" then ($profile_compare_campaign_signoff_existing_summary_age_sec | tonumber) else null end),
           requires_refresh: ($profile_compare_campaign_signoff_existing_summary_requires_refresh == "1"),
           refresh_reason: (if $profile_compare_campaign_signoff_existing_summary_refresh_reason == "" then null else $profile_compare_campaign_signoff_existing_summary_refresh_reason end)
         },
@@ -1558,6 +1665,9 @@ if [[ "$three_machine_docker_readiness_available" == "1" ]]; then
 fi
 if [[ "$profile_compare_campaign_signoff_available" == "1" ]]; then
   echo "[single-machine-prod-readiness] profile_compare_campaign_signoff_status=$profile_compare_campaign_signoff_status decision=${profile_compare_campaign_signoff_decision:-unset}"
+fi
+if [[ "$profile_compare_campaign_signoff_existing_summary_available" == "1" ]]; then
+  echo "[single-machine-prod-readiness] profile_compare_campaign_signoff_existing_summary_freshness_source=${profile_compare_campaign_signoff_existing_summary_freshness_source:-unset} age_sec=${profile_compare_campaign_signoff_existing_summary_age_sec:-unset} max_age_sec=${profile_compare_campaign_signoff_summary_max_age_sec} fresh=${profile_compare_campaign_signoff_existing_summary_fresh:-0}"
 fi
 if [[ "$real_wg_privileged_matrix_step_status" != "skip" ]]; then
   echo "[single-machine-prod-readiness] real_wg_privileged_matrix_step_status=$real_wg_privileged_matrix_step_status"
