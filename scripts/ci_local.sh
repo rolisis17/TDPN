@@ -456,6 +456,12 @@ echo "[ci] easy-node server preflight integration"
 echo "[ci] easy-node prod authority/provider env wiring integration"
 ./scripts/integration_easy_node_prod_server_env.sh
 
+echo "[ci] compose privilege guardrails integration"
+./scripts/integration_compose_privilege_guardrails.sh
+
+echo "[ci] tokenpop redaction guardrails integration"
+./scripts/integration_tokenpop_redaction_guardrails.sh
+
 echo "[ci] easy-node server-up auto-invite integration"
 ./scripts/integration_easy_node_server_up_auto_invite.sh
 

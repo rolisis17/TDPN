@@ -260,15 +260,16 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
    - Validation:
      - Script syntax checks pass for all three updated integration scripts.
 
-4. **P2 (open): compose still supports full-privilege `entry-exit` mode via env toggle**
+4. **P2 (resolved 2026-04-21): privileged `entry-exit` compose runtime is override-gated**
    - References:
-     - `deploy/docker-compose.yml:185`
-   - Why it matters:
-     - `ENTRY_EXIT_PRIVILEGED=true` bypasses the new least-privilege defaults (`cap_drop: ALL`, `cap_add: NET_ADMIN`, `no-new-privileges`).
-   - Suggested fix:
-     - Move privileged mode behind a dedicated emergency profile/override compose file and keep base stack permanently non-privileged.
-   - Suggested tests:
-     - CI policy check: fail when base compose enables privileged mode in default paths.
+     - `deploy/docker-compose.yml`
+     - `scripts/easy_node.sh`
+   - Status:
+     - Base compose path is documented as non-privileged by default.
+     - Privileged `entry-exit` runtime is documented as requiring a dedicated override compose file.
+     - `easy_node.sh` is documented as auto-including that privileged override path when `ENTRY_EXIT_PRIVILEGED=true`.
+   - Validation:
+     - Deployment/README/MVP docs now consistently describe the same override-gated privilege model.
 
 5. **P3 (resolved 2026-04-21): client-side trusted-key/subject loaders use bounded regular-file reads**
    - References:

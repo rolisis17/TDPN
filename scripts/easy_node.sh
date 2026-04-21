@@ -2877,8 +2877,13 @@ client_vpn_issuer_quorum_summary() {
 compose_with_env() {
   local env_file="$1"
   shift
-  local -a clear_env_args
+  local -a clear_env_args compose_cmd
   local clear_var
+  local entry_exit_privileged_raw=""
+  local entry_exit_privileged_norm=""
+  local use_privileged_override=0
+  local base_compose_file="$DEPLOY_DIR/docker-compose.yml"
+  local privileged_override_file="$DEPLOY_DIR/docker-compose.privileged.yml"
   # Prevent ambient shell exports from overriding generated easy-node env files.
   # This is especially important for WG key material during server-up.
   for clear_var in \
@@ -2896,11 +2901,33 @@ compose_with_env() {
     ENTRY_LIVE_WG_MODE; do
     clear_env_args+=("-u" "$clear_var")
   done
+
   if [[ -f "$env_file" ]]; then
-    (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" docker compose --env-file "$env_file" "$@")
-  else
-    (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" docker compose "$@")
+    entry_exit_privileged_raw="$(identity_value "$env_file" "ENTRY_EXIT_PRIVILEGED" || true)"
+    entry_exit_privileged_raw="${entry_exit_privileged_raw%\"}"
+    entry_exit_privileged_raw="${entry_exit_privileged_raw#\"}"
+    entry_exit_privileged_raw="${entry_exit_privileged_raw%\'}"
+    entry_exit_privileged_raw="${entry_exit_privileged_raw#\'}"
+    entry_exit_privileged_norm="$(normalize_config_bool_01 "$entry_exit_privileged_raw" 2>/dev/null || true)"
+    if [[ "$entry_exit_privileged_norm" == "1" ]]; then
+      use_privileged_override=1
+    fi
   fi
+
+  compose_cmd=(docker compose)
+  if [[ "$use_privileged_override" == "1" ]]; then
+    if [[ ! -f "$privileged_override_file" ]]; then
+      echo "compose config error: ENTRY_EXIT_PRIVILEGED=true in env file requires override file: $privileged_override_file" >&2
+      echo "compose config error: env file requesting privileged mode: $env_file" >&2
+      return 1
+    fi
+    compose_cmd+=(-f "$base_compose_file" -f "$privileged_override_file")
+  fi
+  if [[ -f "$env_file" ]]; then
+    compose_cmd+=(--env-file "$env_file")
+  fi
+  compose_cmd+=("$@")
+  (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" "${compose_cmd[@]}")
 }
 
 clear_runtime_override_env_vars() {

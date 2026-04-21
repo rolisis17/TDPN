@@ -636,7 +636,7 @@ Optional env vars:
 - `EXIT_WG_KERNEL_PROXY_MAX_SESSIONS` (default `2048`; max concurrent exit WG kernel-proxy session sockets before new proxy allocations are rejected)
 - `EXIT_WG_KERNEL_PROXY_IDLE_SEC` (default `120`; idle timeout for automatic closure of inactive exit WG proxy session sockets, `0` disables idle cleanup)
 - `ENTRY_EXIT_USER` (compose runtime user for `entry-exit`; easy-mode prod profile sets `0:0` for WG command backend management)
-- `ENTRY_EXIT_PRIVILEGED` (compose privileged mode for `entry-exit`; easy-mode prod profile sets `true` for WG interface creation)
+- `ENTRY_EXIT_PRIVILEGED` (base compose path is non-privileged by default; privileged `entry-exit` runtime is gated behind a dedicated compose override file, and `easy_node.sh` auto-includes that override when this is `true`)
 - `EXIT_SESSION_CLEANUP_SEC` (default `30`; cleanup cadence for expired sessions and idle WG proxy sockets)
 - `EXIT_WG_EXIT_IP` (default `10.90.0.1/32`)
 - `EXIT_OPAQUE_SINK_ADDR` (optional UDP sink for accepted opaque payload bytes; required when `EXIT_LIVE_WG_MODE=1`)

@@ -39,6 +39,8 @@ Data locations:
 Notes:
 - In easy-mode `server-up`, issuer/directory/puzzle secrets are auto-generated; if you override manually, avoid defaults and keep them private.
 - `entry-exit` is one process running both roles (`--entry --exit`).
+- Base `deploy/docker-compose.yml` keeps `entry-exit` non-privileged by default.
+- Privileged `entry-exit` runtime is gated behind a dedicated override compose file; `easy_node.sh` auto-includes that override when `ENTRY_EXIT_PRIVILEGED=true`.
 
 ## 2) Easy installer + launcher (for simple testing)
 
@@ -333,7 +335,7 @@ Prod strict additions:
 - `server-federation-status` now includes per-peer cooldown retry windows (`retry_after_sec`), a `cooling_retry_max_sec` summary, and sync-source operator details (`source_operator_count`, `peer_sync_source_operators`, `issuer_sync_source_operators`) to make intermittent peer outage behavior and diversity posture easier to reason about during operations; it can also enforce strict one-shot policy checks via `--fail-on-not-ready 1` and emit a machine-readable summary via `--summary-json`.
 - `server-federation-wait` can now enforce strict federation readiness policy (`--require-configured-healthy`, `--max-cooling-retry-sec`, `--max-peer-sync-age-sec`, `--max-issuer-sync-age-sec`, `--min-peer-success-sources`, `--min-issuer-success-sources`, `--min-peer-source-operators`, `--min-issuer-source-operators`) and emit machine-readable wait summaries (`--summary-json`, `--print-summary-json`) with explicit failure reasons. `server-up --federation-wait 1` can pass the same policy gates via `--federation-require-configured-healthy`, `--federation-max-cooling-retry-sec`, `--federation-max-peer-sync-age-sec`, `--federation-max-issuer-sync-age-sec`, `--federation-min-peer-success-sources`, `--federation-min-issuer-success-sources`, `--federation-min-peer-source-operators`, and `--federation-min-issuer-source-operators`, plus wait-summary forwarding via `--federation-wait-summary-json` and `--federation-wait-print-summary-json`.
 - authority mode can auto-generate invite keys at startup (`--auto-invite 1`, optional `--auto-invite-count`, `--auto-invite-tier`, `--auto-invite-wait-sec`); `--auto-invite-fail-open 1` keeps startup non-blocking if invite generation fails.
-- prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds) and sets entry-exit compose runtime privileges (`ENTRY_EXIT_USER=0:0`, `ENTRY_EXIT_PRIVILEGED=true`).
+- prod profile auto-wires WG command-backend runtime defaults (`WG_BACKEND=command`, live WG filters, exit WG kernel proxy, and issuer quorum URL feeds), sets `ENTRY_EXIT_USER=0:0`, and when `ENTRY_EXIT_PRIVILEGED=true` relies on the dedicated privileged compose override path (auto-included by `easy_node.sh`).
 - authority invite/admin commands auto-switch to signed auth in prod profile; they also support explicit signed credentials (`--admin-key-file`, `--admin-key-id`).
 - run `./scripts/security_secret_guard.sh` before packaging/release to fail fast on tracked invite-key/private-key leakage in `docs/` and `deploy/`.
 - use `./scripts/easy_node.sh admin-signing-status` and `./scripts/easy_node.sh admin-signing-rotate --restart-issuer 1 --key-history 3` for signer maintenance on authority nodes.

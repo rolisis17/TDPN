@@ -182,7 +182,7 @@ services:
       - ./data/entry-exit:/app/data
       - ./tls:/app/tls:ro
     user: "${ENTRY_EXIT_USER:-nodeuser}"
-    privileged: ${ENTRY_EXIT_PRIVILEGED:-false}
+    privileged: false
     cap_drop:
       - ALL
     cap_add:
