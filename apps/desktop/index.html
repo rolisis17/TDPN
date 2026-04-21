@@ -279,11 +279,30 @@
           </div>
 
           <div class="tabs" role="tablist" aria-label="Workspaces">
-            <button id="tab_client" class="tab active" type="button">Client</button>
-            <button id="tab_server" class="tab" type="button">Server</button>
+            <button
+              id="tab_client"
+              class="tab active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel_client"
+            >
+              Client
+            </button>
+            <button
+              id="tab_server"
+              class="tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel_server"
+            >
+              Server
+            </button>
           </div>
+          <p id="tab_lock_hint" class="hint locked tab-lock-hint" hidden aria-live="polite"></p>
 
-          <div id="panel_client" class="tab-panel active">
+          <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
             <div class="panel-block">
               <h3>Client Workspace</h3>
               <p id="client_lock_hint" class="hint">
@@ -373,7 +392,7 @@
             </div>
           </div>
 
-          <div id="panel_server" class="tab-panel">
+          <div id="panel_server" class="tab-panel" role="tabpanel" aria-labelledby="tab_server">
             <div class="panel-block">
               <h3>Server Workspace</h3>
               <p id="server_lock_hint" class="hint">

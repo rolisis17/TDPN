@@ -7,6 +7,8 @@ What this scaffold includes:
 - Tauri app shell (`src-tauri`)
 - minimal desktop UI (`src`)
 - one desktop window with `Client` and `Server` tabs; role-ineligible tab remains visible but non-clickable, with lock-status guidance in UI hints
+- tab-level lock-reason strip directly under the workspace tabs so a disabled `Client`/`Server` tab always explains why it is locked
+- VPN-style connect controls: `Connect` now reflects runtime state (`Connect`, `Connecting...`, `Connected`, `Reconnect`) and pairs with `Disconnect` enable/disable states for clearer tunnel posture
 - Windows release bundle scaffold scripts:
   - `scripts/windows/desktop_release_bundle.ps1`
   - `scripts/windows/desktop_release_bundle.cmd`

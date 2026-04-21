@@ -7,13 +7,13 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:*"
     />
-    <title>GPM Portal</title>
+    <title>Global Private Mesh Portal (GPM)</title>
     <link rel="stylesheet" href="./assets/gpm.css" />
   </head>
   <body class="page-portal">
     <header class="topbar">
       <div class="wrap">
-        <div class="brand">GPM Portal <small>Wallet-first onboarding console</small></div>
+        <div class="brand">Global Private Mesh Portal <small>(GPM) Wallet-first onboarding console</small></div>
         <nav class="nav">
           <a class="btn secondary" href="./index.html">Home</a>
           <a class="btn primary" href="./portal.html">Portal</a>
@@ -217,6 +217,9 @@
         <p id="signin_policy_hint" class="helper-copy">
           Keplr and Leap wallet-extension sign + verify are available now.
         </p>
+        <p id="wallet_extension_hint" class="helper-copy">
+          Wallet extension readiness: select Keplr or Leap, set wallet chain ID, then use Sign + Verify (Wallet).
+        </p>
         <p class="helper-copy">
           Manual verify availability follows runtime policy; when locked, use Sign + Verify (Wallet).
         </p>
@@ -287,6 +290,8 @@
         </p>
         <div class="actions">
           <button class="btn primary" id="register_client_btn">Register Client</button>
+          <button class="btn secondary" id="client_status_btn">Check Client Status</button>
+          <button class="btn secondary" id="overview_status_btn">Refresh Overview</button>
         </div>
       </section>
 

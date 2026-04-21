@@ -70,6 +70,7 @@ const adminTokenEl = byId("admin_token");
 const operatorApprovalPolicyHintEl = byId("operator_approval_policy_hint");
 const manualSignInBtnEl = byId("signin_btn");
 const signinPolicyHintEl = document.getElementById("signin_policy_hint");
+const walletExtensionHintEl = document.getElementById("wallet_extension_hint");
 const connectionSnapshotEl = byId("connection_snapshot");
 const connectionSnapshotLineEl = byId("connection_snapshot_line");
 const connectionStateEl = byId("connection_state");
@@ -1093,6 +1094,7 @@ function strictWalletExtensionSourceRequired() {
 
 function syncManualSignInAction() {
   if (!manualSignInBtnEl) {
+    syncWalletExtensionReadinessHint();
     return;
   }
   const isBusy = document.body.classList.contains("is-busy");
@@ -1121,6 +1123,7 @@ function syncManualSignInAction() {
   if (signinPolicyHintEl) {
     signinPolicyHintEl.textContent = `${guidance}${cryptoProofGuidance}`;
   }
+  syncWalletExtensionReadinessHint();
 }
 
 function compatibilityOverrideEnabled() {
@@ -4173,6 +4176,12 @@ function bindReadinessListeners() {
   challengeMessageEl.addEventListener("input", () => {
     syncPortalOnboardingStateBanner();
   });
+  byId("wallet_provider").addEventListener("change", () => {
+    syncWalletExtensionReadinessHint();
+  });
+  walletChainIdEl.addEventListener("input", () => {
+    syncWalletExtensionReadinessHint();
+  });
 }
 
 function bindCompatibilityOverrideListeners() {
@@ -4361,6 +4370,43 @@ function walletProviderDisplayName(value) {
     return "Keplr";
   }
   return "Wallet";
+}
+
+function walletExtensionDetected(walletProvider) {
+  const provider = normalizeWalletProviderValue(walletProvider);
+  if (!provider) {
+    return false;
+  }
+  const view = window;
+  if (provider === "keplr") {
+    return Boolean(view.keplr && typeof view.keplr === "object");
+  }
+  return Boolean(
+    (view.leap && typeof view.leap === "object") ||
+      (view.leap?.cosmos && typeof view.leap.cosmos === "object")
+  );
+}
+
+function syncWalletExtensionReadinessHint() {
+  if (!walletExtensionHintEl) {
+    return;
+  }
+  const walletProvider = byId("wallet_provider").value;
+  const providerLabel = walletProviderDisplayName(walletProvider);
+  const chainId = walletChainIdEl.value.trim();
+  const extensionDetected = walletExtensionDetected(walletProvider);
+  const walletPolicyLocked = gpmProductionMode || strictWalletExtensionSourceRequired();
+  const requirementSummary = walletPolicyLocked
+    ? "Wallet extension Sign + Verify is required by active policy."
+    : "Wallet extension Sign + Verify is available and recommended.";
+  const extensionSummary = extensionDetected
+    ? `${providerLabel} extension detected in this browser.`
+    : `${providerLabel} extension not detected in this browser. Install/enable it and reload before signing.`;
+  const chainSummary = chainId
+    ? `Chain: ${chainId}.`
+    : "Set wallet chain ID before signing with wallet extension.";
+  walletExtensionHintEl.textContent = `${requirementSummary} ${extensionSummary} ${chainSummary}`;
+  walletExtensionHintEl.classList.toggle("locked", walletPolicyLocked || !extensionDetected || !chainId);
 }
 
 function challengeMessageFromPayload(payload) {
@@ -5305,6 +5351,36 @@ byId("register_client_btn").addEventListener("click", () =>
   })
 );
 
+byId("client_status_btn").addEventListener("click", () =>
+  run(
+    "client_status",
+    async () => {
+      const result = await requestClientStatus();
+      applyClientRegistrationPayload(result);
+      refreshClientReadiness();
+      return result;
+    },
+    {
+      successDetail: () => "Client onboarding status refreshed."
+    }
+  )
+);
+
+byId("overview_status_btn").addEventListener("click", () =>
+  run(
+    "onboarding_overview",
+    async () => {
+      const result = await requestOverview();
+      applyOnboardingOverviewPayload(result);
+      persistPortalState();
+      return result;
+    },
+    {
+      successDetail: () => "Onboarding overview refreshed for client and operator lanes."
+    }
+  )
+);
+
 byId("apply_operator_btn").addEventListener("click", () =>
   run("operator_apply", async () => {
     assertOperatorMutationActionAllowed("Operator apply");
@@ -5660,6 +5736,7 @@ function initializePortal() {
   bindReadinessListeners();
   bindOperatorListFilterListeners();
   persistPortalState();
+  syncWalletExtensionReadinessHint();
   refreshOperatorReadiness();
   refreshPolicyPostureBanner();
   refreshLegacyAliasWarningBanner();

@@ -68,10 +68,13 @@ const tabClientEl = byId("tab_client");
 const tabServerEl = byId("tab_server");
 const panelClientEl = byId("panel_client");
 const panelServerEl = byId("panel_server");
+const tabLockHintEl = document.getElementById("tab_lock_hint");
 const compatAdvancedSectionEl = document.getElementById("legacy_compat_section");
 const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
+const connectBtnEl = byId("connect_btn");
+const disconnectBtnEl = byId("disconnect_btn");
 const compatAdvancedHintEl =
   document.getElementById("legacy_compat_hint") || document.querySelector("details#legacy_compat_section > p");
 const desktopStepSessionEl = document.getElementById("desktop_step_session");
@@ -1505,6 +1508,62 @@ function applyConnectionSnapshot(snapshot) {
   if (routingDetailEl) {
     routingDetailEl.textContent = state.routingDetail;
   }
+  syncConnectActionButtons();
+}
+
+function syncConnectActionButtons() {
+  if (!connectBtnEl || !disconnectBtnEl) {
+    return;
+  }
+  const stateKey = normalizeConnectionState(state.connectionState) || "unknown";
+  const clientControlsUnlocked = isClientTabVisibleRole();
+  const clientLockReason = computeClientLockHintText();
+  let connectLabel = "Connect";
+  let connectDisabled = !clientControlsUnlocked;
+  let connectTitle = clientControlsUnlocked
+    ? "Establish VPN connection."
+    : `Connect is unavailable: ${clientLockReason}`;
+  let disconnectDisabled = false;
+  let disconnectTitle = "Disconnect VPN connection.";
+
+  if (stateKey === "connected" || stateKey === "healthy") {
+    connectLabel = "Connected";
+    connectDisabled = true;
+    connectTitle = "VPN connection is active.";
+    disconnectDisabled = false;
+  } else if (stateKey === "connecting") {
+    connectLabel = "Connecting...";
+    connectDisabled = true;
+    connectTitle = "Connect request in progress.";
+    disconnectDisabled = true;
+    disconnectTitle = "Wait for connect request to complete.";
+  } else if (stateKey === "disconnecting") {
+    connectLabel = "Connect";
+    connectDisabled = true;
+    connectTitle = "Wait for disconnect request to complete.";
+    disconnectDisabled = true;
+    disconnectTitle = "Disconnect request in progress.";
+  } else if (stateKey === "degraded") {
+    connectLabel = "Reconnect";
+    connectDisabled = !clientControlsUnlocked;
+    connectTitle = clientControlsUnlocked
+      ? "Connection health is degraded; reconnect is recommended."
+      : `Reconnect is unavailable: ${clientLockReason}`;
+    disconnectDisabled = false;
+  } else if (stateKey === "disconnected") {
+    disconnectDisabled = true;
+  }
+
+  connectBtnEl.textContent = connectLabel;
+  connectBtnEl.disabled = connectDisabled;
+  connectBtnEl.title = connectTitle;
+  connectBtnEl.setAttribute("aria-pressed", stateKey === "connected" || stateKey === "healthy" ? "true" : "false");
+  connectBtnEl.classList.toggle("vpn-connected", stateKey === "connected" || stateKey === "healthy");
+  connectBtnEl.classList.toggle("vpn-transition", stateKey === "connecting");
+
+  disconnectBtnEl.disabled = disconnectDisabled;
+  disconnectBtnEl.title = disconnectTitle;
+  disconnectBtnEl.classList.toggle("vpn-transition", stateKey === "disconnecting");
 }
 
 function updateConnectionDashboard(source, payload) {
@@ -3902,15 +3961,52 @@ function computeClientLockHintText() {
   return "Client controls are available for client-capable roles.";
 }
 
+function syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason) {
+  if (!tabLockHintEl) {
+    return;
+  }
+  const lockMessages = [];
+  if (!clientTabVisible && clientReason) {
+    lockMessages.push(`Client tab locked: ${clientReason}`);
+  }
+  if (!serverTabVisible && serverReason) {
+    lockMessages.push(`Server tab locked: ${serverReason}`);
+  }
+  if (lockMessages.length === 0) {
+    tabLockHintEl.textContent = "";
+    tabLockHintEl.hidden = true;
+    return;
+  }
+  tabLockHintEl.textContent = lockMessages.join(" ");
+  tabLockHintEl.hidden = false;
+}
+
 function syncServerRoleLockState() {
   const clientTabVisible = isClientTabVisibleRole();
   const serverTabVisible = isServerTabVisibleRole();
+  const clientReason = computeClientLockHintText();
+  const serverReason = computeServerLockHintText();
+
   tabClientEl.disabled = !clientTabVisible;
   tabClientEl.classList.toggle("locked", !clientTabVisible);
   panelClientEl.classList.toggle("locked", !clientTabVisible);
+  tabClientEl.setAttribute("aria-disabled", clientTabVisible ? "false" : "true");
+  tabClientEl.title = clientTabVisible ? "Open Client workspace." : clientReason;
+  tabClientEl.setAttribute(
+    "aria-label",
+    clientTabVisible ? "Client workspace tab." : `Client workspace tab locked. ${clientReason}`
+  );
+
   tabServerEl.disabled = !serverTabVisible;
   tabServerEl.classList.toggle("locked", !serverTabVisible);
   panelServerEl.classList.toggle("locked", !serverTabVisible);
+  tabServerEl.setAttribute("aria-disabled", serverTabVisible ? "false" : "true");
+  tabServerEl.title = serverTabVisible ? "Open Server workspace." : serverReason;
+  tabServerEl.setAttribute(
+    "aria-label",
+    serverTabVisible ? "Server workspace tab." : `Server workspace tab locked. ${serverReason}`
+  );
+
   const clientTabActive = tabClientEl.classList.contains("active");
   const serverTabActive = tabServerEl.classList.contains("active");
   if ((clientTabActive && !clientTabVisible) || (serverTabActive && !serverTabVisible)) {
@@ -3922,11 +4018,13 @@ function syncServerRoleLockState() {
   }
   syncServerMutationControls();
   if (clientLockHintEl) {
-    clientLockHintEl.textContent = computeClientLockHintText();
+    clientLockHintEl.textContent = clientReason;
     clientLockHintEl.classList.toggle("locked", !clientTabVisible);
   }
-  serverLockHintEl.textContent = computeServerLockHintText();
+  serverLockHintEl.textContent = serverReason;
   serverLockHintEl.classList.toggle("locked", !serverTabVisible);
+  syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason);
+  syncConnectActionButtons();
   syncDesktopOnboardingSteps();
   syncDesktopOnboardingBanner();
 }
@@ -4292,8 +4390,12 @@ function activateTab(name) {
   const isClient = selectedTab === "client";
   tabClientEl.classList.toggle("active", isClient);
   tabServerEl.classList.toggle("active", !isClient);
+  tabClientEl.setAttribute("aria-selected", isClient ? "true" : "false");
+  tabServerEl.setAttribute("aria-selected", !isClient ? "true" : "false");
   panelClientEl.classList.toggle("active", isClient);
   panelServerEl.classList.toggle("active", !isClient);
+  panelClientEl.hidden = !isClient;
+  panelServerEl.hidden = isClient;
 }
 
 function parseSessionRole(payload) {
@@ -5335,7 +5437,7 @@ byId("reject_operator_btn").addEventListener("click", async () => {
   await refreshSession();
 });
 
-byId("connect_btn").addEventListener("click", async () => {
+connectBtnEl.addEventListener("click", async () => {
   if (!requireClientControlEligibility("Connect")) {
     return;
   }
@@ -5362,7 +5464,7 @@ compatEnableEl.addEventListener("change", () => {
   }
 });
 
-byId("disconnect_btn").addEventListener("click", async () => {
+disconnectBtnEl.addEventListener("click", async () => {
   const result = await call("disconnect", "control_disconnect");
   updateConnectionDashboard("disconnect", result);
 });
