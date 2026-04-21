@@ -1737,6 +1737,88 @@ func TestLoadTokenProofReplayStorePrunesExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestNewReadsTokenProofReplaySharedFileModeConfig(t *testing.T) {
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE", "1")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC", "9")
+
+	s := New()
+	if !s.tokenProofReplaySharedFileMode {
+		t.Fatalf("expected EXIT_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE to enable shared replay mode")
+	}
+	if got := s.effectiveTokenProofReplayLockTimeout(); got != 9*time.Second {
+		t.Fatalf("effective replay lock timeout=%s want=%s", got, 9*time.Second)
+	}
+}
+
+func TestCheckAndRememberProofNonceSharedModeRejectsCrossInstanceReplay(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store_shared.json")
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-shared-1",
+		ExpiryUnix: now + 3600,
+	}
+	req := proto.PathOpenRequest{TokenProofNonce: "nonce-shared-1"}
+
+	first := &Service{
+		tokenProofReplayGuard:          true,
+		tokenProofReplaySharedFileMode: true,
+		tokenProofReplayLockTimeout:    time.Second,
+		tokenProofReplayStoreFile:      storePath,
+	}
+	second := &Service{
+		tokenProofReplayGuard:          true,
+		tokenProofReplaySharedFileMode: true,
+		tokenProofReplayLockTimeout:    time.Second,
+		tokenProofReplayStoreFile:      storePath,
+	}
+
+	if err := first.checkAndRememberProofNonce(claims, req, now); err != nil {
+		t.Fatalf("first shared replay nonce should pass: %v", err)
+	}
+	if err := second.checkAndRememberProofNonce(claims, req, now+1); err == nil || !strings.Contains(err.Error(), "replay") {
+		t.Fatalf("expected shared replay rejection in second instance, got %v", err)
+	}
+
+	second.mu.RLock()
+	defer second.mu.RUnlock()
+	if seen := second.proofNonceSeen[claims.TokenID]; seen == nil {
+		t.Fatalf("expected second instance memory cache refreshed from shared replay store")
+	} else if _, ok := seen[req.TokenProofNonce]; !ok {
+		t.Fatalf("expected shared nonce reflected in refreshed in-memory cache")
+	}
+}
+
+func TestCheckAndRememberProofNonceSharedModeLockTimeout(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store_shared.json")
+	lockPath := storePath + ".lock"
+	if err := os.WriteFile(lockPath, []byte("held"), 0o600); err != nil {
+		t.Fatalf("seed lock file: %v", err)
+	}
+
+	s := &Service{
+		tokenProofReplayGuard:          true,
+		tokenProofReplaySharedFileMode: true,
+		tokenProofReplayLockTimeout:    100 * time.Millisecond,
+		tokenProofReplayStoreFile:      storePath,
+	}
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-shared-lock-timeout",
+		ExpiryUnix: now + 60,
+	}
+	req := proto.PathOpenRequest{TokenProofNonce: "nonce-shared-timeout"}
+	err := s.checkAndRememberProofNonce(claims, req, now)
+	if err == nil {
+		t.Fatalf("expected lock timeout error in shared replay mode")
+	}
+	if !strings.Contains(err.Error(), "token proof replay lock failed") {
+		t.Fatalf("expected lock failure context, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "timeout acquiring replay store lock") {
+		t.Fatalf("expected timeout lock error detail, got %v", err)
+	}
+}
+
 func TestApplyRevocationFeedSigned(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {

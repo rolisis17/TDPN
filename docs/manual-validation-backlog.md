@@ -249,8 +249,9 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
       - Keep local file/cache as fast-path only.
       - Treat shared-file mode as an interim same-volume deployment option, not the long-term HA endpoint.
    - Progress update (2026-04-21):
-      - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings when replay persistence is instance-local.
-      - Directory provider replay guard now supports opt-in shared-file mode via `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
+     - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings when replay persistence is instance-local.
+     - Exit replay guard now supports opt-in shared-file mode via `EXIT_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `EXIT_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
+     - Directory provider replay guard now supports opt-in shared-file mode via `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
    - Suggested tests:
      - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
 

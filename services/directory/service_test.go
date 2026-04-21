@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -196,5 +197,48 @@ func TestParseDNSPeerHintsMergesDuplicateURLHints(t *testing.T) {
 	}
 	if got[1].URL != "https://other.example.com" {
 		t.Fatalf("unexpected second url: %q", got[1].URL)
+	}
+}
+
+func TestProviderTokenProofReplaySharedModeRejectsAcrossInstances(t *testing.T) {
+	replayStorePath := filepath.Join(t.TempDir(), "provider_token_proof_replay.json")
+	now := time.Unix(1_700_000_000, 0)
+
+	first := &Service{
+		providerTokenProofSeen:           make(map[string]time.Time),
+		providerTokenProofStoreFile:      replayStorePath,
+		providerTokenProofSharedFileMode: true,
+		providerTokenProofLockTimeout:    time.Second,
+	}
+	second := &Service{
+		providerTokenProofSeen:           make(map[string]time.Time),
+		providerTokenProofStoreFile:      replayStorePath,
+		providerTokenProofSharedFileMode: true,
+		providerTokenProofLockTimeout:    time.Second,
+	}
+
+	if err := first.markProviderTokenProofReplay("tok-1", "nonce-1", now); err != nil {
+		t.Fatalf("first mark replay failed: %v", err)
+	}
+	if got := first.providerTokenProofReplayCount(); got != 1 {
+		t.Fatalf("first replay count=%d want 1", got)
+	}
+
+	err := second.markProviderTokenProofReplay("tok-1", "nonce-1", now.Add(time.Second))
+	if err == nil {
+		t.Fatal("expected shared replay store to reject nonce reuse across instances")
+	}
+	if !strings.Contains(err.Error(), "nonce replayed") {
+		t.Fatalf("unexpected replay error: %v", err)
+	}
+	if got := second.providerTokenProofReplayCount(); got != 1 {
+		t.Fatalf("second replay count=%d want 1 after shared load", got)
+	}
+
+	if err := second.markProviderTokenProofReplay("tok-1", "nonce-2", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("second mark with distinct nonce failed: %v", err)
+	}
+	if got := second.providerTokenProofReplayCount(); got != 2 {
+		t.Fatalf("second replay count=%d want 2", got)
 	}
 }

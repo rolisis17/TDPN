@@ -29,109 +29,111 @@ import (
 )
 
 type Service struct {
-	addr                        string
-	localURL                    string
-	operatorID                  string
-	pubKey                      ed25519.PublicKey
-	privKey                     ed25519.PrivateKey
-	server                      *http.Server
-	entryEndpoints              []string
-	endpointRotateSec           int64
-	descriptorEpoch             time.Duration
-	descriptorTTL               time.Duration
-	selectionFeedTTL            time.Duration
-	selectionEpoch              time.Duration
-	trustFeedTTL                time.Duration
-	trustEpoch                  time.Duration
-	adminToken                  string
-	previousPubKeysFile         string
-	providerIssuerURLs          []string
-	providerIssuerPubCacheTTL   time.Duration
-	providerRelayMaxTTL         time.Duration
-	providerMinEntryTier        int
-	providerMinExitTier         int
-	providerMaxPerOperator      int
-	providerSplitRoles          bool
-	issuerTrustURLs             []string
-	issuerTrustedKeysFile       string
-	issuerTrustedKeys           []ed25519.PublicKey
-	issuerSyncSec               int
-	issuerTrustMinVotes         int
-	issuerDisputeMinVotes       int
-	issuerAppealMinVotes        int
-	peerURLs                    []string
-	peerSyncSec                 int
-	gossipSec                   int
-	gossipFanout                int
-	peerListTTL                 time.Duration
-	peerDiscoveryEnabled        bool
-	peerDiscoveryMax            int
-	peerDiscoveryTTL            time.Duration
-	peerDiscoveryMinVotes       int
-	peerDiscoveryRequireHint    bool
-	peerDiscoveryMaxPerSrc      int
-	peerDiscoveryMaxPerOp       int
-	peerDiscoveryFailN          int
-	peerDiscoveryBackoff        time.Duration
-	peerDiscoveryBackoffMax     time.Duration
-	peerDiscoveryDNSSeeds       []string
-	peerDiscoveryDNSRefresh     time.Duration
-	peerMinOperators            int
-	peerMinVotes                int
-	peerScoreMinVotes           int
-	peerTrustMinVotes           int
-	peerDisputeMinVotes         int
-	peerAppealMinVotes          int
-	adjudicationMetaMin         int
-	finalAdjudicationOps        int
-	finalAdjudicationSources    int
-	finalDisputeMinVotes        int
-	finalAppealMinVotes         int
-	finalAdjudicationMin        float64
-	disputeMaxTTL               time.Duration
-	appealMaxTTL                time.Duration
-	issuerMinOperators          int
-	peerMaxHops                 int
-	peerMu                      sync.RWMutex
-	peerRelays                  map[string]proto.RelayDescriptor
-	providerMu                  sync.RWMutex
-	providerRelays              map[string]proto.RelayDescriptor
-	providerTokenProofSeen      map[string]time.Time
-	providerTokenProofStoreFile string
-	peerScores                  map[string]proto.RelaySelectionScore
-	peerTrust                   map[string]proto.RelayTrustAttestation
-	issuerTrust                 map[string]proto.RelayTrustAttestation
-	discoveredPeers             map[string]time.Time
-	discoveredPeerVoters        map[string]map[string]time.Time
-	discoveredPeerHealth        map[string]discoveredPeerHealth
-	peerHintPubKeys             map[string]string
-	peerHintOperators           map[string]string
-	peerPubKeyCache             map[string]peerPubKeyCacheEntry
-	peerRelayETags              map[string]string
-	peerRelayCache              map[string][]proto.RelayDescriptor
-	peerScoreETags              map[string]string
-	peerScoreCache              map[string]map[string]proto.RelaySelectionScore
-	peerTrustETags              map[string]string
-	peerTrustCache              map[string]map[string]proto.RelayTrustAttestation
-	issuerTrustETags            map[string]string
-	issuerTrustCache            map[string]map[string]proto.RelayTrustAttestation
-	providerIssuerPubCacheMu    sync.RWMutex
-	providerIssuerPubCache      map[string]providerIssuerPubCacheEntry
-	peerTrustStrict             bool
-	peerTrustTOFU               bool
-	peerTrustFile               string
-	betaStrict                  bool
-	prodStrict                  bool
-	peerTrustMu                 sync.Mutex
-	syncStatusMu                sync.RWMutex
-	peerSyncStatus              proto.DirectorySyncRunStatus
-	issuerSyncStatus            proto.DirectorySyncRunStatus
-	keyMu                       sync.RWMutex
-	httpClient                  *http.Client
-	privateKeyPath              string
-	keyRotateEvery              time.Duration
-	keyHistory                  int
-	dnsLookupTXT                func(context.Context, string) ([]string, error)
+	addr                             string
+	localURL                         string
+	operatorID                       string
+	pubKey                           ed25519.PublicKey
+	privKey                          ed25519.PrivateKey
+	server                           *http.Server
+	entryEndpoints                   []string
+	endpointRotateSec                int64
+	descriptorEpoch                  time.Duration
+	descriptorTTL                    time.Duration
+	selectionFeedTTL                 time.Duration
+	selectionEpoch                   time.Duration
+	trustFeedTTL                     time.Duration
+	trustEpoch                       time.Duration
+	adminToken                       string
+	previousPubKeysFile              string
+	providerIssuerURLs               []string
+	providerIssuerPubCacheTTL        time.Duration
+	providerRelayMaxTTL              time.Duration
+	providerMinEntryTier             int
+	providerMinExitTier              int
+	providerMaxPerOperator           int
+	providerSplitRoles               bool
+	issuerTrustURLs                  []string
+	issuerTrustedKeysFile            string
+	issuerTrustedKeys                []ed25519.PublicKey
+	issuerSyncSec                    int
+	issuerTrustMinVotes              int
+	issuerDisputeMinVotes            int
+	issuerAppealMinVotes             int
+	peerURLs                         []string
+	peerSyncSec                      int
+	gossipSec                        int
+	gossipFanout                     int
+	peerListTTL                      time.Duration
+	peerDiscoveryEnabled             bool
+	peerDiscoveryMax                 int
+	peerDiscoveryTTL                 time.Duration
+	peerDiscoveryMinVotes            int
+	peerDiscoveryRequireHint         bool
+	peerDiscoveryMaxPerSrc           int
+	peerDiscoveryMaxPerOp            int
+	peerDiscoveryFailN               int
+	peerDiscoveryBackoff             time.Duration
+	peerDiscoveryBackoffMax          time.Duration
+	peerDiscoveryDNSSeeds            []string
+	peerDiscoveryDNSRefresh          time.Duration
+	peerMinOperators                 int
+	peerMinVotes                     int
+	peerScoreMinVotes                int
+	peerTrustMinVotes                int
+	peerDisputeMinVotes              int
+	peerAppealMinVotes               int
+	adjudicationMetaMin              int
+	finalAdjudicationOps             int
+	finalAdjudicationSources         int
+	finalDisputeMinVotes             int
+	finalAppealMinVotes              int
+	finalAdjudicationMin             float64
+	disputeMaxTTL                    time.Duration
+	appealMaxTTL                     time.Duration
+	issuerMinOperators               int
+	peerMaxHops                      int
+	peerMu                           sync.RWMutex
+	peerRelays                       map[string]proto.RelayDescriptor
+	providerMu                       sync.RWMutex
+	providerRelays                   map[string]proto.RelayDescriptor
+	providerTokenProofSeen           map[string]time.Time
+	providerTokenProofStoreFile      string
+	providerTokenProofSharedFileMode bool
+	providerTokenProofLockTimeout    time.Duration
+	peerScores                       map[string]proto.RelaySelectionScore
+	peerTrust                        map[string]proto.RelayTrustAttestation
+	issuerTrust                      map[string]proto.RelayTrustAttestation
+	discoveredPeers                  map[string]time.Time
+	discoveredPeerVoters             map[string]map[string]time.Time
+	discoveredPeerHealth             map[string]discoveredPeerHealth
+	peerHintPubKeys                  map[string]string
+	peerHintOperators                map[string]string
+	peerPubKeyCache                  map[string]peerPubKeyCacheEntry
+	peerRelayETags                   map[string]string
+	peerRelayCache                   map[string][]proto.RelayDescriptor
+	peerScoreETags                   map[string]string
+	peerScoreCache                   map[string]map[string]proto.RelaySelectionScore
+	peerTrustETags                   map[string]string
+	peerTrustCache                   map[string]map[string]proto.RelayTrustAttestation
+	issuerTrustETags                 map[string]string
+	issuerTrustCache                 map[string]map[string]proto.RelayTrustAttestation
+	providerIssuerPubCacheMu         sync.RWMutex
+	providerIssuerPubCache           map[string]providerIssuerPubCacheEntry
+	peerTrustStrict                  bool
+	peerTrustTOFU                    bool
+	peerTrustFile                    string
+	betaStrict                       bool
+	prodStrict                       bool
+	peerTrustMu                      sync.Mutex
+	syncStatusMu                     sync.RWMutex
+	peerSyncStatus                   proto.DirectorySyncRunStatus
+	issuerSyncStatus                 proto.DirectorySyncRunStatus
+	keyMu                            sync.RWMutex
+	httpClient                       *http.Client
+	privateKeyPath                   string
+	keyRotateEvery                   time.Duration
+	keyHistory                       int
+	dnsLookupTXT                     func(context.Context, string) ([]string, error)
 }
 
 type discoveredPeerHealth struct {
@@ -162,6 +164,8 @@ const providerRelayUpsertProofReplayTTL = 15 * time.Minute
 const providerRelayUpsertProofNonceMaxLen = 128
 const providerRelayUpsertProofReplayMaxEntries = 8192
 const providerRelayUpsertProofReplayMaxPerToken = 512
+const providerRelayUpsertProofReplayDefaultLockTimeout = 5 * time.Second
+const providerRelayUpsertProofReplayLockRetryInterval = 50 * time.Millisecond
 const gossipRelaysMaxBodyBytes int64 = 1024 * 1024
 const gossipRelaysMaxDescriptors = 512
 const remoteResponseMaxBodyBytes int64 = 1024 * 1024
@@ -400,6 +404,11 @@ func New() *Service {
 	if providerTokenProofStoreFile == "" {
 		providerTokenProofStoreFile = "data/directory_provider_token_proof_replay.json"
 	}
+	providerTokenProofSharedFileMode := envEnabled("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE")
+	providerTokenProofLockTimeout := providerRelayUpsertProofReplayDefaultLockTimeout
+	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC")); err == nil && v > 0 {
+		providerTokenProofLockTimeout = time.Duration(v) * time.Second
+	}
 	providerRelayMaxTTL := 5 * time.Minute
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC")); err == nil && v > 0 {
 		providerRelayMaxTTL = time.Duration(v) * time.Second
@@ -464,97 +473,99 @@ func New() *Service {
 		keyHistory = v
 	}
 	return &Service{
-		addr:                        addr,
-		localURL:                    localURL,
-		operatorID:                  operatorID,
-		entryEndpoints:              eps,
-		endpointRotateSec:           rotateSec,
-		descriptorEpoch:             descriptorEpoch,
-		descriptorTTL:               descriptorTTL,
-		selectionFeedTTL:            selectionFeedTTL,
-		selectionEpoch:              selectionEpoch,
-		trustFeedTTL:                trustFeedTTL,
-		trustEpoch:                  trustEpoch,
-		adminToken:                  adminToken,
-		previousPubKeysFile:         previousPubKeysFile,
-		providerIssuerURLs:          providerIssuerURLs,
-		providerIssuerPubCacheTTL:   providerIssuerPubCacheTTL,
-		providerRelayMaxTTL:         providerRelayMaxTTL,
-		providerMinEntryTier:        providerMinEntryTier,
-		providerMinExitTier:         providerMinExitTier,
-		providerMaxPerOperator:      providerMaxPerOperator,
-		providerSplitRoles:          providerSplitRoles,
-		issuerTrustURLs:             issuerTrustURLs,
-		issuerSyncSec:               issuerSyncSec,
-		issuerTrustMinVotes:         issuerTrustMinVotes,
-		issuerDisputeMinVotes:       issuerDisputeMinVotes,
-		issuerAppealMinVotes:        issuerAppealMinVotes,
-		peerURLs:                    peerURLs,
-		peerSyncSec:                 peerSyncSec,
-		gossipSec:                   gossipSec,
-		gossipFanout:                gossipFanout,
-		peerListTTL:                 peerListTTL,
-		peerDiscoveryEnabled:        peerDiscoveryEnabled,
-		peerDiscoveryMax:            peerDiscoveryMax,
-		peerDiscoveryTTL:            peerDiscoveryTTL,
-		peerDiscoveryMinVotes:       peerDiscoveryMinVotes,
-		peerDiscoveryRequireHint:    peerDiscoveryRequireHint,
-		peerDiscoveryMaxPerSrc:      peerDiscoveryMaxPerSrc,
-		peerDiscoveryMaxPerOp:       peerDiscoveryMaxPerOp,
-		peerDiscoveryFailN:          peerDiscoveryFailN,
-		peerDiscoveryBackoff:        peerDiscoveryBackoff,
-		peerDiscoveryBackoffMax:     peerDiscoveryBackoffMax,
-		peerDiscoveryDNSSeeds:       peerDiscoveryDNSSeeds,
-		peerDiscoveryDNSRefresh:     peerDiscoveryDNSRefresh,
-		peerMinOperators:            peerMinOperators,
-		peerMinVotes:                peerMinVotes,
-		peerScoreMinVotes:           peerScoreMinVotes,
-		peerTrustMinVotes:           peerTrustMinVotes,
-		peerDisputeMinVotes:         peerDisputeMinVotes,
-		peerAppealMinVotes:          peerAppealMinVotes,
-		adjudicationMetaMin:         adjudicationMetaMin,
-		finalAdjudicationOps:        finalAdjudicationOps,
-		finalAdjudicationSources:    finalAdjudicationSources,
-		finalDisputeMinVotes:        finalDisputeMinVotes,
-		finalAppealMinVotes:         finalAppealMinVotes,
-		finalAdjudicationMin:        finalAdjudicationMin,
-		disputeMaxTTL:               disputeMaxTTL,
-		appealMaxTTL:                appealMaxTTL,
-		issuerMinOperators:          issuerMinOperators,
-		peerMaxHops:                 peerMaxHops,
-		peerRelays:                  make(map[string]proto.RelayDescriptor),
-		providerRelays:              make(map[string]proto.RelayDescriptor),
-		providerTokenProofSeen:      make(map[string]time.Time),
-		providerTokenProofStoreFile: providerTokenProofStoreFile,
-		peerScores:                  make(map[string]proto.RelaySelectionScore),
-		peerTrust:                   make(map[string]proto.RelayTrustAttestation),
-		issuerTrust:                 make(map[string]proto.RelayTrustAttestation),
-		discoveredPeers:             make(map[string]time.Time),
-		discoveredPeerVoters:        make(map[string]map[string]time.Time),
-		discoveredPeerHealth:        make(map[string]discoveredPeerHealth),
-		peerHintPubKeys:             make(map[string]string),
-		peerHintOperators:           make(map[string]string),
-		peerPubKeyCache:             make(map[string]peerPubKeyCacheEntry),
-		peerRelayETags:              make(map[string]string),
-		peerRelayCache:              make(map[string][]proto.RelayDescriptor),
-		peerScoreETags:              make(map[string]string),
-		peerScoreCache:              make(map[string]map[string]proto.RelaySelectionScore),
-		peerTrustETags:              make(map[string]string),
-		peerTrustCache:              make(map[string]map[string]proto.RelayTrustAttestation),
-		issuerTrustETags:            make(map[string]string),
-		issuerTrustCache:            make(map[string]map[string]proto.RelayTrustAttestation),
-		providerIssuerPubCache:      make(map[string]providerIssuerPubCacheEntry),
-		peerTrustStrict:             peerTrustStrict,
-		peerTrustTOFU:               peerTrustTOFU,
-		peerTrustFile:               peerTrustFile,
-		issuerTrustedKeysFile:       issuerTrustedKeysFile,
-		betaStrict:                  betaStrict,
-		prodStrict:                  prodStrict,
-		httpClient:                  &http.Client{Timeout: 5 * time.Second},
-		privateKeyPath:              privateKeyPath,
-		keyRotateEvery:              keyRotateEvery,
-		keyHistory:                  keyHistory,
-		dnsLookupTXT:                net.DefaultResolver.LookupTXT,
+		addr:                             addr,
+		localURL:                         localURL,
+		operatorID:                       operatorID,
+		entryEndpoints:                   eps,
+		endpointRotateSec:                rotateSec,
+		descriptorEpoch:                  descriptorEpoch,
+		descriptorTTL:                    descriptorTTL,
+		selectionFeedTTL:                 selectionFeedTTL,
+		selectionEpoch:                   selectionEpoch,
+		trustFeedTTL:                     trustFeedTTL,
+		trustEpoch:                       trustEpoch,
+		adminToken:                       adminToken,
+		previousPubKeysFile:              previousPubKeysFile,
+		providerIssuerURLs:               providerIssuerURLs,
+		providerIssuerPubCacheTTL:        providerIssuerPubCacheTTL,
+		providerRelayMaxTTL:              providerRelayMaxTTL,
+		providerMinEntryTier:             providerMinEntryTier,
+		providerMinExitTier:              providerMinExitTier,
+		providerMaxPerOperator:           providerMaxPerOperator,
+		providerSplitRoles:               providerSplitRoles,
+		issuerTrustURLs:                  issuerTrustURLs,
+		issuerSyncSec:                    issuerSyncSec,
+		issuerTrustMinVotes:              issuerTrustMinVotes,
+		issuerDisputeMinVotes:            issuerDisputeMinVotes,
+		issuerAppealMinVotes:             issuerAppealMinVotes,
+		peerURLs:                         peerURLs,
+		peerSyncSec:                      peerSyncSec,
+		gossipSec:                        gossipSec,
+		gossipFanout:                     gossipFanout,
+		peerListTTL:                      peerListTTL,
+		peerDiscoveryEnabled:             peerDiscoveryEnabled,
+		peerDiscoveryMax:                 peerDiscoveryMax,
+		peerDiscoveryTTL:                 peerDiscoveryTTL,
+		peerDiscoveryMinVotes:            peerDiscoveryMinVotes,
+		peerDiscoveryRequireHint:         peerDiscoveryRequireHint,
+		peerDiscoveryMaxPerSrc:           peerDiscoveryMaxPerSrc,
+		peerDiscoveryMaxPerOp:            peerDiscoveryMaxPerOp,
+		peerDiscoveryFailN:               peerDiscoveryFailN,
+		peerDiscoveryBackoff:             peerDiscoveryBackoff,
+		peerDiscoveryBackoffMax:          peerDiscoveryBackoffMax,
+		peerDiscoveryDNSSeeds:            peerDiscoveryDNSSeeds,
+		peerDiscoveryDNSRefresh:          peerDiscoveryDNSRefresh,
+		peerMinOperators:                 peerMinOperators,
+		peerMinVotes:                     peerMinVotes,
+		peerScoreMinVotes:                peerScoreMinVotes,
+		peerTrustMinVotes:                peerTrustMinVotes,
+		peerDisputeMinVotes:              peerDisputeMinVotes,
+		peerAppealMinVotes:               peerAppealMinVotes,
+		adjudicationMetaMin:              adjudicationMetaMin,
+		finalAdjudicationOps:             finalAdjudicationOps,
+		finalAdjudicationSources:         finalAdjudicationSources,
+		finalDisputeMinVotes:             finalDisputeMinVotes,
+		finalAppealMinVotes:              finalAppealMinVotes,
+		finalAdjudicationMin:             finalAdjudicationMin,
+		disputeMaxTTL:                    disputeMaxTTL,
+		appealMaxTTL:                     appealMaxTTL,
+		issuerMinOperators:               issuerMinOperators,
+		peerMaxHops:                      peerMaxHops,
+		peerRelays:                       make(map[string]proto.RelayDescriptor),
+		providerRelays:                   make(map[string]proto.RelayDescriptor),
+		providerTokenProofSeen:           make(map[string]time.Time),
+		providerTokenProofStoreFile:      providerTokenProofStoreFile,
+		providerTokenProofSharedFileMode: providerTokenProofSharedFileMode,
+		providerTokenProofLockTimeout:    providerTokenProofLockTimeout,
+		peerScores:                       make(map[string]proto.RelaySelectionScore),
+		peerTrust:                        make(map[string]proto.RelayTrustAttestation),
+		issuerTrust:                      make(map[string]proto.RelayTrustAttestation),
+		discoveredPeers:                  make(map[string]time.Time),
+		discoveredPeerVoters:             make(map[string]map[string]time.Time),
+		discoveredPeerHealth:             make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:                  make(map[string]string),
+		peerHintOperators:                make(map[string]string),
+		peerPubKeyCache:                  make(map[string]peerPubKeyCacheEntry),
+		peerRelayETags:                   make(map[string]string),
+		peerRelayCache:                   make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:                   make(map[string]string),
+		peerScoreCache:                   make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:                   make(map[string]string),
+		peerTrustCache:                   make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:                 make(map[string]string),
+		issuerTrustCache:                 make(map[string]map[string]proto.RelayTrustAttestation),
+		providerIssuerPubCache:           make(map[string]providerIssuerPubCacheEntry),
+		peerTrustStrict:                  peerTrustStrict,
+		peerTrustTOFU:                    peerTrustTOFU,
+		peerTrustFile:                    peerTrustFile,
+		issuerTrustedKeysFile:            issuerTrustedKeysFile,
+		betaStrict:                       betaStrict,
+		prodStrict:                       prodStrict,
+		httpClient:                       &http.Client{Timeout: 5 * time.Second},
+		privateKeyPath:                   privateKeyPath,
+		keyRotateEvery:                   keyRotateEvery,
+		keyHistory:                       keyHistory,
+		dnsLookupTXT:                     net.DefaultResolver.LookupTXT,
 	}
 }
 
@@ -578,6 +589,8 @@ func (s *Service) Run(ctx context.Context) error {
 	replayStorePath := strings.TrimSpace(s.providerTokenProofStoreFile)
 	if replayStorePath == "" {
 		log.Printf("directory provider token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
+	} else if s.providerTokenProofSharedFileMode {
+		log.Printf("directory provider token proof replay guard: shared file mode enabled path=%s lock_timeout_sec=%d", replayStorePath, int(s.providerTokenProofLockTimeout/time.Second))
 	} else {
 		log.Printf("directory provider token proof replay guard: using file-backed store path=%s (instance-local persistence only; use shared durable replay storage for multi-instance deployments)", replayStorePath)
 	}
@@ -3501,37 +3514,93 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 	if tokenID == "" || nonce == "" {
 		return fmt.Errorf("provider token proof token id and nonce are required")
 	}
-	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
+	if s.providerTokenProofSharedFileMode {
+		return s.markProviderTokenProofReplayShared(tokenID, nonce, now)
+	}
+	return s.markProviderTokenProofReplayInstanceLocal(tokenID, nonce, now)
+}
+
+func (s *Service) markProviderTokenProofReplayInstanceLocal(tokenID string, nonce string, now time.Time) error {
 	replayStorePath := strings.TrimSpace(s.providerTokenProofStoreFile)
 	needsPersist := replayStorePath != ""
+	var before map[string]time.Time
 	var snapshot map[string]time.Time
 
 	s.providerMu.Lock()
 	if s.providerTokenProofSeen == nil {
 		s.providerTokenProofSeen = make(map[string]time.Time)
 	}
-	for key, seenAt := range s.providerTokenProofSeen {
-		if seenAt.Before(cutoff) {
-			delete(s.providerTokenProofSeen, key)
-		}
+	if needsPersist {
+		before = cloneProviderTokenProofSeen(s.providerTokenProofSeen)
 	}
-
-	replayKey := tokenID + ":" + nonce
-	if seenAt, ok := s.providerTokenProofSeen[replayKey]; ok && !seenAt.Before(cutoff) {
+	if providerTokenProofReplaySeenMapMarkAndCheck(s.providerTokenProofSeen, tokenID, nonce, now) {
 		s.providerMu.Unlock()
 		return fmt.Errorf("provider token proof nonce replayed")
 	}
-	removed := make(map[string]time.Time)
-	rememberRemoved := func(key string) {
-		if seenAt, ok := s.providerTokenProofSeen[key]; ok {
-			removed[key] = seenAt
-			delete(s.providerTokenProofSeen, key)
+	if needsPersist {
+		snapshot = cloneProviderTokenProofSeen(s.providerTokenProofSeen)
+	}
+	s.providerMu.Unlock()
+	if !needsPersist {
+		return nil
+	}
+	if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, snapshot); err != nil {
+		s.providerMu.Lock()
+		s.providerTokenProofSeen = before
+		s.providerMu.Unlock()
+		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) markProviderTokenProofReplayShared(tokenID string, nonce string, now time.Time) error {
+	replayStorePath := strings.TrimSpace(s.providerTokenProofStoreFile)
+	if replayStorePath == "" {
+		return fmt.Errorf("provider token proof shared replay mode requires DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE")
+	}
+	releaseLock, err := acquireProviderTokenProofReplayStoreLock(replayStorePath, s.providerTokenProofLockTimeout)
+	if err != nil {
+		return fmt.Errorf("provider token proof replay lock failed: %w", err)
+	}
+	defer releaseLock()
+
+	seen, _, err := loadProviderTokenProofReplayStoreSnapshot(replayStorePath, now)
+	if err != nil {
+		return fmt.Errorf("provider token proof replay store load failed: %w", err)
+	}
+	if seen == nil {
+		seen = make(map[string]time.Time)
+	}
+	if providerTokenProofReplaySeenMapMarkAndCheck(seen, tokenID, nonce, now) {
+		s.providerMu.Lock()
+		s.providerTokenProofSeen = cloneProviderTokenProofSeen(seen)
+		s.providerMu.Unlock()
+		return fmt.Errorf("provider token proof nonce replayed")
+	}
+	if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, seen); err != nil {
+		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
+	}
+	s.providerMu.Lock()
+	s.providerTokenProofSeen = cloneProviderTokenProofSeen(seen)
+	s.providerMu.Unlock()
+	return nil
+}
+
+func providerTokenProofReplaySeenMapMarkAndCheck(seen map[string]time.Time, tokenID string, nonce string, now time.Time) bool {
+	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
+	for key, seenAt := range seen {
+		if seenAt.Before(cutoff) {
+			delete(seen, key)
 		}
+	}
+	replayKey := tokenID + ":" + nonce
+	if seenAt, ok := seen[replayKey]; ok && !seenAt.Before(cutoff) {
+		return true
 	}
 	tokenCount := 0
 	oldestTokenKey := ""
 	oldestTokenSeenAt := now
-	for key, seenAt := range s.providerTokenProofSeen {
+	for key, seenAt := range seen {
 		if !strings.HasPrefix(key, tokenID+":") {
 			continue
 		}
@@ -3542,12 +3611,12 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 		}
 	}
 	if tokenCount >= providerRelayUpsertProofReplayMaxPerToken && oldestTokenKey != "" {
-		rememberRemoved(oldestTokenKey)
+		delete(seen, oldestTokenKey)
 	}
-	for len(s.providerTokenProofSeen) >= providerRelayUpsertProofReplayMaxEntries {
+	for len(seen) >= providerRelayUpsertProofReplayMaxEntries {
 		oldestKey := ""
 		oldestSeenAt := now
-		for key, seenAt := range s.providerTokenProofSeen {
+		for key, seenAt := range seen {
 			if oldestKey == "" || seenAt.Before(oldestSeenAt) {
 				oldestKey = key
 				oldestSeenAt = seenAt
@@ -3556,30 +3625,41 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 		if oldestKey == "" {
 			break
 		}
-		rememberRemoved(oldestKey)
+		delete(seen, oldestKey)
 	}
-	s.providerTokenProofSeen[replayKey] = now
-	if needsPersist {
-		snapshot = cloneProviderTokenProofSeen(s.providerTokenProofSeen)
+	seen[replayKey] = now
+	return false
+}
+
+func acquireProviderTokenProofReplayStoreLock(path string, timeout time.Duration) (func(), error) {
+	lockPath := strings.TrimSpace(path) + ".lock"
+	if lockPath == ".lock" {
+		return nil, fmt.Errorf("provider token proof replay lock path is required")
 	}
-	s.providerMu.Unlock()
-	if !needsPersist {
-		return nil
+	if timeout <= 0 {
+		timeout = providerRelayUpsertProofReplayDefaultLockTimeout
 	}
-	if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, snapshot); err != nil {
-		s.providerMu.Lock()
-		if seenAt, ok := s.providerTokenProofSeen[replayKey]; ok && seenAt.Equal(now) {
-			delete(s.providerTokenProofSeen, replayKey)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		file, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			_, _ = file.WriteString(strconv.Itoa(os.Getpid()))
+			_ = file.Close()
+			return func() {
+				_ = os.Remove(lockPath)
+			}, nil
 		}
-		for key, seenAt := range removed {
-			if _, exists := s.providerTokenProofSeen[key]; !exists {
-				s.providerTokenProofSeen[key] = seenAt
-			}
+		if !os.IsExist(err) {
+			return nil, err
 		}
-		s.providerMu.Unlock()
-		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out after %s acquiring replay lock %s", timeout, lockPath)
+		}
+		time.Sleep(providerRelayUpsertProofReplayLockRetryInterval)
 	}
-	return nil
 }
 
 type providerTokenReplayStoreSnapshot struct {
@@ -3593,17 +3673,35 @@ func (s *Service) loadProviderTokenProofReplayStore(now time.Time) error {
 	if path == "" {
 		return nil
 	}
+	seen, exists, err := loadProviderTokenProofReplayStoreSnapshot(path, now)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	s.providerMu.Lock()
+	s.providerTokenProofSeen = seen
+	s.providerMu.Unlock()
+	return nil
+}
+
+func loadProviderTokenProofReplayStoreSnapshot(path string, now time.Time) (map[string]time.Time, bool, error) {
 	b, err := readFileBounded(path, directoryProviderReplayStoreMaxBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return make(map[string]time.Time), false, nil
 		}
-		return err
+		return nil, false, err
 	}
 	var snapshot providerTokenReplayStoreSnapshot
 	if err := json.Unmarshal(b, &snapshot); err != nil {
-		return fmt.Errorf("invalid replay store json: %w", err)
+		return nil, true, fmt.Errorf("invalid replay store json: %w", err)
 	}
+	return normalizeProviderTokenProofReplayStoreSnapshot(snapshot, now), true, nil
+}
+
+func normalizeProviderTokenProofReplayStoreSnapshot(snapshot providerTokenReplayStoreSnapshot, now time.Time) map[string]time.Time {
 	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
 	type replayItem struct {
 		key    string
@@ -3641,10 +3739,7 @@ func (s *Service) loadProviderTokenProofReplayStore(now time.Time) error {
 		}
 		seen[item.key] = item.seenAt
 	}
-	s.providerMu.Lock()
-	s.providerTokenProofSeen = seen
-	s.providerMu.Unlock()
-	return nil
+	return seen
 }
 
 func (s *Service) providerTokenProofReplayCount() int {

@@ -50,60 +50,62 @@ type sessionInfo struct {
 }
 
 type Service struct {
-	addr                      string
-	dataAddr                  string
-	issuerURL                 string
-	issuerURLs                []string
-	issuerMinSources          int
-	issuerMinOperators        int
-	issuerMinKeyVotes         int
-	issuerRequireID           bool
-	revocationsURL            string
-	revocationsURLs           []string
-	dataMode                  string
-	opaqueSinkAddr            string
-	opaqueSourceAddr          string
-	opaqueEcho                bool
-	wgPubKey                  string
-	wgExitIP                  string
-	wgMTU                     int
-	wgKeepaliveSec            int
-	ipAllocCursor             uint32
-	wgInterface               string
-	wgPrivateKey              string
-	wgListenPort              int
-	wgBackend                 string
-	wgKernelProxy             bool
-	wgKernelProxyMax          int
-	wgKernelProxyIdle         time.Duration
-	sessionCleanupSec         int
-	maxActiveSessions         int
-	wgKernelTargetUDP         *net.UDPAddr
-	wgManager                 wg.Manager
-	liveWGMode                bool
-	wgOnlyMode                bool
-	egressBackend             string
-	egressIface               string
-	egressCIDR                string
-	egressChain               string
-	egressConfigured          bool
-	tokenProofReplayGuard     bool
-	peerRebindAfter           time.Duration
-	revocationRefreshSec      int
-	accountingFile            string
-	tokenProofReplayStoreFile string
-	accountingFlushSec        int
-	settlementReconcileSec    int
-	startupSyncTimeout        time.Duration
-	verifyRefreshMinInterval  time.Duration
-	betaStrict                bool
-	prodStrict                bool
-	enforcer                  *policy.Enforcer
-	httpClient                *http.Client
-	httpSrv                   *http.Server
-	udpConn                   *net.UDPConn
-	opaqueSourceConn          *net.UDPConn
-	opaqueSinkUDP             *net.UDPAddr
+	addr                           string
+	dataAddr                       string
+	issuerURL                      string
+	issuerURLs                     []string
+	issuerMinSources               int
+	issuerMinOperators             int
+	issuerMinKeyVotes              int
+	issuerRequireID                bool
+	revocationsURL                 string
+	revocationsURLs                []string
+	dataMode                       string
+	opaqueSinkAddr                 string
+	opaqueSourceAddr               string
+	opaqueEcho                     bool
+	wgPubKey                       string
+	wgExitIP                       string
+	wgMTU                          int
+	wgKeepaliveSec                 int
+	ipAllocCursor                  uint32
+	wgInterface                    string
+	wgPrivateKey                   string
+	wgListenPort                   int
+	wgBackend                      string
+	wgKernelProxy                  bool
+	wgKernelProxyMax               int
+	wgKernelProxyIdle              time.Duration
+	sessionCleanupSec              int
+	maxActiveSessions              int
+	wgKernelTargetUDP              *net.UDPAddr
+	wgManager                      wg.Manager
+	liveWGMode                     bool
+	wgOnlyMode                     bool
+	egressBackend                  string
+	egressIface                    string
+	egressCIDR                     string
+	egressChain                    string
+	egressConfigured               bool
+	tokenProofReplayGuard          bool
+	tokenProofReplaySharedFileMode bool
+	tokenProofReplayLockTimeout    time.Duration
+	peerRebindAfter                time.Duration
+	revocationRefreshSec           int
+	accountingFile                 string
+	tokenProofReplayStoreFile      string
+	accountingFlushSec             int
+	settlementReconcileSec         int
+	startupSyncTimeout             time.Duration
+	verifyRefreshMinInterval       time.Duration
+	betaStrict                     bool
+	prodStrict                     bool
+	enforcer                       *policy.Enforcer
+	httpClient                     *http.Client
+	httpSrv                        *http.Server
+	udpConn                        *net.UDPConn
+	opaqueSourceConn               *net.UDPConn
+	opaqueSinkUDP                  *net.UDPAddr
 
 	mu                sync.RWMutex
 	issuerPub         ed25519.PublicKey
@@ -187,6 +189,8 @@ const sessionReplayWindowSize = 8192
 const tokenProofReplayMaxTokenIDs = 4096
 const tokenProofReplayMaxNoncesPerToken = 4096
 const tokenProofReplayStoreMaxBytes int64 = 8 * 1024 * 1024
+const defaultTokenProofReplayLockTimeout = 5 * time.Second
+const tokenProofReplayLockRetryInterval = 50 * time.Millisecond
 const capabilityTokenMaxBytes = 16 * 1024
 const capabilityTokenPayloadMaxBytes = 8 * 1024
 const serverReadHeaderTimeout = 10 * time.Second
@@ -356,6 +360,13 @@ func New() *Service {
 	if tokenProofReplayStoreFile == "" {
 		tokenProofReplayStoreFile = "data/exit_token_proof_replay.json"
 	}
+	tokenProofReplaySharedFileMode := envEnabled("EXIT_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE")
+	tokenProofReplayLockTimeout := defaultTokenProofReplayLockTimeout
+	if raw := strings.TrimSpace(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			tokenProofReplayLockTimeout = time.Duration(n) * time.Second
+		}
+	}
 	peerRebindAfter := time.Duration(0)
 	if v := os.Getenv("EXIT_PEER_REBIND_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -419,65 +430,67 @@ func New() *Service {
 	}
 
 	return &Service{
-		addr:                      addr,
-		dataAddr:                  dataAddr,
-		issuerURL:                 issuerURL,
-		issuerURLs:                issuerURLs,
-		issuerMinSources:          issuerMinSources,
-		issuerMinOperators:        issuerMinOperators,
-		issuerMinKeyVotes:         issuerMinKeyVotes,
-		issuerRequireID:           issuerRequireID,
-		revocationsURL:            revocationsURL,
-		revocationsURLs:           revocationsURLs,
-		dataMode:                  dataMode,
-		opaqueSinkAddr:            opaqueSinkAddr,
-		opaqueSourceAddr:          opaqueSourceAddr,
-		opaqueEcho:                opaqueEcho,
-		wgPubKey:                  wgPubKey,
-		wgExitIP:                  wgExitIP,
-		wgMTU:                     1280,
-		wgKeepaliveSec:            25,
-		ipAllocCursor:             2,
-		wgInterface:               wgInterface,
-		wgPrivateKey:              wgPrivateKey,
-		wgListenPort:              wgListenPort,
-		wgBackend:                 wgBackend,
-		wgKernelProxy:             wgKernelProxy,
-		wgKernelProxyMax:          wgKernelProxyMax,
-		wgKernelProxyIdle:         wgKernelProxyIdle,
-		sessionCleanupSec:         sessionCleanupSec,
-		maxActiveSessions:         maxActiveSessions,
-		wgManager:                 wgManager,
-		liveWGMode:                liveWGMode,
-		wgOnlyMode:                wgOnlyMode,
-		egressBackend:             egressBackend,
-		egressIface:               egressIface,
-		egressCIDR:                egressCIDR,
-		egressChain:               egressChain,
-		tokenProofReplayGuard:     tokenProofReplayGuard,
-		tokenProofReplayStoreFile: tokenProofReplayStoreFile,
-		peerRebindAfter:           peerRebindAfter,
-		revocationRefreshSec:      revocationRefreshSec,
-		accountingFile:            accountingFile,
-		accountingFlushSec:        accountingFlushSec,
-		settlementReconcileSec:    settlementReconcileSec,
-		startupSyncTimeout:        startupSyncTimeout,
-		verifyRefreshMinInterval:  verifyRefreshMinInterval,
-		betaStrict:                betaStrict,
-		prodStrict:                prodStrict,
-		enforcer:                  policy.NewEnforcer(),
-		httpClient:                &http.Client{Timeout: 5 * time.Second},
-		issuerPubs:                make(map[string]ed25519.PublicKey),
-		issuerKeyIssuer:           make(map[string]string),
-		sessions:                  make(map[string]sessionInfo),
-		wgSessionProxies:          make(map[string]*net.UDPConn),
-		wgProxyLastSeen:           make(map[string]int64),
-		proofNonceSeen:            make(map[string]map[string]int64),
-		revokedJTI:                make(map[string]int64),
-		minTokenEpoch:             make(map[string]int64),
-		revocationVersion:         make(map[string]int64),
-		settlement:                newSettlementServiceFromEnv(),
-		sessionReserve:            sessionReserve,
+		addr:                           addr,
+		dataAddr:                       dataAddr,
+		issuerURL:                      issuerURL,
+		issuerURLs:                     issuerURLs,
+		issuerMinSources:               issuerMinSources,
+		issuerMinOperators:             issuerMinOperators,
+		issuerMinKeyVotes:              issuerMinKeyVotes,
+		issuerRequireID:                issuerRequireID,
+		revocationsURL:                 revocationsURL,
+		revocationsURLs:                revocationsURLs,
+		dataMode:                       dataMode,
+		opaqueSinkAddr:                 opaqueSinkAddr,
+		opaqueSourceAddr:               opaqueSourceAddr,
+		opaqueEcho:                     opaqueEcho,
+		wgPubKey:                       wgPubKey,
+		wgExitIP:                       wgExitIP,
+		wgMTU:                          1280,
+		wgKeepaliveSec:                 25,
+		ipAllocCursor:                  2,
+		wgInterface:                    wgInterface,
+		wgPrivateKey:                   wgPrivateKey,
+		wgListenPort:                   wgListenPort,
+		wgBackend:                      wgBackend,
+		wgKernelProxy:                  wgKernelProxy,
+		wgKernelProxyMax:               wgKernelProxyMax,
+		wgKernelProxyIdle:              wgKernelProxyIdle,
+		sessionCleanupSec:              sessionCleanupSec,
+		maxActiveSessions:              maxActiveSessions,
+		wgManager:                      wgManager,
+		liveWGMode:                     liveWGMode,
+		wgOnlyMode:                     wgOnlyMode,
+		egressBackend:                  egressBackend,
+		egressIface:                    egressIface,
+		egressCIDR:                     egressCIDR,
+		egressChain:                    egressChain,
+		tokenProofReplayGuard:          tokenProofReplayGuard,
+		tokenProofReplaySharedFileMode: tokenProofReplaySharedFileMode,
+		tokenProofReplayLockTimeout:    tokenProofReplayLockTimeout,
+		tokenProofReplayStoreFile:      tokenProofReplayStoreFile,
+		peerRebindAfter:                peerRebindAfter,
+		revocationRefreshSec:           revocationRefreshSec,
+		accountingFile:                 accountingFile,
+		accountingFlushSec:             accountingFlushSec,
+		settlementReconcileSec:         settlementReconcileSec,
+		startupSyncTimeout:             startupSyncTimeout,
+		verifyRefreshMinInterval:       verifyRefreshMinInterval,
+		betaStrict:                     betaStrict,
+		prodStrict:                     prodStrict,
+		enforcer:                       policy.NewEnforcer(),
+		httpClient:                     &http.Client{Timeout: 5 * time.Second},
+		issuerPubs:                     make(map[string]ed25519.PublicKey),
+		issuerKeyIssuer:                make(map[string]string),
+		sessions:                       make(map[string]sessionInfo),
+		wgSessionProxies:               make(map[string]*net.UDPConn),
+		wgProxyLastSeen:                make(map[string]int64),
+		proofNonceSeen:                 make(map[string]map[string]int64),
+		revokedJTI:                     make(map[string]int64),
+		minTokenEpoch:                  make(map[string]int64),
+		revocationVersion:              make(map[string]int64),
+		settlement:                     newSettlementServiceFromEnv(),
+		sessionReserve:                 sessionReserve,
 	}
 }
 
@@ -610,8 +623,8 @@ func (s *Service) Run(ctx context.Context) error {
 	configureOutboundDialPolicy(httpClient, envEnabled(allowDangerousOutboundPrivateDNS), s.betaStrict || s.prodStrict)
 	s.httpClient = httpClient
 
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t token_proof_replay_shared_file_mode=%t token_proof_replay_lock_timeout_sec=%d peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, s.tokenProofReplaySharedFileMode, int(s.effectiveTokenProofReplayLockTimeout()/time.Second), int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -619,6 +632,8 @@ func (s *Service) Run(ctx context.Context) error {
 		replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
 		if replayStorePath == "" {
 			log.Printf("exit token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
+		} else if s.tokenProofReplaySharedFileMode {
+			log.Printf("exit token proof replay guard: using shared file-backed store path=%s lock_timeout_sec=%d", replayStorePath, int(s.effectiveTokenProofReplayLockTimeout()/time.Second))
 		} else {
 			log.Printf("exit token proof replay guard: using file-backed store path=%s (instance-local persistence only; use shared durable replay storage for multi-instance deployments)", replayStorePath)
 		}
@@ -1892,6 +1907,9 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 		exp = nowUnix + 1
 	}
 	replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
+	if s.tokenProofReplaySharedFileMode {
+		return s.checkAndRememberProofNonceShared(tokenID, nonce, exp, nowUnix, replayStorePath)
+	}
 	needsPersist := replayStorePath != ""
 	var snapshot tokenProofReplayStoreSnapshot
 
@@ -1993,23 +2011,10 @@ func (s *Service) loadTokenProofReplayStore(nowUnix int64) error {
 	if path == "" {
 		return nil
 	}
-	b, err := readRegularFileBounded(path, tokenProofReplayStoreMaxBytes)
+	buckets, err := loadTokenProofReplayStoreBuckets(path, nowUnix)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-	var snapshot tokenProofReplayStoreSnapshot
-	if err := json.Unmarshal(b, &snapshot); err != nil {
-		return fmt.Errorf("invalid replay store json: %w", err)
-	}
-	buckets := snapshot.Buckets
-	if buckets == nil {
-		buckets = make(map[string]map[string]int64)
-	}
-	pruneExpiredProofNonceBucketsLocked(buckets, nowUnix)
-	buckets = trimReplayBucketsToCaps(buckets)
 
 	s.mu.Lock()
 	s.proofNonceSeen = buckets
@@ -2097,6 +2102,152 @@ func (s *Service) persistTokenProofReplayStoreLocked(nowUnix int64) error {
 		Buckets:     cloneProofNonceBuckets(s.proofNonceSeen),
 	}
 	return persistTokenProofReplayStoreSnapshot(path, snapshot)
+}
+
+type tokenProofReplayFileLock struct {
+	path string
+	file *os.File
+}
+
+func (l *tokenProofReplayFileLock) release() error {
+	if l == nil {
+		return nil
+	}
+	var firstErr error
+	if l.file != nil {
+		if err := l.file.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if l.path != "" {
+		if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func acquireTokenProofReplayFileLock(storePath string, timeout time.Duration) (*tokenProofReplayFileLock, error) {
+	storePath = strings.TrimSpace(storePath)
+	if storePath == "" {
+		return nil, errors.New("token proof replay store file path is required")
+	}
+	lockPath := storePath + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, err
+	}
+	if timeout <= 0 {
+		timeout = defaultTokenProofReplayLockTimeout
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			if _, writeErr := fmt.Fprintf(file, "%d\n", os.Getpid()); writeErr != nil {
+				_ = file.Close()
+				_ = os.Remove(lockPath)
+				return nil, writeErr
+			}
+			return &tokenProofReplayFileLock{
+				path: lockPath,
+				file: file,
+			}, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout acquiring replay store lock %s after %s", lockPath, timeout)
+		}
+		time.Sleep(tokenProofReplayLockRetryInterval)
+	}
+}
+
+func loadTokenProofReplayStoreBuckets(path string, nowUnix int64) (map[string]map[string]int64, error) {
+	b, err := readRegularFileBounded(path, tokenProofReplayStoreMaxBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]map[string]int64), nil
+		}
+		return nil, err
+	}
+	var snapshot tokenProofReplayStoreSnapshot
+	if err := json.Unmarshal(b, &snapshot); err != nil {
+		return nil, fmt.Errorf("invalid replay store json: %w", err)
+	}
+	buckets := snapshot.Buckets
+	if buckets == nil {
+		buckets = make(map[string]map[string]int64)
+	}
+	pruneExpiredProofNonceBucketsLocked(buckets, nowUnix)
+	buckets = trimReplayBucketsToCaps(buckets)
+	return buckets, nil
+}
+
+func (s *Service) effectiveTokenProofReplayLockTimeout() time.Duration {
+	if s.tokenProofReplayLockTimeout > 0 {
+		return s.tokenProofReplayLockTimeout
+	}
+	return defaultTokenProofReplayLockTimeout
+}
+
+func (s *Service) checkAndRememberProofNonceShared(tokenID string, nonce string, exp int64, nowUnix int64, replayStorePath string) error {
+	if replayStorePath == "" {
+		return errors.New("token proof replay shared file mode requires replay store file path")
+	}
+	lock, err := acquireTokenProofReplayFileLock(replayStorePath, s.effectiveTokenProofReplayLockTimeout())
+	if err != nil {
+		return fmt.Errorf("token proof replay lock failed: %w", err)
+	}
+	defer func() {
+		if releaseErr := lock.release(); releaseErr != nil {
+			log.Printf("exit token proof replay guard: release lock failed path=%s err=%v", replayStorePath, releaseErr)
+		}
+	}()
+
+	buckets, err := loadTokenProofReplayStoreBuckets(replayStorePath, nowUnix)
+	if err != nil {
+		return fmt.Errorf("token proof replay store load failed: %w", err)
+	}
+	s.mu.Lock()
+	s.proofNonceSeen = cloneProofNonceBuckets(buckets)
+	s.mu.Unlock()
+	seen := buckets[tokenID]
+	if seen == nil {
+		if len(buckets) >= tokenProofReplayMaxTokenIDs {
+			pruneExpiredProofNonceBucketsLocked(buckets, nowUnix)
+			if len(buckets) >= tokenProofReplayMaxTokenIDs {
+				return errors.New("token proof replay cache saturated")
+			}
+		}
+		seen = make(map[string]int64)
+		buckets[tokenID] = seen
+	}
+	for k, until := range seen {
+		if nowUnix >= until {
+			delete(seen, k)
+		}
+	}
+	if _, exists := seen[nonce]; exists {
+		return errors.New("token proof replay")
+	}
+	if len(seen) >= tokenProofReplayMaxNoncesPerToken {
+		return errors.New("token proof replay cache saturated")
+	}
+	seen[nonce] = exp
+	snapshot := tokenProofReplayStoreSnapshot{
+		Version:     1,
+		SavedAtUnix: nowUnix,
+		Buckets:     cloneProofNonceBuckets(buckets),
+	}
+	if err := persistTokenProofReplayStoreSnapshot(replayStorePath, snapshot); err != nil {
+		return fmt.Errorf("token proof replay persistence failed: %w", err)
+	}
+
+	s.mu.Lock()
+	s.proofNonceSeen = cloneProofNonceBuckets(snapshot.Buckets)
+	s.mu.Unlock()
+	return nil
 }
 
 func persistTokenProofReplayStoreSnapshot(path string, snapshot tokenProofReplayStoreSnapshot) error {
