@@ -24,6 +24,8 @@ STEP_TIMEOUT_SUMMARY="$TMP_DIR/step_timeout_summary.json"
 STEP_TIMEOUT_LOG="$TMP_DIR/step_timeout.log"
 PROFILE_SIGNOFF_SUMMARY="$TMP_DIR/profile_signoff_summary.json"
 PROFILE_SIGNOFF_LOG="$TMP_DIR/profile_signoff.log"
+PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_SUMMARY="$TMP_DIR/profile_signoff_selection_policy_override_summary.json"
+PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_LOG="$TMP_DIR/profile_signoff_selection_policy_override.log"
 PROFILE_SIGNOFF_NON_BLOCKING_SUMMARY="$TMP_DIR/profile_signoff_non_blocking_summary.json"
 PROFILE_SIGNOFF_NON_BLOCKING_LOG="$TMP_DIR/profile_signoff_non_blocking.log"
 AUTO_REFRESH_SUMMARY="$TMP_DIR/auto_refresh_summary.json"
@@ -160,14 +162,18 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
-  cat >"$summary_json" <<'EOF_JSON'
+  cat >"$summary_json" <<EOF_JSON
 {
   "version": 1,
   "status": "ok",
   "final_rc": 0,
   "decision": {
-    "decision": "GO",
-    "recommended_profile": "balanced"
+    "decision": "${FAKE_PROFILE_SIGNOFF_DECISION:-GO}",
+    "recommended_profile": "${FAKE_PROFILE_SIGNOFF_RECOMMENDED_PROFILE:-balanced}",
+    "selection_policy_evidence": {
+      "present": $(if [[ "${FAKE_PROFILE_SIGNOFF_SELECTION_POLICY_PRESENT:-1}" == "1" ]]; then printf 'true'; else printf 'false'; fi),
+      "valid": $(if [[ "${FAKE_PROFILE_SIGNOFF_SELECTION_POLICY_VALID:-1}" == "1" ]]; then printf 'true'; else printf 'false'; fi)
+    }
   }
 }
 EOF_JSON
@@ -766,6 +772,7 @@ done
 
 echo "[single-machine-prod-readiness] profile-compare campaign signoff step"
 : >"$MANUAL_REPORT_ARGS_LOG"
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
 FAKE_MANUAL_REPORT_MODE=pending_multi \
 SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
 SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
@@ -776,6 +783,7 @@ SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
 SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
 SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
 FAKE_MANUAL_REPORT_ARGS_LOG="$MANUAL_REPORT_ARGS_LOG" \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
 FAKE_PROFILE_SIGNOFF_RC=0 \
 ./scripts/single_machine_prod_readiness.sh \
   --run-ci-local 0 \
@@ -799,17 +807,86 @@ if ! jq -e '
   and .summary.profile_compare_campaign_signoff.ready == true
   and .summary.profile_compare_campaign_signoff.decision == "GO"
   and .summary.profile_compare_campaign_signoff.recommended_profile == "balanced"
+  and .summary.profile_compare_campaign_signoff.selection_policy_evidence.available == true
+  and .summary.profile_compare_campaign_signoff.selection_policy_evidence.present == true
+  and .summary.profile_compare_campaign_signoff.selection_policy_evidence.valid == true
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_present_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_present_effective == true
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_effective == true
 ' "$PROFILE_SIGNOFF_SUMMARY" >/dev/null; then
   echo "profile compare campaign signoff summary JSON missing expected fields"
   cat "$PROFILE_SIGNOFF_LOG"
   cat "$PROFILE_SIGNOFF_SUMMARY"
   exit 1
 fi
+for expected in '--require-selection-policy-present 1' '--require-selection-policy-valid 1'; do
+  if ! rg -q -- "$expected" "$PROFILE_SIGNOFF_ARGS_LOG"; then
+    echo "profile signoff invocation missing $expected"
+    cat "$PROFILE_SIGNOFF_ARGS_LOG"
+    exit 1
+  fi
+done
 if ! rg -q -- "--profile-compare-signoff-summary-json $TMP_DIR/profile_compare_campaign_signoff_summary.json" "$MANUAL_REPORT_ARGS_LOG"; then
   echo "manual validation report invocation missing forwarded --profile-compare-signoff-summary-json path"
   cat "$MANUAL_REPORT_ARGS_LOG"
   exit 1
 fi
+
+echo "[single-machine-prod-readiness] profile-compare selection policy diagnostic override"
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+FAKE_PROFILE_SIGNOFF_RC=0 \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
+FAKE_PROFILE_SIGNOFF_SELECTION_POLICY_PRESENT=0 \
+FAKE_PROFILE_SIGNOFF_SELECTION_POLICY_VALID=0 \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff 1 \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --profile-compare-campaign-signoff-refresh-campaign 0 \
+  --profile-compare-campaign-signoff-require-selection-policy-present 0 \
+  --profile-compare-campaign-signoff-require-selection-policy-valid 0 \
+  --profile-compare-campaign-signoff-summary-json "$TMP_DIR/profile_compare_campaign_signoff_selection_policy_override_source_summary.json" \
+  --summary-json "$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_SUMMARY" \
+  --print-summary-json 0 >"$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_present_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_present_effective == false
+  and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_effective == false
+  and .summary.profile_compare_campaign_signoff.selection_policy_evidence.available == true
+  and .summary.profile_compare_campaign_signoff.selection_policy_evidence.present == false
+  and .summary.profile_compare_campaign_signoff.selection_policy_evidence.valid == false
+' "$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_SUMMARY" >/dev/null; then
+  echo "profile compare campaign signoff selection policy override summary JSON missing expected fields"
+  cat "$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_LOG"
+  cat "$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_SUMMARY"
+  exit 1
+fi
+for expected in '--require-selection-policy-present 0' '--require-selection-policy-valid 0'; do
+  if ! rg -q -- "$expected" "$PROFILE_SIGNOFF_ARGS_LOG"; then
+    echo "profile signoff override invocation missing $expected"
+    cat "$PROFILE_SIGNOFF_ARGS_LOG"
+    exit 1
+  fi
+done
 
 echo "[single-machine-prod-readiness] profile-compare signoff non-blocking failure"
 set +e

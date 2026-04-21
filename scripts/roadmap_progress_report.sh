@@ -374,6 +374,181 @@ profile_default_gate_campaign_check_summary_from_signoff() {
   printf '%s' ""
 }
 
+selection_policy_state_from_summary_json() {
+  local summary_json_path="$1"
+  local state=""
+  if [[ ! -f "$summary_json_path" ]] || ! jq -e . "$summary_json_path" >/dev/null 2>&1; then
+    printf 'null\x1fnull'
+    return
+  fi
+  state="$(jq -r '
+    def scalar:
+      if type == "array" then (.[0] // null) else . end;
+    def to_num:
+      scalar
+      | if . == null then null
+        elif type == "number" then .
+        elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+        else null
+        end;
+    def to_str:
+      scalar
+      | if . == null then null
+        elif type == "string" then .
+        elif type == "number" then tostring
+        else null
+        end;
+    def normalize($p):
+      {
+        sticky_pair_sec: ($p.sticky_pair_sec | to_num),
+        entry_rotation_sec: ($p.entry_rotation_sec | to_num),
+        entry_rotation_jitter_pct: ($p.entry_rotation_jitter_pct | to_num),
+        exit_exploration_pct: ($p.exit_exploration_pct | to_num),
+        path_profile: ($p.path_profile | to_str)
+      };
+    def valid_policy($p):
+      ($p.sticky_pair_sec != null)
+      and ($p.entry_rotation_sec != null)
+      and ($p.entry_rotation_jitter_pct != null)
+      and ($p.exit_exploration_pct != null)
+      and ($p.path_profile != null)
+      and (($p.path_profile | length) > 0);
+    ([
+      (.summary.selection_policy // empty),
+      (.selection_policy // empty),
+      (.trend.selection_policy // empty),
+      ((.runs // [])[]?.selection_policy // empty)
+    ] | map(normalize(.))) as $policies
+    | (if ($policies | length) > 0 then "true" else "false" end) as $present
+    | (if ($policies | any(valid_policy(.))) then "true" else "false" end) as $valid
+    | ($present + "\u001f" + $valid)
+  ' "$summary_json_path" 2>/dev/null || true)"
+  if [[ "$state" != *$'\x1f'* ]]; then
+    printf 'null\x1fnull'
+    return
+  fi
+  printf '%s' "$state"
+}
+
+profile_default_gate_campaign_summary_from_signoff() {
+  local signoff_summary_path="$1"
+  local candidate=""
+  local resolved=""
+  if [[ ! -f "$signoff_summary_path" ]] || ! jq -e . "$signoff_summary_path" >/dev/null 2>&1; then
+    printf '%s' ""
+    return
+  fi
+  while IFS= read -r candidate; do
+    candidate="$(trim "$candidate")"
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    resolved="$(resolve_path_with_base "$candidate" "$signoff_summary_path")"
+    if [[ -n "$resolved" ]]; then
+      printf '%s' "$resolved"
+      return
+    fi
+  done < <(jq -r '
+    [
+      (.artifacts.campaign_summary_json // ""),
+      (.stages.campaign.summary_json // ""),
+      (.inputs.campaign_summary_json // "")
+    ]
+    | .[]
+    | strings
+    | select(length > 0)
+  ' "$signoff_summary_path" 2>/dev/null || true)
+  printf '%s' ""
+}
+
+profile_default_gate_selection_policy_evidence_from_signoff() {
+  local signoff_summary_path="$1"
+  local present="null"
+  local valid="null"
+  local fallback_present="null"
+  local fallback_valid="null"
+  local state=""
+  local campaign_summary_path=""
+
+  if [[ ! -f "$signoff_summary_path" ]] || ! jq -e . "$signoff_summary_path" >/dev/null 2>&1; then
+    printf 'null\x1fnull'
+    return
+  fi
+
+  present="$(jq -r '
+    if (.decision.selection_policy_evidence.present | type) == "boolean"
+    then (.decision.selection_policy_evidence.present | tostring)
+    else "null"
+    end
+  ' "$signoff_summary_path" 2>/dev/null || true)"
+  valid="$(jq -r '
+    if (.decision.selection_policy_evidence.valid | type) == "boolean"
+    then (.decision.selection_policy_evidence.valid | tostring)
+    else "null"
+    end
+  ' "$signoff_summary_path" 2>/dev/null || true)"
+
+  state="$(selection_policy_state_from_summary_json "$signoff_summary_path")"
+  if [[ "$state" == *$'\x1f'* ]]; then
+    fallback_present="${state%%$'\x1f'*}"
+    fallback_valid="${state#*$'\x1f'}"
+  fi
+  if [[ "$present" == "null" ]]; then
+    present="$fallback_present"
+  fi
+  if [[ "$valid" == "null" ]]; then
+    valid="$fallback_valid"
+  fi
+
+  campaign_summary_path="$(profile_default_gate_campaign_summary_from_signoff "$signoff_summary_path")"
+  if [[ "$(json_file_valid_01 "$campaign_summary_path")" == "1" ]]; then
+    state="$(selection_policy_state_from_summary_json "$campaign_summary_path")"
+    if [[ "$state" == *$'\x1f'* ]]; then
+      fallback_present="${state%%$'\x1f'*}"
+      fallback_valid="${state#*$'\x1f'}"
+      if [[ "$present" == "null" ]]; then
+        present="$fallback_present"
+      fi
+      if [[ "$valid" == "null" ]]; then
+        valid="$fallback_valid"
+      fi
+    fi
+  fi
+
+  case "$present" in
+    true|false|null) ;;
+    *) present="null" ;;
+  esac
+  case "$valid" in
+    true|false|null) ;;
+    *) valid="null" ;;
+  esac
+
+  printf '%s\x1f%s' "$present" "$valid"
+}
+
+profile_default_gate_selection_policy_evidence_note_text() {
+  local present="$1"
+  local valid="$2"
+  if [[ "$present" == "false" ]]; then
+    printf '%s' "selection-policy evidence missing in profile-compare campaign signoff summary; rerun profile-compare-campaign-signoff with --refresh-campaign 1"
+    return
+  fi
+  if [[ "$present" == "null" ]]; then
+    printf '%s' "selection-policy evidence unavailable from profile-compare campaign signoff summary; verify summary path and rerun profile-compare-campaign-signoff with --refresh-campaign 1"
+    return
+  fi
+  if [[ "$valid" == "false" ]]; then
+    printf '%s' "selection-policy evidence invalid in profile-compare campaign signoff summary; rerun profile-compare-campaign-signoff with --refresh-campaign 1"
+    return
+  fi
+  if [[ "$valid" == "null" ]]; then
+    printf '%s' "selection-policy evidence validity unavailable in profile-compare campaign signoff summary; rerun profile-compare-campaign-signoff with --refresh-campaign 1"
+    return
+  fi
+  printf '%s' ""
+}
+
 profile_default_gate_no_go_insufficient_evidence_01() {
   local signoff_summary_path="$1"
   local campaign_check_summary_path=""
@@ -6526,6 +6701,24 @@ if [[ -n "$profile_default_gate_signoff_status" ]]; then
     profile_compare_signoff_summary_json="$profile_default_gate_summary_json_manual"
   fi
 fi
+profile_default_gate_selection_policy_evidence_present_json="null"
+profile_default_gate_selection_policy_evidence_valid_json="null"
+profile_default_gate_selection_policy_evidence_note=""
+profile_default_gate_selection_policy_evidence_resolution="$(
+  profile_default_gate_selection_policy_evidence_from_signoff "$profile_compare_signoff_summary_json"
+)"
+if [[ "$profile_default_gate_selection_policy_evidence_resolution" == *$'\x1f'* ]]; then
+  profile_default_gate_selection_policy_evidence_present_json="${profile_default_gate_selection_policy_evidence_resolution%%$'\x1f'*}"
+  profile_default_gate_selection_policy_evidence_valid_json="${profile_default_gate_selection_policy_evidence_resolution#*$'\x1f'}"
+fi
+case "$profile_default_gate_selection_policy_evidence_present_json" in
+  true|false|null) ;;
+  *) profile_default_gate_selection_policy_evidence_present_json="null" ;;
+esac
+case "$profile_default_gate_selection_policy_evidence_valid_json" in
+  true|false|null) ;;
+  *) profile_default_gate_selection_policy_evidence_valid_json="null" ;;
+esac
 profile_default_gate_next_command_host_a_effective="$(trim "${A_HOST:-}")"
 profile_default_gate_next_command_host_b_effective="$(trim "${B_HOST:-}")"
 if [[ -z "$profile_default_gate_next_command_host_a_effective" ]]; then
@@ -6613,6 +6806,22 @@ fi
 profile_default_gate_needs_attention_json="true"
 if [[ "$profile_default_gate_status" == "pass" || "$profile_default_gate_status" == "skip" ]]; then
   profile_default_gate_needs_attention_json="false"
+fi
+if [[ "$profile_default_gate_needs_attention_json" == "true" ]] \
+   && ([[ -n "$profile_default_gate_next_command" ]] || [[ -n "$profile_default_gate_next_command_sudo" ]]); then
+  profile_default_gate_selection_policy_evidence_note="$(
+    profile_default_gate_selection_policy_evidence_note_text \
+      "$profile_default_gate_selection_policy_evidence_present_json" \
+      "$profile_default_gate_selection_policy_evidence_valid_json"
+  )"
+fi
+if [[ -n "$profile_default_gate_selection_policy_evidence_note" ]] \
+   && [[ "$profile_default_gate_notes" != *"selection-policy evidence"* ]]; then
+  if [[ -n "$profile_default_gate_notes" ]]; then
+    profile_default_gate_notes="$profile_default_gate_notes; $profile_default_gate_selection_policy_evidence_note"
+  else
+    profile_default_gate_notes="$profile_default_gate_selection_policy_evidence_note"
+  fi
 fi
 docker_rehearsal_status="$(jq -r '.summary.docker_rehearsal_gate.status // "pending"' "$manual_validation_summary_json")"
 real_wg_privileged_status="$(jq -r '.summary.real_wg_privileged_gate.status // "pending"' "$manual_validation_summary_json")"
@@ -7196,6 +7405,9 @@ summary_payload="$(jq -n \
   --arg profile_default_gate_campaign_check_summary_json_resolved "$profile_default_gate_campaign_check_summary_json_resolved" \
   --arg profile_default_gate_docker_matrix_summary_json "$profile_default_gate_docker_matrix_summary_json" \
   --arg profile_default_gate_docker_profile_summary_json "$profile_default_gate_docker_profile_summary_json" \
+  --argjson profile_default_gate_selection_policy_evidence_present "$profile_default_gate_selection_policy_evidence_present_json" \
+  --argjson profile_default_gate_selection_policy_evidence_valid "$profile_default_gate_selection_policy_evidence_valid_json" \
+  --arg profile_default_gate_selection_policy_evidence_note "$profile_default_gate_selection_policy_evidence_note" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
   --argjson total_checks "$counts_total" \
@@ -7402,7 +7614,10 @@ summary_payload="$(jq -n \
         docker_hint_source: (if $profile_default_gate_docker_hint_source == "" then null else $profile_default_gate_docker_hint_source end),
         campaign_check_summary_json_resolved: (if $profile_default_gate_campaign_check_summary_json_resolved == "" then null else $profile_default_gate_campaign_check_summary_json_resolved end),
         docker_matrix_summary_json: (if $profile_default_gate_docker_matrix_summary_json == "" then null else $profile_default_gate_docker_matrix_summary_json end),
-        docker_profile_summary_json: (if $profile_default_gate_docker_profile_summary_json == "" then null else $profile_default_gate_docker_profile_summary_json end)
+        docker_profile_summary_json: (if $profile_default_gate_docker_profile_summary_json == "" then null else $profile_default_gate_docker_profile_summary_json end),
+        selection_policy_evidence_present: $profile_default_gate_selection_policy_evidence_present,
+        selection_policy_evidence_valid: $profile_default_gate_selection_policy_evidence_valid,
+        selection_policy_evidence_note: (if $profile_default_gate_selection_policy_evidence_note == "" then null else $profile_default_gate_selection_policy_evidence_note end)
       },
       optional_gate_status: {
         profile_default_gate: $profile_default_gate_status,
@@ -7712,6 +7927,9 @@ cat >"$report_tmp" <<EOF_MD
 - Profile gate campaign-check summary (resolved): $(jq -r '.vpn_track.profile_default_gate.campaign_check_summary_json_resolved // "none"' "$summary_json")
 - Profile gate docker matrix summary: $(jq -r '.vpn_track.profile_default_gate.docker_matrix_summary_json // "none"' "$summary_json")
 - Profile gate docker profile summary: $(jq -r '.vpn_track.profile_default_gate.docker_profile_summary_json // "none"' "$summary_json")
+- Profile gate selection-policy evidence present: $(jq -r '.vpn_track.profile_default_gate.selection_policy_evidence_present | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate selection-policy evidence valid: $(jq -r '.vpn_track.profile_default_gate.selection_policy_evidence_valid | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate selection-policy evidence note: $(jq -r '.vpn_track.profile_default_gate.selection_policy_evidence_note // "none"' "$summary_json")
 - Primary next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
 
 ## Pending Real-Host Checks
@@ -7899,6 +8117,7 @@ echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_ac
 echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json summary_generated_at=${blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json:-} summary_stale=${blockchain_bootstrap_governance_graduation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
+echo "[roadmap-progress-report] profile_default_gate_selection_policy_evidence_present=$profile_default_gate_selection_policy_evidence_present_json selection_policy_evidence_valid=$profile_default_gate_selection_policy_evidence_valid_json selection_policy_evidence_note=${profile_default_gate_selection_policy_evidence_note:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

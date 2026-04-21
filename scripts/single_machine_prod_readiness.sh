@@ -27,6 +27,8 @@ Usage:
     [--run-profile-compare-campaign-signoff auto|0|1] \
     [--profile-compare-campaign-signoff-refresh-campaign 0|1] \
     [--profile-compare-campaign-signoff-fail-on-no-go 0|1] \
+    [--profile-compare-campaign-signoff-require-selection-policy-present 0|1] \
+    [--profile-compare-campaign-signoff-require-selection-policy-valid 0|1] \
     [--profile-compare-campaign-signoff-reports-dir PATH] \
     [--profile-compare-campaign-signoff-summary-json PATH] \
     [--profile-compare-campaign-signoff-campaign-execution-mode auto|docker|local] \
@@ -159,6 +161,8 @@ three_machine_docker_readiness_summary_json=""
 run_profile_compare_campaign_signoff="auto"
 profile_compare_campaign_signoff_refresh_campaign="0"
 profile_compare_campaign_signoff_fail_on_no_go="1"
+profile_compare_campaign_signoff_require_selection_policy_present="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
+profile_compare_campaign_signoff_require_selection_policy_valid="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_VALID:-1}"
 profile_compare_campaign_signoff_reports_dir="$ROOT_DIR/.easy-node-logs"
 profile_compare_campaign_signoff_summary_json=""
 profile_compare_campaign_signoff_campaign_execution_mode="auto"
@@ -253,6 +257,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profile-compare-campaign-signoff-fail-on-no-go)
       profile_compare_campaign_signoff_fail_on_no_go="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-selection-policy-present)
+      profile_compare_campaign_signoff_require_selection_policy_present="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-selection-policy-valid)
+      profile_compare_campaign_signoff_require_selection_policy_valid="${2:-}"
       shift 2
       ;;
     --profile-compare-campaign-signoff-reports-dir)
@@ -383,6 +395,8 @@ esac
 tri_state_or_die "--run-profile-compare-campaign-signoff" "$run_profile_compare_campaign_signoff"
 bool_arg_or_die "--profile-compare-campaign-signoff-refresh-campaign" "$profile_compare_campaign_signoff_refresh_campaign"
 bool_arg_or_die "--profile-compare-campaign-signoff-fail-on-no-go" "$profile_compare_campaign_signoff_fail_on_no_go"
+bool_arg_or_die "--profile-compare-campaign-signoff-require-selection-policy-present" "$profile_compare_campaign_signoff_require_selection_policy_present"
+bool_arg_or_die "--profile-compare-campaign-signoff-require-selection-policy-valid" "$profile_compare_campaign_signoff_require_selection_policy_valid"
 case "$profile_compare_campaign_signoff_campaign_execution_mode" in
   auto|docker|local) ;;
   *)
@@ -680,6 +694,8 @@ profile_compare_campaign_signoff_campaign_issuer_url_effective="$profile_compare
 profile_compare_campaign_signoff_campaign_entry_url_effective="$profile_compare_campaign_signoff_campaign_entry_url"
 profile_compare_campaign_signoff_campaign_exit_url_effective="$profile_compare_campaign_signoff_campaign_exit_url"
 profile_compare_campaign_signoff_campaign_start_local_stack_effective="$profile_compare_campaign_signoff_campaign_start_local_stack"
+profile_compare_campaign_signoff_require_selection_policy_present_effective="$profile_compare_campaign_signoff_require_selection_policy_present"
+profile_compare_campaign_signoff_require_selection_policy_valid_effective="$profile_compare_campaign_signoff_require_selection_policy_valid"
 
 profile_compare_campaign_summary_available="0"
 if [[ -f "$profile_compare_campaign_summary_json" ]] && jq -e . "$profile_compare_campaign_summary_json" >/dev/null 2>&1; then
@@ -728,6 +744,8 @@ build_profile_compare_campaign_signoff_cmd() {
     --reports-dir "$profile_compare_campaign_signoff_reports_dir"
     --refresh-campaign "$refresh_value"
     --fail-on-no-go "$profile_compare_campaign_signoff_fail_on_no_go"
+    --require-selection-policy-present "$profile_compare_campaign_signoff_require_selection_policy_present_effective"
+    --require-selection-policy-valid "$profile_compare_campaign_signoff_require_selection_policy_valid_effective"
     --summary-json "$profile_compare_campaign_signoff_summary_json"
     --print-summary-json 0
   )
@@ -943,12 +961,20 @@ profile_compare_campaign_signoff_status=""
 profile_compare_campaign_signoff_final_rc="0"
 profile_compare_campaign_signoff_decision=""
 profile_compare_campaign_signoff_recommended_profile=""
+profile_compare_campaign_signoff_selection_policy_evidence_available="0"
+profile_compare_campaign_signoff_selection_policy_evidence_present="0"
+profile_compare_campaign_signoff_selection_policy_evidence_valid="0"
 if [[ "$profile_compare_campaign_signoff_step_status" != "skip" && -f "$profile_compare_campaign_signoff_summary_json" ]] && jq -e . "$profile_compare_campaign_signoff_summary_json" >/dev/null 2>&1; then
   profile_compare_campaign_signoff_available="1"
   profile_compare_campaign_signoff_status="$(jq -r '.status // ""' "$profile_compare_campaign_signoff_summary_json")"
   profile_compare_campaign_signoff_final_rc="$(jq -r '.final_rc // 0' "$profile_compare_campaign_signoff_summary_json")"
   profile_compare_campaign_signoff_decision="$(jq -r '.decision.decision // ""' "$profile_compare_campaign_signoff_summary_json")"
   profile_compare_campaign_signoff_recommended_profile="$(jq -r '.decision.recommended_profile // ""' "$profile_compare_campaign_signoff_summary_json")"
+  if jq -e '.decision.selection_policy_evidence | type == "object"' "$profile_compare_campaign_signoff_summary_json" >/dev/null 2>&1; then
+    profile_compare_campaign_signoff_selection_policy_evidence_available="1"
+    profile_compare_campaign_signoff_selection_policy_evidence_present="$(jq -r 'if (.decision.selection_policy_evidence.present // false) then "1" else "0" end' "$profile_compare_campaign_signoff_summary_json")"
+    profile_compare_campaign_signoff_selection_policy_evidence_valid="$(jq -r 'if (.decision.selection_policy_evidence.valid // false) then "1" else "0" end' "$profile_compare_campaign_signoff_summary_json")"
+  fi
 fi
 
 pending_checks_json='[]'
@@ -1069,6 +1095,10 @@ summary_payload="$({
     --arg profile_compare_campaign_signoff_refresh_effective "$profile_compare_campaign_signoff_refresh_effective" \
     --arg profile_compare_campaign_signoff_auto_refresh_reason "$profile_compare_campaign_signoff_auto_refresh_reason" \
     --arg profile_compare_campaign_signoff_fail_on_no_go "$profile_compare_campaign_signoff_fail_on_no_go" \
+    --arg profile_compare_campaign_signoff_require_selection_policy_present "$profile_compare_campaign_signoff_require_selection_policy_present" \
+    --arg profile_compare_campaign_signoff_require_selection_policy_valid "$profile_compare_campaign_signoff_require_selection_policy_valid" \
+    --arg profile_compare_campaign_signoff_require_selection_policy_present_effective "$profile_compare_campaign_signoff_require_selection_policy_present_effective" \
+    --arg profile_compare_campaign_signoff_require_selection_policy_valid_effective "$profile_compare_campaign_signoff_require_selection_policy_valid_effective" \
     --arg profile_compare_campaign_summary_available "$profile_compare_campaign_summary_available" \
     --arg profile_compare_campaign_signoff_existing_summary_available "$profile_compare_campaign_signoff_existing_summary_available" \
     --arg profile_compare_campaign_signoff_existing_summary_valid "$profile_compare_campaign_signoff_existing_summary_valid" \
@@ -1105,6 +1135,9 @@ summary_payload="$({
     --arg profile_compare_campaign_signoff_final_rc "$profile_compare_campaign_signoff_final_rc" \
     --arg profile_compare_campaign_signoff_decision "$profile_compare_campaign_signoff_decision" \
     --arg profile_compare_campaign_signoff_recommended_profile "$profile_compare_campaign_signoff_recommended_profile" \
+    --arg profile_compare_campaign_signoff_selection_policy_evidence_available "$profile_compare_campaign_signoff_selection_policy_evidence_available" \
+    --arg profile_compare_campaign_signoff_selection_policy_evidence_present "$profile_compare_campaign_signoff_selection_policy_evidence_present" \
+    --arg profile_compare_campaign_signoff_selection_policy_evidence_valid "$profile_compare_campaign_signoff_selection_policy_evidence_valid" \
     --arg real_wg_privileged_matrix_step_status "$real_wg_privileged_matrix_step_status" \
     --argjson rc "$overall_rc" \
     --argjson steps_failed "$steps_failed" \
@@ -1163,6 +1196,10 @@ summary_payload="$({
         profile_compare_campaign_signoff_auto_refreshed_via_docker: ($profile_compare_campaign_signoff_auto_refreshed_via_docker == 1),
         profile_compare_campaign_signoff_auto_skipped_non_root: ($profile_compare_campaign_signoff_auto_skipped_non_root == 1),
         profile_compare_campaign_signoff_fail_on_no_go: ($profile_compare_campaign_signoff_fail_on_no_go == "1"),
+        profile_compare_campaign_signoff_require_selection_policy_present_requested: ($profile_compare_campaign_signoff_require_selection_policy_present == "1"),
+        profile_compare_campaign_signoff_require_selection_policy_valid_requested: ($profile_compare_campaign_signoff_require_selection_policy_valid == "1"),
+        profile_compare_campaign_signoff_require_selection_policy_present_effective: ($profile_compare_campaign_signoff_require_selection_policy_present_effective == "1"),
+        profile_compare_campaign_signoff_require_selection_policy_valid_effective: ($profile_compare_campaign_signoff_require_selection_policy_valid_effective == "1"),
         profile_compare_campaign_summary_available: ($profile_compare_campaign_summary_available == "1"),
         profile_compare_campaign_signoff_existing_summary: {
           available: ($profile_compare_campaign_signoff_existing_summary_available == "1"),
@@ -1254,6 +1291,11 @@ summary_payload="$({
           final_rc: ($profile_compare_campaign_signoff_final_rc | tonumber),
           decision: $profile_compare_campaign_signoff_decision,
           recommended_profile: $profile_compare_campaign_signoff_recommended_profile,
+          selection_policy_evidence: {
+            available: ($profile_compare_campaign_signoff_selection_policy_evidence_available == "1"),
+            present: ($profile_compare_campaign_signoff_selection_policy_evidence_present == "1"),
+            valid: ($profile_compare_campaign_signoff_selection_policy_evidence_valid == "1")
+          },
           ready: ($profile_compare_campaign_signoff_status == "ok" and $profile_compare_campaign_signoff_decision == "GO")
         },
         real_wg_privileged_matrix: {

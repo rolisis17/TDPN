@@ -168,7 +168,7 @@ PROFILE_DEFAULT_GATE_FAKE_CURL_URL_CAPTURE_FILE="$CURL_URL_CAPTURE" \
 CAMPAIGN_SUBJECT="inv-env-success" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
-  --directory-b "http://dir-b.test:19081" \
+  --directory-b "https://dir-b.test:19081" \
   --endpoint-wait-timeout-sec 6 \
   --endpoint-wait-interval-sec 1 \
   --endpoint-connect-timeout-sec 1 \
@@ -205,13 +205,15 @@ if [[ -z "$success_line" ]]; then
 fi
 success_line_sp="${success_line//$'\t'/ }"
 assert_contains "$success_line_sp" "--campaign-subject inv-env-success" "missing forwarded subject fallback"
-assert_contains "$success_line_sp" "--campaign-directory-urls http://dir-a.test:8081,http://dir-b.test:19081" "missing forwarded directory urls"
-assert_contains "$success_line_sp" "--campaign-bootstrap-directory http://dir-a.test:8081" "missing forwarded bootstrap directory"
+assert_contains "$success_line_sp" "--campaign-directory-urls https://dir-a.test:8081,https://dir-b.test:19081" "missing forwarded directory urls"
+assert_contains "$success_line_sp" "--campaign-bootstrap-directory https://dir-a.test:8081" "missing forwarded bootstrap directory"
 assert_contains "$success_line_sp" "--refresh-campaign 1" "missing default refresh forwarding"
 assert_contains "$success_line_sp" "--campaign-execution-mode docker" "missing docker execution mode default"
 assert_contains "$success_line_sp" "--campaign-start-local-stack 0" "missing start-local-stack default"
 assert_contains "$success_line_sp" "--fail-on-no-go 0" "missing optional fail-on-no-go default"
 assert_contains "$success_line_sp" "--campaign-timeout-sec 2400" "missing default campaign timeout forwarding"
+assert_contains "$success_line_sp" "--require-selection-policy-present 1" "missing default require-selection-policy-present forwarding"
+assert_contains "$success_line_sp" "--require-selection-policy-valid 1" "missing default require-selection-policy-valid forwarding"
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
 assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=2400" "missing campaign-timeout start marker"
@@ -222,6 +224,40 @@ assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "mi
 assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-progress elapsed_sec=0 state=campaign_start_pending" "missing immediate signoff progress marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
+
+echo "[profile-default-gate-run] wrapper-level selection-policy opt-out forwards explicit zeros"
+: >"$SIGNOFF_CAPTURE"
+SELECTION_POLICY_OPT_OUT_LOG="$TMP_DIR/profile_default_gate_run_selection_policy_opt_out.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_selection_policy_opt_out.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-selection-policy-opt-out" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --require-selection-policy-present 0 \
+  --require-selection-policy-valid=0 >"$SELECTION_POLICY_OPT_OUT_LOG" 2>&1
+selection_policy_opt_out_rc=$?
+set -e
+if [[ "$selection_policy_opt_out_rc" -ne 0 ]]; then
+  echo "expected selection-policy opt-out path rc=0, got rc=$selection_policy_opt_out_rc"
+  cat "$SELECTION_POLICY_OPT_OUT_LOG"
+  exit 1
+fi
+selection_policy_opt_out_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$selection_policy_opt_out_line" ]]; then
+  echo "missing captured signoff invocation in selection-policy opt-out path"
+  cat "$SELECTION_POLICY_OPT_OUT_LOG"
+  exit 1
+fi
+selection_policy_opt_out_line_sp="${selection_policy_opt_out_line//$'\t'/ }"
+assert_contains "$selection_policy_opt_out_line_sp" "--require-selection-policy-present 0" "missing opt-out require-selection-policy-present forwarding"
+assert_contains "$selection_policy_opt_out_line_sp" "--require-selection-policy-valid 0" "missing opt-out require-selection-policy-valid forwarding"
+assert_not_contains "$selection_policy_opt_out_line_sp" "--require-selection-policy-present 1" "unexpected default require-selection-policy-present forwarding during opt-out"
+assert_not_contains "$selection_policy_opt_out_line_sp" "--require-selection-policy-valid 1" "unexpected default require-selection-policy-valid forwarding during opt-out"
 
 echo "[profile-default-gate-run] CLI heartbeat override supersedes env default"
 : >"$SIGNOFF_CAPTURE"
@@ -409,6 +445,39 @@ fi
 passthrough_key_line_sp="${passthrough_key_line//$'\t'/ }"
 assert_contains "$passthrough_key_line_sp" "--key inv-passthrough-key" "missing passthrough --key credential forwarding"
 assert_not_contains "$passthrough_key_line_sp" "--campaign-subject inv-env-no-dup" "unexpected duplicate --campaign-subject injection when passthrough --key exists"
+
+echo "[profile-default-gate-run] passthrough selection-policy flags suppress default injection"
+: >"$SIGNOFF_CAPTURE"
+PASSTHROUGH_SELECTION_POLICY_LOG="$TMP_DIR/profile_default_gate_run_passthrough_selection_policy.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_passthrough_selection_policy.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-passthrough-selection-policy" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  -- --require-selection-policy-present 0 --require-selection-policy-valid=0 >"$PASSTHROUGH_SELECTION_POLICY_LOG" 2>&1
+passthrough_selection_policy_rc=$?
+set -e
+if [[ "$passthrough_selection_policy_rc" -ne 0 ]]; then
+  echo "expected passthrough selection-policy path rc=0, got rc=$passthrough_selection_policy_rc"
+  cat "$PASSTHROUGH_SELECTION_POLICY_LOG"
+  exit 1
+fi
+passthrough_selection_policy_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$passthrough_selection_policy_line" ]]; then
+  echo "missing captured signoff invocation in passthrough selection-policy path"
+  cat "$PASSTHROUGH_SELECTION_POLICY_LOG"
+  exit 1
+fi
+passthrough_selection_policy_line_sp="${passthrough_selection_policy_line//$'\t'/ }"
+assert_contains "$passthrough_selection_policy_line_sp" "--require-selection-policy-present 0" "missing passthrough require-selection-policy-present forwarding"
+assert_contains "$passthrough_selection_policy_line_sp" "--require-selection-policy-valid=0" "missing passthrough equals-form require-selection-policy-valid forwarding"
+assert_not_contains "$passthrough_selection_policy_line_sp" "--require-selection-policy-present 1" "unexpected default require-selection-policy-present injection with passthrough override"
+assert_not_contains "$passthrough_selection_policy_line_sp" "--require-selection-policy-valid 1" "unexpected default require-selection-policy-valid injection with passthrough override"
 
 echo "[profile-default-gate-run] missing subject fails clearly"
 : >"$SIGNOFF_CAPTURE"

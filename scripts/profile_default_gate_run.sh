@@ -17,6 +17,8 @@ Usage:
     [--endpoint-connect-timeout-sec N] \
     [--allow-insecure-probe [0|1]] \
     [--heartbeat-interval-sec N] \
+    [--require-selection-policy-present [0|1]] \
+    [--require-selection-policy-valid [0|1]] \
     [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY] \
     [profile-compare-campaign-signoff args...]
 
@@ -46,6 +48,11 @@ Notes:
     --campaign-start-local-stack 0
     --fail-on-no-go 0
     --campaign-timeout-sec 2400
+  - This wrapper defaults selection-policy evidence checks to strict:
+    --require-selection-policy-present 1
+    --require-selection-policy-valid 1
+    (opt out with --require-selection-policy-present 0 and/or
+     --require-selection-policy-valid 0)
 USAGE
 }
 
@@ -314,6 +321,15 @@ int_arg_or_die() {
   fi
 }
 
+bool_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
 timestamp_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -516,6 +532,8 @@ allow_insecure_probe="${PROFILE_DEFAULT_GATE_RUN_ALLOW_INSECURE_PROBE:-0}"
 env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
 campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-2400}"
 heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-60}"
+require_selection_policy_present="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
+require_selection_policy_valid="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_VALID:-1}"
 heartbeat_interval_sec_cli=""
 
 campaign_subject_cli=""
@@ -578,6 +596,32 @@ while [[ $# -gt 0 ]]; do
       ;;
     --heartbeat-interval-sec=*)
       heartbeat_interval_sec_cli="${1#--heartbeat-interval-sec=}"
+      shift
+      ;;
+    --require-selection-policy-present)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_selection_policy_present="${2:-}"
+        shift 2
+      else
+        require_selection_policy_present="1"
+        shift
+      fi
+      ;;
+    --require-selection-policy-present=*)
+      require_selection_policy_present="${1#--require-selection-policy-present=}"
+      shift
+      ;;
+    --require-selection-policy-valid)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_selection_policy_valid="${2:-}"
+        shift 2
+      else
+        require_selection_policy_valid="1"
+        shift
+      fi
+      ;;
+    --require-selection-policy-valid=*)
+      require_selection_policy_valid="${1#--require-selection-policy-valid=}"
       shift
       ;;
     --campaign-subject)
@@ -649,6 +693,8 @@ int_arg_or_die "--endpoint-wait-timeout-sec" "$endpoint_wait_timeout_sec"
 int_arg_or_die "--endpoint-wait-interval-sec" "$endpoint_wait_interval_sec"
 int_arg_or_die "--endpoint-connect-timeout-sec" "$endpoint_connect_timeout_sec"
 bool_arg_or_die "--allow-insecure-probe" "$allow_insecure_probe"
+bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
+bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
 int_arg_or_die "PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC" "$campaign_timeout_default_sec"
 
 if (( directory_a_port < 1 || directory_a_port > 65535 )); then
@@ -865,6 +911,12 @@ if ! array_has_arg_or_equals_prefix "--fail-on-no-go" "${signoff_passthrough[@]}
 fi
 if ! array_has_arg_or_equals_prefix "--campaign-timeout-sec" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-timeout-sec "$campaign_timeout_default_sec")
+fi
+if ! array_has_arg_or_equals_prefix "--require-selection-policy-present" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-selection-policy-present "$require_selection_policy_present")
+fi
+if ! array_has_arg_or_equals_prefix "--require-selection-policy-valid" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-selection-policy-valid "$require_selection_policy_valid")
 fi
 if ! array_has_arg_or_equals_prefix "--print-summary-json" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--print-summary-json 0)

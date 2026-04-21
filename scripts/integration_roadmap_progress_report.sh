@@ -798,6 +798,16 @@ if ! jq -e '
   and (((.next_actions // []) | any(.id == "three_machine_docker_readiness")) | not)
   and (((.next_actions // []) | any(.id == "real_wg_privileged_matrix")) | not)
   and (((.next_actions // []) | any(.id == "blockchain_mainnet_activation_missing_metrics")) | not)
+  and (.vpn_track.profile_default_gate | has("selection_policy_evidence_present"))
+  and (.vpn_track.profile_default_gate | has("selection_policy_evidence_valid"))
+  and (
+    (.vpn_track.profile_default_gate.selection_policy_evidence_present == null)
+    or ((.vpn_track.profile_default_gate.selection_policy_evidence_present | type) == "boolean")
+  )
+  and (
+    (.vpn_track.profile_default_gate.selection_policy_evidence_valid == null)
+    or ((.vpn_track.profile_default_gate.selection_policy_evidence_valid | type) == "boolean")
+  )
   and .refresh.manual_validation_report.status == "pass"
   and .refresh.manual_validation_report.timed_out == false
   and .refresh.manual_validation_report.summary_valid_after_run == true
@@ -1167,6 +1177,16 @@ if ! rg -q 'VPN RC done for phase: `false`' "$REPORT_MD"; then
 fi
 if ! rg -q 'Pending real-host checks: machine_c_vpn_smoke,three_machine_prod_signoff' "$REPORT_MD"; then
   echo "report markdown missing pending real-host check list"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Profile gate selection-policy evidence present: null' "$REPORT_MD"; then
+  echo "report markdown missing profile gate selection-policy evidence present line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Profile gate selection-policy evidence note: selection-policy evidence unavailable' "$REPORT_MD"; then
+  echo "report markdown missing profile gate selection-policy evidence guidance note"
   cat "$REPORT_MD"
   exit 1
 fi
@@ -3542,6 +3562,9 @@ fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
   .vpn_track.optional_gate_status.profile_default_gate == "warn"
   and .artifacts.profile_compare_signoff_summary_json == $src
+  and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
+  and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
+  and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" >/dev/null; then
   echo "NO-GO profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json"
@@ -3609,6 +3632,9 @@ fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
   and .artifacts.profile_compare_signoff_summary_json == $src
+  and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
+  and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
+  and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json" >/dev/null; then
   echo "NO-GO insufficient evidence profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json"
@@ -3643,6 +3669,9 @@ fi
 if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
   and .artifacts.profile_compare_signoff_summary_json == $src
+  and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
+  and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
+  and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json" >/dev/null; then
   echo "pending profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json"
@@ -3668,6 +3697,9 @@ if ! run_roadmap_progress_report \
 fi
 if ! jq -e '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
+  and .vpn_track.profile_default_gate.selection_policy_evidence_present == null
+  and .vpn_track.profile_default_gate.selection_policy_evidence_valid == null
+  and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json" >/dev/null; then
   echo "missing profile default gate fallback summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json"
@@ -3702,6 +3734,9 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
   and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-timeout-sec 2400"))
   and ((.vpn_track.profile_default_gate.next_command // "") | contains("--summary-json " + $src))
   and ((.vpn_track.profile_default_gate.next_command // "") | contains("--subject INVITE_KEY"))
+  and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
+  and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
+  and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
   and ((.next_actions // []) | any(.id == "profile_default_gate" and is_non_sudo_profile_gate_cmd(.command)))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_summary.json" >/dev/null; then
   echo "profile default gate missing-command fallback summary mismatch"
