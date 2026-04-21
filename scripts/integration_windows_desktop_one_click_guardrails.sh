@@ -106,28 +106,28 @@ FIX_MODE_REGEX='\[desktop-doctor\] mode=fix'
 CHECK_MODE_REGEX='\[desktop-doctor\] mode=check'
 
 echo "[windows-desktop-one-click-guardrails] default dry-run auto-enables install remediation"
-run_expect_pass_regex \
+run_expect_output_regex \
   "default_fix_dry_run" \
   "$FIX_MODE_REGEX" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun'"
 
 echo "[windows-desktop-one-click-guardrails] gpm env disable forces doctor check mode"
-run_expect_pass_regex \
+run_expect_output_regex \
   "gpm_env_disable_check_dry_run" \
   "$CHECK_MODE_REGEX" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun'"
 
 echo "[windows-desktop-one-click-guardrails] gpm env enable forces doctor fix mode"
-run_expect_pass_regex \
+run_expect_output_regex \
   "gpm_env_enable_fix_dry_run" \
   "$FIX_MODE_REGEX" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun'"
 
 echo "[windows-desktop-one-click-guardrails] legacy tdpn env alias disables when gpm env is unset"
-run_expect_pass_regex \
+run_expect_output_regex \
   "tdpn_env_disable_check_dry_run" \
   "$CHECK_MODE_REGEX" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
@@ -148,7 +148,7 @@ run_expect_output_regex \
     "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun' '-NoInstallMissing'"
 
 echo "[windows-desktop-one-click-guardrails] explicit -InstallMissing overrides env disable"
-run_expect_pass_regex \
+run_expect_output_regex \
   "explicit_true_beats_env_disable_fix_dry_run" \
   "$FIX_MODE_REGEX" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \

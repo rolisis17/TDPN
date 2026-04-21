@@ -106,8 +106,8 @@ run_expect_fail_regex() {
   fi
 }
 
-INSTALL_ON_REGEX='rerun with process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -InstallMissing -DryRun -ApiAddr'
-INSTALL_OFF_REGEX='rerun with process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -DryRun -ApiAddr'
+INSTALL_ON_REGEX='rerun (with|in this shell with) process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -InstallMissing -DryRun -ApiAddr'
+INSTALL_OFF_REGEX='rerun (with|in this shell with) process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -DryRun -ApiAddr'
 CONFLICT_REGEX='conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing'
 
 echo "[windows-desktop-dev-guardrails] default dry-run uses install intent enabled path"
