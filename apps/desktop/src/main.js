@@ -113,6 +113,10 @@ const AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const AUTH_VERIFY_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
 const OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT = "env_default";
+const BOOTSTRAP_TRUST_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT = "env_default";
+const PROFILE_GATE_PROBE_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
 const WALLET_SIGN_IN_LABEL_RECOMMENDED = "Wallet Sign-In (Recommended)";
 const WALLET_SIGN_IN_LABEL_REQUIRED = "Wallet Sign-In (Required)";
 const MANUAL_SIGN_IN_LABEL = "Sign In (Manual)";
@@ -181,6 +185,12 @@ const state = {
   authVerifyPolicySource: AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT,
   operatorApprovalRequireSession: false,
   operatorApprovalPolicySource: OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT,
+  manifestRequireHTTPS: undefined,
+  manifestRequireSignature: undefined,
+  manifestTrustPolicySource: BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT,
+  profileGateAllowRemoteHttpProbe: undefined,
+  profileGateAllowInsecureProbe: undefined,
+  profileGateProbePolicySource: PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT,
   legacyEnvAliasesActive: [],
   legacyEnvAliasWarnings: [],
   legacyEnvAliasActiveCount: 0,
@@ -1622,6 +1632,22 @@ function normalizeOperatorApprovalPolicySource(value) {
   );
 }
 
+function normalizeBootstrapTrustPolicySource(value) {
+  return normalizePolicySource(
+    value,
+    BOOTSTRAP_TRUST_POLICY_SOURCE_RUNTIME_CONFIG,
+    BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT
+  );
+}
+
+function normalizeProfileGateProbePolicySource(value) {
+  return normalizePolicySource(
+    value,
+    PROFILE_GATE_PROBE_POLICY_SOURCE_RUNTIME_CONFIG,
+    PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT
+  );
+}
+
 function normalizePolicyRequirement(value) {
   if (typeof value === "boolean") {
     return value;
@@ -1960,6 +1986,120 @@ function readRuntimeOperatorApprovalPolicyMetadata(runtimeCfg) {
   return {
     operatorApprovalRequireSession,
     operatorApprovalPolicySource
+  };
+}
+
+function readRuntimeBootstrapTrustPolicyMetadata(runtimeCfg) {
+  const baseScopes = collectRuntimeConfigScopes(runtimeCfg);
+  const scopes = collectRuntimeSectionScopes(baseScopes, [
+    ["manifest_trust_policy", "manifestTrustPolicy"],
+    ["bootstrap_manifest_policy", "bootstrapManifestPolicy"],
+    ["bootstrap_manifest", "bootstrapManifest"],
+    ["manifest"]
+  ]);
+  const manifestRequireHttps = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_manifest_require_https",
+        "gpmManifestRequireHttps",
+        "manifest_require_https",
+        "manifestRequireHttps",
+        "require_https",
+        "requireHttps",
+        "https_required_by_policy",
+        "httpsRequiredByPolicy"
+      ])
+    )
+  );
+  const manifestRequireSignature = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_manifest_require_signature",
+        "gpmManifestRequireSignature",
+        "manifest_require_signature",
+        "manifestRequireSignature",
+        "require_signature",
+        "requireSignature",
+        "signature_required_by_policy",
+        "signatureRequiredByPolicy"
+      ])
+    )
+  );
+  const manifestTrustPolicySource = normalizeBootstrapTrustPolicySource(
+    firstDefined(
+      ...scopes.map((scope) =>
+        readConfigString(scope, [
+          "gpm_manifest_trust_policy_source",
+          "gpmManifestTrustPolicySource",
+          "manifest_trust_policy_source",
+          "manifestTrustPolicySource",
+          "manifest_policy_source",
+          "manifestPolicySource",
+          "policy_source",
+          "policySource"
+        ])
+      )
+    )
+  );
+  return {
+    manifestRequireHttps,
+    manifestRequireSignature,
+    manifestTrustPolicySource
+  };
+}
+
+function readRuntimeProfileGateProbePolicyMetadata(runtimeCfg) {
+  const baseScopes = collectRuntimeConfigScopes(runtimeCfg);
+  const scopes = collectRuntimeSectionScopes(baseScopes, [
+    ["profile_default_gate_policy", "profileDefaultGatePolicy"],
+    ["profile_default_gate", "profileDefaultGate"],
+    ["profile_gate", "profileGate"],
+    ["profile"]
+  ]);
+  const allowRemoteHttpProbe = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "profile_default_gate_allow_remote_http_probe",
+        "profileDefaultGateAllowRemoteHttpProbe",
+        "gpm_profile_default_gate_allow_remote_http_probe",
+        "gpmProfileDefaultGateAllowRemoteHttpProbe",
+        "allow_remote_http_probe",
+        "allowRemoteHttpProbe"
+      ])
+    )
+  );
+  const allowInsecureProbe = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "profile_default_gate_allow_insecure_probe",
+        "profileDefaultGateAllowInsecureProbe",
+        "gpm_profile_default_gate_allow_insecure_probe",
+        "gpmProfileDefaultGateAllowInsecureProbe",
+        "allow_insecure_probe",
+        "allowInsecureProbe"
+      ])
+    )
+  );
+  const profileGateProbePolicySource = normalizeProfileGateProbePolicySource(
+    firstDefined(
+      ...scopes.map((scope) =>
+        readConfigString(scope, [
+          "profile_default_gate_probe_policy_source",
+          "profileDefaultGateProbePolicySource",
+          "profile_gate_probe_policy_source",
+          "profileGateProbePolicySource",
+          "probe_policy_source",
+          "probePolicySource",
+          "policy_source",
+          "policySource"
+        ])
+      )
+    )
+  );
+  return {
+    allowRemoteHttpProbe,
+    allowInsecureProbe,
+    profileGateProbePolicySource
   };
 }
 
@@ -2383,6 +2523,54 @@ function formatOperatorApprovalPolicyClientSourceLabel(source) {
 function formatOperatorApprovalPolicySourceHint(source, requireSession) {
   const mode = requireSession ? "session-required" : "compat";
   return `operator approval policy: ${mode} (${formatOperatorApprovalPolicySourceLabel(source)})`;
+}
+
+function formatBootstrapTrustPolicySourceLabel(source) {
+  if (source === BOOTSTRAP_TRUST_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config";
+  }
+  if (source === BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT) {
+    return "env default";
+  }
+  return nonEmptyStringOrUndefined(source)?.replace(/_/g, " ") || "env default";
+}
+
+function formatBootstrapTrustPolicyHint(manifestRequireHttps, manifestRequireSignature, source) {
+  const requirements = [];
+  if (manifestRequireHttps !== undefined) {
+    requirements.push(manifestRequireHttps ? "https-required" : "https-compat");
+  }
+  if (manifestRequireSignature !== undefined) {
+    requirements.push(manifestRequireSignature ? "signature-required" : "signature-compat");
+  }
+  if (requirements.length === 0) {
+    return "";
+  }
+  return `bootstrap trust policy: ${requirements.join(" + ")} (${formatBootstrapTrustPolicySourceLabel(source)})`;
+}
+
+function formatProfileGateProbePolicySourceLabel(source) {
+  if (source === PROFILE_GATE_PROBE_POLICY_SOURCE_RUNTIME_CONFIG) {
+    return "runtime config";
+  }
+  if (source === PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT) {
+    return "env default";
+  }
+  return nonEmptyStringOrUndefined(source)?.replace(/_/g, " ") || "env default";
+}
+
+function formatProfileGateProbePolicyHint(allowRemoteHttpProbe, allowInsecureProbe, source) {
+  const policies = [];
+  if (allowRemoteHttpProbe !== undefined) {
+    policies.push(allowRemoteHttpProbe ? "remote-http-probe-opt-in" : "remote-http-probe-blocked");
+  }
+  if (allowInsecureProbe !== undefined) {
+    policies.push(allowInsecureProbe ? "insecure-probe-enabled" : "insecure-probe-disabled");
+  }
+  if (policies.length === 0) {
+    return "";
+  }
+  return `profile gate probe policy: ${policies.join(" + ")} (${formatProfileGateProbePolicySourceLabel(source)})`;
 }
 
 function normalizeOperatorApplicationStatus(value) {
@@ -4345,6 +4533,17 @@ function deriveBootstrapManifestTrustTelemetry(result) {
       manifest?.manifestSource
     )
   );
+  const manifestSourceUrl =
+    toDetailText(
+      firstDefined(
+        response?.manifest_source_url,
+        response?.manifestSourceUrl,
+        response?.source_url,
+        response?.sourceUrl,
+        response?.trust?.manifest_source_url,
+        response?.trust?.manifestSourceUrl
+      )
+    ) || "";
   const signatureVerified = normalizeManifestSignatureVerified(
     firstDefined(
       response?.signature_verified,
@@ -4357,6 +4556,28 @@ function deriveBootstrapManifestTrustTelemetry(result) {
       response?.telemetry?.signatureVerified,
       manifest?.signature_verified,
       manifest?.signatureVerified
+    )
+  );
+  const signatureRequiredByPolicy = toBooleanLike(
+    firstDefined(
+      response?.signature_required_by_policy,
+      response?.signatureRequiredByPolicy,
+      response?.manifest_signature_required_by_policy,
+      response?.manifestSignatureRequiredByPolicy,
+      response?.trust?.signature_required_by_policy,
+      response?.trust?.signatureRequiredByPolicy,
+      state.manifestRequireSignature
+    )
+  );
+  const httpsRequiredByPolicy = toBooleanLike(
+    firstDefined(
+      response?.https_required_by_policy,
+      response?.httpsRequiredByPolicy,
+      response?.manifest_https_required_by_policy,
+      response?.manifestHttpsRequiredByPolicy,
+      response?.trust?.https_required_by_policy,
+      response?.trust?.httpsRequiredByPolicy,
+      state.manifestRequireHTTPS
     )
   );
   const trustStatus =
@@ -4466,12 +4687,17 @@ function deriveBootstrapManifestTrustTelemetry(result) {
   const expired = Number.isFinite(expiresInSec) ? expiresInSec <= 0 : Number.isFinite(expiresAtMs) ? expiresAtMs <= Date.now() : false;
   const expiringSoon = Number.isFinite(expiresInSec) ? expiresInSec > 0 && expiresInSec <= 900 : false;
 
+  const sourceUrlLower = manifestSourceUrl.toLowerCase();
+  const sourceUrlUsesHttp = sourceUrlLower.startsWith("http://");
   const degradedByStatus = hasBootstrapManifestTrustDegradedFragment(trustStatus) || hasBootstrapManifestTrustDegradedFragment(trustReason);
+  const signatureFailureIsDegraded = signatureVerified === false && signatureRequiredByPolicy !== false;
+  const httpsPolicyViolation = httpsRequiredByPolicy === true && sourceUrlUsesHttp;
   const degraded =
     explicitRevoked === true ||
     explicitDegraded === true ||
     degradedByStatus ||
-    signatureVerified === false ||
+    signatureFailureIsDegraded ||
+    httpsPolicyViolation ||
     expired;
 
   let stateKey = "unknown";
@@ -4508,8 +4734,12 @@ function deriveBootstrapManifestTrustTelemetry(result) {
 
   let guidance = guidanceText || trustReason;
   if (!guidance) {
-    if (signatureVerified === false) {
+    if (httpsPolicyViolation) {
+      guidance = "Bootstrap manifest source uses http while https is required by policy; refresh from a trusted https endpoint.";
+    } else if (signatureFailureIsDegraded) {
       guidance = "Signature verification failed; refresh manifest from a trusted remote source and verify signer policy.";
+    } else if (signatureVerified === false && signatureRequiredByPolicy === false) {
+      guidance = "Signature is not verified, but current policy allows compatibility mode.";
     } else if (expired) {
       guidance = "Manifest is expired; refresh bootstrap manifest before registering or connecting clients.";
     } else if (degraded) {
@@ -4524,6 +4754,9 @@ function deriveBootstrapManifestTrustTelemetry(result) {
   return {
     source,
     sourceLabel,
+    manifestSourceUrl,
+    signatureRequiredByPolicy,
+    httpsRequiredByPolicy,
     signatureVerified,
     signatureLabel,
     trustStatus,
@@ -4540,6 +4773,18 @@ function renderBootstrapManifestTrustTelemetry(telemetry) {
   const trust = telemetry && typeof telemetry === "object" ? telemetry : deriveBootstrapManifestTrustTelemetry(null);
   const sourceLabel = trust.sourceLabel || "unknown";
   const signatureLabel = trust.signatureLabel || "unknown";
+  const signaturePolicyLabel =
+    trust.signatureRequiredByPolicy === true
+      ? "required"
+      : trust.signatureRequiredByPolicy === false
+        ? "compat"
+        : "unknown";
+  const httpsPolicyLabel =
+    trust.httpsRequiredByPolicy === true
+      ? "https-required"
+      : trust.httpsRequiredByPolicy === false
+        ? "https-compat"
+        : "https-policy-unknown";
   const signatureSummary =
     trust.signatureVerified === true
       ? "signature verified"
@@ -4554,8 +4799,8 @@ function renderBootstrapManifestTrustTelemetry(telemetry) {
   }
 
   bootstrapTrustStateEl.textContent = trust.stateLabel || "Unknown";
-  bootstrapTrustSourceEl.textContent = `Source: ${sourceLabel}`;
-  bootstrapTrustSignatureEl.textContent = `Signature: ${signatureLabel}`;
+  bootstrapTrustSourceEl.textContent = `Source: ${sourceLabel} (${httpsPolicyLabel})`;
+  bootstrapTrustSignatureEl.textContent = `Signature: ${signatureLabel} (${signaturePolicyLabel})`;
   bootstrapTrustExpiryEl.textContent = `Expiry: ${trust.expiryLabel || "unknown"}`;
   bootstrapTrustGuidanceEl.textContent = `Guidance: ${trust.guidance || "Load manifest to evaluate bootstrap trust posture."}`;
 
@@ -5217,11 +5462,19 @@ async function init() {
     let authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     let operatorApprovalRequireSession = false;
     let operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
+    let manifestRequireHttps = state.manifestRequireHTTPS;
+    let manifestRequireSignature = state.manifestRequireSignature;
+    let manifestTrustPolicySource = BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT;
+    let profileGateAllowRemoteHttpProbe = state.profileGateAllowRemoteHttpProbe;
+    let profileGateAllowInsecureProbe = state.profileGateAllowInsecureProbe;
+    let profileGateProbePolicySource = PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT;
     try {
       const runtimeCfg = await invoke("control_runtime_config");
       const runtimeConnectPolicy = readRuntimeConnectPolicyMetadata(runtimeCfg || {});
       const runtimeAuthVerifyPolicy = readRuntimeAuthVerifyPolicyMetadata(runtimeCfg || {});
       const runtimeOperatorApprovalPolicy = readRuntimeOperatorApprovalPolicyMetadata(runtimeCfg || {});
+      const runtimeBootstrapPolicy = readRuntimeBootstrapTrustPolicyMetadata(runtimeCfg || {});
+      const runtimeProfileGateProbePolicy = readRuntimeProfileGateProbePolicyMetadata(runtimeCfg || {});
       const runtimeProductionMode = readRuntimeProductionModeMetadata(
         runtimeCfg || {},
         runtimeConnectPolicy,
@@ -5279,6 +5532,34 @@ async function init() {
       } else if (runtimeOperatorApprovalPolicy.operatorApprovalRequireSession !== undefined) {
         operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_RUNTIME_CONFIG;
       }
+      if (runtimeBootstrapPolicy.manifestRequireHttps !== undefined) {
+        manifestRequireHttps = runtimeBootstrapPolicy.manifestRequireHttps;
+      }
+      if (runtimeBootstrapPolicy.manifestRequireSignature !== undefined) {
+        manifestRequireSignature = runtimeBootstrapPolicy.manifestRequireSignature;
+      }
+      if (runtimeBootstrapPolicy.manifestTrustPolicySource) {
+        manifestTrustPolicySource = runtimeBootstrapPolicy.manifestTrustPolicySource;
+      } else if (
+        runtimeBootstrapPolicy.manifestRequireHttps !== undefined ||
+        runtimeBootstrapPolicy.manifestRequireSignature !== undefined
+      ) {
+        manifestTrustPolicySource = BOOTSTRAP_TRUST_POLICY_SOURCE_RUNTIME_CONFIG;
+      }
+      if (runtimeProfileGateProbePolicy.allowRemoteHttpProbe !== undefined) {
+        profileGateAllowRemoteHttpProbe = runtimeProfileGateProbePolicy.allowRemoteHttpProbe;
+      }
+      if (runtimeProfileGateProbePolicy.allowInsecureProbe !== undefined) {
+        profileGateAllowInsecureProbe = runtimeProfileGateProbePolicy.allowInsecureProbe;
+      }
+      if (runtimeProfileGateProbePolicy.profileGateProbePolicySource) {
+        profileGateProbePolicySource = runtimeProfileGateProbePolicy.profileGateProbePolicySource;
+      } else if (
+        runtimeProfileGateProbePolicy.allowRemoteHttpProbe !== undefined ||
+        runtimeProfileGateProbePolicy.allowInsecureProbe !== undefined
+      ) {
+        profileGateProbePolicySource = PROFILE_GATE_PROBE_POLICY_SOURCE_RUNTIME_CONFIG;
+      }
     } catch {
       productionModeSource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
       connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
@@ -5288,6 +5569,8 @@ async function init() {
       authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
       operatorApprovalRequireSession = false;
       operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
+      manifestTrustPolicySource = BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT;
+      profileGateProbePolicySource = PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT;
     }
     state.connectPolicySource = connectPolicySource;
     state.connectPolicyMode = connectPolicyMode;
@@ -5301,6 +5584,12 @@ async function init() {
     state.authVerifyPolicySource = authVerifyPolicySource;
     state.operatorApprovalRequireSession = operatorApprovalRequireSession === true;
     state.operatorApprovalPolicySource = operatorApprovalPolicySource;
+    state.manifestRequireHTTPS = manifestRequireHttps;
+    state.manifestRequireSignature = manifestRequireSignature;
+    state.manifestTrustPolicySource = manifestTrustPolicySource;
+    state.profileGateAllowRemoteHttpProbe = profileGateAllowRemoteHttpProbe;
+    state.profileGateAllowInsecureProbe = profileGateAllowInsecureProbe;
+    state.profileGateProbePolicySource = profileGateProbePolicySource;
     state.legacyEnvAliasesActive = legacyAliasTelemetry.activeAliases;
     state.legacyEnvAliasWarnings = legacyAliasTelemetry.warnings;
     state.legacyEnvAliasActiveCount = legacyAliasTelemetry.activeCount;
@@ -5315,7 +5604,13 @@ async function init() {
         state.authVerifyRequireWalletExtensionSource,
         state.authVerifyRequireCryptoProof
       ),
-      formatOperatorApprovalPolicySourceHint(operatorApprovalPolicySource, state.operatorApprovalRequireSession)
+      formatOperatorApprovalPolicySourceHint(operatorApprovalPolicySource, state.operatorApprovalRequireSession),
+      formatBootstrapTrustPolicyHint(state.manifestRequireHTTPS, state.manifestRequireSignature, state.manifestTrustPolicySource),
+      formatProfileGateProbePolicyHint(
+        state.profileGateAllowRemoteHttpProbe,
+        state.profileGateAllowInsecureProbe,
+        state.profileGateProbePolicySource
+      )
     ]
       .filter((value) => typeof value === "string" && value.trim().length > 0)
       .join(" | ");
@@ -5343,6 +5638,12 @@ async function init() {
     state.authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     state.operatorApprovalRequireSession = false;
     state.operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
+    state.manifestRequireHTTPS = undefined;
+    state.manifestRequireSignature = undefined;
+    state.manifestTrustPolicySource = BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT;
+    state.profileGateAllowRemoteHttpProbe = undefined;
+    state.profileGateAllowInsecureProbe = undefined;
+    state.profileGateProbePolicySource = PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT;
     state.legacyEnvAliasesActive = [];
     state.legacyEnvAliasWarnings = [];
     state.legacyEnvAliasActiveCount = 0;

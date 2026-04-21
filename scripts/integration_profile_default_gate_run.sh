@@ -114,6 +114,7 @@ set -euo pipefail
 capture_file="${PROFILE_DEFAULT_GATE_CAPTURE_FILE:?}"
 {
   printf 'signoff'
+  printf '\tenv_CAMPAIGN_SUBJECT=%s' "${CAMPAIGN_SUBJECT-}"
   for arg in "$@"; do
     printf '\t%s' "$arg"
   done
@@ -155,6 +156,7 @@ set -euo pipefail
 capture_file="${PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE:?}"
 {
   printf 'wrapper'
+  printf '\tenv_CAMPAIGN_SUBJECT=%s' "${CAMPAIGN_SUBJECT-}"
   for arg in "$@"; do
     printf '\t%s' "$arg"
   done
@@ -215,7 +217,11 @@ if [[ -z "$success_line" ]]; then
   exit 1
 fi
 success_line_sp="${success_line//$'\t'/ }"
-assert_contains "$success_line_sp" "--campaign-subject inv-env-success" "missing forwarded subject fallback"
+assert_contains "$success_line_sp" "env_CAMPAIGN_SUBJECT=inv-env-success" "missing signoff env CAMPAIGN_SUBJECT marker"
+assert_not_contains "$success_line_sp" "--campaign-subject inv-env-success" "unexpected forwarded subject credential arg"
+assert_not_contains "$success_line_sp" "--subject inv-env-success" "unexpected forwarded --subject credential arg"
+assert_not_contains "$success_line_sp" "--key inv-env-success" "unexpected forwarded --key credential arg"
+assert_not_contains "$success_line_sp" "--invite-key inv-env-success" "unexpected forwarded --invite-key credential arg"
 assert_contains "$success_line_sp" "--campaign-directory-urls https://dir-a.test:8081,https://dir-b.test:19081" "missing forwarded directory urls"
 assert_contains "$success_line_sp" "--campaign-bootstrap-directory https://dir-a.test:8081" "missing forwarded bootstrap directory"
 assert_contains "$success_line_sp" "--refresh-campaign 1" "missing default refresh forwarding"
@@ -377,7 +383,8 @@ if [[ -z "$file_fallback_line" ]]; then
   exit 1
 fi
 file_fallback_line_sp="${file_fallback_line//$'\t'/ }"
-assert_contains "$file_fallback_line_sp" "--campaign-subject inv-file-campaign-subject" "missing forwarded file-derived campaign subject"
+assert_contains "$file_fallback_line_sp" "env_CAMPAIGN_SUBJECT=inv-file-campaign-subject" "missing forwarded file-derived campaign subject env marker"
+assert_not_contains "$file_fallback_line_sp" "--campaign-subject inv-file-campaign-subject" "unexpected forwarded file-derived campaign subject arg"
 assert_file_contains "$FILE_FALLBACK_LOG" "subject_source=file:CAMPAIGN_SUBJECT" "missing file-derived subject source marker"
 
 echo "[profile-default-gate-run] explicit --key alias forwards campaign subject"
@@ -409,7 +416,9 @@ if [[ -z "$key_alias_line" ]]; then
   exit 1
 fi
 key_alias_line_sp="${key_alias_line//$'\t'/ }"
-assert_contains "$key_alias_line_sp" "--campaign-subject inv-key-alias" "missing forwarded --key alias subject"
+assert_contains "$key_alias_line_sp" "env_CAMPAIGN_SUBJECT=inv-key-alias" "missing forwarded --key alias subject env marker"
+assert_not_contains "$key_alias_line_sp" "--campaign-subject inv-key-alias" "unexpected forwarded --key alias subject arg"
+assert_not_contains "$key_alias_line_sp" "--key inv-key-alias" "unexpected forwarded --key alias credential arg"
 assert_file_contains "$KEY_ALIAS_LOG" "subject_source=explicit:--key" "missing explicit --key subject source marker"
 
 echo "[profile-default-gate-run] explicit --invite-key alias forwards campaign subject"
@@ -441,8 +450,39 @@ if [[ -z "$invite_key_alias_line" ]]; then
   exit 1
 fi
 invite_key_alias_line_sp="${invite_key_alias_line//$'\t'/ }"
-assert_contains "$invite_key_alias_line_sp" "--campaign-subject inv-invite-key-alias" "missing forwarded --invite-key alias subject"
+assert_contains "$invite_key_alias_line_sp" "env_CAMPAIGN_SUBJECT=inv-invite-key-alias" "missing forwarded --invite-key alias subject env marker"
+assert_not_contains "$invite_key_alias_line_sp" "--campaign-subject inv-invite-key-alias" "unexpected forwarded --invite-key alias subject arg"
+assert_not_contains "$invite_key_alias_line_sp" "--invite-key inv-invite-key-alias" "unexpected forwarded --invite-key alias credential arg"
 assert_file_contains "$INVITE_KEY_ALIAS_LOG" "subject_source=explicit:--invite-key" "missing explicit --invite-key subject source marker"
+
+echo "[profile-default-gate-run] equals-form credential flag rejects flag-like value"
+: >"$SIGNOFF_CAPTURE"
+EQUALS_SUBJECT_VALUE_REJECT_LOG="$TMP_DIR/profile_default_gate_run_equals_subject_value_reject.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_equals_subject_value_reject.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --key=--oops >"$EQUALS_SUBJECT_VALUE_REJECT_LOG" 2>&1
+equals_subject_value_reject_rc=$?
+set -e
+if [[ "$equals_subject_value_reject_rc" -ne 2 ]]; then
+  echo "expected equals-form credential value rejection path rc=2, got rc=$equals_subject_value_reject_rc"
+  cat "$EQUALS_SUBJECT_VALUE_REJECT_LOG"
+  exit 1
+fi
+assert_file_contains "$EQUALS_SUBJECT_VALUE_REJECT_LOG" "--key requires a value" "missing equals-form --key value rejection text"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "equals-form credential value rejection path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
 
 echo "[profile-default-gate-run] conflicting subject aliases fail clearly"
 : >"$SIGNOFF_CAPTURE"
@@ -503,8 +543,104 @@ if [[ -z "$passthrough_key_line" ]]; then
   exit 1
 fi
 passthrough_key_line_sp="${passthrough_key_line//$'\t'/ }"
-assert_contains "$passthrough_key_line_sp" "--key inv-passthrough-key" "missing passthrough --key credential forwarding"
+assert_contains "$passthrough_key_line_sp" "env_CAMPAIGN_SUBJECT=inv-passthrough-key" "missing passthrough --key subject env forwarding"
+assert_not_contains "$passthrough_key_line_sp" "--key inv-passthrough-key" "unexpected passthrough --key credential arg forwarding"
 assert_not_contains "$passthrough_key_line_sp" "--campaign-subject inv-env-no-dup" "unexpected duplicate --campaign-subject injection when passthrough --key exists"
+
+echo "[profile-default-gate-run] anon-cred passthrough forwards anon credential without subject args"
+: >"$SIGNOFF_CAPTURE"
+ANON_CRED_LOG="$TMP_DIR/profile_default_gate_run_anon_cred.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_anon_cred.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  -- --campaign-anon-cred "anon-campaign-token" >"$ANON_CRED_LOG" 2>&1
+anon_cred_rc=$?
+set -e
+if [[ "$anon_cred_rc" -ne 0 ]]; then
+  echo "expected anon-cred passthrough path rc=0, got rc=$anon_cred_rc"
+  cat "$ANON_CRED_LOG"
+  exit 1
+fi
+anon_cred_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$anon_cred_line" ]]; then
+  echo "missing captured signoff invocation in anon-cred passthrough path"
+  cat "$ANON_CRED_LOG"
+  exit 1
+fi
+anon_cred_line_sp="${anon_cred_line//$'\t'/ }"
+assert_contains "$anon_cred_line_sp" "--campaign-anon-cred anon-campaign-token" "missing forwarded --campaign-anon-cred credential"
+assert_not_contains "$anon_cred_line_sp" "--campaign-subject" "unexpected subject credential forwarding in anon-cred mode"
+assert_not_contains "$anon_cred_line_sp" "--subject" "unexpected --subject forwarding in anon-cred mode"
+assert_not_contains "$anon_cred_line_sp" "--key" "unexpected --key forwarding in anon-cred mode"
+assert_not_contains "$anon_cred_line_sp" "--invite-key" "unexpected --invite-key forwarding in anon-cred mode"
+assert_file_contains "$ANON_CRED_LOG" "subject_source=passthrough:--campaign-anon-cred" "missing anon-cred subject source marker"
+
+echo "[profile-default-gate-run] anon-cred and subject combination fails clearly"
+: >"$SIGNOFF_CAPTURE"
+ANON_SUBJECT_CONFLICT_LOG="$TMP_DIR/profile_default_gate_run_anon_subject_conflict.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_anon_subject_conflict.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --subject "inv-subject-conflict" \
+  -- --anon-cred "anon-conflict-token" >"$ANON_SUBJECT_CONFLICT_LOG" 2>&1
+anon_subject_conflict_rc=$?
+set -e
+if [[ "$anon_subject_conflict_rc" -ne 2 ]]; then
+  echo "expected anon-cred+subject conflict path rc=2, got rc=$anon_subject_conflict_rc"
+  cat "$ANON_SUBJECT_CONFLICT_LOG"
+  exit 1
+fi
+assert_file_contains "$ANON_SUBJECT_CONFLICT_LOG" "cannot be combined with --campaign-subject/--subject/--key/--invite-key" "missing anon-cred+subject conflict rejection text"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "anon-cred+subject conflict path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] malformed campaign anon-cred value fails closed even when anon alias is valid"
+: >"$SIGNOFF_CAPTURE"
+ANON_MALFORMED_LOG="$TMP_DIR/profile_default_gate_run_anon_malformed.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_anon_malformed.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  -- --campaign-anon-cred --oops --anon-cred "anon-valid-token" >"$ANON_MALFORMED_LOG" 2>&1
+anon_malformed_rc=$?
+set -e
+if [[ "$anon_malformed_rc" -ne 2 ]]; then
+  echo "expected malformed campaign anon-cred path rc=2, got rc=$anon_malformed_rc"
+  cat "$ANON_MALFORMED_LOG"
+  exit 1
+fi
+assert_file_contains "$ANON_MALFORMED_LOG" "--campaign-anon-cred requires a non-flag value" "missing malformed campaign anon-cred rejection text"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "malformed campaign anon-cred path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
 
 echo "[profile-default-gate-run] passthrough selection-policy flags suppress default injection"
 : >"$SIGNOFF_CAPTURE"
@@ -676,33 +812,204 @@ if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   exit 1
 fi
 
-echo "[profile-default-gate-run] remote HTTP preflight reject does not emit generic wait-fail marker"
+echo "[profile-default-gate-run] remote HTTP probe path fails closed by default"
 : >"$SIGNOFF_CAPTURE"
-REMOTE_HTTP_REJECT_LOG="$TMP_DIR/profile_default_gate_run_remote_http_reject.log"
+REMOTE_HTTP_PROBE_LOG="$TMP_DIR/profile_default_gate_run_remote_http_probe.log"
 set +e
 PATH="$TMP_BIN:$PATH" \
 PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
 PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
-PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_remote_http_reject.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_remote_http_probe.txt" \
 PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
-CAMPAIGN_SUBJECT="inv-env-remote-http-reject" \
+CAMPAIGN_SUBJECT="inv-env-remote-http-probe" \
 "$SCRIPT_UNDER_TEST" \
   --directory-a "http://dir-a.test:8081" \
-  --host-b "dir-b.test" >"$REMOTE_HTTP_REJECT_LOG" 2>&1
-remote_http_reject_rc=$?
+  --host-b "dir-b.test" >"$REMOTE_HTTP_PROBE_LOG" 2>&1
+remote_http_probe_rc=$?
 set -e
-if [[ "$remote_http_reject_rc" -eq 0 ]]; then
-  echo "expected remote-http preflight reject path to fail"
-  cat "$REMOTE_HTTP_REJECT_LOG"
+if [[ "$remote_http_probe_rc" -eq 0 ]]; then
+  echo "expected default remote-http probe path to fail closed"
+  cat "$REMOTE_HTTP_PROBE_LOG"
   exit 1
 fi
-assert_file_contains "$REMOTE_HTTP_REJECT_LOG" "wait-reject label=directory_a" "missing remote-http preflight reject marker"
-assert_file_contains "$REMOTE_HTTP_REJECT_LOG" "error=remote_http_disallowed" "missing remote-http reject error kind"
-assert_file_not_contains "$REMOTE_HTTP_REJECT_LOG" "wait-fail" "remote-http preflight reject should not emit generic wait-fail marker"
-assert_file_not_contains "$REMOTE_HTTP_REJECT_LOG" "failure_kind=unreachable_directory_endpoint" "remote-http preflight reject should not be mislabeled unreachable_directory_endpoint"
+assert_file_contains "$REMOTE_HTTP_PROBE_LOG" "wait-reject label=directory_a" "missing remote-http default rejection marker"
+assert_file_contains "$REMOTE_HTTP_PROBE_LOG" "error=remote_http_disallowed" "missing remote-http fail-closed error marker"
+assert_file_contains "$REMOTE_HTTP_PROBE_LOG" "pass --allow-remote-http-probe 1" "missing remote-http explicit opt-in hint"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
-  echo "remote-http preflight reject path should not invoke signoff"
-  cat "$SIGNOFF_CAPTURE"
+  echo "default remote-http probe path should not invoke signoff"
+  cat "$REMOTE_HTTP_PROBE_LOG"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] invalid --allow-remote-http-probe value fails closed"
+: >"$SIGNOFF_CAPTURE"
+REMOTE_HTTP_PROBE_INVALID_VALUE_LOG="$TMP_DIR/profile_default_gate_run_remote_http_probe_invalid_value.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_remote_http_probe_invalid_value.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-remote-http-probe-invalid" \
+"$SCRIPT_UNDER_TEST" \
+  --directory-a "http://dir-a.test:8081" \
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 2 >"$REMOTE_HTTP_PROBE_INVALID_VALUE_LOG" 2>&1
+remote_http_probe_invalid_value_rc=$?
+set -e
+if [[ "$remote_http_probe_invalid_value_rc" -ne 2 ]]; then
+  echo "expected invalid --allow-remote-http-probe path rc=2, got rc=$remote_http_probe_invalid_value_rc"
+  cat "$REMOTE_HTTP_PROBE_INVALID_VALUE_LOG"
+  exit 1
+fi
+assert_file_contains "$REMOTE_HTTP_PROBE_INVALID_VALUE_LOG" "--allow-remote-http-probe must be 0 or 1" "missing invalid --allow-remote-http-probe value error"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "invalid --allow-remote-http-probe value path should not invoke signoff"
+  cat "$REMOTE_HTTP_PROBE_INVALID_VALUE_LOG"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] remote HTTP probe path proceeds with explicit opt-in"
+: >"$SIGNOFF_CAPTURE"
+REMOTE_HTTP_PROBE_OPT_IN_LOG="$TMP_DIR/profile_default_gate_run_remote_http_probe_opt_in.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_remote_http_probe_opt_in.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-remote-http-probe-opt-in" \
+"$SCRIPT_UNDER_TEST" \
+  --directory-a "http://dir-a.test:8081" \
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 >"$REMOTE_HTTP_PROBE_OPT_IN_LOG" 2>&1
+remote_http_probe_opt_in_rc=$?
+set -e
+if [[ "$remote_http_probe_opt_in_rc" -ne 0 ]]; then
+  echo "expected remote-http opt-in probe path rc=0, got rc=$remote_http_probe_opt_in_rc"
+  cat "$REMOTE_HTTP_PROBE_OPT_IN_LOG"
+  exit 1
+fi
+assert_file_contains "$REMOTE_HTTP_PROBE_OPT_IN_LOG" "wait-pass label=directory_a" "missing remote-http opt-in directory_a wait-pass marker"
+assert_file_not_contains "$REMOTE_HTTP_PROBE_OPT_IN_LOG" "error=remote_http_disallowed" "remote-http opt-in path unexpectedly emitted remote_http_disallowed"
+remote_http_probe_opt_in_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$remote_http_probe_opt_in_line" ]]; then
+  echo "remote-http opt-in probe path should invoke signoff"
+  cat "$REMOTE_HTTP_PROBE_OPT_IN_LOG"
+  exit 1
+fi
+remote_http_probe_opt_in_line_sp="${remote_http_probe_opt_in_line//$'\t'/ }"
+assert_contains "$remote_http_probe_opt_in_line_sp" "--campaign-directory-urls http://dir-a.test:8081,https://dir-b.test:8081" "missing forwarded mixed-scheme campaign-directory-urls in remote-http opt-in path"
+
+echo "[profile-default-gate-run] invalid --allow-insecure-probe value fails closed"
+: >"$SIGNOFF_CAPTURE"
+INSECURE_PROBE_INVALID_VALUE_LOG="$TMP_DIR/profile_default_gate_run_insecure_probe_invalid_value.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_insecure_probe_invalid_value.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-insecure-probe-invalid" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --allow-insecure-probe 2 >"$INSECURE_PROBE_INVALID_VALUE_LOG" 2>&1
+insecure_probe_invalid_value_rc=$?
+set -e
+if [[ "$insecure_probe_invalid_value_rc" -ne 2 ]]; then
+  echo "expected invalid --allow-insecure-probe path rc=2, got rc=$insecure_probe_invalid_value_rc"
+  cat "$INSECURE_PROBE_INVALID_VALUE_LOG"
+  exit 1
+fi
+assert_file_contains "$INSECURE_PROBE_INVALID_VALUE_LOG" "--allow-insecure-probe must be 0 or 1" "missing invalid --allow-insecure-probe value error"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "invalid --allow-insecure-probe value path should not invoke signoff"
+  cat "$INSECURE_PROBE_INVALID_VALUE_LOG"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] invalid --allow-insecure-probe=<value> fails closed"
+: >"$SIGNOFF_CAPTURE"
+INSECURE_PROBE_EQUALS_INVALID_VALUE_LOG="$TMP_DIR/profile_default_gate_run_insecure_probe_equals_invalid_value.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_insecure_probe_equals_invalid_value.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-insecure-probe-equals-invalid" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --allow-insecure-probe=2 >"$INSECURE_PROBE_EQUALS_INVALID_VALUE_LOG" 2>&1
+insecure_probe_equals_invalid_value_rc=$?
+set -e
+if [[ "$insecure_probe_equals_invalid_value_rc" -ne 2 ]]; then
+  echo "expected invalid --allow-insecure-probe=<value> path rc=2, got rc=$insecure_probe_equals_invalid_value_rc"
+  cat "$INSECURE_PROBE_EQUALS_INVALID_VALUE_LOG"
+  exit 1
+fi
+assert_file_contains "$INSECURE_PROBE_EQUALS_INVALID_VALUE_LOG" "--allow-insecure-probe must be 0 or 1" "missing invalid --allow-insecure-probe=<value> error"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "invalid --allow-insecure-probe=<value> path should not invoke signoff"
+  cat "$INSECURE_PROBE_EQUALS_INVALID_VALUE_LOG"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] --allow-insecure-probe=1 is accepted and reaches signoff"
+: >"$SIGNOFF_CAPTURE"
+INSECURE_PROBE_EQUALS_VALID_LOG="$TMP_DIR/profile_default_gate_run_insecure_probe_equals_valid.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_insecure_probe_equals_valid.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-insecure-probe-equals-valid" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "localhost" \
+  --host-b "127.0.0.1" \
+  --allow-insecure-probe=1 >"$INSECURE_PROBE_EQUALS_VALID_LOG" 2>&1
+insecure_probe_equals_valid_rc=$?
+set -e
+if [[ "$insecure_probe_equals_valid_rc" -ne 0 ]]; then
+  echo "expected --allow-insecure-probe=1 path rc=0, got rc=$insecure_probe_equals_valid_rc"
+  cat "$INSECURE_PROBE_EQUALS_VALID_LOG"
+  exit 1
+fi
+insecure_probe_equals_valid_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$insecure_probe_equals_valid_line" ]]; then
+  echo "--allow-insecure-probe=1 path should invoke signoff"
+  cat "$INSECURE_PROBE_EQUALS_VALID_LOG"
+  exit 1
+fi
+
+echo "[profile-default-gate-run] malformed endpoint URL with missing host fails closed before signoff"
+: >"$SIGNOFF_CAPTURE"
+MALFORMED_ENDPOINT_LOG="$TMP_DIR/profile_default_gate_run_malformed_endpoint.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_malformed_endpoint.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-malformed-endpoint" \
+"$SCRIPT_UNDER_TEST" \
+  --directory-a "http:///missing-host" \
+  --host-b "dir-b.test" >"$MALFORMED_ENDPOINT_LOG" 2>&1
+malformed_endpoint_rc=$?
+set -e
+if [[ "$malformed_endpoint_rc" -eq 0 ]]; then
+  echo "expected malformed endpoint URL path to fail closed"
+  cat "$MALFORMED_ENDPOINT_LOG"
+  exit 1
+fi
+assert_file_contains "$MALFORMED_ENDPOINT_LOG" "error=invalid_endpoint_url_missing_host" "missing malformed endpoint rejection marker"
+assert_file_contains "$MALFORMED_ENDPOINT_LOG" "invalid endpoint URL missing host" "missing malformed endpoint failure reason"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "malformed endpoint path should not invoke signoff"
+  cat "$MALFORMED_ENDPOINT_LOG"
   exit 1
 fi
 
@@ -797,16 +1104,49 @@ fi
 live_wrapper_line_sp="${live_wrapper_line//$'\t'/ }"
 assert_contains "$live_wrapper_line_sp" "--directory-a http://wrapper-live-a.test:8081" "missing live forwarded --directory-a"
 assert_contains "$live_wrapper_line_sp" "--directory-b http://wrapper-live-b.test:8081" "missing live forwarded --directory-b"
+assert_contains "$live_wrapper_line_sp" "--allow-remote-http-probe 1" "missing live forwarded --allow-remote-http-probe opt-in"
 assert_contains "$live_wrapper_line_sp" "--campaign-bootstrap-directory http://wrapper-live-a.test:8081" "missing live forwarded --campaign-bootstrap-directory"
 assert_contains "$live_wrapper_line_sp" "--campaign-issuer-url http://wrapper-live-a.test:8082" "missing live forwarded --campaign-issuer-url"
 assert_contains "$live_wrapper_line_sp" "--campaign-entry-url http://wrapper-live-a.test:8083" "missing live forwarded --campaign-entry-url"
 assert_contains "$live_wrapper_line_sp" "--campaign-exit-url http://wrapper-live-a.test:8084" "missing live forwarded --campaign-exit-url"
-assert_contains "$live_wrapper_line_sp" "--campaign-subject inv-live-wrapper" "missing live forwarded --campaign-subject"
+assert_contains "$live_wrapper_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-wrapper" "missing live forwarded env CAMPAIGN_SUBJECT"
+assert_not_contains "$live_wrapper_line_sp" "--campaign-subject" "unexpected live forwarded --campaign-subject credential arg"
+assert_not_contains "$live_wrapper_line_sp" "--subject" "unexpected live forwarded --subject credential arg"
+assert_not_contains "$live_wrapper_line_sp" "--key" "unexpected live forwarded --key credential arg"
+assert_not_contains "$live_wrapper_line_sp" "--invite-key" "unexpected live forwarded --invite-key credential arg"
 assert_contains "$live_wrapper_line_sp" "--reports-dir $TMP_DIR/live_reports" "missing live forwarded --reports-dir"
 assert_contains "$live_wrapper_line_sp" "--campaign-timeout-sec 777" "missing live forwarded --campaign-timeout-sec"
 assert_contains "$live_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_summary.json" "missing live forwarded --summary-json"
 assert_contains "$live_wrapper_line_sp" "--print-summary-json 1" "missing live forwarded --print-summary-json"
 assert_contains "$live_wrapper_line_sp" "--omega 10 value" "missing live forwarded passthrough args"
+
+echo "[profile-default-gate-live] invalid --allow-remote-http-probe value fails closed"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_INVALID_ALLOW_REMOTE_HTTP_PROBE_LOG="$TMP_DIR/easy_node_profile_default_gate_live_invalid_allow_remote_http_probe.log"
+set +e
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "wrapper-live-a.test" \
+  --host-b "wrapper-live-b.test" \
+  --campaign-subject "inv-live-invalid-allow-remote-http-probe" \
+  --allow-remote-http-probe 2 \
+  --reports-dir "$TMP_DIR/live_reports_invalid_allow_remote_http_probe" \
+  --campaign-timeout-sec 777 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_invalid_allow_remote_http_probe_summary.json" >"$EASY_NODE_LIVE_INVALID_ALLOW_REMOTE_HTTP_PROBE_LOG" 2>&1
+live_invalid_allow_remote_http_probe_rc=$?
+set -e
+if [[ "$live_invalid_allow_remote_http_probe_rc" -ne 2 ]]; then
+  echo "expected profile-default-gate-live invalid --allow-remote-http-probe path rc=2, got rc=$live_invalid_allow_remote_http_probe_rc"
+  cat "$EASY_NODE_LIVE_INVALID_ALLOW_REMOTE_HTTP_PROBE_LOG"
+  exit 1
+fi
+assert_file_contains "$EASY_NODE_LIVE_INVALID_ALLOW_REMOTE_HTTP_PROBE_LOG" "profile-default-gate-live requires --allow-remote-http-probe 0|1" "missing live invalid --allow-remote-http-probe value error"
+if [[ -s "$WRAPPER_CAPTURE" ]]; then
+  echo "profile-default-gate-live invalid --allow-remote-http-probe path should not invoke wrapper"
+  cat "$WRAPPER_CAPTURE"
+  exit 1
+fi
 
 echo "[profile-default-gate-live] equals-form args parse and forward correctly"
 : >"$WRAPPER_CAPTURE"
@@ -832,12 +1172,52 @@ fi
 live_equals_wrapper_line_sp="${live_equals_wrapper_line//$'\t'/ }"
 assert_contains "$live_equals_wrapper_line_sp" "--directory-a http://wrapper-live-eq-a.test:8081" "missing equals live forwarded --directory-a"
 assert_contains "$live_equals_wrapper_line_sp" "--directory-b http://wrapper-live-eq-b.test:8081" "missing equals live forwarded --directory-b"
-assert_contains "$live_equals_wrapper_line_sp" "--campaign-subject inv-live-equals-wrapper" "missing equals live forwarded --campaign-subject"
+assert_contains "$live_equals_wrapper_line_sp" "--allow-remote-http-probe 1" "missing equals live forwarded --allow-remote-http-probe opt-in"
+assert_contains "$live_equals_wrapper_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-equals-wrapper" "missing equals live forwarded env CAMPAIGN_SUBJECT"
+assert_not_contains "$live_equals_wrapper_line_sp" "--campaign-subject" "unexpected equals live forwarded --campaign-subject credential arg"
+assert_not_contains "$live_equals_wrapper_line_sp" "--subject" "unexpected equals live forwarded --subject credential arg"
+assert_not_contains "$live_equals_wrapper_line_sp" "--key" "unexpected equals live forwarded --key credential arg"
+assert_not_contains "$live_equals_wrapper_line_sp" "--invite-key" "unexpected equals live forwarded --invite-key credential arg"
 assert_contains "$live_equals_wrapper_line_sp" "--reports-dir $TMP_DIR/live_reports_equals" "missing equals live forwarded --reports-dir"
 assert_contains "$live_equals_wrapper_line_sp" "--campaign-timeout-sec 778" "missing equals live forwarded --campaign-timeout-sec"
 assert_contains "$live_equals_wrapper_line_sp" "--heartbeat-interval-sec 9" "missing equals live forwarded --heartbeat-interval-sec"
 assert_contains "$live_equals_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_equals_summary.json" "missing equals live forwarded --summary-json"
 assert_contains "$live_equals_wrapper_line_sp" "--print-summary-json 0" "missing equals live forwarded --print-summary-json"
+
+echo "[profile-default-gate-live] explicit directory URL overrides are forwarded as-is with env subject forwarding"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG="$TMP_DIR/easy_node_profile_default_gate_live_directory_url_override.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --directory-a-url "https://user:pw@dir-a-override.example:18443/custom/path?token=abc#frag" \
+  --directory-b-url "https://dir-b-override.example:19443/alt/path?apikey=xyz" \
+  --campaign-subject "inv-live-directory-url-override" \
+  --reports-dir "$TMP_DIR/live_reports_directory_url_override" \
+  --campaign-timeout-sec 781 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_directory_url_override_summary.json" >"$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG" 2>&1
+
+live_directory_url_override_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_directory_url_override_line" ]]; then
+  echo "missing easy_node live directory-url override wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG"
+  exit 1
+fi
+live_directory_url_override_line_sp="${live_directory_url_override_line//$'\t'/ }"
+assert_contains "$live_directory_url_override_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-directory-url-override" "missing directory-url override env CAMPAIGN_SUBJECT forwarding"
+assert_contains "$live_directory_url_override_line_sp" "--directory-a https://user:pw@dir-a-override.example:18443/custom/path?token=abc#frag" "missing directory-url override forwarded --directory-a"
+assert_contains "$live_directory_url_override_line_sp" "--directory-b https://dir-b-override.example:19443/alt/path?apikey=xyz" "missing directory-url override forwarded --directory-b"
+assert_contains "$live_directory_url_override_line_sp" "--allow-remote-http-probe 0" "missing directory-url override forwarded --allow-remote-http-probe fail-closed default"
+assert_contains "$live_directory_url_override_line_sp" "--campaign-bootstrap-directory https://user:pw@dir-a-override.example:18443/custom/path?token=abc#frag" "missing directory-url override forwarded --campaign-bootstrap-directory"
+assert_not_contains "$live_directory_url_override_line_sp" "--campaign-subject" "unexpected directory-url override forwarded --campaign-subject credential arg"
+assert_not_contains "$live_directory_url_override_line_sp" "--subject" "unexpected directory-url override forwarded --subject credential arg"
+assert_not_contains "$live_directory_url_override_line_sp" "--key" "unexpected directory-url override forwarded --key credential arg"
+assert_not_contains "$live_directory_url_override_line_sp" "--invite-key" "unexpected directory-url override forwarded --invite-key credential arg"
+assert_file_not_contains "$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG" "user:pw@" "directory-url override log should redact URL userinfo"
+assert_file_not_contains "$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG" "token=abc" "directory-url override log should redact URL query token"
+assert_file_not_contains "$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG" "apikey=xyz" "directory-url override log should redact URL query api key"
+assert_file_contains "$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG" "resolved_directory_a_url: https://dir-a-override.example:18443/custom/path" "directory-url override log missing sanitized resolved directory_a URL"
+assert_file_contains "$EASY_NODE_LIVE_DIRECTORY_URL_OVERRIDE_LOG" "resolved_directory_b_url: https://dir-b-override.example:19443/alt/path" "directory-url override log missing sanitized resolved directory_b URL"
 
 echo "[profile-default-gate-live] host scheme/path/port values normalize to safe endpoint hosts"
 : >"$WRAPPER_CAPTURE"
@@ -861,11 +1241,40 @@ fi
 live_host_norm_line_sp="${live_host_norm_line//$'\t'/ }"
 assert_contains "$live_host_norm_line_sp" "--directory-a http://wrapper-live-norm-a.test:8081" "missing host-normalized live forwarded --directory-a"
 assert_contains "$live_host_norm_line_sp" "--directory-b http://wrapper-live-norm-b.test:8081" "missing host-normalized live forwarded --directory-b"
+assert_contains "$live_host_norm_line_sp" "--allow-remote-http-probe 1" "missing host-normalized live forwarded --allow-remote-http-probe opt-in"
 assert_contains "$live_host_norm_line_sp" "--campaign-bootstrap-directory http://wrapper-live-norm-a.test:8081" "missing host-normalized live forwarded --campaign-bootstrap-directory"
 assert_contains "$live_host_norm_line_sp" "--campaign-issuer-url http://wrapper-live-norm-a.test:8082" "missing host-normalized live forwarded --campaign-issuer-url"
 assert_contains "$live_host_norm_line_sp" "--campaign-entry-url http://wrapper-live-norm-a.test:8083" "missing host-normalized live forwarded --campaign-entry-url"
 assert_contains "$live_host_norm_line_sp" "--campaign-exit-url http://wrapper-live-norm-a.test:8084" "missing host-normalized live forwarded --campaign-exit-url"
-assert_contains "$live_host_norm_line_sp" "--campaign-subject inv-live-host-norm" "missing host-normalized live forwarded --campaign-subject"
+assert_contains "$live_host_norm_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-host-norm" "missing host-normalized live forwarded env CAMPAIGN_SUBJECT"
+assert_not_contains "$live_host_norm_line_sp" "--campaign-subject" "unexpected host-normalized live forwarded --campaign-subject credential arg"
+assert_not_contains "$live_host_norm_line_sp" "--subject" "unexpected host-normalized live forwarded --subject credential arg"
+assert_not_contains "$live_host_norm_line_sp" "--key" "unexpected host-normalized live forwarded --key credential arg"
+assert_not_contains "$live_host_norm_line_sp" "--invite-key" "unexpected host-normalized live forwarded --invite-key credential arg"
+
+echo "[profile-default-gate-live] loopback HTTP endpoints do not auto-enable remote-http probe opt-in"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_LOOPBACK_HTTP_LOG="$TMP_DIR/easy_node_profile_default_gate_live_loopback_http.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "127.0.0.1" \
+  --host-b "localhost" \
+  --campaign-subject "inv-live-loopback-http" \
+  --reports-dir "$TMP_DIR/live_reports_loopback_http" \
+  --campaign-timeout-sec 779 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_loopback_http_summary.json" >"$EASY_NODE_LIVE_LOOPBACK_HTTP_LOG" 2>&1
+
+live_loopback_http_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_loopback_http_line" ]]; then
+  echo "missing easy_node live loopback-http wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_LOOPBACK_HTTP_LOG"
+  exit 1
+fi
+live_loopback_http_line_sp="${live_loopback_http_line//$'\t'/ }"
+assert_contains "$live_loopback_http_line_sp" "--directory-a http://127.0.0.1:8081" "missing loopback-http live forwarded --directory-a"
+assert_contains "$live_loopback_http_line_sp" "--directory-b http://localhost:8081" "missing loopback-http live forwarded --directory-b"
+assert_contains "$live_loopback_http_line_sp" "--allow-remote-http-probe 0" "missing loopback-http live forwarded --allow-remote-http-probe fail-closed default"
 
 echo "[profile-default-gate-live] IPv6 host literals preserve address and safely drop explicit ports"
 : >"$WRAPPER_CAPTURE"
@@ -893,7 +1302,11 @@ assert_contains "$live_ipv6_norm_line_sp" "--campaign-bootstrap-directory http:/
 assert_contains "$live_ipv6_norm_line_sp" "--campaign-issuer-url http://[2001:db8::10]:8082" "missing IPv6-normalized live forwarded --campaign-issuer-url"
 assert_contains "$live_ipv6_norm_line_sp" "--campaign-entry-url http://[2001:db8::10]:8083" "missing IPv6-normalized live forwarded --campaign-entry-url"
 assert_contains "$live_ipv6_norm_line_sp" "--campaign-exit-url http://[2001:db8::10]:8084" "missing IPv6-normalized live forwarded --campaign-exit-url"
-assert_contains "$live_ipv6_norm_line_sp" "--campaign-subject inv-live-ipv6-norm" "missing IPv6-normalized live forwarded --campaign-subject"
+assert_contains "$live_ipv6_norm_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-ipv6-norm" "missing IPv6-normalized live forwarded env CAMPAIGN_SUBJECT"
+assert_not_contains "$live_ipv6_norm_line_sp" "--campaign-subject" "unexpected IPv6-normalized live forwarded --campaign-subject credential arg"
+assert_not_contains "$live_ipv6_norm_line_sp" "--subject" "unexpected IPv6-normalized live forwarded --subject credential arg"
+assert_not_contains "$live_ipv6_norm_line_sp" "--key" "unexpected IPv6-normalized live forwarded --key credential arg"
+assert_not_contains "$live_ipv6_norm_line_sp" "--invite-key" "unexpected IPv6-normalized live forwarded --invite-key credential arg"
 
 echo "[profile-default-gate-live] missing env/subject fails clearly"
 : >"$WRAPPER_CAPTURE"
@@ -912,7 +1325,7 @@ if [[ "$live_missing_rc" -ne 2 ]]; then
   cat "$LIVE_MISSING_LOG"
   exit 1
 fi
-assert_file_contains "$LIVE_MISSING_LOG" "requires host A (set --host-a or A_HOST)" "missing profile-default-gate-live missing-host-A error"
+assert_file_contains "$LIVE_MISSING_LOG" "requires host A (set --host-a or A_HOST" "missing profile-default-gate-live missing-host-A error"
 if [[ -s "$WRAPPER_CAPTURE" ]]; then
   echo "profile-default-gate-live missing-env path should not invoke wrapper"
   cat "$WRAPPER_CAPTURE"

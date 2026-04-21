@@ -179,52 +179,33 @@ pub struct RuntimePolicyConfig {
     pub connect_require_session: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_legacy_connect_override: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<Value>,
 }
 
 impl RuntimePolicyConfig {
     pub fn from_config_payload(payload: &Value) -> Self {
-        let config = payload.get("config");
-        let data_config = payload.get("data").and_then(|value| value.get("config"));
-        let connect_require_session =
-            parse_bool_like_json(config.and_then(|value| value.get("connect_require_session")))
-                .or_else(|| {
-                    parse_bool_like_json(
-                        config.and_then(|value| value.get("connectRequireSession")),
-                    )
-                })
-                .or_else(|| parse_bool_like_json(payload.get("connect_require_session")))
-                .or_else(|| parse_bool_like_json(payload.get("connectRequireSession")))
-                .or_else(|| {
-                    parse_bool_like_json(
-                        data_config.and_then(|value| value.get("connect_require_session")),
-                    )
-                })
-                .or_else(|| {
-                    parse_bool_like_json(
-                        data_config.and_then(|value| value.get("connectRequireSession")),
-                    )
-                });
-        let allow_legacy_connect_override = parse_bool_like_json(
-            config.and_then(|value| value.get("allow_legacy_connect_override")),
-        )
-        .or_else(|| {
-            parse_bool_like_json(config.and_then(|value| value.get("allowLegacyConnectOverride")))
-        })
-        .or_else(|| parse_bool_like_json(payload.get("allow_legacy_connect_override")))
-        .or_else(|| parse_bool_like_json(payload.get("allowLegacyConnectOverride")))
-        .or_else(|| {
-            parse_bool_like_json(
-                data_config.and_then(|value| value.get("allow_legacy_connect_override")),
-            )
-        })
-        .or_else(|| {
-            parse_bool_like_json(
-                data_config.and_then(|value| value.get("allowLegacyConnectOverride")),
-            )
+        let connect_require_session = parse_runtime_config_bool(
+            payload,
+            &["connect_require_session", "connectRequireSession"],
+        );
+        let allow_legacy_connect_override = parse_runtime_config_bool(
+            payload,
+            &[
+                "allow_legacy_connect_override",
+                "allowLegacyConnectOverride",
+            ],
+        );
+        let config = payload.get("config").cloned().or_else(|| {
+            payload
+                .get("data")
+                .and_then(|value| value.get("config"))
+                .cloned()
         });
         Self {
             connect_require_session,
             allow_legacy_connect_override,
+            config,
         }
     }
 }
@@ -442,6 +423,27 @@ fn parse_bool_like_json(value: Option<&Value>) -> Option<bool> {
         }
         _ => None,
     }
+}
+
+fn parse_runtime_config_bool(payload: &Value, aliases: &[&str]) -> Option<bool> {
+    parse_bool_like_json(runtime_config_lookup(payload.get("config"), aliases))
+        .or_else(|| parse_bool_like_json(runtime_config_lookup(Some(payload), aliases)))
+        .or_else(|| {
+            parse_bool_like_json(runtime_config_lookup(
+                payload.get("data").and_then(|value| value.get("config")),
+                aliases,
+            ))
+        })
+}
+
+fn runtime_config_lookup<'a>(scope: Option<&'a Value>, aliases: &[&str]) -> Option<&'a Value> {
+    let scope = scope?;
+    for alias in aliases {
+        if let Some(value) = scope.get(alias) {
+            return Some(value);
+        }
+    }
+    None
 }
 
 fn is_literal_loopback_host(url: &reqwest::Url) -> bool {
@@ -930,6 +932,59 @@ mod tests {
     fn with_env_vars<T>(vars: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
         let _guard = env_lock().lock().expect("env lock");
         with_env(vars, f)
+    }
+
+    #[test]
+    fn runtime_policy_config_reads_connect_flags_and_carries_config_payload() {
+        let payload = json!({
+            "ok": true,
+            "config": {
+                "connect_require_session": true,
+                "allow_legacy_connect_override": false,
+                "gpm_manifest_require_https": true,
+                "profile_default_gate_allow_remote_http_probe": false
+            }
+        });
+        let policy = RuntimePolicyConfig::from_config_payload(&payload);
+        assert_eq!(policy.connect_require_session, Some(true));
+        assert_eq!(policy.allow_legacy_connect_override, Some(false));
+        let config = policy.config.expect("runtime config payload");
+        assert_eq!(
+            config
+                .get("gpm_manifest_require_https")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            config
+                .get("profile_default_gate_allow_remote_http_probe")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn runtime_policy_config_uses_data_config_fallback_when_top_level_missing() {
+        let payload = json!({
+            "ok": true,
+            "data": {
+                "config": {
+                    "connectRequireSession": "1",
+                    "allowLegacyConnectOverride": "0",
+                    "profile_default_gate_allow_insecure_probe": true
+                }
+            }
+        });
+        let policy = RuntimePolicyConfig::from_config_payload(&payload);
+        assert_eq!(policy.connect_require_session, Some(true));
+        assert_eq!(policy.allow_legacy_connect_override, Some(false));
+        let config = policy.config.expect("runtime data.config payload");
+        assert_eq!(
+            config
+                .get("profile_default_gate_allow_insecure_probe")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]

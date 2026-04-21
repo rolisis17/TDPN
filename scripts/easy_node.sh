@@ -274,8 +274,14 @@ Usage:
   ./scripts/easy_node.sh desktop-windows-release-bundle [desktop_release_bundle args...]
   ./scripts/easy_node.sh desktop-windows-local-api-session [local_api_session args...]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
-  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
-  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-sweep [profile_compare_multi_vm_sweep args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-reducer [profile_compare_multi_vm_reducer args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-cycle [profile_compare_multi_vm_cycle args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-run [profile_compare_multi_vm_stability_run args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-check [profile_compare_multi_vm_stability_check args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle [profile_compare_multi_vm_stability_cycle args...]
+  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [--allow-remote-http-probe [0|1]] [profile-compare-campaign-signoff args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL|--directory-a-url URL] [--host-b HOST|--directory-b HOST_OR_URL|--directory-b-url URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--allow-remote-http-probe [0|1]] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
 ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
 ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
@@ -394,10 +400,16 @@ Usage:
   ./scripts/easy_node.sh profile-compare-trend [--compare-summary-json PATH]... [--compare-summary-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--min-profile-runs N] [--min-profile-pass-rate-pct N] [--balanced-latency-margin-pct N] [--fail-on-any-fail [0|1]] [--min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign [--campaign-runs N] [--campaign-pause-sec N] [--reports-dir DIR] [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-min-profile-runs N] [--trend-min-profile-pass-rate-pct N] [--trend-balanced-latency-margin-pct N] [--trend-fail-on-any-fail [0|1]] [--trend-min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-sweep [profile_compare_multi_vm_sweep args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-reducer [profile_compare_multi_vm_reducer args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-cycle [profile_compare_multi_vm_cycle args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-run [profile_compare_multi_vm_stability_run args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-check [profile_compare_multi_vm_stability_check args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle [profile_compare_multi_vm_stability_cycle args...]
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--campaign-anon-cred TOKEN] [--subject ID (alias for --campaign-subject)|--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
-  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
+  ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [--allow-remote-http-probe [0|1]] [profile-compare-campaign-signoff args...]
+  ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL|--directory-a-url URL] [--host-b HOST|--directory-b HOST_OR_URL|--directory-b-url URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--allow-remote-http-probe [0|1]] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
 ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
 ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
@@ -606,10 +618,16 @@ Notes:
   - client-vpn-profile-compare runs repeatable real client-vpn-smoke rounds across `1hop|2hop|3hop`, emits JSON/markdown comparison artifacts, and recommends default/latency/privacy profiles while keeping `1hop` experimental/non-default and outside the simple path.
   - profile-compare-campaign runs repeat local profile comparisons and auto-aggregates them into one campaign-level recommendation/report bundle.
   - profile-compare-docker-matrix wraps profile-compare-campaign with docker-first defaults (`1hop,2hop,3hop`) while preserving pass-through overrides and printing summary/report artifact paths.
+  - profile-compare-multi-vm-sweep runs repeatable external multi-VM profile sweeps and emits campaign-schema-compatible artifacts for later reduction.
+  - profile-compare-multi-vm-reducer reduces multi-VM sweep artifacts into one campaign-style summary/report bundle for downstream policy gates.
+  - profile-compare-multi-vm-cycle runs the multi-VM sweep + reducer flow in one command and emits campaign-style summary/report artifacts for downstream policy gates.
+  - profile-compare-multi-vm-stability-run executes repeated multi-VM cycle runs and emits stability evidence artifacts.
+  - profile-compare-multi-vm-stability-check evaluates multi-VM stability evidence against fail-closed policy requirements and emits one GO/NO-GO summary.
+  - profile-compare-multi-vm-stability-cycle runs multi-VM stability run + stability check in one command for operational evidence gating.
   - profile-compare-campaign-check applies fail-closed policy gates to campaign artifacts and emits one GO/NO-GO decision for default-profile readiness.
   - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff. In invite-key flows, prefer `--campaign-subject` (alias `--subject`) with a real key value; fallback order is `CAMPAIGN_SUBJECT` then `INVITE_KEY`.
-  - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. This wrapper is invite-key subject only and rejects anon-cred flags.
-  - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, then calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping.
+  - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. Auth mode supports invite-key subject flags or anon-credential pass-through flags, and rejects mixed subject+anon modes.
+  - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, supports explicit directory endpoint overrides via `--directory-a-url/--directory-b-url`, auto-enables remote HTTP probe opt-in only when resolved directory URLs are non-loopback `http://`, and calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping when explicit URLs are not provided.
   - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
   - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
@@ -9646,6 +9664,36 @@ profile_compare_docker_matrix() {
   "$matrix_script" "$@"
 }
 
+profile_compare_multi_vm_sweep() {
+  local sweep_script="${PROFILE_COMPARE_MULTI_VM_SWEEP_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_sweep.sh}"
+  "$sweep_script" "$@"
+}
+
+profile_compare_multi_vm_reducer() {
+  local reducer_script="${PROFILE_COMPARE_MULTI_VM_REDUCER_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_reducer.sh}"
+  "$reducer_script" "$@"
+}
+
+profile_compare_multi_vm_cycle() {
+  local cycle_script="${PROFILE_COMPARE_MULTI_VM_CYCLE_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_cycle.sh}"
+  "$cycle_script" "$@"
+}
+
+profile_compare_multi_vm_stability_run() {
+  local stability_run_script="${PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh}"
+  "$stability_run_script" "$@"
+}
+
+profile_compare_multi_vm_stability_check() {
+  local stability_check_script="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_check.sh}"
+  "$stability_check_script" "$@"
+}
+
+profile_compare_multi_vm_stability_cycle() {
+  local stability_cycle_script="${PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_cycle.sh}"
+  "$stability_cycle_script" "$@"
+}
+
 profile_compare_campaign_check() {
   local campaign_check_script="${PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_check.sh}"
   "$campaign_check_script" "$@"
@@ -9766,6 +9814,9 @@ gpm_endpoint_posture_remediate() {
 profile_default_gate_live() {
   local raw_host_a="${A_HOST:-}"
   local raw_host_b="${B_HOST:-}"
+  local raw_directory_a_url=""
+  local raw_directory_b_url=""
+  local allow_remote_http_probe_override=""
   local campaign_subject="${INVITE_KEY:-}"
   local reports_dir=".easy-node-logs"
   local campaign_timeout_sec="2400"
@@ -9798,6 +9849,63 @@ profile_default_gate_live() {
         ;;
       --host-b=*|--b-host=*|--directory-b=*)
         raw_host_b="${1#*=}"
+        shift
+        ;;
+      --directory-a-url)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --directory-a-url URL"
+          exit 2
+        fi
+        raw_directory_a_url="$2"
+        shift 2
+        ;;
+      --directory-a-url=*)
+        raw_directory_a_url="${1#*=}"
+        shift
+        ;;
+      --directory-b-url)
+        if [[ $# -lt 2 ]]; then
+          echo "profile-default-gate-live requires --directory-b-url URL"
+          exit 2
+        fi
+        raw_directory_b_url="$2"
+        shift 2
+        ;;
+      --directory-b-url=*)
+        raw_directory_b_url="${1#*=}"
+        shift
+        ;;
+      --allow-remote-http-probe)
+        if [[ $# -ge 2 ]]; then
+          case "${2:-}" in
+            0|1)
+              allow_remote_http_probe_override="${2:-}"
+              shift 2
+              ;;
+            --*)
+              allow_remote_http_probe_override="1"
+              shift
+              ;;
+            *)
+              echo "profile-default-gate-live requires --allow-remote-http-probe 0|1"
+              exit 2
+              ;;
+          esac
+        else
+          allow_remote_http_probe_override="1"
+          shift
+        fi
+        ;;
+      --allow-remote-http-probe=*)
+        case "${1#*=}" in
+          0|1)
+            allow_remote_http_probe_override="${1#*=}"
+            ;;
+          *)
+            echo "profile-default-gate-live requires --allow-remote-http-probe 0|1"
+            exit 2
+            ;;
+        esac
         shift
         ;;
       --campaign-subject|--subject|--key|--invite-key)
@@ -9907,15 +10015,30 @@ profile_default_gate_live() {
 
   local host_a=""
   local host_b=""
+  local directory_a_url_override=""
+  local directory_b_url_override=""
   host_a="$(normalize_live_host "$raw_host_a")"
   host_b="$(normalize_live_host "$raw_host_b")"
+  directory_a_url_override="$(trim "${raw_directory_a_url:-}")"
+  directory_b_url_override="$(trim "${raw_directory_b_url:-}")"
 
-  if [[ -z "$host_a" ]]; then
-    echo "profile-default-gate-live requires host A (set --host-a or A_HOST)"
+  if [[ -n "$directory_a_url_override" && -z "$host_a" ]]; then
+    host_a="$(normalize_live_host "$directory_a_url_override")"
+  fi
+  if [[ -n "$directory_b_url_override" && -z "$host_b" ]]; then
+    host_b="$(normalize_live_host "$directory_b_url_override")"
+  fi
+
+  if [[ -z "$host_a" && -z "$directory_a_url_override" ]]; then
+    echo "profile-default-gate-live requires host A (set --host-a or A_HOST, or pass --directory-a-url URL)"
     exit 2
   fi
-  if [[ -z "$host_b" ]]; then
-    echo "profile-default-gate-live requires host B (set --host-b or B_HOST)"
+  if [[ -z "$host_b" && -z "$directory_b_url_override" ]]; then
+    echo "profile-default-gate-live requires host B (set --host-b or B_HOST, or pass --directory-b-url URL)"
+    exit 2
+  fi
+  if [[ -z "$host_a" ]]; then
+    echo "profile-default-gate-live could not resolve host A from --directory-a-url"
     exit 2
   fi
   if [[ -z "$campaign_subject" ]]; then
@@ -9932,15 +10055,81 @@ profile_default_gate_live() {
   local issuer_a
   local entry_a
   local exit_a
-  directory_a="$(url_from_host_port "$host_a" 8081)"
-  directory_b="$(url_from_host_port "$host_b" 8081)"
+  local directory_a_log
+  local directory_b_log
+  local allow_remote_http_probe_effective="0"
+  local directory_a_source="host-default"
+  local directory_b_source="host-default"
+
+  requires_remote_http_probe_opt_in_01() {
+    local endpoint_url endpoint_host
+    endpoint_url="$(trim_url "${1:-}")"
+    if [[ "$endpoint_url" != http://* ]]; then
+      return 1
+    fi
+    endpoint_host="$(host_from_url "$endpoint_url")"
+    endpoint_host="$(printf '%s' "$endpoint_host" | tr '[:upper:]' '[:lower:]')"
+    endpoint_host="${endpoint_host#[}"
+    endpoint_host="${endpoint_host%]}"
+    if host_is_loopback "$endpoint_host"; then
+      return 1
+    fi
+    return 0
+  }
+
+  if [[ -n "$directory_a_url_override" ]]; then
+    directory_a="$directory_a_url_override"
+    directory_a_source="explicit-url"
+  else
+    directory_a="$(url_from_host_port "$host_a" 8081)"
+  fi
+  if [[ -n "$directory_b_url_override" ]]; then
+    directory_b="$directory_b_url_override"
+    directory_b_source="explicit-url"
+  else
+    directory_b="$(url_from_host_port "$host_b" 8081)"
+  fi
   issuer_a="$(url_from_host_port "$host_a" 8082)"
   entry_a="$(url_from_host_port "$host_a" 8083)"
   exit_a="$(url_from_host_port "$host_a" 8084)"
+  if [[ -n "$allow_remote_http_probe_override" ]]; then
+    allow_remote_http_probe_effective="$allow_remote_http_probe_override"
+  elif requires_remote_http_probe_opt_in_01 "$directory_a" || requires_remote_http_probe_opt_in_01 "$directory_b"; then
+    allow_remote_http_probe_effective="1"
+  fi
+
+  redact_url_for_log_01() {
+    local raw scheme remainder
+    raw="$(trim "${1:-}")"
+    if [[ -z "$raw" ]]; then
+      printf '%s\n' ""
+      return
+    fi
+    if [[ "$raw" != *"://"* ]]; then
+      printf '%s\n' "$raw"
+      return
+    fi
+    scheme="${raw%%://*}"
+    remainder="${raw#*://}"
+    remainder="${remainder%%\#*}"
+    remainder="${remainder%%\?*}"
+    if [[ "$remainder" == *@* ]]; then
+      remainder="${remainder#*@}"
+    fi
+    printf '%s\n' "${scheme}://${remainder}"
+  }
+
+  directory_a_log="$(redact_url_for_log_01 "$directory_a")"
+  directory_b_log="$(redact_url_for_log_01 "$directory_b")"
 
   echo "profile-default-gate-live:"
-  echo "  directory_a: $directory_a"
-  echo "  directory_b: $directory_b"
+  echo "  resolved_directory_a_url: $directory_a_log"
+  echo "  resolved_directory_b_url: $directory_b_log"
+  echo "  directory_a_source: $directory_a_source"
+  echo "  directory_b_source: $directory_b_source"
+  echo "  allow_remote_http_probe: $allow_remote_http_probe_effective"
+  echo "  directory_a: $directory_a_log"
+  echo "  directory_b: $directory_b_log"
   echo "  subject: [redacted]"
   echo "  reports_dir: $reports_dir"
   echo "  summary_json: $summary_json"
@@ -9952,18 +10141,18 @@ profile_default_gate_live() {
     --campaign-issuer-url "$issuer_a" \
     --campaign-entry-url "$entry_a" \
     --campaign-exit-url "$exit_a" \
-    --campaign-subject "$campaign_subject" \
     --reports-dir "$reports_dir" \
     --campaign-timeout-sec "$campaign_timeout_sec" \
     --summary-json "$summary_json" \
     --print-summary-json "$print_summary_json"
   )
+  run_args+=(--allow-remote-http-probe "$allow_remote_http_probe_effective")
   if [[ -n "$heartbeat_interval_sec" ]]; then
     run_args+=(--heartbeat-interval-sec "$heartbeat_interval_sec")
   fi
   run_args+=("${passthrough[@]}")
 
-  profile_default_gate_run "${run_args[@]}"
+  CAMPAIGN_SUBJECT="$campaign_subject" profile_default_gate_run "${run_args[@]}"
 }
 
 manual_validation_report() {
@@ -16554,6 +16743,30 @@ main() {
     profile-compare-docker-matrix)
       shift
       profile_compare_docker_matrix "$@"
+      ;;
+    profile-compare-multi-vm-sweep)
+      shift
+      profile_compare_multi_vm_sweep "$@"
+      ;;
+    profile-compare-multi-vm-reducer)
+      shift
+      profile_compare_multi_vm_reducer "$@"
+      ;;
+    profile-compare-multi-vm-cycle)
+      shift
+      profile_compare_multi_vm_cycle "$@"
+      ;;
+    profile-compare-multi-vm-stability-run)
+      shift
+      profile_compare_multi_vm_stability_run "$@"
+      ;;
+    profile-compare-multi-vm-stability-check)
+      shift
+      profile_compare_multi_vm_stability_check "$@"
+      ;;
+    profile-compare-multi-vm-stability-cycle)
+      shift
+      profile_compare_multi_vm_stability_cycle "$@"
       ;;
     profile-compare-campaign-check)
       shift

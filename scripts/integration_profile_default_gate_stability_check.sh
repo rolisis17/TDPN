@@ -30,6 +30,15 @@ make_summary() {
   local selection_policy_present_all="$7"
   local consistent_selection_policy="$8"
   local recommended_profile_counts_json="$9"
+  local decision_counts_json="{\"GO\":${runs_completed}}"
+  local decision_consensus_json="true"
+  local _args=("$@")
+  if ((${#_args[@]} >= 10)); then
+    decision_counts_json="${_args[9]}"
+  fi
+  if ((${#_args[@]} >= 11)); then
+    decision_consensus_json="${_args[10]}"
+  fi
 
   jq -n \
     --arg status "$status" \
@@ -40,6 +49,8 @@ make_summary() {
     --argjson selection_policy_present_all "$selection_policy_present_all" \
     --argjson consistent_selection_policy "$consistent_selection_policy" \
     --argjson recommended_profile_counts "$recommended_profile_counts_json" \
+    --argjson decision_counts "$decision_counts_json" \
+    --argjson decision_consensus "$decision_consensus_json" \
     '{
       version: 1,
       schema: { id: "profile_default_gate_stability_summary" },
@@ -53,6 +64,8 @@ make_summary() {
       selection_policy_present_all: $selection_policy_present_all,
       consistent_selection_policy: $consistent_selection_policy,
       recommended_profile_counts: $recommended_profile_counts,
+      decision_counts: $decision_counts,
+      decision_consensus: $decision_consensus,
       artifacts: { summary_json: "dummy" }
     }' >"$path"
 }
@@ -90,9 +103,94 @@ if ! jq -e '
   and .observed.runs_fail == 0
   and .observed.modal_recommended_profile == "balanced"
   and (.observed.modal_support_rate_pct >= 99.9)
+  and .observed.modal_decision == "GO"
+  and .observed.decision_consensus == true
+  and .observed.decision_counts.GO == 3
 ' "$BASELINE_OUT" >/dev/null 2>&1; then
   echo "baseline summary missing expected fields"
   cat "$BASELINE_OUT"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] require-decision-consensus pass path"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$BASELINE_SUMMARY" \
+  --require-decision-consensus 1 \
+  --summary-json "$TMP_DIR/stability_check_decision_consensus_pass.json" >/tmp/integration_profile_default_gate_stability_check_decision_consensus_pass.log 2>&1
+decision_consensus_pass_rc=$?
+set -e
+
+if [[ "$decision_consensus_pass_rc" -ne 0 ]]; then
+  echo "expected decision-consensus pass path rc=0"
+  cat /tmp/integration_profile_default_gate_stability_check_decision_consensus_pass.log
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] fail when decision consensus is required and mixed"
+MIXED_DECISION_SUMMARY="$TMP_DIR/stability_summary_mixed_decision.json"
+make_summary "$MIXED_DECISION_SUMMARY" "pass" 3 3 0 true true true '{"balanced":3}' '{"GO":2,"NO-GO":1}' false
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$MIXED_DECISION_SUMMARY" \
+  --require-decision-consensus 1 \
+  --summary-json "$TMP_DIR/stability_check_decision_consensus_fail.json" >/tmp/integration_profile_default_gate_stability_check_decision_consensus_fail.log 2>&1
+decision_consensus_fail_rc=$?
+set -e
+
+if [[ "$decision_consensus_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for mixed decision consensus requirement"
+  cat /tmp/integration_profile_default_gate_stability_check_decision_consensus_fail.log
+  exit 1
+fi
+if ! grep -q 'decision_consensus must be true' /tmp/integration_profile_default_gate_stability_check_decision_consensus_fail.log; then
+  echo "expected decision-consensus failure reason missing"
+  cat /tmp/integration_profile_default_gate_stability_check_decision_consensus_fail.log
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] fail when modal decision requirement mismatches"
+NO_GO_MODAL_SUMMARY="$TMP_DIR/stability_summary_no_go_modal.json"
+make_summary "$NO_GO_MODAL_SUMMARY" "pass" 3 3 0 true true true '{"balanced":3}' '{"NO-GO":3}' true
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$NO_GO_MODAL_SUMMARY" \
+  --require-modal-decision GO \
+  --summary-json "$TMP_DIR/stability_check_modal_decision_mismatch.json" >/tmp/integration_profile_default_gate_stability_check_modal_decision_mismatch.log 2>&1
+modal_decision_mismatch_rc=$?
+set -e
+
+if [[ "$modal_decision_mismatch_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for modal decision mismatch"
+  cat /tmp/integration_profile_default_gate_stability_check_modal_decision_mismatch.log
+  exit 1
+fi
+if ! grep -q 'modal decision mismatch' /tmp/integration_profile_default_gate_stability_check_modal_decision_mismatch.log; then
+  echo "expected modal decision mismatch failure reason missing"
+  cat /tmp/integration_profile_default_gate_stability_check_modal_decision_mismatch.log
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] fail when modal decision support rate is below threshold"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$MIXED_DECISION_SUMMARY" \
+  --require-modal-decision GO \
+  --require-modal-decision-support-rate-pct 80 \
+  --summary-json "$TMP_DIR/stability_check_modal_decision_support_fail.json" >/tmp/integration_profile_default_gate_stability_check_modal_decision_support_fail.log 2>&1
+modal_decision_support_fail_rc=$?
+set -e
+
+if [[ "$modal_decision_support_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for low modal decision support rate"
+  cat /tmp/integration_profile_default_gate_stability_check_modal_decision_support_fail.log
+  exit 1
+fi
+if ! grep -q 'modal decision support rate below threshold' /tmp/integration_profile_default_gate_stability_check_modal_decision_support_fail.log; then
+  echo "expected modal decision support-rate failure reason missing"
+  cat /tmp/integration_profile_default_gate_stability_check_modal_decision_support_fail.log
   exit 1
 fi
 
@@ -203,6 +301,26 @@ fi
 if ! grep -q -- '--require-min-runs-completed requires a value' /tmp/integration_profile_default_gate_stability_check_missing_value.log; then
   echo "expected missing-value error message not found"
   cat /tmp/integration_profile_default_gate_stability_check_missing_value.log
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] invalid --require-modal-decision returns rc=2"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$BASELINE_SUMMARY" \
+  --require-modal-decision maybe \
+  --summary-json "$TMP_DIR/stability_check_invalid_modal_decision.json" >/tmp/integration_profile_default_gate_stability_check_invalid_modal_decision.log 2>&1
+invalid_modal_decision_rc=$?
+set -e
+
+if [[ "$invalid_modal_decision_rc" -ne 2 ]]; then
+  echo "expected rc=2 for invalid --require-modal-decision value"
+  cat /tmp/integration_profile_default_gate_stability_check_invalid_modal_decision.log
+  exit 1
+fi
+if ! grep -q -- '--require-modal-decision must be GO or NO-GO' /tmp/integration_profile_default_gate_stability_check_invalid_modal_decision.log; then
+  echo "expected invalid-modal-decision error message not found"
+  cat /tmp/integration_profile_default_gate_stability_check_invalid_modal_decision.log
   exit 1
 fi
 

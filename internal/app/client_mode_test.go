@@ -868,6 +868,41 @@ func TestNewClientPathProfile3HopEnablesMiddlePreference(t *testing.T) {
 	}
 }
 
+func TestNewClientPathProfileSpeedAliasMapsTo2Hop(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "speed")
+	c := NewClient()
+	if c.pathProfile != "2hop" {
+		t.Fatalf("expected speed profile alias to map to 2hop, got %q", c.pathProfile)
+	}
+	if c.preferMiddleRelay {
+		t.Fatalf("expected middle preference disabled for speed/2hop profile")
+	}
+}
+
+func TestNewClientPathProfileInvalidFailsClosedAtValidation(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "turbo")
+	c := NewClient()
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected invalid CLIENT_PATH_PROFILE to fail closed")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_PATH_PROFILE=\"turbo\" is invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewClientPathProfileAmbiguousFailsClosedAtValidation(t *testing.T) {
+	t.Setenv("CLIENT_PATH_PROFILE", "speed,private")
+	c := NewClient()
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected ambiguous CLIENT_PATH_PROFILE to fail closed")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestNewClientRequireMiddleRelayEnvOverrideOn(t *testing.T) {
 	t.Setenv("CLIENT_PATH_PROFILE", "2hop")
 	t.Setenv("CLIENT_REQUIRE_MIDDLE_RELAY", "1")

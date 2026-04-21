@@ -68,7 +68,13 @@ function Get-ProcessBypassRerunCommand {
     ""
   }
   $keepApiRunningArg = if ($KeepApiRunning) { " -KeepApiRunning" } else { "" }
-  return ("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}{10}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg, $keepApiRunningArg)
+  $summaryJsonArg = if (-not [string]::IsNullOrWhiteSpace($SummaryJson)) {
+    " -SummaryJson " + (Quote-PowerShellSingleQuotedString -Value $SummaryJson)
+  } else {
+    ""
+  }
+  $printSummaryJsonArg = " -PrintSummaryJson " + (Quote-PowerShellSingleQuotedString -Value ([string]$PrintSummaryJson))
+  return ("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}{10}{11}{12}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg, $keepApiRunningArg, $summaryJsonArg, $printSummaryJsonArg)
 }
 
 function Get-CommonToolDirectories {
@@ -194,6 +200,11 @@ function Resolve-ToolPath {
   $allowWindowsAppsAlias = $Name.ToLowerInvariant() -eq "winget"
   if (-not [string]::IsNullOrWhiteSpace($path) -and ($allowWindowsAppsAlias -or $path -notmatch '\\WindowsApps\\')) {
     return $path
+  }
+
+  $disableFallbackLookups = [Environment]::GetEnvironmentVariable("DESKTOP_NATIVE_BOOTSTRAP_DISABLE_TOOL_FALLBACK_LOOKUPS", "Process")
+  if ([string]::Equals([string]$disableFallbackLookups, "1", [System.StringComparison]::Ordinal)) {
+    return ""
   }
 
   $programFiles = [Environment]::GetFolderPath("ProgramFiles")
@@ -1248,6 +1259,11 @@ function Resolve-NextCommand {
     return [string]$preferredWithInstall
   }
 
+  $preferredBootstrapCommand = $RecommendedCommands | Where-Object { $_ -like "*desktop_native_bootstrap.ps1*" -and $_ -notlike "*-InstallMissing*" } | Select-Object -First 1
+  if (-not [string]::IsNullOrWhiteSpace([string]$preferredBootstrapCommand)) {
+    return [string]$preferredBootstrapCommand
+  }
+
   $preferredBootstrap = $RecommendedCommands | Where-Object { $_ -like "*desktop_native_bootstrap.ps1*" -and $_ -like "*-Mode run-full*" } | Select-Object -First 1
   if (-not [string]::IsNullOrWhiteSpace([string]$preferredBootstrap)) {
     return [string]$preferredBootstrap
@@ -1543,12 +1559,33 @@ function Wait-LocalApiReady {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Addr,
-    [int]$TimeoutSec = 25
+    [int]$TimeoutSec = 25,
+    [System.Diagnostics.Process]$ExpectedProcess = $null
 )
 
   $endpoint = Resolve-LocalApiAddr -Addr $Addr
+  $expectedPid = 0
+  if ($null -ne $ExpectedProcess) {
+    $expectedPid = [int]$ExpectedProcess.Id
+  }
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   while ((Get-Date) -lt $deadline) {
+    if ($null -ne $ExpectedProcess) {
+      try {
+        if ($ExpectedProcess.HasExited) {
+          $exitCodeText = "unknown"
+          try {
+            $exitCodeText = [string]([int]$ExpectedProcess.ExitCode)
+          } catch {
+          }
+          Write-Warning ("local api process exited before readiness (pid={0}, exit_code={1})" -f $expectedPid, $exitCodeText)
+          return $false
+        }
+      } catch {
+        Write-Warning ("unable to inspect local api process state during readiness check (pid={0}): {1}" -f $expectedPid, $_.Exception.Message)
+        return $false
+      }
+    }
     try {
       $result = Invoke-RestMethod -Uri $endpoint -Method Get -TimeoutSec 3
       if ($null -ne $result -and $result.ok -eq $true) {
@@ -1559,7 +1596,11 @@ function Wait-LocalApiReady {
       Start-Sleep -Seconds 1
     }
   }
-  Write-Warning "local api health check timed out: $endpoint"
+  if ($null -ne $ExpectedProcess) {
+    Write-Warning ("local api health check timed out: {0} (pid={1})" -f $endpoint, $expectedPid)
+  } else {
+    Write-Warning "local api health check timed out: $endpoint"
+  }
   return $false
 }
 
@@ -1612,7 +1653,7 @@ function Start-LocalApiBackgroundWindow {
   )
 
   $scriptPath = Join-Path $RepoRootPath "scripts\windows\local_api_session.ps1"
-  $args = @("-NoExit", "-NoProfile")
+  $args = @("-NoProfile")
   if ($EnablePolicyBypass) {
     $args += @("-ExecutionPolicy", "Bypass")
   }
@@ -1653,6 +1694,169 @@ function Stop-LocalApiProcess {
   } catch {
     Write-Warning "failed to stop local api process pid=$($Process.Id): $($_.Exception.Message)"
   }
+}
+
+function Resolve-DesktopExecutablePathCanonical {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ExecutablePath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    return ""
+  }
+
+  try {
+    return (Resolve-Path -LiteralPath $ExecutablePath -ErrorAction Stop).Path
+  } catch {
+    try {
+      return [System.IO.Path]::GetFullPath($ExecutablePath)
+    } catch {
+      return $ExecutablePath
+    }
+  }
+}
+
+function Get-RunningProcessesForExecutablePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ExecutablePath,
+    [int[]]$ExcludeProcessIds = @()
+  )
+
+  $canonicalExecutablePath = Resolve-DesktopExecutablePathCanonical -ExecutablePath $ExecutablePath
+  if ([string]::IsNullOrWhiteSpace($canonicalExecutablePath)) {
+    return @()
+  }
+
+  $excludePidSet = @{}
+  foreach ($excludePid in $ExcludeProcessIds) {
+    if ($excludePid -gt 0) {
+      $excludePidSet[[int]$excludePid] = $true
+    }
+  }
+
+  $matchingProcesses = @()
+  foreach ($runningProc in @(Get-Process -ErrorAction SilentlyContinue)) {
+    if ($null -eq $runningProc) {
+      continue
+    }
+    if ($excludePidSet.ContainsKey([int]$runningProc.Id)) {
+      continue
+    }
+
+    $runningProcPath = ""
+    try {
+      $runningProcPath = [string]$runningProc.Path
+    } catch {
+      continue
+    }
+    if ([string]::IsNullOrWhiteSpace($runningProcPath)) {
+      continue
+    }
+
+    $canonicalRunningProcPath = $runningProcPath
+    try {
+      $canonicalRunningProcPath = [System.IO.Path]::GetFullPath($runningProcPath)
+    } catch {
+    }
+
+    if ([string]::Equals($canonicalExecutablePath, $canonicalRunningProcPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $matchingProcesses += $runningProc
+    }
+  }
+
+  return @($matchingProcesses)
+}
+
+function Get-PackagedDesktopHandoffMetadata {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopExecutablePath,
+    [int]$LaunchedProcessId,
+    [int]$ExitCode,
+    [Parameter(Mandatory = $true)]
+    [DateTimeOffset]$LaunchStartedAtUtc,
+    [double]$DurationSeconds,
+    [double]$QuickExitThresholdSeconds = 8,
+    [double]$LaunchCorrelationToleranceSeconds = 3,
+    [double]$HandoffProbeWindowSeconds = 2,
+    [int]$HandoffProbeIntervalMs = 200
+  )
+
+  $handoffMetadata = [ordered]@{
+    handoff_detected = $false
+    handoff_reason = "not_evaluated"
+    quick_exit_threshold_seconds = [math]::Round($QuickExitThresholdSeconds, 3)
+    launch_started_at_utc = [string]$LaunchStartedAtUtc.ToString("o")
+    launch_correlation_tolerance_seconds = [math]::Round($LaunchCorrelationToleranceSeconds, 3)
+    matching_process_count = 0
+    matching_process_ids = @()
+    correlated_matching_process_count = 0
+    correlated_matching_process_ids = @()
+  }
+
+  if ($ExitCode -ne 0) {
+    $handoffMetadata.handoff_reason = "non_zero_exit"
+    return $handoffMetadata
+  }
+
+  if ($DurationSeconds -gt $QuickExitThresholdSeconds) {
+    $handoffMetadata.handoff_reason = "clean_exit_not_quick"
+    return $handoffMetadata
+  }
+
+  $matchingProcesses = @()
+  $probeWindowSeconds = $HandoffProbeWindowSeconds
+  if ($probeWindowSeconds -lt 0) {
+    $probeWindowSeconds = 0
+  }
+  $probeIntervalMs = $HandoffProbeIntervalMs
+  if ($probeIntervalMs -lt 10) {
+    $probeIntervalMs = 10
+  }
+  $probeDeadline = [DateTimeOffset]::UtcNow.AddSeconds($probeWindowSeconds)
+  while ($true) {
+    $matchingProcesses = @(Get-RunningProcessesForExecutablePath -ExecutablePath $DesktopExecutablePath -ExcludeProcessIds @($LaunchedProcessId))
+    if ($matchingProcesses.Count -gt 0) {
+      break
+    }
+    if ([DateTimeOffset]::UtcNow -ge $probeDeadline) {
+      break
+    }
+    Start-Sleep -Milliseconds $probeIntervalMs
+  }
+  $correlatedMatchingProcesses = @()
+  $correlationFloor = $LaunchStartedAtUtc
+  $correlationCeiling = [DateTimeOffset]::UtcNow.AddSeconds([Math]::Abs($LaunchCorrelationToleranceSeconds))
+  foreach ($matchingProc in $matchingProcesses) {
+    $startedAtUtc = $null
+    try {
+      $startedAtUtc = [DateTimeOffset]$matchingProc.StartTime.ToUniversalTime()
+    } catch {
+      continue
+    }
+    if ($null -eq $startedAtUtc) {
+      continue
+    }
+    if ($startedAtUtc -ge $correlationFloor -and $startedAtUtc -le $correlationCeiling) {
+      $correlatedMatchingProcesses += $matchingProc
+    }
+  }
+  $handoffMetadata.matching_process_count = $matchingProcesses.Count
+  $handoffMetadata.matching_process_ids = @($matchingProcesses | ForEach-Object { [int]$_.Id })
+  $handoffMetadata.correlated_matching_process_count = $correlatedMatchingProcesses.Count
+  $handoffMetadata.correlated_matching_process_ids = @($correlatedMatchingProcesses | ForEach-Object { [int]$_.Id })
+  if ($correlatedMatchingProcesses.Count -gt 0) {
+    $handoffMetadata.handoff_detected = $true
+    $handoffMetadata.handoff_reason = "quick_exit_with_correlated_instance"
+  } elseif ($matchingProcesses.Count -gt 0) {
+    $handoffMetadata.handoff_reason = "quick_exit_with_uncorrelated_existing_instance"
+  } else {
+    $handoffMetadata.handoff_reason = "quick_exit_no_existing_instance"
+  }
+
+  return $handoffMetadata
 }
 
 function Invoke-DesktopDev {
@@ -1712,13 +1916,34 @@ function Invoke-DesktopPackaged {
     [string]$DesktopExecutablePath
   )
 
+  $quickExitThresholdSeconds = 8
+  if ([string]::IsNullOrWhiteSpace($DesktopExecutablePath)) {
+    throw "packaged desktop executable path was empty"
+  }
+  $canonicalDesktopExecutablePath = Resolve-DesktopExecutablePathCanonical -ExecutablePath $DesktopExecutablePath
+
   if ($DryRun) {
     Write-Step "dry-run packaged desktop: $DesktopExecutablePath"
-    return
+    return [ordered]@{
+      executable_path = $canonicalDesktopExecutablePath
+      pid = 0
+      exit_code = 0
+      duration_seconds = 0.0
+      handoff_detected = $false
+      handoff_reason = "dry_run"
+      quick_exit_threshold_seconds = [math]::Round($quickExitThresholdSeconds, 3)
+      launch_started_at_utc = ""
+      launch_correlation_tolerance_seconds = 3.0
+      matching_process_count = 0
+      matching_process_ids = @()
+      correlated_matching_process_count = 0
+      correlated_matching_process_ids = @()
+    }
   }
 
   Write-Step "running packaged desktop (wait): $DesktopExecutablePath"
   $desktopProc = $null
+  $launchStartedAtUtc = [DateTimeOffset]::UtcNow
   try {
     $desktopProc = Start-Process -FilePath $DesktopExecutablePath -PassThru -Wait
   } catch {
@@ -1727,11 +1952,43 @@ function Invoke-DesktopPackaged {
   if ($null -eq $desktopProc) {
     throw "packaged desktop launch did not return a process handle"
   }
+
   $desktopExitCode = [int]$desktopProc.ExitCode
+  $durationSeconds = [math]::Round(([DateTimeOffset]::UtcNow - $launchStartedAtUtc).TotalSeconds, 3)
+  $launchMetadata = [ordered]@{
+    executable_path = $canonicalDesktopExecutablePath
+    pid = [int]$desktopProc.Id
+    exit_code = $desktopExitCode
+    duration_seconds = $durationSeconds
+    handoff_detected = $false
+    handoff_reason = "not_evaluated"
+    quick_exit_threshold_seconds = [math]::Round($quickExitThresholdSeconds, 3)
+    matching_process_count = 0
+    matching_process_ids = @()
+  }
+
   if ($desktopExitCode -ne 0) {
     throw "packaged desktop process exited with code $desktopExitCode"
   }
-  Write-Step "packaged desktop exited cleanly (exit_code=0)"
+
+  $handoffMetadata = Get-PackagedDesktopHandoffMetadata -DesktopExecutablePath $DesktopExecutablePath -LaunchedProcessId ([int]$desktopProc.Id) -ExitCode $desktopExitCode -LaunchStartedAtUtc $launchStartedAtUtc -DurationSeconds $durationSeconds -QuickExitThresholdSeconds $quickExitThresholdSeconds
+  $launchMetadata.handoff_detected = [bool]$handoffMetadata.handoff_detected
+  $launchMetadata.handoff_reason = [string]$handoffMetadata.handoff_reason
+  $launchMetadata.matching_process_count = [int]$handoffMetadata.matching_process_count
+  $launchMetadata.matching_process_ids = @($handoffMetadata.matching_process_ids)
+  $launchMetadata.launch_started_at_utc = [string]$handoffMetadata.launch_started_at_utc
+  $launchMetadata.launch_correlation_tolerance_seconds = [double]$handoffMetadata.launch_correlation_tolerance_seconds
+  $launchMetadata.correlated_matching_process_count = [int]$handoffMetadata.correlated_matching_process_count
+  $launchMetadata.correlated_matching_process_ids = @($handoffMetadata.correlated_matching_process_ids)
+
+  Write-Step ("packaged desktop exited cleanly (exit_code=0, pid={0}, duration_s={1})" -f $launchMetadata.pid, $launchMetadata.duration_seconds)
+  if ($launchMetadata.handoff_detected) {
+    Write-Step ("packaged launch likely handed off to existing instance (correlated_pid_count={0}, correlated_pids={1}, observed_pid_count={2})" -f $launchMetadata.correlated_matching_process_count, ($launchMetadata.correlated_matching_process_ids -join ","), $launchMetadata.matching_process_count)
+  } elseif ($launchMetadata.matching_process_count -gt 0) {
+    Write-Step ("packaged launch found uncorrelated existing instance(s); keeping default cleanup behavior (observed_pid_count={0}, observed_pids={1})" -f $launchMetadata.matching_process_count, ($launchMetadata.matching_process_ids -join ","))
+  }
+
+  return $launchMetadata
 }
 
 function Ensure-DesktopIconAsset {
@@ -1794,7 +2051,14 @@ function Invoke-BootstrapMain {
   }
 
   $commonToolDirs = Get-CommonToolDirectories
-  if ($commonToolDirs.Count -gt 0) {
+  $disableCommonToolPathAugment = [string]::Equals(
+    [string]([Environment]::GetEnvironmentVariable("DESKTOP_NATIVE_BOOTSTRAP_DISABLE_COMMON_TOOL_PATH_AUGMENT", "Process")),
+    "1",
+    [System.StringComparison]::Ordinal
+  )
+  if ($disableCommonToolPathAugment) {
+    Write-Step "session PATH common tool directory augmentation disabled by DESKTOP_NATIVE_BOOTSTRAP_DISABLE_COMMON_TOOL_PATH_AUGMENT=1"
+  } elseif ($commonToolDirs.Count -gt 0) {
     Add-SessionPathSegments -Segments $commonToolDirs
     Write-Step "session PATH augmented with common tool directories: $($commonToolDirs -join ';')"
   }
@@ -1859,7 +2123,11 @@ function Invoke-BootstrapMain {
 
   if ($Mode -eq "run-desktop") {
     if ($desktopLaunchPlan.Strategy -eq "packaged") {
-      Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+      $packagedLaunchMetadata = Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+      if ($null -ne $packagedLaunchMetadata) {
+        $script:BootstrapSummary.packaged_launch_metadata = $packagedLaunchMetadata
+        $script:BootstrapSummary.packaged_handoff_detected = [bool]$packagedLaunchMetadata.handoff_detected
+      }
     } else {
       Invoke-DesktopDev -RepoRootPath $repoRoot
     }
@@ -1880,18 +2148,25 @@ function Invoke-BootstrapMain {
       } else {
         Write-Step "dry-run run-full: local api would be stopped after desktop exits (default)"
       }
+      $script:BootstrapSummary.api_cleanup_action = "dry_run_no_api_started"
       return 0
     }
     $apiProc = Start-LocalApiBackgroundWindow -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
     $apiHealthy = $false
     $desktopRunSucceeded = $false
+    $packagedLaunchMetadata = $null
+    $apiCleanupAction = "unknown"
     try {
-      $apiHealthy = [bool](Wait-LocalApiReady -Addr $ApiAddr -TimeoutSec 25)
+      $apiHealthy = [bool](Wait-LocalApiReady -Addr $ApiAddr -TimeoutSec 25 -ExpectedProcess $apiProc)
       if (-not $apiHealthy) {
         throw "local api health check did not pass"
       }
       if ($desktopLaunchPlan.Strategy -eq "packaged") {
-        Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+        $packagedLaunchMetadata = Invoke-DesktopPackaged -DesktopExecutablePath $desktopLaunchPlan.DesktopExecutablePath
+        if ($null -ne $packagedLaunchMetadata) {
+          $script:BootstrapSummary.packaged_launch_metadata = $packagedLaunchMetadata
+          $script:BootstrapSummary.packaged_handoff_detected = [bool]$packagedLaunchMetadata.handoff_detected
+        }
       } else {
         Invoke-DesktopDev -RepoRootPath $repoRoot
       }
@@ -1899,13 +2174,21 @@ function Invoke-BootstrapMain {
     } finally {
       if (-not $apiHealthy) {
         Stop-LocalApiProcess -Process $apiProc -Reason "after failed startup"
+        $apiCleanupAction = "stopped_after_failed_startup"
       } elseif (-not $desktopRunSucceeded) {
         Stop-LocalApiProcess -Process $apiProc -Reason "after run-full failure"
-      } elseif (-not $KeepApiRunning) {
-        Stop-LocalApiProcess -Process $apiProc -Reason "after desktop exit (default cleanup)"
-      } else {
+        $apiCleanupAction = "stopped_after_run_full_failure"
+      } elseif ($KeepApiRunning) {
         Write-Step "keeping local api window running after desktop exit (-KeepApiRunning)"
+        $apiCleanupAction = "kept_running_keep_api_running"
+      } elseif ($desktopLaunchPlan.Strategy -eq "packaged" -and $null -ne $packagedLaunchMetadata -and [bool]$packagedLaunchMetadata.handoff_detected) {
+        Write-Step "packaged handoff detected after clean desktop exit; skipping default local api cleanup"
+        $apiCleanupAction = "kept_running_packaged_handoff"
+      } else {
+        Stop-LocalApiProcess -Process $apiProc -Reason "after desktop exit (default cleanup)"
+        $apiCleanupAction = "stopped_after_desktop_exit_default_cleanup"
       }
+      $script:BootstrapSummary.api_cleanup_action = $apiCleanupAction
     }
     return 0
   }
@@ -1925,6 +2208,9 @@ $script:BootstrapSummary = [ordered]@{
   keep_api_running = [bool]$KeepApiRunning
   tool_report = (Get-SummaryToolReport -Report $null)
   desktop_prerequisites = (Get-DefaultDesktopPrerequisiteSummary)
+  packaged_launch_metadata = $null
+  packaged_handoff_detected = $false
+  api_cleanup_action = "not_applicable"
   missing_package_ids = @()
   next_command = ""
   recommended_commands = @()

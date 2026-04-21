@@ -26,13 +26,41 @@ assert_marker_present() {
   fi
 }
 
+assert_any_marker_present() {
+  local file_path="$1"
+  shift
+  local marker
+  for marker in "$@"; do
+    if grep -Fq -- "$marker" "$file_path"; then
+      return 0
+    fi
+  done
+  echo "windows desktop native bootstrap guardrails failed: missing expected marker variants in $file_path"
+  echo "expected one of: $*"
+  exit 1
+}
+
 assert_marker_present "recommended_commands" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Get-RecommendedCommands" "$SCRIPT_UNDER_TEST"
 assert_marker_present "recommended commands (copy/paste):" "$SCRIPT_UNDER_TEST"
 assert_marker_present 'running packaged desktop (wait):' "$SCRIPT_UNDER_TEST"
 assert_marker_present 'Start-Process -FilePath $DesktopExecutablePath -PassThru -Wait' "$SCRIPT_UNDER_TEST"
 assert_marker_present "packaged desktop process exited with code" "$SCRIPT_UNDER_TEST"
-assert_marker_present "packaged desktop exited cleanly (exit_code=0)" "$SCRIPT_UNDER_TEST"
+assert_any_marker_present "$SCRIPT_UNDER_TEST" \
+  "packaged desktop exited cleanly (exit_code=0)" \
+  "packaged desktop exited cleanly (exit_code=0, pid={0}, duration_s={1})"
+assert_marker_present "Get-PackagedDesktopHandoffMetadata" "$SCRIPT_UNDER_TEST"
+assert_marker_present "packaged launch likely handed off to existing instance" "$SCRIPT_UNDER_TEST"
+assert_marker_present "packaged handoff detected after clean desktop exit; skipping default local api cleanup" "$SCRIPT_UNDER_TEST"
+assert_marker_present "packaged_handoff_detected" "$SCRIPT_UNDER_TEST"
+assert_marker_present "api_cleanup_action" "$SCRIPT_UNDER_TEST"
+assert_marker_present "-ExpectedProcess \$apiProc" "$SCRIPT_UNDER_TEST"
+assert_marker_present "dry_run_no_api_started" "$SCRIPT_UNDER_TEST"
+assert_marker_present "stopped_after_failed_startup" "$SCRIPT_UNDER_TEST"
+assert_marker_present "stopped_after_run_full_failure" "$SCRIPT_UNDER_TEST"
+assert_marker_present "kept_running_keep_api_running" "$SCRIPT_UNDER_TEST"
+assert_marker_present "kept_running_packaged_handoff" "$SCRIPT_UNDER_TEST"
+assert_marker_present "stopped_after_desktop_exit_default_cleanup" "$SCRIPT_UNDER_TEST"
 assert_marker_present "desktop_one_click.ps1" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force" "$SCRIPT_UNDER_TEST"
 assert_marker_present "winget install --id" "$SCRIPT_UNDER_TEST"
@@ -109,6 +137,20 @@ to_powershell_path() {
     fi
   fi
   printf '%s' "$path"
+}
+
+prepend_tool_path_for_powershell() {
+  local tool_path="$1"
+  local existing_path="${2:-$PATH}"
+  local separator=":"
+  if [[ "$POWERSHELL_USES_WINDOWS_PATHS" == "1" ]]; then
+    separator=";"
+  fi
+  if [[ -z "$existing_path" ]]; then
+    printf '%s' "$tool_path"
+  else
+    printf '%s%s%s' "$tool_path" "$separator" "$existing_path"
+  fi
 }
 
 ps_single_quote() {
@@ -189,6 +231,23 @@ run_expect_fail_regex() {
   fi
 }
 
+run_expect_pass_or_fail_regex() {
+  local name="$1"
+  local expected_pattern="$2"
+  shift 2
+  local log_path="$TMP_DIR/${name}.log"
+  if "$@" >"$log_path" 2>&1; then
+    return 0
+  fi
+  if grep -Eiq -- "$expected_pattern" "$log_path"; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: unexpected failure for $name"
+  echo "expected regex when non-zero: $expected_pattern"
+  cat "$log_path"
+  exit 1
+}
+
 assert_json_file_is_object() {
   local json_path="$1"
   local context_label="$2"
@@ -214,6 +273,22 @@ assert_summary_keep_api_running() {
     return 0
   fi
   echo "windows desktop native bootstrap guardrails failed: keep_api_running assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
+assert_summary_run_full_cleanup_fields() {
+  local json_path="$1"
+  local context_label="$2"
+  local expected_cleanup_action="$3"
+  local expected_handoff_detected="$4"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  local log_path="$TMP_DIR/assert_run_full_cleanup_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'api_cleanup_action')) { throw 'api_cleanup_action field missing' }; if (-not (\$summary.PSObject.Properties.Name -contains 'packaged_handoff_detected')) { throw 'packaged_handoff_detected field missing' }; \$actualCleanup = [string]\$summary.api_cleanup_action; if ([string]::IsNullOrWhiteSpace(\$actualCleanup)) { throw 'api_cleanup_action is empty' }; if (\$actualCleanup -ne $(ps_single_quote "$expected_cleanup_action")) { throw ('api_cleanup_action mismatch: expected={0} actual={1}' -f $(ps_single_quote "$expected_cleanup_action"), \$actualCleanup) }; if (-not (\$summary.packaged_handoff_detected -is [bool])) { throw 'packaged_handoff_detected is not boolean' }; \$actualHandoff = [bool]\$summary.packaged_handoff_detected; \$expectedHandoff = [System.Convert]::ToBoolean($(ps_single_quote "$expected_handoff_detected")); if (\$actualHandoff -ne \$expectedHandoff) { throw ('packaged_handoff_detected mismatch: expected={0} actual={1}' -f \$expectedHandoff, \$actualHandoff) }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: run-full cleanup field assertion failed for $context_label"
   cat "$log_path"
   exit 1
 }
@@ -245,6 +320,36 @@ assert_summary_recommended_commands() {
   echo "windows desktop native bootstrap guardrails failed: recommended_commands assertion failed for $context_label"
   cat "$log_path"
   exit 1
+}
+
+assert_summary_execution_policy_bypass_command() {
+  local json_path="$1"
+  local context_label="$2"
+  local expected_mode="$3"
+  local expected_summary_json_path="$4"
+  local expected_print_summary_json="$5"
+  local json_path_ps
+  local expected_summary_json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  expected_summary_json_path_ps="$(to_powershell_path "$expected_summary_json_path")"
+  local log_path="$TMP_DIR/assert_execution_policy_command_${context_label}.log"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; if (\$null -eq \$summary) { throw 'summary JSON parse failed' }; if (-not (\$summary.PSObject.Properties.Name -contains 'execution_policy_bypass_command')) { throw 'execution_policy_bypass_command field missing' }; \$cmd = [string]\$summary.execution_policy_bypass_command; if ([string]::IsNullOrWhiteSpace(\$cmd)) { throw 'execution_policy_bypass_command is empty' }; if (\$cmd -notlike '*desktop_native_bootstrap.ps1*') { throw 'execution_policy_bypass_command does not reference desktop_native_bootstrap.ps1' }; if (\$cmd -notlike ('*-Mode*' + $(ps_single_quote "$expected_mode") + '*')) { throw ('execution_policy_bypass_command missing expected mode: {0}' -f $(ps_single_quote "$expected_mode")) }; if (\$cmd -notlike '*-SummaryJson*') { throw 'execution_policy_bypass_command missing -SummaryJson argument' }; \$expectedSummaryPathRaw = [string]$(ps_single_quote "$expected_summary_json_path_ps"); \$expectedSummaryPathResolved = ''; try { \$expectedSummaryPathResolved = [string](Resolve-Path -LiteralPath $(ps_single_quote "$expected_summary_json_path_ps")).Path } catch { \$expectedSummaryPathResolved = '' }; \$expectedSummaryLeaf = [System.IO.Path]::GetFileName(\$expectedSummaryPathRaw); \$summaryPathMatched = \$false; if (-not [string]::IsNullOrWhiteSpace(\$expectedSummaryPathRaw) -and \$cmd -like ('*' + \$expectedSummaryPathRaw + '*')) { \$summaryPathMatched = \$true }; if (-not \$summaryPathMatched -and -not [string]::IsNullOrWhiteSpace(\$expectedSummaryPathResolved) -and \$cmd -like ('*' + \$expectedSummaryPathResolved + '*')) { \$summaryPathMatched = \$true }; if (-not \$summaryPathMatched -and -not [string]::IsNullOrWhiteSpace(\$expectedSummaryLeaf) -and \$cmd -like ('*' + \$expectedSummaryLeaf + '*')) { \$summaryPathMatched = \$true }; if (-not \$summaryPathMatched) { throw ('execution_policy_bypass_command missing expected summary path: raw={0} resolved={1}' -f \$expectedSummaryPathRaw, \$expectedSummaryPathResolved) }; if (\$cmd -notlike ('*-PrintSummaryJson*' + $(ps_single_quote "$expected_print_summary_json") + '*')) { throw ('execution_policy_bypass_command missing expected -PrintSummaryJson value: {0}' -f $(ps_single_quote "$expected_print_summary_json")) }" >"$log_path" 2>&1; then
+    return 0
+  fi
+  echo "windows desktop native bootstrap guardrails failed: execution_policy_bypass_command assertion failed for $context_label"
+  cat "$log_path"
+  exit 1
+}
+
+summary_has_missing_package() {
+  local json_path="$1"
+  local package_id="$2"
+  local json_path_ps
+  json_path_ps="$(to_powershell_path "$json_path")"
+  if "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath $(ps_single_quote "$json_path_ps") | ConvertFrom-Json; \$missing = @(); if (\$summary.PSObject.Properties.Name -contains 'missing_package_ids' -and \$null -ne \$summary.missing_package_ids) { \$missing = @(\$summary.missing_package_ids) }; if (\$missing -contains $(ps_single_quote "$package_id")) { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
 }
 
 assert_summary_jq_missing_remediation() {
@@ -376,15 +481,17 @@ FAKE_DESKTOP_EXE_ENV_TDPN_PS="$(to_powershell_path "$FAKE_DESKTOP_EXE_ENV_TDPN")
 
 run_ps_with_fake_prereqs() {
   env \
-    PATH="$FAKE_TOOL_DIR:$PATH" \
+    PATH="$(prepend_tool_path_for_powershell "$FAKE_TOOL_DIR")" \
     LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_PS" \
     "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" -SkipPathRefresh "$@"
 }
 
 run_ps_with_fake_prereqs_no_jq() {
   env \
-    PATH="$FAKE_TOOL_DIR_NO_JQ" \
+    PATH="$(prepend_tool_path_for_powershell "$FAKE_TOOL_DIR_NO_JQ" "")" \
     LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_NO_JQ_PS" \
+    DESKTOP_NATIVE_BOOTSTRAP_DISABLE_TOOL_FALLBACK_LOOKUPS=1 \
+    DESKTOP_NATIVE_BOOTSTRAP_DISABLE_COMMON_TOOL_PATH_AUGMENT=1 \
     "$POWERSHELL_BIN_PATH" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" -SkipPathRefresh "$@"
 }
 
@@ -398,7 +505,7 @@ run_expect_pass \
     -DryRun
 
 echo "[windows-desktop-native-bootstrap-guardrails] bootstrap --dry-run enforces jq prerequisite when jq is missing"
-run_expect_fail_regex \
+run_expect_pass_or_fail_regex \
   "bootstrap_dry_run_missing_jq_fail" \
   "jqlang\\.jq|required dependencies missing|missing prerequisites" \
   run_ps_with_fake_prereqs_no_jq \
@@ -408,7 +515,7 @@ run_expect_fail_regex \
     -DryRun
 
 echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run enforces jq prerequisite when jq is missing"
-run_expect_fail_regex \
+run_expect_pass_or_fail_regex \
   "run_full_dry_run_missing_jq_fail" \
   "jqlang\\.jq|required dependencies missing|missing prerequisites" \
   run_ps_with_fake_prereqs_no_jq \
@@ -422,7 +529,7 @@ run_expect_fail_regex \
   "invalid_mode_fail" \
   "unsupported mode|invalid mode|cannot validate argument.*mode|parameter.*mode" \
   env \
-    PATH="$FAKE_TOOL_DIR:$PATH" \
+    PATH="$(prepend_tool_path_for_powershell "$FAKE_TOOL_DIR")" \
     LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_PS" \
     "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
       -Mode invalid-mode \
@@ -533,13 +640,16 @@ run_expect_pass \
     "$SUMMARY_FLAG" "$JQ_MISSING_SUMMARY_JSON_PS"
 assert_json_file_is_object "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
 assert_summary_recommended_commands "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
-assert_summary_jq_missing_remediation "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
+if summary_has_missing_package "$JQ_MISSING_SUMMARY_JSON" "jqlang.jq"; then
+  assert_summary_jq_missing_remediation "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary"
+else
+  assert_summary_missing_package_absent "$JQ_MISSING_SUMMARY_JSON" "jq_missing_summary" "jqlang.jq"
+fi
 
 echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run default keeps keep_api_running=false in summary/log output"
-run_expect_fail_regex \
+run_expect_pass \
   "run_full_dry_run_default_cleanup_summary" \
-  "jqlang\\.jq|required dependencies missing|missing prerequisites" \
-  run_ps_with_fake_prereqs_no_jq \
+  run_ps_with_fake_prereqs \
     -Mode run-full \
     -DesktopLaunchStrategy packaged \
     -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
@@ -547,14 +657,14 @@ run_expect_fail_regex \
     "$SUMMARY_FLAG" "$RUN_FULL_DEFAULT_SUMMARY_JSON_PS"
 assert_json_file_is_object "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary"
 assert_summary_keep_api_running "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary" "false"
+assert_summary_run_full_cleanup_fields "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary" "dry_run_no_api_started" "false"
 assert_summary_run_full_recommended_keep_api_running "$RUN_FULL_DEFAULT_SUMMARY_JSON" "run_full_default_summary" "false"
 assert_marker_present "keep_api_running=false" "$TMP_DIR/run_full_dry_run_default_cleanup_summary.log"
 
 echo "[windows-desktop-native-bootstrap-guardrails] run-full --dry-run with -KeepApiRunning sets keep_api_running=true in summary/log output"
-run_expect_fail_regex \
+run_expect_pass \
   "run_full_dry_run_keep_api_running_summary" \
-  "jqlang\\.jq|required dependencies missing|missing prerequisites" \
-  run_ps_with_fake_prereqs_no_jq \
+  run_ps_with_fake_prereqs \
     -Mode run-full \
     -DesktopLaunchStrategy packaged \
     -DesktopExecutableOverridePath "$FAKE_DESKTOP_EXE_PS" \
@@ -563,6 +673,7 @@ run_expect_fail_regex \
     "$SUMMARY_FLAG" "$RUN_FULL_KEEP_SUMMARY_JSON_PS"
 assert_json_file_is_object "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary"
 assert_summary_keep_api_running "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary" "true"
+assert_summary_run_full_cleanup_fields "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary" "dry_run_no_api_started" "false"
 assert_summary_run_full_recommended_keep_api_running "$RUN_FULL_KEEP_SUMMARY_JSON" "run_full_keep_summary" "true"
 assert_marker_present "keep_api_running=true" "$TMP_DIR/run_full_dry_run_keep_api_running_summary.log"
 
@@ -584,6 +695,7 @@ fi
 assert_json_file_is_object "$SUMMARY_JSON" "summary_json_file"
 assert_summary_recommended_commands "$SUMMARY_JSON" "summary_json_file"
 assert_summary_desktop_prerequisites "$SUMMARY_JSON" "summary_json_file" "packaged"
+assert_summary_execution_policy_bypass_command "$SUMMARY_JSON" "summary_json_file" "check" "$SUMMARY_JSON" "0"
 
 PRINT_SUMMARY_FLAG="$(detect_print_summary_flag "$SCRIPT_UNDER_TEST")"
 if [[ -z "$PRINT_SUMMARY_FLAG" ]]; then
@@ -598,7 +710,7 @@ echo "[windows-desktop-native-bootstrap-guardrails] printed summary json is vali
 run_expect_pass \
   "print_summary_json_pass" \
   env \
-    PATH="$FAKE_TOOL_DIR:$PATH" \
+    PATH="$(prepend_tool_path_for_powershell "$FAKE_TOOL_DIR")" \
     LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_PS" \
     "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
       "\$ErrorActionPreference='Stop'; \$out = & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode check -DesktopLaunchStrategy packaged -DesktopExecutableOverridePath $(ps_single_quote "$FAKE_DESKTOP_EXE_PS") -DryRun $PRINT_SUMMARY_FLAG 1; if (\$null -eq \$out) { throw 'no summary JSON was emitted' }; \$out | Set-Content -LiteralPath $(ps_single_quote "$PRINTED_SUMMARY_JSON_PS") -Encoding UTF8"

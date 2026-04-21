@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -78,7 +79,9 @@ func applyConfigFile(path string) error {
 	}
 
 	if strings.TrimSpace(values["EASY_MODE_CONFIG_VERSION"]) == "1" {
-		applyEasyModeConfigV1(values)
+		if err := applyEasyModeConfigV1(values); err != nil {
+			return fmt.Errorf("read config file: %w", err)
+		}
 		return nil
 	}
 
@@ -91,9 +94,14 @@ func applyConfigFile(path string) error {
 	return nil
 }
 
-func applyEasyModeConfigV1(values map[string]string) {
-	profile := normalizeConfigV1PathProfile(values["SIMPLE_CLIENT_PROFILE_DEFAULT"])
-	applyPathProfileFromConfigV1(values["SIMPLE_CLIENT_PROFILE_DEFAULT"])
+func applyEasyModeConfigV1(values map[string]string) error {
+	profile, profileMigrationHint, err := applyPathProfileFromConfigV1(values["SIMPLE_CLIENT_PROFILE_DEFAULT"])
+	if err != nil {
+		return err
+	}
+	if profileMigrationHint != "" {
+		log.Printf("config v1 path-profile migration hint: %s", profileMigrationHint)
+	}
 	setEnvIfUnset("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE", profile)
 
 	iface := strings.TrimSpace(values["SIMPLE_CLIENT_INTERFACE"])
@@ -108,10 +116,14 @@ func applyEasyModeConfigV1(values map[string]string) {
 		"LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT",
 		normalizeConfigV1ProdProfileDefault(values["SIMPLE_CLIENT_PROD_PROFILE_DEFAULT"]),
 	)
+	return nil
 }
 
-func applyPathProfileFromConfigV1(raw string) {
-	profile := normalizeConfigV1PathProfile(raw)
+func applyPathProfileFromConfigV1(raw string) (string, string, error) {
+	profile, profileMigrationHint, err := resolveConfigV1PathProfile(raw)
+	if err != nil {
+		return "", "", err
+	}
 	setEnvIfUnset("CLIENT_PATH_PROFILE", profile)
 	// Easy mode should keep VPN sessions alive by default. Expert flows can still
 	// override this explicitly with CLIENT_SESSION_REUSE=0.
@@ -145,20 +157,15 @@ func applyPathProfileFromConfigV1(raw string) {
 		setEnvIfUnset("CLIENT_ENTRY_ROTATION_JITTER_PCT", "15")
 		setEnvIfUnset("CLIENT_EXIT_EXPLORATION_PCT", "10")
 	}
+	return profile, profileMigrationHint, nil
 }
 
 func normalizeConfigV1PathProfile(raw string) string {
-	value := strings.ToLower(strings.TrimSpace(raw))
-	switch value {
-	case "1", "1hop", "speed-1hop":
-		return "1hop"
-	case "2", "2hop", "speed", "fast", "balanced":
-		return "2hop"
-	case "3", "3hop", "private", "privacy":
-		return "3hop"
-	default:
-		return "2hop"
+	profile, _, err := resolveConfigV1PathProfile(raw)
+	if err != nil {
+		return clientPathProfileDefault
 	}
+	return profile
 }
 
 func normalizeConfigV1ProdProfileDefault(raw string) string {

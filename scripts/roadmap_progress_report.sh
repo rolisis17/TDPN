@@ -819,22 +819,153 @@ profile_default_gate_command_has_credential_args_01() {
   fi
 }
 
-profile_default_gate_command_with_subject_placeholder() {
+profile_default_gate_command_redact_credentials_parse_fail_closed() {
+  local cmd
+  local sudo_prefix=""
+  local subcommand="profile-compare-campaign-signoff"
+  local safe_cmd=""
+  local has_primary_credential="0"
+  local has_anon_credential="0"
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$cmd" =~ ^sudo[[:space:]]+ ]]; then
+    sudo_prefix="sudo "
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])\./scripts/easy_node\.sh[[:space:]]+([A-Za-z0-9._-]+) ]]; then
+    subcommand="${BASH_REMATCH[2]}"
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)([[:space:]=]|$) ]]; then
+    has_primary_credential="1"
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])(--campaign-anon-cred|--anon-cred)([[:space:]=]|$) ]]; then
+    has_anon_credential="1"
+  fi
+  safe_cmd="${sudo_prefix}./scripts/easy_node.sh ${subcommand}"
+  if [[ "$has_primary_credential" == "1" ]]; then
+    safe_cmd="$safe_cmd --subject INVITE_KEY"
+  fi
+  if [[ "$has_anon_credential" == "1" ]]; then
+    safe_cmd="$safe_cmd --anon-cred ANON_CRED"
+  fi
+  printf '%s' "$safe_cmd"
+}
+
+profile_default_gate_command_redact_credentials_best_effort() {
   local cmd
   cmd="$(trim "${1:-}")"
   if [[ -z "$cmd" ]]; then
     printf '%s' ""
     return
   fi
+  printf '%s' "$cmd" | sed -E \
+    -e 's@(^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)=([^[:space:]]+)@\1\2=INVITE_KEY@g' \
+    -e 's@(^|[[:space:]])(--campaign-anon-cred|--anon-cred)=([^[:space:]]+)@\1\2=ANON_CRED@g' \
+    -e 's@(^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)[[:space:]]+([^[:space:]]+)@\1\2 INVITE_KEY@g' \
+    -e 's@(^|[[:space:]])(--campaign-anon-cred|--anon-cred)[[:space:]]+([^[:space:]]+)@\1\2 ANON_CRED@g'
+}
+
+profile_default_gate_command_redact_credentials() {
+  local cmd
+  local token=""
+  local next_token=""
+  local redacted_parse_fail_cmd=""
+  local idx=0
+  local -a redacted_argv=()
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    if [[ "$(profile_default_gate_command_has_credential_args_01 "$cmd")" == "1" ]]; then
+      redacted_parse_fail_cmd="$(profile_default_gate_command_redact_credentials_parse_fail_closed "$cmd" || true)"
+      if [[ -z "$redacted_parse_fail_cmd" ]]; then
+        redacted_parse_fail_cmd="./scripts/easy_node.sh profile-compare-campaign-signoff"
+        if [[ "$cmd" =~ (^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)([[:space:]=]|$) ]]; then
+          redacted_parse_fail_cmd="$redacted_parse_fail_cmd --subject INVITE_KEY"
+        fi
+        if [[ "$cmd" =~ (^|[[:space:]])(--campaign-anon-cred|--anon-cred)([[:space:]=]|$) ]]; then
+          redacted_parse_fail_cmd="$redacted_parse_fail_cmd --anon-cred ANON_CRED"
+        fi
+        if [[ "$cmd" =~ ^sudo[[:space:]]+ ]]; then
+          redacted_parse_fail_cmd="sudo $redacted_parse_fail_cmd"
+        fi
+      fi
+      printf '%s' "$redacted_parse_fail_cmd"
+      return 0
+    fi
+    profile_default_gate_command_redact_credentials_best_effort "$cmd"
+    return 0
+  fi
+  while (( idx < ${#COMMAND_STRING_ARGV[@]} )); do
+    token="${COMMAND_STRING_ARGV[$idx]}"
+    case "$token" in
+      --campaign-subject|--subject|--key|--invite-key)
+        redacted_argv+=("$token")
+        if (( idx + 1 < ${#COMMAND_STRING_ARGV[@]} )); then
+          next_token="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if [[ "$next_token" != --* ]]; then
+            redacted_argv+=("INVITE_KEY")
+            idx=$((idx + 2))
+            continue
+          fi
+        fi
+        ;;
+      --campaign-anon-cred|--anon-cred)
+        redacted_argv+=("$token")
+        if (( idx + 1 < ${#COMMAND_STRING_ARGV[@]} )); then
+          next_token="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if [[ "$next_token" != --* ]]; then
+            redacted_argv+=("ANON_CRED")
+            idx=$((idx + 2))
+            continue
+          fi
+        fi
+        ;;
+      --campaign-subject=*|--subject=*|--key=*|--invite-key=*)
+        redacted_argv+=("${token%%=*}=INVITE_KEY")
+        ;;
+      --campaign-anon-cred=*|--anon-cred=*)
+        redacted_argv+=("${token%%=*}=ANON_CRED")
+        ;;
+      *)
+        redacted_argv+=("$token")
+        ;;
+    esac
+    idx=$((idx + 1))
+  done
+  profile_default_gate_command_from_argv "${redacted_argv[@]}"
+  return 0
+}
+
+profile_default_gate_command_with_subject_placeholder() {
+  local cmd
+  local sanitized_cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  sanitized_cmd="$(profile_default_gate_command_redact_credentials "$cmd")"
+  if [[ -z "$sanitized_cmd" ]]; then
+    if [[ "$(profile_default_gate_command_has_credential_args_01 "$cmd")" == "1" ]]; then
+      sanitized_cmd="$(profile_default_gate_command_redact_credentials_parse_fail_closed "$cmd")"
+    else
+      sanitized_cmd="$cmd"
+    fi
+  fi
   if [[ "$(profile_default_gate_command_supports_subject_placeholder_01 "$cmd")" != "1" ]]; then
-    printf '%s' "$cmd"
+    printf '%s' "$sanitized_cmd"
     return
   fi
-  if [[ "$(profile_default_gate_command_has_credential_args_01 "$cmd")" == "1" ]]; then
-    printf '%s' "$cmd"
+  if [[ "$(profile_default_gate_command_has_credential_args_01 "$sanitized_cmd")" == "1" ]]; then
+    printf '%s' "$sanitized_cmd"
     return
   fi
-  printf '%s --subject INVITE_KEY' "$cmd"
+  printf '%s --subject INVITE_KEY' "$sanitized_cmd"
 }
 
 command_string_to_argv() {
@@ -1149,6 +1280,7 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   local primary_credential_value=""
   local campaign_anon_cred_value=""
   local anon_cred_value=""
+  local has_anon_credential="0"
   local convert_localhost_run="0"
   local convert_signoff="0"
   local convert_allowed="0"
@@ -1213,8 +1345,20 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
       break
     fi
   done
+  if [[ "$cmd" =~ (^|[[:space:]])(--campaign-anon-cred|--anon-cred)([[:space:]=]|$) ]]; then
+    has_anon_credential="1"
+  fi
   campaign_anon_cred_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-anon-cred")"
   anon_cred_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--anon-cred")"
+  if [[ -n "$campaign_anon_cred_value" || -n "$anon_cred_value" ]]; then
+    has_anon_credential="1"
+  fi
+  if [[ "$has_anon_credential" == "1" ]]; then
+    # profile-default-gate-live only supports invite-subject credentials.
+    # Keep anon-credential commands in their original mode.
+    printf '%s' "$cmd"
+    return
+  fi
   rebuilt_argv+=("./scripts/easy_node.sh" "profile-default-gate-live" "--host-a" "$host_a" "--host-b" "$host_b")
   if [[ -n "$reports_dir" ]]; then
     rebuilt_argv+=("--reports-dir" "$reports_dir")
@@ -1245,12 +1389,6 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   fi
   if [[ -n "$primary_credential_flag" && -n "$primary_credential_value" ]]; then
     rebuilt_argv+=("$primary_credential_flag" "$primary_credential_value")
-  fi
-  if [[ -n "$campaign_anon_cred_value" ]]; then
-    rebuilt_argv+=("--campaign-anon-cred" "$campaign_anon_cred_value")
-  fi
-  if [[ -n "$anon_cred_value" ]]; then
-    rebuilt_argv+=("--anon-cred" "$anon_cred_value")
   fi
   rebuilt="$(profile_default_gate_command_from_argv "${rebuilt_argv[@]}")"
   printf '%s' "$rebuilt"

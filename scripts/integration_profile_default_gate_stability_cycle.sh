@@ -108,6 +108,9 @@ capture_file="${FAKE_CYCLE_CAPTURE_FILE:-}"
 summary_json=""
 stability_summary_json=""
 fail_on_no_go="1"
+require_decision_consensus=""
+require_modal_decision=""
+require_modal_decision_support_rate_pct=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -134,6 +137,30 @@ while [[ $# -gt 0 ]]; do
       fail_on_no_go="${1#*=}"
       shift
       ;;
+    --require-decision-consensus)
+      require_decision_consensus="${2:-}"
+      shift 2
+      ;;
+    --require-decision-consensus=*)
+      require_decision_consensus="${1#*=}"
+      shift
+      ;;
+    --require-modal-decision)
+      require_modal_decision="${2:-}"
+      shift 2
+      ;;
+    --require-modal-decision=*)
+      require_modal_decision="${1#*=}"
+      shift
+      ;;
+    --require-modal-decision-support-rate-pct)
+      require_modal_decision_support_rate_pct="${2:-}"
+      shift 2
+      ;;
+    --require-modal-decision-support-rate-pct=*)
+      require_modal_decision_support_rate_pct="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -150,8 +177,8 @@ if [[ -z "$stability_summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'check\tscenario=%s\tfail_on_no_go=%s\tstability_summary_json=%s\tsummary_json=%s\n' \
-    "$scenario" "$fail_on_no_go" "$stability_summary_json" "$summary_json" >>"$capture_file"
+  printf 'check\tscenario=%s\tfail_on_no_go=%s\trequire_decision_consensus=%s\trequire_modal_decision=%s\trequire_modal_decision_support_rate_pct=%s\tstability_summary_json=%s\tsummary_json=%s\n' \
+    "$scenario" "$fail_on_no_go" "$require_decision_consensus" "$require_modal_decision" "$require_modal_decision_support_rate_pct" "$stability_summary_json" "$summary_json" >>"$capture_file"
 fi
 
 mkdir -p "$(dirname "$summary_json")"
@@ -215,6 +242,9 @@ bash "$SCRIPT_UNDER_TEST" \
   --runs 3 \
   --campaign-timeout-sec 1200 \
   --sleep-between-sec 0 \
+  --require-decision-consensus 1 \
+  --require-modal-decision GO \
+  --require-modal-decision-support-rate-pct 70 \
   --reports-dir "$TMP_DIR/happy_reports" \
   --summary-json "$HAPPY_SUMMARY" \
   --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_happy.log 2>&1
@@ -237,6 +267,9 @@ if ! jq -e '
   and .stages.check.status == "pass"
   and .check.decision == "GO"
   and .check.modal_recommended_profile == "balanced"
+  and .inputs.check.policy.require_decision_consensus == true
+  and .inputs.check.policy.require_modal_decision == "GO"
+  and .inputs.check.policy.require_modal_decision_support_rate_pct == 70
   and .artifacts.run_summary_json == .stages.run.summary_json
   and .artifacts.check_summary_json == .stages.check.summary_json
 ' "$HAPPY_SUMMARY" >/dev/null 2>&1; then
@@ -251,6 +284,11 @@ if ! grep -q '^run' "$FAKE_CAPTURE_FILE"; then
 fi
 if ! grep -q '^check' "$FAKE_CAPTURE_FILE"; then
   echo "expected fake check script invocation not captured"
+  cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+if ! grep -q $'check\t.*\trequire_decision_consensus=1\trequire_modal_decision=GO\trequire_modal_decision_support_rate_pct=70\t' "$FAKE_CAPTURE_FILE"; then
+  echo "expected check-stage policy forwarding not captured"
   cat "$FAKE_CAPTURE_FILE"
   exit 1
 fi

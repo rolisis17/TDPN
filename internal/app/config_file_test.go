@@ -142,13 +142,13 @@ func TestApplyConfigFileV1RespectsExistingEnv(t *testing.T) {
 
 func TestApplyConfigFileV1ProfileSelectionPolicyDefaults(t *testing.T) {
 	tests := []struct {
-		name                      string
-		simpleClientProfile       string
-		wantPathProfile           string
-		wantStickyPairSec         string
-		wantEntryRotationSec      string
-		wantEntryRotationJitter   string
-		wantExitExplorationPct    string
+		name                    string
+		simpleClientProfile     string
+		wantPathProfile         string
+		wantStickyPairSec       string
+		wantEntryRotationSec    string
+		wantEntryRotationJitter string
+		wantExitExplorationPct  string
 	}{
 		{
 			name:                    "balanced defaults to 2hop policy",
@@ -477,5 +477,50 @@ func TestNormalizeConfigV1PathProfileAliasContract(t *testing.T) {
 		if got := normalizeConfigV1PathProfile(tc.in); got != tc.want {
 			t.Fatalf("normalizeConfigV1PathProfile(%q)=%q want=%q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestApplyConfigFileV1RejectsInvalidPathProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "easy_mode_config_v1.conf")
+	if err := os.WriteFile(path, []byte(
+		"EASY_MODE_CONFIG_VERSION=1\n"+
+			"SIMPLE_CLIENT_PROFILE_DEFAULT=turbo\n",
+	), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("CLIENT_PATH_PROFILE", "")
+	t.Setenv("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE", "")
+
+	err := applyConfigFile(path)
+	if err == nil {
+		t.Fatalf("expected invalid SIMPLE_CLIENT_PROFILE_DEFAULT to fail closed")
+	}
+	if !strings.Contains(err.Error(), "SIMPLE_CLIENT_PROFILE_DEFAULT=\"turbo\" is invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("CLIENT_PATH_PROFILE"); got != "" {
+		t.Fatalf("CLIENT_PATH_PROFILE=%q want empty on failed config apply", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE=%q want empty on failed config apply", got)
+	}
+}
+
+func TestApplyConfigFileV1RejectsAmbiguousPathProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "easy_mode_config_v1.conf")
+	if err := os.WriteFile(path, []byte(
+		"EASY_MODE_CONFIG_VERSION=1\n"+
+			"SIMPLE_CLIENT_PROFILE_DEFAULT=speed,private\n",
+	), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	err := applyConfigFile(path)
+	if err == nil {
+		t.Fatalf("expected ambiguous SIMPLE_CLIENT_PROFILE_DEFAULT to fail closed")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -7,17 +7,14 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/profile_default_gate_stability_check.sh \
+  ./scripts/profile_compare_multi_vm_stability_check.sh \
     [--stability-summary-json PATH] \
     [--reports-dir DIR] \
     [--require-status-pass [0|1]] \
-    [--require-stability-ok [0|1]] \
-    [--require-selection-policy-present-all [0|1]] \
-    [--require-consistent-selection-policy [0|1]] \
-    [--require-decision-consensus [0|1]] \
     [--require-min-runs-requested N] \
     [--require-min-runs-completed N] \
     [--require-max-runs-fail N] \
+    [--require-decision-consensus [0|1]] \
     [--require-modal-decision GO|NO-GO] \
     [--require-modal-decision-support-rate-pct N] \
     [--require-recommended-profile PROFILE] \
@@ -29,8 +26,8 @@ Usage:
     [--print-summary-json [0|1]]
 
 Purpose:
-  Verify profile-default-gate stability summary artifacts and emit a
-  fail-closed GO/NO-GO decision for default-profile stability readiness.
+  Verify profile-compare multi-VM stability summary artifacts and emit a
+  fail-closed GO/NO-GO decision for stability readiness.
 USAGE
 }
 
@@ -127,26 +124,23 @@ need_cmd jq
 need_cmd date
 
 stability_summary_json=""
-reports_dir="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REPORTS_DIR:-${REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}}"
+reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REPORTS_DIR:-${REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}}"
 
-require_status_pass="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_STATUS_PASS:-${REQUIRE_STATUS_PASS:-1}}"
-require_stability_ok="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_STABILITY_OK:-${REQUIRE_STABILITY_OK:-1}}"
-require_selection_policy_present_all="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_SELECTION_POLICY_PRESENT_ALL:-${REQUIRE_SELECTION_POLICY_PRESENT_ALL:-1}}"
-require_consistent_selection_policy="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_CONSISTENT_SELECTION_POLICY:-${REQUIRE_CONSISTENT_SELECTION_POLICY:-1}}"
-require_decision_consensus="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS:-${REQUIRE_DECISION_CONSENSUS:-0}}"
-require_min_runs_requested="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
-require_min_runs_completed="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED:-${REQUIRE_MIN_RUNS_COMPLETED:-3}}"
-require_max_runs_fail="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL:-${REQUIRE_MAX_RUNS_FAIL:-0}}"
-require_modal_decision="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-}}"
-require_modal_decision_support_rate_pct="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-0}}"
-require_recommended_profile="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE:-${REQUIRE_RECOMMENDED_PROFILE:-}}"
-allow_recommended_profiles="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES:-${ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}}"
-require_modal_support_rate_pct="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_SUPPORT_RATE_PCT:-60}}"
-fail_on_no_go="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_FAIL_ON_NO_GO:-${FAIL_ON_NO_GO:-1}}"
+require_status_pass="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_STATUS_PASS:-${REQUIRE_STATUS_PASS:-1}}"
+require_min_runs_requested="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
+require_min_runs_completed="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED:-${REQUIRE_MIN_RUNS_COMPLETED:-3}}"
+require_max_runs_fail="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL:-${REQUIRE_MAX_RUNS_FAIL:-0}}"
+require_decision_consensus="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS:-${REQUIRE_DECISION_CONSENSUS:-0}}"
+require_modal_decision="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-}}"
+require_modal_decision_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-0}}"
+require_recommended_profile="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE:-${REQUIRE_RECOMMENDED_PROFILE:-}}"
+allow_recommended_profiles="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES:-${ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}}"
+require_modal_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_SUPPORT_RATE_PCT:-60}}"
+fail_on_no_go="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_FAIL_ON_NO_GO:-${FAIL_ON_NO_GO:-1}}"
 
-show_json="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_SHOW_JSON:-0}"
-print_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_PRINT_SUMMARY_JSON:-0}"
-summary_json="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_SUMMARY_JSON:-}"
+show_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SHOW_JSON:-0}"
+print_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_PRINT_SUMMARY_JSON:-0}"
+summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SUMMARY_JSON:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -181,58 +175,6 @@ while [[ $# -gt 0 ]]; do
       require_status_pass="${1#*=}"
       shift
       ;;
-    --require-stability-ok)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_stability_ok="${2:-}"
-        shift 2
-      else
-        require_stability_ok="1"
-        shift
-      fi
-      ;;
-    --require-stability-ok=*)
-      require_stability_ok="${1#*=}"
-      shift
-      ;;
-    --require-selection-policy-present-all)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_selection_policy_present_all="${2:-}"
-        shift 2
-      else
-        require_selection_policy_present_all="1"
-        shift
-      fi
-      ;;
-    --require-selection-policy-present-all=*)
-      require_selection_policy_present_all="${1#*=}"
-      shift
-      ;;
-    --require-consistent-selection-policy)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_consistent_selection_policy="${2:-}"
-        shift 2
-      else
-        require_consistent_selection_policy="1"
-        shift
-      fi
-      ;;
-    --require-consistent-selection-policy=*)
-      require_consistent_selection_policy="${1#*=}"
-      shift
-      ;;
-    --require-decision-consensus)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_decision_consensus="${2:-}"
-        shift 2
-      else
-        require_decision_consensus="1"
-        shift
-      fi
-      ;;
-    --require-decision-consensus=*)
-      require_decision_consensus="${1#*=}"
-      shift
-      ;;
     --require-min-runs-requested)
       require_value_or_die "$1" "$#"
       require_min_runs_requested="${2:-}"
@@ -258,6 +200,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --require-max-runs-fail=*)
       require_max_runs_fail="${1#*=}"
+      shift
+      ;;
+    --require-decision-consensus)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_decision_consensus="${2:-}"
+        shift 2
+      else
+        require_decision_consensus="1"
+        shift
+      fi
+      ;;
+    --require-decision-consensus=*)
+      require_decision_consensus="${1#*=}"
       shift
       ;;
     --require-modal-decision)
@@ -366,9 +321,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--require-status-pass" "$require_status_pass"
-bool_arg_or_die "--require-stability-ok" "$require_stability_ok"
-bool_arg_or_die "--require-selection-policy-present-all" "$require_selection_policy_present_all"
-bool_arg_or_die "--require-consistent-selection-policy" "$require_consistent_selection_policy"
 bool_arg_or_die "--require-decision-consensus" "$require_decision_consensus"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
@@ -394,7 +346,7 @@ reports_dir="$(abs_path "$reports_dir")"
 if [[ -n "$stability_summary_json" ]]; then
   stability_summary_json="$(abs_path "$stability_summary_json")"
 else
-  stability_summary_json="$reports_dir/profile_default_gate_stability_summary.json"
+  stability_summary_json="$reports_dir/profile_compare_multi_vm_stability_summary.json"
 fi
 
 if [[ -n "$require_recommended_profile" ]]; then
@@ -412,7 +364,7 @@ log_dir="${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
 mkdir -p "$log_dir"
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
 if [[ -z "$summary_json" ]]; then
-  summary_json="$log_dir/profile_default_gate_stability_check_${run_stamp}.json"
+  summary_json="$log_dir/profile_compare_multi_vm_stability_check_${run_stamp}.json"
 else
   summary_json="$(abs_path "$summary_json")"
 fi
@@ -424,53 +376,50 @@ summary_exists="0"
 schema_valid="0"
 if [[ -f "$stability_summary_json" ]]; then
   summary_exists="1"
-  if jq -e '.version == 1 and (.schema | type == "object") and (.schema.id == "profile_default_gate_stability_summary")' "$stability_summary_json" >/dev/null 2>&1; then
+  if jq -e '
+    .version == 1
+    and (.schema | type == "object")
+    and (
+      .schema.id == "profile_compare_multi_vm_stability_summary"
+      or .schema.id == "profile_compare_multi_vm_stability_run_summary"
+    )
+  ' "$stability_summary_json" >/dev/null 2>&1; then
     schema_valid="1"
   else
-    errors+=("stability summary schema.id must be profile_default_gate_stability_summary (path=$stability_summary_json)")
+    errors+=("stability summary schema.id must be profile_compare_multi_vm_stability_summary or profile_compare_multi_vm_stability_run_summary (path=$stability_summary_json)")
   fi
 else
   errors+=("stability summary JSON not found ($stability_summary_json)")
 fi
 
 observed_status=""
-observed_rc_json="null"
 observed_runs_requested_json="null"
 observed_runs_completed_json="null"
 observed_runs_fail_json="null"
-observed_stability_ok=""
-observed_selection_policy_present_all=""
-observed_consistent_selection_policy=""
 observed_recommended_profile_counts_json='{}'
 observed_recommended_profile_total_json="0"
 observed_modal_recommended_profile=""
 observed_modal_recommended_profile_count_json="0"
-observed_modal_support_rate_pct="0"
+observed_modal_support_rate_pct_json="0"
 observed_decision_counts_json='{}'
 observed_decision_total_json="0"
 observed_modal_decision=""
 observed_modal_decision_count_json="0"
-observed_modal_decision_support_rate_pct="0"
+observed_modal_decision_support_rate_pct_json="0"
 observed_decision_consensus=""
 
 if [[ "$schema_valid" == "1" ]]; then
-  observed_status="$(jq -r '.status // ""' "$stability_summary_json" 2>/dev/null || true)"
-
-  observed_rc_candidate="$(jq -r '
-    if (.rc | type) == "number" then .rc
-    elif (.rc | type) == "string" and (.rc | test("^-?[0-9]+$")) then (.rc | tonumber)
-    else ""
-    end
-  ' "$stability_summary_json" 2>/dev/null || true)"
-  if [[ -n "$observed_rc_candidate" ]]; then
-    observed_rc_json="$observed_rc_candidate"
-  fi
+  observed_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$stability_summary_json" 2>/dev/null || true)"
 
   observed_runs_requested_candidate="$(jq -r '
     if (.runs_requested | type) == "number" then .runs_requested
     elif (.runs_requested | type) == "string" and (.runs_requested | test("^[0-9]+$")) then (.runs_requested | tonumber)
+    elif (.counts.requested | type) == "number" then .counts.requested
+    elif (.counts.requested | type) == "string" and (.counts.requested | test("^[0-9]+$")) then (.counts.requested | tonumber)
     elif (.inputs.runs_requested | type) == "number" then .inputs.runs_requested
     elif (.inputs.runs_requested | type) == "string" and (.inputs.runs_requested | test("^[0-9]+$")) then (.inputs.runs_requested | tonumber)
+    elif (.inputs.runs | type) == "number" then .inputs.runs
+    elif (.inputs.runs | type) == "string" and (.inputs.runs | test("^[0-9]+$")) then (.inputs.runs | tonumber)
     else ""
     end
   ' "$stability_summary_json" 2>/dev/null || true)"
@@ -481,6 +430,8 @@ if [[ "$schema_valid" == "1" ]]; then
   observed_runs_completed_candidate="$(jq -r '
     if (.runs_completed | type) == "number" then .runs_completed
     elif (.runs_completed | type) == "string" and (.runs_completed | test("^[0-9]+$")) then (.runs_completed | tonumber)
+    elif (.counts.completed | type) == "number" then .counts.completed
+    elif (.counts.completed | type) == "string" and (.counts.completed | test("^[0-9]+$")) then (.counts.completed | tonumber)
     else ""
     end
   ' "$stability_summary_json" 2>/dev/null || true)"
@@ -491,36 +442,16 @@ if [[ "$schema_valid" == "1" ]]; then
   observed_runs_fail_candidate="$(jq -r '
     if (.runs_fail | type) == "number" then .runs_fail
     elif (.runs_fail | type) == "string" and (.runs_fail | test("^[0-9]+$")) then (.runs_fail | tonumber)
+    elif (.counts.fail | type) == "number" then .counts.fail
+    elif (.counts.fail | type) == "string" and (.counts.fail | test("^[0-9]+$")) then (.counts.fail | tonumber)
+    elif (.counts.runs_fail | type) == "number" then .counts.runs_fail
+    elif (.counts.runs_fail | type) == "string" and (.counts.runs_fail | test("^[0-9]+$")) then (.counts.runs_fail | tonumber)
     else ""
     end
   ' "$stability_summary_json" 2>/dev/null || true)"
   if [[ -n "$observed_runs_fail_candidate" ]]; then
     observed_runs_fail_json="$observed_runs_fail_candidate"
   fi
-
-  observed_stability_ok="$(jq -r '
-    if (.stability_ok | type) == "boolean" then
-      if .stability_ok then "true" else "false" end
-    else
-      ""
-    end
-  ' "$stability_summary_json" 2>/dev/null || true)"
-
-  observed_selection_policy_present_all="$(jq -r '
-    if (.selection_policy_present_all | type) == "boolean" then
-      if .selection_policy_present_all then "true" else "false" end
-    else
-      ""
-    end
-  ' "$stability_summary_json" 2>/dev/null || true)"
-
-  observed_consistent_selection_policy="$(jq -r '
-    if (.consistent_selection_policy | type) == "boolean" then
-      if .consistent_selection_policy then "true" else "false" end
-    else
-      ""
-    end
-  ' "$stability_summary_json" 2>/dev/null || true)"
 
   observed_recommended_profile_counts_json="$(jq -c '
     def normalize_profile:
@@ -534,9 +465,7 @@ if [[ "$schema_valid" == "1" ]]; then
         elif . == "speed1hop" or . == "onehop" or . == "1hop" or . == "1-hop" or . == "hop1" or . == "hop-1" or . == "fast-1hop" or . == "fast1hop" then "speed-1hop"
         else .
         end;
-    if (.recommended_profile_counts | type) != "object" then
-      {}
-    else
+    if (.recommended_profile_counts | type) == "object" then
       reduce (.recommended_profile_counts | to_entries[]) as $entry
         ({};
           ($entry.key | tostring | normalize_profile) as $k
@@ -545,19 +474,47 @@ if [[ "$schema_valid" == "1" ]]; then
                elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
                else null
                end) as $v
-          | if ($k | length) == 0 or $v == null or $v < 0 then
-              .
-            else
-              .[$k] = ((.[$k] // 0) + $v)
+          | if ($k | length) == 0 or $v == null or $v < 0 then .
+            else .[$k] = ((.[$k] // 0) + $v)
             end
         )
+    elif (.histograms.recommended_profile_counts | type) == "object" then
+      reduce (.histograms.recommended_profile_counts | to_entries[]) as $entry
+        ({};
+          ($entry.key | tostring | normalize_profile) as $k
+          | ($entry.value
+             | if type == "number" then .
+               elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+               else null
+               end) as $v
+          | if ($k | length) == 0 or $v == null or $v < 0 then .
+            else .[$k] = ((.[$k] // 0) + $v)
+            end
+        )
+    elif (.runs | type) == "array" then
+      [ .runs[]
+        | select(.completed == true)
+        | if (.recommended_profile | type) == "string"
+          then .recommended_profile
+          else (.decision.recommended_profile // empty)
+          end
+        | strings
+        | gsub("^\\s+|\\s+$"; "")
+        | select(length > 0)
+        | normalize_profile
+      ]
+      | group_by(.)
+      | map({ (.[0]): length })
+      | add // {}
+    else
+      {}
     end
   ' "$stability_summary_json" 2>/dev/null || printf '{}')"
 
   observed_recommended_profile_total_json="$(jq -r '[.[]] | add // 0' <<<"$observed_recommended_profile_counts_json")"
   observed_modal_recommended_profile="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$observed_recommended_profile_counts_json")"
   observed_modal_recommended_profile_count_json="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$observed_recommended_profile_counts_json")"
-  observed_modal_support_rate_pct="$(jq -n \
+  observed_modal_support_rate_pct_json="$(jq -n \
     --argjson total "$observed_recommended_profile_total_json" \
     --argjson modal "$observed_modal_recommended_profile_count_json" \
     'if $total > 0 then (($modal * 100) / $total) else 0 end')"
@@ -570,15 +527,28 @@ if [[ "$schema_valid" == "1" ]]; then
         elif . == "NO-GO" or . == "NOGO" or . == "NO_GO" then "NO-GO"
         else .
         end;
-    def parse_count:
-      if type == "number" then .
-      elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
-      else null
-      end;
     if (.decision_counts | type) == "object" then
       reduce (.decision_counts | to_entries[]) as $entry
-        ({}; ($entry.key | tostring | normalize_decision) as $k
-          | ($entry.value | parse_count) as $v
+        ({};
+          ($entry.key | tostring | normalize_decision) as $k
+          | ($entry.value
+             | if type == "number" then .
+               elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+               else null
+               end) as $v
+          | if ($k | length) == 0 or $v == null or $v < 0 then .
+            else .[$k] = ((.[$k] // 0) + $v)
+            end
+        )
+    elif (.histograms.decision_counts | type) == "object" then
+      reduce (.histograms.decision_counts | to_entries[]) as $entry
+        ({};
+          ($entry.key | tostring | normalize_decision) as $k
+          | ($entry.value
+             | if type == "number" then .
+               elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+               else null
+               end) as $v
           | if ($k | length) == 0 or $v == null or $v < 0 then .
             else .[$k] = ((.[$k] // 0) + $v)
             end
@@ -586,7 +556,7 @@ if [[ "$schema_valid" == "1" ]]; then
     elif (.runs | type) == "array" then
       [ .runs[]
         | select(.completed == true)
-        | .decision.decision // empty
+        | if (.decision | type) == "string" then .decision else (.decision.decision // empty) end
         | strings
         | gsub("^\\s+|\\s+$"; "")
         | select(length > 0)
@@ -603,7 +573,7 @@ if [[ "$schema_valid" == "1" ]]; then
   observed_decision_total_json="$(jq -r '[.[]] | add // 0' <<<"$observed_decision_counts_json")"
   observed_modal_decision="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$observed_decision_counts_json")"
   observed_modal_decision_count_json="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$observed_decision_counts_json")"
-  observed_modal_decision_support_rate_pct="$(jq -n \
+  observed_modal_decision_support_rate_pct_json="$(jq -n \
     --argjson total "$observed_decision_total_json" \
     --argjson modal "$observed_modal_decision_count_json" \
     'if $total > 0 then (($modal * 100) / $total) else 0 end')"
@@ -616,48 +586,54 @@ if [[ "$schema_valid" == "1" ]]; then
         elif . == "NO-GO" or . == "NOGO" or . == "NO_GO" then "NO-GO"
         else .
         end;
-    def runs_completed_count:
-      if (.runs_completed | type) == "number" then .runs_completed
-      elif (.runs_completed | type) == "string" and (.runs_completed | test("^[0-9]+$")) then (.runs_completed | tonumber)
-      elif (.runs | type) == "array" then ([.runs[] | select(.completed == true)] | length)
-      else null
-      end;
-    def decision_counts:
-      if (.decision_counts | type) == "object" then
-        reduce (.decision_counts | to_entries[]) as $entry
-          ({}; ($entry.key | tostring | normalize_decision) as $k
-            | ($entry.value
-               | if type == "number" then .
-                 elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
-                 else null
-                 end) as $v
-            | if ($k | length) == 0 or $v == null or $v < 0 then .
-              else .[$k] = ((.[$k] // 0) + $v)
-              end
-          )
-      elif (.runs | type) == "array" then
-        [ .runs[]
-          | select(.completed == true)
-          | .decision.decision // empty
-          | strings
-          | gsub("^\\s+|\\s+$"; "")
-          | select(length > 0)
-          | normalize_decision
-        ]
-        | group_by(.)
-        | map({ (.[0]): length })
-        | add // {}
-      else
-        {}
-      end;
     if (.decision_consensus | type) == "boolean" then
       if .decision_consensus then "true" else "false" end
     else
-      (runs_completed_count) as $completed
-      | (decision_counts) as $counts
+      (
+        if (.decision_counts | type) == "object" then
+          reduce (.decision_counts | to_entries[]) as $entry
+            ({};
+              ($entry.key | tostring | normalize_decision) as $k
+              | ($entry.value
+                 | if type == "number" then .
+                   elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+                   else null
+                   end) as $v
+              | if ($k | length) == 0 or $v == null or $v < 0 then .
+                else .[$k] = ((.[$k] // 0) + $v)
+                end
+            )
+        elif (.histograms.decision_counts | type) == "object" then
+          reduce (.histograms.decision_counts | to_entries[]) as $entry
+            ({};
+              ($entry.key | tostring | normalize_decision) as $k
+              | ($entry.value
+                 | if type == "number" then .
+                   elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+                   else null
+                   end) as $v
+              | if ($k | length) == 0 or $v == null or $v < 0 then .
+                else .[$k] = ((.[$k] // 0) + $v)
+                end
+            )
+        elif (.runs | type) == "array" then
+          [ .runs[]
+            | select(.completed == true)
+            | if (.decision | type) == "string" then .decision else (.decision.decision // empty) end
+            | strings
+            | gsub("^\\s+|\\s+$"; "")
+            | select(length > 0)
+            | normalize_decision
+          ]
+          | group_by(.)
+          | map({ (.[0]): length })
+          | add // {}
+        else
+          {}
+        end
+      ) as $counts
       | ([$counts[]] | add // 0) as $total
-      | if $completed == null or $completed == 0 then ""
-        elif $total != $completed then "false"
+      | if $total == 0 then ""
         elif (($counts | keys | length) == 1) then "true"
         else "false"
         end
@@ -668,22 +644,6 @@ fi
 if [[ "$schema_valid" == "1" ]]; then
   if [[ "$require_status_pass" == "1" ]] && [[ "$observed_status" != "pass" ]]; then
     errors+=("stability status must be pass (actual=${observed_status:-unset})")
-  fi
-
-  if [[ "$require_stability_ok" == "1" && "$observed_stability_ok" != "true" ]]; then
-    errors+=("stability_ok must be true (actual=${observed_stability_ok:-unset})")
-  fi
-
-  if [[ "$require_selection_policy_present_all" == "1" && "$observed_selection_policy_present_all" != "true" ]]; then
-    errors+=("selection_policy_present_all must be true (actual=${observed_selection_policy_present_all:-unset})")
-  fi
-
-  if [[ "$require_consistent_selection_policy" == "1" && "$observed_consistent_selection_policy" != "true" ]]; then
-    errors+=("consistent_selection_policy must be true (actual=${observed_consistent_selection_policy:-unset})")
-  fi
-
-  if [[ "$require_decision_consensus" == "1" && "$observed_decision_consensus" != "true" ]]; then
-    errors+=("decision_consensus must be true (actual=${observed_decision_consensus:-unset})")
   fi
 
   if [[ "$observed_runs_requested_json" == "null" ]]; then
@@ -704,6 +664,10 @@ if [[ "$schema_valid" == "1" ]]; then
     errors+=("runs_fail exceeds allowed maximum (actual=$observed_runs_fail_json max=$require_max_runs_fail)")
   fi
 
+  if [[ "$require_decision_consensus" == "1" && "$observed_decision_consensus" != "true" ]]; then
+    errors+=("decision_consensus must be true (actual=${observed_decision_consensus:-unset})")
+  fi
+
   if [[ -z "$observed_modal_recommended_profile" ]]; then
     errors+=("modal recommended profile is empty")
   fi
@@ -718,8 +682,8 @@ if [[ "$schema_valid" == "1" ]]; then
     fi
   fi
 
-  if awk -v observed="$observed_modal_support_rate_pct" -v min_required="$require_modal_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
-    errors+=("modal support rate below threshold (actual=${observed_modal_support_rate_pct}% required=${require_modal_support_rate_pct}%)")
+  if awk -v observed="$observed_modal_support_rate_pct_json" -v min_required="$require_modal_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
+    errors+=("modal support rate below threshold (actual=${observed_modal_support_rate_pct_json}% required=${require_modal_support_rate_pct}%)")
   fi
 
   if [[ -n "$require_modal_decision" ]]; then
@@ -730,18 +694,18 @@ if [[ "$schema_valid" == "1" ]]; then
     fi
   fi
 
-  if awk -v observed="$observed_modal_decision_support_rate_pct" -v min_required="$require_modal_decision_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
-    errors+=("modal decision support rate below threshold (actual=${observed_modal_decision_support_rate_pct}% required=${require_modal_decision_support_rate_pct}%)")
+  if awk -v observed="$observed_modal_decision_support_rate_pct_json" -v min_required="$require_modal_decision_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
+    errors+=("modal decision support rate below threshold (actual=${observed_modal_decision_support_rate_pct_json}% required=${require_modal_decision_support_rate_pct}%)")
   fi
 fi
 
 decision="GO"
 status="ok"
-notes="profile-default gate stability summary passes configured policy"
+notes="multi-VM stability summary passes configured policy"
 if ((${#errors[@]} > 0)); then
   decision="NO-GO"
   status="fail"
-  notes="profile-default gate stability summary violates one or more policy checks"
+  notes="multi-VM stability summary violates one or more policy checks"
 fi
 
 rc=0
@@ -763,32 +727,25 @@ jq -n \
   --argjson stability_summary_exists "$summary_exists" \
   --argjson stability_summary_schema_valid "$schema_valid" \
   --arg observed_status "$observed_status" \
-  --argjson observed_rc "$observed_rc_json" \
   --argjson observed_runs_requested "$observed_runs_requested_json" \
   --argjson observed_runs_completed "$observed_runs_completed_json" \
   --argjson observed_runs_fail "$observed_runs_fail_json" \
-  --arg observed_stability_ok "$observed_stability_ok" \
-  --arg observed_selection_policy_present_all "$observed_selection_policy_present_all" \
-  --arg observed_consistent_selection_policy "$observed_consistent_selection_policy" \
   --argjson observed_recommended_profile_counts "$observed_recommended_profile_counts_json" \
   --arg observed_modal_recommended_profile "$observed_modal_recommended_profile" \
   --argjson observed_modal_recommended_profile_count "$observed_modal_recommended_profile_count_json" \
   --argjson observed_recommended_profile_total "$observed_recommended_profile_total_json" \
-  --argjson observed_modal_support_rate_pct "$observed_modal_support_rate_pct" \
+  --argjson observed_modal_support_rate_pct "$observed_modal_support_rate_pct_json" \
   --argjson observed_decision_counts "$observed_decision_counts_json" \
   --argjson observed_decision_total "$observed_decision_total_json" \
   --arg observed_modal_decision "$observed_modal_decision" \
   --argjson observed_modal_decision_count "$observed_modal_decision_count_json" \
-  --argjson observed_modal_decision_support_rate_pct "$observed_modal_decision_support_rate_pct" \
+  --argjson observed_modal_decision_support_rate_pct "$observed_modal_decision_support_rate_pct_json" \
   --arg observed_decision_consensus "$observed_decision_consensus" \
   --argjson require_status_pass "$require_status_pass" \
-  --argjson require_stability_ok "$require_stability_ok" \
-  --argjson require_selection_policy_present_all "$require_selection_policy_present_all" \
-  --argjson require_consistent_selection_policy "$require_consistent_selection_policy" \
-  --argjson require_decision_consensus "$require_decision_consensus" \
   --argjson require_min_runs_requested "$require_min_runs_requested" \
   --argjson require_min_runs_completed "$require_min_runs_completed" \
   --argjson require_max_runs_fail "$require_max_runs_fail" \
+  --argjson require_decision_consensus "$require_decision_consensus" \
   --arg require_modal_decision "$require_modal_decision" \
   --argjson require_modal_decision_support_rate_pct "$require_modal_decision_support_rate_pct" \
   --arg require_recommended_profile "$require_recommended_profile" \
@@ -800,6 +757,9 @@ jq -n \
   --arg summary_json "$summary_json" \
   '{
     version: 1,
+    schema: {
+      id: "profile_compare_multi_vm_stability_check_summary"
+    },
     generated_at_utc: $generated_at_utc,
     decision: $decision,
     status: $status,
@@ -809,21 +769,26 @@ jq -n \
       stability_summary_json: $stability_summary_json,
       policy: {
         require_status_pass: ($require_status_pass == 1),
-        require_stability_ok: ($require_stability_ok == 1),
-        require_selection_policy_present_all: ($require_selection_policy_present_all == 1),
-        require_consistent_selection_policy: ($require_consistent_selection_policy == 1),
-        require_decision_consensus: ($require_decision_consensus == 1),
         require_min_runs_requested: $require_min_runs_requested,
         require_min_runs_completed: $require_min_runs_completed,
         require_max_runs_fail: $require_max_runs_fail,
+        require_decision_consensus: ($require_decision_consensus == 1),
         require_modal_decision: (
           if $require_modal_decision == "" then null
           else $require_modal_decision
           end
         ),
         require_modal_decision_support_rate_pct: $require_modal_decision_support_rate_pct,
-        require_recommended_profile: $require_recommended_profile,
-        allow_recommended_profiles: $allow_recommended_profiles,
+        require_recommended_profile: (
+          if $require_recommended_profile == "" then null
+          else $require_recommended_profile
+          end
+        ),
+        allow_recommended_profiles: (
+          if $allow_recommended_profiles == "" then null
+          else $allow_recommended_profiles
+          end
+        ),
         require_modal_support_rate_pct: $require_modal_support_rate_pct,
         fail_on_no_go: ($fail_on_no_go == 1)
       }
@@ -832,28 +797,9 @@ jq -n \
       stability_summary_exists: ($stability_summary_exists == 1),
       stability_summary_schema_valid: ($stability_summary_schema_valid == 1),
       status: (if $observed_status == "" then null else $observed_status end),
-      rc: $observed_rc,
       runs_requested: $observed_runs_requested,
       runs_completed: $observed_runs_completed,
       runs_fail: $observed_runs_fail,
-      stability_ok: (
-        if $observed_stability_ok == "true" then true
-        elif $observed_stability_ok == "false" then false
-        else null
-        end
-      ),
-      selection_policy_present_all: (
-        if $observed_selection_policy_present_all == "true" then true
-        elif $observed_selection_policy_present_all == "false" then false
-        else null
-        end
-      ),
-      consistent_selection_policy: (
-        if $observed_consistent_selection_policy == "true" then true
-        elif $observed_consistent_selection_policy == "false" then false
-        else null
-        end
-      ),
       recommended_profile_counts: $observed_recommended_profile_counts,
       recommended_profile_counts_total: $observed_recommended_profile_total,
       modal_recommended_profile: (
@@ -885,9 +831,9 @@ jq -n \
     }
   }' >"$summary_json"
 
-echo "[profile-default-gate-stability-check] decision=$decision status=$status rc=$rc modal_profile=${observed_modal_recommended_profile:-unset} modal_support_rate_pct=${observed_modal_support_rate_pct} modal_decision=${observed_modal_decision:-unset} modal_decision_support_rate_pct=${observed_modal_decision_support_rate_pct}"
+echo "[profile-compare-multi-vm-stability-check] decision=$decision status=$status rc=$rc modal_profile=${observed_modal_recommended_profile:-unset} modal_support_rate_pct=${observed_modal_support_rate_pct_json} modal_decision=${observed_modal_decision:-unset} modal_decision_support_rate_pct=${observed_modal_decision_support_rate_pct_json}"
 if ((${#errors[@]} > 0)); then
-  echo "[profile-default-gate-stability-check] failed with ${#errors[@]} issue(s):"
+  echo "[profile-compare-multi-vm-stability-check] failed with ${#errors[@]} issue(s):"
   idx=1
   for err in "${errors[@]}"; do
     echo "  $idx. $err"
@@ -896,7 +842,7 @@ if ((${#errors[@]} > 0)); then
 fi
 
 if [[ "$show_json" == "1" ]]; then
-  echo "[profile-default-gate-stability-check] summary_json_payload:"
+  echo "[profile-compare-multi-vm-stability-check] summary_json_payload:"
   cat "$summary_json"
 fi
 if [[ "$print_summary_json" == "1" ]]; then

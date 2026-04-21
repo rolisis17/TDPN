@@ -15,11 +15,12 @@ Usage:
     [--endpoint-wait-timeout-sec N] \
     [--endpoint-wait-interval-sec N] \
     [--endpoint-connect-timeout-sec N] \
+    [--allow-remote-http-probe [0|1]] \
     [--allow-insecure-probe [0|1]] \
     [--heartbeat-interval-sec N] \
     [--require-selection-policy-present [0|1]] \
     [--require-selection-policy-valid [0|1]] \
-    [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY] \
+    [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY | --campaign-anon-cred ANON_CRED | --anon-cred ANON_CRED] \
     [profile-compare-campaign-signoff args...]
 
 Purpose:
@@ -30,12 +31,17 @@ Notes:
   - --host-a/--host-b are aliases for --directory-a/--directory-b.
   - --directory-a/--directory-b accept hostnames, host:port, or full http(s) URLs.
   - Host-style inputs are normalized to http://HOST:PORT (default port 8081).
+  - Remote HTTP endpoint probes fail closed by default.
+    Pass --allow-remote-http-probe 1 only when remote HTTP probing is
+    intentionally required.
   - TLS verification is on by default for endpoint probes; pass
     --allow-insecure-probe 1 only for local self-signed setups.
-  - This helper requires invite-key subject mode; passthrough anon-cred flags
-    (--campaign-anon-cred/--anon-cred) are rejected.
+  - Auth mode supports either invite-key subject flags
+    (--campaign-subject/--subject/--key/--invite-key) or anon credential
+    pass-through flags (--campaign-anon-cred/--anon-cred).
+  - Subject flags and anon-cred flags are mutually exclusive.
   - --key/--invite-key are aliases for --subject.
-  - Subject fallback order when CLI subject is omitted:
+  - Subject fallback order applies when anon-cred flags are absent:
     CAMPAIGN_SUBJECT env, INVITE_KEY env, CAMPAIGN_SUBJECT file, INVITE_KEY file.
   - Env-file fallback default: $ROOT_DIR/deploy/.env.easy.client
     (override via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE).
@@ -169,7 +175,7 @@ host_resolves_to_loopback_only_01() {
   local normalized host_ips ip resolved_any
   normalized="$(normalize_host_for_compare_01 "${1:-}")"
   case "$normalized" in
-    ""|localhost|ip6-localhost|::1|127.*)
+    localhost|ip6-localhost|::1|127.*)
       return 0
       ;;
     ::|0.0.0.0)
@@ -228,6 +234,10 @@ extract_url_host_01() {
   fi
   remainder="${url#*://}"
   remainder="${remainder%%/*}"
+  if [[ -z "$remainder" ]]; then
+    printf '%s' ""
+    return
+  fi
   host_port="${remainder##*@}"
   printf '%s' "$(extract_host_from_hostport_01 "$host_port")"
 }
@@ -303,13 +313,33 @@ abs_path() {
   fi
 }
 
-require_value_or_die() {
-  local flag="$1"
-  local argc="$2"
-  if (( argc < 2 )); then
-    echo "$flag requires a value"
+require_non_flag_value_or_die() {
+  local error_message="$1"
+  local value
+  value="$(trim "${2:-}")"
+  if [[ -z "$value" || "$value" == --* ]]; then
+    echo "$error_message"
     exit 2
   fi
+}
+
+require_value_or_die() {
+  local flag="$1"
+  require_non_flag_value_or_die "$flag requires a value" "${3:-}"
+}
+
+require_passthrough_credential_value_or_die() {
+  local flag="$1"
+  require_non_flag_value_or_die \
+    "profile-default-gate-run failed: $flag in signoff passthrough requires a non-flag value" \
+    "${2:-}"
+}
+
+require_credential_value_or_die() {
+  local flag="$1"
+  require_non_flag_value_or_die \
+    "profile-default-gate-run failed: $flag requires a non-flag value" \
+    "${2:-}"
 }
 
 int_arg_or_die() {
@@ -372,6 +402,108 @@ extract_flag_value() {
   printf '%s' "$value"
 }
 
+parse_and_strip_passthrough_subject_flags() {
+  local -a args=("$@")
+  local -a passthrough_without_subject=()
+  local idx=0
+  local arg value subject_flag
+  local passthrough_campaign_subject=""
+  local passthrough_subject_alias=""
+  local passthrough_subject_alias_flag=""
+
+  subject_flags_in_passthrough=false
+  campaign_subject_passthrough_effective=""
+  campaign_subject_passthrough_source=""
+
+  while (( idx < ${#args[@]} )); do
+    arg="${args[$idx]}"
+    case "$arg" in
+      --campaign-subject)
+        value="${args[$((idx + 1))]:-}"
+        require_passthrough_credential_value_or_die "--campaign-subject" "$value"
+        value="$(trim "$value")"
+        passthrough_campaign_subject="$value"
+        campaign_subject_passthrough_source="passthrough:--campaign-subject"
+        subject_flags_in_passthrough=true
+        idx=$((idx + 2))
+        ;;
+      --campaign-subject=*)
+        value="${arg#--campaign-subject=}"
+        require_passthrough_credential_value_or_die "--campaign-subject" "$value"
+        value="$(trim "$value")"
+        passthrough_campaign_subject="$value"
+        campaign_subject_passthrough_source="passthrough:--campaign-subject"
+        subject_flags_in_passthrough=true
+        idx=$((idx + 1))
+        ;;
+      --subject|--key|--invite-key)
+        subject_flag="$arg"
+        value="${args[$((idx + 1))]:-}"
+        require_passthrough_credential_value_or_die "$subject_flag" "$value"
+        value="$(trim "$value")"
+        if [[ -z "$passthrough_subject_alias_flag" ]]; then
+          passthrough_subject_alias="$value"
+          passthrough_subject_alias_flag="$subject_flag"
+        elif [[ "$passthrough_subject_alias" != "$value" ]]; then
+          echo "conflicting subject values in signoff passthrough: $passthrough_subject_alias_flag and $subject_flag must match when both are provided"
+          exit 2
+        fi
+        subject_flags_in_passthrough=true
+        idx=$((idx + 2))
+        ;;
+      --subject=*|--key=*|--invite-key=*)
+        case "$arg" in
+          --subject=*)
+            subject_flag="--subject"
+            value="${arg#--subject=}"
+            ;;
+          --key=*)
+            subject_flag="--key"
+            value="${arg#--key=}"
+            ;;
+          --invite-key=*)
+            subject_flag="--invite-key"
+            value="${arg#--invite-key=}"
+            ;;
+        esac
+        require_passthrough_credential_value_or_die "$subject_flag" "$value"
+        value="$(trim "$value")"
+        if [[ -z "$passthrough_subject_alias_flag" ]]; then
+          passthrough_subject_alias="$value"
+          passthrough_subject_alias_flag="$subject_flag"
+        elif [[ "$passthrough_subject_alias" != "$value" ]]; then
+          echo "conflicting subject values in signoff passthrough: $passthrough_subject_alias_flag and $subject_flag must match when both are provided"
+          exit 2
+        fi
+        subject_flags_in_passthrough=true
+        idx=$((idx + 1))
+        ;;
+      *)
+        passthrough_without_subject+=("$arg")
+        idx=$((idx + 1))
+        ;;
+    esac
+  done
+
+  if [[ -n "$passthrough_subject_alias" && -n "$passthrough_campaign_subject" && "$passthrough_subject_alias" != "$passthrough_campaign_subject" ]]; then
+    if [[ "$passthrough_subject_alias_flag" == "--subject" ]]; then
+      echo "conflicting subject values in signoff passthrough: --subject and --campaign-subject must match when both are provided"
+    else
+      echo "conflicting subject values in signoff passthrough: $passthrough_subject_alias_flag and --campaign-subject must match when both are provided"
+    fi
+    exit 2
+  fi
+
+  if [[ -n "$passthrough_subject_alias" ]]; then
+    campaign_subject_passthrough_effective="$passthrough_subject_alias"
+    campaign_subject_passthrough_source="passthrough:$passthrough_subject_alias_flag"
+  elif [[ -n "$passthrough_campaign_subject" ]]; then
+    campaign_subject_passthrough_effective="$passthrough_campaign_subject"
+  fi
+
+  signoff_passthrough=("${passthrough_without_subject[@]}")
+}
+
 normalize_directory_url() {
   local label="$1"
   local raw_value="$2"
@@ -429,6 +561,24 @@ split_csv_trim() {
   done
 }
 
+sanitize_csv_urls_for_log_01() {
+  local csv="$1"
+  local -a parts=()
+  local item sanitized=""
+  while IFS= read -r item; do
+    parts+=("$(sanitize_url_for_log_01 "$item")")
+  done < <(split_csv_trim "$csv")
+  if (( ${#parts[@]} == 0 )); then
+    printf '%s' ""
+    return
+  fi
+  local old_ifs="$IFS"
+  IFS=,
+  sanitized="${parts[*]}"
+  IFS="$old_ifs"
+  printf '%s' "$sanitized"
+}
+
 probe_url_for_directory() {
   local url="$1"
   if [[ "$url" =~ ^https?://[^/]+$ ]]; then
@@ -440,31 +590,61 @@ probe_url_for_directory() {
   fi
 }
 
+sanitize_url_for_log_01() {
+  local raw scheme remainder
+  raw="$(trim "${1:-}")"
+  if [[ -z "$raw" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$raw" != *"://"* ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  scheme="${raw%%://*}"
+  remainder="${raw#*://}"
+  remainder="${remainder%%\#*}"
+  remainder="${remainder%%\?*}"
+  if [[ "$remainder" == *@* ]]; then
+    remainder="${remainder#*@}"
+  fi
+  printf '%s' "${scheme}://${remainder}"
+}
+
 wait_for_directory_endpoint() {
   local label="$1"
   local directory_url="$2"
   local probe_url start_epoch deadline_epoch now_epoch attempt rc remaining_sec
-  local elapsed_sec attempt_start_epoch probe_host probe_scheme
+  local probe_url_log elapsed_sec attempt_start_epoch probe_host probe_scheme
   local err_file err_text
 
   probe_url="$(probe_url_for_directory "$directory_url")"
+  probe_url_log="$(sanitize_url_for_log_01 "$probe_url")"
   probe_host="$(extract_url_host_01 "$probe_url")"
   probe_scheme="$(extract_url_scheme_01 "$probe_url")"
-  if [[ "$probe_scheme" == "http" ]] && ! is_local_host_for_probe_01 "$probe_host"; then
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url error=remote_http_disallowed"
-    echo "profile-default-gate-run failed: remote HTTP probe endpoint requires HTTPS ($label) url=$probe_url"
+  if [[ "$probe_scheme" == "http" || "$probe_scheme" == "https" ]]; then
+    if [[ -z "$probe_host" ]]; then
+      echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url_log error=invalid_endpoint_url_missing_host"
+      echo "profile-default-gate-run failed: invalid endpoint URL missing host ($label) url=$probe_url_log"
+      return 2
+    fi
+  fi
+  if [[ "$probe_scheme" == "http" ]] && ! is_local_host_for_probe_01 "$probe_host" && [[ "$allow_remote_http_probe" != "1" ]]; then
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url_log error=remote_http_disallowed"
+    echo "profile-default-gate-run failed: remote HTTP probe endpoint is disallowed by default ($label) url=$probe_url_log"
+    echo "pass --allow-remote-http-probe 1 to explicitly allow remote HTTP probe endpoints"
     return 2
   fi
   if [[ "$allow_insecure_probe" == "1" ]] && ! is_local_host_for_probe_01 "$probe_host"; then
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url error=insecure_probe_remote_disallowed"
-    echo "profile-default-gate-run failed: --allow-insecure-probe=1 is only allowed for local endpoints ($label) url=$probe_url"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url_log error=insecure_probe_remote_disallowed"
+    echo "profile-default-gate-run failed: --allow-insecure-probe=1 is only allowed for local endpoints ($label) url=$probe_url_log"
     return 2
   fi
   start_epoch="$(date +%s)"
   deadline_epoch=$((start_epoch + endpoint_wait_timeout_sec))
   attempt=0
 
-  echo "[profile-default-gate-run] $(timestamp_utc) wait-start label=$label url=$probe_url timeout_sec=$endpoint_wait_timeout_sec interval_sec=$endpoint_wait_interval_sec connect_timeout_sec=$endpoint_connect_timeout_sec"
+  echo "[profile-default-gate-run] $(timestamp_utc) wait-start label=$label url=$probe_url_log timeout_sec=$endpoint_wait_timeout_sec interval_sec=$endpoint_wait_interval_sec connect_timeout_sec=$endpoint_connect_timeout_sec"
 
   while true; do
     attempt=$((attempt + 1))
@@ -478,7 +658,7 @@ wait_for_directory_endpoint() {
         remaining_sec=0
       fi
     fi
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-attempt label=$label phase=probe-start url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-attempt label=$label phase=probe-start url=$probe_url_log attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec"
     err_file="$(mktemp)"
     local -a curl_opts=(--silent --show-error --fail --noproxy '*' --connect-timeout "$endpoint_connect_timeout_sec" --max-time "$endpoint_connect_timeout_sec" --output /dev/null)
     if [[ "$allow_insecure_probe" == "1" ]]; then
@@ -486,7 +666,7 @@ wait_for_directory_endpoint() {
     fi
     if curl "${curl_opts[@]}" "$probe_url" > /dev/null 2>"$err_file"; then
       rm -f "$err_file"
-      echo "[profile-default-gate-run] $(timestamp_utc) wait-pass label=$label url=$probe_url attempt=$attempt"
+      echo "[profile-default-gate-run] $(timestamp_utc) wait-pass label=$label url=$probe_url_log attempt=$attempt"
       return 0
     fi
 
@@ -502,11 +682,11 @@ wait_for_directory_endpoint() {
     now_epoch="$(date +%s)"
     elapsed_sec=$((now_epoch - start_epoch))
     if (( endpoint_wait_timeout_sec > 0 && now_epoch >= deadline_epoch )); then
-      echo "[profile-default-gate-run] $(timestamp_utc) wait-timeout label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec error=$err_text"
-      echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=unreachable_directory_endpoint label=$label url=$probe_url"
-      echo "profile-default-gate-run failed: unreachable directory endpoint ($label) url=$probe_url timeout_sec=$endpoint_wait_timeout_sec"
+      echo "[profile-default-gate-run] $(timestamp_utc) wait-timeout label=$label url=$probe_url_log attempt=$attempt elapsed_sec=$elapsed_sec error=$err_text"
+      echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=unreachable_directory_endpoint label=$label url=$probe_url_log"
+      echo "profile-default-gate-run failed: unreachable directory endpoint ($label) url=$probe_url_log timeout_sec=$endpoint_wait_timeout_sec"
       echo "last_error: $err_text"
-      echo "hint: verify endpoint path and host reachability for $probe_url"
+      echo "hint: verify endpoint path and host reachability for $probe_url_log"
       echo "hint: confirm service is listening on expected host:port and serving /v1/pubkeys"
       echo "hint: if startup is slow, increase --endpoint-wait-timeout-sec (current=$endpoint_wait_timeout_sec)"
       echo "hint: if network handshakes are slow, increase --endpoint-connect-timeout-sec (current=$endpoint_connect_timeout_sec)"
@@ -521,8 +701,8 @@ wait_for_directory_endpoint() {
         remaining_sec=0
       fi
     fi
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-retry label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec error=$err_text"
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-next label=$label url=$probe_url next_attempt=$((attempt + 1)) sleep_sec=$endpoint_wait_interval_sec"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-retry label=$label url=$probe_url_log attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec error=$err_text"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-next label=$label url=$probe_url_log next_attempt=$((attempt + 1)) sleep_sec=$endpoint_wait_interval_sec"
     sleep "$endpoint_wait_interval_sec"
   done
 }
@@ -535,6 +715,7 @@ directory_b_port="${PROFILE_DEFAULT_GATE_DIRECTORY_B_PORT:-8081}"
 endpoint_wait_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_TIMEOUT_SEC:-45}"
 endpoint_wait_interval_sec="${PROFILE_DEFAULT_GATE_WAIT_INTERVAL_SEC:-2}"
 endpoint_connect_timeout_sec="${PROFILE_DEFAULT_GATE_WAIT_CONNECT_TIMEOUT_SEC:-3}"
+allow_remote_http_probe="${PROFILE_DEFAULT_GATE_RUN_ALLOW_REMOTE_HTTP_PROBE:-0}"
 allow_insecure_probe="${PROFILE_DEFAULT_GATE_RUN_ALLOW_INSECURE_PROBE:-0}"
 env_client_file="${PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE:-$ROOT_DIR/deploy/.env.easy.client}"
 campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-2400}"
@@ -553,51 +734,100 @@ declare -a signoff_passthrough=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --directory-a|--host-a)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       directory_a_input="${2:-}"
       shift 2
       ;;
     --directory-b|--host-b)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       directory_b_input="${2:-}"
       shift 2
       ;;
     --directory-a-port)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       directory_a_port="${2:-}"
       shift 2
       ;;
     --directory-b-port)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       directory_b_port="${2:-}"
       shift 2
       ;;
     --endpoint-wait-timeout-sec)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       endpoint_wait_timeout_sec="${2:-}"
       shift 2
       ;;
     --endpoint-wait-interval-sec)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       endpoint_wait_interval_sec="${2:-}"
       shift 2
       ;;
     --endpoint-connect-timeout-sec)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       endpoint_connect_timeout_sec="${2:-}"
       shift 2
       ;;
+    --allow-remote-http-probe)
+      if [[ $# -ge 2 ]]; then
+        case "${2:-}" in
+          0|1)
+            allow_remote_http_probe="${2:-}"
+            shift 2
+            ;;
+          --*)
+            allow_remote_http_probe="1"
+            shift
+            ;;
+          *)
+            echo "--allow-remote-http-probe must be 0 or 1"
+            exit 2
+            ;;
+        esac
+      else
+        allow_remote_http_probe="1"
+        shift
+      fi
+      ;;
+    --allow-remote-http-probe=*)
+      allow_remote_http_probe="${1#--allow-remote-http-probe=}"
+      shift
+      ;;
     --allow-insecure-probe)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        allow_insecure_probe="${2:-}"
-        shift 2
+      if [[ $# -ge 2 ]]; then
+        case "${2:-}" in
+          0|1)
+            allow_insecure_probe="${2:-}"
+            shift 2
+            ;;
+          --*)
+            allow_insecure_probe="1"
+            shift
+            ;;
+          *)
+            echo "--allow-insecure-probe must be 0 or 1"
+            exit 2
+            ;;
+        esac
       else
         allow_insecure_probe="1"
         shift
       fi
       ;;
+    --allow-insecure-probe=*)
+      case "${1#--allow-insecure-probe=}" in
+        0|1)
+          allow_insecure_probe="${1#--allow-insecure-probe=}"
+          ;;
+        *)
+          echo "--allow-insecure-probe must be 0 or 1"
+          exit 2
+          ;;
+      esac
+      shift
+      ;;
     --heartbeat-interval-sec)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       heartbeat_interval_sec_cli="${2:-}"
       shift 2
       ;;
@@ -632,39 +862,43 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --campaign-subject)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       campaign_subject_cli="${2:-}"
       shift 2
       ;;
     --campaign-subject=*)
-      campaign_subject_cli="${1#--campaign-subject=}"
+      campaign_subject_cli="$(trim "${1#--campaign-subject=}")"
+      require_non_flag_value_or_die "--campaign-subject requires a value" "$campaign_subject_cli"
       shift
       ;;
     --subject)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       subject_alias_cli="${2:-}"
       shift 2
       ;;
     --subject=*)
-      subject_alias_cli="${1#--subject=}"
+      subject_alias_cli="$(trim "${1#--subject=}")"
+      require_non_flag_value_or_die "--subject requires a value" "$subject_alias_cli"
       shift
       ;;
     --key)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       key_alias_cli="${2:-}"
       shift 2
       ;;
     --key=*)
-      key_alias_cli="${1#--key=}"
+      key_alias_cli="$(trim "${1#--key=}")"
+      require_non_flag_value_or_die "--key requires a value" "$key_alias_cli"
       shift
       ;;
     --invite-key)
-      require_value_or_die "$1" "$#"
+      require_value_or_die "$1" "$#" "${2:-}"
       invite_key_alias_cli="${2:-}"
       shift 2
       ;;
     --invite-key=*)
-      invite_key_alias_cli="${1#--invite-key=}"
+      invite_key_alias_cli="$(trim "${1#--invite-key=}")"
+      require_non_flag_value_or_die "--invite-key requires a value" "$invite_key_alias_cli"
       shift
       ;;
     -h|--help|help)
@@ -699,6 +933,7 @@ int_arg_or_die "--directory-b-port" "$directory_b_port"
 int_arg_or_die "--endpoint-wait-timeout-sec" "$endpoint_wait_timeout_sec"
 int_arg_or_die "--endpoint-wait-interval-sec" "$endpoint_wait_interval_sec"
 int_arg_or_die "--endpoint-connect-timeout-sec" "$endpoint_connect_timeout_sec"
+bool_arg_or_die "--allow-remote-http-probe" "$allow_remote_http_probe"
 bool_arg_or_die "--allow-insecure-probe" "$allow_insecure_probe"
 bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
 bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
@@ -767,10 +1002,60 @@ if [[ "$subject_conflict" == true ]]; then
   exit 2
 fi
 
+auth_mode="subject"
+subject_flags_in_passthrough=false
+campaign_subject_passthrough_effective=""
+campaign_subject_passthrough_source=""
+parse_and_strip_passthrough_subject_flags "${signoff_passthrough[@]}"
+if [[ -n "$subject_reference" && -n "$campaign_subject_passthrough_effective" && "$subject_reference" != "$campaign_subject_passthrough_effective" ]]; then
+  echo "conflicting subject values: wrapper subject flags and passthrough subject flags must match when both are provided"
+  exit 2
+fi
+
+anon_cred_flags_in_passthrough=false
 if array_has_arg_or_equals_prefix "--campaign-anon-cred" "${signoff_passthrough[@]}" \
   || array_has_arg_or_equals_prefix "--anon-cred" "${signoff_passthrough[@]}"; then
-  echo "profile-default-gate-run requires invite-key subject; anon credential flags are not supported in this helper"
-  exit 2
+  anon_cred_flags_in_passthrough=true
+  auth_mode="anon_cred"
+fi
+
+campaign_anon_cred_passthrough="$(extract_flag_value --campaign-anon-cred "${signoff_passthrough[@]}")"
+campaign_anon_cred_passthrough="$(trim "$campaign_anon_cred_passthrough")"
+anon_cred_alias_passthrough="$(extract_flag_value --anon-cred "${signoff_passthrough[@]}")"
+anon_cred_alias_passthrough="$(trim "$anon_cred_alias_passthrough")"
+campaign_anon_cred_flag_present=false
+anon_cred_alias_flag_present=false
+if array_has_arg_or_equals_prefix "--campaign-anon-cred" "${signoff_passthrough[@]}"; then
+  campaign_anon_cred_flag_present=true
+fi
+if array_has_arg_or_equals_prefix "--anon-cred" "${signoff_passthrough[@]}"; then
+  anon_cred_alias_flag_present=true
+fi
+if [[ "$campaign_anon_cred_flag_present" == true ]]; then
+  require_credential_value_or_die "--campaign-anon-cred" "$campaign_anon_cred_passthrough"
+fi
+if [[ "$anon_cred_alias_flag_present" == true ]]; then
+  require_credential_value_or_die "--anon-cred" "$anon_cred_alias_passthrough"
+fi
+anon_cred_effective=""
+if [[ -n "$campaign_anon_cred_passthrough" ]]; then
+  anon_cred_effective="$campaign_anon_cred_passthrough"
+fi
+if [[ -n "$anon_cred_alias_passthrough" ]]; then
+  if [[ -n "$anon_cred_effective" && "$anon_cred_effective" != "$anon_cred_alias_passthrough" ]]; then
+    echo "conflicting anon credential values: --campaign-anon-cred/--anon-cred must match when multiple are provided"
+    exit 2
+  fi
+  if [[ -z "$anon_cred_effective" ]]; then
+    anon_cred_effective="$anon_cred_alias_passthrough"
+  fi
+fi
+if [[ "$anon_cred_flags_in_passthrough" == true ]]; then
+  require_non_flag_value_or_die "profile-default-gate-run failed: --campaign-anon-cred/--anon-cred requires a non-flag value" "$anon_cred_effective"
+  if [[ -n "$subject_reference" || "$subject_flags_in_passthrough" == true ]]; then
+    echo "profile-default-gate-run failed: --campaign-anon-cred/--anon-cred cannot be combined with --campaign-subject/--subject/--key/--invite-key"
+    exit 2
+  fi
 fi
 
 campaign_subject_effective=""
@@ -779,52 +1064,65 @@ campaign_subject_env=""
 invite_key_env=""
 campaign_subject_file=""
 invite_key_file=""
-if [[ -n "$campaign_subject_cli" ]]; then
-  campaign_subject_effective="$campaign_subject_cli"
-  subject_source="explicit:--campaign-subject"
-elif [[ -n "$subject_alias_cli" ]]; then
-  campaign_subject_effective="$subject_alias_cli"
-  subject_source="explicit:--subject"
-elif [[ -n "$key_alias_cli" ]]; then
-  campaign_subject_effective="$key_alias_cli"
-  subject_source="explicit:--key"
-elif [[ -n "$invite_key_alias_cli" ]]; then
-  campaign_subject_effective="$invite_key_alias_cli"
-  subject_source="explicit:--invite-key"
+if [[ "$auth_mode" == "anon_cred" ]]; then
+  if [[ -n "$campaign_anon_cred_passthrough" ]]; then
+    subject_source="passthrough:--campaign-anon-cred"
+  else
+    subject_source="passthrough:--anon-cred"
+  fi
 else
-  campaign_subject_env="$(trim "${CAMPAIGN_SUBJECT:-}")"
-  invite_key_env="$(trim "${INVITE_KEY:-}")"
-  campaign_subject_file="$(trim "$(read_env_key_from_file "$env_client_file" "CAMPAIGN_SUBJECT")")"
-  invite_key_file="$(trim "$(read_env_key_from_file "$env_client_file" "INVITE_KEY")")"
+  if [[ -n "$campaign_subject_passthrough_effective" ]]; then
+    campaign_subject_effective="$campaign_subject_passthrough_effective"
+    subject_source="$campaign_subject_passthrough_source"
+  elif [[ -n "$campaign_subject_cli" ]]; then
+    campaign_subject_effective="$campaign_subject_cli"
+    subject_source="explicit:--campaign-subject"
+  elif [[ -n "$subject_alias_cli" ]]; then
+    campaign_subject_effective="$subject_alias_cli"
+    subject_source="explicit:--subject"
+  elif [[ -n "$key_alias_cli" ]]; then
+    campaign_subject_effective="$key_alias_cli"
+    subject_source="explicit:--key"
+  elif [[ -n "$invite_key_alias_cli" ]]; then
+    campaign_subject_effective="$invite_key_alias_cli"
+    subject_source="explicit:--invite-key"
+  else
+    campaign_subject_env="$(trim "${CAMPAIGN_SUBJECT:-}")"
+    invite_key_env="$(trim "${INVITE_KEY:-}")"
+    campaign_subject_file="$(trim "$(read_env_key_from_file "$env_client_file" "CAMPAIGN_SUBJECT")")"
+    invite_key_file="$(trim "$(read_env_key_from_file "$env_client_file" "INVITE_KEY")")"
 
-  if [[ -n "$campaign_subject_env" ]]; then
-    campaign_subject_effective="$campaign_subject_env"
-    subject_source="env:CAMPAIGN_SUBJECT"
-  elif [[ -n "$invite_key_env" ]]; then
-    campaign_subject_effective="$invite_key_env"
-    subject_source="env:INVITE_KEY"
-  elif [[ -n "$campaign_subject_file" ]]; then
-    campaign_subject_effective="$campaign_subject_file"
-    subject_source="file:CAMPAIGN_SUBJECT"
-  elif [[ -n "$invite_key_file" ]]; then
-    campaign_subject_effective="$invite_key_file"
-    subject_source="file:INVITE_KEY"
+    if [[ -n "$campaign_subject_env" ]]; then
+      campaign_subject_effective="$campaign_subject_env"
+      subject_source="env:CAMPAIGN_SUBJECT"
+    elif [[ -n "$invite_key_env" ]]; then
+      campaign_subject_effective="$invite_key_env"
+      subject_source="env:INVITE_KEY"
+    elif [[ -n "$campaign_subject_file" ]]; then
+      campaign_subject_effective="$campaign_subject_file"
+      subject_source="file:CAMPAIGN_SUBJECT"
+    elif [[ -n "$invite_key_file" ]]; then
+      campaign_subject_effective="$invite_key_file"
+      subject_source="file:INVITE_KEY"
+    fi
   fi
 fi
 
-if [[ -z "$campaign_subject_effective" ]]; then
-  echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition env_client_file=$env_client_file"
-  echo "profile-default-gate-run failed: missing invite key subject"
-  echo "provide --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
-  echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
-  echo "override env file path via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE"
-  exit 2
-fi
-if invite_subject_looks_placeholder_01 "$campaign_subject_effective"; then
-  echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition reason=placeholder_subject"
-  echo "profile-default-gate-run failed: invite key subject appears to be placeholder text ($campaign_subject_effective)"
-  echo "provide a real invite key via --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
-  exit 2
+if [[ "$auth_mode" == "subject" ]]; then
+  if [[ -z "$campaign_subject_effective" ]]; then
+    echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition env_client_file=$env_client_file"
+    echo "profile-default-gate-run failed: missing invite key subject"
+    echo "provide --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+    echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
+    echo "override env file path via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE"
+    exit 2
+  fi
+  if invite_subject_looks_placeholder_01 "$campaign_subject_effective"; then
+    echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition reason=placeholder_subject"
+    echo "profile-default-gate-run failed: invite key subject appears to be placeholder text ($campaign_subject_effective)"
+    echo "provide a real invite key via --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+    exit 2
+  fi
 fi
 
 campaign_directory_urls_passthrough="$(extract_flag_value --campaign-directory-urls "${signoff_passthrough[@]}")"
@@ -862,6 +1160,7 @@ fi
 directory_a_url="$(normalize_directory_url "--directory-a/--host-a" "$directory_a_input" "$directory_a_port")"
 directory_b_url="$(normalize_directory_url "--directory-b/--host-b" "$directory_b_input" "$directory_b_port")"
 campaign_directory_urls_effective="${directory_a_url},${directory_b_url}"
+campaign_directory_urls_effective_log="$(sanitize_csv_urls_for_log_01 "$campaign_directory_urls_effective")"
 
 if [[ -n "$campaign_directory_urls_passthrough" ]]; then
   mapfile -t passthrough_directory_urls < <(split_csv_trim "$campaign_directory_urls_passthrough")
@@ -872,10 +1171,11 @@ if [[ -n "$campaign_directory_urls_passthrough" ]]; then
   passthrough_directory_a_url="$(normalize_directory_url "--campaign-directory-urls[A]" "${passthrough_directory_urls[0]}" "$directory_a_port")"
   passthrough_directory_b_url="$(normalize_directory_url "--campaign-directory-urls[B]" "${passthrough_directory_urls[1]}" "$directory_b_port")"
   passthrough_effective="${passthrough_directory_a_url},${passthrough_directory_b_url}"
+  passthrough_effective_log="$(sanitize_csv_urls_for_log_01 "$passthrough_effective")"
   if [[ "$passthrough_effective" != "$campaign_directory_urls_effective" ]]; then
     echo "profile-default-gate-run failed: A/B endpoint inputs conflict with --campaign-directory-urls"
-    echo "a_b_effective=$campaign_directory_urls_effective"
-    echo "campaign_directory_urls=$passthrough_effective"
+    echo "a_b_effective=$campaign_directory_urls_effective_log"
+    echo "campaign_directory_urls=$passthrough_effective_log"
     exit 2
   fi
 fi
@@ -892,12 +1192,6 @@ if [[ -n "$campaign_bootstrap_passthrough" ]]; then
   fi
 fi
 
-if ! array_has_arg_or_equals_prefix "--campaign-subject" "${signoff_passthrough[@]}" \
-  && ! array_has_arg_or_equals_prefix "--subject" "${signoff_passthrough[@]}" \
-  && ! array_has_arg_or_equals_prefix "--key" "${signoff_passthrough[@]}" \
-  && ! array_has_arg_or_equals_prefix "--invite-key" "${signoff_passthrough[@]}"; then
-  signoff_passthrough+=(--campaign-subject "$campaign_subject_effective")
-fi
 if ! array_has_arg_or_equals_prefix "--campaign-directory-urls" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-directory-urls "$campaign_directory_urls_effective")
 fi
@@ -955,7 +1249,7 @@ else
   summary_json_effective="$reports_dir_effective/profile_compare_campaign_signoff_summary.json"
 fi
 
-echo "[profile-default-gate-run] $(timestamp_utc) start subject_source=$subject_source directory_urls=$campaign_directory_urls_effective campaign_timeout_sec=$campaign_timeout_effective"
+echo "[profile-default-gate-run] $(timestamp_utc) start subject_source=$subject_source directory_urls=$campaign_directory_urls_effective_log campaign_timeout_sec=$campaign_timeout_effective"
 echo "[profile-default-gate-run] $(timestamp_utc) summary_json=$summary_json_effective"
 
 if ! wait_for_directory_endpoint "directory_a" "$directory_a_url"; then
@@ -988,7 +1282,11 @@ heartbeat_pid=""
 ) &
 heartbeat_pid="$!"
 set +e
-"$signoff_script" "${signoff_passthrough[@]}"
+if [[ "$auth_mode" == "subject" ]]; then
+  CAMPAIGN_SUBJECT="$campaign_subject_effective" "$signoff_script" "${signoff_passthrough[@]}"
+else
+  "$signoff_script" "${signoff_passthrough[@]}"
+fi
 signoff_rc=$?
 set -e
 if [[ -n "$heartbeat_pid" ]]; then

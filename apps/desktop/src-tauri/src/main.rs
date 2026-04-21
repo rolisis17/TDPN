@@ -62,6 +62,8 @@ struct RuntimePolicyView {
     #[serde(skip_serializing_if = "Option::is_none")]
     allow_legacy_connect_override: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    config: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     note: Option<String>,
 }
 
@@ -105,9 +107,12 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
         Ok(RuntimePolicyConfig {
             connect_require_session,
             allow_legacy_connect_override,
+            config,
         }) => {
-            let has_runtime_policy =
-                connect_require_session.is_some() || allow_legacy_connect_override.is_some();
+            let config = config.and_then(sanitize_runtime_policy_config_for_renderer);
+            let has_runtime_policy = connect_require_session.is_some()
+                || allow_legacy_connect_override.is_some()
+                || config.is_some();
             RuntimePolicyView {
                 available: true,
                 policy_source: if has_runtime_policy {
@@ -117,6 +122,7 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
                 },
                 connect_require_session,
                 allow_legacy_connect_override,
+                config,
                 note: if has_runtime_policy {
                     None
                 } else {
@@ -132,10 +138,138 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
             policy_source: "env_default".to_string(),
             connect_require_session: None,
             allow_legacy_connect_override: None,
+            config: None,
             note: Some("runtime config unavailable; using env default".to_string()),
         },
     };
     Ok(view)
+}
+
+fn normalize_runtime_policy_key(key: &str) -> String {
+    key.trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn runtime_policy_leaf_key_allowed(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "connectrequiresession"
+            | "allowlegacyconnectoverride"
+            | "gpmmanifestrequirehttps"
+            | "manifestrequirehttps"
+            | "requirehttps"
+            | "httpsrequiredbypolicy"
+            | "gpmmanifestrequiresignature"
+            | "manifestrequiresignature"
+            | "requiresignature"
+            | "signaturerequiredbypolicy"
+            | "gpmmanifesttrustpolicysource"
+            | "manifesttrustpolicysource"
+            | "manifestpolicysource"
+            | "policysource"
+            | "gpmauthverifyrequiremetadata"
+            | "authverifyrequiremetadata"
+            | "requiremetadata"
+            | "gpmauthverifymetadatamode"
+            | "authverifymetadatamode"
+            | "metadatamode"
+            | "gpmauthverifypolicysource"
+            | "authverifypolicysource"
+            | "gpmauthverifyrequirewalletextensionsource"
+            | "authverifyrequirewalletextensionsource"
+            | "requirewalletextensionsource"
+            | "gpmauthverifyrequirewalletextensionsourcepolicysource"
+            | "authverifyrequirewalletextensionsourcepolicysource"
+            | "gpmoperatorapprovalrequiresession"
+            | "operatorapprovalrequiresession"
+            | "approvalrequiresession"
+            | "gpmoperatorapprovalpolicysource"
+            | "operatorapprovalpolicysource"
+            | "gpmoperatorapprovalrequiresessionpolicysource"
+            | "operatorapprovalrequiresessionpolicysource"
+            | "gpmproductionmode"
+            | "productionmode"
+            | "gpmproductionmodepolicysource"
+            | "productionmodepolicysource"
+            | "profiledefaultgateallowremotehttpprobe"
+            | "gpmprofiledefaultgateallowremotehttpprobe"
+            | "allowremotehttpprobe"
+            | "profiledefaultgateallowinsecureprobe"
+            | "gpmprofiledefaultgateallowinsecureprobe"
+            | "allowinsecureprobe"
+            | "profiledefaultgateprobepolicysource"
+            | "profilegateprobepolicysource"
+            | "probepolicysource"
+    )
+}
+
+fn runtime_policy_container_key_allowed(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "config"
+            | "data"
+            | "policy"
+            | "policies"
+            | "authverifypolicy"
+            | "authverify"
+            | "auth"
+            | "operatorapprovalpolicy"
+            | "operatorapproval"
+            | "operator"
+            | "manifesttrustpolicy"
+            | "bootstrapmanifestpolicy"
+            | "bootstrapmanifest"
+            | "manifest"
+            | "profiledefaultgatepolicy"
+            | "profiledefaultgate"
+            | "profilegate"
+            | "profile"
+            | "productionmode"
+            | "production"
+    )
+}
+
+fn sanitize_runtime_policy_value_for_renderer(value: &Value) -> Option<Value> {
+    let Value::Object(object) = value else {
+        return None;
+    };
+    let mut sanitized = Map::new();
+    for (key, entry) in object {
+        let normalized = normalize_runtime_policy_key(key);
+        if runtime_policy_leaf_key_allowed(&normalized) {
+            match entry {
+                Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                    sanitized.insert(key.clone(), entry.clone());
+                }
+                Value::Object(_) => {
+                    if runtime_policy_container_key_allowed(&normalized) {
+                        if let Some(nested) = sanitize_runtime_policy_value_for_renderer(entry) {
+                            sanitized.insert(key.clone(), nested);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if runtime_policy_container_key_allowed(&normalized) {
+            if let Some(nested) = sanitize_runtime_policy_value_for_renderer(entry) {
+                sanitized.insert(key.clone(), nested);
+            }
+        }
+    }
+    if sanitized.is_empty() {
+        None
+    } else {
+        Some(Value::Object(sanitized))
+    }
+}
+
+fn sanitize_runtime_policy_config_for_renderer(value: Value) -> Option<Value> {
+    sanitize_runtime_policy_value_for_renderer(&value)
 }
 
 fn optional_env(name: &str) -> Option<String> {

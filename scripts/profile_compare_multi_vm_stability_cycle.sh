@@ -4,31 +4,24 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-RUN_SCRIPT="${PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_stability_run.sh}"
-CHECK_SCRIPT="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_stability_check.sh}"
+RUN_SCRIPT="${PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh}"
+CHECK_SCRIPT="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_check.sh}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/profile_default_gate_stability_cycle.sh \
-    --host-a HOST \
-    --host-b HOST \
-    [--campaign-subject ID | --subject ID] \
-    [--runs N] \
-    [--campaign-timeout-sec N] \
-    [--sleep-between-sec N] \
-    [--allow-partial [0|1]] \
+  ./scripts/profile_compare_multi_vm_stability_cycle.sh \
     [--reports-dir DIR] \
     [--run-summary-json PATH | --stability-summary-json PATH] \
     [--check-summary-json PATH | --stability-check-summary-json PATH] \
+    [--runs N] \
+    [--sleep-between-sec N] \
+    [--allow-partial [0|1]] \
     [--require-status-pass [0|1]] \
-    [--require-stability-ok [0|1]] \
-    [--require-selection-policy-present-all [0|1]] \
-    [--require-consistent-selection-policy [0|1]] \
-    [--require-decision-consensus [0|1]] \
     [--require-min-runs-requested N] \
     [--require-min-runs-completed N] \
     [--require-max-runs-fail N] \
+    [--require-decision-consensus [0|1]] \
     [--require-modal-decision GO|NO-GO] \
     [--require-modal-decision-support-rate-pct N] \
     [--require-recommended-profile PROFILE] \
@@ -40,13 +33,13 @@ Usage:
     [--print-summary-json [0|1]]
 
 Purpose:
-  Run profile-default-gate stability evidence collection and policy check in
-  one command, then emit a single cycle summary artifact.
+  Run profile-compare multi-VM stability run and policy check in one command,
+  then emit a single cycle summary artifact.
 
 Notes:
   - Stage scripts can be overridden with:
-    PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT
-    PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT
+    PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT
+    PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT
 USAGE
 }
 
@@ -143,126 +136,47 @@ json_file_valid_01() {
   fi
 }
 
+file_fingerprint_01() {
+  local path="$1"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  cksum "$path" 2>/dev/null | awk '{print $1 ":" $2}' || true
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
 need_cmd mkdir
+need_cmd cksum
 
-host_a="${PROFILE_DEFAULT_GATE_STABILITY_HOST_A:-}"
-host_b="${PROFILE_DEFAULT_GATE_STABILITY_HOST_B:-}"
-campaign_subject="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT:-}"
-campaign_subject_from_campaign=""
-campaign_subject_from_alias=""
-runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
-campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
-sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
-allow_partial="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_PARTIAL:-0}"
-reports_dir="${PROFILE_DEFAULT_GATE_STABILITY_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
+reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
+run_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SUMMARY_JSON:-}"
+check_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SUMMARY_JSON:-}"
+summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_SUMMARY_JSON:-}"
 
-run_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_RUN_SUMMARY_JSON:-}"
-check_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_SUMMARY_JSON:-}"
-summary_json="${PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SUMMARY_JSON:-}"
+runs=""
+sleep_between_sec=""
+allow_partial=""
 
-require_status_pass="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_STATUS_PASS:-${REQUIRE_STATUS_PASS:-1}}"
-require_stability_ok="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_STABILITY_OK:-${REQUIRE_STABILITY_OK:-1}}"
-require_selection_policy_present_all="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_SELECTION_POLICY_PRESENT_ALL:-${REQUIRE_SELECTION_POLICY_PRESENT_ALL:-1}}"
-require_consistent_selection_policy="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_CONSISTENT_SELECTION_POLICY:-${REQUIRE_CONSISTENT_SELECTION_POLICY:-1}}"
-require_decision_consensus="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS:-${REQUIRE_DECISION_CONSENSUS:-0}}"
-require_min_runs_requested="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
-require_min_runs_completed="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED:-${REQUIRE_MIN_RUNS_COMPLETED:-3}}"
-require_max_runs_fail="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL:-${REQUIRE_MAX_RUNS_FAIL:-0}}"
-require_modal_decision="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-}}"
-require_modal_decision_support_rate_pct="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-0}}"
-require_recommended_profile="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE:-${REQUIRE_RECOMMENDED_PROFILE:-}}"
-allow_recommended_profiles="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES:-${ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}}"
-require_modal_support_rate_pct="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_SUPPORT_RATE_PCT:-60}}"
-fail_on_no_go="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_FAIL_ON_NO_GO:-${FAIL_ON_NO_GO:-1}}"
+require_status_pass="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_STATUS_PASS:-${REQUIRE_STATUS_PASS:-1}}"
+require_min_runs_requested="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
+require_min_runs_completed="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED:-${REQUIRE_MIN_RUNS_COMPLETED:-3}}"
+require_max_runs_fail="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL:-${REQUIRE_MAX_RUNS_FAIL:-0}}"
+require_decision_consensus="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS:-${REQUIRE_DECISION_CONSENSUS:-0}}"
+require_modal_decision="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-}}"
+require_modal_decision_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-0}}"
+require_recommended_profile="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE:-${REQUIRE_RECOMMENDED_PROFILE:-}}"
+allow_recommended_profiles="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES:-${ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}}"
+require_modal_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_SUPPORT_RATE_PCT:-60}}"
+fail_on_no_go="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_FAIL_ON_NO_GO:-${FAIL_ON_NO_GO:-1}}"
 
-show_json="${PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SHOW_JSON:-0}"
-print_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_CYCLE_PRINT_SUMMARY_JSON:-0}"
+show_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_SHOW_JSON:-0}"
+print_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_PRINT_SUMMARY_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --host-a)
-      require_value_or_die "$1" "$#"
-      host_a="${2:-}"
-      shift 2
-      ;;
-    --host-a=*)
-      host_a="${1#*=}"
-      shift
-      ;;
-    --host-b)
-      require_value_or_die "$1" "$#"
-      host_b="${2:-}"
-      shift 2
-      ;;
-    --host-b=*)
-      host_b="${1#*=}"
-      shift
-      ;;
-    --campaign-subject)
-      require_value_or_die "$1" "$#"
-      campaign_subject="${2:-}"
-      campaign_subject_from_campaign="${2:-}"
-      shift 2
-      ;;
-    --campaign-subject=*)
-      campaign_subject="${1#*=}"
-      campaign_subject_from_campaign="${1#*=}"
-      shift
-      ;;
-    --subject)
-      require_value_or_die "$1" "$#"
-      campaign_subject="${2:-}"
-      campaign_subject_from_alias="${2:-}"
-      shift 2
-      ;;
-    --subject=*)
-      campaign_subject="${1#*=}"
-      campaign_subject_from_alias="${1#*=}"
-      shift
-      ;;
-    --runs)
-      require_value_or_die "$1" "$#"
-      runs="${2:-}"
-      shift 2
-      ;;
-    --runs=*)
-      runs="${1#*=}"
-      shift
-      ;;
-    --campaign-timeout-sec)
-      require_value_or_die "$1" "$#"
-      campaign_timeout_sec="${2:-}"
-      shift 2
-      ;;
-    --campaign-timeout-sec=*)
-      campaign_timeout_sec="${1#*=}"
-      shift
-      ;;
-    --sleep-between-sec)
-      require_value_or_die "$1" "$#"
-      sleep_between_sec="${2:-}"
-      shift 2
-      ;;
-    --sleep-between-sec=*)
-      sleep_between_sec="${1#*=}"
-      shift
-      ;;
-    --allow-partial)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        allow_partial="${2:-}"
-        shift 2
-      else
-        allow_partial="1"
-        shift
-      fi
-      ;;
-    --allow-partial=*)
-      allow_partial="${1#*=}"
-      shift
-      ;;
     --reports-dir)
       require_value_or_die "$1" "$#"
       reports_dir="${2:-}"
@@ -308,6 +222,37 @@ while [[ $# -gt 0 ]]; do
       check_summary_json="${1#*=}"
       shift
       ;;
+    --runs)
+      require_value_or_die "$1" "$#"
+      runs="${2:-}"
+      shift 2
+      ;;
+    --runs=*)
+      runs="${1#*=}"
+      shift
+      ;;
+    --sleep-between-sec)
+      require_value_or_die "$1" "$#"
+      sleep_between_sec="${2:-}"
+      shift 2
+      ;;
+    --sleep-between-sec=*)
+      sleep_between_sec="${1#*=}"
+      shift
+      ;;
+    --allow-partial)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_partial="${2:-}"
+        shift 2
+      else
+        allow_partial="1"
+        shift
+      fi
+      ;;
+    --allow-partial=*)
+      allow_partial="${1#*=}"
+      shift
+      ;;
     --require-status-pass)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_status_pass="${2:-}"
@@ -319,58 +264,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --require-status-pass=*)
       require_status_pass="${1#*=}"
-      shift
-      ;;
-    --require-stability-ok)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_stability_ok="${2:-}"
-        shift 2
-      else
-        require_stability_ok="1"
-        shift
-      fi
-      ;;
-    --require-stability-ok=*)
-      require_stability_ok="${1#*=}"
-      shift
-      ;;
-    --require-selection-policy-present-all)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_selection_policy_present_all="${2:-}"
-        shift 2
-      else
-        require_selection_policy_present_all="1"
-        shift
-      fi
-      ;;
-    --require-selection-policy-present-all=*)
-      require_selection_policy_present_all="${1#*=}"
-      shift
-      ;;
-    --require-consistent-selection-policy)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_consistent_selection_policy="${2:-}"
-        shift 2
-      else
-        require_consistent_selection_policy="1"
-        shift
-      fi
-      ;;
-    --require-consistent-selection-policy=*)
-      require_consistent_selection_policy="${1#*=}"
-      shift
-      ;;
-    --require-decision-consensus)
-      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
-        require_decision_consensus="${2:-}"
-        shift 2
-      else
-        require_decision_consensus="1"
-        shift
-      fi
-      ;;
-    --require-decision-consensus=*)
-      require_decision_consensus="${1#*=}"
       shift
       ;;
     --require-min-runs-requested)
@@ -398,6 +291,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --require-max-runs-fail=*)
       require_max_runs_fail="${1#*=}"
+      shift
+      ;;
+    --require-decision-consensus)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_decision_consensus="${2:-}"
+        shift 2
+      else
+        require_decision_consensus="1"
+        shift
+      fi
+      ;;
+    --require-decision-consensus=*)
+      require_decision_consensus="${1#*=}"
       shift
       ;;
     --require-modal-decision)
@@ -505,27 +411,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-host_a="$(trim "$host_a")"
-host_b="$(trim "$host_b")"
-campaign_subject="$(trim "$campaign_subject")"
-campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
-campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
-runs="$(trim "$runs")"
-campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
-sleep_between_sec="$(trim "$sleep_between_sec")"
-allow_partial="$(trim "$allow_partial")"
 reports_dir="$(abs_path "$reports_dir")"
 run_summary_json="$(abs_path "$run_summary_json")"
 check_summary_json="$(abs_path "$check_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+runs="$(trim "$runs")"
+sleep_between_sec="$(trim "$sleep_between_sec")"
+allow_partial="$(trim "$allow_partial")"
 require_status_pass="$(trim "$require_status_pass")"
-require_stability_ok="$(trim "$require_stability_ok")"
-require_selection_policy_present_all="$(trim "$require_selection_policy_present_all")"
-require_consistent_selection_policy="$(trim "$require_consistent_selection_policy")"
-require_decision_consensus="$(trim "$require_decision_consensus")"
 require_min_runs_requested="$(trim "$require_min_runs_requested")"
 require_min_runs_completed="$(trim "$require_min_runs_completed")"
 require_max_runs_fail="$(trim "$require_max_runs_fail")"
+require_decision_consensus="$(trim "$require_decision_consensus")"
 require_modal_decision="$(trim "$require_modal_decision")"
 require_modal_decision_support_rate_pct="$(trim "$require_modal_decision_support_rate_pct")"
 require_recommended_profile="$(trim "$require_recommended_profile")"
@@ -537,22 +434,6 @@ print_summary_json="$(trim "$print_summary_json")"
 RUN_SCRIPT="$(abs_path "$RUN_SCRIPT")"
 CHECK_SCRIPT="$(abs_path "$CHECK_SCRIPT")"
 
-if [[ -z "$host_a" ]]; then
-  echo "--host-a is required"
-  exit 2
-fi
-if [[ -z "$host_b" ]]; then
-  echo "--host-b is required"
-  exit 2
-fi
-if [[ -z "$campaign_subject" ]]; then
-  echo "--campaign-subject or --subject is required"
-  exit 2
-fi
-if [[ -n "$campaign_subject_from_campaign" && -n "$campaign_subject_from_alias" && "$campaign_subject_from_campaign" != "$campaign_subject_from_alias" ]]; then
-  echo "conflicting subject values: --campaign-subject and --subject must match when both are provided"
-  exit 2
-fi
 if [[ ! -f "$RUN_SCRIPT" ]]; then
   echo "stability run script not found: $RUN_SCRIPT"
   exit 2
@@ -562,22 +443,31 @@ if [[ ! -f "$CHECK_SCRIPT" ]]; then
   exit 2
 fi
 
-int_arg_or_die "--runs" "$runs"
-int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_sec"
-int_arg_or_die "--sleep-between-sec" "$sleep_between_sec"
-int_arg_or_die "--require-min-runs-requested" "$require_min_runs_requested"
-int_arg_or_die "--require-min-runs-completed" "$require_min_runs_completed"
-int_arg_or_die "--require-max-runs-fail" "$require_max_runs_fail"
-bool_arg_or_die "--allow-partial" "$allow_partial"
+if [[ -n "$runs" ]]; then
+  int_arg_or_die "--runs" "$runs"
+  if (( runs < 1 )); then
+    echo "--runs must be >= 1"
+    exit 2
+  fi
+fi
+if [[ -n "$sleep_between_sec" ]]; then
+  int_arg_or_die "--sleep-between-sec" "$sleep_between_sec"
+fi
+if [[ -n "$allow_partial" ]]; then
+  bool_arg_or_die "--allow-partial" "$allow_partial"
+fi
 bool_arg_or_die "--require-status-pass" "$require_status_pass"
-bool_arg_or_die "--require-stability-ok" "$require_stability_ok"
-bool_arg_or_die "--require-selection-policy-present-all" "$require_selection_policy_present_all"
-bool_arg_or_die "--require-consistent-selection-policy" "$require_consistent_selection_policy"
 bool_arg_or_die "--require-decision-consensus" "$require_decision_consensus"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
+for int_arg in "$require_min_runs_requested" "$require_min_runs_completed" "$require_max_runs_fail"; do
+  if ! [[ "$int_arg" =~ ^[0-9]+$ ]]; then
+    echo "run count thresholds must be non-negative integers"
+    exit 2
+  fi
+done
 if ! is_non_negative_decimal "$require_modal_support_rate_pct"; then
   echo "--require-modal-support-rate-pct must be a non-negative number"
   exit 2
@@ -594,45 +484,38 @@ if [[ -n "$require_modal_decision" ]]; then
   fi
 fi
 
-if (( runs < 1 )); then
-  echo "--runs must be >= 1"
-  exit 2
-fi
-if (( campaign_timeout_sec < 1 )); then
-  echo "--campaign-timeout-sec must be >= 1"
-  exit 2
-fi
-
 mkdir -p "$reports_dir"
 if [[ -z "$run_summary_json" ]]; then
-  run_summary_json="$reports_dir/profile_default_gate_stability_summary.json"
+  run_summary_json="$reports_dir/profile_compare_multi_vm_stability_summary.json"
 fi
 if [[ -z "$check_summary_json" ]]; then
-  check_summary_json="$reports_dir/profile_default_gate_stability_check_summary.json"
+  check_summary_json="$reports_dir/profile_compare_multi_vm_stability_check_summary.json"
 fi
 if [[ -z "$summary_json" ]]; then
-  summary_json="$reports_dir/profile_default_gate_stability_cycle_summary.json"
+  summary_json="$reports_dir/profile_compare_multi_vm_stability_cycle_summary.json"
 fi
 mkdir -p "$(dirname "$run_summary_json")" "$(dirname "$check_summary_json")" "$(dirname "$summary_json")"
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
-run_log="$reports_dir/profile_default_gate_stability_cycle_${run_stamp}_run.log"
-check_log="$reports_dir/profile_default_gate_stability_cycle_${run_stamp}_check.log"
+run_log="$reports_dir/profile_compare_multi_vm_stability_cycle_${run_stamp}_run.log"
+check_log="$reports_dir/profile_compare_multi_vm_stability_cycle_${run_stamp}_check.log"
 
 declare -a run_cmd
 run_cmd=(
   bash "$RUN_SCRIPT"
-  --host-a "$host_a"
-  --host-b "$host_b"
-  --campaign-subject "$campaign_subject"
-  --runs "$runs"
-  --campaign-timeout-sec "$campaign_timeout_sec"
-  --sleep-between-sec "$sleep_between_sec"
-  --allow-partial "$allow_partial"
   --reports-dir "$reports_dir"
   --summary-json "$run_summary_json"
   --print-summary-json 0
 )
+if [[ -n "$runs" ]]; then
+  run_cmd+=(--runs "$runs")
+fi
+if [[ -n "$sleep_between_sec" ]]; then
+  run_cmd+=(--sleep-between-sec "$sleep_between_sec")
+fi
+if [[ -n "$allow_partial" ]]; then
+  run_cmd+=(--allow-partial "$allow_partial")
+fi
 run_command_display="$(quote_cmd "${run_cmd[@]}")"
 
 declare -a check_cmd
@@ -641,13 +524,10 @@ check_cmd=(
   --stability-summary-json "$run_summary_json"
   --reports-dir "$reports_dir"
   --require-status-pass "$require_status_pass"
-  --require-stability-ok "$require_stability_ok"
-  --require-selection-policy-present-all "$require_selection_policy_present_all"
-  --require-consistent-selection-policy "$require_consistent_selection_policy"
-  --require-decision-consensus "$require_decision_consensus"
   --require-min-runs-requested "$require_min_runs_requested"
   --require-min-runs-completed "$require_min_runs_completed"
   --require-max-runs-fail "$require_max_runs_fail"
+  --require-decision-consensus "$require_decision_consensus"
   --require-modal-decision-support-rate-pct "$require_modal_decision_support_rate_pct"
   --require-modal-support-rate-pct "$require_modal_support_rate_pct"
   --fail-on-no-go "$fail_on_no_go"
@@ -666,7 +546,12 @@ if [[ -n "$allow_recommended_profiles" ]]; then
 fi
 check_command_display="$(quote_cmd "${check_cmd[@]}")"
 
-echo "[profile-default-gate-stability-cycle] $(timestamp_utc) run-stage start reports_dir=$reports_dir run_summary_json=$run_summary_json"
+run_summary_exists="false"
+run_summary_valid="false"
+run_summary_fresh="false"
+
+echo "[profile-compare-multi-vm-stability-cycle] $(timestamp_utc) run-stage start reports_dir=$reports_dir run_summary_json=$run_summary_json"
+pre_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
 set +e
 "${run_cmd[@]}" >"$run_log" 2>&1
 run_stage_rc=$?
@@ -677,6 +562,19 @@ if [[ "$run_stage_rc" -ne 0 ]]; then
   run_stage_status="fail"
 fi
 
+if [[ -f "$run_summary_json" ]]; then
+  run_summary_exists="true"
+fi
+if [[ "$(json_file_valid_01 "$run_summary_json")" == "1" ]]; then
+  run_summary_valid="true"
+  post_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
+  if [[ -z "$pre_run_summary_fingerprint" && -n "$post_run_summary_fingerprint" ]]; then
+    run_summary_fresh="true"
+  elif [[ -n "$post_run_summary_fingerprint" && "$post_run_summary_fingerprint" != "$pre_run_summary_fingerprint" ]]; then
+    run_summary_fresh="true"
+  fi
+fi
+
 check_stage_attempted="false"
 check_stage_status="skip"
 check_stage_rc_json="null"
@@ -684,6 +582,7 @@ check_stage_rc=0
 
 check_summary_exists="false"
 check_summary_valid="false"
+check_summary_fresh="false"
 check_decision=""
 check_status=""
 check_rc_json="null"
@@ -701,13 +600,29 @@ if [[ "$run_stage_rc" -ne 0 ]]; then
   failure_stage="run"
   failure_reason="stability run failed (rc=$run_stage_rc)"
   decision="NO-GO"
+  status="fail"
   final_rc="$run_stage_rc"
   if [[ "$final_rc" -eq 0 ]]; then
     final_rc=1
   fi
+elif [[ "$run_summary_valid" != "true" ]]; then
+  run_stage_status="fail"
+  failure_stage="run"
+  failure_reason="stability run summary is missing or invalid"
+  decision="NO-GO"
+  status="fail"
+  final_rc=1
+elif [[ "$run_summary_fresh" != "true" ]]; then
+  run_stage_status="fail"
+  failure_stage="run"
+  failure_reason="stability run summary is stale (not refreshed by current run)"
+  decision="NO-GO"
+  status="fail"
+  final_rc=1
 else
-  echo "[profile-default-gate-stability-cycle] $(timestamp_utc) check-stage start check_summary_json=$check_summary_json"
+  echo "[profile-compare-multi-vm-stability-cycle] $(timestamp_utc) check-stage start check_summary_json=$check_summary_json"
   check_stage_attempted="true"
+  pre_check_summary_fingerprint="$(file_fingerprint_01 "$check_summary_json")"
   set +e
   "${check_cmd[@]}" >"$check_log" 2>&1
   check_stage_rc=$?
@@ -722,7 +637,14 @@ else
   if [[ "$(json_file_valid_01 "$check_summary_json")" == "1" ]]; then
     check_summary_exists="true"
     check_summary_valid="true"
+    post_check_summary_fingerprint="$(file_fingerprint_01 "$check_summary_json")"
+    if [[ -z "$pre_check_summary_fingerprint" && -n "$post_check_summary_fingerprint" ]]; then
+      check_summary_fresh="true"
+    elif [[ -n "$post_check_summary_fingerprint" && "$post_check_summary_fingerprint" != "$pre_check_summary_fingerprint" ]]; then
+      check_summary_fresh="true"
+    fi
     check_decision="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+    check_decision="$(normalize_decision "$check_decision")"
     check_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
     check_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else "null" end' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
     check_modal_recommended_profile="$(jq -r '
@@ -737,9 +659,7 @@ else
       else "null"
       end
     ' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
-    check_errors_json="$(jq -c '
-      if (.errors | type) == "array" then .errors else [] end
-    ' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
+    check_errors_json="$(jq -c 'if (.errors | type) == "array" then .errors else [] end' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
   elif [[ -f "$check_summary_json" ]]; then
     check_summary_exists="true"
     check_summary_valid="false"
@@ -747,6 +667,8 @@ else
 
   if [[ "$check_stage_rc" -eq 0 ]]; then
     if [[ "$check_summary_valid" != "true" ]]; then
+      check_stage_status="fail"
+    elif [[ "$check_summary_fresh" != "true" ]]; then
       check_stage_status="fail"
     elif [[ "$check_status" == "fail" || "$check_decision" == "NO-GO" ]]; then
       check_stage_status="fail"
@@ -778,6 +700,18 @@ else
     if [[ -z "$failure_reason" ]]; then
       failure_reason="stability check failed (rc=$check_stage_rc)"
     fi
+  elif [[ "$check_summary_valid" != "true" ]]; then
+    decision="NO-GO"
+    status="fail"
+    final_rc=1
+    failure_stage="check"
+    failure_reason="stability check summary is missing or invalid"
+  elif [[ "$check_summary_fresh" != "true" ]]; then
+    decision="NO-GO"
+    status="fail"
+    final_rc=1
+    failure_stage="check"
+    failure_reason="stability check summary is stale (not refreshed by current run)"
   elif [[ "$check_decision" == "GO" ]]; then
     status="pass"
     final_rc=0
@@ -800,6 +734,19 @@ else
   fi
 fi
 
+runs_json="null"
+sleep_between_sec_json="null"
+allow_partial_json="null"
+if [[ -n "$runs" ]]; then
+  runs_json="$runs"
+fi
+if [[ -n "$sleep_between_sec" ]]; then
+  sleep_between_sec_json="$sleep_between_sec"
+fi
+if [[ -n "$allow_partial" ]]; then
+  allow_partial_json="$allow_partial"
+fi
+
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
@@ -811,17 +758,18 @@ jq -n \
   --arg check_log "$check_log" \
   --arg run_command "$run_command_display" \
   --arg check_command "$check_command_display" \
-  --arg host_a "$host_a" \
-  --arg host_b "$host_b" \
-  --arg campaign_subject "$campaign_subject" \
   --arg reports_dir "$reports_dir" \
   --arg run_stage_status "$run_stage_status" \
   --arg check_stage_attempted "$check_stage_attempted" \
   --arg check_stage_status "$check_stage_status" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
+  --arg run_summary_exists "$run_summary_exists" \
+  --arg run_summary_valid "$run_summary_valid" \
+  --arg run_summary_fresh "$run_summary_fresh" \
   --arg check_summary_exists "$check_summary_exists" \
   --arg check_summary_valid "$check_summary_valid" \
+  --arg check_summary_fresh "$check_summary_fresh" \
   --arg check_decision "$check_decision" \
   --arg check_status "$check_status" \
   --arg check_modal_recommended_profile "$check_modal_recommended_profile" \
@@ -831,18 +779,14 @@ jq -n \
   --argjson check_rc "$check_rc_json" \
   --argjson check_modal_support_rate_pct "$check_modal_support_rate_pct_json" \
   --argjson check_errors "$check_errors_json" \
-  --argjson runs "$runs" \
-  --argjson campaign_timeout_sec "$campaign_timeout_sec" \
-  --argjson sleep_between_sec "$sleep_between_sec" \
-  --argjson allow_partial "$allow_partial" \
+  --argjson runs "$runs_json" \
+  --argjson sleep_between_sec "$sleep_between_sec_json" \
+  --argjson allow_partial "$allow_partial_json" \
   --argjson require_status_pass "$require_status_pass" \
-  --argjson require_stability_ok "$require_stability_ok" \
-  --argjson require_selection_policy_present_all "$require_selection_policy_present_all" \
-  --argjson require_consistent_selection_policy "$require_consistent_selection_policy" \
-  --argjson require_decision_consensus "$require_decision_consensus" \
   --argjson require_min_runs_requested "$require_min_runs_requested" \
   --argjson require_min_runs_completed "$require_min_runs_completed" \
   --argjson require_max_runs_fail "$require_max_runs_fail" \
+  --argjson require_decision_consensus "$require_decision_consensus" \
   --arg require_modal_decision "$require_modal_decision" \
   --argjson require_modal_decision_support_rate_pct "$require_modal_decision_support_rate_pct" \
   --arg require_recommended_profile "$require_recommended_profile" \
@@ -852,7 +796,7 @@ jq -n \
   '{
     version: 1,
     schema: {
-      id: "profile_default_gate_stability_cycle_summary"
+      id: "profile_compare_multi_vm_stability_cycle_summary"
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -861,26 +805,23 @@ jq -n \
     failure_stage: (if $failure_stage == "" then null else $failure_stage end),
     failure_reason: (if $failure_reason == "" then null else $failure_reason end),
     inputs: {
-      host_a: $host_a,
-      host_b: $host_b,
-      campaign_subject: $campaign_subject,
       reports_dir: $reports_dir,
       run: {
-        runs: $runs,
-        campaign_timeout_sec: $campaign_timeout_sec,
-        sleep_between_sec: $sleep_between_sec,
-        allow_partial: ($allow_partial == 1)
+        runs: (if $runs == null then null else $runs end),
+        sleep_between_sec: (if $sleep_between_sec == null then null else $sleep_between_sec end),
+        allow_partial: (
+          if $allow_partial == null then null
+          else ($allow_partial == 1)
+          end
+        )
       },
       check: {
         policy: {
           require_status_pass: ($require_status_pass == 1),
-          require_stability_ok: ($require_stability_ok == 1),
-          require_selection_policy_present_all: ($require_selection_policy_present_all == 1),
-          require_consistent_selection_policy: ($require_consistent_selection_policy == 1),
-          require_decision_consensus: ($require_decision_consensus == 1),
           require_min_runs_requested: $require_min_runs_requested,
           require_min_runs_completed: $require_min_runs_completed,
           require_max_runs_fail: $require_max_runs_fail,
+          require_decision_consensus: ($require_decision_consensus == 1),
           require_modal_decision: (
             if $require_modal_decision == "" then null
             else $require_modal_decision
@@ -920,9 +861,15 @@ jq -n \
         summary_json: $check_summary_json
       }
     },
+    run: {
+      summary_exists: ($run_summary_exists == "true"),
+      summary_valid_json: ($run_summary_valid == "true"),
+      summary_fresh: ($run_summary_fresh == "true")
+    },
     check: {
       summary_exists: ($check_summary_exists == "true"),
       summary_valid_json: ($check_summary_valid == "true"),
+      summary_fresh: ($check_summary_fresh == "true"),
       decision: (if $check_decision == "" then null else $check_decision end),
       status: (if $check_status == "" then null else $check_status end),
       rc: $check_rc,
@@ -943,12 +890,12 @@ jq -n \
     }
   }' >"$summary_json"
 
-echo "[profile-default-gate-stability-cycle] status=$status rc=$final_rc decision=${decision:-unset} summary_json=$summary_json"
+echo "[profile-compare-multi-vm-stability-cycle] status=$status rc=$final_rc decision=${decision:-unset} summary_json=$summary_json"
 if [[ -n "$failure_stage" ]]; then
-  echo "[profile-default-gate-stability-cycle] failure_stage=$failure_stage failure_reason=${failure_reason:-}"
+  echo "[profile-compare-multi-vm-stability-cycle] failure_stage=$failure_stage failure_reason=${failure_reason:-}"
 fi
 if [[ "$show_json" == "1" ]]; then
-  echo "[profile-default-gate-stability-cycle] summary_json_payload:"
+  echo "[profile-compare-multi-vm-stability-cycle] summary_json_payload:"
   cat "$summary_json"
 fi
 if [[ "$print_summary_json" == "1" ]]; then

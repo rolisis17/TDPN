@@ -99,6 +99,7 @@ entry_rotation_sec=180
 entry_rotation_jitter_pct=15
 exit_exploration_pct=10
 path_profile="2hop"
+decision_value="GO"
 
 if [[ "$scenario" == "mismatch" && "$run_index" -eq 2 ]]; then
   sticky_pair_sec=420
@@ -106,6 +107,9 @@ if [[ "$scenario" == "mismatch" && "$run_index" -eq 2 ]]; then
   entry_rotation_jitter_pct=10
   exit_exploration_pct=5
   path_profile="3hop"
+fi
+if [[ "$scenario" == "mixed_decision" && "$run_index" -eq 2 ]]; then
+  decision_value="NO-GO"
 fi
 
 campaign_summary_json="${summary_json%.json}_campaign_summary.json"
@@ -132,11 +136,12 @@ jq -n \
 
 jq -n \
   --arg campaign_summary_json "$campaign_summary_json" \
+  --arg decision_value "$decision_value" \
   '{
     status: "ok",
     final_rc: 0,
     decision: {
-      decision: "GO",
+      decision: $decision_value,
       recommended_profile: "balanced",
       support_rate_pct: 88.5
     },
@@ -201,6 +206,12 @@ if ! jq -e '
   and .consistent_selection_policy == true
   and .stability_ok == true
   and .recommended_profile_counts.balanced == 3
+  and .decision_counts.GO == 3
+  and .decision_total == 3
+  and .modal_decision == "GO"
+  and .modal_decision_count == 3
+  and (.modal_decision_support_rate_pct >= 99.9)
+  and .decision_consensus == true
   and (.runs | length) == 3
 ' "$STABLE_SUMMARY" >/dev/null 2>&1; then
   echo "stable summary JSON missing expected fields"
@@ -326,6 +337,56 @@ mismatch_counter_value="$(cat "$MISMATCH_COUNTER" 2>/dev/null || echo "0")"
 if [[ "$mismatch_counter_value" != "3" ]]; then
   echo "expected mismatch fake easy_node run count to be 3, got: $mismatch_counter_value"
   cat "$MISMATCH_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-run] mixed decision evidence"
+MIXED_DECISION_SUMMARY="$TMP_DIR/mixed_decision_summary.json"
+MIXED_DECISION_REPORTS_DIR="$TMP_DIR/reports_mixed_decision"
+MIXED_DECISION_COUNTER="$TMP_DIR/mixed_decision_counter.txt"
+MIXED_DECISION_CAPTURE="$TMP_DIR/mixed_decision_capture.log"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_EASY_NODE_COUNTER_FILE="$MIXED_DECISION_COUNTER" \
+FAKE_EASY_NODE_CAPTURE_FILE="$MIXED_DECISION_CAPTURE" \
+FAKE_EASY_NODE_SCENARIO="mixed_decision" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "host-a.test" \
+  --host-b "host-b.test" \
+  --campaign-subject "inv-mixed-decision" \
+  --runs 3 \
+  --campaign-timeout-sec 2400 \
+  --sleep-between-sec 0 \
+  --reports-dir "$MIXED_DECISION_REPORTS_DIR" \
+  --summary-json "$MIXED_DECISION_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_run_mixed_decision.log 2>&1
+mixed_decision_rc=$?
+set -e
+
+if [[ "$mixed_decision_rc" -ne 0 ]]; then
+  echo "expected mixed-decision path rc=0, got rc=$mixed_decision_rc"
+  cat /tmp/integration_profile_default_gate_stability_run_mixed_decision.log
+  exit 1
+fi
+if ! jq -e '
+  .runs_total == 3
+  and .runs_completed == 3
+  and .decision_counts.GO == 2
+  and .decision_counts."NO-GO" == 1
+  and .decision_total == 3
+  and .modal_decision == "GO"
+  and .modal_decision_count == 2
+  and (.modal_decision_support_rate_pct > 66 and .modal_decision_support_rate_pct < 67)
+  and .decision_consensus == false
+' "$MIXED_DECISION_SUMMARY" >/dev/null 2>&1; then
+  echo "mixed-decision summary JSON missing expected decision evidence"
+  cat "$MIXED_DECISION_SUMMARY"
+  exit 1
+fi
+mixed_decision_counter_value="$(cat "$MIXED_DECISION_COUNTER" 2>/dev/null || echo "0")"
+if [[ "$mixed_decision_counter_value" != "3" ]]; then
+  echo "expected mixed-decision fake easy_node run count to be 3, got: $mixed_decision_counter_value"
+  cat "$MIXED_DECISION_CAPTURE"
   exit 1
 fi
 

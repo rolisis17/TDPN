@@ -10,10 +10,7 @@ fn main() {
     println!("cargo:rerun-if-changed=icons/icon.svg");
     println!("cargo:rerun-if-changed=icons/icon.ico");
 
-    let is_windows_target = env::var("CARGO_CFG_TARGET_OS")
-        .ok()
-        .as_deref()
-        == Some("windows");
+    let is_windows_target = env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("windows");
 
     if is_windows_target {
         let manifest_dir = PathBuf::from(

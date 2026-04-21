@@ -79,6 +79,7 @@ type Client struct {
 	requireDistinctOps       bool
 	requireDistinctCountries bool
 	pathProfile              string
+	pathProfileConfigError   string
 	preferMiddleRelay        bool
 	requireMiddleRelay       bool
 	stickyPairSec            int
@@ -341,7 +342,14 @@ func NewClient() *Client {
 	}
 	requireDistinctOps := os.Getenv("CLIENT_REQUIRE_DISTINCT_OPERATORS") == "1"
 	requireDistinctCountries := os.Getenv("CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY") == "1"
-	pathProfile := normalizeClientPathProfile(os.Getenv("CLIENT_PATH_PROFILE"))
+	pathProfile, pathProfileMigrationHint, pathProfileErr := resolveClientPathProfile(os.Getenv("CLIENT_PATH_PROFILE"))
+	if pathProfileMigrationHint != "" {
+		log.Printf("client path-profile migration hint: %s", pathProfileMigrationHint)
+	}
+	pathProfileConfigError := ""
+	if pathProfileErr != nil {
+		pathProfileConfigError = pathProfileErr.Error()
+	}
 	preferMiddleRelay := pathProfile == "3hop"
 	requireMiddleRelay := pathProfile == "3hop"
 	if raw := strings.TrimSpace(os.Getenv("CLIENT_REQUIRE_MIDDLE_RELAY")); raw != "" {
@@ -557,6 +565,7 @@ func NewClient() *Client {
 		requireDistinctOps:       requireDistinctOps,
 		requireDistinctCountries: requireDistinctCountries,
 		pathProfile:              pathProfile,
+		pathProfileConfigError:   pathProfileConfigError,
 		preferMiddleRelay:        preferMiddleRelay,
 		requireMiddleRelay:       requireMiddleRelay,
 		stickyPairSec:            stickyPairSec,
@@ -693,6 +702,9 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) validateRuntimeConfig() error {
+	if strings.TrimSpace(c.pathProfileConfigError) != "" {
+		return fmt.Errorf("%s", c.pathProfileConfigError)
+	}
 	if securehttp.Enabled() {
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
@@ -4079,15 +4091,11 @@ func normalizeRegion(raw string) string {
 }
 
 func normalizeClientPathProfile(raw string) string {
-	v := strings.ToLower(strings.TrimSpace(raw))
-	switch v {
-	case "1", "1hop", "speed", "speed-1hop", "speed1hop", "fast", "fast-1hop", "onehop":
-		return "1hop"
-	case "3", "3hop", "private", "privacy":
-		return "3hop"
-	default:
-		return "2hop"
+	profile, _, err := resolveClientPathProfile(raw)
+	if err != nil {
+		return clientPathProfileDefault
 	}
+	return profile
 }
 
 func parseSelectionBiasEnv(name string, def float64) float64 {

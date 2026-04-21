@@ -2990,7 +2990,7 @@ fi
 
 : >"$CAPTURE"
 
-echo "[roadmap-progress-report] profile default live-wrapper rewrite preserves anon credential flags and keeps key behavior intact"
+echo "[roadmap-progress-report] profile default anon-cred commands remain run-mode and redact credential values"
 PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_live_anon_cred_summary.json"
 cat >"$PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_LIVE_ANON_CRED_SUMMARY'
 {
@@ -3050,45 +3050,227 @@ if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
     --report-md "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_report.md" \
     --print-report 0 \
     --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_anon_cred.log 2>&1; then
-  echo "expected success when profile default live-wrapper rewrite preserves anon credential flags"
+  echo "expected success when profile default anon-cred commands stay in run-mode with redacted credentials"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_live_anon_cred.log
   exit 1
 fi
 if ! jq -e '
+  def is_profile_gate_run_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-run( |$)"));
+  def is_profile_gate_run_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-run( |$)"));
   def is_profile_gate_live_non_sudo_cmd($cmd):
     (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
   def is_profile_gate_live_sudo_cmd($cmd):
     (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
-  def has_hosts($cmd):
-    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
-    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
-  def has_campaign_anon_cred($cmd):
-    (($cmd // "") | test("(^| )--campaign-anon-cred CAMPAIGN_ANON_TOKEN( |$)"));
-  def has_anon_cred($cmd):
-    (($cmd // "") | test("(^| )--anon-cred ANON_TOKEN( |$)"));
+  def has_campaign_anon_cred_redacted($cmd):
+    (($cmd // "") | test("(^| )--campaign-anon-cred ANON_CRED( |$)"));
+  def has_anon_cred_redacted($cmd):
+    (($cmd // "") | test("(^| )--anon-cred ANON_CRED( |$)"));
   def has_key_placeholder($cmd):
     (($cmd // "") | test("(^| )--key INVITE_KEY( |$)"));
+  def has_raw_anon_tokens($cmd):
+    (($cmd // "") | test("CAMPAIGN_ANON_TOKEN|ANON_TOKEN"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_run_non_sudo_cmd(.command)
+    and has_campaign_anon_cred_redacted(.command)
+    and ((is_profile_gate_live_non_sudo_cmd(.command)) | not)
+    and ((has_raw_anon_tokens(.command)) | not)
+  ))
+  and is_profile_gate_run_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_run_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+  and has_campaign_anon_cred_redacted(.vpn_track.profile_default_gate.next_command)
+  and has_key_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_anon_cred_redacted(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((has_raw_anon_tokens(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((has_raw_anon_tokens(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+' "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json" >/dev/null; then
+  echo "profile default anon-cred summary JSON missing expected run-mode redaction fields"
+  cat "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] malformed anon-cred flags remain signoff-mode and never inject subject placeholders"
+PROFILE_DEFAULT_GATE_MALFORMED_ANON_FLAG_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_malformed_anon_flag_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_MALFORMED_ANON_FLAG_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MALFORMED_ANON_FLAG_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "malformed anon-cred must stay signoff-mode",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --campaign-directory-urls 'https://198.51.100.31:8081,https://198.51.100.32:8081' --anon-cred --oops --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --campaign-directory-urls 'https://198.51.100.31:8081,https://198.51.100.32:8081' --anon-cred --oops --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "signoff+docker_rehearsal_artifacts",
+      "docker_hint_available": true,
+      "docker_hint_source": "signoff+docker_rehearsal_artifacts"
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_MALFORMED_ANON_FLAG_SUMMARY
+
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_MALFORMED_ANON_FLAG_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_malformed_anon_flag_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_malformed_anon_flag_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_malformed_anon_flag.log 2>&1; then
+  echo "expected success when malformed anon-cred flags preserve signoff-mode"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_malformed_anon_flag.log
+  exit 1
+fi
+if ! jq -e '
+  def is_signoff_cmd($cmd):
+    (($cmd // "") | test("^(sudo )?\\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
+  def is_live_wrapper_cmd($cmd):
+    (($cmd // "") | test("^(sudo )?\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
+  def has_anon_flag($cmd):
+    (($cmd // "") | test("(^| )--anon-cred( |$)"));
   def has_subject_placeholder($cmd):
     (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
   ((.next_actions // []) | any(
     .id == "profile_default_gate"
-    and is_profile_gate_live_non_sudo_cmd(.command)
-    and has_hosts(.command)
-    and has_campaign_anon_cred(.command)
+    and is_signoff_cmd(.command)
+    and has_anon_flag(.command)
+    and ((is_live_wrapper_cmd(.command)) | not)
     and ((has_subject_placeholder(.command)) | not)
   ))
-  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
-  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
-  and has_hosts(.vpn_track.profile_default_gate.next_command)
-  and has_hosts(.vpn_track.profile_default_gate.next_command_sudo)
-  and has_campaign_anon_cred(.vpn_track.profile_default_gate.next_command)
-  and has_key_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
-  and has_anon_cred(.vpn_track.profile_default_gate.next_command_sudo)
+  and is_signoff_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_signoff_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_anon_flag(.vpn_track.profile_default_gate.next_command)
+  and has_anon_flag(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((is_live_wrapper_cmd(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((is_live_wrapper_cmd(.vpn_track.profile_default_gate.next_command_sudo)) | not)
   and ((has_subject_placeholder(.vpn_track.profile_default_gate.next_command)) | not)
   and ((has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)) | not)
-' "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json" >/dev/null; then
-  echo "profile default live-wrapper anon credential summary JSON missing expected credential preservation fields"
-  cat "$TMP_DIR/roadmap_progress_profile_default_live_anon_cred_summary.json"
+' "$TMP_DIR/roadmap_progress_profile_default_malformed_anon_flag_summary.json" >/dev/null; then
+  echo "malformed anon-cred summary JSON unexpectedly rewrote command mode or injected subject placeholder"
+  cat "$TMP_DIR/roadmap_progress_profile_default_malformed_anon_flag_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] profile default credential redaction fails closed when command parsing fails"
+PROFILE_DEFAULT_GATE_PARSE_FAIL_CRED_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_parse_fail_cred_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_PARSE_FAIL_CRED_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_PARSE_FAIL_CRED_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "parse-failure credential values must not leak",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --subject 'LEAKY MULTI TOKEN VALUE --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --anon-cred 'ANON LEAK MULTI TOKEN --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "default_non_sudo",
+      "docker_rehearsal_hint_available": false
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_PARSE_FAIL_CRED_SUMMARY
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_PARSE_FAIL_CRED_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_parse_fail_cred_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_parse_fail_cred_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_parse_fail_cred.log 2>&1; then
+  echo "expected success when profile default commands contain unparseable quoted credential values"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_parse_fail_cred.log
+  exit 1
+fi
+if ! jq -e '
+  def is_profile_gate_signoff_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
+  def is_profile_gate_signoff_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
+  def has_subject_placeholder($cmd):
+    (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
+  def has_anon_cred_redacted($cmd):
+    (($cmd // "") | test("(^| )--anon-cred ANON_CRED( |$)"));
+  def has_raw_leaked_values($cmd):
+    (($cmd // "") | test("LEAKY MULTI TOKEN VALUE|ANON LEAK MULTI TOKEN"));
+  ((.next_actions // []) | any(
+    .id == "profile_default_gate"
+    and is_profile_gate_signoff_non_sudo_cmd(.command)
+    and has_subject_placeholder(.command)
+    and ((has_raw_leaked_values(.command)) | not)
+  ))
+  and is_profile_gate_signoff_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_signoff_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
+  and has_anon_cred_redacted(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((has_raw_leaked_values(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((has_raw_leaked_values(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+' "$TMP_DIR/roadmap_progress_profile_default_parse_fail_cred_summary.json" >/dev/null; then
+  echo "profile default parse-failure credential redaction summary JSON leaked raw credential text"
+  cat "$TMP_DIR/roadmap_progress_profile_default_parse_fail_cred_summary.json"
   exit 1
 fi
 
@@ -3741,7 +3923,7 @@ fi
 
 : >"$CAPTURE"
 
-echo "[roadmap-progress-report] profile default docker signoff source derives live wrapper hosts from campaign-directory-urls and bootstrap fallback when A_HOST/B_HOST are unset"
+echo "[roadmap-progress-report] profile default docker signoff source with anon creds stays signoff-mode and redacts credential values when A_HOST/B_HOST are unset"
 PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_docker_signoff_source_no_env_summary.json"
 cat >"$PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_MANUAL_DOCKER_SIGNOFF_NO_ENV_SUMMARY'
 {
@@ -3801,25 +3983,25 @@ if ! A_HOST="" B_HOST="" \
     --report-md "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_report.md" \
     --print-report 0 \
     --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_signoff_source_no_env_live_wrapper.log 2>&1; then
-  echo "expected success when docker signoff hint is converted to live wrapper without A_HOST/B_HOST using campaign-directory-urls and bootstrap fallback"
+  echo "expected success when docker signoff hint stays signoff-mode for anon creds without A_HOST/B_HOST"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_docker_signoff_source_no_env_live_wrapper.log
   exit 1
 fi
 if ! jq -e '
+  def is_profile_gate_signoff_non_sudo_cmd($cmd):
+    (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
+  def is_profile_gate_signoff_sudo_cmd($cmd):
+    (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
   def is_profile_gate_live_non_sudo_cmd($cmd):
     (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
   def is_profile_gate_live_sudo_cmd($cmd):
     (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
-  def has_hosts_from_directory_urls($cmd):
-    (($cmd // "") | test("(^| )--host-a 198\\.51\\.100\\.31( |$)"))
-    and (($cmd // "") | test("(^| )--host-b 198\\.51\\.100\\.32( |$)"));
-  def has_hosts_with_bootstrap_fallback($cmd):
-    (($cmd // "") | test("(^| )--host-a 203\\.0\\.113\\.41( |$)"))
-    and (($cmd // "") | test("(^| )--host-b 203\\.0\\.113\\.42( |$)"));
-  def has_campaign_anon_cred($cmd):
-    (($cmd // "") | test("(^| )--campaign-anon-cred SIGNOFF_CAMPAIGN_ANON( |$)"));
-  def has_anon_cred($cmd):
-    (($cmd // "") | test("(^| )--anon-cred SIGNOFF_ANON( |$)"));
+  def has_campaign_anon_cred_redacted($cmd):
+    (($cmd // "") | test("(^| )--campaign-anon-cred ANON_CRED( |$)"));
+  def has_anon_cred_redacted($cmd):
+    (($cmd // "") | test("(^| )--anon-cred ANON_CRED( |$)"));
+  def has_raw_anon_tokens($cmd):
+    (($cmd // "") | test("SIGNOFF_CAMPAIGN_ANON|SIGNOFF_ANON"));
   def has_refresh_campaign($cmd):
     (($cmd // "") | test("(^| )--refresh-campaign 1( |$)"));
   def has_fail_on_no_go($cmd):
@@ -3828,21 +4010,24 @@ if ! jq -e '
     (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
   ((.next_actions // []) | any(
     .id == "profile_default_gate"
-    and is_profile_gate_live_non_sudo_cmd(.command)
-    and has_hosts_from_directory_urls(.command)
-    and has_campaign_anon_cred(.command)
+    and is_profile_gate_signoff_non_sudo_cmd(.command)
+    and has_campaign_anon_cred_redacted(.command)
+    and ((is_profile_gate_live_non_sudo_cmd(.command)) | not)
+    and ((has_raw_anon_tokens(.command)) | not)
     and has_refresh_campaign(.command)
     and has_fail_on_no_go(.command)
     and has_campaign_timeout(.command)
   ))
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
-  and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
-  and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
-  and has_hosts_from_directory_urls(.vpn_track.profile_default_gate.next_command)
-  and has_hosts_with_bootstrap_fallback(.vpn_track.profile_default_gate.next_command_sudo)
-  and has_campaign_anon_cred(.vpn_track.profile_default_gate.next_command)
-  and has_anon_cred(.vpn_track.profile_default_gate.next_command_sudo)
+  and is_profile_gate_signoff_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
+  and is_profile_gate_signoff_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+  and has_campaign_anon_cred_redacted(.vpn_track.profile_default_gate.next_command)
+  and has_anon_cred_redacted(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((has_raw_anon_tokens(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((has_raw_anon_tokens(.vpn_track.profile_default_gate.next_command_sudo)) | not)
   and has_refresh_campaign(.vpn_track.profile_default_gate.next_command)
   and has_refresh_campaign(.vpn_track.profile_default_gate.next_command_sudo)
   and has_fail_on_no_go(.vpn_track.profile_default_gate.next_command)
@@ -3850,7 +4035,7 @@ if ! jq -e '
   and has_campaign_timeout(.vpn_track.profile_default_gate.next_command)
   and has_campaign_timeout(.vpn_track.profile_default_gate.next_command_sudo)
 ' "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_summary.json" >/dev/null; then
-  echo "profile default docker-signoff no-env live-wrapper summary JSON missing expected campaign-directory-urls and bootstrap host extraction fields"
+  echo "profile default docker-signoff no-env summary JSON missing expected signoff-mode anon-cred redaction fields"
   cat "$TMP_DIR/roadmap_progress_profile_default_docker_signoff_source_no_env_live_wrapper_summary.json"
   exit 1
 fi

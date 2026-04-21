@@ -489,6 +489,42 @@ recommended_profile_counts_json="$(jq '
   | add // {}
 ' <<<"$runs_json")"
 
+decision_counts_json="$(jq '
+  def normalize_decision:
+    ascii_upcase
+    | if . == "GO" then "GO"
+      elif . == "NO-GO" or . == "NOGO" or . == "NO_GO" then "NO-GO"
+      else .
+      end;
+  [ .[] | select(.completed == true) | .decision.decision // empty | strings | gsub("^\\s+|\\s+$"; "") | select(length > 0) | normalize_decision ]
+  | group_by(.)
+  | map({ (.[0]): length })
+  | add // {}
+' <<<"$runs_json")"
+
+decision_total_json="$(jq -r '[.[]] | add // 0' <<<"$decision_counts_json")"
+modal_decision="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$decision_counts_json")"
+modal_decision_count_json="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$decision_counts_json")"
+modal_decision_support_rate_pct_json="$(jq -n \
+  --argjson total "$decision_total_json" \
+  --argjson modal "$modal_decision_count_json" \
+  'if $total > 0 then (($modal * 100) / $total) else 0 end')"
+
+decision_consensus="$(jq -r '
+  def normalize_decision:
+    ascii_upcase
+    | if . == "GO" then "GO"
+      elif . == "NO-GO" or . == "NOGO" or . == "NO_GO" then "NO-GO"
+      else .
+      end;
+  ([.[] | select(.completed == true)] ) as $completed
+  | ([.[] | select(.completed == true) | .decision.decision // empty | strings | gsub("^\\s+|\\s+$"; "") | select(length > 0) | normalize_decision ]) as $decisions
+  | if ($completed | length) == 0 then false
+    elif ($decisions | length) != ($completed | length) then false
+    else (($decisions | unique | length) == 1)
+    end
+' <<<"$runs_json")"
+
 stability_ok="$(jq -r '
   ([.[] | select(.completed == true)] ) as $completed
   | ([.[] | select(.completed == true and .selection_policy_present == true) | (.selection_policy | tojson)]) as $policies
@@ -549,6 +585,12 @@ jq -n \
   --argjson consistent_selection_policy "$consistent_selection_policy" \
   --argjson selection_policy_present_all "$selection_policy_present_all" \
   --argjson recommended_profile_counts "$recommended_profile_counts_json" \
+  --argjson decision_counts "$decision_counts_json" \
+  --argjson decision_total "$decision_total_json" \
+  --arg modal_decision "$modal_decision" \
+  --argjson modal_decision_count "$modal_decision_count_json" \
+  --argjson modal_decision_support_rate_pct "$modal_decision_support_rate_pct_json" \
+  --argjson decision_consensus "$decision_consensus" \
   --argjson stability_ok "$stability_ok" \
   --argjson runs "$runs_json" \
   '{
@@ -576,6 +618,12 @@ jq -n \
     consistent_selection_policy: $consistent_selection_policy,
     selection_policy_present_all: $selection_policy_present_all,
     recommended_profile_counts: $recommended_profile_counts,
+    decision_counts: $decision_counts,
+    decision_total: $decision_total,
+    modal_decision: (if $modal_decision == "" then null else $modal_decision end),
+    modal_decision_count: $modal_decision_count,
+    modal_decision_support_rate_pct: $modal_decision_support_rate_pct,
+    decision_consensus: $decision_consensus,
     stability_ok: $stability_ok,
     runs: $runs,
     artifacts: {

@@ -88,25 +88,34 @@ fn windows_icon_preflight_reports_missing_and_invalid_states() {
 
     let status = icon_scaffold::inspect_windows_icon(&icon_path, &source_icon_path)
         .expect("preflight should be inspectable");
-    assert_eq!(status, icon_scaffold::WindowsIconPreflightStatus::MissingSourceIcon);
+    assert_eq!(
+        status,
+        icon_scaffold::WindowsIconPreflightStatus::MissingSourceIcon
+    );
 
-    fs::write(&source_icon_path, b"<svg xmlns='http://www.w3.org/2000/svg'/>")
-        .expect("source icon should be writable");
+    fs::write(
+        &source_icon_path,
+        b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+    )
+    .expect("source icon should be writable");
 
     let status = icon_scaffold::inspect_windows_icon(&icon_path, &source_icon_path)
         .expect("preflight should see a missing icon");
-    assert_eq!(status, icon_scaffold::WindowsIconPreflightStatus::MissingIcon);
+    assert_eq!(
+        status,
+        icon_scaffold::WindowsIconPreflightStatus::MissingIcon
+    );
 
     fs::write(&icon_path, [0x00, 0x00, 0x01]).expect("should write truncated icon");
     let status = icon_scaffold::inspect_windows_icon(&icon_path, &source_icon_path)
         .expect("preflight should see invalid icon bytes");
-    assert_eq!(status, icon_scaffold::WindowsIconPreflightStatus::InvalidIcon);
-
-    let message = icon_scaffold::windows_icon_failure_message(
-        &icon_path,
-        &source_icon_path,
+    assert_eq!(
         status,
+        icon_scaffold::WindowsIconPreflightStatus::InvalidIcon
     );
+
+    let message =
+        icon_scaffold::windows_icon_failure_message(&icon_path, &source_icon_path, status);
     assert!(message.contains("generate:windows-icon"));
     assert!(message.contains("npm install"));
 
