@@ -83,6 +83,22 @@ cleanup() {
   rm -rf "$tmp_dir"
 }
 
+wait_for_http_ready() {
+  local url="$1"
+  local label="$2"
+  local timeout_sec="${3:-20}"
+  local deadline=$((SECONDS + timeout_sec))
+  while ((SECONDS < deadline)); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "timed out waiting for ${label} (${url})"
+  cat "$node_log"
+  return 1
+}
+
 timeout 25s env \
   DIRECTORY_PROVIDER_ISSUER_URLS=http://127.0.0.1:8082 \
   DIRECTORY_ISSUER_TRUST_URLS=http://127.0.0.1:8082 \
@@ -94,7 +110,8 @@ timeout 25s env \
 node_pid=$!
 trap cleanup EXIT
 
-sleep 2
+wait_for_http_ready "http://127.0.0.1:8081/v1/health" "directory health"
+wait_for_http_ready "http://127.0.0.1:8082/v1/health" "issuer health"
 
 provider_pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
 provider_pop_pub=$(echo "$provider_pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
