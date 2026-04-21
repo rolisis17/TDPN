@@ -56,7 +56,7 @@ assert_token() {
 
 echo "[easy-node-profile-default-gate-stability-run] help contract"
 bash "$SCRIPT_UNDER_TEST" help >"$HELP_OUT"
-if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST --campaign-subject ID [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
+if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
   echo "easy_node help missing profile-default-gate-stability-run command contract"
   cat "$HELP_OUT"
   exit 1

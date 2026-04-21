@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp rg chmod; do
+for cmd in bash jq mktemp grep chmod; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -171,6 +171,16 @@ if [[ "$scenario" == "go" ]]; then
   exit 0
 fi
 
+if [[ "$scenario" == "invalid" ]]; then
+  jq -n '{
+    version: 1,
+    status: "fail",
+    rc: 0,
+    errors: ["invalid check summary shape"]
+  }' >"$summary_json"
+  exit 0
+fi
+
 jq -n '{
   version: 1,
   decision: "NO-GO",
@@ -201,7 +211,7 @@ FAKE_CYCLE_CHECK_SCENARIO="go" \
 bash "$SCRIPT_UNDER_TEST" \
   --host-a "a.test" \
   --host-b "b.test" \
-  --campaign-subject "inv-happy" \
+  --subject "inv-happy" \
   --runs 3 \
   --campaign-timeout-sec 1200 \
   --sleep-between-sec 0 \
@@ -234,14 +244,41 @@ if ! jq -e '
   cat "$HAPPY_SUMMARY"
   exit 1
 fi
-if ! rg -q '^run' "$FAKE_CAPTURE_FILE"; then
+if ! grep -q '^run' "$FAKE_CAPTURE_FILE"; then
   echo "expected fake run script invocation not captured"
   cat "$FAKE_CAPTURE_FILE"
   exit 1
 fi
-if ! rg -q '^check' "$FAKE_CAPTURE_FILE"; then
+if ! grep -q '^check' "$FAKE_CAPTURE_FILE"; then
   echo "expected fake check script invocation not captured"
   cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] conflicting --campaign-subject/--subject is rejected"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$TMP_DIR/capture_conflict.log" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "inv-one" \
+  --subject "inv-two" \
+  --reports-dir "$TMP_DIR/conflict_reports" \
+  --summary-json "$TMP_DIR/cycle_conflict_summary.json" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_conflict.log 2>&1
+conflict_rc=$?
+set -e
+
+if [[ "$conflict_rc" -ne 2 ]]; then
+  echo "expected conflicting subject values to return rc=2, got rc=$conflict_rc"
+  cat /tmp/integration_profile_default_gate_stability_cycle_conflict.log
+  exit 1
+fi
+if ! grep -q 'conflicting subject values' /tmp/integration_profile_default_gate_stability_cycle_conflict.log; then
+  echo "expected conflicting subject error message not found"
+  cat /tmp/integration_profile_default_gate_stability_cycle_conflict.log
   exit 1
 fi
 
@@ -282,7 +319,7 @@ if ! jq -e '
   cat "$RUN_FAIL_SUMMARY"
   exit 1
 fi
-if rg -q '^check' "$RUN_FAIL_CAPTURE"; then
+if grep -q '^check' "$RUN_FAIL_CAPTURE"; then
   echo "check stage should not run when run stage fails"
   cat "$RUN_FAIL_CAPTURE"
   exit 1
@@ -354,11 +391,52 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .failure_stage == null
   and .stages.check.attempted == true
-  and .stages.check.status == "pass"
+  and .stages.check.status == "fail"
+  and .stages.check.rc == 0
   and .check.decision == "NO-GO"
 ' "$CHECK_FAIL_OPEN_SUMMARY" >/dev/null 2>&1; then
   echo "check-stage NO-GO fail-open summary mismatch"
   cat "$CHECK_FAIL_OPEN_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] malformed check summary fails closed even with fail-on-no-go=0"
+CHECK_INVALID_SUMMARY="$TMP_DIR/cycle_check_invalid_summary.json"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$TMP_DIR/capture_check_invalid.log" \
+FAKE_CYCLE_RUN_SCENARIO="pass" \
+FAKE_CYCLE_CHECK_SCENARIO="invalid" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "inv-check-invalid" \
+  --reports-dir "$TMP_DIR/check_invalid_reports" \
+  --fail-on-no-go 0 \
+  --summary-json "$CHECK_INVALID_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_check_invalid.log 2>&1
+check_invalid_rc=$?
+set -e
+
+if [[ "$check_invalid_rc" -eq 0 ]]; then
+  echo "expected malformed check summary to fail closed with rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_cycle_check_invalid.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "check"
+  and ((.failure_reason // "") | test("missing a usable decision"))
+  and .stages.check.status == "fail"
+  and .stages.check.rc == 0
+  and .check.summary_valid_json == true
+  and .check.decision == null
+' "$CHECK_INVALID_SUMMARY" >/dev/null 2>&1; then
+  echo "malformed check summary fail-closed mismatch"
+  cat "$CHECK_INVALID_SUMMARY"
   exit 1
 fi
 

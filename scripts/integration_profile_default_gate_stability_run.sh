@@ -214,6 +214,70 @@ if [[ "$stable_counter_value" != "3" ]]; then
   exit 1
 fi
 
+echo "[profile-default-gate-stability-run] --subject alias path"
+ALIAS_SUMMARY="$TMP_DIR/alias_summary.json"
+ALIAS_REPORTS_DIR="$TMP_DIR/reports_alias"
+ALIAS_COUNTER="$TMP_DIR/alias_counter.txt"
+ALIAS_CAPTURE="$TMP_DIR/alias_capture.log"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_EASY_NODE_COUNTER_FILE="$ALIAS_COUNTER" \
+FAKE_EASY_NODE_CAPTURE_FILE="$ALIAS_CAPTURE" \
+FAKE_EASY_NODE_SCENARIO="stable" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "host-a.test" \
+  --host-b "host-b.test" \
+  --subject "inv-alias" \
+  --runs 1 \
+  --campaign-timeout-sec 2400 \
+  --sleep-between-sec 0 \
+  --reports-dir "$ALIAS_REPORTS_DIR" \
+  --summary-json "$ALIAS_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_run_alias.log 2>&1
+alias_rc=$?
+set -e
+
+if [[ "$alias_rc" -ne 0 ]]; then
+  echo "expected --subject alias path rc=0, got rc=$alias_rc"
+  cat /tmp/integration_profile_default_gate_stability_run_alias.log
+  exit 1
+fi
+if ! grep -q $'subject=inv-alias' "$ALIAS_CAPTURE"; then
+  echo "expected alias subject to be forwarded"
+  cat "$ALIAS_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-run] conflicting --campaign-subject/--subject is rejected"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_EASY_NODE_COUNTER_FILE="$TMP_DIR/conflict_counter.txt" \
+FAKE_EASY_NODE_CAPTURE_FILE="$TMP_DIR/conflict_capture.log" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "host-a.test" \
+  --host-b "host-b.test" \
+  --campaign-subject "inv-one" \
+  --subject "inv-two" \
+  --runs 1 \
+  --campaign-timeout-sec 2400 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/reports_conflict" \
+  --summary-json "$TMP_DIR/conflict_summary.json" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_run_conflict.log 2>&1
+conflict_rc=$?
+set -e
+
+if [[ "$conflict_rc" -ne 2 ]]; then
+  echo "expected conflicting subject values to return rc=2, got rc=$conflict_rc"
+  cat /tmp/integration_profile_default_gate_stability_run_conflict.log
+  exit 1
+fi
+if ! grep -q 'conflicting subject values' /tmp/integration_profile_default_gate_stability_run_conflict.log; then
+  echo "expected conflicting subject error message not found"
+  cat /tmp/integration_profile_default_gate_stability_run_conflict.log
+  exit 1
+fi
+
 echo "[profile-default-gate-stability-run] mismatched policy path"
 MISMATCH_SUMMARY="$TMP_DIR/mismatch_summary.json"
 MISMATCH_REPORTS_DIR="$TMP_DIR/reports_mismatch"

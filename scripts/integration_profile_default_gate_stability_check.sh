@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp rg; do
+for cmd in bash jq mktemp grep; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -75,7 +75,7 @@ if [[ "$baseline_rc" -ne 0 ]]; then
   cat /tmp/integration_profile_default_gate_stability_check_baseline.log
   exit 1
 fi
-if ! rg -q '\[profile-default-gate-stability-check\] decision=GO status=ok rc=0' /tmp/integration_profile_default_gate_stability_check_baseline.log; then
+if ! grep -q '\[profile-default-gate-stability-check\] decision=GO status=ok rc=0' /tmp/integration_profile_default_gate_stability_check_baseline.log; then
   echo "expected GO baseline output not found"
   cat /tmp/integration_profile_default_gate_stability_check_baseline.log
   exit 1
@@ -112,7 +112,7 @@ if [[ "$low_support_rc" -eq 0 ]]; then
   cat /tmp/integration_profile_default_gate_stability_check_low_support.log
   exit 1
 fi
-if ! rg -q 'modal support rate below threshold' /tmp/integration_profile_default_gate_stability_check_low_support.log; then
+if ! grep -q 'modal support rate below threshold' /tmp/integration_profile_default_gate_stability_check_low_support.log; then
   echo "expected modal support failure reason missing"
   cat /tmp/integration_profile_default_gate_stability_check_low_support.log
   exit 1
@@ -134,7 +134,7 @@ if [[ "$not_allowed_rc" -eq 0 ]]; then
   cat /tmp/integration_profile_default_gate_stability_check_not_allowed.log
   exit 1
 fi
-if ! rg -q 'recommended profile is not in allowed set' /tmp/integration_profile_default_gate_stability_check_not_allowed.log; then
+if ! grep -q 'recommended profile is not in allowed set' /tmp/integration_profile_default_gate_stability_check_not_allowed.log; then
   echo "expected disallowed-profile failure reason missing"
   cat /tmp/integration_profile_default_gate_stability_check_not_allowed.log
   exit 1
@@ -154,7 +154,7 @@ if [[ "$required_mismatch_rc" -eq 0 ]]; then
   cat /tmp/integration_profile_default_gate_stability_check_required_mismatch.log
   exit 1
 fi
-if ! rg -q 'recommended profile mismatch' /tmp/integration_profile_default_gate_stability_check_required_mismatch.log; then
+if ! grep -q 'recommended profile mismatch' /tmp/integration_profile_default_gate_stability_check_required_mismatch.log; then
   echo "expected required-profile mismatch failure reason missing"
   cat /tmp/integration_profile_default_gate_stability_check_required_mismatch.log
   exit 1
@@ -176,14 +176,33 @@ if [[ "$invalid_flags_rc" -eq 0 ]]; then
   cat /tmp/integration_profile_default_gate_stability_check_invalid_flags.log
   exit 1
 fi
-if ! rg -q 'selection_policy_present_all must be true' /tmp/integration_profile_default_gate_stability_check_invalid_flags.log; then
+if ! grep -q 'selection_policy_present_all must be true' /tmp/integration_profile_default_gate_stability_check_invalid_flags.log; then
   echo "expected selection_policy_present_all failure reason missing"
   cat /tmp/integration_profile_default_gate_stability_check_invalid_flags.log
   exit 1
 fi
-if ! rg -q 'consistent_selection_policy must be true' /tmp/integration_profile_default_gate_stability_check_invalid_flags.log; then
+if ! grep -q 'consistent_selection_policy must be true' /tmp/integration_profile_default_gate_stability_check_invalid_flags.log; then
   echo "expected consistent_selection_policy failure reason missing"
   cat /tmp/integration_profile_default_gate_stability_check_invalid_flags.log
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] missing value for numeric threshold returns rc=2"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$BASELINE_SUMMARY" \
+  --require-min-runs-completed >/tmp/integration_profile_default_gate_stability_check_missing_value.log 2>&1
+missing_value_rc=$?
+set -e
+
+if [[ "$missing_value_rc" -ne 2 ]]; then
+  echo "expected rc=2 when --require-min-runs-completed is missing a value"
+  cat /tmp/integration_profile_default_gate_stability_check_missing_value.log
+  exit 1
+fi
+if ! grep -q -- '--require-min-runs-completed requires a value' /tmp/integration_profile_default_gate_stability_check_missing_value.log; then
+  echo "expected missing-value error message not found"
+  cat /tmp/integration_profile_default_gate_stability_check_missing_value.log
   exit 1
 fi
 
@@ -229,7 +248,7 @@ FAIL_OPEN_OUT="$TMP_DIR/stability_check_fail_on_no_go_0.json"
 set +e
 bash "$SCRIPT_UNDER_TEST" \
   --stability-summary-json "$LOW_SUPPORT_SUMMARY" \
-  --fail-on-no-go 0 \
+  --fail-on-no-go=0 \
   --summary-json "$FAIL_OPEN_OUT" >/tmp/integration_profile_default_gate_stability_check_fail_open.log 2>&1
 fail_open_rc=$?
 set -e

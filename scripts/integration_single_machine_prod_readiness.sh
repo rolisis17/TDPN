@@ -60,6 +60,16 @@ PROFILE_STABILITY_CHECK_VALID_SOURCE_JSON="$TMP_DIR/profile_default_gate_stabili
 PROFILE_STABILITY_CHECK_INVALID_SOURCE_JSON="$TMP_DIR/profile_default_gate_stability_check_invalid_source.json"
 PROFILE_STABILITY_CHECK_MISSING_REPORTS_DIR="$TMP_DIR/profile_default_gate_stability_check_missing_reports"
 PROFILE_STABILITY_CHECK_MISSING_DEFAULT_JSON="$PROFILE_STABILITY_CHECK_MISSING_REPORTS_DIR/profile_default_gate_stability_check_summary.json"
+PROFILE_STABILITY_CYCLE_VALID_SUMMARY="$TMP_DIR/profile_stability_cycle_valid_summary.json"
+PROFILE_STABILITY_CYCLE_VALID_LOG="$TMP_DIR/profile_stability_cycle_valid.log"
+PROFILE_STABILITY_CYCLE_INVALID_SUMMARY="$TMP_DIR/profile_stability_cycle_invalid_summary.json"
+PROFILE_STABILITY_CYCLE_INVALID_LOG="$TMP_DIR/profile_stability_cycle_invalid.log"
+PROFILE_STABILITY_CYCLE_MISSING_SUMMARY="$TMP_DIR/profile_stability_cycle_missing_summary.json"
+PROFILE_STABILITY_CYCLE_MISSING_LOG="$TMP_DIR/profile_stability_cycle_missing.log"
+PROFILE_STABILITY_CYCLE_VALID_SOURCE_JSON="$TMP_DIR/profile_default_gate_stability_cycle_valid_source.json"
+PROFILE_STABILITY_CYCLE_INVALID_SOURCE_JSON="$TMP_DIR/profile_default_gate_stability_cycle_invalid_source.json"
+PROFILE_STABILITY_CYCLE_MISSING_REPORTS_DIR="$TMP_DIR/profile_default_gate_stability_cycle_missing_reports"
+PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_JSON="$PROFILE_STABILITY_CYCLE_MISSING_REPORTS_DIR/profile_default_gate_stability_cycle_summary.json"
 DOCKER_REHEARSAL_ARGS_LOG="$TMP_DIR/docker_rehearsal_args.log"
 PROFILE_SIGNOFF_ARGS_LOG="$TMP_DIR/profile_signoff_args.log"
 MANUAL_REPORT_ARGS_LOG="$TMP_DIR/manual_report_args.log"
@@ -352,11 +362,12 @@ EOF_JSON
     exit 2
     ;;
 esac
-if [[ -n "${FAKE_MANUAL_REPORT_STABILITY_SUMMARY_JSON:-}" || -n "${FAKE_MANUAL_REPORT_STABILITY_CHECK_SUMMARY_JSON:-}" ]]; then
+if [[ -n "${FAKE_MANUAL_REPORT_STABILITY_SUMMARY_JSON:-}" || -n "${FAKE_MANUAL_REPORT_STABILITY_CHECK_SUMMARY_JSON:-}" || -n "${FAKE_MANUAL_REPORT_STABILITY_CYCLE_SUMMARY_JSON:-}" ]]; then
   summary_json_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
   jq \
     --arg stability_summary_json "${FAKE_MANUAL_REPORT_STABILITY_SUMMARY_JSON:-}" \
-    --arg stability_check_summary_json "${FAKE_MANUAL_REPORT_STABILITY_CHECK_SUMMARY_JSON:-}" '
+    --arg stability_check_summary_json "${FAKE_MANUAL_REPORT_STABILITY_CHECK_SUMMARY_JSON:-}" \
+    --arg stability_cycle_summary_json "${FAKE_MANUAL_REPORT_STABILITY_CYCLE_SUMMARY_JSON:-}" '
     .summary.profile_default_gate = (
       ((.summary.profile_default_gate // {}) | if type == "object" then . else {} end)
       + {
@@ -364,6 +375,7 @@ if [[ -n "${FAKE_MANUAL_REPORT_STABILITY_SUMMARY_JSON:-}" || -n "${FAKE_MANUAL_R
             ((.summary.profile_default_gate.artifacts // {}) | if type == "object" then . else {} end)
             + (if $stability_summary_json == "" then {} else {profile_default_gate_stability_summary_json: $stability_summary_json} end)
             + (if $stability_check_summary_json == "" then {} else {profile_default_gate_stability_check_summary_json: $stability_check_summary_json} end)
+            + (if $stability_cycle_summary_json == "" then {} else {profile_default_gate_stability_cycle_summary_json: $stability_cycle_summary_json} end)
           )
         }
     )
@@ -807,6 +819,154 @@ fi
 if ! rg -q '\[single-machine-prod-readiness\] profile_default_gate_stability_check_available=false' "$PROFILE_STABILITY_CHECK_MISSING_LOG"; then
   echo "missing stability check path missing availability=false log line"
   cat "$PROFILE_STABILITY_CHECK_MISSING_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] profile default gate stability cycle summary (valid)"
+cat >"$PROFILE_STABILITY_CYCLE_VALID_SOURCE_JSON" <<'EOF_STABILITY_CYCLE_VALID'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_default_gate_stability_cycle_summary"
+  },
+  "decision": "GO",
+  "status": "pass",
+  "rc": 0,
+  "failure_stage": null,
+  "failure_reason": null
+}
+EOF_STABILITY_CYCLE_VALID
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+FAKE_MANUAL_REPORT_STABILITY_CYCLE_SUMMARY_JSON="$PROFILE_STABILITY_CYCLE_VALID_SOURCE_JSON" \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff 0 \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/profile_default_gate_stability_cycle_valid_reports" \
+  --summary-json "$PROFILE_STABILITY_CYCLE_VALID_SUMMARY" \
+  --print-summary-json 0 >"$PROFILE_STABILITY_CYCLE_VALID_LOG"
+if ! jq -e --arg cycle_json "$PROFILE_STABILITY_CYCLE_VALID_SOURCE_JSON" '
+  .summary.profile_default_gate.cycle_summary_json == $cycle_json
+  and .summary.profile_default_gate.cycle_summary_available == true
+  and .summary.profile_default_gate.cycle_decision == "GO"
+  and .summary.profile_default_gate.cycle_status == "pass"
+  and .summary.profile_default_gate.cycle_rc == 0
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' "$PROFILE_STABILITY_CYCLE_VALID_SUMMARY" >/dev/null; then
+  echo "valid profile default gate stability cycle summary did not propagate as expected"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_LOG"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_SUMMARY"
+  exit 1
+fi
+if ! rg -q '\[single-machine-prod-readiness\] profile_default_gate_stability_cycle_available=true' "$PROFILE_STABILITY_CYCLE_VALID_LOG"; then
+  echo "valid stability cycle path missing availability=true log line"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_LOG"
+  exit 1
+fi
+if ! rg -q '\[single-machine-prod-readiness\] profile_default_gate_stability_cycle_status=pass decision=GO rc=0 failure_stage=unset failure_reason=unset' "$PROFILE_STABILITY_CYCLE_VALID_LOG"; then
+  echo "valid stability cycle path missing status log line"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] profile default gate stability cycle summary (invalid shape)"
+cat >"$PROFILE_STABILITY_CYCLE_INVALID_SOURCE_JSON" <<'EOF_STABILITY_CYCLE_INVALID'
+{
+  "version": 1,
+  "schema": {
+    "id": "wrong_schema"
+  },
+  "decision": 123,
+  "status": false,
+  "rc": "0",
+  "failure_stage": 12,
+  "failure_reason": {}
+}
+EOF_STABILITY_CYCLE_INVALID
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+FAKE_MANUAL_REPORT_STABILITY_CYCLE_SUMMARY_JSON="$PROFILE_STABILITY_CYCLE_INVALID_SOURCE_JSON" \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff 0 \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/profile_default_gate_stability_cycle_invalid_reports" \
+  --summary-json "$PROFILE_STABILITY_CYCLE_INVALID_SUMMARY" \
+  --print-summary-json 0 >"$PROFILE_STABILITY_CYCLE_INVALID_LOG"
+if ! jq -e --arg cycle_json "$PROFILE_STABILITY_CYCLE_INVALID_SOURCE_JSON" '
+  .summary.profile_default_gate.cycle_summary_json == $cycle_json
+  and .summary.profile_default_gate.cycle_summary_available == false
+  and .summary.profile_default_gate.cycle_decision == null
+  and .summary.profile_default_gate.cycle_status == null
+  and .summary.profile_default_gate.cycle_rc == null
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' "$PROFILE_STABILITY_CYCLE_INVALID_SUMMARY" >/dev/null; then
+  echo "invalid profile default gate stability cycle summary should fail closed"
+  cat "$PROFILE_STABILITY_CYCLE_INVALID_LOG"
+  cat "$PROFILE_STABILITY_CYCLE_INVALID_SUMMARY"
+  exit 1
+fi
+if ! rg -q '\[single-machine-prod-readiness\] profile_default_gate_stability_cycle_available=false' "$PROFILE_STABILITY_CYCLE_INVALID_LOG"; then
+  echo "invalid stability cycle path missing availability=false log line"
+  cat "$PROFILE_STABILITY_CYCLE_INVALID_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] profile default gate stability cycle summary (missing default path)"
+rm -rf "$PROFILE_STABILITY_CYCLE_MISSING_REPORTS_DIR"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff 0 \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --profile-compare-campaign-signoff-reports-dir "$PROFILE_STABILITY_CYCLE_MISSING_REPORTS_DIR" \
+  --summary-json "$PROFILE_STABILITY_CYCLE_MISSING_SUMMARY" \
+  --print-summary-json 0 >"$PROFILE_STABILITY_CYCLE_MISSING_LOG"
+if ! jq -e --arg cycle_json "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_JSON" '
+  .summary.profile_default_gate.cycle_summary_json == $cycle_json
+  and .summary.profile_default_gate.cycle_summary_available == false
+  and .summary.profile_default_gate.cycle_decision == null
+  and .summary.profile_default_gate.cycle_status == null
+  and .summary.profile_default_gate.cycle_rc == null
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' "$PROFILE_STABILITY_CYCLE_MISSING_SUMMARY" >/dev/null; then
+  echo "missing default stability cycle summary should leave additive fields null-safe"
+  cat "$PROFILE_STABILITY_CYCLE_MISSING_LOG"
+  cat "$PROFILE_STABILITY_CYCLE_MISSING_SUMMARY"
+  exit 1
+fi
+if ! rg -q '\[single-machine-prod-readiness\] profile_default_gate_stability_cycle_available=false' "$PROFILE_STABILITY_CYCLE_MISSING_LOG"; then
+  echo "missing stability cycle path missing availability=false log line"
+  cat "$PROFILE_STABILITY_CYCLE_MISSING_LOG"
   exit 1
 fi
 

@@ -78,7 +78,7 @@ chmod +x "$SLOW2"
 cat >"$UNREACHABLE_PROFILE" <<'EOF_UNREACHABLE_PROFILE'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "[profile-default-gate-run] 2026-01-01T00:00:00Z wait-fail label=directory-a url=http://100.113.245.61:8081/v1/pubkeys attempt=3 error=curl rc=7"
+echo "[profile-default-gate-run] 2026-01-01T00:00:00Z wait-timeout label=directory-a url=http://100.113.245.61:8081/v1/pubkeys attempt=3 error=curl rc=7"
 echo "profile-default-gate-run failed: unreachable directory endpoint (directory-a) url=http://100.113.245.61:8081/v1/pubkeys timeout_sec=45"
 echo "last_error: curl rc=7: Failed to connect"
 exit 1
@@ -124,10 +124,61 @@ chmod +x "$MISSING_SUBJECT_PROFILE_MARKER"
 cat >"$FAKE_EASY_NODE" <<'EOF_FAKE_EASY_NODE'
 #!/usr/bin/env bash
 set -euo pipefail
+arg_value_for_flag() {
+  local flag="$1"
+  shift
+  local -a argv=("$@")
+  local idx=0
+  local token=""
+  for token in "${argv[@]}"; do
+    if [[ "$token" == "$flag" ]]; then
+      if (( idx + 1 < ${#argv[@]} )); then
+        printf '%s' "${argv[$((idx + 1))]}"
+      else
+        printf '%s' ""
+      fi
+      return
+    fi
+    if [[ "$token" == "$flag="* ]]; then
+      printf '%s' "${token#"$flag="}"
+      return
+    fi
+    idx=$((idx + 1))
+  done
+  printf '%s' ""
+}
 if [[ -n "${FAKE_EASY_NODE_CAPTURE:-}" ]]; then
   printf '%s\n' "$*" >>"$FAKE_EASY_NODE_CAPTURE"
 fi
-if [[ "$*" == *"--campaign-subject"* || "$*" == *"--subject"* || "$*" == *"--key"* || "$*" == *"--invite-key"* || "$*" == *"--campaign-anon-cred"* || "$*" == *"--anon-cred"* ]]; then
+reports_dir="$(arg_value_for_flag --reports-dir "$@")"
+summary_json="$(arg_value_for_flag --summary-json "$@")"
+subject_value="$(arg_value_for_flag --campaign-subject "$@")"
+if [[ -z "$subject_value" ]]; then
+  subject_value="$(arg_value_for_flag --subject "$@")"
+fi
+if [[ -z "$subject_value" ]]; then
+  subject_value="$(arg_value_for_flag --key "$@")"
+fi
+if [[ -z "$subject_value" ]]; then
+  subject_value="$(arg_value_for_flag --invite-key "$@")"
+fi
+anon_cred_value="$(arg_value_for_flag --campaign-anon-cred "$@")"
+if [[ -z "$anon_cred_value" ]]; then
+  anon_cred_value="$(arg_value_for_flag --anon-cred "$@")"
+fi
+if [[ -n "${FAKE_EASY_NODE_EXPECT_REPORTS_DIR:-}" && "$reports_dir" != "$FAKE_EASY_NODE_EXPECT_REPORTS_DIR" ]]; then
+  echo "fake easy_node expected --reports-dir '$FAKE_EASY_NODE_EXPECT_REPORTS_DIR' but got '$reports_dir'"
+  exit 9
+fi
+if [[ -n "${FAKE_EASY_NODE_EXPECT_SUMMARY_JSON:-}" && "$summary_json" != "$FAKE_EASY_NODE_EXPECT_SUMMARY_JSON" ]]; then
+  echo "fake easy_node expected --summary-json '$FAKE_EASY_NODE_EXPECT_SUMMARY_JSON' but got '$summary_json'"
+  exit 9
+fi
+if [[ -n "${FAKE_EASY_NODE_EXPECT_SUBJECT:-}" && "$subject_value" != "$FAKE_EASY_NODE_EXPECT_SUBJECT" ]]; then
+  echo "fake easy_node expected subject '$FAKE_EASY_NODE_EXPECT_SUBJECT' but got '$subject_value'"
+  exit 9
+fi
+if [[ -n "$subject_value" || -n "$anon_cred_value" ]]; then
   echo "fake easy_node profile-default-gate-run ok"
   exit 0
 fi
@@ -305,6 +356,15 @@ JSON
 {
   "next_actions": [
     {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --directory-a http://127.0.0.1:18081 --directory-b http://127.0.0.1:28081 --reports-dir /tmp/fake_profile_reports --campaign-timeout-sec 180 --summary-json /tmp/fake_profile_summary.json --print-summary-json 1 --subject INVITE_KEY","reason":"test-localhost-live-conversion"}
+  ]
+}
+JSON
+    ;;
+  profile_localhost_run_easy_node_quoted)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --directory-a 'http://127.0.0.1:18081' --directory-b \"http://127.0.0.1:28081\" --reports-dir '/tmp/fake profile reports' --campaign-timeout-sec 180 --summary-json \"/tmp/fake profile summary.json\" --print-summary-json 1 --subject 'inv quoted subject'","reason":"test-localhost-live-conversion-quoted"}
   ]
 }
 JSON
@@ -772,6 +832,51 @@ if ! grep -E -- '--host-b[[:space:]]+100\.64\.244\.24([[:space:]]|$)' "$FAKE_EAS
 fi
 if grep -E -- '127\.0\.0\.1' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   echo "profile localhost-to-live conversion command capture still contains localhost endpoints"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile localhost run quoted values round-trip through live-wrapper rewrite"
+SUMMARY_PROFILE_LOCALHOST_TO_LIVE_QUOTED="$TMP_DIR/summary_profile_localhost_to_live_quoted.json"
+REPORTS_PROFILE_LOCALHOST_TO_LIVE_QUOTED="$TMP_DIR/reports_profile_localhost_to_live_quoted"
+: >"$FAKE_EASY_NODE_CAPTURE"
+A_HOST=100.113.245.61 B_HOST=100.64.244.24 \
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_localhost_run_easy_node_quoted \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+FAKE_EASY_NODE_EXPECT_REPORTS_DIR="/tmp/fake profile reports" \
+FAKE_EASY_NODE_EXPECT_SUMMARY_JSON="/tmp/fake profile summary.json" \
+FAKE_EASY_NODE_EXPECT_SUBJECT="inv quoted subject" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_LOCALHOST_TO_LIVE_QUOTED" \
+  --summary-json "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_QUOTED" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("profile-default-gate-live"))
+  and ((.actions[0].command // "") | contains("--host-a 100.113.245.61"))
+  and ((.actions[0].command // "") | contains("--host-b 100.64.244.24"))
+  and ((.actions[0].command // "") | contains("--reports-dir /tmp/fake\\ profile\\ reports"))
+  and ((.actions[0].command // "") | contains("--summary-json /tmp/fake\\ profile\\ summary.json"))
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
+  and (((.actions[0].command // "") | contains("127.0.0.1")) | not)
+' "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_QUOTED" >/dev/null; then
+  echo "profile localhost-to-live quoted rewrite summary mismatch"
+  cat "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_QUOTED"
+  exit 1
+fi
+if ! grep -E -- 'profile-default-gate-live' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile localhost-to-live quoted rewrite command capture missing live wrapper command"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- '127\.0\.0\.1' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile localhost-to-live quoted rewrite command capture still contains localhost endpoints"
   cat "$FAKE_EASY_NODE_CAPTURE"
   exit 1
 fi

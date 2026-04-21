@@ -684,6 +684,26 @@ profile_default_gate_stability_check_summary_usable_01() {
   fi
 }
 
+profile_default_gate_stability_cycle_summary_usable_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (.schema | type == "object")
+    and ((.schema.id // "") == "profile_default_gate_stability_cycle_summary")
+    and (.version == 1)
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and ((.rc | type) == "number")
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 resolve_profile_default_gate_stability_summary_path() {
   local manual_summary_path="$1"
   local reports_dir="$2"
@@ -714,6 +734,26 @@ resolve_profile_default_gate_stability_check_summary_path() {
   fi
   if [[ -z "$candidate" && -n "$reports_dir" ]]; then
     candidate="$(abs_path "$reports_dir/profile_default_gate_stability_check_summary.json")"
+  fi
+  printf '%s' "$candidate"
+}
+
+resolve_profile_default_gate_stability_cycle_summary_path() {
+  local manual_summary_path="$1"
+  local reports_dir="$2"
+  local candidate=""
+  if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
+    candidate="$(jq -r '
+      .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json
+      // .report.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json
+      // .summary.profile_default_gate.cycle_summary_json
+      // .summary.profile_default_gate.stability_cycle_summary_json
+      // ""
+    ' "$manual_summary_path" 2>/dev/null || true)"
+    candidate="$(resolve_path_with_base "$candidate" "$manual_summary_path")"
+  fi
+  if [[ -z "$candidate" && -n "$reports_dir" ]]; then
+    candidate="$(abs_path "$reports_dir/profile_default_gate_stability_cycle_summary.json")"
   fi
   printf '%s' "$candidate"
 }
@@ -6837,6 +6877,34 @@ if [[ -n "$profile_default_gate_stability_check_summary_json" ]] \
     end
   ' "$profile_default_gate_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
 fi
+profile_default_gate_stability_cycle_summary_json="$(
+  resolve_profile_default_gate_stability_cycle_summary_path "$manual_validation_summary_json" "$default_log_dir"
+)"
+profile_default_gate_stability_cycle_summary_available_json="false"
+profile_default_gate_stability_cycle_decision_json=""
+profile_default_gate_stability_cycle_status_json=""
+profile_default_gate_stability_cycle_rc_json="null"
+profile_default_gate_stability_cycle_failure_stage_json=""
+profile_default_gate_stability_cycle_failure_reason_json=""
+if [[ -n "$profile_default_gate_stability_cycle_summary_json" ]] \
+   && [[ "$(profile_default_gate_stability_cycle_summary_usable_01 "$profile_default_gate_stability_cycle_summary_json")" == "1" ]]; then
+  profile_default_gate_stability_cycle_summary_available_json="true"
+  profile_default_gate_stability_cycle_decision_json="$(jq -r '
+    if (.decision | type) == "string" then .decision else "" end
+  ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+  profile_default_gate_stability_cycle_status_json="$(jq -r '
+    if (.status | type) == "string" then .status else "" end
+  ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+  profile_default_gate_stability_cycle_rc_json="$(jq -r '
+    if (.rc | type) == "number" then .rc else "null" end
+  ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "null")"
+  profile_default_gate_stability_cycle_failure_stage_json="$(jq -r '
+    if (.failure_stage | type) == "string" then .failure_stage else "" end
+  ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+  profile_default_gate_stability_cycle_failure_reason_json="$(jq -r '
+    if (.failure_reason | type) == "string" then .failure_reason else "" end
+  ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+fi
 profile_default_gate_signoff_resolution="$(resolve_profile_default_gate_signoff_status "$profile_compare_signoff_summary_json" "$manual_validation_summary_json")"
 profile_default_gate_signoff_status="${profile_default_gate_signoff_resolution%%$'\x1f'*}"
 profile_default_gate_signoff_source=""
@@ -7575,6 +7643,13 @@ summary_payload="$(jq -n \
   --argjson profile_default_gate_stability_check_rc "$profile_default_gate_stability_check_rc_json" \
   --arg profile_default_gate_stability_check_modal_recommended_profile "$profile_default_gate_stability_check_modal_recommended_profile_json" \
   --argjson profile_default_gate_stability_check_modal_support_rate_pct "$profile_default_gate_stability_check_modal_support_rate_pct_json" \
+  --arg profile_default_gate_stability_cycle_summary_json "$profile_default_gate_stability_cycle_summary_json" \
+  --argjson profile_default_gate_stability_cycle_summary_available "$profile_default_gate_stability_cycle_summary_available_json" \
+  --arg profile_default_gate_stability_cycle_decision "$profile_default_gate_stability_cycle_decision_json" \
+  --arg profile_default_gate_stability_cycle_status "$profile_default_gate_stability_cycle_status_json" \
+  --argjson profile_default_gate_stability_cycle_rc "$profile_default_gate_stability_cycle_rc_json" \
+  --arg profile_default_gate_stability_cycle_failure_stage "$profile_default_gate_stability_cycle_failure_stage_json" \
+  --arg profile_default_gate_stability_cycle_failure_reason "$profile_default_gate_stability_cycle_failure_reason_json" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
   --argjson total_checks "$counts_total" \
@@ -7803,6 +7878,13 @@ summary_payload="$(jq -n \
           end
         ),
         stability_check_modal_support_rate_pct: $profile_default_gate_stability_check_modal_support_rate_pct,
+        cycle_summary_json: (if $profile_default_gate_stability_cycle_summary_json == "" then null else $profile_default_gate_stability_cycle_summary_json end),
+        cycle_summary_available: $profile_default_gate_stability_cycle_summary_available,
+        cycle_decision: (if $profile_default_gate_stability_cycle_decision == "" then null else $profile_default_gate_stability_cycle_decision end),
+        cycle_status: (if $profile_default_gate_stability_cycle_status == "" then null else $profile_default_gate_stability_cycle_status end),
+        cycle_rc: $profile_default_gate_stability_cycle_rc,
+        cycle_failure_stage: (if $profile_default_gate_stability_cycle_failure_stage == "" then null else $profile_default_gate_stability_cycle_failure_stage end),
+        cycle_failure_reason: (if $profile_default_gate_stability_cycle_failure_reason == "" then null else $profile_default_gate_stability_cycle_failure_reason end),
         selection_policy_evidence_present: $profile_default_gate_selection_policy_evidence_present,
         selection_policy_evidence_valid: $profile_default_gate_selection_policy_evidence_valid,
         selection_policy_evidence_note: (if $profile_default_gate_selection_policy_evidence_note == "" then null else $profile_default_gate_selection_policy_evidence_note end)
@@ -8131,6 +8213,10 @@ cat >"$report_tmp" <<EOF_MD
 - Profile gate stability-check available: $(jq -r '.vpn_track.profile_default_gate.stability_check_summary_available | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate stability-check decision/status: decision=$(jq -r '.vpn_track.profile_default_gate.stability_check_decision // "none"' "$summary_json"), status=$(jq -r '.vpn_track.profile_default_gate.stability_check_status // "none"' "$summary_json")
 - Profile gate stability-check rc/modal: rc=$(jq -r '.vpn_track.profile_default_gate.stability_check_rc // "null"' "$summary_json"), modal_profile=$(jq -r '.vpn_track.profile_default_gate.stability_check_modal_recommended_profile // "none"' "$summary_json"), modal_support_rate_pct=$(jq -r '.vpn_track.profile_default_gate.stability_check_modal_support_rate_pct // "null"' "$summary_json")
+- Profile gate stability-cycle summary: $(jq -r '.vpn_track.profile_default_gate.cycle_summary_json // "none"' "$summary_json")
+- Profile gate stability-cycle available: $(jq -r '.vpn_track.profile_default_gate.cycle_summary_available | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate stability-cycle decision/status: decision=$(jq -r '.vpn_track.profile_default_gate.cycle_decision // "none"' "$summary_json"), status=$(jq -r '.vpn_track.profile_default_gate.cycle_status // "none"' "$summary_json")
+- Profile gate stability-cycle rc/failure: rc=$(jq -r '.vpn_track.profile_default_gate.cycle_rc // "null"' "$summary_json"), failure_stage=$(jq -r '.vpn_track.profile_default_gate.cycle_failure_stage // "none"' "$summary_json"), failure_reason=$(jq -r '.vpn_track.profile_default_gate.cycle_failure_reason // "none"' "$summary_json")
 - Primary next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
 
 ## Pending Real-Host Checks
@@ -8322,6 +8408,7 @@ echo "[roadmap-progress-report] profile_default_gate_selection_policy_evidence_p
 echo "[roadmap-progress-report] profile_default_gate_stability_summary_json=${profile_default_gate_stability_summary_json:-} stability_summary_available=$profile_default_gate_stability_summary_available_json stability_status=${profile_default_gate_stability_status_json:-} stability_rc=$profile_default_gate_stability_rc_json stability_runs_requested=$profile_default_gate_stability_runs_requested_json stability_runs_completed=$profile_default_gate_stability_runs_completed_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_selection_policy_present_all=$profile_default_gate_stability_selection_policy_present_all_json stability_consistent_selection_policy=$profile_default_gate_stability_consistent_selection_policy_json stability_ok=$profile_default_gate_stability_ok_json stability_recommended_profile_counts=$profile_default_gate_stability_recommended_profile_counts_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_check_summary_json=${profile_default_gate_stability_check_summary_json:-} stability_check_summary_available=$profile_default_gate_stability_check_summary_available_json stability_check_decision=${profile_default_gate_stability_check_decision_json:-} stability_check_status=${profile_default_gate_stability_check_status_json:-} stability_check_rc=$profile_default_gate_stability_check_rc_json stability_check_modal_recommended_profile=${profile_default_gate_stability_check_modal_recommended_profile_json:-} stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct_json"
+echo "[roadmap-progress-report] profile_default_gate_stability_cycle_summary_json=${profile_default_gate_stability_cycle_summary_json:-} cycle_summary_available=$profile_default_gate_stability_cycle_summary_available_json cycle_decision=${profile_default_gate_stability_cycle_decision_json:-} cycle_status=${profile_default_gate_stability_cycle_status_json:-} cycle_rc=$profile_default_gate_stability_cycle_rc_json cycle_failure_stage=${profile_default_gate_stability_cycle_failure_stage_json:-} cycle_failure_reason=${profile_default_gate_stability_cycle_failure_reason_json:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

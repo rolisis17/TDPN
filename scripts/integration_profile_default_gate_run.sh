@@ -66,6 +66,17 @@ assert_file_contains() {
   fi
 }
 
+assert_file_not_contains() {
+  local file_path="$1"
+  local pattern="$2"
+  local message="$3"
+  if grep -F -- "$pattern" "$file_path" >/dev/null 2>&1; then
+    echo "$message"
+    cat "$file_path"
+    exit 1
+  fi
+}
+
 cat >"$TMP_BIN/curl" <<'EOF_FAKE_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -224,6 +235,55 @@ assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "mi
 assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-progress elapsed_sec=0 state=campaign_start_pending" "missing immediate signoff progress marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
+
+echo "[profile-default-gate-run] endpoint-wait-timeout-sec=0 is unbounded (no immediate timeout)"
+: >"$SIGNOFF_CAPTURE"
+: >"$CURL_URL_CAPTURE"
+UNBOUNDED_LOG="$TMP_DIR/profile_default_gate_run_unbounded_timeout.log"
+UNBOUNDED_COUNTER="$TMP_DIR/curl_counter_unbounded.txt"
+UNBOUNDED_SUMMARY="$TMP_DIR/profile_default_gate_run_unbounded_timeout_summary.json"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$UNBOUNDED_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=2 \
+PROFILE_DEFAULT_GATE_FAKE_CURL_URL_CAPTURE_FILE="$CURL_URL_CAPTURE" \
+CAMPAIGN_SUBJECT="inv-env-unbounded-timeout" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --endpoint-wait-timeout-sec 0 \
+  --endpoint-wait-interval-sec 1 \
+  --endpoint-connect-timeout-sec 1 \
+  --summary-json "$UNBOUNDED_SUMMARY" >"$UNBOUNDED_LOG" 2>&1
+unbounded_rc=$?
+set -e
+if [[ "$unbounded_rc" -ne 0 ]]; then
+  echo "expected unbounded-timeout path rc=0, got rc=$unbounded_rc"
+  cat "$UNBOUNDED_LOG"
+  exit 1
+fi
+if [[ ! -f "$UNBOUNDED_SUMMARY" ]]; then
+  echo "expected unbounded-timeout summary JSON artifact to be created"
+  cat "$UNBOUNDED_LOG"
+  exit 1
+fi
+unbounded_counter="$(cat "$UNBOUNDED_COUNTER" 2>/dev/null || echo "0")"
+if ! [[ "$unbounded_counter" =~ ^[0-9]+$ ]] || (( unbounded_counter < 3 )); then
+  echo "expected unbounded-timeout path to keep retrying until success (counter >= 3), got: $unbounded_counter"
+  cat "$UNBOUNDED_LOG"
+  exit 1
+fi
+assert_file_contains "$UNBOUNDED_LOG" "wait-start label=directory_a" "missing unbounded-timeout wait-start marker"
+assert_file_contains "$UNBOUNDED_LOG" "timeout_sec=0" "missing unbounded-timeout timeout marker"
+assert_file_contains "$UNBOUNDED_LOG" "remaining_sec=unbounded" "missing unbounded-timeout unbounded remaining marker"
+unbounded_signoff_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$unbounded_signoff_line" ]]; then
+  echo "expected unbounded-timeout path to invoke signoff after retries"
+  cat "$UNBOUNDED_LOG"
+  exit 1
+fi
 
 echo "[profile-default-gate-run] wrapper-level selection-policy opt-out forwards explicit zeros"
 : >"$SIGNOFF_CAPTURE"
@@ -616,6 +676,36 @@ if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   exit 1
 fi
 
+echo "[profile-default-gate-run] remote HTTP preflight reject does not emit generic wait-fail marker"
+: >"$SIGNOFF_CAPTURE"
+REMOTE_HTTP_REJECT_LOG="$TMP_DIR/profile_default_gate_run_remote_http_reject.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_remote_http_reject.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-remote-http-reject" \
+"$SCRIPT_UNDER_TEST" \
+  --directory-a "http://dir-a.test:8081" \
+  --host-b "dir-b.test" >"$REMOTE_HTTP_REJECT_LOG" 2>&1
+remote_http_reject_rc=$?
+set -e
+if [[ "$remote_http_reject_rc" -eq 0 ]]; then
+  echo "expected remote-http preflight reject path to fail"
+  cat "$REMOTE_HTTP_REJECT_LOG"
+  exit 1
+fi
+assert_file_contains "$REMOTE_HTTP_REJECT_LOG" "wait-reject label=directory_a" "missing remote-http preflight reject marker"
+assert_file_contains "$REMOTE_HTTP_REJECT_LOG" "error=remote_http_disallowed" "missing remote-http reject error kind"
+assert_file_not_contains "$REMOTE_HTTP_REJECT_LOG" "wait-fail" "remote-http preflight reject should not emit generic wait-fail marker"
+assert_file_not_contains "$REMOTE_HTTP_REJECT_LOG" "failure_kind=unreachable_directory_endpoint" "remote-http preflight reject should not be mislabeled unreachable_directory_endpoint"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "remote-http preflight reject path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-default-gate-run] unreachable directory endpoint fails before signoff"
 : >"$SIGNOFF_CAPTURE"
 UNREACHABLE_LOG="$TMP_DIR/profile_default_gate_run_unreachable.log"
@@ -748,6 +838,62 @@ assert_contains "$live_equals_wrapper_line_sp" "--campaign-timeout-sec 778" "mis
 assert_contains "$live_equals_wrapper_line_sp" "--heartbeat-interval-sec 9" "missing equals live forwarded --heartbeat-interval-sec"
 assert_contains "$live_equals_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_equals_summary.json" "missing equals live forwarded --summary-json"
 assert_contains "$live_equals_wrapper_line_sp" "--print-summary-json 0" "missing equals live forwarded --print-summary-json"
+
+echo "[profile-default-gate-live] host scheme/path/port values normalize to safe endpoint hosts"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_HOST_NORM_LOG="$TMP_DIR/easy_node_profile_default_gate_live_host_norm.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "https://wrapper-live-norm-a.test:19081/bootstrap/v1" \
+  --host-b "wrapper-live-norm-b.test:29081/ignored/path" \
+  --campaign-subject "inv-live-host-norm" \
+  --reports-dir "$TMP_DIR/live_reports_host_norm" \
+  --campaign-timeout-sec 779 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_host_norm_summary.json" >"$EASY_NODE_LIVE_HOST_NORM_LOG" 2>&1
+
+live_host_norm_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_host_norm_line" ]]; then
+  echo "missing easy_node live host normalization wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_HOST_NORM_LOG"
+  exit 1
+fi
+live_host_norm_line_sp="${live_host_norm_line//$'\t'/ }"
+assert_contains "$live_host_norm_line_sp" "--directory-a http://wrapper-live-norm-a.test:8081" "missing host-normalized live forwarded --directory-a"
+assert_contains "$live_host_norm_line_sp" "--directory-b http://wrapper-live-norm-b.test:8081" "missing host-normalized live forwarded --directory-b"
+assert_contains "$live_host_norm_line_sp" "--campaign-bootstrap-directory http://wrapper-live-norm-a.test:8081" "missing host-normalized live forwarded --campaign-bootstrap-directory"
+assert_contains "$live_host_norm_line_sp" "--campaign-issuer-url http://wrapper-live-norm-a.test:8082" "missing host-normalized live forwarded --campaign-issuer-url"
+assert_contains "$live_host_norm_line_sp" "--campaign-entry-url http://wrapper-live-norm-a.test:8083" "missing host-normalized live forwarded --campaign-entry-url"
+assert_contains "$live_host_norm_line_sp" "--campaign-exit-url http://wrapper-live-norm-a.test:8084" "missing host-normalized live forwarded --campaign-exit-url"
+assert_contains "$live_host_norm_line_sp" "--campaign-subject inv-live-host-norm" "missing host-normalized live forwarded --campaign-subject"
+
+echo "[profile-default-gate-live] IPv6 host literals preserve address and safely drop explicit ports"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_IPV6_NORM_LOG="$TMP_DIR/easy_node_profile_default_gate_live_ipv6_norm.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "https://[2001:db8::10]:19081/bootstrap/v1" \
+  --host-b "2001:db8::20" \
+  --campaign-subject "inv-live-ipv6-norm" \
+  --reports-dir "$TMP_DIR/live_reports_ipv6_norm" \
+  --campaign-timeout-sec 780 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_ipv6_norm_summary.json" >"$EASY_NODE_LIVE_IPV6_NORM_LOG" 2>&1
+
+live_ipv6_norm_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_ipv6_norm_line" ]]; then
+  echo "missing easy_node live IPv6 normalization wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_IPV6_NORM_LOG"
+  exit 1
+fi
+live_ipv6_norm_line_sp="${live_ipv6_norm_line//$'\t'/ }"
+assert_contains "$live_ipv6_norm_line_sp" "--directory-a http://[2001:db8::10]:8081" "missing IPv6-normalized live forwarded --directory-a"
+assert_contains "$live_ipv6_norm_line_sp" "--directory-b http://[2001:db8::20]:8081" "missing IPv6-normalized live forwarded --directory-b"
+assert_contains "$live_ipv6_norm_line_sp" "--campaign-bootstrap-directory http://[2001:db8::10]:8081" "missing IPv6-normalized live forwarded --campaign-bootstrap-directory"
+assert_contains "$live_ipv6_norm_line_sp" "--campaign-issuer-url http://[2001:db8::10]:8082" "missing IPv6-normalized live forwarded --campaign-issuer-url"
+assert_contains "$live_ipv6_norm_line_sp" "--campaign-entry-url http://[2001:db8::10]:8083" "missing IPv6-normalized live forwarded --campaign-entry-url"
+assert_contains "$live_ipv6_norm_line_sp" "--campaign-exit-url http://[2001:db8::10]:8084" "missing IPv6-normalized live forwarded --campaign-exit-url"
+assert_contains "$live_ipv6_norm_line_sp" "--campaign-subject inv-live-ipv6-norm" "missing IPv6-normalized live forwarded --campaign-subject"
 
 echo "[profile-default-gate-live] missing env/subject fails clearly"
 : >"$WRAPPER_CAPTURE"

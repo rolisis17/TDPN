@@ -167,39 +167,74 @@ redact_command_secrets() {
 profile_default_gate_extract_arg_value_from_cmd() {
   local cmd
   local opt
-  local value=""
+  local token
+  local idx=0
   cmd="$(trim "${1:-}")"
   opt="${2:-}"
   if [[ -z "$cmd" || -z "$opt" ]]; then
     printf '%s' ""
     return
   fi
-  if [[ "$cmd" =~ (^|[[:space:]])${opt}[[:space:]]+([^[:space:]]+) ]]; then
-    value="${BASH_REMATCH[2]}"
-    printf '%s' "$value"
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' ""
     return
   fi
-  if [[ "$cmd" =~ (^|[[:space:]])${opt}=([^[:space:]]+) ]]; then
-    value="${BASH_REMATCH[2]}"
-    printf '%s' "$value"
-    return
-  fi
+  for token in "${COMMAND_STRING_ARGV[@]}"; do
+    if [[ "$token" == "$opt" ]]; then
+      if (( idx + 1 < ${#COMMAND_STRING_ARGV[@]} )); then
+        printf '%s' "${COMMAND_STRING_ARGV[$((idx + 1))]}"
+      else
+        printf '%s' ""
+      fi
+      return
+    fi
+    if [[ "$token" == "$opt="* ]]; then
+      printf '%s' "${token#"$opt="}"
+      return
+    fi
+    idx=$((idx + 1))
+  done
   printf '%s' ""
+}
+
+profile_default_gate_command_from_argv() {
+  local token
+  local out=""
+  for token in "$@"; do
+    out="${out}${out:+ }$(printf '%q' "$token")"
+  done
+  printf '%s' "$out"
 }
 
 profile_default_gate_command_is_localhost_profile_default_run_01() {
   local cmd
+  local token
+  local has_profile_default_gate_run="0"
+  local directory_a=""
+  local directory_b=""
   cmd="$(trim "${1:-}")"
   if [[ -z "$cmd" ]]; then
     printf '%s' "0"
     return
   fi
-  if [[ ! "$cmd" =~ (^|[[:space:]])profile-default-gate-run([[:space:]]|$) ]]; then
+  if ! command_string_to_argv "$cmd"; then
     printf '%s' "0"
     return
   fi
-  if [[ "$cmd" =~ (^|[[:space:]])--directory-a([[:space:]]+|=)https?://127\.0\.0\.1:[0-9]+([[:space:]]|$) \
-     && "$cmd" =~ (^|[[:space:]])--directory-b([[:space:]]+|=)https?://127\.0\.0\.1:[0-9]+([[:space:]]|$) ]]; then
+  for token in "${COMMAND_STRING_ARGV[@]}"; do
+    if [[ "$token" == "profile-default-gate-run" ]]; then
+      has_profile_default_gate_run="1"
+      break
+    fi
+  done
+  if [[ "$has_profile_default_gate_run" != "1" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  directory_a="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--directory-a")"
+  directory_b="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--directory-b")"
+  if [[ "$directory_a" =~ ^https?://127\.0\.0\.1:[0-9]+$ \
+     && "$directory_b" =~ ^https?://127\.0\.0\.1:[0-9]+$ ]]; then
     printf '%s' "1"
   else
     printf '%s' "0"
@@ -210,15 +245,13 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   local cmd
   local host_a
   local host_b
-  local reports_dir=""
-  local summary_json=""
-  local print_summary_json=""
-  local campaign_timeout_sec=""
-  local credential_flag=""
-  local credential_value=""
-  local supported_credential_flags=("--campaign-subject" "--subject" "--key" "--invite-key")
-  local flag=""
-  local rebuilt=""
+  local token=""
+  local -a in_argv=()
+  local -a out_argv=()
+  local idx=0
+  local token_count=0
+  local has_host_a="0"
+  local has_host_b="0"
   cmd="$(trim "${1:-}")"
   host_a="$(trim "${2:-}")"
   host_b="$(trim "${3:-}")"
@@ -234,44 +267,71 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
     printf '%s' "$cmd"
     return
   fi
-  reports_dir="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--reports-dir")"
-  summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--summary-json")"
-  print_summary_json="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--print-summary-json")"
-  campaign_timeout_sec="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "--campaign-timeout-sec")"
-  for flag in "${supported_credential_flags[@]}"; do
-    credential_value="$(profile_default_gate_extract_arg_value_from_cmd "$cmd" "$flag")"
-    if [[ -n "$credential_value" ]]; then
-      credential_flag="$flag"
-      break
-    fi
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' "$cmd"
+    return
+  fi
+  in_argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#in_argv[@]}"
+  while (( idx < token_count )); do
+    token="${in_argv[$idx]}"
+    case "$token" in
+      profile-default-gate-run)
+        out_argv+=("profile-default-gate-live")
+        ;;
+      --directory-a)
+        out_argv+=("--directory-a" "$host_a")
+        if (( idx + 1 < token_count )); then
+          idx=$((idx + 1))
+        fi
+        ;;
+      --directory-a=*)
+        out_argv+=("--directory-a=$host_a")
+        ;;
+      --directory-b)
+        out_argv+=("--directory-b" "$host_b")
+        if (( idx + 1 < token_count )); then
+          idx=$((idx + 1))
+        fi
+        ;;
+      --directory-b=*)
+        out_argv+=("--directory-b=$host_b")
+        ;;
+      --host-a)
+        has_host_a="1"
+        out_argv+=("--host-a" "$host_a")
+        if (( idx + 1 < token_count )); then
+          idx=$((idx + 1))
+        fi
+        ;;
+      --host-a=*)
+        has_host_a="1"
+        out_argv+=("--host-a=$host_a")
+        ;;
+      --host-b)
+        has_host_b="1"
+        out_argv+=("--host-b" "$host_b")
+        if (( idx + 1 < token_count )); then
+          idx=$((idx + 1))
+        fi
+        ;;
+      --host-b=*)
+        has_host_b="1"
+        out_argv+=("--host-b=$host_b")
+        ;;
+      *)
+        out_argv+=("$token")
+        ;;
+    esac
+    idx=$((idx + 1))
   done
-  rebuilt="${cmd/profile-default-gate-run/profile-default-gate-live}"
-  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(--directory-a[[:space:]]+|--directory-a=)https?://127\.0\.0\.1:[0-9]+@\1'"${host_a}"'@g')"
-  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(--directory-b[[:space:]]+|--directory-b=)https?://127\.0\.0\.1:[0-9]+@\1'"${host_b}"'@g')"
-  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--host-a([[:space:]]+|=)[^[:space:]]+@\1--host-a\2'"${host_a}"'@g')"
-  rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--host-b([[:space:]]+|=)[^[:space:]]+@\1--host-b\2'"${host_b}"'@g')"
-  if [[ ! "$rebuilt" =~ (^|[[:space:]])--host-a([[:space:]=]|$) ]]; then
-    rebuilt="${rebuilt} --host-a ${host_a}"
+  if [[ "$has_host_a" != "1" ]]; then
+    out_argv+=("--host-a" "$host_a")
   fi
-  if [[ ! "$rebuilt" =~ (^|[[:space:]])--host-b([[:space:]=]|$) ]]; then
-    rebuilt="${rebuilt} --host-b ${host_b}"
+  if [[ "$has_host_b" != "1" ]]; then
+    out_argv+=("--host-b" "$host_b")
   fi
-  if [[ -n "$reports_dir" ]]; then
-    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--reports-dir([[:space:]]+|=)[^[:space:]]+@\1--reports-dir\2'"${reports_dir}"'@g')"
-  fi
-  if [[ -n "$campaign_timeout_sec" ]]; then
-    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--campaign-timeout-sec([[:space:]]+|=)[^[:space:]]+@\1--campaign-timeout-sec\2'"${campaign_timeout_sec}"'@g')"
-  fi
-  if [[ -n "$summary_json" ]]; then
-    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--summary-json([[:space:]]+|=)[^[:space:]]+@\1--summary-json\2'"${summary_json}"'@g')"
-  fi
-  if [[ -n "$print_summary_json" ]]; then
-    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])--print-summary-json([[:space:]]+|=)[^[:space:]]+@\1--print-summary-json\2'"${print_summary_json}"'@g')"
-  fi
-  if [[ -n "$credential_flag" && -n "$credential_value" ]]; then
-    rebuilt="$(printf '%s' "$rebuilt" | sed -E 's@(^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)([[:space:]]+|=)[^[:space:]]+@\1'"${credential_flag}"'\3'"${credential_value}"'@')"
-  fi
-  printf '%s' "$rebuilt"
+  profile_default_gate_command_from_argv "${out_argv[@]}"
 }
 
 log_has_failure_kind_marker() {
@@ -1022,7 +1082,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       action_failure_kind="soft_failed_profile_default_gate_precondition"
       action_notes="soft-failed profile_default_gate missing invite-subject precondition (allow flag enabled)"
       action_soft_failed="true"
-    elif [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*unreachable directory endpoint|[[:space:]]wait-fail[[:space:]]' "$action_log"; then
+    elif [[ -f "$action_log" ]] && grep -E -q 'profile-default-gate-run failed:[[:space:]]*unreachable directory endpoint|[[:space:]]wait-timeout[[:space:]]' "$action_log"; then
       action_status="pass"
       action_rc=0
       action_failure_kind="soft_failed_unreachable_profile_default_gate"

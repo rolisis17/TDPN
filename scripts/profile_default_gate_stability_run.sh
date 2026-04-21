@@ -10,7 +10,7 @@ Usage:
   ./scripts/profile_default_gate_stability_run.sh \
     --host-a HOST \
     --host-b HOST \
-    --campaign-subject ID \
+    [--campaign-subject ID | --subject ID] \
     [--runs N] \
     [--campaign-timeout-sec N] \
     [--sleep-between-sec N] \
@@ -96,6 +96,8 @@ need_cmd sleep
 host_a="${PROFILE_DEFAULT_GATE_STABILITY_HOST_A:-}"
 host_b="${PROFILE_DEFAULT_GATE_STABILITY_HOST_B:-}"
 campaign_subject="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT:-}"
+campaign_subject_from_campaign=""
+campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
@@ -128,10 +130,23 @@ while [[ $# -gt 0 ]]; do
     --campaign-subject)
       require_value_or_die "$1" "$#"
       campaign_subject="${2:-}"
+      campaign_subject_from_campaign="${2:-}"
       shift 2
       ;;
     --campaign-subject=*)
       campaign_subject="${1#*=}"
+      campaign_subject_from_campaign="${1#*=}"
+      shift
+      ;;
+    --subject)
+      require_value_or_die "$1" "$#"
+      campaign_subject="${2:-}"
+      campaign_subject_from_alias="${2:-}"
+      shift 2
+      ;;
+    --subject=*)
+      campaign_subject="${1#*=}"
+      campaign_subject_from_alias="${1#*=}"
       shift
       ;;
     --runs)
@@ -220,6 +235,8 @@ done
 host_a="$(trim "$host_a")"
 host_b="$(trim "$host_b")"
 campaign_subject="$(trim "$campaign_subject")"
+campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
+campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
@@ -238,7 +255,11 @@ if [[ -z "$host_b" ]]; then
   exit 2
 fi
 if [[ -z "$campaign_subject" ]]; then
-  echo "--campaign-subject is required"
+  echo "--campaign-subject or --subject is required"
+  exit 2
+fi
+if [[ -n "$campaign_subject_from_campaign" && -n "$campaign_subject_from_alias" && "$campaign_subject_from_campaign" != "$campaign_subject_from_alias" ]]; then
+  echo "conflicting subject values: --campaign-subject and --subject must match when both are provided"
   exit 2
 fi
 if [[ ! -f "$easy_node_script" ]]; then

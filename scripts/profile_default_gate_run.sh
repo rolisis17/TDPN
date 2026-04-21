@@ -451,12 +451,12 @@ wait_for_directory_endpoint() {
   probe_host="$(extract_url_host_01 "$probe_url")"
   probe_scheme="$(extract_url_scheme_01 "$probe_url")"
   if [[ "$probe_scheme" == "http" ]] && ! is_local_host_for_probe_01 "$probe_host"; then
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url error=remote_http_disallowed"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url error=remote_http_disallowed"
     echo "profile-default-gate-run failed: remote HTTP probe endpoint requires HTTPS ($label) url=$probe_url"
     return 2
   fi
   if [[ "$allow_insecure_probe" == "1" ]] && ! is_local_host_for_probe_01 "$probe_host"; then
-    echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url error=insecure_probe_remote_disallowed"
+    echo "[profile-default-gate-run] $(timestamp_utc) wait-reject label=$label url=$probe_url error=insecure_probe_remote_disallowed"
     echo "profile-default-gate-run failed: --allow-insecure-probe=1 is only allowed for local endpoints ($label) url=$probe_url"
     return 2
   fi
@@ -501,8 +501,8 @@ wait_for_directory_endpoint() {
 
     now_epoch="$(date +%s)"
     elapsed_sec=$((now_epoch - start_epoch))
-    if (( endpoint_wait_timeout_sec == 0 || now_epoch >= deadline_epoch )); then
-      echo "[profile-default-gate-run] $(timestamp_utc) wait-fail label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec error=$err_text"
+    if (( endpoint_wait_timeout_sec > 0 && now_epoch >= deadline_epoch )); then
+      echo "[profile-default-gate-run] $(timestamp_utc) wait-timeout label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec error=$err_text"
       echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=unreachable_directory_endpoint label=$label url=$probe_url"
       echo "profile-default-gate-run failed: unreachable directory endpoint ($label) url=$probe_url timeout_sec=$endpoint_wait_timeout_sec"
       echo "last_error: $err_text"
@@ -513,7 +513,14 @@ wait_for_directory_endpoint() {
       return 1
     fi
 
-    remaining_sec=$((deadline_epoch - now_epoch))
+    if (( endpoint_wait_timeout_sec == 0 )); then
+      remaining_sec="unbounded"
+    else
+      remaining_sec=$((deadline_epoch - now_epoch))
+      if (( remaining_sec < 0 )); then
+        remaining_sec=0
+      fi
+    fi
     echo "[profile-default-gate-run] $(timestamp_utc) wait-retry label=$label url=$probe_url attempt=$attempt elapsed_sec=$elapsed_sec remaining_sec=$remaining_sec error=$err_text"
     echo "[profile-default-gate-run] $(timestamp_utc) wait-next label=$label url=$probe_url next_attempt=$((attempt + 1)) sleep_sec=$endpoint_wait_interval_sec"
     sleep "$endpoint_wait_interval_sec"

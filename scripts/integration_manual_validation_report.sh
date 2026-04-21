@@ -36,6 +36,9 @@ TIMEOUT_STATUS_PAYLOAD_LOG="$TMP_DIR/integration_manual_validation_report_timeou
 STABILITY_VALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_stability_valid.log"
 STABILITY_INVALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_stability_invalid.log"
 STABILITY_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_stability_default_missing.log"
+CYCLE_VALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_cycle_valid.log"
+CYCLE_INVALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_cycle_invalid.log"
+CYCLE_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_cycle_default_missing.log"
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
@@ -44,10 +47,17 @@ FAKE_STATUS_ROOT_DEFER="$TMP_DIR/fake_manual_validation_status_root_defer.sh"
 FAKE_STATUS_STABILITY_VALID="$TMP_DIR/fake_manual_validation_status_stability_valid.sh"
 FAKE_STATUS_STABILITY_INVALID="$TMP_DIR/fake_manual_validation_status_stability_invalid.sh"
 FAKE_STATUS_STABILITY_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_stability_default_missing.sh"
+FAKE_STATUS_CYCLE_VALID="$TMP_DIR/fake_manual_validation_status_cycle_valid.sh"
+FAKE_STATUS_CYCLE_INVALID="$TMP_DIR/fake_manual_validation_status_cycle_invalid.sh"
+FAKE_STATUS_CYCLE_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_cycle_default_missing.sh"
 STABILITY_VALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_valid.json"
 STABILITY_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_invalid.json"
 STABILITY_DEFAULT_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary_default.json"
 STABILITY_DEFAULT_EXPECTED_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary.json"
+CYCLE_VALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary_valid.json"
+CYCLE_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary_invalid.json"
+CYCLE_DEFAULT_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_cycle_default.json"
+CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary.json"
 
 cat >"$FAKE_DOCTOR" <<'EOF_DOCTOR'
 #!/usr/bin/env bash
@@ -1190,6 +1200,315 @@ if ! printf '%s\n' "$stability_default_missing_report_json" | jq -e --arg expect
 ' >/dev/null; then
   echo "manual validation report missing-default-stability JSON missing expected fail-closed fields"
   printf '%s\n' "$stability_default_missing_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default stability-cycle fields (valid summary)"
+cat >"$CYCLE_VALID_SUMMARY_JSON" <<'EOF_CYCLE_VALID_SUMMARY'
+{
+  "version": 1,
+  "status": "pass",
+  "decision": "GO",
+  "rc": 0,
+  "failure_stage": null,
+  "failure_reason": null
+}
+EOF_CYCLE_VALID_SUMMARY
+cat >"$FAKE_STATUS_CYCLE_VALID" <<EOF_STATUS_CYCLE_VALID
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_cycle_valid.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {
+        "profile_default_gate_stability_cycle_summary_json": "$CYCLE_VALID_SUMMARY_JSON"
+      }
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_CYCLE_VALID
+chmod +x "$FAKE_STATUS_CYCLE_VALID"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_CYCLE_VALID" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/cycle_valid_summary.json" \
+  --report-md "$TMP_DIR/cycle_valid_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$CYCLE_VALID_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_stability_cycle_summary_available=true' "$CYCLE_VALID_REPORT_LOG"; then
+  echo "manual validation report valid-cycle run missing cycle available=true line"
+  cat "$CYCLE_VALID_REPORT_LOG"
+  exit 1
+fi
+cycle_valid_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$CYCLE_VALID_REPORT_LOG")"
+if [[ -z "$cycle_valid_report_json" ]]; then
+  echo "manual validation report valid-cycle run missing JSON payload"
+  cat "$CYCLE_VALID_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$cycle_valid_report_json" | jq -e --arg cycle "$CYCLE_VALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.cycle_summary_json == $cycle
+  and .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json == $cycle
+  and .summary.profile_default_gate.cycle_summary_available == true
+  and .summary.profile_default_gate.cycle_decision == "GO"
+  and .summary.profile_default_gate.cycle_status == "pass"
+  and .summary.profile_default_gate.cycle_rc == 0
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' >/dev/null; then
+  echo "manual validation report valid-cycle JSON missing expected fields"
+  printf '%s\n' "$cycle_valid_report_json"
+  exit 1
+fi
+if ! rg -q 'Stability-cycle summary available: `true`' "$TMP_DIR/cycle_valid_report.md"; then
+  echo "manual validation report valid-cycle markdown missing availability line"
+  cat "$TMP_DIR/cycle_valid_report.md"
+  exit 1
+fi
+if ! rg -q 'Stability-cycle decision/status: decision=`GO`, status=`pass`' "$TMP_DIR/cycle_valid_report.md"; then
+  echo "manual validation report valid-cycle markdown missing decision/status line"
+  cat "$TMP_DIR/cycle_valid_report.md"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default stability-cycle fields (invalid summary fail-closed)"
+cat >"$CYCLE_INVALID_SUMMARY_JSON" <<'EOF_CYCLE_INVALID_SUMMARY'
+{
+  "version": 1,
+  "status": "pass",
+  "decision": "GO",
+  "rc": "0"
+}
+EOF_CYCLE_INVALID_SUMMARY
+cat >"$FAKE_STATUS_CYCLE_INVALID" <<EOF_STATUS_CYCLE_INVALID
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_cycle_invalid.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {
+        "profile_default_gate_stability_cycle_summary_json": "$CYCLE_INVALID_SUMMARY_JSON"
+      }
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_CYCLE_INVALID
+chmod +x "$FAKE_STATUS_CYCLE_INVALID"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_CYCLE_INVALID" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/cycle_invalid_summary.json" \
+  --report-md "$TMP_DIR/cycle_invalid_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$CYCLE_INVALID_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_stability_cycle_summary_available=false' "$CYCLE_INVALID_REPORT_LOG"; then
+  echo "manual validation report invalid-cycle run missing cycle available=false line"
+  cat "$CYCLE_INVALID_REPORT_LOG"
+  exit 1
+fi
+cycle_invalid_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$CYCLE_INVALID_REPORT_LOG")"
+if [[ -z "$cycle_invalid_report_json" ]]; then
+  echo "manual validation report invalid-cycle run missing JSON payload"
+  cat "$CYCLE_INVALID_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$cycle_invalid_report_json" | jq -e --arg cycle "$CYCLE_INVALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.cycle_summary_json == $cycle
+  and .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json == $cycle
+  and .summary.profile_default_gate.cycle_summary_available == false
+  and .summary.profile_default_gate.cycle_decision == null
+  and .summary.profile_default_gate.cycle_status == null
+  and .summary.profile_default_gate.cycle_rc == null
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' >/dev/null; then
+  echo "manual validation report invalid-cycle JSON missing expected fail-closed fields"
+  printf '%s\n' "$cycle_invalid_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default stability-cycle fields (missing default artifact path)"
+printf '%s\n' '{"version":1,"status":"ok"}' >"$CYCLE_DEFAULT_SIGNOFF_SUMMARY_JSON"
+rm -f "$CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON"
+cat >"$FAKE_STATUS_CYCLE_DEFAULT_MISSING" <<EOF_STATUS_CYCLE_DEFAULT_MISSING
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_cycle_default_missing.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$CYCLE_DEFAULT_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {}
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_CYCLE_DEFAULT_MISSING
+chmod +x "$FAKE_STATUS_CYCLE_DEFAULT_MISSING"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_CYCLE_DEFAULT_MISSING" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/cycle_default_missing_summary.json" \
+  --report-md "$TMP_DIR/cycle_default_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$CYCLE_DEFAULT_MISSING_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_stability_cycle_summary_available=false' "$CYCLE_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report missing-default-cycle run missing cycle available=false line"
+  cat "$CYCLE_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q "\[manual-validation-report\] profile_default_gate_stability_cycle_summary_json=${CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON}" "$CYCLE_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report missing-default-cycle run missing default summary path line"
+  cat "$CYCLE_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+cycle_default_missing_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$CYCLE_DEFAULT_MISSING_REPORT_LOG")"
+if [[ -z "$cycle_default_missing_report_json" ]]; then
+  echo "manual validation report missing-default-cycle run missing JSON payload"
+  cat "$CYCLE_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$cycle_default_missing_report_json" | jq -e --arg expected "$CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON" '
+  .summary.profile_default_gate.cycle_summary_json == $expected
+  and .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_available == false
+  and .summary.profile_default_gate.cycle_decision == null
+  and .summary.profile_default_gate.cycle_status == null
+  and .summary.profile_default_gate.cycle_rc == null
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' >/dev/null; then
+  echo "manual validation report missing-default-cycle JSON missing expected fail-closed fields"
+  printf '%s\n' "$cycle_default_missing_report_json"
   exit 1
 fi
 

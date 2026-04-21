@@ -38,6 +38,9 @@ PROFILE_INVALID_SUMMARY_LOG="$TMP_DIR/integration_manual_validation_status_profi
 PROFILE_STABILITY_CHECK_VALID_LOG="$TMP_DIR/integration_manual_validation_status_profile_stability_check_valid.log"
 PROFILE_STABILITY_CHECK_INVALID_LOG="$TMP_DIR/integration_manual_validation_status_profile_stability_check_invalid.log"
 PROFILE_STABILITY_CHECK_MISSING_DEFAULT_LOG="$TMP_DIR/integration_manual_validation_status_profile_stability_check_missing_default.log"
+PROFILE_STABILITY_CYCLE_VALID_LOG="$TMP_DIR/integration_manual_validation_status_profile_stability_cycle_valid.log"
+PROFILE_STABILITY_CYCLE_INVALID_LOG="$TMP_DIR/integration_manual_validation_status_profile_stability_cycle_invalid.log"
+PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG="$TMP_DIR/integration_manual_validation_status_profile_stability_cycle_missing_default.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
 UNREADABLE_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_unreadable_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
@@ -46,6 +49,9 @@ INVALID_DOCTOR_JSON_LOG="$TMP_DIR/integration_manual_validation_status_invalid_r
 PROFILE_STABILITY_CHECK_DEFAULT_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary.json"
 PROFILE_STABILITY_CHECK_EXPLICIT_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_explicit_summary.json"
 PROFILE_STABILITY_CHECK_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_invalid_summary.json"
+PROFILE_STABILITY_CYCLE_DEFAULT_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary.json"
+PROFILE_STABILITY_CYCLE_EXPLICIT_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_explicit_summary.json"
+PROFILE_STABILITY_CYCLE_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_invalid_summary.json"
 
 cat >"$FAKE_DOCTOR" <<'EOF'
 #!/usr/bin/env bash
@@ -1530,6 +1536,182 @@ if ! printf '%s\n' "$profile_stability_check_missing_default_json" | jq -e --arg
 ' >/dev/null; then
   echo "profile-stability-check-missing-default status JSON missing expected default fail-closed fields"
   printf '%s\n' "$profile_stability_check_missing_default_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default stability-cycle summary (explicit valid path)"
+cat >"$PROFILE_STABILITY_CYCLE_EXPLICIT_SUMMARY_JSON" <<'EOF_PROFILE_STABILITY_CYCLE_EXPLICIT'
+{
+  "version": 1,
+  "status": "pass",
+  "decision": "GO",
+  "rc": 0,
+  "failure_stage": null,
+  "failure_reason": null
+}
+EOF_PROFILE_STABILITY_CYCLE_EXPLICIT
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_STABILITY_CYCLE_VALID
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  },
+  "artifacts": {
+    "profile_default_gate_stability_cycle_summary_json": "$(basename "$PROFILE_STABILITY_CYCLE_EXPLICIT_SUMMARY_JSON")"
+  }
+}
+EOF_PROFILE_SIGNOFF_STABILITY_CYCLE_VALID
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >"$PROFILE_STABILITY_CYCLE_VALID_LOG"
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_stability_cycle_available=true' "$PROFILE_STABILITY_CYCLE_VALID_LOG"; then
+  echo "profile-stability-cycle-valid status missing available=true line"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] profile_default_gate_stability_cycle_status=pass decision=GO rc=0 failure_stage=none failure_reason=none' "$PROFILE_STABILITY_CYCLE_VALID_LOG"; then
+  echo "profile-stability-cycle-valid status missing stability-cycle detail line"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_LOG"
+  exit 1
+fi
+profile_stability_cycle_valid_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$PROFILE_STABILITY_CYCLE_VALID_LOG")"
+if [[ -z "$profile_stability_cycle_valid_json" ]]; then
+  echo "profile-stability-cycle-valid status missing JSON payload"
+  cat "$PROFILE_STABILITY_CYCLE_VALID_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$profile_stability_cycle_valid_json" | jq -e --arg expected "$PROFILE_STABILITY_CYCLE_EXPLICIT_SUMMARY_JSON" '
+  .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_available == true
+  and .summary.profile_default_gate.cycle_decision == "GO"
+  and .summary.profile_default_gate.cycle_status == "pass"
+  and .summary.profile_default_gate.cycle_rc == 0
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' >/dev/null; then
+  echo "profile-stability-cycle-valid status JSON missing expected stability-cycle fields"
+  printf '%s\n' "$profile_stability_cycle_valid_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default stability-cycle summary (explicit invalid shape fail-closed)"
+cat >"$PROFILE_STABILITY_CYCLE_INVALID_SUMMARY_JSON" <<'EOF_PROFILE_STABILITY_CYCLE_INVALID'
+{
+  "version": 1,
+  "status": "pass",
+  "decision": "GO",
+  "rc": "0"
+}
+EOF_PROFILE_STABILITY_CYCLE_INVALID
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_STABILITY_CYCLE_INVALID
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  },
+  "artifacts": {
+    "profile_default_gate_stability_cycle_summary_json": "$(basename "$PROFILE_STABILITY_CYCLE_INVALID_SUMMARY_JSON")"
+  }
+}
+EOF_PROFILE_SIGNOFF_STABILITY_CYCLE_INVALID
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >"$PROFILE_STABILITY_CYCLE_INVALID_LOG"
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_stability_cycle_available=false' "$PROFILE_STABILITY_CYCLE_INVALID_LOG"; then
+  echo "profile-stability-cycle-invalid status missing available=false line"
+  cat "$PROFILE_STABILITY_CYCLE_INVALID_LOG"
+  exit 1
+fi
+profile_stability_cycle_invalid_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$PROFILE_STABILITY_CYCLE_INVALID_LOG")"
+if [[ -z "$profile_stability_cycle_invalid_json" ]]; then
+  echo "profile-stability-cycle-invalid status missing JSON payload"
+  cat "$PROFILE_STABILITY_CYCLE_INVALID_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$profile_stability_cycle_invalid_json" | jq -e --arg expected "$PROFILE_STABILITY_CYCLE_INVALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_available == false
+  and .summary.profile_default_gate.cycle_decision == null
+  and .summary.profile_default_gate.cycle_status == null
+  and .summary.profile_default_gate.cycle_rc == null
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' >/dev/null; then
+  echo "profile-stability-cycle-invalid status JSON missing fail-closed stability-cycle fields"
+  printf '%s\n' "$profile_stability_cycle_invalid_json"
+  exit 1
+fi
+
+echo "[manual-validation] profile-default stability-cycle summary (missing default path fail-closed)"
+rm -f "$PROFILE_STABILITY_CYCLE_DEFAULT_SUMMARY_JSON"
+cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<'EOF_PROFILE_SIGNOFF_STABILITY_CYCLE_MISSING_DEFAULT'
+{
+  "version": 1,
+  "status": "fail",
+  "final_rc": 1,
+  "failure_stage": "campaign_check",
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "NO-GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_PROFILE_SIGNOFF_STABILITY_CYCLE_MISSING_DEFAULT
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh --show-json 1 >"$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG"
+
+if ! rg -q '\[manual-validation-status\] profile_default_gate_stability_cycle_available=false' "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG"; then
+  echo "profile-stability-cycle-missing-default status missing available=false line"
+  cat "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG"
+  exit 1
+fi
+if ! rg -q "\\[manual-validation-status\\] profile_default_gate_stability_cycle_summary_json=${PROFILE_STABILITY_CYCLE_DEFAULT_SUMMARY_JSON}" "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG"; then
+  echo "profile-stability-cycle-missing-default status missing default-path summary line"
+  cat "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG"
+  exit 1
+fi
+profile_stability_cycle_missing_default_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG")"
+if [[ -z "$profile_stability_cycle_missing_default_json" ]]; then
+  echo "profile-stability-cycle-missing-default status missing JSON payload"
+  cat "$PROFILE_STABILITY_CYCLE_MISSING_DEFAULT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$profile_stability_cycle_missing_default_json" | jq -e --arg expected "$PROFILE_STABILITY_CYCLE_DEFAULT_SUMMARY_JSON" '
+  .summary.profile_default_gate.artifacts.profile_default_gate_stability_cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_json == $expected
+  and .summary.profile_default_gate.cycle_summary_available == false
+  and .summary.profile_default_gate.cycle_decision == null
+  and .summary.profile_default_gate.cycle_status == null
+  and .summary.profile_default_gate.cycle_rc == null
+  and .summary.profile_default_gate.cycle_failure_stage == null
+  and .summary.profile_default_gate.cycle_failure_reason == null
+' >/dev/null; then
+  echo "profile-stability-cycle-missing-default status JSON missing expected default fail-closed fields"
+  printf '%s\n' "$profile_stability_cycle_missing_default_json"
   exit 1
 fi
 

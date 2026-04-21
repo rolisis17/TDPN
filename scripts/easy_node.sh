@@ -276,9 +276,9 @@ Usage:
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
-  ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST --campaign-subject ID [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
+./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST --campaign-subject ID [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
+./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
@@ -398,9 +398,9 @@ Usage:
   ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--campaign-anon-cred TOKEN] [--subject ID (alias for --campaign-subject)|--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL] [--host-b HOST|--directory-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
-  ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST --campaign-subject ID [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
+./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST --campaign-subject ID [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
+./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
@@ -1249,10 +1249,15 @@ hostport_from_url() {
 }
 
 host_from_hostport() {
-  local value="$1"
-  if [[ "$value" == \[*\]* ]]; then
+  local value
+  value="$(trim_url "$1")"
+  if [[ -z "$value" ]]; then
+    echo ""
+    return
+  fi
+  if [[ "$value" =~ ^\[([^][]+)\](:[0-9]+)?$ ]]; then
     # Bracketed IPv6 literal, with optional :port.
-    echo "${value%%]*}]"
+    printf '[%s]\n' "${BASH_REMATCH[1]}"
     return
   fi
   local colon_count
@@ -9888,11 +9893,16 @@ profile_default_gate_live() {
 
   normalize_live_host() {
     local raw="$1"
-    raw="${raw#http://}"
-    raw="${raw#https://}"
-    raw="${raw%%/*}"
-    raw="${raw%%:*}"
-    printf '%s\n' "$raw"
+    raw="$(trim_url "$raw")"
+    if [[ -z "$raw" ]]; then
+      printf '%s\n' ""
+      return
+    fi
+    if [[ "$raw" == *"://"* || "$raw" == */* ]]; then
+      printf '%s\n' "$(host_from_url "$raw")"
+      return
+    fi
+    printf '%s\n' "$(host_from_hostport "$raw")"
   }
 
   local host_a=""
@@ -9917,11 +9927,16 @@ profile_default_gate_live() {
     exit 2
   fi
 
-  local directory_a="http://${host_a}:8081"
-  local directory_b="http://${host_b}:8081"
-  local issuer_a="http://${host_a}:8082"
-  local entry_a="http://${host_a}:8083"
-  local exit_a="http://${host_a}:8084"
+  local directory_a
+  local directory_b
+  local issuer_a
+  local entry_a
+  local exit_a
+  directory_a="$(url_from_host_port "$host_a" 8081)"
+  directory_b="$(url_from_host_port "$host_b" 8081)"
+  issuer_a="$(url_from_host_port "$host_a" 8082)"
+  entry_a="$(url_from_host_port "$host_a" 8083)"
+  exit_a="$(url_from_host_port "$host_a" 8084)"
 
   echo "profile-default-gate-live:"
   echo "  directory_a: $directory_a"

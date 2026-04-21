@@ -68,6 +68,15 @@ bool_arg_or_die() {
   fi
 }
 
+require_value_or_die() {
+  local flag="$1"
+  local argc="$2"
+  if (( argc < 2 )); then
+    echo "$flag requires a value"
+    exit 2
+  fi
+}
+
 is_non_negative_decimal() {
   local value="$1"
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
@@ -126,6 +135,7 @@ summary_json="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_SUMMARY_JSON:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --stability-summary-json)
+      require_value_or_die "$1" "$#"
       stability_summary_json="${2:-}"
       shift 2
       ;;
@@ -134,6 +144,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --reports-dir)
+      require_value_or_die "$1" "$#"
       reports_dir="${2:-}"
       shift 2
       ;;
@@ -150,6 +161,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-status-pass=*)
+      require_status_pass="${1#*=}"
+      shift
+      ;;
     --require-stability-ok)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_stability_ok="${2:-}"
@@ -158,6 +173,10 @@ while [[ $# -gt 0 ]]; do
         require_stability_ok="1"
         shift
       fi
+      ;;
+    --require-stability-ok=*)
+      require_stability_ok="${1#*=}"
+      shift
       ;;
     --require-selection-policy-present-all)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -168,6 +187,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-selection-policy-present-all=*)
+      require_selection_policy_present_all="${1#*=}"
+      shift
+      ;;
     --require-consistent-selection-policy)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_consistent_selection_policy="${2:-}"
@@ -177,7 +200,12 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-consistent-selection-policy=*)
+      require_consistent_selection_policy="${1#*=}"
+      shift
+      ;;
     --require-min-runs-requested)
+      require_value_or_die "$1" "$#"
       require_min_runs_requested="${2:-}"
       shift 2
       ;;
@@ -186,6 +214,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --require-min-runs-completed)
+      require_value_or_die "$1" "$#"
       require_min_runs_completed="${2:-}"
       shift 2
       ;;
@@ -194,6 +223,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --require-max-runs-fail)
+      require_value_or_die "$1" "$#"
       require_max_runs_fail="${2:-}"
       shift 2
       ;;
@@ -202,6 +232,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --require-recommended-profile)
+      require_value_or_die "$1" "$#"
       require_recommended_profile="${2:-}"
       shift 2
       ;;
@@ -210,6 +241,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --allow-recommended-profiles)
+      require_value_or_die "$1" "$#"
       allow_recommended_profiles="${2:-}"
       shift 2
       ;;
@@ -218,6 +250,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --require-modal-support-rate-pct)
+      require_value_or_die "$1" "$#"
       require_modal_support_rate_pct="${2:-}"
       shift 2
       ;;
@@ -234,7 +267,12 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --fail-on-no-go=*)
+      fail_on_no_go="${1#*=}"
+      shift
+      ;;
     --summary-json)
+      require_value_or_die "$1" "$#"
       summary_json="${2:-}"
       shift 2
       ;;
@@ -251,6 +289,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --show-json=*)
+      show_json="${1#*=}"
+      shift
+      ;;
     --print-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_summary_json="${2:-}"
@@ -259,6 +301,10 @@ while [[ $# -gt 0 ]]; do
         print_summary_json="1"
         shift
       fi
+      ;;
+    --print-summary-json=*)
+      print_summary_json="${1#*=}"
+      shift
       ;;
     -h|--help|help)
       usage

@@ -12,6 +12,7 @@ param(
   [switch]$ForceNpmInstall,
   [string]$ApiAddr = "127.0.0.1:8095",
   [string]$CommandRunner = "",
+  [switch]$KeepApiRunning,
   [string]$SummaryJson = "",
   [ValidateSet(0, 1)]
   [int]$PrintSummaryJson = 0
@@ -66,7 +67,8 @@ function Get-ProcessBypassRerunCommand {
   } else {
     ""
   }
-  return ("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg)
+  $keepApiRunningArg = if ($KeepApiRunning) { " -KeepApiRunning" } else { "" }
+  return ("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}{1}{2}{3}{4}{5}{6}{7}{8}{9}{10}" -f $scriptPath, $modeArg, $desktopLaunchStrategyArg, $desktopExecutableOverrideArg, $installMissingArg, $skipPathRefreshArg, $dryRunArg, $forceNpmInstallArg, $apiAddrArg, $commandRunnerArg, $keepApiRunningArg)
 }
 
 function Get-CommonToolDirectories {
@@ -1624,6 +1626,30 @@ function Start-LocalApiBackgroundWindow {
   return $proc
 }
 
+function Stop-LocalApiProcess {
+  param(
+    [System.Diagnostics.Process]$Process,
+    [string]$Reason
+  )
+
+  if ($null -eq $Process) {
+    return
+  }
+
+  try {
+    if (-not $Process.HasExited) {
+      Stop-Process -Id $Process.Id -Force -ErrorAction Stop
+      if ([string]::IsNullOrWhiteSpace($Reason)) {
+        Write-Step "stopped local api window pid=$($Process.Id)"
+      } else {
+        Write-Step "stopped local api window pid=$($Process.Id) $Reason"
+      }
+    }
+  } catch {
+    Write-Warning "failed to stop local api process pid=$($Process.Id): $($_.Exception.Message)"
+  }
+}
+
 function Invoke-DesktopDev {
   param(
     [Parameter(Mandatory = $true)]
@@ -1735,6 +1761,9 @@ function Invoke-BootstrapMain {
 
   Write-Step "mode=$Mode"
   Write-Step "desktop_launch_strategy=$DesktopLaunchStrategy"
+  if ($Mode -eq "run-full") {
+    Write-Step ("keep_api_running={0}" -f $(if ($KeepApiRunning) { "true" } else { "false" }))
+  }
   if (-not [string]::IsNullOrWhiteSpace($DesktopExecutableOverridePath)) {
     Write-Step "desktop_executable_override=$DesktopExecutableOverridePath"
   }
@@ -1831,10 +1860,16 @@ function Invoke-BootstrapMain {
       } else {
         Write-Step "dry-run run-full: would launch desktop dev with npm.cmd run tauri -- dev"
       }
+      if ($KeepApiRunning) {
+        Write-Step "dry-run run-full: local api would remain running after desktop exits (-KeepApiRunning)"
+      } else {
+        Write-Step "dry-run run-full: local api would be stopped after desktop exits (default)"
+      }
       return 0
     }
     $apiProc = Start-LocalApiBackgroundWindow -RepoRootPath $repoRoot -Addr $ApiAddr -RunnerPath $CommandRunner
     $apiHealthy = $false
+    $desktopRunSucceeded = $false
     try {
       $apiHealthy = [bool](Wait-LocalApiReady -Addr $ApiAddr -TimeoutSec 25)
       if (-not $apiHealthy) {
@@ -1845,16 +1880,16 @@ function Invoke-BootstrapMain {
       } else {
         Invoke-DesktopDev -RepoRootPath $repoRoot
       }
+      $desktopRunSucceeded = $true
     } finally {
-      if (-not $apiHealthy -and $null -ne $apiProc) {
-        try {
-          if (-not $apiProc.HasExited) {
-            Stop-Process -Id $apiProc.Id -Force -ErrorAction Stop
-            Write-Step "stopped local api window pid=$($apiProc.Id) after failed startup"
-          }
-        } catch {
-          Write-Warning "failed to stop local api process pid=$($apiProc.Id): $($_.Exception.Message)"
-        }
+      if (-not $apiHealthy) {
+        Stop-LocalApiProcess -Process $apiProc -Reason "after failed startup"
+      } elseif (-not $desktopRunSucceeded) {
+        Stop-LocalApiProcess -Process $apiProc -Reason "after run-full failure"
+      } elseif (-not $KeepApiRunning) {
+        Stop-LocalApiProcess -Process $apiProc -Reason "after desktop exit (default cleanup)"
+      } else {
+        Write-Step "keeping local api window running after desktop exit (-KeepApiRunning)"
       }
     }
     return 0
@@ -1872,6 +1907,7 @@ $script:BootstrapSummary = [ordered]@{
   desktop_launch_source = ""
   desktop_executable_path = ""
   api_addr = $ApiAddr
+  keep_api_running = [bool]$KeepApiRunning
   tool_report = (Get-SummaryToolReport -Report $null)
   desktop_prerequisites = (Get-DefaultDesktopPrerequisiteSummary)
   missing_package_ids = @()

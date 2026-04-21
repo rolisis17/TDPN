@@ -13,7 +13,7 @@ Usage:
   ./scripts/profile_default_gate_stability_cycle.sh \
     --host-a HOST \
     --host-b HOST \
-    --campaign-subject ID \
+    [--campaign-subject ID | --subject ID] \
     [--runs N] \
     [--campaign-timeout-sec N] \
     [--sleep-between-sec N] \
@@ -138,6 +138,8 @@ need_cmd mkdir
 host_a="${PROFILE_DEFAULT_GATE_STABILITY_HOST_A:-}"
 host_b="${PROFILE_DEFAULT_GATE_STABILITY_HOST_B:-}"
 campaign_subject="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT:-}"
+campaign_subject_from_campaign=""
+campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
@@ -186,10 +188,23 @@ while [[ $# -gt 0 ]]; do
     --campaign-subject)
       require_value_or_die "$1" "$#"
       campaign_subject="${2:-}"
+      campaign_subject_from_campaign="${2:-}"
       shift 2
       ;;
     --campaign-subject=*)
       campaign_subject="${1#*=}"
+      campaign_subject_from_campaign="${1#*=}"
+      shift
+      ;;
+    --subject)
+      require_value_or_die "$1" "$#"
+      campaign_subject="${2:-}"
+      campaign_subject_from_alias="${2:-}"
+      shift 2
+      ;;
+    --subject=*)
+      campaign_subject="${1#*=}"
+      campaign_subject_from_alias="${1#*=}"
       shift
       ;;
     --runs)
@@ -446,6 +461,8 @@ done
 host_a="$(trim "$host_a")"
 host_b="$(trim "$host_b")"
 campaign_subject="$(trim "$campaign_subject")"
+campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
+campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
@@ -479,7 +496,11 @@ if [[ -z "$host_b" ]]; then
   exit 2
 fi
 if [[ -z "$campaign_subject" ]]; then
-  echo "--campaign-subject is required"
+  echo "--campaign-subject or --subject is required"
+  exit 2
+fi
+if [[ -n "$campaign_subject_from_campaign" && -n "$campaign_subject_from_alias" && "$campaign_subject_from_campaign" != "$campaign_subject_from_alias" ]]; then
+  echo "conflicting subject values: --campaign-subject and --subject must match when both are provided"
   exit 2
 fi
 if [[ ! -f "$RUN_SCRIPT" ]]; then
@@ -605,13 +626,14 @@ check_errors_json="[]"
 
 failure_stage=""
 failure_reason=""
-decision="NO-GO"
+decision=""
 status="fail"
 final_rc=1
 
 if [[ "$run_stage_rc" -ne 0 ]]; then
   failure_stage="run"
   failure_reason="stability run failed (rc=$run_stage_rc)"
+  decision="NO-GO"
   final_rc="$run_stage_rc"
   if [[ "$final_rc" -eq 0 ]]; then
     final_rc=1
@@ -656,11 +678,24 @@ else
     check_summary_valid="false"
   fi
 
+  if [[ "$check_stage_rc" -eq 0 ]]; then
+    if [[ "$check_summary_valid" != "true" ]]; then
+      check_stage_status="fail"
+    elif [[ "$check_status" == "fail" || "$check_decision" == "NO-GO" ]]; then
+      check_stage_status="fail"
+    elif [[ "$check_status" == "ok" || "$check_decision" == "GO" ]]; then
+      check_stage_status="pass"
+    fi
+  fi
+
   if [[ -n "$check_decision" ]]; then
     decision="$check_decision"
   fi
 
   if [[ "$check_stage_rc" -ne 0 ]]; then
+    if [[ -z "$decision" ]]; then
+      decision="NO-GO"
+    fi
     status="fail"
     final_rc="$check_stage_rc"
     if [[ "$final_rc" -eq 0 ]]; then
@@ -676,10 +711,10 @@ else
     if [[ -z "$failure_reason" ]]; then
       failure_reason="stability check failed (rc=$check_stage_rc)"
     fi
-  elif [[ "$decision" == "GO" ]]; then
+  elif [[ "$check_decision" == "GO" ]]; then
     status="pass"
     final_rc=0
-  elif [[ "$decision" == "NO-GO" ]]; then
+  elif [[ "$check_decision" == "NO-GO" ]]; then
     if [[ "$fail_on_no_go" == "1" ]]; then
       status="fail"
       final_rc=1
@@ -690,6 +725,7 @@ else
       final_rc=0
     fi
   else
+    decision="NO-GO"
     status="fail"
     final_rc=1
     failure_stage="check"
@@ -739,6 +775,8 @@ jq -n \
   --argjson require_min_runs_requested "$require_min_runs_requested" \
   --argjson require_min_runs_completed "$require_min_runs_completed" \
   --argjson require_max_runs_fail "$require_max_runs_fail" \
+  --arg require_recommended_profile "$require_recommended_profile" \
+  --arg allow_recommended_profiles "$allow_recommended_profiles" \
   --argjson require_modal_support_rate_pct "$require_modal_support_rate_pct" \
   --argjson fail_on_no_go "$fail_on_no_go" \
   '{
@@ -772,6 +810,16 @@ jq -n \
           require_min_runs_requested: $require_min_runs_requested,
           require_min_runs_completed: $require_min_runs_completed,
           require_max_runs_fail: $require_max_runs_fail,
+          require_recommended_profile: (
+            if $require_recommended_profile == "" then null
+            else $require_recommended_profile
+            end
+          ),
+          allow_recommended_profiles: (
+            if $allow_recommended_profiles == "" then null
+            else $allow_recommended_profiles
+            end
+          ),
           require_modal_support_rate_pct: $require_modal_support_rate_pct,
           fail_on_no_go: ($fail_on_no_go == 1)
         }
