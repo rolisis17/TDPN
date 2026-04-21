@@ -187,7 +187,13 @@ If auth is required and missing/invalid, the API returns `401`.
 - Liveness for desktop app process supervision.
 
 ### `GET /v1/status`
-- Returns `client-vpn-status --show-json 1`.
+- Returns `client-vpn-status --show-json 1` as `status`.
+- Also returns additive top-level routing posture telemetry in `routing`:
+  - `mode`: `direct | relay_fallback | relay | unknown`
+  - `relay_fallback_active`: boolean
+  - `direct_preferred`: boolean
+  - `detail`: optional routing detail/reason text when available
+  - `source`: telemetry source label (`status_payload`)
 
 ### `GET /v1/config`
 - Returns non-secret local API policy/config hints for desktop/portal UX.
@@ -318,7 +324,7 @@ Notes:
 Behavior:
 - runs optional `client-vpn-preflight`
 - then runs `client-vpn-up` (background)
-- returns status payload and selected `bootstrap_directory`
+- returns status payload, selected `bootstrap_directory`, and additive routing posture telemetry in top-level `routing`
 
 ### `POST /v1/disconnect`
 - Runs `client-vpn-down --force-iface-cleanup 1`.

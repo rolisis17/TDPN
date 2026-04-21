@@ -891,6 +891,14 @@ if ! grep -qF 'id="legacy_compat_hint"' "$DESKTOP_HTML_FILE"; then
   echo "desktop scaffold contract failed: missing legacy compatibility hint marker in $DESKTOP_HTML_FILE"
   exit 1
 fi
+if ! grep -qF 'id="routing_mode"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing routing mode marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'id="routing_detail"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing routing detail marker in $DESKTOP_HTML_FILE"
+  exit 1
+fi
 
 client_hint_marker_present="0"
 if grep -qF 'id="client_lock_hint"' "$DESKTOP_HTML_FILE"; then
@@ -1020,6 +1028,22 @@ if ! grep -qF 'renderBootstrapManifestTrustUnavailable(' "$JS_FILE"; then
   exit 1
 fi
 echo "[desktop-scaffold] bootstrap trust UI markers are present"
+
+ROUTING_JS_MARKERS=(
+  'const routingModeEl = document.getElementById("routing_mode");'
+  'const routingDetailEl = document.getElementById("routing_detail");'
+  'function inferRoutingSnapshot(source, payload) {'
+  'function updateConnectionDashboard(source, payload) {'
+  'routingModeEl.textContent = state.routingMode;'
+  'routingDetailEl.textContent = state.routingDetail;'
+)
+for marker in "${ROUTING_JS_MARKERS[@]}"; do
+  if ! grep -qF -- "$marker" "$JS_FILE"; then
+    echo "desktop scaffold contract failed: missing routing telemetry JS marker ($marker) in $JS_FILE"
+    exit 1
+  fi
+done
+echo "[desktop-scaffold] routing telemetry UI markers are present"
 
 if ! grep -qF 'function syncServerRoleLockState()' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing server role lock sync function in $JS_FILE"
