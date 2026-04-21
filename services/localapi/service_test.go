@@ -613,6 +613,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
@@ -667,6 +669,15 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrap {
+			t.Fatalf("gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=false", s.gpmLegacyConnectRequireTrustedManifestBootstrap)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrapSource != "default" {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrapSource=%q want=default",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+			)
 		}
 		if s.gpmConnectPolicyMode != "default" {
 			t.Fatalf("gpmConnectPolicyMode=%q want=default", s.gpmConnectPolicyMode)
@@ -943,6 +954,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
 		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "")
@@ -967,6 +980,18 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if !s.gpmLegacyConnectRequireTrustedManifestBootstrap {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=true",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrapSource != "production-default" {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrapSource=%q want=production-default",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+			)
 		}
 		if s.gpmConnectPolicyMode != "production" {
 			t.Fatalf("gpmConnectPolicyMode=%q want=production", s.gpmConnectPolicyMode)
@@ -1021,6 +1046,154 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAuthVerifyCryptoSource != "production-default" {
 			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=production-default", s.gpmAuthVerifyCryptoSource)
+		}
+	})
+
+	t.Run("production mode fails closed when GPM_PRODUCTION_MODE env is invalid", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "definitely-not-bool")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+
+		s := New()
+		if !s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=true", s.gpmConnectRequireSession)
+		}
+		if s.gpmConnectPolicyMode != "production" {
+			t.Fatalf("gpmConnectPolicyMode=%q want=production", s.gpmConnectPolicyMode)
+		}
+		if s.gpmConnectPolicySource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmConnectPolicySource=%q want=production-invalid-env-fail-closed", s.gpmConnectPolicySource)
+		}
+		if s.gpmManifestTrustPolicyMode != "production" {
+			t.Fatalf("gpmManifestTrustPolicyMode=%q want=production", s.gpmManifestTrustPolicyMode)
+		}
+		if s.gpmManifestTrustPolicySource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmManifestTrustPolicySource=%q want=production-invalid-env-fail-closed", s.gpmManifestTrustPolicySource)
+		}
+		if s.gpmAuthVerifyPolicyMode != "production" {
+			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=production", s.gpmAuthVerifyPolicyMode)
+		}
+		if s.gpmAuthVerifyPolicySource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmAuthVerifyPolicySource=%q want=production-invalid-env-fail-closed", s.gpmAuthVerifyPolicySource)
+		}
+	})
+
+	t.Run("production mode fails closed when security booleans are invalid", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "invalid")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "invalid")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "invalid")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "invalid")
+		t.Setenv("TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
+		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "invalid")
+		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "invalid")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_METADATA", "invalid")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_METADATA", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "invalid")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
+		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "invalid")
+		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
+
+		s := New()
+		if !s.gpmManifestRequireHTTPS {
+			t.Fatalf("gpmManifestRequireHTTPS=%t want=true", s.gpmManifestRequireHTTPS)
+		}
+		if s.gpmManifestRequireHTTPSSource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=production-invalid-env-fail-closed", s.gpmManifestRequireHTTPSSource)
+		}
+		if !s.gpmManifestRequireSignature {
+			t.Fatalf("gpmManifestRequireSignature=%t want=true", s.gpmManifestRequireSignature)
+		}
+		if s.gpmManifestRequireSigSource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmManifestRequireSigSource=%q want=production-invalid-env-fail-closed", s.gpmManifestRequireSigSource)
+		}
+		if !s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=true", s.gpmConnectRequireSession)
+		}
+		if !s.gpmOperatorApprovalRequireSession {
+			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=true", s.gpmOperatorApprovalRequireSession)
+		}
+		if s.gpmOperatorApprovalRequireSessionSource != "production-invalid-env-fail-closed" {
+			t.Fatalf(
+				"gpmOperatorApprovalRequireSessionSource=%q want=production-invalid-env-fail-closed",
+				s.gpmOperatorApprovalRequireSessionSource,
+			)
+		}
+		if s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if !s.gpmAuthVerifyRequireCommand {
+			t.Fatalf("gpmAuthVerifyRequireCommand=%t want=true", s.gpmAuthVerifyRequireCommand)
+		}
+		if s.gpmAuthVerifyRequireCmdSource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmAuthVerifyRequireCmdSource=%q want=production-invalid-env-fail-closed", s.gpmAuthVerifyRequireCmdSource)
+		}
+		if !s.gpmAuthVerifyRequireMetadata {
+			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=true", s.gpmAuthVerifyRequireMetadata)
+		}
+		if s.gpmAuthVerifyMetadataSource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmAuthVerifyMetadataSource=%q want=production-invalid-env-fail-closed", s.gpmAuthVerifyMetadataSource)
+		}
+		if !s.gpmAuthVerifyRequireWalletExt {
+			t.Fatalf("gpmAuthVerifyRequireWalletExt=%t want=true", s.gpmAuthVerifyRequireWalletExt)
+		}
+		if s.gpmAuthVerifyWalletExtSource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=production-invalid-env-fail-closed", s.gpmAuthVerifyWalletExtSource)
+		}
+		if !s.gpmAuthVerifyRequireCryptoProof {
+			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=true", s.gpmAuthVerifyRequireCryptoProof)
+		}
+		if s.gpmAuthVerifyCryptoSource != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=production-invalid-env-fail-closed", s.gpmAuthVerifyCryptoSource)
+		}
+	})
+
+	t.Run("production mode fails closed when legacy trusted-manifest binding env is invalid", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "not-a-bool")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
+
+		s := New()
+		if !s.gpmLegacyConnectRequireTrustedManifestBootstrap {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=true",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrapSource != "production-invalid-env-fail-closed" {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrapSource=%q want=production-invalid-env-fail-closed",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+			)
+		}
+	})
+
+	t.Run("non-production honors explicit false for legacy trusted-manifest binding env", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "0")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
+
+		s := New()
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrap {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=false",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrapSource != "GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP" {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrapSource=%q want=GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+			)
 		}
 	})
 
@@ -2142,6 +2315,42 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		}
 	})
 
+	t.Run("manual invite override with session token fails closed when trusted-manifest binding policy is enabled", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = true
+		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
+		bootstrapDirectory := "https://dir-session.example:8081"
+		configureSessionManifest(t, svc, now, bootstrapDirectory)
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-connect-session-manual-invite-override-token",
+			WalletAddress:      "cosmos1manualinviteoverride",
+			WalletProvider:     "keplr",
+			Role:               "client",
+			CreatedAt:          now,
+			ExpiresAt:          now.Add(time.Hour),
+			BootstrapDirectory: bootstrapDirectory,
+			InviteKey:          "wallet:cosmos1manualinviteoverride",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-session-manual-invite-override-token",
+			"invite_key":"inv-manual-override-should-fail",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "manual invite_key override cannot be combined with session_token") {
+			t.Fatalf("error=%q want manual-invite/session-token rejection guidance", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("manual invite override rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
 	t.Run("selected session bootstrap directory must be trusted by the session", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true
@@ -2978,6 +3187,37 @@ func TestHandleConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid GPM_PRODUCTION_MODE env is reported as fail-closed production in config", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "invalid")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+
+		svc := New()
+		svc.authToken = "cfg-invalid-production-mode"
+
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
+			"Authorization": "Bearer cfg-invalid-production-mode",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		configMap, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("config payload missing map: %v", payload)
+		}
+		if got, _ := configMap["gpm_production_mode"].(bool); !got {
+			t.Fatalf("gpm_production_mode=%v want=true", configMap["gpm_production_mode"])
+		}
+		if got, _ := configMap["gpm_production_mode_source"].(string); got != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpm_production_mode_source=%q want=production-invalid-env-fail-closed", got)
+		}
+		if got, _ := configMap["connect_policy_mode"].(string); got != "production" {
+			t.Fatalf("connect_policy_mode=%q want=production", got)
+		}
+		if got, _ := configMap["connect_policy_source"].(string); got != "production-invalid-env-fail-closed" {
+			t.Fatalf("connect_policy_source=%q want=production-invalid-env-fail-closed", got)
+		}
+	})
+
 	t.Run("production mode reports trusted-manifest binding policy source when exposed", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("TDPN_PRODUCTION_MODE", "")
@@ -3001,6 +3241,34 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source"].(string); got != "production-default" {
 			t.Fatalf("gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source=%q want=production-default", got)
+		}
+	})
+
+	t.Run("production mode config reports invalid-env fail-closed source for trusted-manifest binding policy", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "invalid")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
+
+		svc := New()
+		svc.authToken = "cfg-production-invalid-legacy-manifest-binding"
+
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
+			"Authorization": "Bearer cfg-production-invalid-legacy-manifest-binding",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		configMap, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("config payload missing map: %v", payload)
+		}
+		if got, _ := configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap"].(bool); !got {
+			t.Fatalf("gpm_legacy_connect_require_trusted_manifest_bootstrap=%v want=true", configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap"])
+		}
+		if got, _ := configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source"].(string); got != "production-invalid-env-fail-closed" {
+			t.Fatalf("gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source=%q want=production-invalid-env-fail-closed", got)
 		}
 	})
 

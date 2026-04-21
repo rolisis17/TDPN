@@ -327,13 +327,13 @@ func New() *Service {
 		"TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS",
 	)
 	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", gpmManifestRequireHTTPSSource)
-	gpmManifestRequireHTTPS := parseBoolWithDefault(gpmManifestRequireHTTPSRaw, false)
+	gpmManifestRequireHTTPS, gpmManifestRequireHTTPSValid := parseBool(gpmManifestRequireHTTPSRaw)
 	gpmManifestRequireSignatureRaw, gpmManifestRequireSigSource, gpmManifestRequireSignatureSet := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE",
 		"TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE",
 	)
 	noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", gpmManifestRequireSigSource)
-	gpmManifestRequireSignature := parseBoolWithDefault(gpmManifestRequireSignatureRaw, false)
+	gpmManifestRequireSignature, gpmManifestRequireSignatureValid := parseBool(gpmManifestRequireSignatureRaw)
 	gpmApprovalAdminToken, gpmApprovalAdminTokenSource, gpmApprovalAdminTokenSet := preferredEnvValueWithSource(
 		"GPM_APPROVAL_ADMIN_TOKEN",
 		"TDPN_APPROVAL_ADMIN_TOKEN",
@@ -355,7 +355,7 @@ func New() *Service {
 		"TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION",
 	)
 	noteLegacyAlias("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", gpmOperatorApprovalRequireSessionSource)
-	gpmOperatorApprovalRequireSession := parseBoolWithDefault(gpmOperatorApprovalRequireSessionRaw, false)
+	gpmOperatorApprovalRequireSession, gpmOperatorApprovalRequireSessionValid := parseBool(gpmOperatorApprovalRequireSessionRaw)
 	gpmAuthVerifyCommandRaw, gpmAuthVerifyCommandSource, gpmAuthVerifyCommandSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_COMMAND",
 		"TDPN_AUTH_VERIFY_COMMAND",
@@ -370,7 +370,7 @@ func New() *Service {
 		"TDPN_AUTH_VERIFY_REQUIRE_COMMAND",
 	)
 	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_COMMAND", gpmAuthVerifyRequireCommandSource)
-	gpmAuthVerifyRequireCommand := parseBoolWithDefault(gpmAuthVerifyRequireCommandRaw, false)
+	gpmAuthVerifyRequireCommand, gpmAuthVerifyRequireCommandValid := parseBool(gpmAuthVerifyRequireCommandRaw)
 	if !gpmAuthVerifyRequireCommandSet {
 		gpmAuthVerifyRequireCommand = false
 		gpmAuthVerifyRequireCommandSource = "default"
@@ -380,25 +380,29 @@ func New() *Service {
 		"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
 	)
 	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_METADATA", gpmAuthVerifyMetadataSource)
-	gpmAuthVerifyRequireMetadata := parseBoolWithDefault(gpmAuthVerifyRequireMetadataRaw, false)
+	gpmAuthVerifyRequireMetadata, gpmAuthVerifyRequireMetadataValid := parseBool(gpmAuthVerifyRequireMetadataRaw)
 	gpmAuthVerifyRequireWalletExtRaw, gpmAuthVerifyWalletExtSource, gpmAuthVerifyRequireWalletExtSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
 		"TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE",
 	)
 	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", gpmAuthVerifyWalletExtSource)
-	gpmAuthVerifyRequireWalletExt := parseBoolWithDefault(gpmAuthVerifyRequireWalletExtRaw, false)
+	gpmAuthVerifyRequireWalletExt, gpmAuthVerifyRequireWalletExtValid := parseBool(gpmAuthVerifyRequireWalletExtRaw)
 	gpmAuthVerifyRequireCryptoRaw, gpmAuthVerifyCryptoSource, gpmAuthVerifyRequireCryptoSet := preferredEnvValueWithSource(
 		"GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF",
 		"TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF",
 	)
 	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", gpmAuthVerifyCryptoSource)
-	gpmAuthVerifyRequireCryptoProof := parseBoolWithDefault(gpmAuthVerifyRequireCryptoRaw, false)
+	gpmAuthVerifyRequireCryptoProof, gpmAuthVerifyRequireCryptoValid := parseBool(gpmAuthVerifyRequireCryptoRaw)
 	gpmConnectPolicyRaw, gpmConnectPolicySource, gpmConnectPolicySet := preferredEnvValueWithSource(
 		"GPM_PRODUCTION_MODE",
 		"TDPN_PRODUCTION_MODE",
 	)
 	noteLegacyAlias("GPM_PRODUCTION_MODE", gpmConnectPolicySource)
-	gpmConnectPolicyProduction := parseBoolWithDefault(gpmConnectPolicyRaw, false)
+	gpmConnectPolicyProduction, gpmConnectPolicyValid := parseBool(gpmConnectPolicyRaw)
+	if gpmConnectPolicySet && !gpmConnectPolicyValid {
+		gpmConnectPolicyProduction = true
+		gpmConnectPolicySource = "production-invalid-env-fail-closed"
+	}
 	gpmConnectPolicyMode := "default"
 	if gpmConnectPolicyProduction {
 		gpmConnectPolicyMode = "production"
@@ -428,6 +432,9 @@ func New() *Service {
 			gpmManifestRequireHTTPS = true
 			gpmManifestRequireHTTPSSource = "production-default"
 		}
+	} else if !gpmManifestRequireHTTPSValid && gpmConnectPolicyProduction {
+		gpmManifestRequireHTTPS = true
+		gpmManifestRequireHTTPSSource = "production-invalid-env-fail-closed"
 	}
 	if !gpmManifestRequireSignatureSet {
 		gpmManifestRequireSigSource = "default"
@@ -435,10 +442,16 @@ func New() *Service {
 			gpmManifestRequireSignature = true
 			gpmManifestRequireSigSource = "production-default"
 		}
+	} else if !gpmManifestRequireSignatureValid && gpmConnectPolicyProduction {
+		gpmManifestRequireSignature = true
+		gpmManifestRequireSigSource = "production-invalid-env-fail-closed"
 	}
 	if !gpmAuthVerifyRequireCommandSet && gpmConnectPolicyProduction {
 		gpmAuthVerifyRequireCommand = true
 		gpmAuthVerifyRequireCommandSource = "production-default"
+	} else if gpmAuthVerifyRequireCommandSet && !gpmAuthVerifyRequireCommandValid && gpmConnectPolicyProduction {
+		gpmAuthVerifyRequireCommand = true
+		gpmAuthVerifyRequireCommandSource = "production-invalid-env-fail-closed"
 	}
 	if !gpmAuthVerifyRequireMetadataSet {
 		gpmAuthVerifyMetadataSource = "default"
@@ -446,6 +459,9 @@ func New() *Service {
 			gpmAuthVerifyRequireMetadata = true
 			gpmAuthVerifyMetadataSource = "production-default"
 		}
+	} else if !gpmAuthVerifyRequireMetadataValid && gpmConnectPolicyProduction {
+		gpmAuthVerifyRequireMetadata = true
+		gpmAuthVerifyMetadataSource = "production-invalid-env-fail-closed"
 	}
 	if !gpmAuthVerifyRequireWalletExtSet {
 		gpmAuthVerifyWalletExtSource = "default"
@@ -453,6 +469,9 @@ func New() *Service {
 			gpmAuthVerifyRequireWalletExt = true
 			gpmAuthVerifyWalletExtSource = "production-default"
 		}
+	} else if !gpmAuthVerifyRequireWalletExtValid && gpmConnectPolicyProduction {
+		gpmAuthVerifyRequireWalletExt = true
+		gpmAuthVerifyWalletExtSource = "production-invalid-env-fail-closed"
 	}
 	if !gpmAuthVerifyRequireCryptoSet {
 		gpmAuthVerifyCryptoSource = "default"
@@ -460,14 +479,19 @@ func New() *Service {
 			gpmAuthVerifyRequireCryptoProof = true
 			gpmAuthVerifyCryptoSource = "production-default"
 		}
+	} else if !gpmAuthVerifyRequireCryptoValid && gpmConnectPolicyProduction {
+		gpmAuthVerifyRequireCryptoProof = true
+		gpmAuthVerifyCryptoSource = "production-invalid-env-fail-closed"
 	}
 	gpmConnectRequireSessionRaw, gpmConnectRequireSessionSource, gpmConnectRequireSessionSet := preferredEnvValueWithSource(
 		"GPM_CONNECT_REQUIRE_SESSION",
 		"TDPN_CONNECT_REQUIRE_SESSION",
 	)
 	noteLegacyAlias("GPM_CONNECT_REQUIRE_SESSION", gpmConnectRequireSessionSource)
-	gpmConnectRequireSession := parseBoolWithDefault(gpmConnectRequireSessionRaw, false)
+	gpmConnectRequireSession, gpmConnectRequireSessionValid := parseBool(gpmConnectRequireSessionRaw)
 	if !gpmConnectRequireSessionSet && gpmConnectPolicyProduction {
+		gpmConnectRequireSession = true
+	} else if gpmConnectRequireSessionSet && !gpmConnectRequireSessionValid && gpmConnectPolicyProduction {
 		gpmConnectRequireSession = true
 	}
 	if !gpmOperatorApprovalRequireSessionSet {
@@ -476,14 +500,19 @@ func New() *Service {
 			gpmOperatorApprovalRequireSession = true
 			gpmOperatorApprovalRequireSessionSource = "production-default"
 		}
+	} else if !gpmOperatorApprovalRequireSessionValid && gpmConnectPolicyProduction {
+		gpmOperatorApprovalRequireSession = true
+		gpmOperatorApprovalRequireSessionSource = "production-invalid-env-fail-closed"
 	}
 	gpmAllowLegacyConnectOverrideRaw, gpmAllowLegacyConnectOverrideSource, gpmAllowLegacyConnectOverrideSet := preferredEnvValueWithSource(
 		"GPM_ALLOW_LEGACY_CONNECT_OVERRIDE",
 		"TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE",
 	)
 	noteLegacyAlias("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", gpmAllowLegacyConnectOverrideSource)
-	gpmAllowLegacyConnectOverride := parseBoolWithDefault(gpmAllowLegacyConnectOverrideRaw, false)
+	gpmAllowLegacyConnectOverride, gpmAllowLegacyConnectOverrideValid := parseBool(gpmAllowLegacyConnectOverrideRaw)
 	if !gpmAllowLegacyConnectOverrideSet && gpmConnectPolicyProduction {
+		gpmAllowLegacyConnectOverride = false
+	} else if gpmAllowLegacyConnectOverrideSet && !gpmAllowLegacyConnectOverrideValid && gpmConnectPolicyProduction {
 		gpmAllowLegacyConnectOverride = false
 	}
 	gpmLegacyConnectRequireTrustedManifestBootstrapRaw, gpmLegacyConnectRequireTrustedManifestBootstrapSource, gpmLegacyConnectRequireTrustedManifestBootstrapSet := preferredEnvValueWithSource(
@@ -494,13 +523,18 @@ func New() *Service {
 		"GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP",
 		gpmLegacyConnectRequireTrustedManifestBootstrapSource,
 	)
-	gpmLegacyConnectRequireTrustedManifestBootstrap := parseBoolWithDefault(gpmLegacyConnectRequireTrustedManifestBootstrapRaw, false)
+	gpmLegacyConnectRequireTrustedManifestBootstrap, gpmLegacyConnectRequireTrustedManifestBootstrapValid := parseBool(
+		gpmLegacyConnectRequireTrustedManifestBootstrapRaw,
+	)
 	if !gpmLegacyConnectRequireTrustedManifestBootstrapSet {
 		gpmLegacyConnectRequireTrustedManifestBootstrapSource = "default"
 		if gpmConnectPolicyProduction {
 			gpmLegacyConnectRequireTrustedManifestBootstrap = true
 			gpmLegacyConnectRequireTrustedManifestBootstrapSource = "production-default"
 		}
+	} else if !gpmLegacyConnectRequireTrustedManifestBootstrapValid && gpmConnectPolicyProduction {
+		gpmLegacyConnectRequireTrustedManifestBootstrap = true
+		gpmLegacyConnectRequireTrustedManifestBootstrapSource = "production-invalid-env-fail-closed"
 	}
 	gpmStateStorePathRaw, gpmStateStorePathSource, gpmStateStorePathSet := preferredEnvValueWithSource(
 		"GPM_STATE_STORE_PATH",
@@ -874,6 +908,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	in.SessionBootstrapDirectory = strings.TrimSpace(in.SessionBootstrapDirectory)
 	manualOverridesProvided := in.BootstrapDirectory != "" || in.InviteKey != ""
 	manualBootstrapDirectoryOverrideUsed := in.BootstrapDirectory != ""
+	manualInviteKeyOverrideUsed := in.InviteKey != ""
 	if in.SessionBootstrapDirectory != "" && in.SessionToken == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -1023,6 +1058,13 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+	if s.gpmLegacyConnectRequireTrustedManifestBootstrap && manualInviteKeyOverrideUsed && in.SessionToken != "" {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":    false,
+			"error": "manual invite_key override cannot be combined with session_token when trusted manifest binding policy is enabled; use the registered session invite_key",
+		})
+		return
 	}
 	if err := validateInviteKey(in.InviteKey); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -2123,14 +2165,22 @@ func normalizeProdMode(raw string) string {
 }
 
 func parseBoolWithDefault(raw string, fallback bool) bool {
+	value, ok := parseBool(raw)
+	if ok {
+		return value
+	}
+	return fallback
+}
+
+func parseBool(raw string) (bool, bool) {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	switch value {
 	case "1", "true", "yes", "y", "on":
-		return true
+		return true, true
 	case "0", "false", "no", "n", "off":
-		return false
+		return false, true
 	default:
-		return fallback
+		return false, false
 	}
 }
 
