@@ -52,6 +52,8 @@ const authVerifyPolicyHintEl = document.getElementById("auth_verify_policy_hint"
 const operatorApprovalPolicyHintEl = document.getElementById("operator_approval_policy_hint");
 const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
+const routingModeEl = document.getElementById("routing_mode");
+const routingDetailEl = document.getElementById("routing_detail");
 const signInPolicyHintEl = document.getElementById("signin_policy_hint");
 const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
 
@@ -89,6 +91,8 @@ const OPERATOR_DECISION_CONFLICT_GUIDANCE =
   "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
+const ROUTING_DEFAULT_MODE = "Unknown";
+const ROUTING_DEFAULT_DETAIL = "No routing telemetry yet";
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
 const COMPAT_ADVANCED_DEFAULT_HINT = "Optional legacy fields for support-only compatibility flows.";
@@ -184,6 +188,8 @@ const state = {
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
+  routingMode: ROUTING_DEFAULT_MODE,
+  routingDetail: ROUTING_DEFAULT_DETAIL,
   operatorListNextCursor: "",
   operatorListRequestContext: null,
   walletSignatureContext: null,
@@ -908,6 +914,46 @@ const CONNECTION_HINT_KEYS = {
   healthy: ["healthy", "ok", "is_ok", "alive"],
   detail: ["detail", "details", "message", "reason", "error", "description"]
 };
+const ROUTING_HINT_KEYS = {
+  mode: [
+    "mode",
+    "routing_mode",
+    "routingmode",
+    "route_mode",
+    "routemode",
+    "strategy",
+    "routing_strategy",
+    "routingstrategy",
+    "route_strategy",
+    "routestrategy"
+  ],
+  detail: [
+    "detail",
+    "details",
+    "routing_detail",
+    "routingdetail",
+    "route_detail",
+    "routedetail",
+    "message",
+    "reason",
+    "description",
+    "status_reason"
+  ],
+  profile: ["path_profile", "pathprofile", "policy_profile", "policyprofile", "profile"],
+  relay: [
+    "relay",
+    "relay_active",
+    "relayactive",
+    "managed_relay",
+    "managedrelay",
+    "using_relay",
+    "usingrelay",
+    "relay_fallback",
+    "relayfallback"
+  ],
+  direct: ["direct", "direct_path", "directpath", "direct_active", "directactive", "mesh_direct", "meshdirect"],
+  fallback: ["fallback", "fallback_active", "fallbackactive", "degraded", "needs_relay", "needsrelay"]
+};
 
 function findHintValue(payload, keys, depth = 0) {
   if (payload === null || payload === undefined || depth > 4) {
@@ -1148,6 +1194,249 @@ function inferConnectionDetail(payload, source, stateKey, stateHint) {
   return CONNECTION_DEFAULT_DETAIL;
 }
 
+function normalizeRoutingProfileHint(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim().toLowerCase();
+  if (!text) {
+    return undefined;
+  }
+  if (text.includes("1hop") || text.includes("1-hop") || text.includes("speed")) {
+    return "1hop";
+  }
+  if (text.includes("2hop") || text.includes("2-hop") || text.includes("balanced")) {
+    return "2hop";
+  }
+  if (text.includes("3hop") || text.includes("3-hop") || text.includes("private")) {
+    return "3hop";
+  }
+  const hopMatch = text.match(/\b([1-9])\s*hop\b/);
+  if (hopMatch?.[1]) {
+    return `${hopMatch[1]}hop`;
+  }
+  return undefined;
+}
+
+function normalizeRoutingModeKey(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim().toLowerCase();
+  if (!text) {
+    return undefined;
+  }
+  if (text.includes("inactive") || text.includes("disconnect") || text.includes("offline") || text === "down") {
+    return "inactive";
+  }
+  if (text.includes("hybrid") || text.includes("auto")) {
+    return "hybrid_auto";
+  }
+  if (
+    text.includes("relay") ||
+    text.includes("fallback") ||
+    text.includes("proxy") ||
+    text.includes("turn") ||
+    text.includes("transit")
+  ) {
+    return "managed_relay";
+  }
+  if (
+    text.includes("direct") ||
+    text.includes("mesh") ||
+    text.includes("p2p") ||
+    text.includes("hop") ||
+    text === "1hop" ||
+    text === "2hop" ||
+    text === "3hop"
+  ) {
+    return "direct_mesh";
+  }
+  return undefined;
+}
+
+function formatRoutingModeLabel(modeKey, profileHint = "") {
+  switch (modeKey) {
+    case "direct_mesh":
+      return profileHint ? `Direct Mesh (${profileHint})` : "Direct Mesh";
+    case "managed_relay":
+      return "Managed Relay";
+    case "hybrid_auto":
+      return "Hybrid Auto";
+    case "inactive":
+      return "Inactive";
+    default:
+      return ROUTING_DEFAULT_MODE;
+  }
+}
+
+function inferRoutingModeHints(candidate) {
+  const modeHint = toDetailText(findHintValue(candidate, ROUTING_HINT_KEYS.mode));
+  const profileHint = normalizeRoutingProfileHint(toDetailText(findHintValue(candidate, ROUTING_HINT_KEYS.profile)) || "");
+  const relayHint = toBooleanLike(findHintValue(candidate, ROUTING_HINT_KEYS.relay));
+  const directHint = toBooleanLike(findHintValue(candidate, ROUTING_HINT_KEYS.direct));
+  const fallbackHint = toBooleanLike(findHintValue(candidate, ROUTING_HINT_KEYS.fallback));
+  let modeKey = normalizeRoutingModeKey(modeHint);
+  if (!modeKey && relayHint === true) {
+    modeKey = "managed_relay";
+  }
+  if (!modeKey && (directHint === true || profileHint)) {
+    modeKey = "direct_mesh";
+  }
+  if (!modeKey && fallbackHint === true) {
+    modeKey = "managed_relay";
+  }
+  return {
+    modeKey,
+    modeHint,
+    profileHint,
+    relayHint,
+    directHint,
+    fallbackHint
+  };
+}
+
+function inferRoutingDetail(modeHints, candidate) {
+  const detailHint = toDetailText(findHintValue(candidate, ROUTING_HINT_KEYS.detail));
+  if (detailHint) {
+    return detailHint;
+  }
+  if (modeHints.modeKey === "managed_relay") {
+    return modeHints.fallbackHint === true ? "Managed relay fallback is active." : "Managed relay path selected.";
+  }
+  if (modeHints.modeKey === "direct_mesh") {
+    return modeHints.profileHint ? `Direct mesh path profile ${modeHints.profileHint}.` : "Direct mesh path selected.";
+  }
+  if (modeHints.modeKey === "hybrid_auto") {
+    return "Hybrid auto routing prefers direct mesh and falls back to relay when needed.";
+  }
+  if (modeHints.modeKey === "inactive") {
+    return "Routing is inactive while disconnected.";
+  }
+  if (modeHints.modeHint) {
+    return modeHints.modeHint;
+  }
+  return undefined;
+}
+
+function inferRoutingSnapshotFromCandidate(candidate) {
+  if (candidate === null || candidate === undefined) {
+    return { mode: undefined, detail: undefined };
+  }
+  const modeHints = inferRoutingModeHints(candidate);
+  return {
+    mode: modeHints.modeKey ? formatRoutingModeLabel(modeHints.modeKey, modeHints.profileHint) : undefined,
+    detail: inferRoutingDetail(modeHints, candidate)
+  };
+}
+
+function readTopLevelRoutingHint(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "routing")) {
+    return payload.routing;
+  }
+  const mode = firstDefined(payload.routing_mode, payload.routingMode, payload.route_mode, payload.routeMode);
+  const detail = firstDefined(
+    payload.routing_detail,
+    payload.routingDetail,
+    payload.route_detail,
+    payload.routeDetail,
+    payload.routing_reason,
+    payload.routingReason,
+    payload.route_reason,
+    payload.routeReason
+  );
+  const profile = firstDefined(payload.routing_profile, payload.routingProfile, payload.path_profile, payload.pathProfile);
+  const relay = firstDefined(
+    payload.relay_active,
+    payload.relayActive,
+    payload.using_relay,
+    payload.usingRelay,
+    payload.managed_relay,
+    payload.managedRelay
+  );
+  const direct = firstDefined(payload.direct_active, payload.directActive, payload.direct_path, payload.directPath);
+  const fallback = firstDefined(payload.relay_fallback, payload.relayFallback, payload.fallback_active, payload.fallbackActive);
+  if (
+    mode === undefined &&
+    detail === undefined &&
+    profile === undefined &&
+    relay === undefined &&
+    direct === undefined &&
+    fallback === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    mode,
+    detail,
+    profile,
+    relay,
+    direct,
+    fallback
+  };
+}
+
+function inferRoutingSnapshot(source, payload) {
+  const topLevelRouting = inferRoutingSnapshotFromCandidate(readTopLevelRoutingHint(payload));
+  if (topLevelRouting.mode || topLevelRouting.detail) {
+    return {
+      mode: topLevelRouting.mode || state.routingMode || ROUTING_DEFAULT_MODE,
+      detail: topLevelRouting.detail || state.routingDetail || ROUTING_DEFAULT_DETAIL
+    };
+  }
+
+  const statusRouting = inferRoutingSnapshotFromCandidate(payload?.status);
+  if (statusRouting.mode || statusRouting.detail) {
+    return {
+      mode: statusRouting.mode || state.routingMode || ROUTING_DEFAULT_MODE,
+      detail: statusRouting.detail || state.routingDetail || ROUTING_DEFAULT_DETAIL
+    };
+  }
+
+  const fallbackRouting = inferRoutingSnapshotFromCandidate(payload);
+  if (fallbackRouting.mode || fallbackRouting.detail) {
+    return {
+      mode: fallbackRouting.mode || state.routingMode || ROUTING_DEFAULT_MODE,
+      detail: fallbackRouting.detail || state.routingDetail || ROUTING_DEFAULT_DETAIL
+    };
+  }
+
+  if (source === "disconnect") {
+    return {
+      mode: formatRoutingModeLabel("inactive"),
+      detail: "Routing is inactive after disconnect."
+    };
+  }
+  if (source === "connect") {
+    const profileHint = normalizeRoutingProfileHint(pathProfileEl.value);
+    return {
+      mode: formatRoutingModeLabel("direct_mesh", profileHint),
+      detail: profileHint
+        ? `Connect requested ${profileHint} path profile; waiting for runtime routing telemetry.`
+        : "Connect request completed; waiting for runtime routing telemetry."
+    };
+  }
+  if (source === "status") {
+    return {
+      mode: state.routingMode || ROUTING_DEFAULT_MODE,
+      detail: "Status refreshed; routing telemetry unavailable."
+    };
+  }
+  if (source === "health") {
+    return {
+      mode: state.routingMode || ROUTING_DEFAULT_MODE,
+      detail: "Health check completed; routing telemetry unavailable."
+    };
+  }
+  return {
+    mode: state.routingMode || ROUTING_DEFAULT_MODE,
+    detail: state.routingDetail || ROUTING_DEFAULT_DETAIL
+  };
+}
+
 function inferConnectionSnapshot(source, payload) {
   const stateHint = findHintValue(payload, CONNECTION_HINT_KEYS.state);
   const connected = toBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.connected));
@@ -1179,21 +1468,32 @@ function inferConnectionSnapshot(source, payload) {
   if (!stateKey) {
     stateKey = normalizeConnectionState(state.connectionState) || "unknown";
   }
+  const routingSnapshot = inferRoutingSnapshot(source, payload);
 
   return {
     state: formatConnectionStateLabel(stateKey),
-    detail: inferConnectionDetail(payload, source, stateKey, stateHint)
+    detail: inferConnectionDetail(payload, source, stateKey, stateHint),
+    routingMode: routingSnapshot.mode,
+    routingDetail: routingSnapshot.detail
   };
 }
 
 function applyConnectionSnapshot(snapshot) {
   state.connectionState = snapshot?.state || state.connectionState || CONNECTION_DEFAULT_STATE;
   state.connectionDetail = snapshot?.detail || state.connectionDetail || CONNECTION_DEFAULT_DETAIL;
+  state.routingMode = snapshot?.routingMode || state.routingMode || ROUTING_DEFAULT_MODE;
+  state.routingDetail = snapshot?.routingDetail || state.routingDetail || ROUTING_DEFAULT_DETAIL;
   if (connectionStateEl) {
     connectionStateEl.textContent = state.connectionState;
   }
   if (connectionDetailEl) {
     connectionDetailEl.textContent = state.connectionDetail;
+  }
+  if (routingModeEl) {
+    routingModeEl.textContent = state.routingMode;
+  }
+  if (routingDetailEl) {
+    routingDetailEl.textContent = state.routingDetail;
   }
 }
 

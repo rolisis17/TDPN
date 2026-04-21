@@ -74,6 +74,9 @@ const connectionSnapshotEl = byId("connection_snapshot");
 const connectionSnapshotLineEl = byId("connection_snapshot_line");
 const connectionStateEl = byId("connection_state");
 const connectionDetailEl = byId("connection_detail");
+const connectionRoutingLineEl = byId("connection_routing_line");
+const connectionRoutingModeEl = byId("connection_routing_mode");
+const connectionRoutingDetailEl = byId("connection_routing_detail");
 const tabClientEl = byId("tab_client");
 const tabServerEl = byId("tab_server");
 const panelClientEl = byId("panel_client");
@@ -136,12 +139,45 @@ const PORTAL_WORKSPACE_TAB_STORAGE_KEY = "gpm.portal.workspace_tab.v1";
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
+const CONNECTION_DEFAULT_ROUTING_MODE = "Unknown";
+const CONNECTION_DEFAULT_ROUTING_DETAIL = "Run Status to fetch current routing posture.";
 const CONNECTION_HINT_KEYS = {
   state: ["connection_state", "state", "status", "phase", "mode"],
   connected: ["connected", "is_connected", "online", "active"],
   disconnected: ["disconnected", "is_disconnected", "offline"],
   healthy: ["healthy", "ok", "is_ok", "alive"],
   detail: ["detail", "details", "message", "reason", "error", "description"]
+};
+const CONNECTION_ROUTING_HINT_KEYS = {
+  mode: [
+    "routing_mode",
+    "route_mode",
+    "path_mode",
+    "routing_strategy",
+    "route_strategy",
+    "resolve_policy",
+    "routing_posture",
+    "routing_state"
+  ],
+  detail: [
+    "routing_detail",
+    "route_detail",
+    "resolve_policy_detail",
+    "routing_reason",
+    "route_reason",
+    "fallback_reason",
+    "relay_reason"
+  ],
+  direct: ["direct_path", "direct_mesh", "direct_mode", "using_direct", "direct_preferred", "direct_exit_forced"],
+  relay: [
+    "relay_active",
+    "using_relay",
+    "managed_relay",
+    "relay_mode",
+    "relay_fallback",
+    "fallback_to_relay",
+    "direct_exit_fallback"
+  ]
 };
 const PERSISTED_FIELD_IDS = [
   "api_base",
@@ -201,6 +237,8 @@ let walletSignatureContext = null;
 let activeWorkspaceTab = "client";
 let connectionState = CONNECTION_DEFAULT_STATE;
 let connectionDetail = CONNECTION_DEFAULT_DETAIL;
+let connectionRoutingMode = CONNECTION_DEFAULT_ROUTING_MODE;
+let connectionRoutingDetail = CONNECTION_DEFAULT_ROUTING_DETAIL;
 let bootstrapTrustTelemetry = null;
 
 function localStore() {
@@ -2709,6 +2747,140 @@ function inferConnectionDetail(payload, source, stateKey, stateHint) {
   return stateKey === "degraded" ? "Connection check reported issues." : CONNECTION_DEFAULT_DETAIL;
 }
 
+function formatConnectionRoutingModeLabel(value) {
+  const text = nonEmptyString(value);
+  if (!text) {
+    return undefined;
+  }
+  const compact = text.toLowerCase().replace(/[\s-]+/g, "_");
+  if (compact.includes("direct")) {
+    return "Direct mesh";
+  }
+  if (compact.includes("relay")) {
+    return "Managed relay";
+  }
+  if (compact.includes("hybrid") || compact === "auto" || compact.includes("fallback")) {
+    return "Auto (hybrid)";
+  }
+  if (compact === "inactive" || compact === "disconnected" || compact === "none" || compact === "off") {
+    return "Inactive";
+  }
+  if (compact === "unknown") {
+    return CONNECTION_DEFAULT_ROUTING_MODE;
+  }
+  const normalized = text.replace(/[_-]+/g, " ").trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function parseConnectionRoutingFromObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const mode = formatConnectionRoutingModeLabel(
+    toDetailText(
+      firstDefined(
+        value.mode,
+        value.routing_mode,
+        value.route_mode,
+        value.path_mode,
+        value.strategy,
+        value.routing_strategy,
+        value.resolve_policy,
+        value.routing_posture,
+        value.routing_state
+      )
+    )
+  );
+  const detail = toDetailText(
+    firstDefined(
+      value.detail,
+      value.routing_detail,
+      value.route_detail,
+      value.resolve_policy_detail,
+      value.reason,
+      value.status_reason,
+      value.description,
+      value.hint,
+      value.note
+    )
+  );
+  if (!mode && !detail) {
+    return null;
+  }
+  return {
+    mode: mode || CONNECTION_DEFAULT_ROUTING_MODE,
+    detail
+  };
+}
+
+function parseConnectionRoutingFromValue(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return parseConnectionRoutingFromObject(value);
+  }
+  const mode = formatConnectionRoutingModeLabel(toDetailText(value));
+  if (!mode) {
+    return null;
+  }
+  return { mode };
+}
+
+function inferConnectionRoutingDetailFallback(source, mode) {
+  if (source === "disconnect" || mode === "Inactive") {
+    return "Routing is inactive while disconnected.";
+  }
+  if (source === "connect") {
+    return "Connect request completed. Run Status to confirm current routing posture.";
+  }
+  if (source === "status") {
+    if (mode === CONNECTION_DEFAULT_ROUTING_MODE) {
+      return "Routing payload unavailable in status response.";
+    }
+    return "Routing posture refreshed.";
+  }
+  return CONNECTION_DEFAULT_ROUTING_DETAIL;
+}
+
+function inferConnectionRoutingSnapshotHeuristic(source, payload, stateKey) {
+  const nestedRouting = parseConnectionRoutingFromValue(findHintValue(payload, ["routing"]));
+  const modeHint = formatConnectionRoutingModeLabel(toDetailText(findHintValue(payload, CONNECTION_ROUTING_HINT_KEYS.mode)));
+  const detailHint = toDetailText(findHintValue(payload, CONNECTION_ROUTING_HINT_KEYS.detail));
+  const directHint = parseConnectionBooleanLike(findHintValue(payload, CONNECTION_ROUTING_HINT_KEYS.direct));
+  const relayHint = parseConnectionBooleanLike(findHintValue(payload, CONNECTION_ROUTING_HINT_KEYS.relay));
+
+  let mode = nestedRouting?.mode || modeHint;
+  if (!mode && relayHint === true) {
+    mode = "Managed relay";
+  }
+  if (!mode && directHint === true && relayHint !== true) {
+    mode = "Direct mesh";
+  }
+  if (!mode && (source === "disconnect" || stateKey === "disconnected")) {
+    mode = "Inactive";
+  }
+  if (!mode) {
+    mode = CONNECTION_DEFAULT_ROUTING_MODE;
+  }
+
+  let detail = nestedRouting?.detail || detailHint;
+  if (!detail) {
+    detail = inferConnectionRoutingDetailFallback(source, mode);
+  }
+  return { mode, detail };
+}
+
+function inferConnectionRoutingSnapshot(source, payload, stateKey) {
+  const root = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null;
+  const topLevelRouting = parseConnectionRoutingFromValue(root ? root.routing : undefined);
+  const heuristic = inferConnectionRoutingSnapshotHeuristic(source, payload, stateKey);
+  return {
+    mode: topLevelRouting?.mode || heuristic.mode || connectionRoutingMode || CONNECTION_DEFAULT_ROUTING_MODE,
+    detail: topLevelRouting?.detail || heuristic.detail || connectionRoutingDetail || CONNECTION_DEFAULT_ROUTING_DETAIL
+  };
+}
+
 function inferConnectionSnapshot(source, payload) {
   const stateHint = findHintValue(payload, CONNECTION_HINT_KEYS.state);
   const connected = parseConnectionBooleanLike(findHintValue(payload, CONNECTION_HINT_KEYS.connected));
@@ -2772,8 +2944,26 @@ function applyConnectionSnapshot(snapshot) {
   connectionSnapshotLineEl.classList.add(kind);
 }
 
+function applyConnectionRoutingSnapshot(snapshot, stateKey) {
+  connectionRoutingMode = snapshot?.mode || connectionRoutingMode || CONNECTION_DEFAULT_ROUTING_MODE;
+  connectionRoutingDetail = snapshot?.detail || connectionRoutingDetail || CONNECTION_DEFAULT_ROUTING_DETAIL;
+  if (connectionRoutingModeEl) {
+    connectionRoutingModeEl.textContent = connectionRoutingMode;
+  }
+  if (connectionRoutingDetailEl) {
+    connectionRoutingDetailEl.textContent = connectionRoutingDetail;
+  }
+  if (connectionRoutingLineEl) {
+    const kind = connectionSnapshotKind(stateKey);
+    connectionRoutingLineEl.classList.remove("good", "warn", "bad");
+    connectionRoutingLineEl.classList.add(kind);
+  }
+}
+
 function updateConnectionDashboard(source, payload) {
-  applyConnectionSnapshot(inferConnectionSnapshot(source, payload));
+  const snapshot = inferConnectionSnapshot(source, payload);
+  applyConnectionSnapshot(snapshot);
+  applyConnectionRoutingSnapshot(inferConnectionRoutingSnapshot(source, payload, snapshot?.stateKey), snapshot?.stateKey);
 }
 
 function parseServerReadiness(payload) {

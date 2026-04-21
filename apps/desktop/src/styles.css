@@ -132,14 +132,17 @@ body {
 #api_hints,
 #manifest_source,
 #connection_state,
-#connection_detail {
+#connection_detail,
+#routing_mode,
+#routing_detail {
   font-size: 0.9rem;
   color: var(--text);
   line-height: 1.35;
   word-break: break-word;
 }
 
-#connection_state {
+#connection_state,
+#routing_mode {
   font-size: 1rem;
   font-weight: 700;
 }

@@ -640,7 +640,11 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal([]byte(out), &payload) != nil {
 		payload = map[string]any{"raw": out}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": payload})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"status":  payload,
+		"routing": deriveRoutingPostureFromStatusPayload(payload),
+	})
 }
 
 func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -1054,11 +1058,13 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal([]byte(statusOut), &statusPayload) != nil {
 			statusPayload = map[string]any{"raw": statusOut}
 		}
+		routingPayload := deriveRoutingPostureFromStatusPayload(statusPayload)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":                  true,
 			"stage":               "connect",
 			"output":              upOut,
 			"status":              statusPayload,
+			"routing":             routingPayload,
 			"profile":             options.profile,
 			"bootstrap_directory": bootstrapDirectory,
 		})
@@ -2064,6 +2070,284 @@ func boolTo01(v bool) string {
 		return "1"
 	}
 	return "0"
+}
+
+func deriveRoutingPostureFromStatusPayload(statusPayload any) map[string]any {
+	aliasValues := map[string][]any{}
+	collectRoutingAliasValues(statusPayload, nil, aliasValues)
+
+	modeAliases := []string{
+		"routing_mode",
+		"path_mode",
+		"route_mode",
+		"connection_mode",
+		"selected_route",
+		"active_path",
+		"routing_state",
+		"routing_status",
+		"transport_mode",
+		"routing_path_mode",
+		"routing_mode_state",
+		"mode",
+	}
+	relayFallbackAliases := []string{
+		"relay_fallback_active",
+		"relay_fallback",
+		"fallback_relay_active",
+		"using_relay_fallback",
+		"relay_fallback_enabled",
+		"routing_relay_fallback_active",
+		"routing_relay_fallback",
+		"routing_relay_fallback_state",
+		"routing_relay_fallback_status",
+	}
+	directPreferredAliases := []string{
+		"direct_preferred",
+		"prefer_direct",
+		"direct_path_preferred",
+		"prefer_direct_path",
+		"routing_direct_preferred",
+		"routing_prefer_direct",
+		"routing_direct_path_preferred",
+	}
+	detailAliases := []string{
+		"routing_detail",
+		"route_detail",
+		"routing_reason",
+		"route_reason",
+		"fallback_reason",
+		"detail",
+		"reason",
+		"status_detail",
+	}
+
+	mode := ""
+	if modeHint, ok := findRoutingString(aliasValues, modeAliases...); ok {
+		mode = canonicalRoutingMode(modeHint)
+	}
+	relayFallbackActive, relayFallbackFound := findRoutingBool(aliasValues, relayFallbackAliases...)
+	directPreferred, _ := findRoutingBool(aliasValues, directPreferredAliases...)
+
+	detail := ""
+	if detailHint, ok := findRoutingString(aliasValues, detailAliases...); ok {
+		if mode == "" {
+			if inferred := canonicalRoutingMode(detailHint); inferred != "" {
+				mode = inferred
+			} else {
+				detail = detailHint
+			}
+		} else {
+			detail = detailHint
+		}
+	}
+
+	if mode == "" {
+		switch {
+		case relayFallbackActive:
+			mode = "relay_fallback"
+		case directPreferred:
+			mode = "direct"
+		}
+	}
+
+	if mode == "relay" && relayFallbackFound && relayFallbackActive {
+		mode = "relay_fallback"
+	}
+
+	switch mode {
+	case "direct":
+		directPreferred = true
+	case "relay_fallback":
+		relayFallbackActive = true
+		if !directPreferred {
+			directPreferred = true
+		}
+	case "relay":
+		// Preserve direct_preferred hint as-is when explicit relay mode is reported.
+	default:
+		mode = "unknown"
+	}
+
+	routing := map[string]any{
+		"mode":                  mode,
+		"relay_fallback_active": relayFallbackActive,
+		"direct_preferred":      directPreferred,
+		"source":                "status_payload",
+	}
+	if detail != "" {
+		routing["detail"] = detail
+	}
+	return routing
+}
+
+func collectRoutingAliasValues(node any, path []string, aliasValues map[string][]any) {
+	switch typed := node.(type) {
+	case map[string]any:
+		for rawKey, value := range typed {
+			normalizedKey := normalizeRoutingAliasKey(rawKey)
+			nextPath := path
+			if normalizedKey != "" {
+				aliasValues[normalizedKey] = append(aliasValues[normalizedKey], value)
+				nextPath = append(append([]string{}, path...), normalizedKey)
+				normalizedPath := strings.Join(nextPath, "")
+				if normalizedPath != "" {
+					aliasValues[normalizedPath] = append(aliasValues[normalizedPath], value)
+				}
+			}
+			collectRoutingAliasValues(value, nextPath, aliasValues)
+		}
+	case []any:
+		for _, value := range typed {
+			collectRoutingAliasValues(value, path, aliasValues)
+		}
+	}
+}
+
+func normalizeRoutingAliasKey(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	builder := strings.Builder{}
+	builder.Grow(len(raw))
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func findRoutingString(aliasValues map[string][]any, aliases ...string) (string, bool) {
+	for _, alias := range aliases {
+		values, ok := aliasValues[normalizeRoutingAliasKey(alias)]
+		if !ok {
+			continue
+		}
+		for _, value := range values {
+			text, ok := value.(string)
+			if !ok {
+				continue
+			}
+			text = strings.TrimSpace(text)
+			if text != "" {
+				return text, true
+			}
+		}
+	}
+	return "", false
+}
+
+func findRoutingBool(aliasValues map[string][]any, aliases ...string) (bool, bool) {
+	for _, alias := range aliases {
+		values, ok := aliasValues[normalizeRoutingAliasKey(alias)]
+		if !ok {
+			continue
+		}
+		for _, value := range values {
+			parsed, ok := parseRoutingBoolValue(value)
+			if ok {
+				return parsed, true
+			}
+		}
+	}
+	return false, false
+}
+
+func parseRoutingBoolValue(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "y", "on", "enabled", "active":
+			return true, true
+		case "0", "false", "no", "n", "off", "disabled", "inactive":
+			return false, true
+		}
+	case float64:
+		if typed == 1 {
+			return true, true
+		}
+		if typed == 0 {
+			return false, true
+		}
+	case int:
+		if typed == 1 {
+			return true, true
+		}
+		if typed == 0 {
+			return false, true
+		}
+	case int64:
+		if typed == 1 {
+			return true, true
+		}
+		if typed == 0 {
+			return false, true
+		}
+	case json.Number:
+		if v, err := typed.Int64(); err == nil {
+			if v == 1 {
+				return true, true
+			}
+			if v == 0 {
+				return false, true
+			}
+		}
+	}
+	return false, false
+}
+
+func canonicalRoutingMode(raw string) string {
+	tokens := splitRoutingModeTokens(raw)
+	if len(tokens) == 0 {
+		return ""
+	}
+	joined := strings.Join(tokens, "")
+	hasRelay := containsRoutingToken(tokens, "relay")
+	hasFallback := containsRoutingToken(tokens, "fallback") || containsRoutingToken(tokens, "failover")
+	if strings.Contains(joined, "relayfallback") || strings.Contains(joined, "fallbackrelay") || (hasRelay && hasFallback) {
+		return "relay_fallback"
+	}
+	if containsRoutingToken(tokens, "direct") || containsRoutingToken(tokens, "mesh") || containsRoutingToken(tokens, "peer") || containsRoutingToken(tokens, "p2p") {
+		return "direct"
+	}
+	if hasRelay || containsRoutingToken(tokens, "proxy") {
+		return "relay"
+	}
+	return ""
+}
+
+func splitRoutingModeTokens(raw string) []string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			tokens = append(tokens, field)
+		}
+	}
+	return tokens
+}
+
+func containsRoutingToken(tokens []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, token := range tokens {
+		if token == target {
+			return true
+		}
+	}
+	return false
 }
 
 func validateBootstrapDirectoryURL(raw string) error {

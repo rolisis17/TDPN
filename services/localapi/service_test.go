@@ -157,7 +157,9 @@ case "$cmd" in
       echo "status failed"
       exit 44
     fi
-    if [[ "${LOCALAPI_TEST_STATUS_RAW:-0}" == "1" ]]; then
+    if [[ -n "${LOCALAPI_TEST_STATUS_JSON:-}" ]]; then
+      echo "${LOCALAPI_TEST_STATUS_JSON}"
+    elif [[ "${LOCALAPI_TEST_STATUS_RAW:-0}" == "1" ]]; then
       echo "status-raw"
     else
       echo '{"connected":true,"profile":"2hop"}'
@@ -2501,6 +2503,13 @@ func TestHandleStatusVariants(t *testing.T) {
 		if connected, _ := statusMap["connected"].(bool); !connected {
 			t.Fatalf("status.connected=%v want=true", statusMap["connected"])
 		}
+		routing, ok := payload["routing"].(map[string]any)
+		if !ok {
+			t.Fatalf("routing payload missing map: %v", payload)
+		}
+		if got, _ := routing["source"].(string); got != "status_payload" {
+			t.Fatalf("routing.source=%q want=status_payload", got)
+		}
 	})
 
 	t.Run("raw payload fallback", func(t *testing.T) {
@@ -2517,6 +2526,82 @@ func TestHandleStatusVariants(t *testing.T) {
 		}
 		if raw, _ := statusMap["raw"].(string); raw != "status-raw" {
 			t.Fatalf("status.raw=%q want=status-raw", raw)
+		}
+	})
+
+	t.Run("routing relay fallback detection", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		t.Setenv("LOCALAPI_TEST_STATUS_JSON", `{
+			"connected": true,
+			"network": {
+				"routing": {
+					"path_mode": "managed-relay-fallback",
+					"detail": "direct path unavailable; using managed relay"
+				},
+				"policy": {
+					"direct_preferred": true
+				}
+			}
+		}`)
+
+		code, payload := callJSONHandler(t, svc.handleStatus, http.MethodGet, "/v1/status", "")
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		routing, ok := payload["routing"].(map[string]any)
+		if !ok {
+			t.Fatalf("routing payload missing map: %v", payload)
+		}
+		if got, _ := routing["mode"].(string); got != "relay_fallback" {
+			t.Fatalf("routing.mode=%q want=relay_fallback payload=%v", got, routing)
+		}
+		if got, _ := routing["relay_fallback_active"].(bool); !got {
+			t.Fatalf("routing.relay_fallback_active=%v want=true payload=%v", got, routing)
+		}
+		if got, _ := routing["direct_preferred"].(bool); !got {
+			t.Fatalf("routing.direct_preferred=%v want=true payload=%v", got, routing)
+		}
+		if got, _ := routing["detail"].(string); got != "direct path unavailable; using managed relay" {
+			t.Fatalf("routing.detail=%q want expected detail payload=%v", got, routing)
+		}
+		if got, _ := routing["source"].(string); got != "status_payload" {
+			t.Fatalf("routing.source=%q want=status_payload payload=%v", got, routing)
+		}
+	})
+
+	t.Run("routing direct detection", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		t.Setenv("LOCALAPI_TEST_STATUS_JSON", `{
+			"connected": true,
+			"telemetry": {
+				"route": {
+					"connection_mode": "direct_mesh"
+				},
+				"preferences": {
+					"prefer_direct": "true"
+				}
+			}
+		}`)
+
+		code, payload := callJSONHandler(t, svc.handleStatus, http.MethodGet, "/v1/status", "")
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		routing, ok := payload["routing"].(map[string]any)
+		if !ok {
+			t.Fatalf("routing payload missing map: %v", payload)
+		}
+		if got, _ := routing["mode"].(string); got != "direct" {
+			t.Fatalf("routing.mode=%q want=direct payload=%v", got, routing)
+		}
+		if got, _ := routing["direct_preferred"].(bool); !got {
+			t.Fatalf("routing.direct_preferred=%v want=true payload=%v", got, routing)
+		}
+		if got, _ := routing["relay_fallback_active"].(bool); got {
+			t.Fatalf("routing.relay_fallback_active=%v want=false payload=%v", got, routing)
+		}
+		if got, _ := routing["source"].(string); got != "status_payload" {
+			t.Fatalf("routing.source=%q want=status_payload payload=%v", got, routing)
 		}
 	})
 
