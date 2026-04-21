@@ -918,6 +918,35 @@ func TestNewClientReadsBootstrapBackoffEnv(t *testing.T) {
 	}
 }
 
+func TestNewClientReadsEntryRotationJitterPctEnv(t *testing.T) {
+	t.Setenv("CLIENT_ENTRY_ROTATION_JITTER_PCT", "37")
+	c := NewClient()
+	if c.entryRotationJitterPct != 37 {
+		t.Fatalf("expected CLIENT_ENTRY_ROTATION_JITTER_PCT parsed, got %d", c.entryRotationJitterPct)
+	}
+}
+
+func TestNewClientClampsEntryRotationJitterPctEnv(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{name: "negative", value: "-5", want: 0},
+		{name: "above-max", value: "95", want: 90},
+		{name: "invalid", value: "abc", want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLIENT_ENTRY_ROTATION_JITTER_PCT", tc.value)
+			c := NewClient()
+			if c.entryRotationJitterPct != tc.want {
+				t.Fatalf("CLIENT_ENTRY_ROTATION_JITTER_PCT=%q got=%d want=%d", tc.value, c.entryRotationJitterPct, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewClientDefaultInnerSourceSyntheticInNoopMode(t *testing.T) {
 	t.Setenv("CLIENT_INNER_SOURCE", "")
 	t.Setenv("CLIENT_WG_BACKEND", "noop")

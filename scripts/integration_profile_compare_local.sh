@@ -73,9 +73,23 @@ case "$cmd" in
     if [[ "$profile" == "speed-1hop" ]]; then
       direct_forced="true"
     fi
+    policy_path_profile="2hop"
+    sticky_pair_sec="0"
+    entry_rotation_sec="0"
+    entry_rotation_jitter_pct="0"
+    exit_exploration_pct="10"
+    case "$profile" in
+      private)
+        policy_path_profile="3hop"
+        ;;
+      speed-1hop)
+        policy_path_profile="1hop"
+        sticky_pair_sec="300"
+        ;;
+    esac
 
     {
-      echo "2026/03/24 12:00:00 client role enabled: direct_exit_forced=${direct_forced}"
+      echo "2026/03/24 12:00:00 client role enabled: path_profile=${policy_path_profile} sticky_pair_sec=${sticky_pair_sec} entry_rotation_sec=${entry_rotation_sec} entry_rotation_jitter_pct=${entry_rotation_jitter_pct} exit_exploration_pct=${exit_exploration_pct} direct_exit_forced=${direct_forced}"
       if [[ "$profile" == "speed" ]]; then
         echo "2026/03/24 12:00:01 client bootstrap retry failed: transient"
       fi
@@ -143,6 +157,11 @@ if ! jq -e '
   and .summary.runs_total == 8
   and .summary.runs_executed == 8
   and .summary.runs_fail == 1
+  and (.summary.selection_policy.sticky_pair_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
+  and (.summary.selection_policy.exit_exploration_pct | type == "number")
+  and (.summary.selection_policy.path_profile | type == "string")
   and .decision.recommended_default_profile == "balanced"
   and ([.profiles[] | select(.profile == "speed-1hop")][0].direct_exit_forced_runs == 2)
 ' "$SUMMARY_JSON" >/dev/null; then

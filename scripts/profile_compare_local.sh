@@ -264,6 +264,41 @@ extract_metric_from_line() {
   printf '%s\n' "$value"
 }
 
+extract_metric_from_line_optional() {
+  local line="$1"
+  local key="$2"
+  local value
+  value="$(printf '%s\n' "$line" | sed -nE "s/.*${key}=([0-9]+).*/\\1/p")"
+  if [[ -z "$value" || ! "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+  printf '%s\n' "$value"
+}
+
+extract_text_from_line_optional() {
+  local line="$1"
+  local key="$2"
+  local value
+  value="$(printf '%s\n' "$line" | sed -nE "s/.*${key}=([^[:space:]]+).*/\\1/p")"
+  printf '%s\n' "$value"
+}
+
+runtime_path_profile_from_compare_profile() {
+  local profile="${1:-}"
+  case "$profile" in
+    speed-1hop)
+      printf '%s\n' "1hop"
+      ;;
+    private)
+      printf '%s\n' "3hop"
+      ;;
+    *)
+      printf '%s\n' "2hop"
+      ;;
+  esac
+}
+
 prepare_log_dir() {
   local dir="${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
   mkdir -p "$dir"
@@ -509,6 +544,36 @@ if [[ -n "$subject" && -n "$anon_cred" ]]; then
   exit 2
 fi
 
+selection_policy_env_sticky_pair_sec="${CLIENT_STICKY_PAIR_SEC:-0}"
+if ! [[ "$selection_policy_env_sticky_pair_sec" =~ ^[0-9]+$ ]]; then
+  selection_policy_env_sticky_pair_sec="0"
+fi
+
+selection_policy_env_entry_rotation_sec="${CLIENT_ENTRY_ROTATION_SEC:-0}"
+if ! [[ "$selection_policy_env_entry_rotation_sec" =~ ^[0-9]+$ ]]; then
+  selection_policy_env_entry_rotation_sec="0"
+fi
+
+selection_policy_env_entry_rotation_jitter_pct="${CLIENT_ENTRY_ROTATION_JITTER_PCT:-0}"
+if ! [[ "$selection_policy_env_entry_rotation_jitter_pct" =~ ^-?[0-9]+$ ]]; then
+  selection_policy_env_entry_rotation_jitter_pct="0"
+fi
+if ((selection_policy_env_entry_rotation_jitter_pct < 0)); then
+  selection_policy_env_entry_rotation_jitter_pct="0"
+elif ((selection_policy_env_entry_rotation_jitter_pct > 90)); then
+  selection_policy_env_entry_rotation_jitter_pct="90"
+fi
+
+selection_policy_env_exit_exploration_pct="${CLIENT_EXIT_EXPLORATION_PCT:-10}"
+if ! [[ "$selection_policy_env_exit_exploration_pct" =~ ^-?[0-9]+$ ]]; then
+  selection_policy_env_exit_exploration_pct="10"
+fi
+if ((selection_policy_env_exit_exploration_pct < 0)); then
+  selection_policy_env_exit_exploration_pct="0"
+elif ((selection_policy_env_exit_exploration_pct > 100)); then
+  selection_policy_env_exit_exploration_pct="100"
+fi
+
 IFS=',' read -r -a raw_profiles <<<"$profiles_csv"
 declare -a profiles=()
 declare -A seen_profiles=()
@@ -688,6 +753,11 @@ append_run_record() {
   local client_log="${22}"
   local command="${23}"
   local skip_reason="${24}"
+  local selection_policy_sticky_pair_sec="${25}"
+  local selection_policy_entry_rotation_sec="${26}"
+  local selection_policy_entry_rotation_jitter_pct="${27}"
+  local selection_policy_exit_exploration_pct="${28}"
+  local selection_policy_path_profile="${29}"
 
   jq -n \
     --arg profile "$profile" \
@@ -714,6 +784,11 @@ append_run_record() {
     --arg client_log "$client_log" \
     --arg command "$command" \
     --arg skip_reason "$skip_reason" \
+    --argjson selection_policy_sticky_pair_sec "$selection_policy_sticky_pair_sec" \
+    --argjson selection_policy_entry_rotation_sec "$selection_policy_entry_rotation_sec" \
+    --argjson selection_policy_entry_rotation_jitter_pct "$selection_policy_entry_rotation_jitter_pct" \
+    --argjson selection_policy_exit_exploration_pct "$selection_policy_exit_exploration_pct" \
+    --arg selection_policy_path_profile "$selection_policy_path_profile" \
     '{
       profile: $profile,
       round: $round,
@@ -738,7 +813,14 @@ append_run_record() {
       output_log: $output_log,
       client_log: $client_log,
       command: $command,
-      skip_reason: $skip_reason
+      skip_reason: $skip_reason,
+      selection_policy: {
+        sticky_pair_sec: $selection_policy_sticky_pair_sec,
+        entry_rotation_sec: $selection_policy_entry_rotation_sec,
+        entry_rotation_jitter_pct: $selection_policy_entry_rotation_jitter_pct,
+        exit_exploration_pct: $selection_policy_exit_exploration_pct,
+        path_profile: $selection_policy_path_profile
+      }
     }' >>"$runs_file"
 }
 
@@ -754,7 +836,8 @@ for profile in "${profiles[@]}"; do
 
     if [[ -n "$skip_reason" ]]; then
       echo "[profile-compare-local] profile=$profile round=$round_idx status=skip reason=$skip_reason" | tee -a "$summary_log"
-      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason"
+      skip_policy_path_profile="$(runtime_path_profile_from_compare_profile "$profile")"
+      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile"
       continue
     fi
 
@@ -876,6 +959,26 @@ for profile in "${profiles[@]}"; do
     if printf '%s\n' "$startup_line" | rg -q 'direct_exit_forced=true'; then
       direct_exit_forced="true"
     fi
+    selection_policy_sticky_pair_sec="$(extract_metric_from_line_optional "$startup_line" "sticky_pair_sec")"
+    selection_policy_entry_rotation_sec="$(extract_metric_from_line_optional "$startup_line" "entry_rotation_sec")"
+    selection_policy_entry_rotation_jitter_pct="$(extract_metric_from_line_optional "$startup_line" "entry_rotation_jitter_pct")"
+    selection_policy_exit_exploration_pct="$(extract_metric_from_line_optional "$startup_line" "exit_exploration_pct")"
+    selection_policy_path_profile="$(extract_text_from_line_optional "$startup_line" "path_profile")"
+    if [[ -z "$selection_policy_sticky_pair_sec" ]]; then
+      selection_policy_sticky_pair_sec="$selection_policy_env_sticky_pair_sec"
+    fi
+    if [[ -z "$selection_policy_entry_rotation_sec" ]]; then
+      selection_policy_entry_rotation_sec="$selection_policy_env_entry_rotation_sec"
+    fi
+    if [[ -z "$selection_policy_entry_rotation_jitter_pct" ]]; then
+      selection_policy_entry_rotation_jitter_pct="$selection_policy_env_entry_rotation_jitter_pct"
+    fi
+    if [[ -z "$selection_policy_exit_exploration_pct" ]]; then
+      selection_policy_exit_exploration_pct="$selection_policy_env_exit_exploration_pct"
+    fi
+    if [[ -z "$selection_policy_path_profile" ]]; then
+      selection_policy_path_profile="$(runtime_path_profile_from_compare_profile "$profile")"
+    fi
 
     echo "[profile-compare-local] profile=$profile round=$round_idx status=$run_status rc=$run_rc duration_sec=$duration_sec selection_count=$selection_count bootstrap_failures=$bootstrap_failures log=$run_output_log" | tee -a "$summary_log"
 
@@ -886,11 +989,26 @@ for profile in "${profiles[@]}"; do
       "$direct_exit_mode_events" "$direct_exit_fallback_events" \
       "$transport_mismatch_failures" "$token_proof_invalid_failures" "$unknown_exit_failures" "$directory_trust_failures" \
       "$direct_exit_forced" \
-      "$run_output_log" "$client_log_path" "$run_cmd_str" ""
+      "$run_output_log" "$client_log_path" "$run_cmd_str" "" \
+      "$selection_policy_sticky_pair_sec" "$selection_policy_entry_rotation_sec" "$selection_policy_entry_rotation_jitter_pct" "$selection_policy_exit_exploration_pct" "$selection_policy_path_profile"
   done
 done
 
 runs_json="$(jq -s '.' "$runs_file")"
+default_selection_policy_path_profile="$(runtime_path_profile_from_compare_profile "${profiles[0]}")"
+selection_policy_summary_json="$(jq \
+  --argjson fallback_sticky_pair_sec "$selection_policy_env_sticky_pair_sec" \
+  --argjson fallback_entry_rotation_sec "$selection_policy_env_entry_rotation_sec" \
+  --argjson fallback_entry_rotation_jitter_pct "$selection_policy_env_entry_rotation_jitter_pct" \
+  --argjson fallback_exit_exploration_pct "$selection_policy_env_exit_exploration_pct" \
+  --arg fallback_path_profile "$default_selection_policy_path_profile" \
+  '([.[] | select(.status != "skip") | .selection_policy] | .[0]) // {
+    sticky_pair_sec: $fallback_sticky_pair_sec,
+    entry_rotation_sec: $fallback_entry_rotation_sec,
+    entry_rotation_jitter_pct: $fallback_entry_rotation_jitter_pct,
+    exit_exploration_pct: $fallback_exit_exploration_pct,
+    path_profile: $fallback_path_profile
+  }' <<<"$runs_json")"
 profile_summary_json="$(jq '
   sort_by(.profile)
   | group_by(.profile)
@@ -1036,6 +1154,7 @@ jq -n \
   --arg recommended_default_profile "$recommended_default_profile" \
   --arg decision_reason "$decision_reason" \
   --arg comparison_policy_note "$comparison_policy_note" \
+  --argjson selection_policy "$selection_policy_summary_json" \
   --argjson profiles "$profile_inputs_json" \
   --argjson profiles_summary "$profile_summary_json" \
   --argjson runs "$runs_json" \
@@ -1098,7 +1217,8 @@ jq -n \
       transport_mismatch_failures_total: $transport_mismatch_failures_total,
       token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
       unknown_exit_failures_total: $unknown_exit_failures_total,
-      directory_trust_failures_total: $directory_trust_failures_total
+      directory_trust_failures_total: $directory_trust_failures_total,
+      selection_policy: $selection_policy
     },
     decision: {
       recommended_default_profile: $recommended_default_profile,
@@ -1115,6 +1235,32 @@ jq -n \
       stack_bootstrap_log: $stack_bootstrap_log
     }
   }' >"$summary_json"
+
+if ! jq -e '
+  .summary.selection_policy
+  and (.summary.selection_policy.sticky_pair_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
+  and (.summary.selection_policy.exit_exploration_pct | type == "number")
+  and (.summary.selection_policy.path_profile | type == "string")
+' "$summary_json" >/dev/null; then
+  echo "profile-compare-local: summary selection_policy evidence fields are missing"
+  exit 1
+fi
+
+if ! jq -e '
+  [.runs[] | select(.status != "skip")
+    | (.selection_policy != null
+      and (.selection_policy
+        | has("sticky_pair_sec")
+        and has("entry_rotation_sec")
+        and has("entry_rotation_jitter_pct")
+        and has("exit_exploration_pct")
+        and has("path_profile")))] | all
+' "$summary_json" >/dev/null; then
+  echo "profile-compare-local: run-level selection_policy evidence fields are missing"
+  exit 1
+fi
 
 {
   echo "# Local Profile Comparison Report"

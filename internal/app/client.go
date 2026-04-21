@@ -83,6 +83,7 @@ type Client struct {
 	requireMiddleRelay       bool
 	stickyPairSec            int
 	entryRotationSec         int
+	entryRotationJitterPct   int
 	entryRotationSeed        int64
 	lastSelectedEntry        string
 	lastSelectedExit         string
@@ -361,6 +362,17 @@ func NewClient() *Client {
 			entryRotationSeed = parsed
 		}
 	}
+	entryRotationJitterPct := 0
+	if v, err := strconv.Atoi(os.Getenv("CLIENT_ENTRY_ROTATION_JITTER_PCT")); err == nil {
+		switch {
+		case v < 0:
+			entryRotationJitterPct = 0
+		case v > 90:
+			entryRotationJitterPct = 90
+		default:
+			entryRotationJitterPct = v
+		}
+	}
 	sessionReuseRaw := strings.TrimSpace(os.Getenv("CLIENT_SESSION_REUSE"))
 	sessionReuse := true
 	if sessionReuseRaw != "" {
@@ -549,6 +561,7 @@ func NewClient() *Client {
 		requireMiddleRelay:       requireMiddleRelay,
 		stickyPairSec:            stickyPairSec,
 		entryRotationSec:         entryRotationSec,
+		entryRotationJitterPct:   entryRotationJitterPct,
 		entryRotationSeed:        entryRotationSeed,
 		sessionReuse:             sessionReuse,
 		sessionRefreshLeadSec:    sessionRefreshLeadSec,
@@ -602,8 +615,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if initialDelay < 0 {
 		initialDelay = 0
 	}
-	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject_set=%t anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d path_profile=%s middle_pref=%t middle_required=%t exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d min_refresh_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t direct_exit_forced=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
-		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, strings.TrimSpace(c.subject) != "", c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.sessionMinRefreshSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, c.forceDirectExit, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
+	log.Printf("client role enabled: directories=%d min_sources=%d min_operators=%d min_votes=%d issuer=%s subject_set=%t anon_cred=%t entry=%s mode=%s source=%s trust_strict=%t wg_backend=%s iface=%s allowed_ips=%s install_route=%t wg_kernel_proxy=%t wg_proxy_addr=%s synthetic_fallback=%t opaque_session_sec=%d opaque_initial_uplink_timeout_ms=%d health_check=%t path_attempts=%d path_profile=%s middle_pref=%t middle_required=%t exit_country=%s exit_region=%s min_geo_confidence=%.2f locality_fallback=%s strict_locality=%t locality_soft_bias=%t country_bias=%.2f region_bias=%.2f region_prefix_bias=%.2f max_exits_per_operator=%d distinct_operators=%t distinct_countries=%t sticky_pair_sec=%d entry_rotation_sec=%d entry_rotation_jitter_pct=%d entry_rotation_seed_set=%t session_reuse=%t refresh_lead_sec=%d min_refresh_sec=%d exit_exploration_pct=%d selection_feed_disable=%t selection_feed_require=%t selection_feed_min_votes=%d trust_feed_disable=%t trust_feed_require=%t trust_feed_min_votes=%d unknown_exit_fallback=%t direct_exit_fallback=%t direct_exit_forced=%t bootstrap_interval_sec=%d bootstrap_backoff_max_sec=%d bootstrap_jitter_pct=%d bootstrap_initial_delay_sec=%d startup_sync_timeout_sec=%d wg_only=%t beta_strict=%t",
+		len(c.directoryURLs), c.directoryMinSources, c.directoryMinOperators, c.directoryMinVotes, c.issuerURL, strings.TrimSpace(c.subject) != "", c.anonCred != "", c.entryURL, c.dataMode, c.innerSource, c.trustStrict, c.wgBackend, c.wgInterface, c.wgAllowedIPs, c.wgInstallRoute, c.wgKernelProxy, c.wgProxyAddr, c.allowSyntheticFallback(), c.opaqueSessionSec, c.opaqueInitialUpMS, c.healthCheckEnabled, c.pathOpenMaxAttempts, c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay, c.preferredExitCountry, c.preferredExitRegion, c.minGeoConfidence, strings.Join(c.localityFallbackOrder, ","), c.strictExitLocality, c.localitySoftBias, c.localityCountryBias, c.localityRegionBias, c.localityRegionPrefixBias, c.maxExitsPerOperator, c.requireDistinctOps, c.requireDistinctCountries, c.stickyPairSec, c.entryRotationSec, c.entryRotationJitterPct, c.entryRotationSeed != 0, c.sessionReuse, c.sessionRefreshLeadSec, c.sessionMinRefreshSec, c.exitExplorationPct, c.selectionFeedDisable, c.selectionFeedRequire, c.selectionFeedMinVotes, c.trustFeedDisable, c.trustFeedRequire, c.trustFeedMinVotes, c.allowUnknownExitFallback, c.allowDirectExitFallback, c.forceDirectExit, int(bootstrapInterval/time.Second), int(bootstrapBackoffMax/time.Second), c.bootstrapJitterPct, int(initialDelay/time.Second), int(c.startupSyncTimeout/time.Second), c.wgOnlyMode, c.betaStrict)
 	if err := c.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -1995,15 +2008,18 @@ func minDuration(a time.Duration, b time.Duration) time.Duration {
 	return b
 }
 
-func (c *Client) applyEntryRotation(entries []proto.RelayDescriptor, now time.Time) []proto.RelayDescriptor {
-	if len(entries) <= 1 || c.entryRotationSec <= 0 {
-		return entries
+func clampEntryRotationJitterPct(v int) int {
+	switch {
+	case v < 0:
+		return 0
+	case v > 90:
+		return 90
+	default:
+		return v
 	}
-	window := int64(c.entryRotationSec)
-	if window <= 0 {
-		return entries
-	}
+}
 
+func (c *Client) entryRotationBaseSeed() int64 {
 	seed := c.entryRotationSeed
 	if seed == 0 {
 		s := sha256.Sum256([]byte(strings.TrimSpace(c.clientWGPub)))
@@ -2014,8 +2030,45 @@ func (c *Client) applyEntryRotation(entries []proto.RelayDescriptor, now time.Ti
 			seed = -seed
 		}
 	}
+	return seed
+}
+
+func (c *Client) entryRotationJitterOffsetSec(window int64) int64 {
+	if window <= 0 {
+		return 0
+	}
+	jitterPct := clampEntryRotationJitterPct(c.entryRotationJitterPct)
+	if jitterPct == 0 {
+		return 0
+	}
+	spread := (window * int64(jitterPct)) / 100
+	if spread <= 0 {
+		return 0
+	}
+	seed := c.entryRotationBaseSeed()
+	material := fmt.Sprintf("entry-rotation-jitter:%d:%s", seed, strings.TrimSpace(c.clientWGPub))
+	sum := sha256.Sum256([]byte(material))
+	var raw uint64
+	for i := 0; i < 8; i++ {
+		raw = (raw << 8) | uint64(sum[i])
+	}
+	span := uint64(spread*2 + 1)
+	return int64(raw%span) - spread
+}
+
+func (c *Client) applyEntryRotation(entries []proto.RelayDescriptor, now time.Time) []proto.RelayDescriptor {
+	if len(entries) <= 1 || c.entryRotationSec <= 0 {
+		return entries
+	}
+	window := int64(c.entryRotationSec)
+	if window <= 0 {
+		return entries
+	}
+
+	seed := c.entryRotationBaseSeed()
 	n := int64(len(entries))
-	slotMod := (now.Unix() / window) % n
+	effectiveUnix := now.Unix() + c.entryRotationJitterOffsetSec(window)
+	slotMod := (effectiveUnix / window) % n
 	if slotMod < 0 {
 		slotMod += n
 	}

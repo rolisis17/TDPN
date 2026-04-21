@@ -456,6 +456,34 @@ func TestRankRelayPairsAppliesStickyPairPreference(t *testing.T) {
 	}
 }
 
+func TestRankRelayPairsStickyPairWithEntryRotationJitter(t *testing.T) {
+	c := &Client{
+		entryURL:               "http://fallback-entry.local",
+		exitControlURL:         "http://fallback-exit.local",
+		healthCheckEnabled:     false,
+		stickyPairSec:          60,
+		entryRotationSec:       30,
+		entryRotationJitterPct: 90,
+		entryRotationSeed:      7,
+		lastSelectedEntry:      "entry-b",
+		lastSelectedExit:       "exit-b",
+		lastSelectedAt:         time.Now(),
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "entry-a.local"},
+		{RelayID: "entry-b", Role: "entry", ControlURL: "entry-b.local"},
+		{RelayID: "exit-a", Role: "exit", ControlURL: "exit-a.local"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "exit-b.local"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) < 2 {
+		t.Fatalf("expected multiple pairs, got %d", len(pairs))
+	}
+	if pairs[0].entry.RelayID != "entry-b" || pairs[0].exit.RelayID != "exit-b" {
+		t.Fatalf("expected sticky pair first with rotation+jitter enabled, got entry=%s exit=%s", pairs[0].entry.RelayID, pairs[0].exit.RelayID)
+	}
+}
+
 func TestRankRelayPairsStickyPairExpires(t *testing.T) {
 	c := &Client{
 		entryURL:           "http://fallback-entry.local",
@@ -503,8 +531,9 @@ func TestApplyEntryRotationDisabled(t *testing.T) {
 
 func TestApplyEntryRotationDeterministic(t *testing.T) {
 	c := &Client{
-		entryRotationSec:  10,
-		entryRotationSeed: 2,
+		entryRotationSec:       10,
+		entryRotationJitterPct: 0,
+		entryRotationSeed:      2,
 	}
 	entries := []proto.RelayDescriptor{
 		{RelayID: "entry-a", Role: "entry"},
@@ -518,6 +547,107 @@ func TestApplyEntryRotationDeterministic(t *testing.T) {
 	}
 	if got[0].RelayID != "entry-b" || got[1].RelayID != "entry-c" || got[2].RelayID != "entry-a" {
 		t.Fatalf("unexpected deterministic rotation order: %s,%s,%s", got[0].RelayID, got[1].RelayID, got[2].RelayID)
+	}
+}
+
+func TestApplyEntryRotationZeroJitterMatchesLegacy(t *testing.T) {
+	legacy := &Client{
+		entryRotationSec:  10,
+		entryRotationSeed: 2,
+	}
+	withZeroJitter := &Client{
+		entryRotationSec:       10,
+		entryRotationJitterPct: 0,
+		entryRotationSeed:      2,
+	}
+	entries := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry"},
+		{RelayID: "entry-b", Role: "entry"},
+		{RelayID: "entry-c", Role: "entry"},
+	}
+	now := time.Unix(39, 0)
+	gotLegacy := legacy.applyEntryRotation(entries, now)
+	gotZeroJitter := withZeroJitter.applyEntryRotation(entries, now)
+	if len(gotLegacy) != len(gotZeroJitter) {
+		t.Fatalf("unexpected rotated length mismatch: legacy=%d zero_jitter=%d", len(gotLegacy), len(gotZeroJitter))
+	}
+	for i := range gotLegacy {
+		if gotLegacy[i].RelayID != gotZeroJitter[i].RelayID {
+			t.Fatalf("expected jitter=0 parity at idx=%d legacy=%s zero_jitter=%s", i, gotLegacy[i].RelayID, gotZeroJitter[i].RelayID)
+		}
+	}
+}
+
+func TestApplyEntryRotationJitterDeterministicShift(t *testing.T) {
+	base := &Client{
+		entryRotationSec:  10,
+		entryRotationSeed: 2,
+	}
+	jittered := &Client{
+		entryRotationSec:       10,
+		entryRotationJitterPct: 50,
+		entryRotationSeed:      2,
+	}
+	offset := jittered.entryRotationJitterOffsetSec(10)
+	if offset == 0 {
+		t.Fatalf("expected non-zero jitter offset for deterministic shift test")
+	}
+
+	nowUnix := int64(20)
+	if offset > 0 {
+		nowUnix = 19
+	}
+	now := time.Unix(nowUnix, 0)
+	entries := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry"},
+		{RelayID: "entry-b", Role: "entry"},
+		{RelayID: "entry-c", Role: "entry"},
+	}
+	gotBase := base.applyEntryRotation(entries, now)
+	got1 := jittered.applyEntryRotation(entries, now)
+	got2 := jittered.applyEntryRotation(entries, now)
+	for i := range got1 {
+		if got1[i].RelayID != got2[i].RelayID {
+			t.Fatalf("expected jittered rotation stable within slot at idx=%d got1=%s got2=%s", i, got1[i].RelayID, got2[i].RelayID)
+		}
+	}
+	sameAsBase := true
+	for i := range got1 {
+		if got1[i].RelayID != gotBase[i].RelayID {
+			sameAsBase = false
+			break
+		}
+	}
+	if sameAsBase {
+		t.Fatalf("expected jittered rotation to shift slot ordering: offset=%d now=%d", offset, nowUnix)
+	}
+}
+
+func TestApplyEntryRotationJitterBoundedEdgeValues(t *testing.T) {
+	entries := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry"},
+		{RelayID: "entry-b", Role: "entry"},
+		{RelayID: "entry-c", Role: "entry"},
+	}
+	cases := []int{-50, 0, 1, 90, 120}
+	for _, jitterPct := range cases {
+		c := &Client{
+			entryRotationSec:       10,
+			entryRotationJitterPct: jitterPct,
+			entryRotationSeed:      9,
+		}
+		offset := c.entryRotationJitterOffsetSec(10)
+		clamped := clampEntryRotationJitterPct(jitterPct)
+		spread := int64((10 * clamped) / 100)
+		if offset < -spread || offset > spread {
+			t.Fatalf("jitter offset out of bounds for pct=%d offset=%d spread=%d", jitterPct, offset, spread)
+		}
+		for _, nowUnix := range []int64{0, 9, 10, 11, 99} {
+			got := c.applyEntryRotation(entries, time.Unix(nowUnix, 0))
+			if len(got) != len(entries) {
+				t.Fatalf("unexpected rotated length for pct=%d now=%d got=%d want=%d", jitterPct, nowUnix, len(got), len(entries))
+			}
+		}
 	}
 }
 
