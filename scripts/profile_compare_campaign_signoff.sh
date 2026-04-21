@@ -30,6 +30,8 @@ Usage:
     [--allow-recommended-profiles CSV] \
     [--disallow-experimental-default [0|1]] \
     [--require-trend-source CSV] \
+    [--require-selection-policy-present [0|1]] \
+    [--require-selection-policy-valid [0|1]] \
     [--campaign-execution-mode docker|local] \
     [--campaign-directory-urls URL[,URL...]] \
     [--campaign-bootstrap-directory URL] \
@@ -564,6 +566,8 @@ require_recommended_profile="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_RECOMMEN
 allow_recommended_profiles="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_RECOMMENDED_PROFILES:-}"
 disallow_experimental_default="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_DISALLOW_EXPERIMENTAL_DEFAULT:-}"
 require_trend_source="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TREND_SOURCE:-}"
+require_selection_policy_present="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_PRESENT:-}"
+require_selection_policy_valid="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_VALID:-}"
 campaign_execution_mode="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXECUTION_MODE:-}"
 campaign_directory_urls="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_DIRECTORY_URLS:-}"
 campaign_bootstrap_directory="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_BOOTSTRAP_DIRECTORY:-}"
@@ -718,6 +722,24 @@ while [[ $# -gt 0 ]]; do
     --require-trend-source)
       require_trend_source="${2:-}"
       shift 2
+      ;;
+    --require-selection-policy-present)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_selection_policy_present="${2:-}"
+        shift 2
+      else
+        require_selection_policy_present="1"
+        shift
+      fi
+      ;;
+    --require-selection-policy-valid)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_selection_policy_valid="${2:-}"
+        shift 2
+      else
+        require_selection_policy_valid="1"
+        shift
+      fi
       ;;
     --campaign-execution-mode)
       campaign_execution_mode="${2:-}"
@@ -874,6 +896,8 @@ bool_arg_or_die "--print-summary-json" "$print_summary_json"
 optional_bool_arg_or_die "--require-status-pass" "$require_status_pass"
 optional_bool_arg_or_die "--require-trend-status-pass" "$require_trend_status_pass"
 optional_bool_arg_or_die "--disallow-experimental-default" "$disallow_experimental_default"
+optional_bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
+optional_bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
 
 for int_arg in "$require_min_runs_total" "$require_max_runs_fail" "$require_max_runs_warn" "$require_min_runs_with_summary"; do
   if [[ -n "$int_arg" && ! "$int_arg" =~ ^[0-9]+$ ]]; then
@@ -1339,6 +1363,12 @@ fi
 if [[ -n "$require_trend_source" ]]; then
   check_cmd+=(--require-trend-source "$require_trend_source")
 fi
+if [[ -n "$require_selection_policy_present" ]]; then
+  check_cmd+=(--require-selection-policy-present "$require_selection_policy_present")
+fi
+if [[ -n "$require_selection_policy_valid" ]]; then
+  check_cmd+=(--require-selection-policy-valid "$require_selection_policy_valid")
+fi
 
 check_cmd_line="$(quote_cmd "${check_cmd[@]}")"
 
@@ -1367,6 +1397,8 @@ decision_reason=""
 recommended_profile=""
 support_rate_pct="0"
 trend_source_value=""
+selection_policy_evidence_present="0"
+selection_policy_evidence_valid="0"
 decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
 next_operator_action=""
 campaign_check_summary_present=0
@@ -1377,6 +1409,8 @@ if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e
   recommended_profile="$(jq -r '.observed.recommended_profile // ""' "$campaign_check_summary_json")"
   support_rate_pct="$(jq -r '.observed.support_rate_pct // .observed.recommendation_support_rate_pct // 0' "$campaign_check_summary_json")"
   trend_source_value="$(jq -r '.observed.trend_source // ""' "$campaign_check_summary_json")"
+  selection_policy_evidence_present="$(jq -r 'if (.observed.selection_policy_evidence.present // false) then "1" else "0" end' "$campaign_check_summary_json" 2>/dev/null || printf '0')"
+  selection_policy_evidence_valid="$(jq -r 'if (.observed.selection_policy_evidence.valid // false) then "1" else "0" end' "$campaign_check_summary_json" 2>/dev/null || printf '0')"
 fi
 
 if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
@@ -1617,6 +1651,8 @@ jq -n \
   --arg allow_recommended_profiles "$allow_recommended_profiles" \
   --arg disallow_experimental_default "$disallow_experimental_default" \
   --arg require_trend_source "$require_trend_source" \
+  --arg require_selection_policy_present "$require_selection_policy_present" \
+  --arg require_selection_policy_valid "$require_selection_policy_valid" \
   --arg campaign_execution_mode "$campaign_execution_mode" \
   --arg campaign_execution_mode_effective "$campaign_execution_mode_effective" \
   --arg campaign_directory_urls "$campaign_directory_urls" \
@@ -1672,6 +1708,8 @@ jq -n \
   --arg check_status "$check_status" \
   --argjson check_rc "$check_rc" \
   --argjson campaign_check_summary_present "$campaign_check_summary_present" \
+  --arg selection_policy_evidence_present "$selection_policy_evidence_present" \
+  --arg selection_policy_evidence_valid "$selection_policy_evidence_valid" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -1701,7 +1739,9 @@ jq -n \
         require_recommended_profile: (if $require_recommended_profile == "" then null else $require_recommended_profile end),
         allow_recommended_profiles: (if $allow_recommended_profiles == "" then null else ($allow_recommended_profiles | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0))) end),
         disallow_experimental_default: (if $disallow_experimental_default == "" then null else ($disallow_experimental_default | tonumber) end),
-        require_trend_source: (if $require_trend_source == "" then null else ($require_trend_source | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0))) end)
+        require_trend_source: (if $require_trend_source == "" then null else ($require_trend_source | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0))) end),
+        require_selection_policy_present: (if $require_selection_policy_present == "" then null else ($require_selection_policy_present | tonumber) end),
+        require_selection_policy_valid: (if $require_selection_policy_valid == "" then null else ($require_selection_policy_valid | tonumber) end)
       },
       campaign_refresh_overrides: {
         execution_mode: (if $campaign_execution_mode == "" then null else $campaign_execution_mode end),
@@ -1808,7 +1848,11 @@ jq -n \
       next_operator_action: $next_operator_action,
       recommended_profile: $recommended_profile,
       support_rate_pct: ($support_rate_pct | tonumber),
-      trend_source: $trend_source
+      trend_source: $trend_source,
+      selection_policy_evidence: {
+        present: ($selection_policy_evidence_present == "1"),
+        valid: ($selection_policy_evidence_valid == "1")
+      }
     },
     artifacts: {
       summary_json: $summary_json,

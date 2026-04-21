@@ -87,6 +87,11 @@ transport_mismatch_failures=0
 token_proof_invalid_failures=0
 unknown_exit_failures=0
 directory_trust_failures=0
+selection_policy_sticky_pair_sec=300
+selection_policy_entry_rotation_sec=45
+selection_policy_entry_rotation_jitter_pct=9
+selection_policy_exit_exploration_pct=18
+selection_policy_path_profile="2hop"
 case "$diag_mode" in
   staggered)
     case "$count" in
@@ -111,7 +116,14 @@ cat >"$summary_json" <<EOF_SUMMARY
   "notes": "$notes",
   "summary": {
     "runs_executed": 4,
-    "runs_fail": $rc
+    "runs_fail": $rc,
+    "selection_policy": {
+      "sticky_pair_sec": $selection_policy_sticky_pair_sec,
+      "entry_rotation_sec": $selection_policy_entry_rotation_sec,
+      "entry_rotation_jitter_pct": $selection_policy_entry_rotation_jitter_pct,
+      "exit_exploration_pct": $selection_policy_exit_exploration_pct,
+      "path_profile": "$selection_policy_path_profile"
+    }
   },
   "decision": {
     "recommended_default_profile": "$recommended"
@@ -232,6 +244,20 @@ cat >"$summary_json" <<EOF_SUMMARY
 }
 EOF_SUMMARY
 
+if [[ "${FAKE_TREND_INCLUDE_SELECTION_POLICY:-1}" == "1" ]]; then
+  trend_summary_tmp="${summary_json}.selection_policy.tmp"
+  jq '
+    .summary.selection_policy = {
+      sticky_pair_sec: 410,
+      entry_rotation_sec: 60,
+      entry_rotation_jitter_pct: 11,
+      exit_exploration_pct: 24,
+      path_profile: "3hop"
+    }
+  ' "$summary_json" >"$trend_summary_tmp"
+  mv "$trend_summary_tmp" "$summary_json"
+fi
+
 cat >"$report_md" <<EOF_REPORT
 # Fake Trend Report
 EOF_REPORT
@@ -253,6 +279,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=0 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 3 \
   --directory-urls http://dir-a:8081 \
@@ -305,6 +332,16 @@ if ! jq -e '
   and .rc == 0
   and .summary.runs_total == 3
   and .summary.runs_fail == 0
+  and (.summary.selection_policy.sticky_pair_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
+  and (.summary.selection_policy.exit_exploration_pct | type == "number")
+  and (.summary.selection_policy.path_profile | type == "string")
+  and .summary.selection_policy.sticky_pair_sec == 410
+  and .summary.selection_policy.entry_rotation_sec == 60
+  and .summary.selection_policy.entry_rotation_jitter_pct == 11
+  and .summary.selection_policy.exit_exploration_pct == 24
+  and .summary.selection_policy.path_profile == "3hop"
   and (.selected_summaries | length) == 3
   and .trend.status == "pass"
   and .inputs.compare.explicit_remote_endpoints == true
@@ -325,6 +362,36 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[profile-compare-campaign] selection policy fallback from local summaries"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+SELECTION_POLICY_FALLBACK_JSON="$TMP_DIR/campaign_selection_policy_fallback.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=0 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --summary-json "$SELECTION_POLICY_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_selection_policy_fallback.log 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .summary.selection_policy.sticky_pair_sec == 300
+  and .summary.selection_policy.entry_rotation_sec == 45
+  and .summary.selection_policy.entry_rotation_jitter_pct == 9
+  and .summary.selection_policy.exit_exploration_pct == 18
+  and .summary.selection_policy.path_profile == "2hop"
+' "$SELECTION_POLICY_FALLBACK_JSON" >/dev/null 2>&1; then
+  echo "campaign selection policy fallback summary missing expected local values"
+  cat "$SELECTION_POLICY_FALLBACK_JSON"
+  exit 1
+fi
+
 echo "[profile-compare-campaign] diagnostics precedence and operator hint (directory_trust)"
 : >"$LOCAL_CAPTURE"
 : >"$TREND_CAPTURE"
@@ -338,6 +405,7 @@ FAKE_LOCAL_FAIL_AT=0 \
 FAKE_LOCAL_DIAG_MODE=directory_only \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --summary-json "$DIRECTORY_DIAG_JSON" >/tmp/integration_profile_compare_campaign_directory_diag.log 2>&1
@@ -371,6 +439,7 @@ FAKE_LOCAL_DIAG_MODE=missing \
 FAKE_LOCAL_HARD_FAIL_MODE=root_required \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --summary-json "$ROOT_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_root_fallback.log 2>&1
@@ -404,6 +473,7 @@ FAKE_LOCAL_DIAG_MODE=missing \
 FAKE_LOCAL_HARD_FAIL_MODE=endpoint_unreachable \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --summary-json "$ENDPOINT_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_endpoint_fallback.log 2>&1
@@ -435,6 +505,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=0 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --directory-urls http://127.0.0.1:8081 \
@@ -467,6 +538,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=2 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 3 \
   --summary-json "$WARN_JSON" >/tmp/integration_profile_compare_campaign_warn.log 2>&1
@@ -494,6 +566,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=0 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=1 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 2 \
   --summary-json "$TMP_DIR/campaign_fail.json" >/tmp/integration_profile_compare_campaign_fail.log 2>&1
@@ -530,6 +603,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=0 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --reports-dir "$LOCK_REPORTS_DIR" \
@@ -565,6 +639,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=0 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --reports-dir "$LOCK_REPORTS_DIR" \
@@ -597,6 +672,7 @@ FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
 FAKE_LOCAL_FAIL_AT=0 \
 FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 ./scripts/profile_compare_campaign.sh \
   --campaign-runs 1 \
   --reports-dir "$LOCK_REPORTS_ENV" \

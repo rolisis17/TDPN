@@ -37,6 +37,40 @@ cat >"$TREND_JSON" <<'EOF_TREND'
 }
 EOF_TREND
 
+COMPARE_SUMMARY_POLICY_JSON="$TMP_DIR/profile_compare_local_summary_policy.json"
+cat >"$COMPARE_SUMMARY_POLICY_JSON" <<'EOF_COMPARE_POLICY'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {
+    "selection_policy": {
+      "sticky_pair_sec": 0,
+      "entry_rotation_sec": 0,
+      "entry_rotation_jitter_pct": 0,
+      "exit_exploration_pct": 10,
+      "path_profile": "2hop"
+    }
+  }
+}
+EOF_COMPARE_POLICY
+
+COMPARE_SUMMARY_POLICY_INVALID_JSON="$TMP_DIR/profile_compare_local_summary_policy_invalid.json"
+cat >"$COMPARE_SUMMARY_POLICY_INVALID_JSON" <<'EOF_COMPARE_POLICY_INVALID'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {
+    "selection_policy": {
+      "sticky_pair_sec": 0,
+      "entry_rotation_sec": 0,
+      "entry_rotation_jitter_pct": 0,
+      "exit_exploration_pct": "10",
+      "path_profile": 2
+    }
+  }
+}
+EOF_COMPARE_POLICY_INVALID
+
 CAMPAIGN_JSON="$TMP_DIR/profile_compare_campaign_summary.json"
 cat >"$CAMPAIGN_JSON" <<EOF_CAMPAIGN
 {
@@ -62,6 +96,9 @@ cat >"$CAMPAIGN_JSON" <<EOF_CAMPAIGN
     "notes": "trend pass",
     "summary_json": "$TREND_JSON"
   },
+  "selected_summaries": [
+    "$COMPARE_SUMMARY_POLICY_JSON"
+  ],
   "runs": []
 }
 EOF_CAMPAIGN
@@ -78,7 +115,7 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/
   cat /tmp/integration_profile_compare_campaign_check_baseline.log
   exit 1
 fi
-if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | length) == 0 and .observed.recommended_profile == "balanced"' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | length) == 0 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .observed.selection_policy_evidence.selected_summaries_total == 1 and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
   echo "baseline summary missing expected fields"
   cat "$BASELINE_SUMMARY"
   exit 1
@@ -100,6 +137,106 @@ fi
 if ! rg -q 'recommendation support rate below threshold' /tmp/integration_profile_compare_campaign_check_support_fail.log; then
   echo "expected support-rate failure reason missing"
   cat /tmp/integration_profile_compare_campaign_check_support_fail.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] selection policy evidence fail-close: present"
+CAMPAIGN_NO_POLICY_JSON="$TMP_DIR/profile_compare_campaign_summary_no_policy.json"
+cat >"$CAMPAIGN_NO_POLICY_JSON" <<EOF_CAMPAIGN_NO_POLICY
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass",
+  "summary": {
+    "runs_total": 5,
+    "runs_pass": 5,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 5
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced remains best"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass",
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [],
+  "runs": []
+}
+EOF_CAMPAIGN_NO_POLICY
+
+set +e
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_NO_POLICY_JSON" \
+  --require-selection-policy-present 1 \
+  --summary-json "$TMP_DIR/campaign_check_selection_policy_present_fail.json" >/tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log 2>&1
+selection_policy_present_fail_rc=$?
+set -e
+if [[ "$selection_policy_present_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when selection policy evidence presence is required"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log
+  exit 1
+fi
+if ! rg -q 'selection policy evidence is required but not present' /tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log; then
+  echo "expected selection-policy present failure reason missing"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] selection policy evidence fail-close: valid"
+CAMPAIGN_INVALID_POLICY_JSON="$TMP_DIR/profile_compare_campaign_summary_invalid_policy.json"
+cat >"$CAMPAIGN_INVALID_POLICY_JSON" <<EOF_CAMPAIGN_INVALID_POLICY
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass",
+  "summary": {
+    "runs_total": 5,
+    "runs_pass": 5,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 5
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced remains best"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass",
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [
+    "$COMPARE_SUMMARY_POLICY_INVALID_JSON"
+  ],
+  "runs": []
+}
+EOF_CAMPAIGN_INVALID_POLICY
+
+set +e
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_INVALID_POLICY_JSON" \
+  --require-selection-policy-valid 1 \
+  --summary-json "$TMP_DIR/campaign_check_selection_policy_valid_fail.json" >/tmp/integration_profile_compare_campaign_check_selection_policy_valid_fail.log 2>&1
+selection_policy_valid_fail_rc=$?
+set -e
+if [[ "$selection_policy_valid_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when selection policy evidence validity is required"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_valid_fail.log
+  exit 1
+fi
+if ! rg -q 'selection policy evidence is required to be valid' /tmp/integration_profile_compare_campaign_check_selection_policy_valid_fail.log; then
+  echo "expected selection-policy valid failure reason missing"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_valid_fail.log
   exit 1
 fi
 
@@ -129,6 +266,9 @@ cat >"$CAMPAIGN_EXP_JSON" <<EOF_CAMPAIGN_EXP
     "notes": "trend pass",
     "summary_json": "$TREND_JSON"
   },
+  "selected_summaries": [
+    "$COMPARE_SUMMARY_POLICY_JSON"
+  ],
   "runs": []
 }
 EOF_CAMPAIGN_EXP
@@ -167,6 +307,8 @@ PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_FORWARD" \
 ./scripts/easy_node.sh profile-compare-campaign-check \
   --campaign-summary-json /tmp/campaign.json \
   --require-min-runs-total 7 \
+  --require-selection-policy-present 1 \
+  --require-selection-policy-valid 1 \
   --fail-on-no-go 0 \
   --print-summary-json 1
 
@@ -176,7 +318,7 @@ if [[ -z "$forward_line" ]]; then
   cat "$FORWARD_CAPTURE"
   exit 1
 fi
-for expected in '--campaign-summary-json /tmp/campaign.json' '--require-min-runs-total 7' '--fail-on-no-go 0' '--print-summary-json 1'; do
+for expected in '--campaign-summary-json /tmp/campaign.json' '--require-min-runs-total 7' '--require-selection-policy-present 1' '--require-selection-policy-valid 1' '--fail-on-no-go 0' '--print-summary-json 1'; do
   if ! grep -F -- "$expected" <<<"$forward_line" >/dev/null; then
     echo "easy_node forwarding missing $expected"
     cat "$FORWARD_CAPTURE"

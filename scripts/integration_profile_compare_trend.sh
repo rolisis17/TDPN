@@ -25,7 +25,14 @@ cat >"$REPORTS_DIR/profile_compare_local_a.json" <<'EOF_A'
   "rc": 0,
   "summary": {
     "runs_executed": 4,
-    "runs_fail": 0
+    "runs_fail": 0,
+    "selection_policy": {
+      "sticky_pair_sec": 0,
+      "entry_rotation_sec": 0,
+      "entry_rotation_jitter_pct": 0,
+      "exit_exploration_pct": 10,
+      "path_profile": "2hop"
+    }
   },
   "decision": {
     "recommended_default_profile": "balanced"
@@ -47,7 +54,14 @@ cat >"$REPORTS_DIR/profile_compare_local_b.json" <<'EOF_B'
   "rc": 0,
   "summary": {
     "runs_executed": 4,
-    "runs_fail": 0
+    "runs_fail": 0,
+    "selection_policy": {
+      "sticky_pair_sec": 300,
+      "entry_rotation_sec": 0,
+      "entry_rotation_jitter_pct": 0,
+      "exit_exploration_pct": 10,
+      "path_profile": "1hop"
+    }
   },
   "decision": {
     "recommended_default_profile": "speed"
@@ -69,7 +83,14 @@ cat >"$REPORTS_DIR/profile_compare_local_c.json" <<'EOF_C'
   "rc": 0,
   "summary": {
     "runs_executed": 4,
-    "runs_fail": 0
+    "runs_fail": 0,
+    "selection_policy": {
+      "sticky_pair_sec": 60,
+      "entry_rotation_sec": 30,
+      "entry_rotation_jitter_pct": 25,
+      "exit_exploration_pct": 12,
+      "path_profile": "3hop"
+    }
   },
   "decision": {
     "recommended_default_profile": "balanced"
@@ -82,6 +103,9 @@ cat >"$REPORTS_DIR/profile_compare_local_c.json" <<'EOF_C'
   ]
 }
 EOF_C
+
+touch -t 202603240000 "$REPORTS_DIR/profile_compare_local_a.json"
+touch -t 202603240005 "$REPORTS_DIR/profile_compare_local_b.json"
 
 echo "[profile-compare-trend] baseline recommendation"
 SUMMARY_JSON="$TMP_DIR/profile_compare_trend_summary.json"
@@ -111,6 +135,16 @@ if ! jq -e '
   and .summary.fail_reports == 0
   and .decision.recommended_default_profile == "balanced"
   and .decision.experimental_non_default_profiles == ["speed-1hop"]
+  and (.summary.selection_policy.sticky_pair_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
+  and (.summary.selection_policy.exit_exploration_pct | type == "number")
+  and (.summary.selection_policy.path_profile | type == "string")
+  and .summary.selection_policy.sticky_pair_sec == 60
+  and .summary.selection_policy.entry_rotation_sec == 30
+  and .summary.selection_policy.entry_rotation_jitter_pct == 25
+  and .summary.selection_policy.exit_exploration_pct == 12
+  and .summary.selection_policy.path_profile == "3hop"
 ' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "baseline summary JSON missing expected fields"
   cat "$SUMMARY_JSON"
@@ -171,6 +205,17 @@ fi
 if ! rg -q 'profile-compare-trend: status=fail' /tmp/integration_profile_compare_trend_fail.log; then
   echo "expected fail status output in fail-on-any-fail path"
   cat /tmp/integration_profile_compare_trend_fail.log
+  exit 1
+fi
+if ! jq -e '
+  .summary.selection_policy.sticky_pair_sec == 60
+  and .summary.selection_policy.entry_rotation_sec == 30
+  and .summary.selection_policy.entry_rotation_jitter_pct == 25
+  and .summary.selection_policy.exit_exploration_pct == 12
+  and .summary.selection_policy.path_profile == "3hop"
+' "$TMP_DIR/profile_compare_trend_fail.json" >/dev/null 2>&1; then
+  echo "expected fail-path trend summary to keep first valid selection policy evidence"
+  cat "$TMP_DIR/profile_compare_trend_fail.json"
   exit 1
 fi
 

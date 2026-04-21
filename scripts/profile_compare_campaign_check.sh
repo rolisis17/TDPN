@@ -22,6 +22,8 @@ Usage:
     [--allow-recommended-profiles CSV] \
     [--disallow-experimental-default [0|1]] \
     [--require-trend-source CSV] \
+    [--require-selection-policy-present [0|1]] \
+    [--require-selection-policy-valid [0|1]] \
     [--fail-on-no-go [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -141,6 +143,8 @@ require_recommended_profile="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_RECOMMENDE
 allow_recommended_profiles="${PROFILE_COMPARE_CAMPAIGN_CHECK_ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}"
 disallow_experimental_default="${PROFILE_COMPARE_CAMPAIGN_CHECK_DISALLOW_EXPERIMENTAL_DEFAULT:-1}"
 require_trend_source="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TREND_SOURCE:-policy_reliability_latency,vote_fallback,safe_default_fallback}"
+require_selection_policy_present="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_PRESENT:-0}"
+require_selection_policy_valid="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_VALID:-0}"
 fail_on_no_go="${PROFILE_COMPARE_CAMPAIGN_CHECK_FAIL_ON_NO_GO:-1}"
 show_json="${PROFILE_COMPARE_CAMPAIGN_CHECK_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_CHECK_PRINT_SUMMARY_JSON:-0}"
@@ -219,6 +223,24 @@ while [[ $# -gt 0 ]]; do
       require_trend_source="${2:-}"
       shift 2
       ;;
+    --require-selection-policy-present)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_selection_policy_present="${2:-}"
+        shift 2
+      else
+        require_selection_policy_present="1"
+        shift
+      fi
+      ;;
+    --require-selection-policy-valid)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_selection_policy_valid="${2:-}"
+        shift 2
+      else
+        require_selection_policy_valid="1"
+        shift
+      fi
+      ;;
     --fail-on-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_no_go="${2:-}"
@@ -265,6 +287,8 @@ done
 bool_arg_or_die "--require-status-pass" "$require_status_pass"
 bool_arg_or_die "--require-trend-status-pass" "$require_trend_status_pass"
 bool_arg_or_die "--disallow-experimental-default" "$disallow_experimental_default"
+bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
+bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -361,6 +385,70 @@ if [[ -n "$require_recommended_profile" ]]; then
   require_recommended_profile="$(normalize_profile "$require_recommended_profile")"
 fi
 
+campaign_selection_policy_present=0
+campaign_selection_policy_valid=0
+if jq -e '.summary.selection_policy | type == "object"' "$campaign_summary_json" >/dev/null 2>&1; then
+  campaign_selection_policy_present=1
+fi
+if jq -e '
+  .summary.selection_policy
+  and (.summary.selection_policy.sticky_pair_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_sec | type == "number")
+  and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
+  and (.summary.selection_policy.exit_exploration_pct | type == "number")
+  and (.summary.selection_policy.path_profile | type == "string")
+' "$campaign_summary_json" >/dev/null 2>&1; then
+  campaign_selection_policy_valid=1
+fi
+
+selection_policy_selected_summaries_total="$(jq -r '[.selected_summaries[]? | select(type == "string" and length > 0)] | length' "$campaign_summary_json" 2>/dev/null || printf '0')"
+if ! [[ "$selection_policy_selected_summaries_total" =~ ^[0-9]+$ ]]; then
+  selection_policy_selected_summaries_total="0"
+fi
+selection_policy_selected_summaries_found=0
+selection_policy_selected_summaries_present_count=0
+selection_policy_selected_summaries_valid_count=0
+while IFS= read -r selected_summary_path; do
+  selected_summary_path="$(abs_path "$selected_summary_path")"
+  if [[ -z "$selected_summary_path" || ! -f "$selected_summary_path" ]]; then
+    continue
+  fi
+  selection_policy_selected_summaries_found=$((selection_policy_selected_summaries_found + 1))
+  if jq -e '.summary.selection_policy | type == "object"' "$selected_summary_path" >/dev/null 2>&1; then
+    selection_policy_selected_summaries_present_count=$((selection_policy_selected_summaries_present_count + 1))
+  fi
+  if jq -e '
+    .summary.selection_policy
+    and (.summary.selection_policy.sticky_pair_sec | type == "number")
+    and (.summary.selection_policy.entry_rotation_sec | type == "number")
+    and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
+    and (.summary.selection_policy.exit_exploration_pct | type == "number")
+    and (.summary.selection_policy.path_profile | type == "string")
+  ' "$selected_summary_path" >/dev/null 2>&1; then
+    selection_policy_selected_summaries_valid_count=$((selection_policy_selected_summaries_valid_count + 1))
+  fi
+done < <(jq -r '.selected_summaries[]? | select(type == "string" and length > 0)' "$campaign_summary_json" 2>/dev/null || true)
+
+selection_policy_selected_summaries_missing_or_unreadable_count=$((selection_policy_selected_summaries_total - selection_policy_selected_summaries_found))
+if ((selection_policy_selected_summaries_missing_or_unreadable_count < 0)); then
+  selection_policy_selected_summaries_missing_or_unreadable_count=0
+fi
+selection_policy_selected_summaries_invalid_or_missing_policy_count=$((selection_policy_selected_summaries_total - selection_policy_selected_summaries_valid_count))
+if ((selection_policy_selected_summaries_invalid_or_missing_policy_count < 0)); then
+  selection_policy_selected_summaries_invalid_or_missing_policy_count=0
+fi
+
+selection_policy_evidence_present=0
+if ((campaign_selection_policy_present == 1 || selection_policy_selected_summaries_present_count > 0)); then
+  selection_policy_evidence_present=1
+fi
+selection_policy_evidence_valid=0
+if ((campaign_selection_policy_valid == 1)); then
+  selection_policy_evidence_valid=1
+elif ((selection_policy_selected_summaries_total > 0 && selection_policy_selected_summaries_valid_count == selection_policy_selected_summaries_total)); then
+  selection_policy_evidence_valid=1
+fi
+
 declare -a errors=()
 
 if [[ "$require_status_pass" == "1" ]] && [[ "$campaign_status" != "pass" ]]; then
@@ -413,6 +501,12 @@ if [[ -n "$require_trend_source" ]]; then
   elif ! csv_contains "$require_trend_source" "$trend_source_value"; then
     errors+=("trend source is not allowed (actual=$trend_source_value allowed=$require_trend_source)")
   fi
+fi
+if [[ "$require_selection_policy_present" == "1" && "$selection_policy_evidence_present" != "1" ]]; then
+  errors+=("selection policy evidence is required but not present")
+fi
+if [[ "$require_selection_policy_valid" == "1" && "$selection_policy_evidence_valid" != "1" ]]; then
+  errors+=("selection policy evidence is required to be valid (valid_summaries=$selection_policy_selected_summaries_valid_count total_summaries=$selection_policy_selected_summaries_total)")
 fi
 
 decision="GO"
@@ -476,6 +570,18 @@ jq -n \
   --arg allow_recommended_profiles "$allow_recommended_profiles" \
   --argjson disallow_experimental_default "$disallow_experimental_default" \
   --arg require_trend_source "$require_trend_source" \
+  --argjson require_selection_policy_present "$require_selection_policy_present" \
+  --argjson require_selection_policy_valid "$require_selection_policy_valid" \
+  --argjson selection_policy_evidence_present "$selection_policy_evidence_present" \
+  --argjson selection_policy_evidence_valid "$selection_policy_evidence_valid" \
+  --argjson campaign_selection_policy_present "$campaign_selection_policy_present" \
+  --argjson campaign_selection_policy_valid "$campaign_selection_policy_valid" \
+  --argjson selection_policy_selected_summaries_total "$selection_policy_selected_summaries_total" \
+  --argjson selection_policy_selected_summaries_found "$selection_policy_selected_summaries_found" \
+  --argjson selection_policy_selected_summaries_present_count "$selection_policy_selected_summaries_present_count" \
+  --argjson selection_policy_selected_summaries_valid_count "$selection_policy_selected_summaries_valid_count" \
+  --argjson selection_policy_selected_summaries_missing_or_unreadable_count "$selection_policy_selected_summaries_missing_or_unreadable_count" \
+  --argjson selection_policy_selected_summaries_invalid_or_missing_policy_count "$selection_policy_selected_summaries_invalid_or_missing_policy_count" \
   --argjson fail_on_no_go "$fail_on_no_go" \
   --argjson rc "$rc" \
   --argjson errors "$errors_json" \
@@ -502,6 +608,8 @@ jq -n \
         allow_recommended_profiles: $allow_recommended_profiles,
         disallow_experimental_default: ($disallow_experimental_default == 1),
         require_trend_source: $require_trend_source,
+        require_selection_policy_present: ($require_selection_policy_present == 1),
+        require_selection_policy_valid: ($require_selection_policy_valid == 1),
         fail_on_no_go: ($fail_on_no_go == 1)
       }
     },
@@ -519,7 +627,19 @@ jq -n \
       trend_rc: $trend_rc,
       trend_source: $trend_source_value,
       trend_summary_present: ($trend_summary_present == 1),
-      recommendation_support_rate_pct: $support_rate_pct
+      recommendation_support_rate_pct: $support_rate_pct,
+      selection_policy_evidence: {
+        present: ($selection_policy_evidence_present == 1),
+        valid: ($selection_policy_evidence_valid == 1),
+        campaign_summary_present: ($campaign_selection_policy_present == 1),
+        campaign_summary_valid: ($campaign_selection_policy_valid == 1),
+        selected_summaries_total: $selection_policy_selected_summaries_total,
+        selected_summaries_found: $selection_policy_selected_summaries_found,
+        selected_summaries_with_policy_present: $selection_policy_selected_summaries_present_count,
+        selected_summaries_with_policy_valid: $selection_policy_selected_summaries_valid_count,
+        selected_summaries_missing_or_unreadable: $selection_policy_selected_summaries_missing_or_unreadable_count,
+        selected_summaries_invalid_or_missing_policy: $selection_policy_selected_summaries_invalid_or_missing_policy_count
+      }
     },
     errors: $errors,
     artifacts: {

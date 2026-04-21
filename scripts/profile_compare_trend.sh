@@ -356,6 +356,29 @@ done
 reports_json="$(jq -s '.' "${selected_paths[@]}")"
 reports_rows_json="$(jq -s '.' "$reports_rows_file")"
 
+selection_policy_summary_json="$(jq '
+  def valid_selection_policy:
+    type == "object"
+    and (.sticky_pair_sec | type == "number")
+    and (.entry_rotation_sec | type == "number")
+    and (.entry_rotation_jitter_pct | type == "number")
+    and (.exit_exploration_pct | type == "number")
+    and (.path_profile | type == "string")
+    and ((.path_profile | length) > 0);
+
+  ([ .[]
+      | select((.status // "") != "skip")
+      | .summary.selection_policy?
+      | select(valid_selection_policy)
+   ] | .[0]) // {
+    sticky_pair_sec: 0,
+    entry_rotation_sec: 0,
+    entry_rotation_jitter_pct: 0,
+    exit_exploration_pct: 10,
+    path_profile: "2hop"
+  }
+' <<<"$reports_json")"
+
 reports_total="$(jq 'length' <<<"$reports_json")"
 pass_reports="$(jq '[.[] | select(.status == "pass")] | length' <<<"$reports_json")"
 warn_reports="$(jq '[.[] | select(.status == "warn")] | length' <<<"$reports_json")"
@@ -493,6 +516,7 @@ jq -n \
   --argjson vote_summary "$vote_summary_json" \
   --argjson profiles "$profile_aggregate_json" \
   --argjson reliable_profiles "$reliable_profiles_json" \
+  --argjson selection_policy "$selection_policy_summary_json" \
   '{
     version: 1,
     generated_at_utc: $generated_at_utc,
@@ -516,7 +540,8 @@ jq -n \
       warn_reports: $warn_reports,
       fail_reports: $fail_reports,
       top_vote_profile: $top_vote_profile,
-      top_vote_count: $top_vote_count
+      top_vote_count: $top_vote_count,
+      selection_policy: $selection_policy
     },
     decision: {
       recommended_default_profile: $recommended_default_profile,

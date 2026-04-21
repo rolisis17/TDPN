@@ -284,6 +284,51 @@ has_diagnostic_key() {
   ' "$summary_json_path" >/dev/null 2>&1
 }
 
+extract_selection_policy_json() {
+  local summary_json_path="$1"
+  jq -c '
+    def scalar:
+      if type == "array" then (.[0] // null) else . end;
+    def to_num:
+      scalar
+      | if . == null then null
+        elif type == "number" then .
+        elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+        else null
+        end;
+    def to_str:
+      scalar
+      | if . == null then null
+        elif type == "string" then .
+        elif type == "number" then tostring
+        else null
+        end;
+    def normalize($p):
+      {
+        sticky_pair_sec: ($p.sticky_pair_sec | to_num),
+        entry_rotation_sec: ($p.entry_rotation_sec | to_num),
+        entry_rotation_jitter_pct: ($p.entry_rotation_jitter_pct | to_num),
+        exit_exploration_pct: ($p.exit_exploration_pct | to_num),
+        path_profile: ($p.path_profile | to_str)
+      };
+    def valid($p):
+      ($p.sticky_pair_sec != null)
+      and ($p.entry_rotation_sec != null)
+      and ($p.entry_rotation_jitter_pct != null)
+      and ($p.exit_exploration_pct != null)
+      and ($p.path_profile != null)
+      and (($p.path_profile | length) > 0);
+    [
+      (.summary.selection_policy // empty),
+      (.selection_policy // empty),
+      ((.runs // [])[]?.selection_policy // empty)
+    ]
+    | map(normalize(.))
+    | map(select(valid(.)))
+    | .[0] // empty
+  ' "$summary_json_path" 2>/dev/null || true
+}
+
 count_log_pattern() {
   local log_path="$1"
   local pattern="$2"
@@ -998,6 +1043,38 @@ else
   fi
 fi
 
+selection_policy_json=""
+selection_policy_source=""
+if [[ -f "$trend_summary_json" ]]; then
+  selection_policy_json="$(extract_selection_policy_json "$trend_summary_json")"
+  if [[ -n "$selection_policy_json" ]]; then
+    selection_policy_source="trend"
+  fi
+fi
+if [[ -z "$selection_policy_json" ]]; then
+  selection_policy_source_summary=""
+  for selection_policy_source_summary in "${compare_summary_paths[@]}"; do
+    selection_policy_json="$(extract_selection_policy_json "$selection_policy_source_summary")"
+    if [[ -n "$selection_policy_json" ]]; then
+      selection_policy_source="compare:$selection_policy_source_summary"
+      break
+    fi
+  done
+fi
+if [[ -z "$selection_policy_json" ]]; then
+  selection_policy_json="$(jq -nc '
+    {
+      sticky_pair_sec: 0,
+      entry_rotation_sec: 0,
+      entry_rotation_jitter_pct: 0,
+      exit_exploration_pct: 10,
+      path_profile: "2hop"
+    }
+  ')"
+  selection_policy_source="fallback-default"
+fi
+campaign_log_event "stage=selection-policy source=$selection_policy_source elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
+
 runs_json="$(jq -s '.' "$rows_file")"
 runs_total="$(jq 'length' <<<"$runs_json")"
 runs_pass="$(jq '[.[] | select(.status == "pass")] | length' <<<"$runs_json")"
@@ -1174,6 +1251,7 @@ jq -n \
   --argjson runs_missing_summary "$runs_missing_summary" \
   --argjson runs "$runs_json" \
   --argjson selected_summaries "$selected_summaries_json" \
+  --argjson selection_policy "$selection_policy_json" \
   --argjson transport_mismatch_failures "$transport_mismatch_failures" \
   --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
   --argjson unknown_exit_failures "$unknown_exit_failures" \
@@ -1245,7 +1323,8 @@ jq -n \
       runs_warn: $runs_warn,
       runs_fail: $runs_fail,
       runs_with_summary: $runs_with_summary,
-      runs_missing_summary: $runs_missing_summary
+      runs_missing_summary: $runs_missing_summary,
+      selection_policy: $selection_policy
     },
     aggregated_diagnostics: {
       transport_mismatch_failures: $transport_mismatch_failures,
