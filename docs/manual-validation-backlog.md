@@ -232,7 +232,7 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
    - Validation:
      - `internal/app/outbound_dial_policy_test.go` covers mixed-answer rejection in default mode and all-loopback acceptance.
 
-2. **P2 (open): replay guards are partially shared, but full multi-region durability is still pending**
+2. **P2 (open): replay guards now support distributed Redis, but HA rollout is still configuration-sensitive**
    - References:
      - `services/exit/service.go:341`
      - `services/exit/service.go:597`
@@ -241,19 +241,23 @@ Potential remaining hardening items from a read-only grep/ripgrep + manual line-
      - `services/directory/service.go:549`
      - `services/directory/service.go:3307`
    - Why it matters:
-      - Restart durability is present (file-backed stores), but active/active deployments can still accept cross-instance replays when instances do not share replay state safely.
-      - Directory shared-file mode is an opt-in mitigation for same-volume replicas, but it still depends on shared filesystem lock semantics.
-      - Full multi-region/high-availability replay protection still needs a distributed durable backend.
+      - Restart durability is present (file-backed stores), but active/active deployments can still accept cross-instance replays if they stay in instance-local file mode.
+      - Shared-file mode is an opt-in mitigation for same-volume replicas, but it still depends on shared filesystem lock semantics.
+      - Redis distributed mode is now supported, but production safety still depends on explicit Redis durability/availability hardening.
    - Suggested fix:
-      - Back replay keys with shared durable state (for example Redis/DB) keyed by `(token_id, nonce)` with TTL.
-      - Keep local file/cache as fast-path only.
-      - Treat shared-file mode as an interim same-volume deployment option, not the long-term HA endpoint.
+      - Use Redis replay mode for multi-instance deployments, with keys keyed by `(token_id, nonce)` and TTL enforcement.
+      - Keep local file/cache mode for single-instance or same-volume labs only.
+      - Treat shared-file mode as an interim same-volume option, not the long-term HA endpoint.
    - Progress update (2026-04-21):
-     - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings when replay persistence is instance-local.
-     - Exit replay guard now supports opt-in shared-file mode via `EXIT_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `EXIT_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
-     - Directory provider replay guard now supports opt-in shared-file mode via `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
+      - Exit and directory startup logs now explicitly surface replay-store mode and loaded replay-entry counts, including clear warnings when replay persistence is instance-local.
+      - Exit replay guard now supports opt-in shared-file mode via `EXIT_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `EXIT_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
+      - Directory provider replay guard now supports opt-in shared-file mode via `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1` plus lock timeout control `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default 5s).
+      - Exit replay guard now supports Redis mode via `EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR` (+ `EXIT_TOKEN_PROOF_REPLAY_REDIS_PASSWORD`, `EXIT_TOKEN_PROOF_REPLAY_REDIS_DB`, `EXIT_TOKEN_PROOF_REPLAY_REDIS_TLS`, `EXIT_TOKEN_PROOF_REPLAY_REDIS_PREFIX`, `EXIT_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC`).
+      - Directory provider replay guard now supports Redis mode via `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR` (+ `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PASSWORD`, `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DB`, `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_TLS`, `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PREFIX`, `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC`).
+      - Mode precedence is `redis` > `shared-file` > `file` > `in-memory`.
    - Suggested tests:
-     - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
+      - Replay the same proof across two concurrently running instances (distinct local stores) and assert second submission is rejected.
+      - Replay the same proof across two instances sharing one Redis backend and assert second submission is rejected.
 
 3. **P2 (resolved 2026-04-21): integration scripts no longer leak raw PoP private-key JSON on parse failures**
    - References:

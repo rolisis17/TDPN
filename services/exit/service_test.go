@@ -23,6 +23,8 @@ import (
 	"privacynode/pkg/relay"
 	"privacynode/pkg/settlement"
 	"privacynode/pkg/wg"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 type settlementServiceStub struct {
@@ -1750,6 +1752,41 @@ func TestNewReadsTokenProofReplaySharedFileModeConfig(t *testing.T) {
 	}
 }
 
+func TestNewReadsTokenProofReplayRedisConfig(t *testing.T) {
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR", "127.0.0.1:6380")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_PASSWORD", "secret")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_DB", "4")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_TLS", "1")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_PREFIX", "gpm:test:replay")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC", "7")
+
+	s := New()
+	if !s.tokenProofReplayRedisEnabled() {
+		t.Fatalf("expected redis replay mode to be enabled")
+	}
+	if got := s.tokenProofReplayRedisAddr; got != "127.0.0.1:6380" {
+		t.Fatalf("redis addr=%q want=%q", got, "127.0.0.1:6380")
+	}
+	if got := s.tokenProofReplayRedisPassword; got != "secret" {
+		t.Fatalf("redis password=%q want=%q", got, "secret")
+	}
+	if got := s.tokenProofReplayRedisDB; got != 4 {
+		t.Fatalf("redis db=%d want=%d", got, 4)
+	}
+	if !s.tokenProofReplayRedisTLS {
+		t.Fatalf("expected redis tls enabled from env")
+	}
+	if got := s.effectiveTokenProofReplayRedisPrefix(); got != "gpm:test:replay" {
+		t.Fatalf("redis prefix=%q want=%q", got, "gpm:test:replay")
+	}
+	if got := s.effectiveTokenProofReplayRedisDialTimeout(); got != 7*time.Second {
+		t.Fatalf("redis dial timeout=%s want=%s", got, 7*time.Second)
+	}
+	if got := s.tokenProofReplayMode(); got != "redis" {
+		t.Fatalf("replay mode=%q want=%q", got, "redis")
+	}
+}
+
 func TestCheckAndRememberProofNonceSharedModeRejectsCrossInstanceReplay(t *testing.T) {
 	now := time.Now().Unix()
 	storePath := filepath.Join(t.TempDir(), "exit_replay_store_shared.json")
@@ -1816,6 +1853,71 @@ func TestCheckAndRememberProofNonceSharedModeLockTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timeout acquiring replay store lock") {
 		t.Fatalf("expected timeout lock error detail, got %v", err)
+	}
+}
+
+func TestCheckAndRememberProofNonceRedisModeRejectsCrossInstanceReplay(t *testing.T) {
+	now := time.Now().Unix()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-redis-1",
+		ExpiryUnix: now + 3600,
+	}
+	req := proto.PathOpenRequest{TokenProofNonce: "nonce-redis-1"}
+
+	first := &Service{
+		tokenProofReplayGuard:            true,
+		tokenProofReplayRedisAddr:        mr.Addr(),
+		tokenProofReplayRedisPrefix:      "gpm:test:exit:replay",
+		tokenProofReplayRedisDialTimeout: time.Second,
+	}
+	second := &Service{
+		tokenProofReplayGuard:            true,
+		tokenProofReplayRedisAddr:        mr.Addr(),
+		tokenProofReplayRedisPrefix:      "gpm:test:exit:replay",
+		tokenProofReplayRedisDialTimeout: time.Second,
+	}
+
+	if err := first.checkAndRememberProofNonce(claims, req, now); err != nil {
+		t.Fatalf("first redis replay nonce should pass: %v", err)
+	}
+	if err := second.checkAndRememberProofNonce(claims, req, now+1); err == nil || !strings.Contains(err.Error(), "replay") {
+		t.Fatalf("expected redis replay rejection in second instance, got %v", err)
+	}
+}
+
+func TestCheckAndRememberProofNonceRedisModeFailureFailsClosed(t *testing.T) {
+	now := time.Now().Unix()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-redis-fail-1",
+		ExpiryUnix: now + 3600,
+	}
+	s := &Service{
+		tokenProofReplayGuard:            true,
+		tokenProofReplayRedisAddr:        mr.Addr(),
+		tokenProofReplayRedisPrefix:      "gpm:test:exit:replay",
+		tokenProofReplayRedisDialTimeout: time.Second,
+	}
+	if err := s.checkAndRememberProofNonce(claims, proto.PathOpenRequest{TokenProofNonce: "nonce-1"}, now); err != nil {
+		t.Fatalf("seed redis nonce: %v", err)
+	}
+	mr.Close()
+
+	err = s.checkAndRememberProofNonce(claims, proto.PathOpenRequest{TokenProofNonce: "nonce-2"}, now+1)
+	if err == nil {
+		t.Fatalf("expected redis failure to fail closed")
+	}
+	if !strings.Contains(err.Error(), "token proof replay redis failed") {
+		t.Fatalf("expected redis failure context, got %v", err)
 	}
 }
 

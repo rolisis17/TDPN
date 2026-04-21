@@ -51,8 +51,27 @@ Replay guard storage modes (exit token proofs + directory provider token proofs)
   - `EXIT_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default `5`)
   - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1`
   - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC` (default `5`)
+- Opt-in Redis distributed mode is available for multi-instance/multi-region replay coordination:
+  - Exit replay guard:
+    - `EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR` (enables Redis replay mode)
+    - `EXIT_TOKEN_PROOF_REPLAY_REDIS_PASSWORD`
+    - `EXIT_TOKEN_PROOF_REPLAY_REDIS_DB` (default `0`)
+    - `EXIT_TOKEN_PROOF_REPLAY_REDIS_TLS` (default `0`)
+    - `EXIT_TOKEN_PROOF_REPLAY_REDIS_PREFIX` (default `gpm:exit:token-proof-replay`)
+    - `EXIT_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC` (default `5`)
+  - Directory provider replay guard:
+    - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR` (enables Redis replay mode)
+    - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PASSWORD`
+    - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DB` (default `0`)
+    - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_TLS` (default `0`)
+    - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PREFIX` (default `directory:provider_token_proof_replay:`)
+    - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC` (default `5`)
+- Mode precedence and intent:
+  - `redis` > `shared-file` > `file` > `in-memory`.
+  - Use Redis mode for distributed deployments; use shared-file mode only for same-volume replicas.
 - Residual risk remains:
-  - Shared-file mode depends on correct shared filesystem lock semantics and does not replace a distributed durable replay backend for full multi-region HA.
+  - Shared-file mode depends on correct shared filesystem lock semantics.
+  - Redis mode removes cross-instance replay drift, but HA depends on Redis durability/availability and secure deployment settings.
 
 ## 2) Easy installer + launcher (for simple testing)
 

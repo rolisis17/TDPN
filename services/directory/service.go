@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
@@ -100,6 +103,14 @@ type Service struct {
 	providerTokenProofStoreFile      string
 	providerTokenProofSharedFileMode bool
 	providerTokenProofLockTimeout    time.Duration
+	providerTokenProofRedisAddr      string
+	providerTokenProofRedisPassword  string
+	providerTokenProofRedisDB        int
+	providerTokenProofRedisTLS       bool
+	providerTokenProofRedisPrefix    string
+	providerTokenProofRedisDial      time.Duration
+	providerTokenProofRedisMu        sync.Mutex
+	providerTokenProofRedisClient    *redis.Client
 	peerScores                       map[string]proto.RelaySelectionScore
 	peerTrust                        map[string]proto.RelayTrustAttestation
 	issuerTrust                      map[string]proto.RelayTrustAttestation
@@ -166,6 +177,8 @@ const providerRelayUpsertProofReplayMaxEntries = 8192
 const providerRelayUpsertProofReplayMaxPerToken = 512
 const providerRelayUpsertProofReplayDefaultLockTimeout = 5 * time.Second
 const providerRelayUpsertProofReplayLockRetryInterval = 50 * time.Millisecond
+const providerRelayUpsertProofReplayRedisDefaultDialTimeout = 5 * time.Second
+const providerRelayUpsertProofReplayRedisDefaultPrefix = "directory:provider_token_proof_replay:"
 const gossipRelaysMaxBodyBytes int64 = 1024 * 1024
 const gossipRelaysMaxDescriptors = 512
 const remoteResponseMaxBodyBytes int64 = 1024 * 1024
@@ -409,6 +422,21 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_LOCK_TIMEOUT_SEC")); err == nil && v > 0 {
 		providerTokenProofLockTimeout = time.Duration(v) * time.Second
 	}
+	providerTokenProofRedisAddr := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR"))
+	providerTokenProofRedisPassword := os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PASSWORD")
+	providerTokenProofRedisDB := 0
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DB"))); err == nil && v >= 0 {
+		providerTokenProofRedisDB = v
+	}
+	providerTokenProofRedisTLS := envEnabled("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_TLS")
+	providerTokenProofRedisPrefix := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PREFIX"))
+	if providerTokenProofRedisPrefix == "" {
+		providerTokenProofRedisPrefix = providerRelayUpsertProofReplayRedisDefaultPrefix
+	}
+	providerTokenProofRedisDial := providerRelayUpsertProofReplayRedisDefaultDialTimeout
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC"))); err == nil && v > 0 {
+		providerTokenProofRedisDial = time.Duration(v) * time.Second
+	}
 	providerRelayMaxTTL := 5 * time.Minute
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC")); err == nil && v > 0 {
 		providerRelayMaxTTL = time.Duration(v) * time.Second
@@ -537,6 +565,12 @@ func New() *Service {
 		providerTokenProofStoreFile:      providerTokenProofStoreFile,
 		providerTokenProofSharedFileMode: providerTokenProofSharedFileMode,
 		providerTokenProofLockTimeout:    providerTokenProofLockTimeout,
+		providerTokenProofRedisAddr:      providerTokenProofRedisAddr,
+		providerTokenProofRedisPassword:  providerTokenProofRedisPassword,
+		providerTokenProofRedisDB:        providerTokenProofRedisDB,
+		providerTokenProofRedisTLS:       providerTokenProofRedisTLS,
+		providerTokenProofRedisPrefix:    providerTokenProofRedisPrefix,
+		providerTokenProofRedisDial:      providerTokenProofRedisDial,
 		peerScores:                       make(map[string]proto.RelaySelectionScore),
 		peerTrust:                        make(map[string]proto.RelayTrustAttestation),
 		issuerTrust:                      make(map[string]proto.RelayTrustAttestation),
@@ -587,12 +621,23 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 	replayStorePath := strings.TrimSpace(s.providerTokenProofStoreFile)
-	if replayStorePath == "" {
-		log.Printf("directory provider token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
-	} else if s.providerTokenProofSharedFileMode {
+	switch s.providerTokenProofReplayMode() {
+	case "redis":
+		log.Printf(
+			"directory provider token proof replay guard: redis mode enabled addr=%s db=%d tls=%t prefix=%q dial_timeout_sec=%d ttl_sec=%d",
+			strings.TrimSpace(s.providerTokenProofRedisAddr),
+			s.providerTokenProofRedisDB,
+			s.providerTokenProofRedisTLS,
+			s.providerTokenProofRedisPrefix,
+			int(s.providerTokenProofRedisDial/time.Second),
+			int(providerRelayUpsertProofReplayTTL/time.Second),
+		)
+	case "shared-file":
 		log.Printf("directory provider token proof replay guard: shared file mode enabled path=%s lock_timeout_sec=%d", replayStorePath, int(s.providerTokenProofLockTimeout/time.Second))
-	} else {
+	case "file":
 		log.Printf("directory provider token proof replay guard: using file-backed store path=%s (instance-local persistence only; use shared durable replay storage for multi-instance deployments)", replayStorePath)
+	default:
+		log.Printf("directory provider token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
 	}
 	if err := s.loadProviderTokenProofReplayStore(time.Now()); err != nil {
 		return fmt.Errorf("load provider token proof replay store: %w", err)
@@ -3514,6 +3559,9 @@ func (s *Service) markProviderTokenProofReplay(tokenID string, nonce string, now
 	if tokenID == "" || nonce == "" {
 		return fmt.Errorf("provider token proof token id and nonce are required")
 	}
+	if s.providerTokenProofReplayRedisEnabled() {
+		return s.markProviderTokenProofReplayRedis(tokenID, nonce, now)
+	}
 	if s.providerTokenProofSharedFileMode {
 		return s.markProviderTokenProofReplayShared(tokenID, nonce, now)
 	}
@@ -3582,6 +3630,34 @@ func (s *Service) markProviderTokenProofReplayShared(tokenID string, nonce strin
 	}
 	s.providerMu.Lock()
 	s.providerTokenProofSeen = cloneProviderTokenProofSeen(seen)
+	s.providerMu.Unlock()
+	return nil
+}
+
+func (s *Service) markProviderTokenProofReplayRedis(tokenID string, nonce string, now time.Time) error {
+	client, err := s.providerTokenProofReplayRedisClient()
+	if err != nil {
+		return fmt.Errorf("provider token proof replay redis client init failed: %w", err)
+	}
+	key := s.providerTokenProofReplayRedisKey(tokenID, nonce)
+	dialTimeout := s.providerTokenProofRedisDial
+	if dialTimeout <= 0 {
+		dialTimeout = providerRelayUpsertProofReplayRedisDefaultDialTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	seen, err := client.SetNX(ctx, key, strconv.FormatInt(now.Unix(), 10), providerRelayUpsertProofReplayTTL).Result()
+	if err != nil {
+		return fmt.Errorf("provider token proof replay redis setnx failed: %w", err)
+	}
+	if !seen {
+		return fmt.Errorf("provider token proof nonce replayed")
+	}
+	s.providerMu.Lock()
+	if s.providerTokenProofSeen == nil {
+		s.providerTokenProofSeen = make(map[string]time.Time)
+	}
+	providerTokenProofReplaySeenMapMarkAndCheck(s.providerTokenProofSeen, tokenID, nonce, now)
 	s.providerMu.Unlock()
 	return nil
 }
@@ -3669,6 +3745,9 @@ type providerTokenReplayStoreSnapshot struct {
 }
 
 func (s *Service) loadProviderTokenProofReplayStore(now time.Time) error {
+	if s.providerTokenProofReplayRedisEnabled() {
+		return nil
+	}
 	path := strings.TrimSpace(s.providerTokenProofStoreFile)
 	if path == "" {
 		return nil
@@ -3762,6 +3841,66 @@ func cloneProviderTokenProofSeen(src map[string]time.Time) map[string]time.Time 
 		cloned[key] = seenAt
 	}
 	return cloned
+}
+
+func (s *Service) providerTokenProofReplayMode() string {
+	if s.providerTokenProofReplayRedisEnabled() {
+		return "redis"
+	}
+	if s.providerTokenProofSharedFileMode {
+		return "shared-file"
+	}
+	if strings.TrimSpace(s.providerTokenProofStoreFile) != "" {
+		return "file"
+	}
+	return "in-memory"
+}
+
+func (s *Service) providerTokenProofReplayRedisEnabled() bool {
+	return strings.TrimSpace(s.providerTokenProofRedisAddr) != ""
+}
+
+func (s *Service) providerTokenProofReplayRedisKey(tokenID string, nonce string) string {
+	prefix := s.providerTokenProofRedisPrefix
+	if prefix == "" {
+		prefix = providerRelayUpsertProofReplayRedisDefaultPrefix
+	}
+	return prefix + tokenID + ":" + nonce
+}
+
+func (s *Service) providerTokenProofReplayRedisClient() (*redis.Client, error) {
+	if !s.providerTokenProofReplayRedisEnabled() {
+		return nil, fmt.Errorf("redis replay backend disabled")
+	}
+	s.providerTokenProofRedisMu.Lock()
+	defer s.providerTokenProofRedisMu.Unlock()
+	if s.providerTokenProofRedisClient != nil {
+		return s.providerTokenProofRedisClient, nil
+	}
+	dialTimeout := s.providerTokenProofRedisDial
+	if dialTimeout <= 0 {
+		dialTimeout = providerRelayUpsertProofReplayRedisDefaultDialTimeout
+	}
+	opts := &redis.Options{
+		Addr:         strings.TrimSpace(s.providerTokenProofRedisAddr),
+		Password:     s.providerTokenProofRedisPassword,
+		DB:           s.providerTokenProofRedisDB,
+		DialTimeout:  dialTimeout,
+		ReadTimeout:  dialTimeout,
+		WriteTimeout: dialTimeout,
+	}
+	if s.providerTokenProofRedisTLS {
+		opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	client := redis.NewClient(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	s.providerTokenProofRedisClient = client
+	return client, nil
 }
 
 func persistProviderTokenProofReplayStoreSnapshot(path string, now time.Time, seen map[string]time.Time) error {

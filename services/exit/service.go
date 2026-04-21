@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,8 @@ import (
 	"privacynode/pkg/securehttp"
 	"privacynode/pkg/settlement"
 	"privacynode/pkg/wg"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type sessionInfo struct {
@@ -50,80 +53,88 @@ type sessionInfo struct {
 }
 
 type Service struct {
-	addr                           string
-	dataAddr                       string
-	issuerURL                      string
-	issuerURLs                     []string
-	issuerMinSources               int
-	issuerMinOperators             int
-	issuerMinKeyVotes              int
-	issuerRequireID                bool
-	revocationsURL                 string
-	revocationsURLs                []string
-	dataMode                       string
-	opaqueSinkAddr                 string
-	opaqueSourceAddr               string
-	opaqueEcho                     bool
-	wgPubKey                       string
-	wgExitIP                       string
-	wgMTU                          int
-	wgKeepaliveSec                 int
-	ipAllocCursor                  uint32
-	wgInterface                    string
-	wgPrivateKey                   string
-	wgListenPort                   int
-	wgBackend                      string
-	wgKernelProxy                  bool
-	wgKernelProxyMax               int
-	wgKernelProxyIdle              time.Duration
-	sessionCleanupSec              int
-	maxActiveSessions              int
-	wgKernelTargetUDP              *net.UDPAddr
-	wgManager                      wg.Manager
-	liveWGMode                     bool
-	wgOnlyMode                     bool
-	egressBackend                  string
-	egressIface                    string
-	egressCIDR                     string
-	egressChain                    string
-	egressConfigured               bool
-	tokenProofReplayGuard          bool
-	tokenProofReplaySharedFileMode bool
-	tokenProofReplayLockTimeout    time.Duration
-	peerRebindAfter                time.Duration
-	revocationRefreshSec           int
-	accountingFile                 string
-	tokenProofReplayStoreFile      string
-	accountingFlushSec             int
-	settlementReconcileSec         int
-	startupSyncTimeout             time.Duration
-	verifyRefreshMinInterval       time.Duration
-	betaStrict                     bool
-	prodStrict                     bool
-	enforcer                       *policy.Enforcer
-	httpClient                     *http.Client
-	httpSrv                        *http.Server
-	udpConn                        *net.UDPConn
-	opaqueSourceConn               *net.UDPConn
-	opaqueSinkUDP                  *net.UDPAddr
+	addr                             string
+	dataAddr                         string
+	issuerURL                        string
+	issuerURLs                       []string
+	issuerMinSources                 int
+	issuerMinOperators               int
+	issuerMinKeyVotes                int
+	issuerRequireID                  bool
+	revocationsURL                   string
+	revocationsURLs                  []string
+	dataMode                         string
+	opaqueSinkAddr                   string
+	opaqueSourceAddr                 string
+	opaqueEcho                       bool
+	wgPubKey                         string
+	wgExitIP                         string
+	wgMTU                            int
+	wgKeepaliveSec                   int
+	ipAllocCursor                    uint32
+	wgInterface                      string
+	wgPrivateKey                     string
+	wgListenPort                     int
+	wgBackend                        string
+	wgKernelProxy                    bool
+	wgKernelProxyMax                 int
+	wgKernelProxyIdle                time.Duration
+	sessionCleanupSec                int
+	maxActiveSessions                int
+	wgKernelTargetUDP                *net.UDPAddr
+	wgManager                        wg.Manager
+	liveWGMode                       bool
+	wgOnlyMode                       bool
+	egressBackend                    string
+	egressIface                      string
+	egressCIDR                       string
+	egressChain                      string
+	egressConfigured                 bool
+	tokenProofReplayGuard            bool
+	tokenProofReplaySharedFileMode   bool
+	tokenProofReplayLockTimeout      time.Duration
+	tokenProofReplayRedisAddr        string
+	tokenProofReplayRedisPassword    string
+	tokenProofReplayRedisDB          int
+	tokenProofReplayRedisTLS         bool
+	tokenProofReplayRedisPrefix      string
+	tokenProofReplayRedisDialTimeout time.Duration
+	peerRebindAfter                  time.Duration
+	revocationRefreshSec             int
+	accountingFile                   string
+	tokenProofReplayStoreFile        string
+	accountingFlushSec               int
+	settlementReconcileSec           int
+	startupSyncTimeout               time.Duration
+	verifyRefreshMinInterval         time.Duration
+	betaStrict                       bool
+	prodStrict                       bool
+	enforcer                         *policy.Enforcer
+	httpClient                       *http.Client
+	httpSrv                          *http.Server
+	udpConn                          *net.UDPConn
+	opaqueSourceConn                 *net.UDPConn
+	opaqueSinkUDP                    *net.UDPAddr
 
-	mu                sync.RWMutex
-	issuerPub         ed25519.PublicKey
-	issuerPubs        map[string]ed25519.PublicKey
-	issuerKeyIssuer   map[string]string
-	verifyRefreshMu   sync.Mutex
-	verifyRefreshLast time.Time
-	sessions          map[string]sessionInfo
-	wgSessionProxies  map[string]*net.UDPConn
-	wgProxyLastSeen   map[string]int64
-	proofNonceSeen    map[string]map[string]int64
-	metrics           exitMetrics
-	revokedJTI        map[string]int64
-	minTokenEpoch     map[string]int64
-	revocationVersion map[string]int64
-	settlement        settlement.Service
-	sessionReserve    int64
-	settlementStatus  settlementStatusSnapshot
+	mu                          sync.RWMutex
+	issuerPub                   ed25519.PublicKey
+	issuerPubs                  map[string]ed25519.PublicKey
+	issuerKeyIssuer             map[string]string
+	verifyRefreshMu             sync.Mutex
+	verifyRefreshLast           time.Time
+	sessions                    map[string]sessionInfo
+	wgSessionProxies            map[string]*net.UDPConn
+	wgProxyLastSeen             map[string]int64
+	proofNonceSeen              map[string]map[string]int64
+	metrics                     exitMetrics
+	revokedJTI                  map[string]int64
+	minTokenEpoch               map[string]int64
+	revocationVersion           map[string]int64
+	settlement                  settlement.Service
+	sessionReserve              int64
+	settlementStatus            settlementStatusSnapshot
+	tokenProofReplayRedisMu     sync.Mutex
+	tokenProofReplayRedisClient *redis.Client
 }
 
 type exitMetrics struct {
@@ -191,6 +202,8 @@ const tokenProofReplayMaxNoncesPerToken = 4096
 const tokenProofReplayStoreMaxBytes int64 = 8 * 1024 * 1024
 const defaultTokenProofReplayLockTimeout = 5 * time.Second
 const tokenProofReplayLockRetryInterval = 50 * time.Millisecond
+const defaultTokenProofReplayRedisPrefix = "gpm:exit:token-proof-replay"
+const defaultTokenProofReplayRedisDialTimeout = 5 * time.Second
 const capabilityTokenMaxBytes = 16 * 1024
 const capabilityTokenPayloadMaxBytes = 8 * 1024
 const serverReadHeaderTimeout = 10 * time.Second
@@ -367,6 +380,22 @@ func New() *Service {
 			tokenProofReplayLockTimeout = time.Duration(n) * time.Second
 		}
 	}
+	tokenProofReplayRedisAddr := strings.TrimSpace(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR"))
+	tokenProofReplayRedisPassword := os.Getenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_PASSWORD")
+	tokenProofReplayRedisDB := 0
+	if raw := strings.TrimSpace(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_DB")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			tokenProofReplayRedisDB = n
+		}
+	}
+	tokenProofReplayRedisTLS := envEnabled("EXIT_TOKEN_PROOF_REPLAY_REDIS_TLS")
+	tokenProofReplayRedisPrefix := normalizeTokenProofReplayRedisPrefix(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_PREFIX"))
+	tokenProofReplayRedisDialTimeout := defaultTokenProofReplayRedisDialTimeout
+	if raw := strings.TrimSpace(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			tokenProofReplayRedisDialTimeout = time.Duration(n) * time.Second
+		}
+	}
 	peerRebindAfter := time.Duration(0)
 	if v := os.Getenv("EXIT_PEER_REBIND_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -430,67 +459,73 @@ func New() *Service {
 	}
 
 	return &Service{
-		addr:                           addr,
-		dataAddr:                       dataAddr,
-		issuerURL:                      issuerURL,
-		issuerURLs:                     issuerURLs,
-		issuerMinSources:               issuerMinSources,
-		issuerMinOperators:             issuerMinOperators,
-		issuerMinKeyVotes:              issuerMinKeyVotes,
-		issuerRequireID:                issuerRequireID,
-		revocationsURL:                 revocationsURL,
-		revocationsURLs:                revocationsURLs,
-		dataMode:                       dataMode,
-		opaqueSinkAddr:                 opaqueSinkAddr,
-		opaqueSourceAddr:               opaqueSourceAddr,
-		opaqueEcho:                     opaqueEcho,
-		wgPubKey:                       wgPubKey,
-		wgExitIP:                       wgExitIP,
-		wgMTU:                          1280,
-		wgKeepaliveSec:                 25,
-		ipAllocCursor:                  2,
-		wgInterface:                    wgInterface,
-		wgPrivateKey:                   wgPrivateKey,
-		wgListenPort:                   wgListenPort,
-		wgBackend:                      wgBackend,
-		wgKernelProxy:                  wgKernelProxy,
-		wgKernelProxyMax:               wgKernelProxyMax,
-		wgKernelProxyIdle:              wgKernelProxyIdle,
-		sessionCleanupSec:              sessionCleanupSec,
-		maxActiveSessions:              maxActiveSessions,
-		wgManager:                      wgManager,
-		liveWGMode:                     liveWGMode,
-		wgOnlyMode:                     wgOnlyMode,
-		egressBackend:                  egressBackend,
-		egressIface:                    egressIface,
-		egressCIDR:                     egressCIDR,
-		egressChain:                    egressChain,
-		tokenProofReplayGuard:          tokenProofReplayGuard,
-		tokenProofReplaySharedFileMode: tokenProofReplaySharedFileMode,
-		tokenProofReplayLockTimeout:    tokenProofReplayLockTimeout,
-		tokenProofReplayStoreFile:      tokenProofReplayStoreFile,
-		peerRebindAfter:                peerRebindAfter,
-		revocationRefreshSec:           revocationRefreshSec,
-		accountingFile:                 accountingFile,
-		accountingFlushSec:             accountingFlushSec,
-		settlementReconcileSec:         settlementReconcileSec,
-		startupSyncTimeout:             startupSyncTimeout,
-		verifyRefreshMinInterval:       verifyRefreshMinInterval,
-		betaStrict:                     betaStrict,
-		prodStrict:                     prodStrict,
-		enforcer:                       policy.NewEnforcer(),
-		httpClient:                     &http.Client{Timeout: 5 * time.Second},
-		issuerPubs:                     make(map[string]ed25519.PublicKey),
-		issuerKeyIssuer:                make(map[string]string),
-		sessions:                       make(map[string]sessionInfo),
-		wgSessionProxies:               make(map[string]*net.UDPConn),
-		wgProxyLastSeen:                make(map[string]int64),
-		proofNonceSeen:                 make(map[string]map[string]int64),
-		revokedJTI:                     make(map[string]int64),
-		minTokenEpoch:                  make(map[string]int64),
-		revocationVersion:              make(map[string]int64),
-		settlement:                     newSettlementServiceFromEnv(),
-		sessionReserve:                 sessionReserve,
+		addr:                             addr,
+		dataAddr:                         dataAddr,
+		issuerURL:                        issuerURL,
+		issuerURLs:                       issuerURLs,
+		issuerMinSources:                 issuerMinSources,
+		issuerMinOperators:               issuerMinOperators,
+		issuerMinKeyVotes:                issuerMinKeyVotes,
+		issuerRequireID:                  issuerRequireID,
+		revocationsURL:                   revocationsURL,
+		revocationsURLs:                  revocationsURLs,
+		dataMode:                         dataMode,
+		opaqueSinkAddr:                   opaqueSinkAddr,
+		opaqueSourceAddr:                 opaqueSourceAddr,
+		opaqueEcho:                       opaqueEcho,
+		wgPubKey:                         wgPubKey,
+		wgExitIP:                         wgExitIP,
+		wgMTU:                            1280,
+		wgKeepaliveSec:                   25,
+		ipAllocCursor:                    2,
+		wgInterface:                      wgInterface,
+		wgPrivateKey:                     wgPrivateKey,
+		wgListenPort:                     wgListenPort,
+		wgBackend:                        wgBackend,
+		wgKernelProxy:                    wgKernelProxy,
+		wgKernelProxyMax:                 wgKernelProxyMax,
+		wgKernelProxyIdle:                wgKernelProxyIdle,
+		sessionCleanupSec:                sessionCleanupSec,
+		maxActiveSessions:                maxActiveSessions,
+		wgManager:                        wgManager,
+		liveWGMode:                       liveWGMode,
+		wgOnlyMode:                       wgOnlyMode,
+		egressBackend:                    egressBackend,
+		egressIface:                      egressIface,
+		egressCIDR:                       egressCIDR,
+		egressChain:                      egressChain,
+		tokenProofReplayGuard:            tokenProofReplayGuard,
+		tokenProofReplaySharedFileMode:   tokenProofReplaySharedFileMode,
+		tokenProofReplayLockTimeout:      tokenProofReplayLockTimeout,
+		tokenProofReplayRedisAddr:        tokenProofReplayRedisAddr,
+		tokenProofReplayRedisPassword:    tokenProofReplayRedisPassword,
+		tokenProofReplayRedisDB:          tokenProofReplayRedisDB,
+		tokenProofReplayRedisTLS:         tokenProofReplayRedisTLS,
+		tokenProofReplayRedisPrefix:      tokenProofReplayRedisPrefix,
+		tokenProofReplayRedisDialTimeout: tokenProofReplayRedisDialTimeout,
+		tokenProofReplayStoreFile:        tokenProofReplayStoreFile,
+		peerRebindAfter:                  peerRebindAfter,
+		revocationRefreshSec:             revocationRefreshSec,
+		accountingFile:                   accountingFile,
+		accountingFlushSec:               accountingFlushSec,
+		settlementReconcileSec:           settlementReconcileSec,
+		startupSyncTimeout:               startupSyncTimeout,
+		verifyRefreshMinInterval:         verifyRefreshMinInterval,
+		betaStrict:                       betaStrict,
+		prodStrict:                       prodStrict,
+		enforcer:                         policy.NewEnforcer(),
+		httpClient:                       &http.Client{Timeout: 5 * time.Second},
+		issuerPubs:                       make(map[string]ed25519.PublicKey),
+		issuerKeyIssuer:                  make(map[string]string),
+		sessions:                         make(map[string]sessionInfo),
+		wgSessionProxies:                 make(map[string]*net.UDPConn),
+		wgProxyLastSeen:                  make(map[string]int64),
+		proofNonceSeen:                   make(map[string]map[string]int64),
+		revokedJTI:                       make(map[string]int64),
+		minTokenEpoch:                    make(map[string]int64),
+		revocationVersion:                make(map[string]int64),
+		settlement:                       newSettlementServiceFromEnv(),
+		sessionReserve:                   sessionReserve,
 	}
 }
 
@@ -623,25 +658,35 @@ func (s *Service) Run(ctx context.Context) error {
 	configureOutboundDialPolicy(httpClient, envEnabled(allowDangerousOutboundPrivateDNS), s.betaStrict || s.prodStrict)
 	s.httpClient = httpClient
 
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t token_proof_replay_shared_file_mode=%t token_proof_replay_lock_timeout_sec=%d peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, s.tokenProofReplaySharedFileMode, int(s.effectiveTokenProofReplayLockTimeout()/time.Second), int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
+	replayMode := s.tokenProofReplayMode()
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t token_proof_replay_mode=%s token_proof_replay_lock_timeout_sec=%d peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, replayMode, int(s.effectiveTokenProofReplayLockTimeout()/time.Second), int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
 	if s.tokenProofReplayGuard {
 		replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
-		if replayStorePath == "" {
-			log.Printf("exit token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
-		} else if s.tokenProofReplaySharedFileMode {
+		switch replayMode {
+		case "redis":
+			log.Printf("exit token proof replay guard: using redis addr=%s db=%d tls=%t prefix=%s dial_timeout_sec=%d",
+				s.tokenProofReplayRedisAddr, s.tokenProofReplayRedisDB, s.tokenProofReplayRedisTLS, s.effectiveTokenProofReplayRedisPrefix(), int(s.effectiveTokenProofReplayRedisDialTimeout()/time.Second))
+			if _, err := s.tokenProofReplayRedisClientOrInit(); err != nil {
+				return fmt.Errorf("init token proof replay redis: %w", err)
+			}
+		case "shared-file":
 			log.Printf("exit token proof replay guard: using shared file-backed store path=%s lock_timeout_sec=%d", replayStorePath, int(s.effectiveTokenProofReplayLockTimeout()/time.Second))
-		} else {
+		case "file":
 			log.Printf("exit token proof replay guard: using file-backed store path=%s (instance-local persistence only; use shared durable replay storage for multi-instance deployments)", replayStorePath)
+		default:
+			log.Printf("exit token proof replay guard: persistence disabled (in-memory only); restart or multi-instance deployments may accept duplicate proofs")
 		}
-		if err := s.loadTokenProofReplayStore(time.Now().Unix()); err != nil {
-			return fmt.Errorf("load token proof replay store: %w", err)
+		if replayMode == "file" || replayMode == "shared-file" {
+			if err := s.loadTokenProofReplayStore(time.Now().Unix()); err != nil {
+				return fmt.Errorf("load token proof replay store: %w", err)
+			}
+			bucketCount, nonceCount := s.tokenProofReplayStats()
+			log.Printf("exit token proof replay guard: loaded buckets=%d nonces=%d", bucketCount, nonceCount)
 		}
-		bucketCount, nonceCount := s.tokenProofReplayStats()
-		log.Printf("exit token proof replay guard: loaded buckets=%d nonces=%d", bucketCount, nonceCount)
 	}
 	defer s.closeAllWGKernelSessionProxies()
 	if s.wgBackend == "command" {
@@ -1906,6 +1951,9 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 	if exp <= nowUnix {
 		exp = nowUnix + 1
 	}
+	if s.tokenProofReplayRedisEnabled() {
+		return s.checkAndRememberProofNonceRedis(tokenID, nonce, exp, nowUnix)
+	}
 	replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
 	if s.tokenProofReplaySharedFileMode {
 		return s.checkAndRememberProofNonceShared(tokenID, nonce, exp, nowUnix, replayStorePath)
@@ -2189,6 +2237,97 @@ func (s *Service) effectiveTokenProofReplayLockTimeout() time.Duration {
 		return s.tokenProofReplayLockTimeout
 	}
 	return defaultTokenProofReplayLockTimeout
+}
+
+func normalizeTokenProofReplayRedisPrefix(raw string) string {
+	prefix := strings.TrimSpace(raw)
+	if prefix == "" {
+		prefix = defaultTokenProofReplayRedisPrefix
+	}
+	return strings.TrimRight(prefix, ":")
+}
+
+func (s *Service) tokenProofReplayRedisEnabled() bool {
+	return strings.TrimSpace(s.tokenProofReplayRedisAddr) != ""
+}
+
+func (s *Service) effectiveTokenProofReplayRedisPrefix() string {
+	return normalizeTokenProofReplayRedisPrefix(s.tokenProofReplayRedisPrefix)
+}
+
+func (s *Service) effectiveTokenProofReplayRedisDialTimeout() time.Duration {
+	if s.tokenProofReplayRedisDialTimeout > 0 {
+		return s.tokenProofReplayRedisDialTimeout
+	}
+	return defaultTokenProofReplayRedisDialTimeout
+}
+
+func (s *Service) tokenProofReplayMode() string {
+	if s.tokenProofReplayRedisEnabled() {
+		return "redis"
+	}
+	if s.tokenProofReplaySharedFileMode {
+		return "shared-file"
+	}
+	if strings.TrimSpace(s.tokenProofReplayStoreFile) != "" {
+		return "file"
+	}
+	return "in-memory"
+}
+
+func (s *Service) tokenProofReplayRedisClientOrInit() (*redis.Client, error) {
+	if !s.tokenProofReplayRedisEnabled() {
+		return nil, errors.New("token proof replay redis not configured")
+	}
+	s.tokenProofReplayRedisMu.Lock()
+	defer s.tokenProofReplayRedisMu.Unlock()
+	if s.tokenProofReplayRedisClient != nil {
+		return s.tokenProofReplayRedisClient, nil
+	}
+	opts := &redis.Options{
+		Addr:         strings.TrimSpace(s.tokenProofReplayRedisAddr),
+		Password:     s.tokenProofReplayRedisPassword,
+		DB:           s.tokenProofReplayRedisDB,
+		DialTimeout:  s.effectiveTokenProofReplayRedisDialTimeout(),
+		ReadTimeout:  s.effectiveTokenProofReplayRedisDialTimeout(),
+		WriteTimeout: s.effectiveTokenProofReplayRedisDialTimeout(),
+	}
+	if s.tokenProofReplayRedisTLS {
+		opts.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+	client := redis.NewClient(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), s.effectiveTokenProofReplayRedisDialTimeout())
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	s.tokenProofReplayRedisClient = client
+	return client, nil
+}
+
+func (s *Service) checkAndRememberProofNonceRedis(tokenID string, nonce string, exp int64, nowUnix int64) error {
+	client, err := s.tokenProofReplayRedisClientOrInit()
+	if err != nil {
+		return fmt.Errorf("token proof replay redis init failed: %w", err)
+	}
+	ttlSec := exp - nowUnix
+	if ttlSec < 1 {
+		ttlSec = 1
+	}
+	key := fmt.Sprintf("%s:%s:%s", s.effectiveTokenProofReplayRedisPrefix(), tokenID, nonce)
+	ctx, cancel := context.WithTimeout(context.Background(), s.effectiveTokenProofReplayRedisDialTimeout())
+	defer cancel()
+	ok, err := client.SetNX(ctx, key, "1", time.Duration(ttlSec)*time.Second).Result()
+	if err != nil {
+		return fmt.Errorf("token proof replay redis failed: %w", err)
+	}
+	if !ok {
+		return errors.New("token proof replay")
+	}
+	return nil
 }
 
 func (s *Service) checkAndRememberProofNonceShared(tokenID string, nonce string, exp int64, nowUnix int64, replayStorePath string) error {

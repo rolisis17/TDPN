@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestPickEntryEndpointRotates(t *testing.T) {
@@ -240,5 +242,99 @@ func TestProviderTokenProofReplaySharedModeRejectsAcrossInstances(t *testing.T) 
 	}
 	if got := second.providerTokenProofReplayCount(); got != 2 {
 		t.Fatalf("second replay count=%d want 2", got)
+	}
+}
+
+func TestNewReadsProviderTokenProofReplayRedisConfig(t *testing.T) {
+	t.Setenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PASSWORD", "secret")
+	t.Setenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DB", "2")
+	t.Setenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_TLS", "1")
+	t.Setenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_PREFIX", "gpm:test:directory:replay:")
+	t.Setenv("DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_DIAL_TIMEOUT_SEC", "9")
+
+	s := New()
+	if !s.providerTokenProofReplayRedisEnabled() {
+		t.Fatalf("expected redis replay mode to be enabled")
+	}
+	if got := s.providerTokenProofReplayMode(); got != "redis" {
+		t.Fatalf("provider replay mode=%q want=redis", got)
+	}
+	if got := s.providerTokenProofRedisAddr; got != "127.0.0.1:6379" {
+		t.Fatalf("provider redis addr=%q want=%q", got, "127.0.0.1:6379")
+	}
+	if got := s.providerTokenProofRedisPassword; got != "secret" {
+		t.Fatalf("provider redis password=%q want=%q", got, "secret")
+	}
+	if got := s.providerTokenProofRedisDB; got != 2 {
+		t.Fatalf("provider redis db=%d want=2", got)
+	}
+	if !s.providerTokenProofRedisTLS {
+		t.Fatalf("expected provider redis tls=true from env")
+	}
+	if got := s.providerTokenProofRedisPrefix; got != "gpm:test:directory:replay:" {
+		t.Fatalf("provider redis prefix=%q", got)
+	}
+	if got := s.providerTokenProofRedisDial; got != 9*time.Second {
+		t.Fatalf("provider redis dial timeout=%s want=9s", got)
+	}
+}
+
+func TestProviderTokenProofReplayRedisModeRejectsAcrossInstances(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	now := time.Unix(1_700_000_000, 0)
+	first := &Service{
+		providerTokenProofSeen:        make(map[string]time.Time),
+		providerTokenProofRedisAddr:   mr.Addr(),
+		providerTokenProofRedisPrefix: "gpm:test:directory:replay:",
+		providerTokenProofRedisDial:   time.Second,
+	}
+	second := &Service{
+		providerTokenProofSeen:        make(map[string]time.Time),
+		providerTokenProofRedisAddr:   mr.Addr(),
+		providerTokenProofRedisPrefix: "gpm:test:directory:replay:",
+		providerTokenProofRedisDial:   time.Second,
+	}
+
+	if err := first.markProviderTokenProofReplay("tok-redis-1", "nonce-1", now); err != nil {
+		t.Fatalf("first redis replay mark failed: %v", err)
+	}
+	if err := second.markProviderTokenProofReplay("tok-redis-1", "nonce-1", now.Add(time.Second)); err == nil || !strings.Contains(err.Error(), "replayed") {
+		t.Fatalf("expected cross-instance redis replay rejection, got %v", err)
+	}
+	if err := second.markProviderTokenProofReplay("tok-redis-1", "nonce-2", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("second redis replay mark with distinct nonce failed: %v", err)
+	}
+}
+
+func TestProviderTokenProofReplayRedisModeFailureFailsClosed(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	s := &Service{
+		providerTokenProofSeen:        make(map[string]time.Time),
+		providerTokenProofRedisAddr:   mr.Addr(),
+		providerTokenProofRedisPrefix: "gpm:test:directory:replay:",
+		providerTokenProofRedisDial:   time.Second,
+	}
+
+	if err := s.markProviderTokenProofReplay("tok-redis-fail-1", "nonce-1", now); err != nil {
+		t.Fatalf("seed redis replay mark failed: %v", err)
+	}
+	mr.Close()
+
+	err = s.markProviderTokenProofReplay("tok-redis-fail-1", "nonce-2", now.Add(time.Second))
+	if err == nil {
+		t.Fatal("expected redis replay failure to fail closed")
+	}
+	if !strings.Contains(err.Error(), "redis") {
+		t.Fatalf("expected redis context in failure, got %v", err)
 	}
 }
