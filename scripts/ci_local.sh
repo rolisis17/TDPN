@@ -465,6 +465,9 @@ echo "[ci] tokenpop redaction guardrails integration"
 echo "[ci] replay shared-mode guardrails integration"
 ./scripts/integration_replay_shared_mode_guardrails.sh
 
+echo "[ci] replay redis-mode integration"
+./scripts/integration_replay_redis_mode.sh
+
 echo "[ci] easy-node server-up auto-invite integration"
 ./scripts/integration_easy_node_server_up_auto_invite.sh
 
