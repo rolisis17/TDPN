@@ -182,6 +182,8 @@ let authVerifyRequireMetadata = false;
 let authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let authVerifyRequireWalletExtensionSource = false;
 let authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+let authVerifyRequireCryptoProof = false;
+let authVerifyRequireCryptoProofPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let operatorApprovalRequireSession = false;
 let operatorApprovalRequireSessionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let legacyAliasTelemetry = {
@@ -572,6 +574,38 @@ function parseAuthVerifyRequireWalletExtensionPolicySourceConfig(payload) {
   return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 }
 
+function parseAuthVerifyRequireCryptoProofConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const parsed = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_auth_verify_require_crypto_proof",
+        "gpmAuthVerifyRequireCryptoProof",
+        "auth_verify_require_crypto_proof",
+        "authVerifyRequireCryptoProof",
+        "require_crypto_proof",
+        "requireCryptoProof"
+      ])
+    )
+  );
+  return parsed === true;
+}
+
+function parseAuthVerifyRequireCryptoProofPolicySourceConfig(payload) {
+  const scopes = runtimeConfigScopes(payload);
+  const source = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_auth_verify_require_crypto_proof_policy_source",
+        "gpmAuthVerifyRequireCryptoProofPolicySource",
+        "auth_verify_require_crypto_proof_policy_source",
+        "authVerifyRequireCryptoProofPolicySource"
+      ])
+    )
+  );
+  return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
+}
+
 function parseOperatorApprovalRequireSessionConfig(payload) {
   const scopes = runtimeConfigScopes(payload);
   const parsed = firstDefined(
@@ -935,7 +969,11 @@ function refreshConnectPolicyHint() {
 
 function refreshPolicyPostureBanner() {
   const configUnavailable = configEndpointUnavailableFailClosedMode();
-  const strict = connectRequireSession || authVerifyRequireMetadata || authVerifyRequireWalletExtensionSource;
+  const strict =
+    connectRequireSession ||
+    authVerifyRequireMetadata ||
+    authVerifyRequireWalletExtensionSource ||
+    authVerifyRequireCryptoProof;
   const kind = configUnavailable ? "bad" : strict ? "warn" : "good";
   policyPostureEl.dataset.kind = kind;
   policyPostureLineEl.classList.remove("good", "warn", "bad");
@@ -959,14 +997,19 @@ function refreshPolicyPostureBanner() {
   const metadataSource = formatPolicySourceLabel(authVerifyRequireMetadataPolicySource);
   const walletRequired = authVerifyRequireWalletExtensionSource ? "required" : "optional";
   const walletSource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
+  const cryptoProofRequired = authVerifyRequireCryptoProof ? "required" : "optional";
+  const cryptoProofSource = nonEmptyString(authVerifyRequireCryptoProofPolicySource) || "default";
   const manualSignInGuidance = gpmProductionMode
     ? " Manual Verify + Create Session is disabled in production mode; use Sign + Verify (Wallet)."
     : authVerifyRequireWalletExtensionSource
       ? " Manual Verify + Create Session is disabled; use Sign + Verify (Wallet)."
-      : " Manual Verify + Create Session is available for compatibility.";
+      : authVerifyRequireCryptoProof
+        ? " Manual Verify + Create Session is available for compatibility, but cryptographic proof metadata is required by policy; use Sign + Verify (Wallet) when possible."
+        : " Manual Verify + Create Session is available for compatibility.";
   policyAuthVerifyEl.textContent =
     `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
-    `wallet-extension-source ${walletRequired} (source: ${walletSource}).${manualSignInGuidance}`;
+    `wallet-extension-source ${walletRequired} (source: ${walletSource}); ` +
+    `crypto-proof ${cryptoProofRequired} (source: ${cryptoProofSource}).${manualSignInGuidance}`;
   syncManualSignInAction();
   refreshConnectPolicyHint();
   refreshConfigEndpointHint();
@@ -1018,6 +1061,9 @@ function syncManualSignInAction() {
   const productionLocked = gpmProductionMode === true;
   const authPolicyLocked = strictWalletExtensionSourceRequired();
   const policyLocked = productionLocked || authPolicyLocked;
+  const cryptoProofGuidance = authVerifyRequireCryptoProof
+    ? " Cryptographic proof metadata is required by policy; wallet-assisted verify can attach the active challenge context fields."
+    : "";
   const disabled = isBusy || policyLocked;
   const guidance = productionLocked
     ? "Manual verify is disabled in production mode. Use Sign + Verify (Wallet)."
@@ -1035,7 +1081,7 @@ function syncManualSignInAction() {
   }
 
   if (signinPolicyHintEl) {
-    signinPolicyHintEl.textContent = guidance;
+    signinPolicyHintEl.textContent = `${guidance}${cryptoProofGuidance}`;
   }
 }
 
@@ -1132,6 +1178,8 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireMetadataPolicySource = parseAuthVerifyRequireMetadataPolicySourceConfig(config);
     authVerifyRequireWalletExtensionSource = parseAuthVerifyRequireWalletExtensionSourceConfig(config);
     authVerifyRequireWalletExtensionPolicySource = parseAuthVerifyRequireWalletExtensionPolicySourceConfig(config);
+    authVerifyRequireCryptoProof = parseAuthVerifyRequireCryptoProofConfig(config);
+    authVerifyRequireCryptoProofPolicySource = parseAuthVerifyRequireCryptoProofPolicySourceConfig(config);
     operatorApprovalRequireSession = parseOperatorApprovalRequireSessionConfig(config);
     operatorApprovalRequireSessionPolicySource = parseOperatorApprovalRequireSessionPolicySourceConfig(config);
     legacyAliasTelemetry = parseLegacyAliasTelemetryConfig(config, {
@@ -1139,6 +1187,7 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
         connectPolicySource,
         authVerifyRequireMetadataPolicySource,
         authVerifyRequireWalletExtensionPolicySource,
+        authVerifyRequireCryptoProofPolicySource,
         operatorApprovalRequireSessionPolicySource
       ]
     });
@@ -1158,6 +1207,8 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireMetadataPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     authVerifyRequireWalletExtensionSource = false;
     authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    authVerifyRequireCryptoProof = false;
+    authVerifyRequireCryptoProofPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     operatorApprovalRequireSession = false;
     operatorApprovalRequireSessionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     legacyAliasTelemetry = {

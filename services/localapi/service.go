@@ -428,6 +428,10 @@ func New() *Service {
 	}
 	if !gpmAuthVerifyRequireCryptoSet {
 		gpmAuthVerifyCryptoSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmAuthVerifyRequireCryptoProof = true
+			gpmAuthVerifyCryptoSource = "production-default"
+		}
 	}
 	gpmConnectRequireSessionRaw, gpmConnectRequireSessionSource, gpmConnectRequireSessionSet := preferredEnvValueWithSource(
 		"GPM_CONNECT_REQUIRE_SESSION",

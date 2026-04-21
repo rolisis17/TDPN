@@ -1014,11 +1014,11 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmAuthVerifyWalletExtSource != "production-default" {
 			t.Fatalf("gpmAuthVerifyWalletExtSource=%q want=production-default", s.gpmAuthVerifyWalletExtSource)
 		}
-		if s.gpmAuthVerifyRequireCryptoProof {
-			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=false", s.gpmAuthVerifyRequireCryptoProof)
+		if !s.gpmAuthVerifyRequireCryptoProof {
+			t.Fatalf("gpmAuthVerifyRequireCryptoProof=%t want=true", s.gpmAuthVerifyRequireCryptoProof)
 		}
-		if s.gpmAuthVerifyCryptoSource != "default" {
-			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=default", s.gpmAuthVerifyCryptoSource)
+		if s.gpmAuthVerifyCryptoSource != "production-default" {
+			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=production-default", s.gpmAuthVerifyCryptoSource)
 		}
 	})
 
@@ -4547,6 +4547,8 @@ func TestGPMAuthVerifyProductionDefaultRequireCommandFailsClosedWhenCommandUnset
 	t.Setenv("TDPN_AUTH_VERIFY_COMMAND", "")
 	t.Setenv("GPM_AUTH_VERIFY_REQUIRE_COMMAND", "")
 	t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_COMMAND", "")
+	t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "0")
+	t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
 	t.Setenv("GPM_STATE_STORE_PATH", filepath.Join(tmpDir, "gpm_state.json"))
 	t.Setenv("GPM_AUDIT_LOG_PATH", filepath.Join(tmpDir, "gpm_audit.jsonl"))
 

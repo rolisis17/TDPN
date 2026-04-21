@@ -172,6 +172,7 @@ const state = {
   connectPolicyMode: CONNECT_POLICY_MODE_COMPAT_ALLOWED,
   authVerifyRequireMetadata: false,
   authVerifyRequireWalletExtensionSource: false,
+  authVerifyRequireCryptoProof: false,
   authVerifyRuntimeRequireWalletExtensionSource: false,
   authVerifyPolicySource: AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT,
   operatorApprovalRequireSession: false,
@@ -1580,6 +1581,29 @@ function readRuntimeAuthVerifyPolicyMetadata(runtimeCfg) {
     );
   }
 
+  const authVerifyRequireCryptoProof = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigBoolean(scope, [
+        "gpm_auth_verify_require_crypto_proof",
+        "auth_verify_require_crypto_proof",
+        "authVerifyRequireCryptoProof",
+        "require_crypto_proof",
+        "requireCryptoProof",
+        "crypto_proof_required",
+        "cryptoProofRequired"
+      ])
+    )
+  );
+  const authVerifyRequireCryptoProofPolicySource = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_auth_verify_require_crypto_proof_policy_source",
+        "auth_verify_require_crypto_proof_policy_source",
+        "authVerifyRequireCryptoProofPolicySource"
+      ])
+    )
+  );
+
   const authVerifyPolicySource = normalizeAuthVerifyPolicySource(
     firstDefined(
       ...scopes.map((scope) =>
@@ -1596,6 +1620,8 @@ function readRuntimeAuthVerifyPolicyMetadata(runtimeCfg) {
   return {
     authVerifyRequireMetadata,
     authVerifyRequireWalletExtensionSource,
+    authVerifyRequireCryptoProof,
+    authVerifyRequireCryptoProofPolicySource,
     authVerifyPolicySource
   };
 }
@@ -1901,6 +1927,18 @@ function formatConfigMeta(cfg) {
       ])
     )
   );
+  const authVerifyRequireCryptoProof = firstDefined(
+    readConfigBoolean(cfg, [
+      "gpm_auth_verify_require_crypto_proof",
+      "auth_verify_require_crypto_proof",
+      "authVerifyRequireCryptoProof"
+    ])
+  );
+  const authVerifyRequireCryptoProofPolicySource = readConfigString(cfg, [
+    "gpm_auth_verify_require_crypto_proof_policy_source",
+    "auth_verify_require_crypto_proof_policy_source",
+    "authVerifyRequireCryptoProofPolicySource"
+  ]);
 
   const hints = [`contract: ${contract}`];
   if (authConfigured !== undefined) {
@@ -1940,6 +1978,12 @@ function formatConfigMeta(cfg) {
         : "auth verify source allows manual or wallet_extension"
     );
   }
+  if (authVerifyRequireCryptoProof !== undefined) {
+    hints.push(authVerifyRequireCryptoProof ? "auth verify crypto proof required" : "auth verify crypto proof optional");
+  }
+  if (authVerifyRequireCryptoProofPolicySource) {
+    hints.push(`auth verify crypto proof source: ${authVerifyRequireCryptoProofPolicySource}`);
+  }
 
   return {
     apiLine: timeout ? `${product} API: ${baseUrl} (timeout: ${timeout}s)` : `${product} API: ${baseUrl}`,
@@ -1950,7 +1994,9 @@ function formatConfigMeta(cfg) {
     productionMode: productionMode === true,
     allowLegacyConnectOverride: allowLegacyConnectOverride === true,
     authVerifyRequireMetadata: authVerifyRequireMetadata === true,
-    authVerifyRequireWalletExtensionSource: authVerifyRequireWalletExtensionSource === true
+    authVerifyRequireWalletExtensionSource: authVerifyRequireWalletExtensionSource === true,
+    authVerifyRequireCryptoProof: authVerifyRequireCryptoProof === true,
+    authVerifyRequireCryptoProofPolicySource: authVerifyRequireCryptoProofPolicySource || ""
   };
 }
 
@@ -1978,17 +2024,18 @@ function formatProductionModeSourceHint(enabled, source) {
   return `production mode: ${enabled ? "enabled" : "disabled"} (${formatProductionModeSourceLabel(source)})`;
 }
 
-function formatAuthVerifyPolicyModeLabel(requireMetadata, requireWalletExtensionSource) {
-  if (requireMetadata && requireWalletExtensionSource) {
-    return "metadata-required + wallet-extension-source-required";
-  }
+function formatAuthVerifyPolicyModeLabel(requireMetadata, requireWalletExtensionSource, requireCryptoProof) {
+  const labels = [];
   if (requireMetadata) {
-    return "metadata-required";
+    labels.push("metadata-required");
   }
   if (requireWalletExtensionSource) {
-    return "wallet-extension-source-required";
+    labels.push("wallet-extension-source-required");
   }
-  return "compat";
+  if (requireCryptoProof) {
+    labels.push("crypto-proof-required");
+  }
+  return labels.length > 0 ? labels.join(" + ") : "compat";
 }
 
 function formatAuthVerifyPolicySourceLabel(source) {
@@ -2005,13 +2052,14 @@ function formatAuthVerifyPolicyClientSourceLabel(source) {
   if (source === AUTH_VERIFY_POLICY_SOURCE_RUNTIME_CONFIG) {
     return "runtime config (/v1/config)";
   }
-  return "env defaults (GPM_AUTH_VERIFY_REQUIRE_METADATA / GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE; legacy aliases: TDPN_AUTH_VERIFY_REQUIRE_METADATA / TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE)";
+  return "env defaults (GPM_AUTH_VERIFY_REQUIRE_METADATA / GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE / GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF; legacy aliases: TDPN_AUTH_VERIFY_REQUIRE_METADATA / TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE / TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF)";
 }
 
-function formatAuthVerifyPolicySourceHint(source, requireMetadata, requireWalletExtensionSource) {
+function formatAuthVerifyPolicySourceHint(source, requireMetadata, requireWalletExtensionSource, requireCryptoProof) {
   return `auth verify policy: ${formatAuthVerifyPolicyModeLabel(
     requireMetadata,
-    requireWalletExtensionSource
+    requireWalletExtensionSource,
+    requireCryptoProof
   )} (${formatAuthVerifyPolicySourceLabel(source)})`;
 }
 
@@ -3670,28 +3718,45 @@ function updateAuthVerifyPolicyHint() {
   const manualSignInLockedByProductionMode = state.productionMode === true;
   const modeLabel = formatAuthVerifyPolicyModeLabel(
     state.authVerifyRequireMetadata,
-    state.authVerifyRequireWalletExtensionSource
+    state.authVerifyRequireWalletExtensionSource,
+    state.authVerifyRequireCryptoProof
   );
   const sourceLabel = formatAuthVerifyPolicyClientSourceLabel(state.authVerifyPolicySource);
   let postureHint = "signature metadata and signature_source checks are compatibility-optional.";
   if (manualSignInLockedByProductionMode) {
     postureHint =
       "production mode is active; Wallet Sign-In is required and manual Sign In is disabled.";
-  } else if (state.authVerifyRequireMetadata && state.authVerifyRequireWalletExtensionSource) {
-    postureHint = manualSignInLocked
-      ? "signature metadata is required and signature_source must be wallet_extension; use Wallet Sign-In (manual Sign In is disabled)."
-      : "signature metadata is required and signature_source must be wallet_extension.";
-  } else if (state.authVerifyRequireMetadata) {
-    postureHint = "signature metadata is required (signature_kind, signature_source, signed_message).";
-  } else if (state.authVerifyRequireWalletExtensionSource) {
-    postureHint = manualSignInLocked
-      ? "signature_source must be wallet_extension; use Wallet Sign-In (manual Sign In is disabled)."
-      : "signature_source must be wallet_extension.";
+  } else {
+    const requirementHints = [];
+    if (state.authVerifyRequireMetadata) {
+      requirementHints.push("signature metadata is required (signature_kind, signature_source, signed_message)");
+    }
+    if (state.authVerifyRequireWalletExtensionSource) {
+      requirementHints.push("signature_source must be wallet_extension");
+    }
+    if (state.authVerifyRequireCryptoProof) {
+      requirementHints.push(
+        "cryptographic proof metadata is required (signature_public_key, signature_public_key_type, signed_message)"
+      );
+    }
+    if (requirementHints.length > 0) {
+      postureHint = requirementHints.join("; ");
+      if (manualSignInLocked) {
+        postureHint = `${postureHint}; use Wallet Sign-In (manual Sign In is disabled).`;
+      } else if (state.authVerifyRequireCryptoProof) {
+        postureHint = `${postureHint}; manual Sign In remains available if it includes the required proof metadata.`;
+      } else {
+        postureHint = `${postureHint}.`;
+      }
+    }
   }
   authVerifyPolicyHintEl.textContent = `Auth verify policy: ${modeLabel} from ${sourceLabel}; ${postureHint}`;
   authVerifyPolicyHintEl.classList.toggle(
     "locked",
-    state.productionMode || state.authVerifyRequireMetadata || state.authVerifyRequireWalletExtensionSource
+    state.productionMode ||
+      state.authVerifyRequireMetadata ||
+      state.authVerifyRequireWalletExtensionSource ||
+      state.authVerifyRequireCryptoProof
   );
   syncIdentitySignInPolicyControls();
 }
@@ -4847,6 +4912,7 @@ async function init() {
     let connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
     let authVerifyRequireMetadata = meta.authVerifyRequireMetadata;
     let authVerifyRequireWalletExtensionSource = meta.authVerifyRequireWalletExtensionSource;
+    let authVerifyRequireCryptoProof = meta.authVerifyRequireCryptoProof;
     let authVerifyRuntimeRequireWalletExtensionSource = false;
     let authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     let operatorApprovalRequireSession = false;
@@ -4892,11 +4958,16 @@ async function init() {
         authVerifyRuntimeRequireWalletExtensionSource =
           runtimeAuthVerifyPolicy.authVerifyRequireWalletExtensionSource === true;
       }
+      if (runtimeAuthVerifyPolicy.authVerifyRequireCryptoProof !== undefined) {
+        authVerifyRequireCryptoProof = runtimeAuthVerifyPolicy.authVerifyRequireCryptoProof;
+      }
       if (runtimeAuthVerifyPolicy.authVerifyPolicySource) {
         authVerifyPolicySource = runtimeAuthVerifyPolicy.authVerifyPolicySource;
       } else if (
         runtimeAuthVerifyPolicy.authVerifyRequireMetadata !== undefined ||
-        runtimeAuthVerifyPolicy.authVerifyRequireWalletExtensionSource !== undefined
+        runtimeAuthVerifyPolicy.authVerifyRequireWalletExtensionSource !== undefined ||
+        runtimeAuthVerifyPolicy.authVerifyRequireCryptoProof !== undefined ||
+        runtimeAuthVerifyPolicy.authVerifyRequireCryptoProofPolicySource
       ) {
         authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_RUNTIME_CONFIG;
       }
@@ -4913,6 +4984,7 @@ async function init() {
       connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
       connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
       authVerifyRuntimeRequireWalletExtensionSource = false;
+      authVerifyRequireCryptoProof = false;
       authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
       operatorApprovalRequireSession = false;
       operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
@@ -4924,6 +4996,7 @@ async function init() {
     state.allowLegacyConnectOverride = !!allowLegacyConnectOverride;
     state.authVerifyRequireMetadata = !!authVerifyRequireMetadata;
     state.authVerifyRequireWalletExtensionSource = !!authVerifyRequireWalletExtensionSource;
+    state.authVerifyRequireCryptoProof = !!authVerifyRequireCryptoProof;
     state.authVerifyRuntimeRequireWalletExtensionSource = authVerifyRuntimeRequireWalletExtensionSource;
     state.authVerifyPolicySource = authVerifyPolicySource;
     state.operatorApprovalRequireSession = operatorApprovalRequireSession === true;
@@ -4939,7 +5012,8 @@ async function init() {
       formatAuthVerifyPolicySourceHint(
         authVerifyPolicySource,
         state.authVerifyRequireMetadata,
-        state.authVerifyRequireWalletExtensionSource
+        state.authVerifyRequireWalletExtensionSource,
+        state.authVerifyRequireCryptoProof
       ),
       formatOperatorApprovalPolicySourceHint(operatorApprovalPolicySource, state.operatorApprovalRequireSession)
     ]
@@ -4964,6 +5038,7 @@ async function init() {
     state.allowLegacyConnectOverride = false;
     state.authVerifyRequireMetadata = false;
     state.authVerifyRequireWalletExtensionSource = false;
+    state.authVerifyRequireCryptoProof = false;
     state.authVerifyRuntimeRequireWalletExtensionSource = false;
     state.authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     state.operatorApprovalRequireSession = false;

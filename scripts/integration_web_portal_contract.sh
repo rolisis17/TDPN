@@ -178,6 +178,10 @@ JS_MARKERS=(
   'const operatorApprovalPolicyHintEl = byId("operator_approval_policy_hint");'
   'function parseOperatorApprovalRequireSessionConfig('
   'function parseOperatorApprovalRequireSessionPolicySourceConfig('
+  'function parseAuthVerifyRequireCryptoProofConfig('
+  'function parseAuthVerifyRequireCryptoProofPolicySourceConfig('
+  'authVerifyRequireCryptoProof = parseAuthVerifyRequireCryptoProofConfig(config);'
+  'authVerifyRequireCryptoProofPolicySource = parseAuthVerifyRequireCryptoProofPolicySourceConfig(config);'
   'function refreshServerReadinessStatus('
   'byId("register_client_btn").addEventListener'
   'assertClientRegistrationActionAllowed();'
@@ -442,6 +446,18 @@ if ! grep -qF 'gpm_operator_approval_require_session_policy_source' "$README_FIL
 fi
 if ! grep -qF 'GPM_OPERATOR_APPROVAL_REQUIRE_SESSION' "$README_FILE"; then
   echo "web portal contract failed: README must mention GPM_OPERATOR_APPROVAL_REQUIRE_SESSION override behavior"
+  exit 1
+fi
+if ! grep -qF 'gpm_auth_verify_require_crypto_proof' "$README_FILE"; then
+  echo "web portal contract failed: README must mention gpm_auth_verify_require_crypto_proof policy visibility"
+  exit 1
+fi
+if ! grep -qF 'gpm_auth_verify_require_crypto_proof_policy_source' "$README_FILE"; then
+  echo "web portal contract failed: README must mention gpm_auth_verify_require_crypto_proof_policy_source policy visibility"
+  exit 1
+fi
+if ! grep -qF 'GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF' "$README_FILE"; then
+  echo "web portal contract failed: README must mention GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF override behavior"
   exit 1
 fi
 if ! grep -qF 'gpm_production_mode' "$README_FILE"; then

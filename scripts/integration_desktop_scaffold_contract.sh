@@ -1077,6 +1077,22 @@ if ! grep -qF 'Manual Sign In is disabled by production mode; use Wallet Sign-In
   echo "desktop scaffold contract failed: missing production-mode manual-signin disabled marker in $JS_FILE"
   exit 1
 fi
+if ! grep -qF '"gpm_auth_verify_require_crypto_proof"' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing gpm_auth_verify_require_crypto_proof runtime telemetry marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF '"gpm_auth_verify_require_crypto_proof_policy_source"' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing gpm_auth_verify_require_crypto_proof_policy_source runtime telemetry marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'function formatAuthVerifyPolicyModeLabel(requireMetadata, requireWalletExtensionSource, requireCryptoProof) {' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing auth-verify crypto-proof mode formatter marker in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'crypto-proof-required' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing auth-verify crypto-proof strict mode label marker in $JS_FILE"
+  exit 1
+fi
 if ! grep -qF 'state.productionMode = productionMode === true;' "$JS_FILE"; then
   echo "desktop scaffold contract failed: missing init-time production-mode state assignment marker in $JS_FILE"
   exit 1
@@ -1570,6 +1586,22 @@ if ! rg -qi -- 'powershell[[:space:]]+-NoProfile[[:space:]]+-ExecutionPolicy[[:s
 fi
 if ! rg -qi -- 'npm\.ps1|npm\.cmd|npx\.cmd' "$README_FILE"; then
   echo "desktop scaffold contract failed: README must explain npm.cmd/npx.cmd policy-safe guidance"
+  exit 1
+fi
+if ! grep -qF 'GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF policy override"
+  exit 1
+fi
+if ! grep -qF 'gpm_auth_verify_require_crypto_proof_policy_source' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention gpm_auth_verify_require_crypto_proof_policy_source runtime telemetry"
+  exit 1
+fi
+if ! grep -qF 'signature_public_key' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention signature_public_key for strict crypto-proof policy guidance"
+  exit 1
+fi
+if ! grep -qF 'signature_public_key_type' "$README_FILE"; then
+  echo "desktop scaffold contract failed: README must mention signature_public_key_type for strict crypto-proof policy guidance"
   exit 1
 fi
 if ! rg -qi -- 'client/server tabs|client and server tabs|client.*server.*tabs|tabs.*client.*server' "$README_FILE"; then

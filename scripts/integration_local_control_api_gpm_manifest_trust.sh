@@ -97,6 +97,7 @@ start_local_api() {
   local connect_require_session="${11-}"
   local allow_legacy_connect_override="${12-}"
   local manifest_remote_refresh_interval="${13-}"
+  local require_crypto_proof="${14-}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -130,6 +131,9 @@ start_local_api() {
     fi
     if [[ -n "$allow_legacy_connect_override" ]]; then
       api_env+=("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=$allow_legacy_connect_override")
+    fi
+    if [[ -n "$require_crypto_proof" ]]; then
+      api_env+=("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF=$require_crypto_proof")
     fi
     env "${api_env[@]}" go run ./cmd/node --local-api >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
@@ -392,11 +396,16 @@ start_local_api \
   0 \
   0 \
   "" \
-  1
+  1 \
+  "" \
+  "" \
+  "" \
+  "" \
+  ""
 
 echo "[local-control-api-gpm-manifest-trust] production mode /v1/config surfaces fail-closed connect policy defaults"
 prod_auth_config_json="$(api_get_json "/v1/config")"
-if ! jq -e '.ok == true and .config.connect_require_session == true and .config.allow_legacy_connect_override == false and .config.gpm_production_mode == true and .config.gpm_production_mode_source == "GPM_PRODUCTION_MODE"' <<<"$prod_auth_config_json" >/dev/null; then
+if ! jq -e '.ok == true and .config.connect_require_session == true and .config.allow_legacy_connect_override == false and .config.gpm_production_mode == true and .config.gpm_production_mode_source == "GPM_PRODUCTION_MODE" and .config.gpm_auth_verify_require_crypto_proof == true and .config.gpm_auth_verify_require_crypto_proof_policy_source == "production-default"' <<<"$prod_auth_config_json" >/dev/null; then
   echo "expected production mode /v1/config to surface connect fail-closed defaults and production-mode telemetry fields"
   echo "$prod_auth_config_json"
   exit 1
@@ -432,8 +441,8 @@ if [[ "$prod_auth_verify_code" != "401" && "$prod_auth_verify_code" != "400" ]];
 fi
 assert_json_expr \
   "$prod_auth_verify_body" \
-  '.ok == false and ((.error // "") | type == "string") and (((.error // "") | ascii_downcase) | contains("verifier command is required"))' \
-  "expected production auth verify to fail closed when verifier command is not configured"
+  '.ok == false and ((.error // "") | type == "string") and ((((.error // "") | ascii_downcase) | contains("verifier command is required")) or (((.error // "") | ascii_downcase) | contains("cryptographic proof metadata is required by policy")))' \
+  "expected production auth verify to fail closed under strict policy when verifier command/proof requirements are not satisfied"
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] production mode requires https bootstrap manifest URLs when pinned domain is configured"
@@ -446,7 +455,13 @@ start_local_api \
   0 \
   0 \
   "" \
-  1
+  1 \
+  "" \
+  "" \
+  "" \
+  "" \
+  "" \
+  0
 
 session_token_prod_https="$(mint_session_token "cosmos1prodhttpsrequired")"
 prod_https_register_body="$TMP_DIR/prod_https_register.json"
@@ -475,7 +490,13 @@ start_local_api \
   0 \
   0 \
   "" \
-  1
+  1 \
+  "" \
+  "" \
+  "" \
+  "" \
+  "" \
+  0
 
 session_token_prod_sig="$(mint_session_token "cosmos1prodsigrequired")"
 prod_sig_register_body="$TMP_DIR/prod_sig_register.json"
