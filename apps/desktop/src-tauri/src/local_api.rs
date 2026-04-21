@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::net::IpAddr;
-use std::time::Duration;
 #[cfg(test)]
 use std::net::SocketAddr;
+use std::time::Duration;
 
 const MAX_LOCAL_API_RESPONSE_BODY_BYTES: usize = 256 * 1024;
 const MAX_LOCAL_API_AUTH_BEARER_BYTES: usize = 4096;
@@ -184,27 +184,44 @@ pub struct RuntimePolicyConfig {
 impl RuntimePolicyConfig {
     pub fn from_config_payload(payload: &Value) -> Self {
         let config = payload.get("config");
-        let data_config = payload
-            .get("data")
-            .and_then(|value| value.get("config"));
-        let connect_require_session = parse_bool_like_json(config.and_then(|value| value.get("connect_require_session")))
-            .or_else(|| parse_bool_like_json(config.and_then(|value| value.get("connectRequireSession"))))
-            .or_else(|| parse_bool_like_json(payload.get("connect_require_session")))
-            .or_else(|| parse_bool_like_json(payload.get("connectRequireSession")))
-            .or_else(|| parse_bool_like_json(data_config.and_then(|value| value.get("connect_require_session"))))
-            .or_else(|| parse_bool_like_json(data_config.and_then(|value| value.get("connectRequireSession"))));
+        let data_config = payload.get("data").and_then(|value| value.get("config"));
+        let connect_require_session =
+            parse_bool_like_json(config.and_then(|value| value.get("connect_require_session")))
+                .or_else(|| {
+                    parse_bool_like_json(
+                        config.and_then(|value| value.get("connectRequireSession")),
+                    )
+                })
+                .or_else(|| parse_bool_like_json(payload.get("connect_require_session")))
+                .or_else(|| parse_bool_like_json(payload.get("connectRequireSession")))
+                .or_else(|| {
+                    parse_bool_like_json(
+                        data_config.and_then(|value| value.get("connect_require_session")),
+                    )
+                })
+                .or_else(|| {
+                    parse_bool_like_json(
+                        data_config.and_then(|value| value.get("connectRequireSession")),
+                    )
+                });
         let allow_legacy_connect_override = parse_bool_like_json(
             config.and_then(|value| value.get("allow_legacy_connect_override")),
         )
-        .or_else(|| parse_bool_like_json(config.and_then(|value| value.get("allowLegacyConnectOverride"))))
+        .or_else(|| {
+            parse_bool_like_json(config.and_then(|value| value.get("allowLegacyConnectOverride")))
+        })
         .or_else(|| parse_bool_like_json(payload.get("allow_legacy_connect_override")))
         .or_else(|| parse_bool_like_json(payload.get("allowLegacyConnectOverride")))
-        .or_else(|| parse_bool_like_json(
-            data_config.and_then(|value| value.get("allow_legacy_connect_override")),
-        ))
-        .or_else(|| parse_bool_like_json(
-            data_config.and_then(|value| value.get("allowLegacyConnectOverride")),
-        ));
+        .or_else(|| {
+            parse_bool_like_json(
+                data_config.and_then(|value| value.get("allow_legacy_connect_override")),
+            )
+        })
+        .or_else(|| {
+            parse_bool_like_json(
+                data_config.and_then(|value| value.get("allowLegacyConnectOverride")),
+            )
+        });
         Self {
             connect_require_session,
             allow_legacy_connect_override,
@@ -256,7 +273,11 @@ impl LocalApiClient {
         Ok(RuntimePolicyConfig::from_config_payload(&payload))
     }
 
-    pub async fn post_json<T: Serialize + ?Sized>(&self, path: &str, payload: &T) -> Result<Value, String> {
+    pub async fn post_json<T: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        payload: &T,
+    ) -> Result<Value, String> {
         let request = self.client.post(self.config.endpoint(path)).json(payload);
         let response = self
             .with_optional_auth(request)
@@ -278,7 +299,11 @@ impl LocalApiClient {
         }
     }
 
-    async fn parse_response(&self, path: &str, mut response: reqwest::Response) -> Result<Value, String> {
+    async fn parse_response(
+        &self,
+        path: &str,
+        mut response: reqwest::Response,
+    ) -> Result<Value, String> {
         let status = response.status();
         let body = read_limited_response_body(path, &mut response).await?;
 
@@ -314,7 +339,10 @@ fn truncate_error_detail(text: &str) -> String {
     if total <= MAX_LOCAL_API_ERROR_DETAIL_CHARS {
         return trimmed.to_string();
     }
-    let kept: String = trimmed.chars().take(MAX_LOCAL_API_ERROR_DETAIL_CHARS).collect();
+    let kept: String = trimmed
+        .chars()
+        .take(MAX_LOCAL_API_ERROR_DETAIL_CHARS)
+        .collect();
     let omitted = total - MAX_LOCAL_API_ERROR_DETAIL_CHARS;
     format!("{kept}...[truncated {omitted} chars]")
 }
@@ -474,7 +502,10 @@ fn redact_url_for_display(raw: &str) -> String {
     out
 }
 
-async fn read_limited_response_body(path: &str, response: &mut reqwest::Response) -> Result<String, String> {
+async fn read_limited_response_body(
+    path: &str,
+    response: &mut reqwest::Response,
+) -> Result<String, String> {
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
@@ -595,17 +626,16 @@ impl ConnectRequest {
     pub fn validate(&self) -> Result<(), String> {
         let bootstrap = self.bootstrap_directory.trim();
         let invite_key = self.invite_key.trim();
-        let session_token = self
-            .session_token
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("");
+        let session_token = self.session_token.as_deref().map(str::trim).unwrap_or("");
 
         let has_bootstrap = !bootstrap.is_empty();
         let has_invite = !invite_key.is_empty();
         let has_session = !session_token.is_empty();
         if !has_session && (!has_bootstrap || !has_invite) {
-            return Err("connect requires either bootstrap_directory+invite_key or session_token".to_string());
+            return Err(
+                "connect requires either bootstrap_directory+invite_key or session_token"
+                    .to_string(),
+            );
         }
 
         if has_bootstrap {
@@ -649,8 +679,13 @@ impl ConnectRequest {
             if session_token.len() > 4096 {
                 return Err("session_token must be <= 4096 chars".to_string());
             }
-            if session_token.chars().any(|c| c.is_control() || c.is_whitespace()) {
-                return Err("session_token contains invalid control/whitespace characters".to_string());
+            if session_token
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
+            {
+                return Err(
+                    "session_token contains invalid control/whitespace characters".to_string(),
+                );
             }
         }
 
@@ -976,14 +1011,20 @@ mod tests {
     fn from_env_rejects_userinfo_in_base_url() {
         with_env_vars(
             &[
-                ("TDPN_LOCAL_API_BASE_URL", Some("http://user:pass@127.0.0.1:8095")),
+                (
+                    "TDPN_LOCAL_API_BASE_URL",
+                    Some("http://user:pass@127.0.0.1:8095"),
+                ),
                 ("TDPN_LOCAL_API_TIMEOUT_SEC", None),
                 ("TDPN_LOCAL_API_ALLOW_REMOTE", None),
                 ("TDPN_LOCAL_API_AUTH_BEARER", None),
             ],
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected userinfo rejection");
-                assert!(err.contains("userinfo is not allowed"), "unexpected error: {err}");
+                assert!(
+                    err.contains("userinfo is not allowed"),
+                    "unexpected error: {err}"
+                );
             },
         );
     }
@@ -992,13 +1033,17 @@ mod tests {
     fn from_env_rejects_query_and_fragment_in_base_url() {
         with_env_vars(
             &[
-                ("TDPN_LOCAL_API_BASE_URL", Some("http://127.0.0.1:8095?token=secret#frag")),
+                (
+                    "TDPN_LOCAL_API_BASE_URL",
+                    Some("http://127.0.0.1:8095?token=secret#frag"),
+                ),
                 ("TDPN_LOCAL_API_TIMEOUT_SEC", None),
                 ("TDPN_LOCAL_API_ALLOW_REMOTE", None),
                 ("TDPN_LOCAL_API_AUTH_BEARER", None),
             ],
             || {
-                let err = LocalApiConfig::from_env().expect_err("expected query/fragment rejection");
+                let err =
+                    LocalApiConfig::from_env().expect_err("expected query/fragment rejection");
                 assert!(
                     err.contains("query and fragment are not allowed"),
                     "unexpected error: {err}"
@@ -1184,7 +1229,8 @@ mod tests {
                 ("TDPN_LOCAL_API_AUTH_BEARER", Some(long_token.as_str())),
             ],
             || {
-                let err = LocalApiConfig::from_env().expect_err("expected auth bearer length validation");
+                let err =
+                    LocalApiConfig::from_env().expect_err("expected auth bearer length validation");
                 assert!(err.contains("must be <="), "unexpected error: {err}");
             },
         );
@@ -1200,7 +1246,8 @@ mod tests {
                 ("TDPN_LOCAL_API_AUTH_BEARER", Some("token:bad")),
             ],
             || {
-                let err = LocalApiConfig::from_env().expect_err("expected auth bearer charset validation");
+                let err = LocalApiConfig::from_env()
+                    .expect_err("expected auth bearer charset validation");
                 assert!(err.contains("token68"), "unexpected error: {err}");
             },
         );
@@ -1348,7 +1395,10 @@ mod tests {
         with_env(
             &[
                 ("TDPN_LOCAL_API_BASE_URL", Some("http://127.0.0.1:8095")),
-                ("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", Some("maybe")),
+                (
+                    "TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE",
+                    Some("maybe"),
+                ),
             ],
             || {
                 let err = LocalApiConfig::from_env().expect_err("expected bool parse error");
@@ -1388,7 +1438,8 @@ mod tests {
 
         req.bootstrap_directory.clear();
         req.session_token = Some("testsession".to_string());
-        req.validate().expect("session token connect should be accepted");
+        req.validate()
+            .expect("session token connect should be accepted");
     }
 
     #[test]
@@ -1425,7 +1476,10 @@ mod tests {
         let token_err = missing_token
             .validate()
             .expect_err("expected missing token validation error");
-        assert!(token_err.contains("session_token is required"), "{token_err}");
+        assert!(
+            token_err.contains("session_token is required"),
+            "{token_err}"
+        );
 
         let invalid_action = GPMSessionStatusRequest {
             session_token: "gpm-token".to_string(),
@@ -1555,7 +1609,8 @@ mod tests {
             prod_profile: None,
             install_route: None,
         };
-        req.validate().expect("expected loopback http bootstrap to pass");
+        req.validate()
+            .expect("expected loopback http bootstrap to pass");
     }
 
     #[test]
@@ -1651,12 +1706,17 @@ mod tests {
                 "[::1]:8095".parse::<SocketAddr>().expect("socket addr"),
             ])
         });
-        assert!(all_loopback, "expected localhost loopback resolution to pass");
+        assert!(
+            all_loopback,
+            "expected localhost loopback resolution to pass"
+        );
 
         let includes_remote = is_loopback_host_with_resolver(&url, |_host, _port| {
             Ok(vec![
                 "127.0.0.1:8095".parse::<SocketAddr>().expect("socket addr"),
-                "203.0.113.10:8095".parse::<SocketAddr>().expect("socket addr"),
+                "203.0.113.10:8095"
+                    .parse::<SocketAddr>()
+                    .expect("socket addr"),
             ])
         });
         assert!(

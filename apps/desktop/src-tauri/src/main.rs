@@ -1,10 +1,11 @@
 mod local_api;
 
 use local_api::{
-    ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMOperatorApplyRequest,
-    GPMAuditRecentRequest, GPMOperatorApproveRequest, GPMOperatorListRequest, GPMOperatorStatusRequest,
-    GPMServerStatusRequest, GPMSessionStatusRequest, GPMWalletChallengeRequest,
-    GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig, ProfileRequest, RuntimePolicyConfig,
+    ConnectRequest, GPMAuditRecentRequest, GPMClientRegisterRequest, GPMClientStatusRequest,
+    GPMOperatorApplyRequest, GPMOperatorApproveRequest, GPMOperatorListRequest,
+    GPMOperatorStatusRequest, GPMServerStatusRequest, GPMSessionStatusRequest,
+    GPMWalletChallengeRequest, GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig,
+    ProfileRequest, RuntimePolicyConfig,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -76,16 +77,22 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
         allow_service_mutations: cfg.allow_service_mutations,
         connect_require_session: cfg.connect_require_session,
         allow_legacy_connect_override: cfg.allow_legacy_connect_override,
-        update_channel: optional_env_any(&["GPM_DESKTOP_UPDATE_CHANNEL", "TDPN_DESKTOP_UPDATE_CHANNEL"]),
+        update_channel: optional_env_any(&[
+            "GPM_DESKTOP_UPDATE_CHANNEL",
+            "TDPN_DESKTOP_UPDATE_CHANNEL",
+        ]),
         update_feed_configured: optional_env_any(&[
             "GPM_DESKTOP_UPDATE_FEED_CONFIGURED",
             "TDPN_DESKTOP_UPDATE_FEED_CONFIGURED",
         ])
-            .map(|v| v == "1")
-            .unwrap_or_else(|| {
-                optional_env_any(&["GPM_DESKTOP_UPDATE_FEED_URL", "TDPN_DESKTOP_UPDATE_FEED_URL"])
-                    .is_some()
-            }),
+        .map(|v| v == "1")
+        .unwrap_or_else(|| {
+            optional_env_any(&[
+                "GPM_DESKTOP_UPDATE_FEED_URL",
+                "TDPN_DESKTOP_UPDATE_FEED_URL",
+            ])
+            .is_some()
+        }),
         product_name: "Global Private Mesh".to_string(),
         product_short_name: "GPM".to_string(),
         api_contract: "gpm-v1-with-tdpn-compat".to_string(),
@@ -209,7 +216,9 @@ fn is_sensitive_field_key(key: &str) -> bool {
 
 fn redact_sensitive_fields(value: Value) -> Value {
     match value {
-        Value::Array(values) => Value::Array(values.into_iter().map(redact_sensitive_fields).collect()),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(redact_sensitive_fields).collect())
+        }
         Value::Object(mut object) => {
             for (key, entry) in object.iter_mut() {
                 if is_sensitive_field_key(key) {
@@ -337,7 +346,10 @@ async fn control_get_diagnostics(state: State<'_, AppState>) -> Result<Value, St
 }
 
 #[tauri::command]
-async fn control_connect(state: State<'_, AppState>, request: ConnectRequest) -> Result<Value, String> {
+async fn control_connect(
+    state: State<'_, AppState>,
+    request: ConnectRequest,
+) -> Result<Value, String> {
     request.validate()?;
     state
         .local_api
@@ -356,7 +368,10 @@ async fn control_disconnect(state: State<'_, AppState>) -> Result<Value, String>
 }
 
 #[tauri::command]
-async fn control_set_profile(state: State<'_, AppState>, request: ProfileRequest) -> Result<Value, String> {
+async fn control_set_profile(
+    state: State<'_, AppState>,
+    request: ProfileRequest,
+) -> Result<Value, String> {
     request.validate()?;
     state
         .local_api
@@ -415,7 +430,7 @@ async fn control_service_lifecycle(
             let legacy_path = format!("/v1/service/{action}");
             state
                 .local_api
-                .post_empty(&legacy_path)
+                .post_json(&legacy_path, &request)
                 .await
                 .map(sanitize_desktop_payload)
         }
@@ -608,7 +623,7 @@ async fn control_gpm_operator_approve(
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_desktop_payload, Value};
+    use super::{sanitize_desktop_payload, ServiceLifecycleRequest, Value};
     use serde_json::json;
 
     #[test]
@@ -656,6 +671,25 @@ mod tests {
         );
         assert_eq!(array[1].get("refreshToken"), Some(&json!("[REDACTED]")));
         assert_eq!(array[2].get("public"), Some(&json!("safe")));
+    }
+
+    #[test]
+    fn service_lifecycle_request_serialization_preserves_session_token_semantics() {
+        let with_session_token = ServiceLifecycleRequest {
+            session_token: Some("session-123".to_string()),
+        };
+        let without_session_token = ServiceLifecycleRequest {
+            session_token: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(with_session_token).expect("serialize with token"),
+            json!({ "session_token": "session-123" })
+        );
+        assert_eq!(
+            serde_json::to_value(without_session_token).expect("serialize without token"),
+            json!({})
+        );
     }
 }
 

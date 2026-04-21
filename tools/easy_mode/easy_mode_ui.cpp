@@ -280,6 +280,14 @@ std::string redactSensitiveCommandForLog(const std::string &cmd) {
   return out;
 }
 
+std::string redactOrSuppressSensitiveCommandForLog(const std::string &cmd) {
+  std::string redacted = redactSensitiveCommandForLog(cmd);
+  if (redacted.find("<redacted>") != std::string::npos) {
+    return "<suppressed-sensitive-command>";
+  }
+  return redacted;
+}
+
 bool isSecureRepoRootCandidate(const std::filesystem::path &root) {
   std::error_code ec;
   if (!std::filesystem::exists(root, ec) || ec) {
@@ -687,10 +695,12 @@ void printManualValidationReportSummary(const std::string &summaryJsonPath) {
   std::string latestIncidentReport = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.report_md.path // \"\"");
   std::string latestReadinessSummaryAttachment = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.readiness_report_summary_attachment.bundle_path // \"\"");
   std::string latestReadinessReportAttachment = readJsonStringField(summaryJsonPath, ".summary.latest_failed_incident.readiness_report_md_attachment.bundle_path // \"\"");
+  std::string nextActionCommandLog = redactOrSuppressSensitiveCommandForLog(nextActionCommand);
+  std::string machineCSmokeNextCommandLog = redactOrSuppressSensitiveCommandForLog(machineCSmokeNextCommand);
 
-  if (readinessStatus.empty() && nextActionCommand.empty() &&
+  if (readinessStatus.empty() && nextActionCommandLog.empty() &&
       machineCSmokeReady.empty() && machineCSmokeBlockers.empty() &&
-      machineCSmokeNextCommand.empty() &&
+      machineCSmokeNextCommandLog.empty() &&
       latestIncidentSummary.empty() && latestIncidentReport.empty() &&
       latestReadinessSummaryAttachment.empty() &&
       latestReadinessReportAttachment.empty()) {
@@ -701,8 +711,8 @@ void printManualValidationReportSummary(const std::string &summaryJsonPath) {
   if (!readinessStatus.empty()) {
     std::cout << "  readiness_status=" << readinessStatus << "\n";
   }
-  if (!nextActionCommand.empty()) {
-    std::cout << "  next_action_command=" << nextActionCommand << "\n";
+  if (!nextActionCommandLog.empty()) {
+    std::cout << "  next_action_command=" << nextActionCommandLog << "\n";
   }
   if (!machineCSmokeReady.empty()) {
     std::cout << "  machine_c_smoke_ready=" << machineCSmokeReady << "\n";
@@ -710,8 +720,8 @@ void printManualValidationReportSummary(const std::string &summaryJsonPath) {
   if (!machineCSmokeBlockers.empty()) {
     std::cout << "  machine_c_smoke_blockers=" << machineCSmokeBlockers << "\n";
   }
-  if (!machineCSmokeNextCommand.empty()) {
-    std::cout << "  machine_c_smoke_next_command=" << machineCSmokeNextCommand << "\n";
+  if (!machineCSmokeNextCommandLog.empty()) {
+    std::cout << "  machine_c_smoke_next_command=" << machineCSmokeNextCommandLog << "\n";
   }
   if (!latestIncidentSummary.empty()) {
     std::cout << "  latest_failed_incident_summary_json=" << latestIncidentSummary << "\n";
