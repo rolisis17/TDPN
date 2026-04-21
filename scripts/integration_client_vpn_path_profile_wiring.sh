@@ -56,6 +56,22 @@ check_pattern '"CLIENT_SESSION_REUSE=1"' \
 check_pattern '"CLIENT_STICKY_PAIR_SEC=300"' \
   "client-vpn-up missing sticky-pair wiring for 1hop/speed-1hop"
 
+echo "[client-vpn-path-profile] selection-policy defaults by profile"
+check_pattern '1\|0\|1\|1\.80\|1\.35\|1\.15\|180\|120\|20\|25' \
+  "path-profile speed/fast defaults missing expected selection-policy tuple"
+check_pattern '1\|0\|1\|1\.80\|1\.35\|1\.15\|300\|120\|20\|20' \
+  "path-profile speed-1hop defaults missing expected selection-policy tuple"
+check_pattern '1\|1\|0\|1\.60\|1\.25\|1\.10\|420\|240\|10\|5' \
+  "path-profile private/privacy defaults missing expected selection-policy tuple"
+check_pattern '"CLIENT_STICKY_PAIR_SEC=\$sticky_pair_sec"' \
+  "client-vpn-up missing exported CLIENT_STICKY_PAIR_SEC runtime env"
+check_pattern '"CLIENT_ENTRY_ROTATION_SEC=\$entry_rotation_sec"' \
+  "client-vpn-up missing exported CLIENT_ENTRY_ROTATION_SEC runtime env"
+check_pattern '"CLIENT_ENTRY_ROTATION_JITTER_PCT=\$entry_rotation_jitter_pct"' \
+  "client-vpn-up missing exported CLIENT_ENTRY_ROTATION_JITTER_PCT runtime env"
+check_pattern '"CLIENT_EXIT_EXPLORATION_PCT=\$exit_exploration_pct"' \
+  "client-vpn-up missing exported CLIENT_EXIT_EXPLORATION_PCT runtime env"
+
 echo "[client-vpn-path-profile] session lifecycle defaults"
 check_pattern 'local session_reuse="\$\{CLIENT_SESSION_REUSE:-1\}"' \
   "client-vpn-up missing CLIENT_SESSION_REUSE default wiring"

@@ -88,10 +88,10 @@ run_client_test_capture() {
   EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
   FAKE_DOCKER_CAPTURE_FILE="$capture_file" \
   ./scripts/easy_node.sh client-test \
-    --directory-urls "http://dir-a:8081,http://dir-b:8081" \
-    --issuer-url "http://issuer-a:8082" \
-    --entry-url "http://entry-a:8083" \
-    --exit-url "http://exit-a:8084" \
+    --directory-urls "https://dir-a:8081,https://dir-b:8081" \
+    --issuer-url "https://issuer-a:8082" \
+    --entry-url "https://entry-a:8083" \
+    --exit-url "https://exit-a:8084" \
     --subject "integration-client" \
     --min-selection-lines 1 \
     --min-entry-operators 1 \
@@ -114,10 +114,10 @@ run_client_test_expect_fail() {
   EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
   FAKE_DOCKER_CAPTURE_FILE="$TMP_DIR/fail_capture.log" \
   ./scripts/easy_node.sh client-test \
-    --directory-urls "http://dir-a:8081,http://dir-b:8081" \
-    --issuer-url "http://issuer-a:8082" \
-    --entry-url "http://entry-a:8083" \
-    --exit-url "http://exit-a:8084" \
+    --directory-urls "https://dir-a:8081,https://dir-b:8081" \
+    --issuer-url "https://issuer-a:8082" \
+    --entry-url "https://entry-a:8083" \
+    --exit-url "https://exit-a:8084" \
     --subject "integration-client" \
     --min-selection-lines 1 \
     --min-entry-operators 1 \
@@ -236,6 +236,26 @@ if ! rg -q -- "-e CLIENT_PATH_PROFILE=3hop" "$PATH_PROFILE_CAPTURE"; then
   cat "$PATH_PROFILE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- "-e CLIENT_STICKY_PAIR_SEC=420" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected private-profile sticky-pair env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ENTRY_ROTATION_SEC=240" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected private-profile entry-rotation env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ENTRY_ROTATION_JITTER_PCT=10" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected private-profile entry-rotation-jitter env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_EXPLORATION_PCT=5" "$PATH_PROFILE_CAPTURE"; then
+  echo "missing expected private-profile exit-exploration env"
+  cat "$PATH_PROFILE_CAPTURE"
+  exit 1
+fi
 
 PATH_PROFILE_SPEED_CAPTURE="$TMP_DIR/path_profile_speed_capture.log"
 run_client_test_capture "$PATH_PROFILE_SPEED_CAPTURE" "0" "0" --path-profile speed
@@ -264,6 +284,26 @@ if ! rg -q -- "-e CLIENT_PATH_PROFILE=2hop" "$PATH_PROFILE_SPEED_CAPTURE"; then
   cat "$PATH_PROFILE_SPEED_CAPTURE"
   exit 1
 fi
+if ! rg -q -- "-e CLIENT_STICKY_PAIR_SEC=180" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile sticky-pair env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ENTRY_ROTATION_SEC=120" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile entry-rotation env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ENTRY_ROTATION_JITTER_PCT=20" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile entry-rotation-jitter env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_EXPLORATION_PCT=25" "$PATH_PROFILE_SPEED_CAPTURE"; then
+  echo "missing expected speed-profile exit-exploration env"
+  cat "$PATH_PROFILE_SPEED_CAPTURE"
+  exit 1
+fi
 
 PATH_PROFILE_SPEED_1HOP_CAPTURE="$TMP_DIR/path_profile_speed_1hop_capture.log"
 run_client_test_capture "$PATH_PROFILE_SPEED_1HOP_CAPTURE" "0" "0" --path-profile speed-1hop
@@ -284,6 +324,26 @@ if ! rg -q -- "-e CLIENT_FORCE_DIRECT_EXIT=1" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
 fi
 if ! rg -q -- "-e CLIENT_PATH_PROFILE=1hop" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
   echo "missing expected speed-1hop canonical path-profile env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_STICKY_PAIR_SEC=300" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop sticky-pair env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ENTRY_ROTATION_SEC=120" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop entry-rotation env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_ENTRY_ROTATION_JITTER_PCT=20" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop entry-rotation-jitter env"
+  cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e CLIENT_EXIT_EXPLORATION_PCT=20" "$PATH_PROFILE_SPEED_1HOP_CAPTURE"; then
+  echo "missing expected speed-1hop exit-exploration env"
   cat "$PATH_PROFILE_SPEED_1HOP_CAPTURE"
   exit 1
 fi

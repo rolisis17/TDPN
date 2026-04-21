@@ -27,6 +27,9 @@ func TestApplyConfigFileV1OneHop(t *testing.T) {
 	t.Setenv("CLIENT_FORCE_DIRECT_EXIT", "")
 	t.Setenv("CLIENT_SESSION_REUSE", "")
 	t.Setenv("CLIENT_STICKY_PAIR_SEC", "")
+	t.Setenv("CLIENT_ENTRY_ROTATION_SEC", "")
+	t.Setenv("CLIENT_ENTRY_ROTATION_JITTER_PCT", "")
+	t.Setenv("CLIENT_EXIT_EXPLORATION_PCT", "")
 	t.Setenv("CLIENT_PATH_PROFILE", "")
 	t.Setenv("CLIENT_WG_INTERFACE", "")
 	t.Setenv("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE", "")
@@ -51,6 +54,15 @@ func TestApplyConfigFileV1OneHop(t *testing.T) {
 	}
 	if got := os.Getenv("CLIENT_STICKY_PAIR_SEC"); got != "300" {
 		t.Fatalf("CLIENT_STICKY_PAIR_SEC=%q want 300", got)
+	}
+	if got := os.Getenv("CLIENT_ENTRY_ROTATION_SEC"); got != "120" {
+		t.Fatalf("CLIENT_ENTRY_ROTATION_SEC=%q want 120", got)
+	}
+	if got := os.Getenv("CLIENT_ENTRY_ROTATION_JITTER_PCT"); got != "20" {
+		t.Fatalf("CLIENT_ENTRY_ROTATION_JITTER_PCT=%q want 20", got)
+	}
+	if got := os.Getenv("CLIENT_EXIT_EXPLORATION_PCT"); got != "20" {
+		t.Fatalf("CLIENT_EXIT_EXPLORATION_PCT=%q want 20", got)
 	}
 	if got := os.Getenv("CLIENT_PATH_PROFILE"); got != "1hop" {
 		t.Fatalf("CLIENT_PATH_PROFILE=%q want 1hop", got)
@@ -86,6 +98,10 @@ func TestApplyConfigFileV1RespectsExistingEnv(t *testing.T) {
 	t.Setenv("CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY", "0")
 	t.Setenv("CLIENT_SESSION_REUSE", "0")
 	t.Setenv("CLIENT_PATH_PROFILE", "2hop")
+	t.Setenv("CLIENT_STICKY_PAIR_SEC", "111")
+	t.Setenv("CLIENT_ENTRY_ROTATION_SEC", "222")
+	t.Setenv("CLIENT_ENTRY_ROTATION_JITTER_PCT", "33")
+	t.Setenv("CLIENT_EXIT_EXPLORATION_PCT", "44")
 	t.Setenv("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE", "2hop")
 	t.Setenv("LOCAL_CONTROL_API_CONNECT_RUN_PREFLIGHT", "1")
 	t.Setenv("LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT", "0")
@@ -101,6 +117,18 @@ func TestApplyConfigFileV1RespectsExistingEnv(t *testing.T) {
 	if got := os.Getenv("CLIENT_PATH_PROFILE"); got != "2hop" {
 		t.Fatalf("expected existing path profile env to be preserved, got %q", got)
 	}
+	if got := os.Getenv("CLIENT_STICKY_PAIR_SEC"); got != "111" {
+		t.Fatalf("expected existing sticky env to be preserved, got %q", got)
+	}
+	if got := os.Getenv("CLIENT_ENTRY_ROTATION_SEC"); got != "222" {
+		t.Fatalf("expected existing entry rotation env to be preserved, got %q", got)
+	}
+	if got := os.Getenv("CLIENT_ENTRY_ROTATION_JITTER_PCT"); got != "33" {
+		t.Fatalf("expected existing entry jitter env to be preserved, got %q", got)
+	}
+	if got := os.Getenv("CLIENT_EXIT_EXPLORATION_PCT"); got != "44" {
+		t.Fatalf("expected existing exit exploration env to be preserved, got %q", got)
+	}
 	if got := os.Getenv("LOCAL_CONTROL_API_CONNECT_PATH_PROFILE"); got != "2hop" {
 		t.Fatalf("expected existing localapi path env to be preserved, got %q", got)
 	}
@@ -109,6 +137,73 @@ func TestApplyConfigFileV1RespectsExistingEnv(t *testing.T) {
 	}
 	if got := os.Getenv("LOCAL_CONTROL_API_CONNECT_PROD_PROFILE_DEFAULT"); got != "0" {
 		t.Fatalf("expected existing localapi prod env to be preserved, got %q", got)
+	}
+}
+
+func TestApplyConfigFileV1ProfileSelectionPolicyDefaults(t *testing.T) {
+	tests := []struct {
+		name                      string
+		simpleClientProfile       string
+		wantPathProfile           string
+		wantStickyPairSec         string
+		wantEntryRotationSec      string
+		wantEntryRotationJitter   string
+		wantExitExplorationPct    string
+	}{
+		{
+			name:                    "balanced defaults to 2hop policy",
+			simpleClientProfile:     "balanced",
+			wantPathProfile:         "2hop",
+			wantStickyPairSec:       "300",
+			wantEntryRotationSec:    "180",
+			wantEntryRotationJitter: "15",
+			wantExitExplorationPct:  "10",
+		},
+		{
+			name:                    "private maps to 3hop policy",
+			simpleClientProfile:     "private",
+			wantPathProfile:         "3hop",
+			wantStickyPairSec:       "420",
+			wantEntryRotationSec:    "240",
+			wantEntryRotationJitter: "10",
+			wantExitExplorationPct:  "5",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "easy_mode_config_v1.conf")
+			if err := os.WriteFile(path, []byte(
+				"EASY_MODE_CONFIG_VERSION=1\n"+
+					"SIMPLE_CLIENT_PROFILE_DEFAULT="+tc.simpleClientProfile+"\n",
+			), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			t.Setenv("CLIENT_PATH_PROFILE", "")
+			t.Setenv("CLIENT_STICKY_PAIR_SEC", "")
+			t.Setenv("CLIENT_ENTRY_ROTATION_SEC", "")
+			t.Setenv("CLIENT_ENTRY_ROTATION_JITTER_PCT", "")
+			t.Setenv("CLIENT_EXIT_EXPLORATION_PCT", "")
+
+			if err := applyConfigFile(path); err != nil {
+				t.Fatalf("applyConfigFile: %v", err)
+			}
+			if got := os.Getenv("CLIENT_PATH_PROFILE"); got != tc.wantPathProfile {
+				t.Fatalf("CLIENT_PATH_PROFILE=%q want %q", got, tc.wantPathProfile)
+			}
+			if got := os.Getenv("CLIENT_STICKY_PAIR_SEC"); got != tc.wantStickyPairSec {
+				t.Fatalf("CLIENT_STICKY_PAIR_SEC=%q want %q", got, tc.wantStickyPairSec)
+			}
+			if got := os.Getenv("CLIENT_ENTRY_ROTATION_SEC"); got != tc.wantEntryRotationSec {
+				t.Fatalf("CLIENT_ENTRY_ROTATION_SEC=%q want %q", got, tc.wantEntryRotationSec)
+			}
+			if got := os.Getenv("CLIENT_ENTRY_ROTATION_JITTER_PCT"); got != tc.wantEntryRotationJitter {
+				t.Fatalf("CLIENT_ENTRY_ROTATION_JITTER_PCT=%q want %q", got, tc.wantEntryRotationJitter)
+			}
+			if got := os.Getenv("CLIENT_EXIT_EXPLORATION_PCT"); got != tc.wantExitExplorationPct {
+				t.Fatalf("CLIENT_EXIT_EXPLORATION_PCT=%q want %q", got, tc.wantExitExplorationPct)
+			}
+		})
 	}
 }
 

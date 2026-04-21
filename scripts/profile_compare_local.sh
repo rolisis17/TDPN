@@ -299,6 +299,22 @@ runtime_path_profile_from_compare_profile() {
   esac
 }
 
+selection_policy_defaults_from_profile() {
+  local profile
+  profile="$(normalize_path_profile_local "${1:-}" || true)"
+  case "$profile" in
+    private)
+      printf '%s %s %s %s\n' "420" "240" "10" "5"
+      ;;
+    speed-1hop)
+      printf '%s %s %s %s\n' "300" "120" "20" "20"
+      ;;
+    *)
+      printf '%s %s %s %s\n' "300" "180" "15" "10"
+      ;;
+  esac
+}
+
 prepare_log_dir() {
   local dir="${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
   mkdir -p "$dir"
@@ -544,34 +560,42 @@ if [[ -n "$subject" && -n "$anon_cred" ]]; then
   exit 2
 fi
 
-selection_policy_env_sticky_pair_sec="${CLIENT_STICKY_PAIR_SEC:-0}"
-if ! [[ "$selection_policy_env_sticky_pair_sec" =~ ^[0-9]+$ ]]; then
-  selection_policy_env_sticky_pair_sec="0"
+selection_policy_env_sticky_pair_sec="0"
+selection_policy_env_sticky_pair_sec_set="0"
+if [[ -n "${CLIENT_STICKY_PAIR_SEC+x}" && "$CLIENT_STICKY_PAIR_SEC" =~ ^[0-9]+$ ]]; then
+  selection_policy_env_sticky_pair_sec="$CLIENT_STICKY_PAIR_SEC"
+  selection_policy_env_sticky_pair_sec_set="1"
 fi
 
-selection_policy_env_entry_rotation_sec="${CLIENT_ENTRY_ROTATION_SEC:-0}"
-if ! [[ "$selection_policy_env_entry_rotation_sec" =~ ^[0-9]+$ ]]; then
-  selection_policy_env_entry_rotation_sec="0"
+selection_policy_env_entry_rotation_sec="0"
+selection_policy_env_entry_rotation_sec_set="0"
+if [[ -n "${CLIENT_ENTRY_ROTATION_SEC+x}" && "$CLIENT_ENTRY_ROTATION_SEC" =~ ^[0-9]+$ ]]; then
+  selection_policy_env_entry_rotation_sec="$CLIENT_ENTRY_ROTATION_SEC"
+  selection_policy_env_entry_rotation_sec_set="1"
 fi
 
-selection_policy_env_entry_rotation_jitter_pct="${CLIENT_ENTRY_ROTATION_JITTER_PCT:-0}"
-if ! [[ "$selection_policy_env_entry_rotation_jitter_pct" =~ ^-?[0-9]+$ ]]; then
-  selection_policy_env_entry_rotation_jitter_pct="0"
-fi
-if ((selection_policy_env_entry_rotation_jitter_pct < 0)); then
-  selection_policy_env_entry_rotation_jitter_pct="0"
-elif ((selection_policy_env_entry_rotation_jitter_pct > 90)); then
-  selection_policy_env_entry_rotation_jitter_pct="90"
+selection_policy_env_entry_rotation_jitter_pct="0"
+selection_policy_env_entry_rotation_jitter_pct_set="0"
+if [[ -n "${CLIENT_ENTRY_ROTATION_JITTER_PCT+x}" && "$CLIENT_ENTRY_ROTATION_JITTER_PCT" =~ ^-?[0-9]+$ ]]; then
+  selection_policy_env_entry_rotation_jitter_pct="$CLIENT_ENTRY_ROTATION_JITTER_PCT"
+  if ((selection_policy_env_entry_rotation_jitter_pct < 0)); then
+    selection_policy_env_entry_rotation_jitter_pct="0"
+  elif ((selection_policy_env_entry_rotation_jitter_pct > 90)); then
+    selection_policy_env_entry_rotation_jitter_pct="90"
+  fi
+  selection_policy_env_entry_rotation_jitter_pct_set="1"
 fi
 
-selection_policy_env_exit_exploration_pct="${CLIENT_EXIT_EXPLORATION_PCT:-10}"
-if ! [[ "$selection_policy_env_exit_exploration_pct" =~ ^-?[0-9]+$ ]]; then
-  selection_policy_env_exit_exploration_pct="10"
-fi
-if ((selection_policy_env_exit_exploration_pct < 0)); then
-  selection_policy_env_exit_exploration_pct="0"
-elif ((selection_policy_env_exit_exploration_pct > 100)); then
-  selection_policy_env_exit_exploration_pct="100"
+selection_policy_env_exit_exploration_pct="0"
+selection_policy_env_exit_exploration_pct_set="0"
+if [[ -n "${CLIENT_EXIT_EXPLORATION_PCT+x}" && "$CLIENT_EXIT_EXPLORATION_PCT" =~ ^-?[0-9]+$ ]]; then
+  selection_policy_env_exit_exploration_pct="$CLIENT_EXIT_EXPLORATION_PCT"
+  if ((selection_policy_env_exit_exploration_pct < 0)); then
+    selection_policy_env_exit_exploration_pct="0"
+  elif ((selection_policy_env_exit_exploration_pct > 100)); then
+    selection_policy_env_exit_exploration_pct="100"
+  fi
+  selection_policy_env_exit_exploration_pct_set="1"
 fi
 
 IFS=',' read -r -a raw_profiles <<<"$profiles_csv"
@@ -959,22 +983,42 @@ for profile in "${profiles[@]}"; do
     if printf '%s\n' "$startup_line" | rg -q 'direct_exit_forced=true'; then
       direct_exit_forced="true"
     fi
+    read -r selection_policy_profile_default_sticky_pair_sec \
+      selection_policy_profile_default_entry_rotation_sec \
+      selection_policy_profile_default_entry_rotation_jitter_pct \
+      selection_policy_profile_default_exit_exploration_pct <<<"$(selection_policy_defaults_from_profile "$profile")"
     selection_policy_sticky_pair_sec="$(extract_metric_from_line_optional "$startup_line" "sticky_pair_sec")"
     selection_policy_entry_rotation_sec="$(extract_metric_from_line_optional "$startup_line" "entry_rotation_sec")"
     selection_policy_entry_rotation_jitter_pct="$(extract_metric_from_line_optional "$startup_line" "entry_rotation_jitter_pct")"
     selection_policy_exit_exploration_pct="$(extract_metric_from_line_optional "$startup_line" "exit_exploration_pct")"
     selection_policy_path_profile="$(extract_text_from_line_optional "$startup_line" "path_profile")"
     if [[ -z "$selection_policy_sticky_pair_sec" ]]; then
-      selection_policy_sticky_pair_sec="$selection_policy_env_sticky_pair_sec"
+      if [[ "$selection_policy_env_sticky_pair_sec_set" == "1" ]]; then
+        selection_policy_sticky_pair_sec="$selection_policy_env_sticky_pair_sec"
+      else
+        selection_policy_sticky_pair_sec="$selection_policy_profile_default_sticky_pair_sec"
+      fi
     fi
     if [[ -z "$selection_policy_entry_rotation_sec" ]]; then
-      selection_policy_entry_rotation_sec="$selection_policy_env_entry_rotation_sec"
+      if [[ "$selection_policy_env_entry_rotation_sec_set" == "1" ]]; then
+        selection_policy_entry_rotation_sec="$selection_policy_env_entry_rotation_sec"
+      else
+        selection_policy_entry_rotation_sec="$selection_policy_profile_default_entry_rotation_sec"
+      fi
     fi
     if [[ -z "$selection_policy_entry_rotation_jitter_pct" ]]; then
-      selection_policy_entry_rotation_jitter_pct="$selection_policy_env_entry_rotation_jitter_pct"
+      if [[ "$selection_policy_env_entry_rotation_jitter_pct_set" == "1" ]]; then
+        selection_policy_entry_rotation_jitter_pct="$selection_policy_env_entry_rotation_jitter_pct"
+      else
+        selection_policy_entry_rotation_jitter_pct="$selection_policy_profile_default_entry_rotation_jitter_pct"
+      fi
     fi
     if [[ -z "$selection_policy_exit_exploration_pct" ]]; then
-      selection_policy_exit_exploration_pct="$selection_policy_env_exit_exploration_pct"
+      if [[ "$selection_policy_env_exit_exploration_pct_set" == "1" ]]; then
+        selection_policy_exit_exploration_pct="$selection_policy_env_exit_exploration_pct"
+      else
+        selection_policy_exit_exploration_pct="$selection_policy_profile_default_exit_exploration_pct"
+      fi
     fi
     if [[ -z "$selection_policy_path_profile" ]]; then
       selection_policy_path_profile="$(runtime_path_profile_from_compare_profile "$profile")"
@@ -996,11 +1040,27 @@ done
 
 runs_json="$(jq -s '.' "$runs_file")"
 default_selection_policy_path_profile="$(runtime_path_profile_from_compare_profile "${profiles[0]}")"
+read -r selection_policy_summary_fallback_sticky_pair_sec \
+  selection_policy_summary_fallback_entry_rotation_sec \
+  selection_policy_summary_fallback_entry_rotation_jitter_pct \
+  selection_policy_summary_fallback_exit_exploration_pct <<<"$(selection_policy_defaults_from_profile "${profiles[0]}")"
+if [[ "$selection_policy_env_sticky_pair_sec_set" == "1" ]]; then
+  selection_policy_summary_fallback_sticky_pair_sec="$selection_policy_env_sticky_pair_sec"
+fi
+if [[ "$selection_policy_env_entry_rotation_sec_set" == "1" ]]; then
+  selection_policy_summary_fallback_entry_rotation_sec="$selection_policy_env_entry_rotation_sec"
+fi
+if [[ "$selection_policy_env_entry_rotation_jitter_pct_set" == "1" ]]; then
+  selection_policy_summary_fallback_entry_rotation_jitter_pct="$selection_policy_env_entry_rotation_jitter_pct"
+fi
+if [[ "$selection_policy_env_exit_exploration_pct_set" == "1" ]]; then
+  selection_policy_summary_fallback_exit_exploration_pct="$selection_policy_env_exit_exploration_pct"
+fi
 selection_policy_summary_json="$(jq \
-  --argjson fallback_sticky_pair_sec "$selection_policy_env_sticky_pair_sec" \
-  --argjson fallback_entry_rotation_sec "$selection_policy_env_entry_rotation_sec" \
-  --argjson fallback_entry_rotation_jitter_pct "$selection_policy_env_entry_rotation_jitter_pct" \
-  --argjson fallback_exit_exploration_pct "$selection_policy_env_exit_exploration_pct" \
+  --argjson fallback_sticky_pair_sec "$selection_policy_summary_fallback_sticky_pair_sec" \
+  --argjson fallback_entry_rotation_sec "$selection_policy_summary_fallback_entry_rotation_sec" \
+  --argjson fallback_entry_rotation_jitter_pct "$selection_policy_summary_fallback_entry_rotation_jitter_pct" \
+  --argjson fallback_exit_exploration_pct "$selection_policy_summary_fallback_exit_exploration_pct" \
   --arg fallback_path_profile "$default_selection_policy_path_profile" \
   '([.[] | select(.status != "skip") | .selection_policy] | .[0]) // {
     sticky_pair_sec: $fallback_sticky_pair_sec,

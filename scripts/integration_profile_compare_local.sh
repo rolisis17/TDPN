@@ -74,22 +74,17 @@ case "$cmd" in
       direct_forced="true"
     fi
     policy_path_profile="2hop"
-    sticky_pair_sec="0"
-    entry_rotation_sec="0"
-    entry_rotation_jitter_pct="0"
-    exit_exploration_pct="10"
     case "$profile" in
       private)
         policy_path_profile="3hop"
         ;;
       speed-1hop)
         policy_path_profile="1hop"
-        sticky_pair_sec="300"
         ;;
     esac
 
     {
-      echo "2026/03/24 12:00:00 client role enabled: path_profile=${policy_path_profile} sticky_pair_sec=${sticky_pair_sec} entry_rotation_sec=${entry_rotation_sec} entry_rotation_jitter_pct=${entry_rotation_jitter_pct} exit_exploration_pct=${exit_exploration_pct} direct_exit_forced=${direct_forced}"
+      echo "2026/03/24 12:00:00 client role enabled: path_profile=${policy_path_profile} direct_exit_forced=${direct_forced}"
       if [[ "$profile" == "speed" ]]; then
         echo "2026/03/24 12:00:01 client bootstrap retry failed: transient"
       fi
@@ -157,11 +152,11 @@ if ! jq -e '
   and .summary.runs_total == 8
   and .summary.runs_executed == 8
   and .summary.runs_fail == 1
-  and (.summary.selection_policy.sticky_pair_sec | type == "number")
-  and (.summary.selection_policy.entry_rotation_sec | type == "number")
-  and (.summary.selection_policy.entry_rotation_jitter_pct | type == "number")
-  and (.summary.selection_policy.exit_exploration_pct | type == "number")
-  and (.summary.selection_policy.path_profile | type == "string")
+  and .summary.selection_policy.sticky_pair_sec == 300
+  and .summary.selection_policy.entry_rotation_sec == 180
+  and .summary.selection_policy.entry_rotation_jitter_pct == 15
+  and .summary.selection_policy.exit_exploration_pct == 10
+  and .summary.selection_policy.path_profile == "2hop"
   and .decision.recommended_default_profile == "balanced"
   and ([.profiles[] | select(.profile == "speed-1hop")][0].direct_exit_forced_runs == 2)
 ' "$SUMMARY_JSON" >/dev/null; then
@@ -187,6 +182,74 @@ for expected in 'client_inner_source=udp' 'disable_synthetic_fallback=1' 'data_p
     exit 1
   fi
 done
+
+PRIVATE_DEFAULT_SUMMARY_JSON="$TMP_DIR/profile_compare_private_default_summary.json"
+PRIVATE_DEFAULT_REPORT_MD="$TMP_DIR/profile_compare_private_default_report.md"
+PRIVATE_DEFAULT_RUN_LOG="$TMP_DIR/profile_compare_private_default_run.log"
+
+echo "[profile-compare-local] private default selection policy fallback"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles private \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://dir-private:8081 \
+  --issuer-url http://issuer-private:8082 \
+  --entry-url http://entry-private:8083 \
+  --exit-url http://exit-private:8084 \
+  --summary-json "$PRIVATE_DEFAULT_SUMMARY_JSON" \
+  --report-md "$PRIVATE_DEFAULT_REPORT_MD" \
+  --print-summary-json 0 >"$PRIVATE_DEFAULT_RUN_LOG"
+
+if ! jq -e '
+  .status == "pass"
+  and .summary.selection_policy.sticky_pair_sec == 420
+  and .summary.selection_policy.entry_rotation_sec == 240
+  and .summary.selection_policy.entry_rotation_jitter_pct == 10
+  and .summary.selection_policy.exit_exploration_pct == 5
+  and .summary.selection_policy.path_profile == "3hop"
+' "$PRIVATE_DEFAULT_SUMMARY_JSON" >/dev/null; then
+  echo "private summary json missing expected selection policy defaults"
+  cat "$PRIVATE_DEFAULT_SUMMARY_JSON"
+  exit 1
+fi
+
+SPEED_1HOP_DEFAULT_SUMMARY_JSON="$TMP_DIR/profile_compare_speed_1hop_default_summary.json"
+SPEED_1HOP_DEFAULT_REPORT_MD="$TMP_DIR/profile_compare_speed_1hop_default_report.md"
+SPEED_1HOP_DEFAULT_RUN_LOG="$TMP_DIR/profile_compare_speed_1hop_default_run.log"
+
+echo "[profile-compare-local] speed-1hop default selection policy fallback"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles speed-1hop \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://dir-speed-1hop:8081 \
+  --issuer-url http://issuer-speed-1hop:8082 \
+  --entry-url http://entry-speed-1hop:8083 \
+  --exit-url http://exit-speed-1hop:8084 \
+  --summary-json "$SPEED_1HOP_DEFAULT_SUMMARY_JSON" \
+  --report-md "$SPEED_1HOP_DEFAULT_REPORT_MD" \
+  --print-summary-json 0 >"$SPEED_1HOP_DEFAULT_RUN_LOG"
+
+if ! jq -e '
+  .status == "pass"
+  and .summary.selection_policy.sticky_pair_sec == 300
+  and .summary.selection_policy.entry_rotation_sec == 120
+  and .summary.selection_policy.entry_rotation_jitter_pct == 20
+  and .summary.selection_policy.exit_exploration_pct == 20
+  and .summary.selection_policy.path_profile == "1hop"
+' "$SPEED_1HOP_DEFAULT_SUMMARY_JSON" >/dev/null; then
+  echo "speed-1hop summary json missing expected selection policy defaults"
+  cat "$SPEED_1HOP_DEFAULT_SUMMARY_JSON"
+  exit 1
+fi
 
 LOOPBACK_SUMMARY_JSON="$TMP_DIR/profile_compare_loopback_summary.json"
 LOOPBACK_REPORT_MD="$TMP_DIR/profile_compare_loopback_report.md"

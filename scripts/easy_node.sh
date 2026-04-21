@@ -1214,19 +1214,19 @@ path_profile_values() {
   profile="$(normalize_path_profile "${1:-}")" || return 1
   case "$profile" in
     fast)
-      # distinct_operators|distinct_countries|locality_soft_bias|country_bias|region_bias|region_prefix_bias
-      printf '%s\n' "1|0|1|1.80|1.35|1.15"
+      # distinct_operators|distinct_countries|locality_soft_bias|country_bias|region_bias|region_prefix_bias|sticky_pair_sec|entry_rotation_sec|entry_rotation_jitter_pct|exit_exploration_pct
+      printf '%s\n' "1|0|1|1.80|1.35|1.15|180|120|20|25"
       ;;
     speed-1hop)
       # speed-1hop uses speed locality defaults; client-test applies one-hop-only
       # safety overrides (non-strict mode, direct-exit path) separately.
-      printf '%s\n' "1|0|1|1.80|1.35|1.15"
+      printf '%s\n' "1|0|1|1.80|1.35|1.15|300|120|20|20"
       ;;
     privacy)
-      printf '%s\n' "1|1|0|1.60|1.25|1.10"
+      printf '%s\n' "1|1|0|1.60|1.25|1.10|420|240|10|5"
       ;;
     balanced|"")
-      printf '%s\n' "1|0|1|1.50|1.25|1.10"
+      printf '%s\n' "1|0|1|1.50|1.25|1.10|300|180|15|10"
       ;;
     *)
       return 1
@@ -11963,7 +11963,10 @@ client_test() {
   local locality_country_bias="${CLIENT_EXIT_COUNTRY_BIAS:-1.60}"
   local locality_region_bias="${CLIENT_EXIT_REGION_BIAS:-1.25}"
   local locality_region_prefix_bias="${CLIENT_EXIT_REGION_PREFIX_BIAS:-1.10}"
+  local sticky_pair_sec="${CLIENT_STICKY_PAIR_SEC:-0}"
   local entry_rotation_sec="${CLIENT_ENTRY_ROTATION_SEC:-0}"
+  local entry_rotation_jitter_pct="${CLIENT_ENTRY_ROTATION_JITTER_PCT:-0}"
+  local exit_exploration_pct="${CLIENT_EXIT_EXPLORATION_PCT:-10}"
   local entry_rotation_seed="${CLIENT_ENTRY_ROTATION_SEED:-0}"
   local min_selection_lines="${EASY_NODE_CLIENT_MIN_SELECTION_LINES:-1}"
   local min_entry_operators="${EASY_NODE_CLIENT_MIN_ENTRY_OPERATORS:-1}"
@@ -11986,8 +11989,25 @@ client_test() {
   local locality_country_bias_set=0
   local locality_region_bias_set=0
   local locality_region_prefix_bias_set=0
+  local sticky_pair_sec_set=0
+  local entry_rotation_sec_set=0
+  local entry_rotation_jitter_pct_set=0
+  local exit_exploration_pct_set=0
   local speed_onehop_profile=0
   local force_direct_exit_set=0
+
+  if [[ -n "${CLIENT_STICKY_PAIR_SEC+x}" ]]; then
+    sticky_pair_sec_set=1
+  fi
+  if [[ -n "${CLIENT_ENTRY_ROTATION_SEC+x}" ]]; then
+    entry_rotation_sec_set=1
+  fi
+  if [[ -n "${CLIENT_ENTRY_ROTATION_JITTER_PCT+x}" ]]; then
+    entry_rotation_jitter_pct_set=1
+  fi
+  if [[ -n "${CLIENT_EXIT_EXPLORATION_PCT+x}" ]]; then
+    exit_exploration_pct_set=1
+  fi
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -12179,9 +12199,9 @@ client_test() {
     speed_onehop_profile=1
   fi
   if [[ -n "$normalized_path_profile" ]]; then
-    local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias
+    local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias profile_sticky_pair_sec profile_entry_rotation_sec profile_entry_rotation_jitter_pct profile_exit_exploration_pct
     profile_values="$(path_profile_values "$normalized_path_profile")"
-    IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"
+    IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias profile_sticky_pair_sec profile_entry_rotation_sec profile_entry_rotation_jitter_pct profile_exit_exploration_pct <<<"$profile_values"
     if [[ "$distinct_set" -eq 0 ]]; then
       require_distinct_operators="$profile_distinct"
     fi
@@ -12199,6 +12219,18 @@ client_test() {
     fi
     if [[ "$locality_region_prefix_bias_set" -eq 0 ]]; then
       locality_region_prefix_bias="$profile_region_prefix_bias"
+    fi
+    if [[ "$sticky_pair_sec_set" -eq 0 ]]; then
+      sticky_pair_sec="$profile_sticky_pair_sec"
+    fi
+    if [[ "$entry_rotation_sec_set" -eq 0 ]]; then
+      entry_rotation_sec="$profile_entry_rotation_sec"
+    fi
+    if [[ "$entry_rotation_jitter_pct_set" -eq 0 ]]; then
+      entry_rotation_jitter_pct="$profile_entry_rotation_jitter_pct"
+    fi
+    if [[ "$exit_exploration_pct_set" -eq 0 ]]; then
+      exit_exploration_pct="$profile_exit_exploration_pct"
     fi
   fi
   if [[ "$speed_onehop_profile" == "1" ]]; then
@@ -12249,8 +12281,20 @@ client_test() {
     echo "client-test requires CLIENT_REQUIRE_MIDDLE_RELAY to be 0 or 1 when set"
     exit 2
   fi
+  if ! [[ "$sticky_pair_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-test requires CLIENT_STICKY_PAIR_SEC to be a non-negative integer"
+    exit 2
+  fi
   if ! [[ "$entry_rotation_sec" =~ ^[0-9]+$ ]]; then
-    echo "client-test requires CLIENT_ENTRY_ROTATION_SEC to be numeric"
+    echo "client-test requires CLIENT_ENTRY_ROTATION_SEC to be a non-negative integer"
+    exit 2
+  fi
+  if ! [[ "$entry_rotation_jitter_pct" =~ ^[0-9]+$ ]] || ((entry_rotation_jitter_pct < 0 || entry_rotation_jitter_pct > 90)); then
+    echo "client-test requires CLIENT_ENTRY_ROTATION_JITTER_PCT to be an integer in range 0..90"
+    exit 2
+  fi
+  if ! [[ "$exit_exploration_pct" =~ ^[0-9]+$ ]] || ((exit_exploration_pct < 0 || exit_exploration_pct > 100)); then
+    echo "client-test requires CLIENT_EXIT_EXPLORATION_PCT to be an integer in range 0..100"
     exit 2
   fi
   if ! [[ "$entry_rotation_seed" =~ ^-?[0-9]+$ ]]; then
@@ -12427,7 +12471,10 @@ CLIENT_DIRECTORY_URL=${first_dir}
 CLIENT_ISSUER_URL=${issuer_url}
 CLIENT_ENTRY_URL=${entry_url}
 CLIENT_EXIT_CONTROL_URL=${exit_url}
+CLIENT_STICKY_PAIR_SEC=${sticky_pair_sec}
 CLIENT_ENTRY_ROTATION_SEC=${entry_rotation_sec}
+CLIENT_ENTRY_ROTATION_JITTER_PCT=${entry_rotation_jitter_pct}
+CLIENT_EXIT_EXPLORATION_PCT=${exit_exploration_pct}
 CLIENT_ENTRY_ROTATION_SEED=${entry_rotation_seed}
 EOF_CLIENT
 
@@ -12524,7 +12571,10 @@ EOF_CLIENT
       -e "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
       -e "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
       -e "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
+      -e "CLIENT_STICKY_PAIR_SEC=$sticky_pair_sec"
       -e "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
+      -e "CLIENT_ENTRY_ROTATION_JITTER_PCT=$entry_rotation_jitter_pct"
+      -e "CLIENT_EXIT_EXPLORATION_PCT=$exit_exploration_pct"
       -e "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
       -e "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       -e "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
@@ -12598,7 +12648,10 @@ EOF_CLIENT
       "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
       "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
       "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
+      "CLIENT_STICKY_PAIR_SEC=$sticky_pair_sec"
       "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
+      "CLIENT_ENTRY_ROTATION_JITTER_PCT=$entry_rotation_jitter_pct"
+      "CLIENT_EXIT_EXPLORATION_PCT=$exit_exploration_pct"
       "CLIENT_ENTRY_ROTATION_SEED=$entry_rotation_seed"
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
@@ -15166,6 +15219,10 @@ client_vpn_up() {
   local locality_country_bias="${CLIENT_EXIT_COUNTRY_BIAS:-1.60}"
   local locality_region_bias="${CLIENT_EXIT_REGION_BIAS:-1.25}"
   local locality_region_prefix_bias="${CLIENT_EXIT_REGION_PREFIX_BIAS:-1.10}"
+  local sticky_pair_sec="${CLIENT_STICKY_PAIR_SEC:-0}"
+  local entry_rotation_sec="${CLIENT_ENTRY_ROTATION_SEC:-0}"
+  local entry_rotation_jitter_pct="${CLIENT_ENTRY_ROTATION_JITTER_PCT:-0}"
+  local exit_exploration_pct="${CLIENT_EXIT_EXPLORATION_PCT:-10}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
@@ -15199,7 +15256,24 @@ client_vpn_up() {
   local locality_country_bias_set=0
   local locality_region_bias_set=0
   local locality_region_prefix_bias_set=0
+  local sticky_pair_sec_set=0
+  local entry_rotation_sec_set=0
+  local entry_rotation_jitter_pct_set=0
+  local exit_exploration_pct_set=0
   local speed_onehop_profile=0
+
+  if [[ -n "${CLIENT_STICKY_PAIR_SEC+x}" ]]; then
+    sticky_pair_sec_set=1
+  fi
+  if [[ -n "${CLIENT_ENTRY_ROTATION_SEC+x}" ]]; then
+    entry_rotation_sec_set=1
+  fi
+  if [[ -n "${CLIENT_ENTRY_ROTATION_JITTER_PCT+x}" ]]; then
+    entry_rotation_jitter_pct_set=1
+  fi
+  if [[ -n "${CLIENT_EXIT_EXPLORATION_PCT+x}" ]]; then
+    exit_exploration_pct_set=1
+  fi
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -15482,9 +15556,9 @@ client_vpn_up() {
     speed_onehop_profile=1
   fi
   if [[ -n "$normalized_path_profile" ]]; then
-    local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias
+    local profile_values profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias profile_sticky_pair_sec profile_entry_rotation_sec profile_entry_rotation_jitter_pct profile_exit_exploration_pct
     profile_values="$(path_profile_values "$normalized_path_profile")"
-    IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias <<<"$profile_values"
+    IFS='|' read -r profile_distinct profile_distinct_countries profile_locality_soft profile_country_bias profile_region_bias profile_region_prefix_bias profile_sticky_pair_sec profile_entry_rotation_sec profile_entry_rotation_jitter_pct profile_exit_exploration_pct <<<"$profile_values"
     if [[ "$distinct_set" -eq 0 ]]; then
       require_distinct_operators="$profile_distinct"
     fi
@@ -15502,6 +15576,18 @@ client_vpn_up() {
     fi
     if [[ "$locality_region_prefix_bias_set" -eq 0 ]]; then
       locality_region_prefix_bias="$profile_region_prefix_bias"
+    fi
+    if [[ "$sticky_pair_sec_set" -eq 0 ]]; then
+      sticky_pair_sec="$profile_sticky_pair_sec"
+    fi
+    if [[ "$entry_rotation_sec_set" -eq 0 ]]; then
+      entry_rotation_sec="$profile_entry_rotation_sec"
+    fi
+    if [[ "$entry_rotation_jitter_pct_set" -eq 0 ]]; then
+      entry_rotation_jitter_pct="$profile_entry_rotation_jitter_pct"
+    fi
+    if [[ "$exit_exploration_pct_set" -eq 0 ]]; then
+      exit_exploration_pct="$profile_exit_exploration_pct"
     fi
   fi
   if [[ "$speed_onehop_profile" == "1" && "$distinct_set" -eq 0 ]]; then
@@ -15524,6 +15610,22 @@ client_vpn_up() {
   fi
   if [[ "$locality_soft_bias" != "0" && "$locality_soft_bias" != "1" ]]; then
     echo "client-vpn-up requires --locality-soft-bias 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$sticky_pair_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-vpn-up requires CLIENT_STICKY_PAIR_SEC >= 0"
+    exit 2
+  fi
+  if ! [[ "$entry_rotation_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-vpn-up requires CLIENT_ENTRY_ROTATION_SEC >= 0"
+    exit 2
+  fi
+  if ! [[ "$entry_rotation_jitter_pct" =~ ^[0-9]+$ ]] || ((entry_rotation_jitter_pct < 0 || entry_rotation_jitter_pct > 90)); then
+    echo "client-vpn-up requires CLIENT_ENTRY_ROTATION_JITTER_PCT in range 0..90"
+    exit 2
+  fi
+  if ! [[ "$exit_exploration_pct" =~ ^[0-9]+$ ]] || ((exit_exploration_pct < 0 || exit_exploration_pct > 100)); then
+    echo "client-vpn-up requires CLIENT_EXIT_EXPLORATION_PCT in range 0..100"
     exit 2
   fi
   if ! [[ "$locality_country_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_bias" =~ ^[0-9]+([.][0-9]+)?$ && "$locality_region_prefix_bias" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
@@ -15923,6 +16025,10 @@ client_vpn_up() {
     "CLIENT_EXIT_COUNTRY_BIAS=$locality_country_bias"
     "CLIENT_EXIT_REGION_BIAS=$locality_region_bias"
     "CLIENT_EXIT_REGION_PREFIX_BIAS=$locality_region_prefix_bias"
+    "CLIENT_STICKY_PAIR_SEC=$sticky_pair_sec"
+    "CLIENT_ENTRY_ROTATION_SEC=$entry_rotation_sec"
+    "CLIENT_ENTRY_ROTATION_JITTER_PCT=$entry_rotation_jitter_pct"
+    "CLIENT_EXIT_EXPLORATION_PCT=$exit_exploration_pct"
     "CLIENT_BOOTSTRAP_INTERVAL_SEC=2"
     "CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC=4"
     "CLIENT_BOOTSTRAP_JITTER_PCT=10"
@@ -15939,10 +16045,10 @@ client_vpn_up() {
       "CLIENT_FORCE_DIRECT_EXIT=1"
     )
     if [[ "$allow_session_churn" != "1" ]]; then
-      env_vars+=(
-        "CLIENT_SESSION_REUSE=1"
-        "CLIENT_STICKY_PAIR_SEC=300"
-      )
+      env_vars+=("CLIENT_SESSION_REUSE=1")
+      if [[ "$sticky_pair_sec_set" -eq 0 ]]; then
+        env_vars+=("CLIENT_STICKY_PAIR_SEC=300")
+      fi
     fi
   fi
   if [[ -n "$client_subject" ]]; then
