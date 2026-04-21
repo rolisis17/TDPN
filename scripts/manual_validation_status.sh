@@ -610,6 +610,61 @@ profile_default_gate_stability_cycle_summary_usable_01() {
   fi
 }
 
+profile_compare_multi_vm_stability_check_summary_usable_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (. | type) == "object"
+    and (.version == 1)
+    and (
+      ((.schema // null) == null)
+      or (((.schema | type) == "object") and ((.schema.id // "") == "profile_compare_multi_vm_stability_check_summary"))
+    )
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and ((.rc | type) == "number")
+    and ((.observed | type) == "object")
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+profile_compare_multi_vm_stability_cycle_summary_usable_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (. | type) == "object"
+    and (.version == 1)
+    and (
+      ((.schema // null) == null)
+      or (((.schema | type) == "object") and ((.schema.id // "") == "profile_compare_multi_vm_stability_cycle_summary"))
+    )
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and ((.rc | type) == "number")
+    and (
+      (.failure_stage == null)
+      or ((.failure_stage | type) == "string")
+    )
+    and (
+      (.failure_reason == null)
+      or ((.failure_reason | type) == "string")
+    )
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 resolve_signoff_artifact_path() {
   local signoff_summary_json="$1"
   local artifact_path="$2"
@@ -1040,6 +1095,34 @@ build_profile_default_gate_json() {
   local profile_default_gate_stability_cycle_rc_json="null"
   local profile_default_gate_stability_cycle_failure_stage=""
   local profile_default_gate_stability_cycle_failure_reason=""
+  local profile_compare_multi_vm_stability_check_summary_json=""
+  local profile_compare_multi_vm_stability_check_summary_json_raw=""
+  local profile_compare_multi_vm_stability_check_summary_available_json="false"
+  local profile_compare_multi_vm_stability_check_decision=""
+  local profile_compare_multi_vm_stability_check_decision_normalized=""
+  local profile_compare_multi_vm_stability_check_status=""
+  local profile_compare_multi_vm_stability_check_rc_json="null"
+  local profile_compare_multi_vm_stability_check_modal_recommended_profile=""
+  local profile_compare_multi_vm_stability_check_modal_support_rate_pct_json="null"
+  local profile_compare_multi_vm_stability_cycle_summary_json=""
+  local profile_compare_multi_vm_stability_cycle_summary_json_raw=""
+  local profile_compare_multi_vm_stability_cycle_summary_available_json="false"
+  local profile_compare_multi_vm_stability_cycle_decision=""
+  local profile_compare_multi_vm_stability_cycle_decision_normalized=""
+  local profile_compare_multi_vm_stability_cycle_status=""
+  local profile_compare_multi_vm_stability_cycle_rc_json="null"
+  local profile_compare_multi_vm_stability_cycle_failure_stage=""
+  local profile_compare_multi_vm_stability_cycle_failure_reason=""
+  local profile_compare_multi_vm_stability_cycle_modal_recommended_profile=""
+  local profile_compare_multi_vm_stability_cycle_modal_support_rate_pct_json="null"
+  local profile_compare_multi_vm_stability_summary_json=""
+  local profile_compare_multi_vm_stability_source=""
+  local profile_compare_multi_vm_stability_available_json="false"
+  local profile_compare_multi_vm_stability_status=""
+  local profile_compare_multi_vm_stability_decision=""
+  local profile_compare_multi_vm_stability_decision_normalized=""
+  local profile_compare_multi_vm_stability_modal_recommended_profile=""
+  local profile_compare_multi_vm_stability_modal_support_rate_pct_json="null"
 
   if [[ ! "$campaign_timeout_sec_default" =~ ^[0-9]+$ ]]; then
     campaign_timeout_sec_default="2400"
@@ -1056,6 +1139,8 @@ build_profile_default_gate_json() {
   fi
   profile_default_gate_stability_check_summary_json="$(abs_path "$reports_dir/profile_default_gate_stability_check_summary.json")"
   profile_default_gate_stability_cycle_summary_json="$(abs_path "$reports_dir/profile_default_gate_stability_cycle_summary.json")"
+  profile_compare_multi_vm_stability_check_summary_json="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_check_summary.json")"
+  profile_compare_multi_vm_stability_cycle_summary_json="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_cycle_summary.json")"
   next_command_default="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
   next_command_no_sudo="$next_command_default"
   next_command="$next_command_default"
@@ -1179,6 +1264,14 @@ build_profile_default_gate_json() {
     profile_default_gate_stability_cycle_summary_json_raw="$(jq -r '.artifacts.profile_default_gate_stability_cycle_summary_json // ""' "$signoff_summary_json")"
     if [[ -n "$profile_default_gate_stability_cycle_summary_json_raw" ]]; then
       profile_default_gate_stability_cycle_summary_json="$(resolve_signoff_artifact_path "$signoff_summary_json" "$profile_default_gate_stability_cycle_summary_json_raw")"
+    fi
+    profile_compare_multi_vm_stability_check_summary_json_raw="$(jq -r '.artifacts.profile_compare_multi_vm_stability_check_summary_json // .artifacts.multi_vm_stability_check_summary_json // ""' "$signoff_summary_json")"
+    if [[ -n "$profile_compare_multi_vm_stability_check_summary_json_raw" ]]; then
+      profile_compare_multi_vm_stability_check_summary_json="$(resolve_signoff_artifact_path "$signoff_summary_json" "$profile_compare_multi_vm_stability_check_summary_json_raw")"
+    fi
+    profile_compare_multi_vm_stability_cycle_summary_json_raw="$(jq -r '.artifacts.profile_compare_multi_vm_stability_cycle_summary_json // .artifacts.multi_vm_stability_cycle_summary_json // ""' "$signoff_summary_json")"
+    if [[ -n "$profile_compare_multi_vm_stability_cycle_summary_json_raw" ]]; then
+      profile_compare_multi_vm_stability_cycle_summary_json="$(resolve_signoff_artifact_path "$signoff_summary_json" "$profile_compare_multi_vm_stability_cycle_summary_json_raw")"
     fi
     campaign_summary_json_resolved="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_summary_json")"
     campaign_report_md_resolved="$(resolve_signoff_artifact_path "$signoff_summary_json" "$campaign_report_md")"
@@ -1304,6 +1397,96 @@ build_profile_default_gate_json() {
     ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
   fi
 
+  if [[ -n "$profile_compare_multi_vm_stability_check_summary_json" ]] \
+    && [[ "$(profile_compare_multi_vm_stability_check_summary_usable_01 "$profile_compare_multi_vm_stability_check_summary_json")" == "1" ]]; then
+    profile_compare_multi_vm_stability_check_summary_available_json="true"
+    profile_compare_multi_vm_stability_check_decision="$(jq -r '
+      if (.decision | type) == "string" then .decision else "" end
+    ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_check_status="$(jq -r '
+      if (.status | type) == "string" then .status else "" end
+    ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_check_rc_json="$(jq -r '
+      if (.rc | type) == "number" then .rc else "null" end
+    ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+    profile_compare_multi_vm_stability_check_modal_recommended_profile="$(jq -r '
+      if (.observed.modal_recommended_profile | type) == "string" then .observed.modal_recommended_profile
+      else ""
+      end
+    ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_check_modal_support_rate_pct_json="$(jq -r '
+      if (.observed.modal_support_rate_pct | type) == "number" then .observed.modal_support_rate_pct
+      else "null"
+      end
+    ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+    profile_compare_multi_vm_stability_check_decision_normalized="$(printf '%s' "$profile_compare_multi_vm_stability_check_decision" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]_-')"
+    if [[ "$profile_compare_multi_vm_stability_check_decision_normalized" == "NOGO" ]]; then
+      profile_compare_multi_vm_stability_check_decision_normalized="NO-GO"
+    elif [[ "$profile_compare_multi_vm_stability_check_decision_normalized" == "GO" ]]; then
+      profile_compare_multi_vm_stability_check_decision_normalized="GO"
+    else
+      profile_compare_multi_vm_stability_check_decision_normalized=""
+    fi
+  fi
+
+  if [[ -n "$profile_compare_multi_vm_stability_cycle_summary_json" ]] \
+    && [[ "$(profile_compare_multi_vm_stability_cycle_summary_usable_01 "$profile_compare_multi_vm_stability_cycle_summary_json")" == "1" ]]; then
+    profile_compare_multi_vm_stability_cycle_summary_available_json="true"
+    profile_compare_multi_vm_stability_cycle_decision="$(jq -r '
+      if (.decision | type) == "string" then .decision else "" end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_cycle_status="$(jq -r '
+      if (.status | type) == "string" then .status else "" end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_cycle_rc_json="$(jq -r '
+      if (.rc | type) == "number" then .rc else "null" end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "null")"
+    profile_compare_multi_vm_stability_cycle_failure_stage="$(jq -r '
+      if (.failure_stage | type) == "string" then .failure_stage else "" end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_cycle_failure_reason="$(jq -r '
+      if (.failure_reason | type) == "string" then .failure_reason else "" end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_cycle_modal_recommended_profile="$(jq -r '
+      if (.check.modal_recommended_profile | type) == "string" then .check.modal_recommended_profile
+      else ""
+      end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    profile_compare_multi_vm_stability_cycle_modal_support_rate_pct_json="$(jq -r '
+      if (.check.modal_support_rate_pct | type) == "number" then .check.modal_support_rate_pct
+      else "null"
+      end
+    ' "$profile_compare_multi_vm_stability_cycle_summary_json" 2>/dev/null || printf '%s' "null")"
+    profile_compare_multi_vm_stability_cycle_decision_normalized="$(printf '%s' "$profile_compare_multi_vm_stability_cycle_decision" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]_-')"
+    if [[ "$profile_compare_multi_vm_stability_cycle_decision_normalized" == "NOGO" ]]; then
+      profile_compare_multi_vm_stability_cycle_decision_normalized="NO-GO"
+    elif [[ "$profile_compare_multi_vm_stability_cycle_decision_normalized" == "GO" ]]; then
+      profile_compare_multi_vm_stability_cycle_decision_normalized="GO"
+    else
+      profile_compare_multi_vm_stability_cycle_decision_normalized=""
+    fi
+  fi
+
+  if [[ "$profile_compare_multi_vm_stability_check_summary_available_json" == "true" ]]; then
+    profile_compare_multi_vm_stability_summary_json="$profile_compare_multi_vm_stability_check_summary_json"
+    profile_compare_multi_vm_stability_source="check_summary"
+    profile_compare_multi_vm_stability_available_json="true"
+    profile_compare_multi_vm_stability_status="$profile_compare_multi_vm_stability_check_status"
+    profile_compare_multi_vm_stability_decision="$profile_compare_multi_vm_stability_check_decision"
+    profile_compare_multi_vm_stability_decision_normalized="$profile_compare_multi_vm_stability_check_decision_normalized"
+    profile_compare_multi_vm_stability_modal_recommended_profile="$profile_compare_multi_vm_stability_check_modal_recommended_profile"
+    profile_compare_multi_vm_stability_modal_support_rate_pct_json="$profile_compare_multi_vm_stability_check_modal_support_rate_pct_json"
+  elif [[ "$profile_compare_multi_vm_stability_cycle_summary_available_json" == "true" ]]; then
+    profile_compare_multi_vm_stability_summary_json="$profile_compare_multi_vm_stability_cycle_summary_json"
+    profile_compare_multi_vm_stability_source="cycle_summary"
+    profile_compare_multi_vm_stability_available_json="true"
+    profile_compare_multi_vm_stability_status="$profile_compare_multi_vm_stability_cycle_status"
+    profile_compare_multi_vm_stability_decision="$profile_compare_multi_vm_stability_cycle_decision"
+    profile_compare_multi_vm_stability_decision_normalized="$profile_compare_multi_vm_stability_cycle_decision_normalized"
+    profile_compare_multi_vm_stability_modal_recommended_profile="$profile_compare_multi_vm_stability_cycle_modal_recommended_profile"
+    profile_compare_multi_vm_stability_modal_support_rate_pct_json="$profile_compare_multi_vm_stability_cycle_modal_support_rate_pct_json"
+  fi
+
   if [[ "$status" == "pending" ]]; then
     if [[ "$diagnostics_root_required" == "1" && "$docker_hint_requires_local_stack_root" == "1" ]]; then
       next_command="$next_command_sudo"
@@ -1393,6 +1576,32 @@ build_profile_default_gate_json() {
     --argjson profile_default_gate_stability_cycle_rc "$profile_default_gate_stability_cycle_rc_json" \
     --arg profile_default_gate_stability_cycle_failure_stage "$profile_default_gate_stability_cycle_failure_stage" \
     --arg profile_default_gate_stability_cycle_failure_reason "$profile_default_gate_stability_cycle_failure_reason" \
+    --arg profile_compare_multi_vm_stability_summary_json "$profile_compare_multi_vm_stability_summary_json" \
+    --arg profile_compare_multi_vm_stability_source "$profile_compare_multi_vm_stability_source" \
+    --argjson profile_compare_multi_vm_stability_available "$profile_compare_multi_vm_stability_available_json" \
+    --arg profile_compare_multi_vm_stability_status "$profile_compare_multi_vm_stability_status" \
+    --arg profile_compare_multi_vm_stability_decision "$profile_compare_multi_vm_stability_decision" \
+    --arg profile_compare_multi_vm_stability_decision_normalized "$profile_compare_multi_vm_stability_decision_normalized" \
+    --arg profile_compare_multi_vm_stability_modal_recommended_profile "$profile_compare_multi_vm_stability_modal_recommended_profile" \
+    --argjson profile_compare_multi_vm_stability_modal_support_rate_pct "$profile_compare_multi_vm_stability_modal_support_rate_pct_json" \
+    --arg profile_compare_multi_vm_stability_check_summary_json "$profile_compare_multi_vm_stability_check_summary_json" \
+    --argjson profile_compare_multi_vm_stability_check_summary_available "$profile_compare_multi_vm_stability_check_summary_available_json" \
+    --arg profile_compare_multi_vm_stability_check_status "$profile_compare_multi_vm_stability_check_status" \
+    --arg profile_compare_multi_vm_stability_check_decision "$profile_compare_multi_vm_stability_check_decision" \
+    --arg profile_compare_multi_vm_stability_check_decision_normalized "$profile_compare_multi_vm_stability_check_decision_normalized" \
+    --argjson profile_compare_multi_vm_stability_check_rc "$profile_compare_multi_vm_stability_check_rc_json" \
+    --arg profile_compare_multi_vm_stability_check_modal_recommended_profile "$profile_compare_multi_vm_stability_check_modal_recommended_profile" \
+    --argjson profile_compare_multi_vm_stability_check_modal_support_rate_pct "$profile_compare_multi_vm_stability_check_modal_support_rate_pct_json" \
+    --arg profile_compare_multi_vm_stability_cycle_summary_json "$profile_compare_multi_vm_stability_cycle_summary_json" \
+    --argjson profile_compare_multi_vm_stability_cycle_summary_available "$profile_compare_multi_vm_stability_cycle_summary_available_json" \
+    --arg profile_compare_multi_vm_stability_cycle_status "$profile_compare_multi_vm_stability_cycle_status" \
+    --arg profile_compare_multi_vm_stability_cycle_decision "$profile_compare_multi_vm_stability_cycle_decision" \
+    --arg profile_compare_multi_vm_stability_cycle_decision_normalized "$profile_compare_multi_vm_stability_cycle_decision_normalized" \
+    --argjson profile_compare_multi_vm_stability_cycle_rc "$profile_compare_multi_vm_stability_cycle_rc_json" \
+    --arg profile_compare_multi_vm_stability_cycle_failure_stage "$profile_compare_multi_vm_stability_cycle_failure_stage" \
+    --arg profile_compare_multi_vm_stability_cycle_failure_reason "$profile_compare_multi_vm_stability_cycle_failure_reason" \
+    --arg profile_compare_multi_vm_stability_cycle_modal_recommended_profile "$profile_compare_multi_vm_stability_cycle_modal_recommended_profile" \
+    --argjson profile_compare_multi_vm_stability_cycle_modal_support_rate_pct "$profile_compare_multi_vm_stability_cycle_modal_support_rate_pct_json" \
     --argjson available "$available" \
     --argjson valid_json "$valid_json" \
     '{
@@ -1466,6 +1675,125 @@ build_profile_default_gate_json() {
         else $profile_default_gate_stability_cycle_failure_reason
         end
       ),
+      multi_vm_stability_summary_json: (
+        if $profile_compare_multi_vm_stability_summary_json == "" then null
+        else $profile_compare_multi_vm_stability_summary_json
+        end
+      ),
+      multi_vm_stability_source: (
+        if $profile_compare_multi_vm_stability_source == "" then null
+        else $profile_compare_multi_vm_stability_source
+        end
+      ),
+      multi_vm_stability_available: $profile_compare_multi_vm_stability_available,
+      multi_vm_stability_status: (
+        if $profile_compare_multi_vm_stability_status == "" then null
+        else $profile_compare_multi_vm_stability_status
+        end
+      ),
+      multi_vm_stability_decision: (
+        if $profile_compare_multi_vm_stability_decision == "" then null
+        else $profile_compare_multi_vm_stability_decision
+        end
+      ),
+      multi_vm_stability_go: (
+        if $profile_compare_multi_vm_stability_decision_normalized == "GO" then true
+        elif $profile_compare_multi_vm_stability_decision_normalized == "NO-GO" then false
+        else null
+        end
+      ),
+      multi_vm_stability_no_go: (
+        if $profile_compare_multi_vm_stability_decision_normalized == "NO-GO" then true
+        elif $profile_compare_multi_vm_stability_decision_normalized == "GO" then false
+        else null
+        end
+      ),
+      multi_vm_stability_modal_recommended_profile: (
+        if $profile_compare_multi_vm_stability_modal_recommended_profile == "" then null
+        else $profile_compare_multi_vm_stability_modal_recommended_profile
+        end
+      ),
+      multi_vm_stability_modal_support_rate_pct: $profile_compare_multi_vm_stability_modal_support_rate_pct,
+      multi_vm_stability_check_summary_json: (
+        if $profile_compare_multi_vm_stability_check_summary_json == "" then null
+        else $profile_compare_multi_vm_stability_check_summary_json
+        end
+      ),
+      multi_vm_stability_check_summary_available: $profile_compare_multi_vm_stability_check_summary_available,
+      multi_vm_stability_check_status: (
+        if $profile_compare_multi_vm_stability_check_status == "" then null
+        else $profile_compare_multi_vm_stability_check_status
+        end
+      ),
+      multi_vm_stability_check_decision: (
+        if $profile_compare_multi_vm_stability_check_decision == "" then null
+        else $profile_compare_multi_vm_stability_check_decision
+        end
+      ),
+      multi_vm_stability_check_go: (
+        if $profile_compare_multi_vm_stability_check_decision_normalized == "GO" then true
+        elif $profile_compare_multi_vm_stability_check_decision_normalized == "NO-GO" then false
+        else null
+        end
+      ),
+      multi_vm_stability_check_no_go: (
+        if $profile_compare_multi_vm_stability_check_decision_normalized == "NO-GO" then true
+        elif $profile_compare_multi_vm_stability_check_decision_normalized == "GO" then false
+        else null
+        end
+      ),
+      multi_vm_stability_check_rc: $profile_compare_multi_vm_stability_check_rc,
+      multi_vm_stability_check_modal_recommended_profile: (
+        if $profile_compare_multi_vm_stability_check_modal_recommended_profile == "" then null
+        else $profile_compare_multi_vm_stability_check_modal_recommended_profile
+        end
+      ),
+      multi_vm_stability_check_modal_support_rate_pct: $profile_compare_multi_vm_stability_check_modal_support_rate_pct,
+      multi_vm_stability_cycle_summary_json: (
+        if $profile_compare_multi_vm_stability_cycle_summary_json == "" then null
+        else $profile_compare_multi_vm_stability_cycle_summary_json
+        end
+      ),
+      multi_vm_stability_cycle_summary_available: $profile_compare_multi_vm_stability_cycle_summary_available,
+      multi_vm_stability_cycle_status: (
+        if $profile_compare_multi_vm_stability_cycle_status == "" then null
+        else $profile_compare_multi_vm_stability_cycle_status
+        end
+      ),
+      multi_vm_stability_cycle_decision: (
+        if $profile_compare_multi_vm_stability_cycle_decision == "" then null
+        else $profile_compare_multi_vm_stability_cycle_decision
+        end
+      ),
+      multi_vm_stability_cycle_go: (
+        if $profile_compare_multi_vm_stability_cycle_decision_normalized == "GO" then true
+        elif $profile_compare_multi_vm_stability_cycle_decision_normalized == "NO-GO" then false
+        else null
+        end
+      ),
+      multi_vm_stability_cycle_no_go: (
+        if $profile_compare_multi_vm_stability_cycle_decision_normalized == "NO-GO" then true
+        elif $profile_compare_multi_vm_stability_cycle_decision_normalized == "GO" then false
+        else null
+        end
+      ),
+      multi_vm_stability_cycle_rc: $profile_compare_multi_vm_stability_cycle_rc,
+      multi_vm_stability_cycle_failure_stage: (
+        if $profile_compare_multi_vm_stability_cycle_failure_stage == "" then null
+        else $profile_compare_multi_vm_stability_cycle_failure_stage
+        end
+      ),
+      multi_vm_stability_cycle_failure_reason: (
+        if $profile_compare_multi_vm_stability_cycle_failure_reason == "" then null
+        else $profile_compare_multi_vm_stability_cycle_failure_reason
+        end
+      ),
+      multi_vm_stability_cycle_modal_recommended_profile: (
+        if $profile_compare_multi_vm_stability_cycle_modal_recommended_profile == "" then null
+        else $profile_compare_multi_vm_stability_cycle_modal_recommended_profile
+        end
+      ),
+      multi_vm_stability_cycle_modal_support_rate_pct: $profile_compare_multi_vm_stability_cycle_modal_support_rate_pct,
       next_command: $next_command,
       next_command_sudo: $next_command_sudo,
       next_command_source: $next_command_source,
@@ -1495,6 +1823,16 @@ build_profile_default_gate_json() {
         profile_default_gate_stability_cycle_summary_json: (
           if $profile_default_gate_stability_cycle_summary_json == "" then null
           else $profile_default_gate_stability_cycle_summary_json
+          end
+        ),
+        profile_compare_multi_vm_stability_check_summary_json: (
+          if $profile_compare_multi_vm_stability_check_summary_json == "" then null
+          else $profile_compare_multi_vm_stability_check_summary_json
+          end
+        ),
+        profile_compare_multi_vm_stability_cycle_summary_json: (
+          if $profile_compare_multi_vm_stability_cycle_summary_json == "" then null
+          else $profile_compare_multi_vm_stability_cycle_summary_json
           end
         ),
         docker_rehearsal_matrix_summary_json: (if $docker_hint_matrix_summary_json == "" then null else $docker_hint_matrix_summary_json end),
@@ -2129,6 +2467,35 @@ profile_default_gate_stability_cycle_status="$(printf '%s\n' "$combined_json" | 
 profile_default_gate_stability_cycle_rc="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.cycle_rc // "null"')"
 profile_default_gate_stability_cycle_failure_stage="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.cycle_failure_stage // ""')"
 profile_default_gate_stability_cycle_failure_reason="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.cycle_failure_reason // ""')"
+profile_default_gate_multi_vm_stability_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_summary_json // ""')"
+profile_default_gate_multi_vm_stability_source="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_source // ""')"
+profile_default_gate_multi_vm_stability_available="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_available // false')"
+profile_default_gate_multi_vm_stability_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_status // ""')"
+profile_default_gate_multi_vm_stability_decision="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_decision // ""')"
+profile_default_gate_multi_vm_stability_go="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_go // "null"')"
+profile_default_gate_multi_vm_stability_no_go="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_no_go // "null"')"
+profile_default_gate_multi_vm_stability_modal_recommended_profile="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_modal_recommended_profile // ""')"
+profile_default_gate_multi_vm_stability_modal_support_rate_pct="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_modal_support_rate_pct // "null"')"
+profile_default_gate_multi_vm_stability_check_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_summary_json // ""')"
+profile_default_gate_multi_vm_stability_check_summary_available="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_summary_available // false')"
+profile_default_gate_multi_vm_stability_check_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_status // ""')"
+profile_default_gate_multi_vm_stability_check_decision="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_decision // ""')"
+profile_default_gate_multi_vm_stability_check_rc="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_rc // "null"')"
+profile_default_gate_multi_vm_stability_check_go="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_go // "null"')"
+profile_default_gate_multi_vm_stability_check_no_go="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_no_go // "null"')"
+profile_default_gate_multi_vm_stability_check_modal_recommended_profile="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_modal_recommended_profile // ""')"
+profile_default_gate_multi_vm_stability_check_modal_support_rate_pct="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_check_modal_support_rate_pct // "null"')"
+profile_default_gate_multi_vm_stability_cycle_summary_json="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_summary_json // ""')"
+profile_default_gate_multi_vm_stability_cycle_summary_available="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_summary_available // false')"
+profile_default_gate_multi_vm_stability_cycle_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_status // ""')"
+profile_default_gate_multi_vm_stability_cycle_decision="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_decision // ""')"
+profile_default_gate_multi_vm_stability_cycle_rc="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_rc // "null"')"
+profile_default_gate_multi_vm_stability_cycle_go="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_go // "null"')"
+profile_default_gate_multi_vm_stability_cycle_no_go="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_no_go // "null"')"
+profile_default_gate_multi_vm_stability_cycle_modal_recommended_profile="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_modal_recommended_profile // ""')"
+profile_default_gate_multi_vm_stability_cycle_modal_support_rate_pct="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_modal_support_rate_pct // "null"')"
+profile_default_gate_multi_vm_stability_cycle_failure_stage="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_failure_stage // ""')"
+profile_default_gate_multi_vm_stability_cycle_failure_reason="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.multi_vm_stability_cycle_failure_reason // ""')"
 docker_rehearsal_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.status // ""')"
 docker_rehearsal_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.ready // false')"
 docker_rehearsal_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.docker_rehearsal_gate.command // ""')"
@@ -2194,6 +2561,30 @@ fi
 echo "[manual-validation-status] profile_default_gate_stability_cycle_available=$profile_default_gate_stability_cycle_summary_available"
 if [[ "$profile_default_gate_stability_cycle_summary_available" == "true" ]]; then
   echo "[manual-validation-status] profile_default_gate_stability_cycle_status=$profile_default_gate_stability_cycle_status decision=${profile_default_gate_stability_cycle_decision:-unset} rc=${profile_default_gate_stability_cycle_rc:-null} failure_stage=${profile_default_gate_stability_cycle_failure_stage:-none} failure_reason=${profile_default_gate_stability_cycle_failure_reason:-none}"
+fi
+if [[ -n "$profile_default_gate_multi_vm_stability_summary_json" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_summary_json=$profile_default_gate_multi_vm_stability_summary_json"
+fi
+echo "[manual-validation-status] profile_default_gate_multi_vm_stability_available=$profile_default_gate_multi_vm_stability_available"
+if [[ -n "$profile_default_gate_multi_vm_stability_source" || "$profile_default_gate_multi_vm_stability_available" == "true" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_source=${profile_default_gate_multi_vm_stability_source:-none}"
+fi
+if [[ "$profile_default_gate_multi_vm_stability_available" == "true" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_status=${profile_default_gate_multi_vm_stability_status:-unset} decision=${profile_default_gate_multi_vm_stability_decision:-unset} go=${profile_default_gate_multi_vm_stability_go:-null} no_go=${profile_default_gate_multi_vm_stability_no_go:-null} modal_profile=${profile_default_gate_multi_vm_stability_modal_recommended_profile:-unset} modal_support_rate_pct=${profile_default_gate_multi_vm_stability_modal_support_rate_pct:-null}"
+fi
+if [[ -n "$profile_default_gate_multi_vm_stability_check_summary_json" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_check_summary_json=$profile_default_gate_multi_vm_stability_check_summary_json"
+fi
+echo "[manual-validation-status] profile_default_gate_multi_vm_stability_check_available=$profile_default_gate_multi_vm_stability_check_summary_available"
+if [[ "$profile_default_gate_multi_vm_stability_check_summary_available" == "true" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_check_status=${profile_default_gate_multi_vm_stability_check_status:-unset} decision=${profile_default_gate_multi_vm_stability_check_decision:-unset} rc=${profile_default_gate_multi_vm_stability_check_rc:-null} go=${profile_default_gate_multi_vm_stability_check_go:-null} no_go=${profile_default_gate_multi_vm_stability_check_no_go:-null} modal_profile=${profile_default_gate_multi_vm_stability_check_modal_recommended_profile:-unset} modal_support_rate_pct=${profile_default_gate_multi_vm_stability_check_modal_support_rate_pct:-null}"
+fi
+if [[ -n "$profile_default_gate_multi_vm_stability_cycle_summary_json" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_cycle_summary_json=$profile_default_gate_multi_vm_stability_cycle_summary_json"
+fi
+echo "[manual-validation-status] profile_default_gate_multi_vm_stability_cycle_available=$profile_default_gate_multi_vm_stability_cycle_summary_available"
+if [[ "$profile_default_gate_multi_vm_stability_cycle_summary_available" == "true" ]]; then
+  echo "[manual-validation-status] profile_default_gate_multi_vm_stability_cycle_status=${profile_default_gate_multi_vm_stability_cycle_status:-unset} decision=${profile_default_gate_multi_vm_stability_cycle_decision:-unset} rc=${profile_default_gate_multi_vm_stability_cycle_rc:-null} go=${profile_default_gate_multi_vm_stability_cycle_go:-null} no_go=${profile_default_gate_multi_vm_stability_cycle_no_go:-null} modal_profile=${profile_default_gate_multi_vm_stability_cycle_modal_recommended_profile:-unset} modal_support_rate_pct=${profile_default_gate_multi_vm_stability_cycle_modal_support_rate_pct:-null} failure_stage=${profile_default_gate_multi_vm_stability_cycle_failure_stage:-none} failure_reason=${profile_default_gate_multi_vm_stability_cycle_failure_reason:-none}"
 fi
 if [[ -n "$docker_rehearsal_status" ]]; then
   echo "[manual-validation-status] docker_rehearsal_status=$docker_rehearsal_status"

@@ -15,6 +15,7 @@ Usage:
     [--manual-validation-summary-json PATH] \
     [--manual-validation-report-md PATH] \
     [--profile-compare-signoff-summary-json PATH] \
+    [--profile-compare-multi-vm-stability-check-summary-json PATH] \
     [--single-machine-summary-json PATH] \
     [--phase0-summary-json PATH] \
     [--phase1-resilience-handoff-summary-json PATH] \
@@ -1166,6 +1167,69 @@ resolve_profile_default_gate_stability_cycle_summary_path() {
     candidate="$(abs_path "$reports_dir/profile_default_gate_stability_cycle_summary.json")"
   fi
   printf '%s' "$candidate"
+}
+
+profile_compare_multi_vm_stability_check_summary_usable_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (.version == 1)
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and (
+      (.schema == null)
+      or ((.schema.id // "") == "profile_compare_multi_vm_stability_check_summary")
+    )
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+resolve_profile_compare_multi_vm_stability_check_summary_path() {
+  local manual_summary_path="$1"
+  local reports_dir="$2"
+  local candidate=""
+  if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
+    while IFS= read -r candidate; do
+      candidate="$(resolve_path_with_base "$candidate" "$manual_summary_path")"
+      if [[ -n "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return
+      fi
+    done < <(jq -r '
+      [
+        (.summary.profile_compare_multi_vm_stability.summary_json // ""),
+        (.summary.profile_compare_multi_vm_stability_check_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_check_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.multi_vm_stability_check_summary_json // ""),
+        (.artifacts.profile_compare_multi_vm_stability_check_summary_json // "")
+      ]
+      | .[]
+      | strings
+      | select(length > 0)
+    ' "$manual_summary_path" 2>/dev/null || true)
+  fi
+  if [[ -n "$reports_dir" ]]; then
+    candidate="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_check_summary.json")"
+  fi
+  printf '%s' "$candidate"
+}
+
+profile_compare_multi_vm_stability_summary_kind_from_path() {
+  local path="$1"
+  local base_name=""
+  base_name="$(basename "$path" 2>/dev/null || true)"
+  case "$base_name" in
+    profile_compare_multi_vm_stability_check_summary.json) printf '%s' "check" ; return ;;
+    profile_compare_multi_vm_stability_cycle_summary.json) printf '%s' "cycle" ; return ;;
+    profile_compare_multi_vm_stability_summary.json) printf '%s' "run" ; return ;;
+  esac
+  printf '%s' "check"
 }
 
 profile_default_gate_command_supports_subject_placeholder_01() {
@@ -4602,6 +4666,11 @@ report_md="$default_log_dir/roadmap_progress_report.md"
 manual_validation_summary_json="$default_log_dir/manual_validation_readiness_summary.json"
 manual_validation_report_md="$default_log_dir/manual_validation_readiness_report.md"
 profile_compare_signoff_summary_json="$default_log_dir/profile_compare_campaign_signoff_summary.json"
+profile_compare_multi_vm_stability_check_summary_json="${ROADMAP_PROGRESS_PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SUMMARY_JSON:-}"
+if [[ -n "$(trim "$profile_compare_multi_vm_stability_check_summary_json")" ]]; then
+  path_arg_or_die "--profile-compare-multi-vm-stability-check-summary-json" "$profile_compare_multi_vm_stability_check_summary_json"
+fi
+profile_compare_multi_vm_stability_check_summary_json="$(abs_path "$profile_compare_multi_vm_stability_check_summary_json")"
 single_machine_summary_json="$default_log_dir/single_machine_prod_readiness_latest.json"
 phase0_summary_json="${ROADMAP_PROGRESS_PHASE0_SUMMARY_JSON:-$default_log_dir/ci_phase0_summary.json}"
 phase1_resilience_handoff_summary_json="${ROADMAP_PROGRESS_PHASE1_RESILIENCE_HANDOFF_SUMMARY_JSON:-}"
@@ -4674,6 +4743,11 @@ while [[ $# -gt 0 ]]; do
     --profile-compare-signoff-summary-json)
       optional_path_arg_or_die "--profile-compare-signoff-summary-json" "$#" "${2:-}"
       profile_compare_signoff_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --profile-compare-multi-vm-stability-check-summary-json)
+      optional_path_arg_or_die "--profile-compare-multi-vm-stability-check-summary-json" "$#" "${2:-}"
+      profile_compare_multi_vm_stability_check_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --single-machine-summary-json)
@@ -7625,6 +7699,137 @@ if [[ -n "$profile_default_gate_stability_cycle_summary_json" ]] \
     if (.failure_reason | type) == "string" then .failure_reason else "" end
   ' "$profile_default_gate_stability_cycle_summary_json" 2>/dev/null || printf '%s' "")"
 fi
+if [[ -z "$profile_compare_multi_vm_stability_check_summary_json" ]]; then
+  profile_compare_multi_vm_stability_check_summary_json="$(
+    resolve_profile_compare_multi_vm_stability_check_summary_path "$manual_validation_summary_json" "$default_log_dir"
+  )"
+fi
+multi_vm_stability_available_json="false"
+multi_vm_stability_input_summary_json="$profile_compare_multi_vm_stability_check_summary_json"
+multi_vm_stability_source_summary_json=""
+multi_vm_stability_source_summary_kind=""
+multi_vm_stability_status_json="missing"
+multi_vm_stability_rc_json="null"
+multi_vm_stability_decision_json=""
+multi_vm_stability_go_json="null"
+multi_vm_stability_no_go_json="null"
+multi_vm_stability_recommended_profile_json=""
+multi_vm_stability_support_rate_pct_json="null"
+multi_vm_stability_runs_requested_json="null"
+multi_vm_stability_runs_completed_json="null"
+multi_vm_stability_runs_fail_json="null"
+multi_vm_stability_decision_counts_json="null"
+multi_vm_stability_recommended_profile_counts_json="null"
+multi_vm_stability_reasons_json='[]'
+multi_vm_stability_notes_json=""
+multi_vm_stability_needs_attention_json="true"
+multi_vm_stability_next_command="$(jq -r '
+  .summary.profile_compare_multi_vm_stability.next_command
+  // .summary.profile_compare_multi_vm_stability.command
+  // .summary.profile_compare_multi_vm_stability_check.next_command
+  // ""
+' "$manual_validation_summary_json" 2>/dev/null || true)"
+if [[ -z "$multi_vm_stability_next_command" ]]; then
+  multi_vm_stability_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle --reports-dir .easy-node-logs --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_cycle_summary.json --print-summary-json 1"
+fi
+multi_vm_stability_next_command_reason="multi-VM stability evidence is missing; run stability cycle to refresh and publish evidence"
+if [[ -n "$profile_compare_multi_vm_stability_check_summary_json" ]] \
+   && [[ "$(profile_compare_multi_vm_stability_check_summary_usable_01 "$profile_compare_multi_vm_stability_check_summary_json")" == "1" ]]; then
+  multi_vm_stability_available_json="true"
+  multi_vm_stability_source_summary_json="$profile_compare_multi_vm_stability_check_summary_json"
+  multi_vm_stability_source_summary_kind="$(profile_compare_multi_vm_stability_summary_kind_from_path "$profile_compare_multi_vm_stability_check_summary_json")"
+  multi_vm_stability_status_json="$(jq -r '
+    if (.status | type) == "string" then .status else "unknown" end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "unknown")"
+  multi_vm_stability_rc_json="$(jq -r '
+    if (.rc | type) == "number" then .rc else "null" end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_decision_json="$(jq -r '
+    if (.decision | type) == "string" then .decision else "" end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+  multi_vm_stability_go_json="$(jq -r '
+    if (.go | type) == "boolean" then (.go | tostring)
+    elif (.decision | type) == "string" then
+      ((.decision | ascii_upcase | gsub("[[:space:]_-]"; "")) as $d
+      | if $d == "GO" then "true"
+        elif $d == "NOGO" then "false"
+        else "null"
+        end)
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_no_go_json="$(jq -r '
+    if (.no_go | type) == "boolean" then (.no_go | tostring)
+    elif (.decision | type) == "string" then
+      ((.decision | ascii_upcase | gsub("[[:space:]_-]"; "")) as $d
+      | if $d == "NOGO" then "true"
+        elif $d == "GO" then "false"
+        else "null"
+        end)
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_recommended_profile_json="$(jq -r '
+    if (.observed.modal_recommended_profile | type) == "string" then .observed.modal_recommended_profile
+    else ""
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+  multi_vm_stability_support_rate_pct_json="$(jq -r '
+    if (.observed.modal_support_rate_pct | type) == "number" then .observed.modal_support_rate_pct
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_runs_requested_json="$(jq -r '
+    if (.observed.runs_requested | type) == "number" then .observed.runs_requested
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_runs_completed_json="$(jq -r '
+    if (.observed.runs_completed | type) == "number" then .observed.runs_completed
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_runs_fail_json="$(jq -r '
+    if (.observed.runs_fail | type) == "number" then .observed.runs_fail
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_decision_counts_json="$(jq -c '
+    if (.observed.decision_counts | type) == "object" then .observed.decision_counts
+    else null
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_recommended_profile_counts_json="$(jq -c '
+    if (.observed.recommended_profile_counts | type) == "object" then .observed.recommended_profile_counts
+    else null
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_reasons_json="$(jq -c '
+    if (.errors | type) == "array" then [.errors[] | strings]
+    else []
+    end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' '[]')"
+  multi_vm_stability_notes_json="$(jq -r '
+    if (.notes | type) == "string" then .notes else "" end
+  ' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || printf '%s' "")"
+
+  if [[ "$multi_vm_stability_go_json" == "true" ]] \
+     && [[ "$multi_vm_stability_status_json" == "ok" || "$multi_vm_stability_status_json" == "pass" ]]; then
+    multi_vm_stability_needs_attention_json="false"
+    multi_vm_stability_next_command=""
+    multi_vm_stability_next_command_reason=""
+  else
+    multi_vm_stability_needs_attention_json="true"
+    first_reason="$(jq -r 'if (.errors | type) == "array" and (.errors | length) > 0 then (.errors[0] // "") else "" end' "$profile_compare_multi_vm_stability_check_summary_json" 2>/dev/null || true)"
+    if [[ -n "$first_reason" ]]; then
+      multi_vm_stability_next_command_reason="$first_reason"
+    elif [[ -n "$multi_vm_stability_notes_json" ]]; then
+      multi_vm_stability_next_command_reason="$multi_vm_stability_notes_json"
+    else
+      multi_vm_stability_next_command_reason="multi-VM stability evidence requires refresh; rerun stability cycle and review check summary"
+    fi
+  fi
+fi
 profile_default_gate_signoff_resolution="$(resolve_profile_default_gate_signoff_status "$profile_compare_signoff_summary_json" "$manual_validation_summary_json")"
 profile_default_gate_signoff_status="${profile_default_gate_signoff_resolution%%$'\x1f'*}"
 profile_default_gate_signoff_source=""
@@ -8439,6 +8644,27 @@ summary_payload="$(jq -n \
   --argjson profile_default_gate_stability_cycle_rc "$profile_default_gate_stability_cycle_rc_json" \
   --arg profile_default_gate_stability_cycle_failure_stage "$profile_default_gate_stability_cycle_failure_stage_json" \
   --arg profile_default_gate_stability_cycle_failure_reason "$profile_default_gate_stability_cycle_failure_reason_json" \
+  --arg profile_compare_multi_vm_stability_input_summary_json "$multi_vm_stability_input_summary_json" \
+  --argjson profile_compare_multi_vm_stability_available "$multi_vm_stability_available_json" \
+  --arg profile_compare_multi_vm_stability_source_summary_json "$multi_vm_stability_source_summary_json" \
+  --arg profile_compare_multi_vm_stability_source_summary_kind "$multi_vm_stability_source_summary_kind" \
+  --arg profile_compare_multi_vm_stability_status "$multi_vm_stability_status_json" \
+  --argjson profile_compare_multi_vm_stability_rc "$multi_vm_stability_rc_json" \
+  --arg profile_compare_multi_vm_stability_decision "$multi_vm_stability_decision_json" \
+  --argjson profile_compare_multi_vm_stability_go "$multi_vm_stability_go_json" \
+  --argjson profile_compare_multi_vm_stability_no_go "$multi_vm_stability_no_go_json" \
+  --arg profile_compare_multi_vm_stability_recommended_profile "$multi_vm_stability_recommended_profile_json" \
+  --argjson profile_compare_multi_vm_stability_support_rate_pct "$multi_vm_stability_support_rate_pct_json" \
+  --argjson profile_compare_multi_vm_stability_runs_requested "$multi_vm_stability_runs_requested_json" \
+  --argjson profile_compare_multi_vm_stability_runs_completed "$multi_vm_stability_runs_completed_json" \
+  --argjson profile_compare_multi_vm_stability_runs_fail "$multi_vm_stability_runs_fail_json" \
+  --argjson profile_compare_multi_vm_stability_decision_counts "$multi_vm_stability_decision_counts_json" \
+  --argjson profile_compare_multi_vm_stability_recommended_profile_counts "$multi_vm_stability_recommended_profile_counts_json" \
+  --argjson profile_compare_multi_vm_stability_reasons "$multi_vm_stability_reasons_json" \
+  --arg profile_compare_multi_vm_stability_notes "$multi_vm_stability_notes_json" \
+  --argjson profile_compare_multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" \
+  --arg profile_compare_multi_vm_stability_next_command "$multi_vm_stability_next_command" \
+  --arg profile_compare_multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
   --argjson total_checks "$counts_total" \
@@ -8684,6 +8910,37 @@ summary_payload="$(jq -n \
         trust_tier_port_unlock_policy_present: $profile_default_gate_trust_tier_port_unlock_policy_present,
         micro_relay_evidence_note: (if $profile_default_gate_micro_relay_evidence_note == "" then null else $profile_default_gate_micro_relay_evidence_note end)
       },
+      multi_vm_stability: {
+        available: $profile_compare_multi_vm_stability_available,
+        input_summary_json: (if $profile_compare_multi_vm_stability_input_summary_json == "" then null else $profile_compare_multi_vm_stability_input_summary_json end),
+        source_summary_json: (if $profile_compare_multi_vm_stability_source_summary_json == "" then null else $profile_compare_multi_vm_stability_source_summary_json end),
+        source_summary_kind: (if $profile_compare_multi_vm_stability_source_summary_kind == "" then null else $profile_compare_multi_vm_stability_source_summary_kind end),
+        status: (if $profile_compare_multi_vm_stability_status == "" then null else $profile_compare_multi_vm_stability_status end),
+        rc: $profile_compare_multi_vm_stability_rc,
+        decision: (if $profile_compare_multi_vm_stability_decision == "" then null else $profile_compare_multi_vm_stability_decision end),
+        go: $profile_compare_multi_vm_stability_go,
+        no_go: $profile_compare_multi_vm_stability_no_go,
+        recommended_profile: (
+          if $profile_compare_multi_vm_stability_recommended_profile == "" then null
+          else $profile_compare_multi_vm_stability_recommended_profile
+          end
+        ),
+        support_rate_pct: $profile_compare_multi_vm_stability_support_rate_pct,
+        runs_requested: $profile_compare_multi_vm_stability_runs_requested,
+        runs_completed: $profile_compare_multi_vm_stability_runs_completed,
+        runs_fail: $profile_compare_multi_vm_stability_runs_fail,
+        decision_counts: $profile_compare_multi_vm_stability_decision_counts,
+        recommended_profile_counts: $profile_compare_multi_vm_stability_recommended_profile_counts,
+        reasons: $profile_compare_multi_vm_stability_reasons,
+        notes: (if $profile_compare_multi_vm_stability_notes == "" then null else $profile_compare_multi_vm_stability_notes end),
+        needs_attention: $profile_compare_multi_vm_stability_needs_attention,
+        next_command: (if $profile_compare_multi_vm_stability_next_command == "" then null else $profile_compare_multi_vm_stability_next_command end),
+        next_command_reason: (
+          if $profile_compare_multi_vm_stability_next_command_reason == "" then null
+          else $profile_compare_multi_vm_stability_next_command_reason
+          end
+        )
+      },
       optional_gate_status: {
         profile_default_gate: $profile_default_gate_status,
         docker_rehearsal_gate: $docker_rehearsal_status,
@@ -8838,6 +9095,7 @@ summary_payload="$(jq -n \
       manual_validation_summary_json: $manual_validation_summary_json,
       manual_validation_report_md: $manual_validation_report_md,
       profile_compare_signoff_summary_json: (if $profile_compare_signoff_summary_json == "" then null else $profile_compare_signoff_summary_json end),
+      profile_compare_multi_vm_stability_summary_json: (if $profile_compare_multi_vm_stability_source_summary_json == "" then null else $profile_compare_multi_vm_stability_source_summary_json end),
       single_machine_summary_json: $single_machine_summary_json,
       phase0_summary_json: (if $phase0_product_surface_source_summary_json == "" then $phase0_product_surface_input_summary_json else $phase0_product_surface_source_summary_json end),
       phase1_resilience_handoff_summary_json: (if $phase1_resilience_handoff_source_summary_json == "" then null else $phase1_resilience_handoff_source_summary_json end),
@@ -9018,6 +9276,20 @@ cat >"$report_tmp" <<EOF_MD
 - Profile gate stability-cycle available: $(jq -r '.vpn_track.profile_default_gate.cycle_summary_available | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate stability-cycle decision/status: decision=$(jq -r '.vpn_track.profile_default_gate.cycle_decision // "none"' "$summary_json"), status=$(jq -r '.vpn_track.profile_default_gate.cycle_status // "none"' "$summary_json")
 - Profile gate stability-cycle rc/failure: rc=$(jq -r '.vpn_track.profile_default_gate.cycle_rc // "null"' "$summary_json"), failure_stage=$(jq -r '.vpn_track.profile_default_gate.cycle_failure_stage // "none"' "$summary_json"), failure_reason=$(jq -r '.vpn_track.profile_default_gate.cycle_failure_reason // "none"' "$summary_json")
+- Multi-VM stability available: $(jq -r '.vpn_track.multi_vm_stability.available | if . == null then "null" else tostring end' "$summary_json")
+- Multi-VM stability input summary: $(jq -r '.vpn_track.multi_vm_stability.input_summary_json // "none"' "$summary_json")
+- Multi-VM stability source/kind: source=$(jq -r '.vpn_track.multi_vm_stability.source_summary_json // "none"' "$summary_json"), kind=$(jq -r '.vpn_track.multi_vm_stability.source_summary_kind // "none"' "$summary_json")
+- Multi-VM stability status/decision: status=$(jq -r '.vpn_track.multi_vm_stability.status // "none"' "$summary_json"), decision=$(jq -r '.vpn_track.multi_vm_stability.decision // "none"' "$summary_json")
+- Multi-VM stability go/no-go: go=$(jq -r '.vpn_track.multi_vm_stability.go | if . == null then "null" else tostring end' "$summary_json"), no_go=$(jq -r '.vpn_track.multi_vm_stability.no_go | if . == null then "null" else tostring end' "$summary_json")
+- Multi-VM stability recommendation/support: profile=$(jq -r '.vpn_track.multi_vm_stability.recommended_profile // "none"' "$summary_json"), support_rate_pct=$(jq -r '.vpn_track.multi_vm_stability.support_rate_pct // "null"' "$summary_json")
+- Multi-VM stability run counts: requested=$(jq -r '.vpn_track.multi_vm_stability.runs_requested // "null"' "$summary_json"), completed=$(jq -r '.vpn_track.multi_vm_stability.runs_completed // "null"' "$summary_json"), fail=$(jq -r '.vpn_track.multi_vm_stability.runs_fail // "null"' "$summary_json")
+- Multi-VM stability decision counts: $(jq -r '.vpn_track.multi_vm_stability.decision_counts | if . == null then "null" else tojson end' "$summary_json")
+- Multi-VM stability recommended profile counts: $(jq -r '.vpn_track.multi_vm_stability.recommended_profile_counts | if . == null then "null" else tojson end' "$summary_json")
+- Multi-VM stability reasons: $(jq -r '.vpn_track.multi_vm_stability.reasons | if . == null or length == 0 then "none" else join("; ") end' "$summary_json")
+- Multi-VM stability notes: $(jq -r '.vpn_track.multi_vm_stability.notes // "none"' "$summary_json")
+- Multi-VM stability needs attention: $(jq -r '.vpn_track.multi_vm_stability.needs_attention | if . == null then "null" else tostring end' "$summary_json")
+- Multi-VM stability next command: $(jq -r '.vpn_track.multi_vm_stability.next_command // "none"' "$summary_json")
+- Multi-VM stability next command reason: $(jq -r '.vpn_track.multi_vm_stability.next_command_reason // "none"' "$summary_json")
 - Primary next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
 
 ## Pending Real-Host Checks
@@ -9142,6 +9414,7 @@ $non_blockchain_actionable_no_sudo_or_github_md
 - Single-machine summary: $(jq -r '.artifacts.single_machine_summary_json' "$summary_json")
 - Phase-0 summary: $(jq -r '.artifacts.phase0_summary_json // "none"' "$summary_json")
 - Phase-1 resilience handoff summary source: $(jq -r '.artifacts.phase1_resilience_handoff_summary_json // "none"' "$summary_json")
+- Multi-VM stability summary source: $(jq -r '.artifacts.profile_compare_multi_vm_stability_summary_json // "none"' "$summary_json")
 - Phase-2 candidate summary: $(jq -r '.artifacts.phase2_linux_prod_candidate_summary_json // "none"' "$summary_json")
 - Phase-3 Windows client beta summary source: $(jq -r '.artifacts.phase3_windows_client_beta_summary_json // "none"' "$summary_json")
 - Phase-4 Windows full parity summary source: $(jq -r '.artifacts.phase4_windows_full_parity_summary_json // "none"' "$summary_json")
@@ -9211,6 +9484,9 @@ echo "[roadmap-progress-report] profile_default_gate_stability_summary_json=${pr
 echo "[roadmap-progress-report] profile_default_gate_stability_selection_policy_present_all=$profile_default_gate_stability_selection_policy_present_all_json stability_consistent_selection_policy=$profile_default_gate_stability_consistent_selection_policy_json stability_ok=$profile_default_gate_stability_ok_json stability_recommended_profile_counts=$profile_default_gate_stability_recommended_profile_counts_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_check_summary_json=${profile_default_gate_stability_check_summary_json:-} stability_check_summary_available=$profile_default_gate_stability_check_summary_available_json stability_check_decision=${profile_default_gate_stability_check_decision_json:-} stability_check_status=${profile_default_gate_stability_check_status_json:-} stability_check_rc=$profile_default_gate_stability_check_rc_json stability_check_modal_recommended_profile=${profile_default_gate_stability_check_modal_recommended_profile_json:-} stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_cycle_summary_json=${profile_default_gate_stability_cycle_summary_json:-} cycle_summary_available=$profile_default_gate_stability_cycle_summary_available_json cycle_decision=${profile_default_gate_stability_cycle_decision_json:-} cycle_status=${profile_default_gate_stability_cycle_status_json:-} cycle_rc=$profile_default_gate_stability_cycle_rc_json cycle_failure_stage=${profile_default_gate_stability_cycle_failure_stage_json:-} cycle_failure_reason=${profile_default_gate_stability_cycle_failure_reason_json:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_available=$multi_vm_stability_available_json input_summary_json=${multi_vm_stability_input_summary_json:-} source_summary_json=${multi_vm_stability_source_summary_json:-} source_kind=${multi_vm_stability_source_summary_kind:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_status=${multi_vm_stability_status_json:-} rc=$multi_vm_stability_rc_json decision=${multi_vm_stability_decision_json:-} go=$multi_vm_stability_go_json no_go=$multi_vm_stability_no_go_json recommended_profile=${multi_vm_stability_recommended_profile_json:-} support_rate_pct=$multi_vm_stability_support_rate_pct_json runs_requested=$multi_vm_stability_runs_requested_json runs_completed=$multi_vm_stability_runs_completed_json runs_fail=$multi_vm_stability_runs_fail_json needs_attention=$multi_vm_stability_needs_attention_json next_command=${multi_vm_stability_next_command:-} next_command_reason=${multi_vm_stability_next_command_reason:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_decision_counts=$multi_vm_stability_decision_counts_json recommended_profile_counts=$multi_vm_stability_recommended_profile_counts_json reasons=$multi_vm_stability_reasons_json notes=${multi_vm_stability_notes_json:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

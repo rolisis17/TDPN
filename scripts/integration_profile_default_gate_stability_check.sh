@@ -338,6 +338,9 @@ jq -n '{
   stability_ok: true,
   selection_policy_present_all: true,
   consistent_selection_policy: true,
+  decision_counts: { "GO": 4 },
+  modal_decision: "GO",
+  modal_decision_support_rate_pct: 100,
   recommended_profile_counts: { "balanced": 4 }
 }' >"$FALLBACK_SUMMARY"
 

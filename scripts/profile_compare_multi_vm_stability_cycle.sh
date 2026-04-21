@@ -17,6 +17,8 @@ Usage:
     [--runs N] \
     [--sleep-between-sec N] \
     [--allow-partial [0|1]] \
+    [--vm-command SPEC]... \
+    [--vm-command-file PATH]... \
     [--require-status-pass [0|1]] \
     [--require-min-runs-requested N] \
     [--require-min-runs-completed N] \
@@ -159,6 +161,8 @@ summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_SUMMARY_JSON:-}"
 runs=""
 sleep_between_sec=""
 allow_partial=""
+declare -a vm_command_specs=()
+declare -a vm_command_files=()
 
 require_status_pass="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_STATUS_PASS:-${REQUIRE_STATUS_PASS:-1}}"
 require_min_runs_requested="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
@@ -251,6 +255,24 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-partial=*)
       allow_partial="${1#*=}"
+      shift
+      ;;
+    --vm-command)
+      require_value_or_die "$1" "$#"
+      vm_command_specs+=("${2:-}")
+      shift 2
+      ;;
+    --vm-command=*)
+      vm_command_specs+=("${1#*=}")
+      shift
+      ;;
+    --vm-command-file)
+      require_value_or_die "$1" "$#"
+      vm_command_files+=("${2:-}")
+      shift 2
+      ;;
+    --vm-command-file=*)
+      vm_command_files+=("${1#*=}")
       shift
       ;;
     --require-status-pass)
@@ -433,6 +455,20 @@ show_json="$(trim "$show_json")"
 print_summary_json="$(trim "$print_summary_json")"
 RUN_SCRIPT="$(abs_path "$RUN_SCRIPT")"
 CHECK_SCRIPT="$(abs_path "$CHECK_SCRIPT")"
+for i in "${!vm_command_specs[@]}"; do
+  vm_command_specs[$i]="$(trim "${vm_command_specs[$i]}")"
+  if [[ -z "${vm_command_specs[$i]}" ]]; then
+    echo "--vm-command cannot be empty"
+    exit 2
+  fi
+done
+for i in "${!vm_command_files[@]}"; do
+  vm_command_files[$i]="$(abs_path "${vm_command_files[$i]}")"
+  if [[ -z "${vm_command_files[$i]}" ]]; then
+    echo "--vm-command-file cannot be empty"
+    exit 2
+  fi
+done
 
 if [[ ! -f "$RUN_SCRIPT" ]]; then
   echo "stability run script not found: $RUN_SCRIPT"
@@ -516,6 +552,12 @@ fi
 if [[ -n "$allow_partial" ]]; then
   run_cmd+=(--allow-partial "$allow_partial")
 fi
+for vm_spec in "${vm_command_specs[@]}"; do
+  run_cmd+=(--vm-command "$vm_spec")
+done
+for vm_file in "${vm_command_files[@]}"; do
+  run_cmd+=(--vm-command-file "$vm_file")
+done
 run_command_display="$(quote_cmd "${run_cmd[@]}")"
 
 declare -a check_cmd

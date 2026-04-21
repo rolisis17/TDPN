@@ -39,6 +39,9 @@ STABILITY_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_rep
 CYCLE_VALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_cycle_valid.log"
 CYCLE_INVALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_cycle_invalid.log"
 CYCLE_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_cycle_default_missing.log"
+MULTI_VM_STABILITY_VALID_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_multi_vm_stability_valid.log"
+MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_multi_vm_stability_cycle_fallback.log"
+MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG="$TMP_DIR/integration_manual_validation_report_multi_vm_stability_default_missing.log"
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 FAKE_STATUS_INVALID="$TMP_DIR/fake_manual_validation_status_invalid_json.sh"
@@ -50,6 +53,9 @@ FAKE_STATUS_STABILITY_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_st
 FAKE_STATUS_CYCLE_VALID="$TMP_DIR/fake_manual_validation_status_cycle_valid.sh"
 FAKE_STATUS_CYCLE_INVALID="$TMP_DIR/fake_manual_validation_status_cycle_invalid.sh"
 FAKE_STATUS_CYCLE_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_cycle_default_missing.sh"
+FAKE_STATUS_MULTI_VM_STABILITY_VALID="$TMP_DIR/fake_manual_validation_status_multi_vm_stability_valid.sh"
+FAKE_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK="$TMP_DIR/fake_manual_validation_status_multi_vm_stability_cycle_fallback.sh"
+FAKE_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING="$TMP_DIR/fake_manual_validation_status_multi_vm_stability_default_missing.sh"
 STABILITY_VALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_valid.json"
 STABILITY_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_check_summary_invalid.json"
 STABILITY_DEFAULT_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_summary_default.json"
@@ -58,6 +64,11 @@ CYCLE_VALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary_
 CYCLE_INVALID_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary_invalid.json"
 CYCLE_DEFAULT_SIGNOFF_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_cycle_default.json"
 CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON="$TMP_DIR/profile_default_gate_stability_cycle_summary.json"
+MULTI_VM_STABILITY_CHECK_VALID_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_check_summary_valid.json"
+MULTI_VM_STABILITY_CHECK_INVALID_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_check_summary_invalid.json"
+MULTI_VM_STABILITY_CHECK_DEFAULT_EXPECTED_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_check_summary.json"
+MULTI_VM_STABILITY_CYCLE_VALID_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_cycle_summary_valid.json"
+MULTI_VM_STABILITY_CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_cycle_summary.json"
 
 cat >"$FAKE_DOCTOR" <<'EOF_DOCTOR'
 #!/usr/bin/env bash
@@ -1509,6 +1520,379 @@ if ! printf '%s\n' "$cycle_default_missing_report_json" | jq -e --arg expected "
 ' >/dev/null; then
   echo "manual validation report missing-default-cycle JSON missing expected fail-closed fields"
   printf '%s\n' "$cycle_default_missing_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default multi-vm stability fields (valid check summary)"
+cat >"$MULTI_VM_STABILITY_CHECK_VALID_SUMMARY_JSON" <<'EOF_MULTI_VM_STABILITY_CHECK_VALID_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_check_summary"
+  },
+  "status": "ok",
+  "decision": "GO",
+  "rc": 0,
+  "observed": {
+    "modal_recommended_profile": "balanced",
+    "modal_support_rate_pct": 73.5
+  }
+}
+EOF_MULTI_VM_STABILITY_CHECK_VALID_SUMMARY
+cat >"$FAKE_STATUS_MULTI_VM_STABILITY_VALID" <<EOF_STATUS_MULTI_VM_STABILITY_VALID
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_multi_vm_stability_valid.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {
+        "profile_compare_multi_vm_stability_check_summary_json": "$MULTI_VM_STABILITY_CHECK_VALID_SUMMARY_JSON"
+      }
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_MULTI_VM_STABILITY_VALID
+chmod +x "$FAKE_STATUS_MULTI_VM_STABILITY_VALID"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_MULTI_VM_STABILITY_VALID" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/multi_vm_stability_valid_summary.json" \
+  --report-md "$TMP_DIR/multi_vm_stability_valid_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$MULTI_VM_STABILITY_VALID_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_multi_vm_stability_available=true' "$MULTI_VM_STABILITY_VALID_REPORT_LOG"; then
+  echo "manual validation report multi-vm valid run missing availability=true line"
+  cat "$MULTI_VM_STABILITY_VALID_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-report\] profile_default_gate_multi_vm_stability_source=check_summary' "$MULTI_VM_STABILITY_VALID_REPORT_LOG"; then
+  echo "manual validation report multi-vm valid run missing source=check_summary line"
+  cat "$MULTI_VM_STABILITY_VALID_REPORT_LOG"
+  exit 1
+fi
+multi_vm_stability_valid_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$MULTI_VM_STABILITY_VALID_REPORT_LOG")"
+if [[ -z "$multi_vm_stability_valid_report_json" ]]; then
+  echo "manual validation report multi-vm valid run missing JSON payload"
+  cat "$MULTI_VM_STABILITY_VALID_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$multi_vm_stability_valid_report_json" | jq -e --arg check "$MULTI_VM_STABILITY_CHECK_VALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_check_summary_json == $check
+  and .summary.profile_default_gate.multi_vm_stability_check_summary_json == $check
+  and .summary.profile_default_gate.multi_vm_stability_check_summary_available == true
+  and .summary.profile_default_gate.multi_vm_stability_check_status == "ok"
+  and .summary.profile_default_gate.multi_vm_stability_check_decision == "GO"
+  and .summary.profile_default_gate.multi_vm_stability_check_go == true
+  and .summary.profile_default_gate.multi_vm_stability_check_no_go == false
+  and .summary.profile_default_gate.multi_vm_stability_check_modal_recommended_profile == "balanced"
+  and .summary.profile_default_gate.multi_vm_stability_check_modal_support_rate_pct == 73.5
+  and .summary.profile_default_gate.multi_vm_stability_summary_json == $check
+  and .summary.profile_default_gate.multi_vm_stability_source == "check_summary"
+  and .summary.profile_default_gate.multi_vm_stability_available == true
+  and .summary.profile_default_gate.multi_vm_stability_status == "ok"
+  and .summary.profile_default_gate.multi_vm_stability_decision == "GO"
+  and .summary.profile_default_gate.multi_vm_stability_go == true
+  and .summary.profile_default_gate.multi_vm_stability_no_go == false
+  and .summary.profile_default_gate.multi_vm_stability_modal_recommended_profile == "balanced"
+  and .summary.profile_default_gate.multi_vm_stability_modal_support_rate_pct == 73.5
+' >/dev/null; then
+  echo "manual validation report multi-vm valid JSON missing expected fields"
+  printf '%s\n' "$multi_vm_stability_valid_report_json"
+  exit 1
+fi
+if ! rg -q 'Multi-VM stability source: `check_summary`' "$TMP_DIR/multi_vm_stability_valid_report.md"; then
+  echo "manual validation report multi-vm valid markdown missing source line"
+  cat "$TMP_DIR/multi_vm_stability_valid_report.md"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default multi-vm stability fields (cycle fallback)"
+cat >"$MULTI_VM_STABILITY_CHECK_INVALID_SUMMARY_JSON" <<'EOF_MULTI_VM_STABILITY_CHECK_INVALID_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_check_summary"
+  },
+  "status": "ok",
+  "decision": "GO",
+  "rc": "0",
+  "observed": {
+    "modal_recommended_profile": "balanced"
+  }
+}
+EOF_MULTI_VM_STABILITY_CHECK_INVALID_SUMMARY
+cat >"$MULTI_VM_STABILITY_CYCLE_VALID_SUMMARY_JSON" <<'EOF_MULTI_VM_STABILITY_CYCLE_VALID_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_cycle_summary"
+  },
+  "status": "warn",
+  "decision": "NO-GO",
+  "rc": 0,
+  "failure_stage": null,
+  "failure_reason": null,
+  "check": {
+    "modal_recommended_profile": "private",
+    "modal_support_rate_pct": 61.2
+  }
+}
+EOF_MULTI_VM_STABILITY_CYCLE_VALID_SUMMARY
+cat >"$FAKE_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK" <<EOF_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_multi_vm_stability_cycle_fallback.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {
+        "profile_compare_multi_vm_stability_check_summary_json": "$MULTI_VM_STABILITY_CHECK_INVALID_SUMMARY_JSON",
+        "profile_compare_multi_vm_stability_cycle_summary_json": "$MULTI_VM_STABILITY_CYCLE_VALID_SUMMARY_JSON"
+      }
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK
+chmod +x "$FAKE_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_MULTI_VM_STABILITY_CYCLE_FALLBACK" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/multi_vm_stability_cycle_fallback_summary.json" \
+  --report-md "$TMP_DIR/multi_vm_stability_cycle_fallback_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_multi_vm_stability_source=cycle_summary' "$MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG"; then
+  echo "manual validation report multi-vm cycle-fallback run missing source=cycle_summary line"
+  cat "$MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG"
+  exit 1
+fi
+multi_vm_stability_cycle_fallback_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG")"
+if [[ -z "$multi_vm_stability_cycle_fallback_report_json" ]]; then
+  echo "manual validation report multi-vm cycle-fallback run missing JSON payload"
+  cat "$MULTI_VM_STABILITY_CYCLE_FALLBACK_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$multi_vm_stability_cycle_fallback_report_json" | jq -e --arg check "$MULTI_VM_STABILITY_CHECK_INVALID_SUMMARY_JSON" --arg cycle "$MULTI_VM_STABILITY_CYCLE_VALID_SUMMARY_JSON" '
+  .summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_check_summary_json == $check
+  and .summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_cycle_summary_json == $cycle
+  and .summary.profile_default_gate.multi_vm_stability_check_summary_json == $check
+  and .summary.profile_default_gate.multi_vm_stability_check_summary_available == false
+  and .summary.profile_default_gate.multi_vm_stability_cycle_summary_json == $cycle
+  and .summary.profile_default_gate.multi_vm_stability_cycle_summary_available == true
+  and .summary.profile_default_gate.multi_vm_stability_cycle_decision == "NO-GO"
+  and .summary.profile_default_gate.multi_vm_stability_cycle_status == "warn"
+  and .summary.profile_default_gate.multi_vm_stability_cycle_go == false
+  and .summary.profile_default_gate.multi_vm_stability_cycle_no_go == true
+  and .summary.profile_default_gate.multi_vm_stability_cycle_modal_recommended_profile == "private"
+  and .summary.profile_default_gate.multi_vm_stability_cycle_modal_support_rate_pct == 61.2
+  and .summary.profile_default_gate.multi_vm_stability_summary_json == $cycle
+  and .summary.profile_default_gate.multi_vm_stability_source == "cycle_summary"
+  and .summary.profile_default_gate.multi_vm_stability_available == true
+  and .summary.profile_default_gate.multi_vm_stability_decision == "NO-GO"
+  and .summary.profile_default_gate.multi_vm_stability_status == "warn"
+  and .summary.profile_default_gate.multi_vm_stability_go == false
+  and .summary.profile_default_gate.multi_vm_stability_no_go == true
+  and .summary.profile_default_gate.multi_vm_stability_modal_recommended_profile == "private"
+  and .summary.profile_default_gate.multi_vm_stability_modal_support_rate_pct == 61.2
+' >/dev/null; then
+  echo "manual validation report multi-vm cycle-fallback JSON missing expected fields"
+  printf '%s\n' "$multi_vm_stability_cycle_fallback_report_json"
+  exit 1
+fi
+
+echo "[manual-validation-report] profile-default multi-vm stability fields (missing default artifact paths)"
+printf '%s\n' '{"version":1,"status":"ok"}' >"$PROFILE_SIGNOFF_SUMMARY_JSON"
+rm -f "$MULTI_VM_STABILITY_CHECK_DEFAULT_EXPECTED_SUMMARY_JSON" "$MULTI_VM_STABILITY_CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON"
+cat >"$FAKE_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING" <<EOF_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[manual-validation-status] summary_json_payload:
+{
+  "version": 1,
+  "state_dir": "$STATE_DIR",
+  "status_json": "$TMP_DIR/manual_validation_status_multi_vm_stability_default_missing.json",
+  "runtime_doctor": {
+    "status": "OK",
+    "summary": { "findings_total": 0, "warnings_total": 0, "failures_total": 0 },
+    "findings": []
+  },
+  "checks": [],
+  "summary": {
+    "total_checks": 0,
+    "pass_checks": 0,
+    "warn_checks": 0,
+    "fail_checks": 0,
+    "pending_checks": 0,
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "next_action_remediations": [],
+    "pre_machine_c_gate": { "ready": true, "blockers": [], "next_check_id": "", "next_command": "" },
+    "local_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "" },
+    "real_host_gate": { "ready": true, "check_ids": [], "blockers": [], "next_check_id": "", "next_label": "", "next_command": "" },
+    "profile_default_gate": {
+      "enabled": true,
+      "available": true,
+      "valid_json": true,
+      "status": "pass",
+      "summary_json": "$PROFILE_SIGNOFF_SUMMARY_JSON",
+      "decision": "GO",
+      "recommended_profile": "balanced",
+      "notes": "",
+      "next_command": "",
+      "next_command_sudo": "",
+      "next_command_source": "default_non_sudo",
+      "artifacts": {}
+    },
+    "profile_default_ready": true,
+    "docker_rehearsal_gate": { "check_id": "three_machine_docker_readiness", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "real_wg_privileged_gate": { "check_id": "real_wg_privileged_matrix", "status": "pass", "notes": "", "command": "", "next_command": "", "ready": true },
+    "single_machine_ready": true,
+    "roadmap_stage": "PRODUCTION_SIGNOFF_COMPLETE",
+    "latest_failed_incident": null
+  }
+}
+OUT
+EOF_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING
+chmod +x "$FAKE_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING"
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_STATUS_SCRIPT="$FAKE_STATUS_MULTI_VM_STABILITY_DEFAULT_MISSING" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_report.sh \
+  --summary-json "$TMP_DIR/multi_vm_stability_default_missing_summary.json" \
+  --report-md "$TMP_DIR/multi_vm_stability_default_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 1 >"$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"
+
+if ! rg -q '\[manual-validation-report\] profile_default_gate_multi_vm_stability_available=false' "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report multi-vm missing-default run missing availability=false line"
+  cat "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q "\[manual-validation-report\] profile_default_gate_multi_vm_stability_check_summary_json=${MULTI_VM_STABILITY_CHECK_DEFAULT_EXPECTED_SUMMARY_JSON}" "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report multi-vm missing-default run missing default check summary path line"
+  cat "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! rg -q "\[manual-validation-report\] profile_default_gate_multi_vm_stability_cycle_summary_json=${MULTI_VM_STABILITY_CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON}" "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"; then
+  echo "manual validation report multi-vm missing-default run missing default cycle summary path line"
+  cat "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+multi_vm_stability_default_missing_report_json="$(awk '/^\[manual-validation-report\] summary_json_payload:/{flag=1; next} flag{print}' "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG")"
+if [[ -z "$multi_vm_stability_default_missing_report_json" ]]; then
+  echo "manual validation report multi-vm missing-default run missing JSON payload"
+  cat "$MULTI_VM_STABILITY_DEFAULT_MISSING_REPORT_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$multi_vm_stability_default_missing_report_json" | jq -e --arg check "$MULTI_VM_STABILITY_CHECK_DEFAULT_EXPECTED_SUMMARY_JSON" --arg cycle "$MULTI_VM_STABILITY_CYCLE_DEFAULT_EXPECTED_SUMMARY_JSON" '
+  .summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_check_summary_json == $check
+  and .summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_cycle_summary_json == $cycle
+  and .summary.profile_default_gate.multi_vm_stability_check_summary_json == $check
+  and .summary.profile_default_gate.multi_vm_stability_check_summary_available == false
+  and .summary.profile_default_gate.multi_vm_stability_cycle_summary_json == $cycle
+  and .summary.profile_default_gate.multi_vm_stability_cycle_summary_available == false
+  and .summary.profile_default_gate.multi_vm_stability_summary_json == null
+  and .summary.profile_default_gate.multi_vm_stability_source == null
+  and .summary.profile_default_gate.multi_vm_stability_available == false
+  and .summary.profile_default_gate.multi_vm_stability_status == null
+  and .summary.profile_default_gate.multi_vm_stability_decision == null
+  and .summary.profile_default_gate.multi_vm_stability_go == null
+  and .summary.profile_default_gate.multi_vm_stability_no_go == null
+  and .summary.profile_default_gate.multi_vm_stability_modal_recommended_profile == null
+  and .summary.profile_default_gate.multi_vm_stability_modal_support_rate_pct == null
+' >/dev/null; then
+  echo "manual validation report multi-vm missing-default JSON missing expected fail-closed fields"
+  printf '%s\n' "$multi_vm_stability_default_missing_report_json"
   exit 1
 fi
 

@@ -4873,6 +4873,138 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] multi-VM stability-check summary defaults to reports_dir artifact"
+PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR="$TMP_DIR/profile_compare_multi_vm_stability_reports"
+mkdir -p "$PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR"
+PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY_JSON="$PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR/profile_compare_multi_vm_stability_check_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY_JSON" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_check_summary"
+  },
+  "decision": "GO",
+  "status": "ok",
+  "rc": 0,
+  "notes": "multi-VM stability summary passes configured policy",
+  "observed": {
+    "runs_requested": 3,
+    "runs_completed": 3,
+    "runs_fail": 0,
+    "modal_recommended_profile": "balanced",
+    "modal_support_rate_pct": 66.67,
+    "decision_counts": {
+      "GO": 2,
+      "NO-GO": 1
+    },
+    "recommended_profile_counts": {
+      "balanced": 2,
+      "private": 1
+    }
+  },
+  "errors": []
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY
+if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_STABILITY_CYCLE_DEFAULT_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_default_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_default_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log 2>&1; then
+  echo "expected success when multi-VM stability-check summary exists at reports_dir default artifact path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY_JSON" '
+  .vpn_track.multi_vm_stability.available == true
+  and .vpn_track.multi_vm_stability.input_summary_json == $src
+  and .vpn_track.multi_vm_stability.source_summary_json == $src
+  and .vpn_track.multi_vm_stability.source_summary_kind == "check"
+  and .vpn_track.multi_vm_stability.status == "ok"
+  and .vpn_track.multi_vm_stability.rc == 0
+  and .vpn_track.multi_vm_stability.decision == "GO"
+  and .vpn_track.multi_vm_stability.go == true
+  and .vpn_track.multi_vm_stability.no_go == false
+  and .vpn_track.multi_vm_stability.recommended_profile == "balanced"
+  and .vpn_track.multi_vm_stability.support_rate_pct == 66.67
+  and .vpn_track.multi_vm_stability.runs_requested == 3
+  and .vpn_track.multi_vm_stability.runs_completed == 3
+  and .vpn_track.multi_vm_stability.runs_fail == 0
+  and .vpn_track.multi_vm_stability.decision_counts == {"GO":2,"NO-GO":1}
+  and .vpn_track.multi_vm_stability.recommended_profile_counts == {"balanced":2,"private":1}
+  and .vpn_track.multi_vm_stability.reasons == []
+  and ((.vpn_track.multi_vm_stability.notes // "") | test("passes configured policy"))
+  and .vpn_track.multi_vm_stability.needs_attention == false
+  and .vpn_track.multi_vm_stability.next_command == null
+  and .vpn_track.multi_vm_stability.next_command_reason == null
+  and .artifacts.profile_compare_multi_vm_stability_summary_json == $src
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_default_summary.json" >/dev/null; then
+  echo "multi-VM stability default-artifact summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_default_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log; then
+  echo "expected multi-VM stability availability log line in default-artifact scenario"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] multi-VM stability-check summary missing default artifact is fail-closed/null-safe"
+PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR="$TMP_DIR/profile_compare_multi_vm_stability_missing_reports"
+rm -rf "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR"
+PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON="$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR/profile_compare_multi_vm_stability_check_summary.json"
+if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_STABILITY_CYCLE_DEFAULT_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log 2>&1; then
+  echo "expected success when multi-VM stability-check summary default path is missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" '
+  .vpn_track.multi_vm_stability.available == false
+  and .vpn_track.multi_vm_stability.input_summary_json == $src
+  and .vpn_track.multi_vm_stability.source_summary_json == null
+  and .vpn_track.multi_vm_stability.source_summary_kind == null
+  and .vpn_track.multi_vm_stability.status == "missing"
+  and .vpn_track.multi_vm_stability.rc == null
+  and .vpn_track.multi_vm_stability.decision == null
+  and .vpn_track.multi_vm_stability.go == null
+  and .vpn_track.multi_vm_stability.no_go == null
+  and .vpn_track.multi_vm_stability.recommended_profile == null
+  and .vpn_track.multi_vm_stability.support_rate_pct == null
+  and .vpn_track.multi_vm_stability.runs_requested == null
+  and .vpn_track.multi_vm_stability.runs_completed == null
+  and .vpn_track.multi_vm_stability.runs_fail == null
+  and .vpn_track.multi_vm_stability.decision_counts == null
+  and .vpn_track.multi_vm_stability.recommended_profile_counts == null
+  and .vpn_track.multi_vm_stability.reasons == []
+  and .vpn_track.multi_vm_stability.notes == null
+  and .vpn_track.multi_vm_stability.needs_attention == true
+  and ((.vpn_track.multi_vm_stability.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
+  and ((.vpn_track.multi_vm_stability.next_command_reason // "") | test("missing"; "i"))
+  and .artifacts.profile_compare_multi_vm_stability_summary_json == null
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json" >/dev/null; then
+  echo "multi-VM stability missing-default summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log; then
+  echo "expected multi-VM stability availability log line in missing-default scenario"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] manual refresh invalid summary restore path"
 RESTORE_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_restore_target.json"
 RESTORE_MANUAL_REPORT_MD="$TMP_DIR/manual_validation_restore_target.md"
