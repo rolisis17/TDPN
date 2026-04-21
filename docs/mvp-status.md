@@ -73,7 +73,7 @@
 - Token class hardening: split `client_access` vs `provider_role` capability tokens plus PoP-bound path-open proofs (`token_proof` verified against token `cnf_ed25519`).
 - Optional PoP replay guard on exit (`EXIT_TOKEN_PROOF_REPLAY_GUARD=1`): one-time `token_proof_nonce` enforcement per token lifetime.
 - Provider-role directory API: token-gated provider relay advertisement (`/v1/provider/relay/upsert`) with issuer pubkey verification and bounded relay TTL.
-- Provider relay role-tier policy controls (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`, `DIRECTORY_PROVIDER_MIN_EXIT_TIER`) to gate advertised entry/exit roles by provider token tier.
+- Provider relay role-tier policy controls (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`, `DIRECTORY_PROVIDER_MIN_EXIT_TIER`) to gate advertised entry-tier roles (`entry`, `micro-relay`) vs `exit` by provider token tier.
 - Provider relay concentration hardening: optional per-operator relay cap for provider upserts (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`).
 - Provider anti-capture split-role policy: optional per-operator entry/exit separation for provider upserts (`DIRECTORY_PROVIDER_SPLIT_ROLES=1`, auto-enabled in `BETA_STRICT_MODE`).
 - Persisted issuer subject profile store on disk.

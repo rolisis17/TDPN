@@ -1178,6 +1178,175 @@ func TestHandleProviderRelayUpsertAllowsTier1EntryProvider(t *testing.T) {
 	}
 }
 
+func TestHandleProviderRelayUpsertAllowsTier1MicroRelayProvider(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+	s := &Service{
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:       []string{"127.0.0.1:51820"},
+		endpointRotateSec:    30,
+		providerIssuerURLs:   []string{issuerURL},
+		providerRelayMaxTTL:  3 * time.Minute,
+		providerMinEntryTier: 1,
+		providerMinExitTier:  2,
+		providerRelays:       make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-micro",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-micro",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:      "micro-provider-tier1",
+		Role:         "micro-relay",
+		PubKey:       base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:     "127.0.0.1:52820",
+		ControlURL:   "http://127.0.0.1:9283",
+		Capabilities: []string{"wg"},
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for tier1 micro-relay provider token, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var out proto.ProviderRelayUpsertResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Relay.Role != "micro-relay" {
+		t.Fatalf("expected canonical micro-relay role, got %q", out.Relay.Role)
+	}
+	if _, ok := s.providerRelays[relayKey("micro-provider-tier1", "micro-relay")]; !ok {
+		t.Fatalf("expected micro-relay stored under canonical role key")
+	}
+}
+
+func TestHandleProviderRelayUpsertCanonicalizesMicroRelayAliases(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+	s := &Service{
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:       []string{"127.0.0.1:51820"},
+		endpointRotateSec:    30,
+		providerIssuerURLs:   []string{issuerURL},
+		providerRelayMaxTTL:  3 * time.Minute,
+		providerMinEntryTier: 1,
+		providerMinExitTier:  2,
+		providerRelays:       make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-alias",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-alias",
+	})
+
+	aliases := []string{"micro_relay", "middle", "relay"}
+	for idx, alias := range aliases {
+		t.Run(alias, func(t *testing.T) {
+			relayPub, _, err := crypto.GenerateEd25519Keypair()
+			if err != nil {
+				t.Fatalf("relay keygen: %v", err)
+			}
+			in := proto.ProviderRelayUpsertRequest{
+				RelayID:      fmt.Sprintf("micro-alias-provider-%d", idx),
+				Role:         alias,
+				PubKey:       base64.RawURLEncoding.EncodeToString(relayPub),
+				Endpoint:     fmt.Sprintf("127.0.0.1:%d", 52830+idx),
+				ControlURL:   fmt.Sprintf("http://127.0.0.1:%d", 9290+idx),
+				Capabilities: []string{"wg"},
+			}
+			body, _ := json.Marshal(in)
+			req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rr := httptest.NewRecorder()
+			s.handleProviderRelayUpsert(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200 for alias role %q, got %d body=%s", alias, rr.Code, rr.Body.String())
+			}
+
+			var out proto.ProviderRelayUpsertResponse
+			if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if out.Relay.Role != "micro-relay" {
+				t.Fatalf("expected canonical micro-relay role for alias %q, got %q", alias, out.Relay.Role)
+			}
+			if _, ok := s.providerRelays[relayKey(in.RelayID, "micro-relay")]; !ok {
+				t.Fatalf("expected alias role %q stored under canonical micro-relay key", alias)
+			}
+		})
+	}
+}
+
+func TestHandleProviderRelayUpsertRejectsUnknownRole(t *testing.T) {
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:    "provider-unknown-role",
+		Role:       "unknown-role",
+		PubKey:     base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:   "127.0.0.1:52820",
+		ControlURL: "http://127.0.0.1:9283",
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	s := &Service{}
+	s.handleProviderRelayUpsert(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown provider relay role, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "provider relay role must be entry, exit, or micro-relay") {
+		t.Fatalf("expected clear unknown role validation message, got %q", rr.Body.String())
+	}
+}
+
 func TestHandleProviderRelayUpsertRejectsOverOperatorRelayLimit(t *testing.T) {
 	t.Setenv(allowDangerousProviderTokenBypass, "1")
 

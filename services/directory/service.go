@@ -3297,10 +3297,21 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(proto.ProviderRelayUpsertResponse{Accepted: true, Relay: desc})
 }
 
+func canonicalizeProviderRelayRole(raw string) (string, error) {
+	role := strings.TrimSpace(strings.ToLower(raw))
+	switch role {
+	case "entry", "exit", "micro-relay":
+		return role, nil
+	case "micro_relay", "middle", "relay":
+		return "micro-relay", nil
+	default:
+		return "", fmt.Errorf("provider relay role must be entry, exit, or micro-relay (aliases: micro_relay, middle, relay)")
+	}
+}
+
 func validateProviderRelayUpsertShape(req proto.ProviderRelayUpsertRequest) error {
-	role := strings.TrimSpace(strings.ToLower(req.Role))
-	if role != "entry" && role != "exit" {
-		return fmt.Errorf("provider relay role must be entry or exit")
+	if _, err := canonicalizeProviderRelayRole(req.Role); err != nil {
+		return err
 	}
 	if strings.TrimSpace(req.RelayID) == "" {
 		return fmt.Errorf("provider relay_id is required")
@@ -3533,6 +3544,10 @@ func providerRelayUpsertProofMessage(
 	controlURL string,
 	nonce string,
 ) ([]byte, error) {
+	normalizedRole := strings.TrimSpace(strings.ToLower(role))
+	if canonicalRole, err := canonicalizeProviderRelayRole(normalizedRole); err == nil {
+		normalizedRole = canonicalRole
+	}
 	payload := struct {
 		Context    string `json:"context"`
 		TokenID    string `json:"token_id"`
@@ -3548,7 +3563,7 @@ func providerRelayUpsertProofMessage(
 		TokenID:    strings.TrimSpace(tokenID),
 		Subject:    normalizeOperatorID(subject),
 		RelayID:    strings.TrimSpace(relayID),
-		Role:       strings.TrimSpace(strings.ToLower(role)),
+		Role:       normalizedRole,
 		PubKey:     strings.TrimSpace(relayPubKey),
 		Endpoint:   strings.TrimSpace(endpoint),
 		ControlURL: strings.TrimSpace(controlURL),
@@ -3940,9 +3955,9 @@ func isLocalDevelopmentIssuerURL(raw string) bool {
 }
 
 func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequest, claims crypto.CapabilityClaims, now time.Time) (proto.RelayDescriptor, error) {
-	role := strings.TrimSpace(strings.ToLower(req.Role))
-	if role != "entry" && role != "exit" {
-		return proto.RelayDescriptor{}, fmt.Errorf("provider relay role must be entry or exit")
+	role, err := canonicalizeProviderRelayRole(req.Role)
+	if err != nil {
+		return proto.RelayDescriptor{}, err
 	}
 	minTier := s.providerTierMinForRole(role)
 	if claims.Tier < minTier {

@@ -1573,7 +1573,7 @@ All deep checks in one command:
   with replay guard enabled, exit denies repeated `token_proof_nonce` reuse for the same token and accepts a fresh nonce.
 
 - `integration_provider_api.sh`:
-  directory accepts relay upsert from `provider_role` token, rejects `client_access` token for the same API, enforces role-specific minimum provider tiers for `entry` vs `exit`, and enforces optional per-operator provider relay cap.
+  directory accepts relay upsert from `provider_role` token, rejects `client_access` token for the same API, enforces role-specific minimum provider tiers for `entry`/`micro-relay` vs `exit`, canonicalizes micro-relay aliases (`middle`, `relay`, `micro_relay`) to `micro-relay`, and enforces optional per-operator provider relay cap.
 
 - `integration_federation.sh`:
   client can use multiple directories with source/operator quorum and vote thresholds.

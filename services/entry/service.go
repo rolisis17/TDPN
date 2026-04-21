@@ -1304,8 +1304,7 @@ func pickBestRelayDescriptor(candidates map[string]relayDescriptorCandidate, min
 }
 
 func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
-	role := strings.ToLower(strings.TrimSpace(relay.Role))
-	if role == "middle" {
+	if hopRoleIsMiddleDescriptor(relay.Role) {
 		return true
 	}
 	for _, hopRole := range relay.HopRoles {
@@ -1314,8 +1313,7 @@ func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
 		}
 	}
 	for _, capability := range relay.Capabilities {
-		switch strings.ToLower(strings.TrimSpace(capability)) {
-		case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+		if hopRoleIsMiddleDescriptor(capability) {
 			return true
 		}
 	}
@@ -1324,7 +1322,7 @@ func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
 
 func hopRoleIsMiddleDescriptor(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "middle", "relay", "micro-relay", "micro_relay":
+	case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
 		return true
 	default:
 		return false

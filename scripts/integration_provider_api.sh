@@ -153,6 +153,53 @@ if ! echo "$entry_resp" | rg -q '"accepted":true'; then
   exit 1
 fi
 
+provider_pop_micro_json=$(go run ./cmd/tokenpop gen --show-private-key)
+provider_pop_micro_pub=$(echo "$provider_pop_micro_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
+if [[ -z "$provider_pop_micro_pub" ]]; then
+  echo "failed to generate provider micro-relay pop key"
+  redact_token_json "$provider_pop_micro_json"
+  exit 1
+fi
+
+provider_token_micro_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
+  --data "{\"tier\":1,\"subject\":\"provider-op-micro\",\"token_type\":\"provider_role\",\"pop_pub_key\":\"$provider_pop_micro_pub\"}")
+provider_token_micro=$(echo "$provider_token_micro_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+if [[ -z "$provider_token_micro" ]]; then
+  echo "failed to issue provider micro-relay token"
+  redact_token_json "$provider_token_micro_json"
+  cat "$node_log"
+  exit 1
+fi
+
+relay_key_micro_json=$(go run ./cmd/tokenpop gen --show-private-key)
+relay_micro_pub=$(echo "$relay_key_micro_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
+if [[ -z "$relay_micro_pub" ]]; then
+  echo "failed to generate micro-relay pubkey"
+  redact_token_json "$relay_key_micro_json"
+  exit 1
+fi
+
+micro_payload=$(cat <<JSON
+{"relay_id":"micro-provider-1","role":"middle","pub_key":"$relay_micro_pub","endpoint":"127.0.0.1:52830","control_url":"http://127.0.0.1:9290","country_code":"US","region":"us-east","capabilities":["wg"],"valid_for_sec":120}
+JSON
+)
+
+micro_resp=$(curl_with_bearer_config "$provider_token_micro" -sS -X POST http://127.0.0.1:8081/v1/provider/relay/upsert \
+  -H 'Content-Type: application/json' \
+  --data "$micro_payload")
+if ! echo "$micro_resp" | rg -q '"accepted":true'; then
+  echo "expected tier1 provider relay upsert accepted for middle alias role"
+  echo "$micro_resp"
+  cat "$node_log"
+  exit 1
+fi
+if ! echo "$micro_resp" | rg -q '"role":"micro-relay"'; then
+  echo "expected middle alias to canonicalize to micro-relay role"
+  echo "$micro_resp"
+  cat "$node_log"
+  exit 1
+fi
+
 provider_pop_t2_json=$(go run ./cmd/tokenpop gen --show-private-key)
 provider_pop_t2_pub=$(echo "$provider_pop_t2_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$provider_pop_t2_pub" ]]; then

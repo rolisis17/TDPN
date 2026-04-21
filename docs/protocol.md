@@ -102,7 +102,8 @@ Serialization for MVP:
 - `POST /v1/provider/relay/upsert`
   - Provider-role token gated relay advertisement endpoint for directory ingestion.
   - Requires `aud=provider` + `token_type=provider_role`.
-  - Optional role-tier gates can require higher provider token tier for exit advertisements (`DIRECTORY_PROVIDER_MIN_EXIT_TIER`) than for entry advertisements (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`).
+  - Accepted roles: `entry`, `exit`, `micro-relay` (aliases `micro_relay`, `middle`, `relay` canonicalize to `micro-relay`).
+  - Optional role-tier gates can require higher provider token tier for exit advertisements (`DIRECTORY_PROVIDER_MIN_EXIT_TIER`) than for entry-tier advertisements (`DIRECTORY_PROVIDER_MIN_ENTRY_TIER`, also used for `micro-relay`).
   - Optional per-operator admission cap (`DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR`) can limit how many active relays one provider operator may advertise.
   - Optional split-role enforcement (`DIRECTORY_PROVIDER_SPLIT_ROLES=1`) can prevent one provider operator from advertising both entry and exit roles at the same time.
 - `GET /v1/admin/sync-status`
