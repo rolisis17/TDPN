@@ -1795,13 +1795,17 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		}
 	})
 
-	t.Run("manual overrides remain allowed when legacy override policy is enabled", func(t *testing.T) {
+	t.Run("manual overrides remain allowed when trusted-manifest binding policy is disabled", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = false
 		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = false
+
+		now := time.Now().UTC()
+		configureSessionManifest(t, svc, now, "https://dir-trusted-only.example:8081")
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
-			"bootstrap_directory":"https://dir.example:8081",
+			"bootstrap_directory":"https://dir-manual-policy-disabled.example:8081",
 			"invite_key":"inv-manual-enabled-by-policy",
 			"run_preflight":false
 		}`)
@@ -1816,8 +1820,91 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
 			t.Fatalf("unexpected command order: %v", cmds)
 		}
-		mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir.example:8081")
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir-manual-policy-disabled.example:8081")
 		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
+	})
+
+	t.Run("manual overrides are allowed when trusted-manifest binding policy is enabled and bootstrap is trusted", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = true
+
+		now := time.Now().UTC()
+		trustedBootstrap := "https://dir-manual-trusted.example:8081"
+		configureSessionManifest(t, svc, now, trustedBootstrap, "https://dir-manual-secondary.example:8081")
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir-manual-trusted.example:8081",
+			"invite_key":"inv-manual-trusted-bootstrap",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", trustedBootstrap)
+		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
+	})
+
+	t.Run("manual overrides fail closed when trusted-manifest binding policy is enabled and bootstrap is not trusted", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = true
+
+		now := time.Now().UTC()
+		configureSessionManifest(t, svc, now, "https://dir-manual-trusted-only.example:8081")
+		untrustedBootstrap := "https://dir-manual-untrusted.example:8081"
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", fmt.Sprintf(`{
+			"bootstrap_directory":%q,
+			"invite_key":"inv-manual-untrusted-bootstrap",
+			"run_preflight":false
+		}`, untrustedBootstrap))
+		if code != http.StatusBadRequest && code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(strings.ToLower(errMsg), "trusted manifest") && !strings.Contains(strings.ToLower(errMsg), "trusted bootstrap") {
+			t.Fatalf("error=%q want trusted-manifest rejection guidance", errMsg)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("trusted-manifest rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("manual overrides fail closed when trusted-manifest binding policy is enabled and manifest resolution fails", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = true
+
+		svc.gpmMainDomain = "https://127.0.0.1:1"
+		svc.gpmManifestURL = "https://127.0.0.1:1/v1/bootstrap/manifest"
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir-manual-manifest-failure.example:8081",
+			"invite_key":"inv-manual-manifest-failure",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadGateway {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(strings.ToLower(errMsg), "manifest") {
+			t.Fatalf("error=%q want manifest-resolution failure guidance", errMsg)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("manifest-resolution rejection should not execute commands, got=%v", cmds)
+		}
 	})
 
 	t.Run("manual overrides fail closed when an explicitly provided session token is invalid", func(t *testing.T) {
@@ -2888,6 +2975,32 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["connect_policy_source"].(string); got != "default" {
 			t.Fatalf("connect_policy_source=%q want=%q", got, "default")
+		}
+	})
+
+	t.Run("production mode reports trusted-manifest binding policy source when exposed", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+
+		svc := New()
+		svc.authToken = "cfg-production-manual-binding-source"
+
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
+			"Authorization": "Bearer cfg-production-manual-binding-source",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		configMap, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("config payload missing map: %v", payload)
+		}
+		if got, _ := configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap"].(bool); !got {
+			t.Fatalf("gpm_legacy_connect_require_trusted_manifest_bootstrap=%v want=true", configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap"])
+		}
+		if got, _ := configMap["gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source"].(string); got != "production-default" {
+			t.Fatalf("gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source=%q want=production-default", got)
 		}
 	})
 

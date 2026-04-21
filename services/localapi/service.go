@@ -57,63 +57,65 @@ var lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) 
 }
 
 type Service struct {
-	addr                                    string
-	scriptPath                              string
-	commandRunner                           string
-	commandTimeout                          time.Duration
-	maxConcurrentCmds                       int
-	commandSlots                            chan struct{}
-	allowUpdate                             bool
-	allowUnauthLoopback                     bool
-	allowInsecureHTTP                       bool
-	authToken                               string
-	serviceStatus                           string
-	serviceStart                            string
-	serviceStop                             string
-	serviceRestart                          string
-	gpmConnectRequireSession                bool
-	gpmAllowLegacyConnectOverride           bool
-	gpmConnectPolicyMode                    string
-	gpmConnectPolicySource                  string
-	gpmManifestTrustPolicyMode              string
-	gpmManifestTrustPolicySource            string
-	gpmManifestRequireHTTPS                 bool
-	gpmManifestRequireHTTPSSource           string
-	gpmManifestRequireSignature             bool
-	gpmManifestRequireSigSource             string
-	gpmAuthVerifyPolicyMode                 string
-	gpmAuthVerifyPolicySource               string
-	gpmMainDomain                           string
-	gpmManifestURL                          string
-	gpmManifestCache                        string
-	gpmManifestMaxAge                       time.Duration
-	gpmManifestRemoteRefreshIntvl           time.Duration
-	gpmManifestRemoteRefreshSrc             string
-	gpmManifestRefreshFailureMaxCacheAge    time.Duration
-	gpmManifestRefreshFailureMaxCacheAgeSrc string
-	gpmManifestHMACKey                      string
-	gpmManifestHMACKeySource                string
-	gpmManifestEd25519PublicKey             string
-	gpmManifestEd25519PublicKeySource       string
-	gpmRoleDefault                          string
-	gpmApprovalToken                        string
-	gpmOperatorApprovalRequireSession       bool
-	gpmOperatorApprovalRequireSessionSource string
-	gpmAuthVerifyCommand                    string
-	gpmAuthVerifyRequireCommand             bool
-	gpmAuthVerifyRequireCmdSource           string
-	gpmAuthVerifyRequireMetadata            bool
-	gpmAuthVerifyRequireWalletExt           bool
-	gpmAuthVerifyRequireCryptoProof         bool
-	gpmAuthVerifyMetadataSource             string
-	gpmAuthVerifyWalletExtSource            string
-	gpmAuthVerifyCryptoSource               string
-	gpmLegacyEnvAliasesActive               []string
-	gpmLegacyEnvAliasWarnings               []string
-	gpmAuthSignatureVerifier                gpmAuthSignatureVerifier
-	gpmStateStorePath                       string
-	gpmAuditLogPath                         string
-	gpmState                                *gpmRuntimeState
+	addr                                                  string
+	scriptPath                                            string
+	commandRunner                                         string
+	commandTimeout                                        time.Duration
+	maxConcurrentCmds                                     int
+	commandSlots                                          chan struct{}
+	allowUpdate                                           bool
+	allowUnauthLoopback                                   bool
+	allowInsecureHTTP                                     bool
+	authToken                                             string
+	serviceStatus                                         string
+	serviceStart                                          string
+	serviceStop                                           string
+	serviceRestart                                        string
+	gpmConnectRequireSession                              bool
+	gpmAllowLegacyConnectOverride                         bool
+	gpmLegacyConnectRequireTrustedManifestBootstrap       bool
+	gpmLegacyConnectRequireTrustedManifestBootstrapSource string
+	gpmConnectPolicyMode                                  string
+	gpmConnectPolicySource                                string
+	gpmManifestTrustPolicyMode                            string
+	gpmManifestTrustPolicySource                          string
+	gpmManifestRequireHTTPS                               bool
+	gpmManifestRequireHTTPSSource                         string
+	gpmManifestRequireSignature                           bool
+	gpmManifestRequireSigSource                           string
+	gpmAuthVerifyPolicyMode                               string
+	gpmAuthVerifyPolicySource                             string
+	gpmMainDomain                                         string
+	gpmManifestURL                                        string
+	gpmManifestCache                                      string
+	gpmManifestMaxAge                                     time.Duration
+	gpmManifestRemoteRefreshIntvl                         time.Duration
+	gpmManifestRemoteRefreshSrc                           string
+	gpmManifestRefreshFailureMaxCacheAge                  time.Duration
+	gpmManifestRefreshFailureMaxCacheAgeSrc               string
+	gpmManifestHMACKey                                    string
+	gpmManifestHMACKeySource                              string
+	gpmManifestEd25519PublicKey                           string
+	gpmManifestEd25519PublicKeySource                     string
+	gpmRoleDefault                                        string
+	gpmApprovalToken                                      string
+	gpmOperatorApprovalRequireSession                     bool
+	gpmOperatorApprovalRequireSessionSource               string
+	gpmAuthVerifyCommand                                  string
+	gpmAuthVerifyRequireCommand                           bool
+	gpmAuthVerifyRequireCmdSource                         string
+	gpmAuthVerifyRequireMetadata                          bool
+	gpmAuthVerifyRequireWalletExt                         bool
+	gpmAuthVerifyRequireCryptoProof                       bool
+	gpmAuthVerifyMetadataSource                           string
+	gpmAuthVerifyWalletExtSource                          string
+	gpmAuthVerifyCryptoSource                             string
+	gpmLegacyEnvAliasesActive                             []string
+	gpmLegacyEnvAliasWarnings                             []string
+	gpmAuthSignatureVerifier                              gpmAuthSignatureVerifier
+	gpmStateStorePath                                     string
+	gpmAuditLogPath                                       string
+	gpmState                                              *gpmRuntimeState
 }
 
 type boundedOutputBuffer struct {
@@ -484,6 +486,22 @@ func New() *Service {
 	if !gpmAllowLegacyConnectOverrideSet && gpmConnectPolicyProduction {
 		gpmAllowLegacyConnectOverride = false
 	}
+	gpmLegacyConnectRequireTrustedManifestBootstrapRaw, gpmLegacyConnectRequireTrustedManifestBootstrapSource, gpmLegacyConnectRequireTrustedManifestBootstrapSet := preferredEnvValueWithSource(
+		"GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP",
+		"TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP",
+	)
+	noteLegacyAlias(
+		"GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP",
+		gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+	)
+	gpmLegacyConnectRequireTrustedManifestBootstrap := parseBoolWithDefault(gpmLegacyConnectRequireTrustedManifestBootstrapRaw, false)
+	if !gpmLegacyConnectRequireTrustedManifestBootstrapSet {
+		gpmLegacyConnectRequireTrustedManifestBootstrapSource = "default"
+		if gpmConnectPolicyProduction {
+			gpmLegacyConnectRequireTrustedManifestBootstrap = true
+			gpmLegacyConnectRequireTrustedManifestBootstrapSource = "production-default"
+		}
+	}
 	gpmStateStorePathRaw, gpmStateStorePathSource, gpmStateStorePathSet := preferredEnvValueWithSource(
 		"GPM_STATE_STORE_PATH",
 		"TDPN_STATE_STORE_PATH",
@@ -504,63 +522,65 @@ func New() *Service {
 	}
 
 	svc := &Service{
-		addr:                                    addr,
-		scriptPath:                              scriptPath,
-		commandRunner:                           commandRunner,
-		commandTimeout:                          commandTimeout,
-		maxConcurrentCmds:                       maxConcurrentCmds,
-		commandSlots:                            make(chan struct{}, maxConcurrentCmds),
-		allowUpdate:                             allowUpdate,
-		allowUnauthLoopback:                     allowUnauthLoopback,
-		allowInsecureHTTP:                       allowInsecureHTTP,
-		authToken:                               authToken,
-		serviceStatus:                           serviceStatus,
-		serviceStart:                            serviceStart,
-		serviceStop:                             serviceStop,
-		serviceRestart:                          serviceRestart,
-		gpmConnectRequireSession:                gpmConnectRequireSession,
-		gpmAllowLegacyConnectOverride:           gpmAllowLegacyConnectOverride,
-		gpmConnectPolicyMode:                    gpmConnectPolicyMode,
-		gpmConnectPolicySource:                  gpmConnectPolicySource,
-		gpmManifestTrustPolicyMode:              gpmManifestTrustPolicyMode,
-		gpmManifestTrustPolicySource:            gpmManifestTrustPolicySource,
-		gpmManifestRequireHTTPS:                 gpmManifestRequireHTTPS,
-		gpmManifestRequireHTTPSSource:           gpmManifestRequireHTTPSSource,
-		gpmManifestRequireSignature:             gpmManifestRequireSignature,
-		gpmManifestRequireSigSource:             gpmManifestRequireSigSource,
-		gpmAuthVerifyPolicyMode:                 gpmAuthVerifyPolicyMode,
-		gpmAuthVerifyPolicySource:               gpmAuthVerifyPolicySource,
-		gpmMainDomain:                           strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
-		gpmManifestURL:                          strings.TrimSpace(gpmManifestURL),
-		gpmManifestCache:                        strings.TrimSpace(gpmManifestCache),
-		gpmManifestMaxAge:                       time.Duration(gpmManifestMaxAgeSec) * time.Second,
-		gpmManifestRemoteRefreshIntvl:           time.Duration(gpmManifestRemoteRefreshIntervalSec) * time.Second,
-		gpmManifestRemoteRefreshSrc:             gpmManifestRemoteRefreshSource,
-		gpmManifestRefreshFailureMaxCacheAge:    time.Duration(gpmManifestRefreshFailureMaxCacheAgeSec) * time.Second,
-		gpmManifestRefreshFailureMaxCacheAgeSrc: gpmManifestRefreshFailureMaxCacheAgeSource,
-		gpmManifestHMACKey:                      gpmManifestHMACKey,
-		gpmManifestHMACKeySource:                strings.TrimSpace(gpmManifestHMACKeySource),
-		gpmManifestEd25519PublicKey:             gpmManifestEd25519PublicKey,
-		gpmManifestEd25519PublicKeySource:       strings.TrimSpace(gpmManifestEd25519PublicKeySource),
-		gpmRoleDefault:                          gpmRoleDefault,
-		gpmApprovalToken:                        gpmApprovalToken,
-		gpmOperatorApprovalRequireSession:       gpmOperatorApprovalRequireSession,
-		gpmOperatorApprovalRequireSessionSource: gpmOperatorApprovalRequireSessionSource,
-		gpmAuthVerifyCommand:                    strings.TrimSpace(gpmAuthVerifyCommand),
-		gpmAuthVerifyRequireCommand:             gpmAuthVerifyRequireCommand,
-		gpmAuthVerifyRequireCmdSource:           gpmAuthVerifyRequireCommandSource,
-		gpmAuthVerifyRequireMetadata:            gpmAuthVerifyRequireMetadata,
-		gpmAuthVerifyRequireWalletExt:           gpmAuthVerifyRequireWalletExt,
-		gpmAuthVerifyRequireCryptoProof:         gpmAuthVerifyRequireCryptoProof,
-		gpmAuthVerifyMetadataSource:             gpmAuthVerifyMetadataSource,
-		gpmAuthVerifyWalletExtSource:            gpmAuthVerifyWalletExtSource,
-		gpmAuthVerifyCryptoSource:               gpmAuthVerifyCryptoSource,
-		gpmLegacyEnvAliasesActive:               append([]string{}, legacyEnvAliasesActive...),
-		gpmLegacyEnvAliasWarnings:               append([]string{}, legacyEnvAliasWarnings...),
-		gpmAuthSignatureVerifier:                defaultGPMAuthSignatureVerifier,
-		gpmStateStorePath:                       strings.TrimSpace(gpmStateStorePath),
-		gpmAuditLogPath:                         strings.TrimSpace(gpmAuditLogPath),
-		gpmState:                                newGPMRuntimeState(),
+		addr:                          addr,
+		scriptPath:                    scriptPath,
+		commandRunner:                 commandRunner,
+		commandTimeout:                commandTimeout,
+		maxConcurrentCmds:             maxConcurrentCmds,
+		commandSlots:                  make(chan struct{}, maxConcurrentCmds),
+		allowUpdate:                   allowUpdate,
+		allowUnauthLoopback:           allowUnauthLoopback,
+		allowInsecureHTTP:             allowInsecureHTTP,
+		authToken:                     authToken,
+		serviceStatus:                 serviceStatus,
+		serviceStart:                  serviceStart,
+		serviceStop:                   serviceStop,
+		serviceRestart:                serviceRestart,
+		gpmConnectRequireSession:      gpmConnectRequireSession,
+		gpmAllowLegacyConnectOverride: gpmAllowLegacyConnectOverride,
+		gpmLegacyConnectRequireTrustedManifestBootstrap:       gpmLegacyConnectRequireTrustedManifestBootstrap,
+		gpmLegacyConnectRequireTrustedManifestBootstrapSource: gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+		gpmConnectPolicyMode:                                  gpmConnectPolicyMode,
+		gpmConnectPolicySource:                                gpmConnectPolicySource,
+		gpmManifestTrustPolicyMode:                            gpmManifestTrustPolicyMode,
+		gpmManifestTrustPolicySource:                          gpmManifestTrustPolicySource,
+		gpmManifestRequireHTTPS:                               gpmManifestRequireHTTPS,
+		gpmManifestRequireHTTPSSource:                         gpmManifestRequireHTTPSSource,
+		gpmManifestRequireSignature:                           gpmManifestRequireSignature,
+		gpmManifestRequireSigSource:                           gpmManifestRequireSigSource,
+		gpmAuthVerifyPolicyMode:                               gpmAuthVerifyPolicyMode,
+		gpmAuthVerifyPolicySource:                             gpmAuthVerifyPolicySource,
+		gpmMainDomain:                                         strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
+		gpmManifestURL:                                        strings.TrimSpace(gpmManifestURL),
+		gpmManifestCache:                                      strings.TrimSpace(gpmManifestCache),
+		gpmManifestMaxAge:                                     time.Duration(gpmManifestMaxAgeSec) * time.Second,
+		gpmManifestRemoteRefreshIntvl:                         time.Duration(gpmManifestRemoteRefreshIntervalSec) * time.Second,
+		gpmManifestRemoteRefreshSrc:                           gpmManifestRemoteRefreshSource,
+		gpmManifestRefreshFailureMaxCacheAge:                  time.Duration(gpmManifestRefreshFailureMaxCacheAgeSec) * time.Second,
+		gpmManifestRefreshFailureMaxCacheAgeSrc:               gpmManifestRefreshFailureMaxCacheAgeSource,
+		gpmManifestHMACKey:                                    gpmManifestHMACKey,
+		gpmManifestHMACKeySource:                              strings.TrimSpace(gpmManifestHMACKeySource),
+		gpmManifestEd25519PublicKey:                           gpmManifestEd25519PublicKey,
+		gpmManifestEd25519PublicKeySource:                     strings.TrimSpace(gpmManifestEd25519PublicKeySource),
+		gpmRoleDefault:                                        gpmRoleDefault,
+		gpmApprovalToken:                                      gpmApprovalToken,
+		gpmOperatorApprovalRequireSession:                     gpmOperatorApprovalRequireSession,
+		gpmOperatorApprovalRequireSessionSource:               gpmOperatorApprovalRequireSessionSource,
+		gpmAuthVerifyCommand:                                  strings.TrimSpace(gpmAuthVerifyCommand),
+		gpmAuthVerifyRequireCommand:                           gpmAuthVerifyRequireCommand,
+		gpmAuthVerifyRequireCmdSource:                         gpmAuthVerifyRequireCommandSource,
+		gpmAuthVerifyRequireMetadata:                          gpmAuthVerifyRequireMetadata,
+		gpmAuthVerifyRequireWalletExt:                         gpmAuthVerifyRequireWalletExt,
+		gpmAuthVerifyRequireCryptoProof:                       gpmAuthVerifyRequireCryptoProof,
+		gpmAuthVerifyMetadataSource:                           gpmAuthVerifyMetadataSource,
+		gpmAuthVerifyWalletExtSource:                          gpmAuthVerifyWalletExtSource,
+		gpmAuthVerifyCryptoSource:                             gpmAuthVerifyCryptoSource,
+		gpmLegacyEnvAliasesActive:                             append([]string{}, legacyEnvAliasesActive...),
+		gpmLegacyEnvAliasWarnings:                             append([]string{}, legacyEnvAliasWarnings...),
+		gpmAuthSignatureVerifier:                              defaultGPMAuthSignatureVerifier,
+		gpmStateStorePath:                                     strings.TrimSpace(gpmStateStorePath),
+		gpmAuditLogPath:                                       strings.TrimSpace(gpmAuditLogPath),
+		gpmState:                                              newGPMRuntimeState(),
 	}
 	svc.loadGPMStateBestEffort()
 	return svc
@@ -768,6 +788,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if manifestRequireSigSource == "" {
 		manifestRequireSigSource = "default"
 	}
+	legacyConnectRequireTrustedManifestBootstrapSource := strings.TrimSpace(s.gpmLegacyConnectRequireTrustedManifestBootstrapSource)
+	if legacyConnectRequireTrustedManifestBootstrapSource == "" {
+		legacyConnectRequireTrustedManifestBootstrapSource = "default"
+	}
 	manifestSignatureMode, manifestSignatureKeySource := s.manifestSignatureVerifierTelemetry()
 	legacyEnvAliasesActive := append([]string{}, s.gpmLegacyEnvAliasesActive...)
 	legacyEnvAliasWarnings := append([]string{}, s.gpmLegacyEnvAliasWarnings...)
@@ -779,52 +803,54 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"config": map[string]any{
-			"connect_require_session":                                s.gpmConnectRequireSession,
-			"allow_legacy_connect_override":                          s.gpmAllowLegacyConnectOverride,
-			"gpm_production_mode":                                    gpmProductionMode,
-			"gpm_production_mode_source":                             connectPolicySource,
-			"connect_policy_mode":                                    connectPolicyMode,
-			"connect_policy_source":                                  connectPolicySource,
-			"gpm_operator_approval_require_session":                  s.gpmOperatorApprovalRequireSession,
-			"gpm_operator_approval_require_session_policy_source":    operatorApprovalRequireSessionSource,
-			"gpm_manifest_trust_policy_mode":                         manifestTrustPolicyMode,
-			"gpm_manifest_trust_policy_source":                       manifestTrustPolicySource,
-			"gpm_manifest_require_https":                             s.gpmManifestRequireHTTPS,
-			"gpm_manifest_require_https_policy_source":               manifestRequireHTTPSSource,
-			"gpm_manifest_require_signature":                         s.gpmManifestRequireSignature,
-			"gpm_manifest_require_signature_policy_source":           manifestRequireSigSource,
-			"gpm_manifest_signature_mode":                            manifestSignatureMode,
-			"gpm_manifest_signature_key_source":                      manifestSignatureKeySource,
-			"gpm_manifest_hmac_key_configured":                       strings.TrimSpace(s.gpmManifestHMACKey) != "",
-			"gpm_manifest_ed25519_public_key_configured":             strings.TrimSpace(s.gpmManifestEd25519PublicKey) != "",
-			"gpm_auth_verify_policy_mode":                            authVerifyPolicyMode,
-			"gpm_auth_verify_policy_source":                          authVerifyPolicySource,
-			"gpm_auth_verify_require_command":                        s.gpmAuthVerifyRequireCommand,
-			"gpm_auth_verify_require_command_policy_source":          authVerifyRequireCommandSource,
-			"gpm_auth_verify_require_metadata":                       s.gpmAuthVerifyRequireMetadata,
-			"gpm_auth_verify_require_metadata_policy_source":         authVerifyRequireMetadataSource,
-			"gpm_auth_verify_require_wallet_extension_source":        s.gpmAuthVerifyRequireWalletExt,
-			"gpm_auth_verify_require_wallet_extension_policy_source": authVerifyRequireWalletExtSource,
-			"gpm_auth_verify_require_crypto_proof":                   s.gpmAuthVerifyRequireCryptoProof,
-			"gpm_auth_verify_require_crypto_proof_policy_source":     authVerifyRequireCryptoSource,
-			"gpm_auth_verify_command_configured":                     strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
-			"gpm_main_domain":                                        strings.TrimSpace(s.gpmMainDomain),
-			"gpm_manifest_url":                                       strings.TrimSpace(s.gpmManifestURL),
-			"gpm_manifest_cache_path":                                strings.TrimSpace(s.gpmManifestCache),
-			"gpm_manifest_cache_max_age_sec":                         manifestCacheMaxAgeSec,
-			"gpm_manifest_remote_refresh_interval_sec":               manifestRemoteRefreshIntervalSec,
-			"gpm_manifest_remote_refresh_interval_source":            manifestRemoteRefreshIntervalSource,
-			"gpm_manifest_refresh_failure_max_cache_age_sec":         manifestRefreshFailureMaxCacheAgeSec,
-			"gpm_manifest_refresh_failure_max_cache_age_source":      manifestRefreshFailureMaxCacheAgeSource,
-			"gpm_manifest_resolve_policy":                            "cache_first_bounded_remote_refresh",
-			"gpm_manifest_resolve_policy_detail":                     manifestResolvePolicyDetail,
-			"gpm_legacy_env_aliases_active":                          legacyEnvAliasesActive,
-			"gpm_legacy_env_aliases_active_count":                    len(legacyEnvAliasesActive),
-			"gpm_legacy_env_alias_warnings":                          legacyEnvAliasWarnings,
-			"gpm_legacy_env_aliases_warning":                         legacyEnvAliasWarning,
-			"command_timeout_sec":                                    commandTimeoutSec,
-			"allow_update":                                           s.allowUpdate,
-			"allow_remote":                                           !isLoopbackBindAddr(s.addr),
+			"connect_require_session":                                             s.gpmConnectRequireSession,
+			"allow_legacy_connect_override":                                       s.gpmAllowLegacyConnectOverride,
+			"gpm_legacy_connect_require_trusted_manifest_bootstrap":               s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			"gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source": legacyConnectRequireTrustedManifestBootstrapSource,
+			"gpm_production_mode":                                                 gpmProductionMode,
+			"gpm_production_mode_source":                                          connectPolicySource,
+			"connect_policy_mode":                                                 connectPolicyMode,
+			"connect_policy_source":                                               connectPolicySource,
+			"gpm_operator_approval_require_session":                               s.gpmOperatorApprovalRequireSession,
+			"gpm_operator_approval_require_session_policy_source":                 operatorApprovalRequireSessionSource,
+			"gpm_manifest_trust_policy_mode":                                      manifestTrustPolicyMode,
+			"gpm_manifest_trust_policy_source":                                    manifestTrustPolicySource,
+			"gpm_manifest_require_https":                                          s.gpmManifestRequireHTTPS,
+			"gpm_manifest_require_https_policy_source":                            manifestRequireHTTPSSource,
+			"gpm_manifest_require_signature":                                      s.gpmManifestRequireSignature,
+			"gpm_manifest_require_signature_policy_source":                        manifestRequireSigSource,
+			"gpm_manifest_signature_mode":                                         manifestSignatureMode,
+			"gpm_manifest_signature_key_source":                                   manifestSignatureKeySource,
+			"gpm_manifest_hmac_key_configured":                                    strings.TrimSpace(s.gpmManifestHMACKey) != "",
+			"gpm_manifest_ed25519_public_key_configured":                          strings.TrimSpace(s.gpmManifestEd25519PublicKey) != "",
+			"gpm_auth_verify_policy_mode":                                         authVerifyPolicyMode,
+			"gpm_auth_verify_policy_source":                                       authVerifyPolicySource,
+			"gpm_auth_verify_require_command":                                     s.gpmAuthVerifyRequireCommand,
+			"gpm_auth_verify_require_command_policy_source":                       authVerifyRequireCommandSource,
+			"gpm_auth_verify_require_metadata":                                    s.gpmAuthVerifyRequireMetadata,
+			"gpm_auth_verify_require_metadata_policy_source":                      authVerifyRequireMetadataSource,
+			"gpm_auth_verify_require_wallet_extension_source":                     s.gpmAuthVerifyRequireWalletExt,
+			"gpm_auth_verify_require_wallet_extension_policy_source":              authVerifyRequireWalletExtSource,
+			"gpm_auth_verify_require_crypto_proof":                                s.gpmAuthVerifyRequireCryptoProof,
+			"gpm_auth_verify_require_crypto_proof_policy_source":                  authVerifyRequireCryptoSource,
+			"gpm_auth_verify_command_configured":                                  strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
+			"gpm_main_domain":                                                     strings.TrimSpace(s.gpmMainDomain),
+			"gpm_manifest_url":                                                    strings.TrimSpace(s.gpmManifestURL),
+			"gpm_manifest_cache_path":                                             strings.TrimSpace(s.gpmManifestCache),
+			"gpm_manifest_cache_max_age_sec":                                      manifestCacheMaxAgeSec,
+			"gpm_manifest_remote_refresh_interval_sec":                            manifestRemoteRefreshIntervalSec,
+			"gpm_manifest_remote_refresh_interval_source":                         manifestRemoteRefreshIntervalSource,
+			"gpm_manifest_refresh_failure_max_cache_age_sec":                      manifestRefreshFailureMaxCacheAgeSec,
+			"gpm_manifest_refresh_failure_max_cache_age_source":                   manifestRefreshFailureMaxCacheAgeSource,
+			"gpm_manifest_resolve_policy":                                         "cache_first_bounded_remote_refresh",
+			"gpm_manifest_resolve_policy_detail":                                  manifestResolvePolicyDetail,
+			"gpm_legacy_env_aliases_active":                                       legacyEnvAliasesActive,
+			"gpm_legacy_env_aliases_active_count":                                 len(legacyEnvAliasesActive),
+			"gpm_legacy_env_alias_warnings":                                       legacyEnvAliasWarnings,
+			"gpm_legacy_env_aliases_warning":                                      legacyEnvAliasWarning,
+			"command_timeout_sec":                                                 commandTimeoutSec,
+			"allow_update":                                                        s.allowUpdate,
+			"allow_remote":                                                        !isLoopbackBindAddr(s.addr),
 		},
 	})
 }
@@ -847,6 +873,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	in.SessionToken = strings.TrimSpace(in.SessionToken)
 	in.SessionBootstrapDirectory = strings.TrimSpace(in.SessionBootstrapDirectory)
 	manualOverridesProvided := in.BootstrapDirectory != "" || in.InviteKey != ""
+	manualBootstrapDirectoryOverrideUsed := in.BootstrapDirectory != ""
 	if in.SessionBootstrapDirectory != "" && in.SessionToken == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -972,6 +999,27 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"ok":    false,
 				"error": err.Error(),
+			})
+			return
+		}
+	}
+	if s.gpmLegacyConnectRequireTrustedManifestBootstrap && manualBootstrapDirectoryOverrideUsed {
+		manifest, _, _, err := s.resolveBootstrapManifest(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"ok":    false,
+				"error": fmt.Sprintf("manual bootstrap_directory override requires trusted manifest binding, but trusted manifest resolution failed: %v", err),
+			})
+			return
+		}
+		trustedBootstrapSet := make(map[string]struct{}, len(manifest.BootstrapDirectories))
+		for _, trustedBootstrapDirectory := range normalizeBootstrapDirectories(manifest.BootstrapDirectories) {
+			trustedBootstrapSet[trustedBootstrapDirectory] = struct{}{}
+		}
+		if _, ok := trustedBootstrapSet[in.BootstrapDirectory]; !ok {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": fmt.Sprintf("manual bootstrap_directory %q is not present in trusted manifest bootstrap_directories", in.BootstrapDirectory),
 			})
 			return
 		}
