@@ -100,3 +100,5 @@ Local API only:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1
 ```
+
+Once that local-API prerequisite check is healthy, run the real-host evidence cycle from a repo shell with `./scripts/easy_node.sh profile-default-gate-stability-cycle ...`.

@@ -543,6 +543,12 @@ echo "[ci] easy-node profile default gate stability run integration"
 echo "[ci] easy-node profile default gate stability check integration"
 ./scripts/integration_easy_node_profile_default_gate_stability_check.sh
 
+echo "[ci] profile default gate stability cycle integration"
+./scripts/integration_profile_default_gate_stability_cycle.sh
+
+echo "[ci] easy-node profile default gate stability cycle integration"
+./scripts/integration_easy_node_profile_default_gate_stability_cycle.sh
+
 echo "[ci] incident snapshot integration"
 ./scripts/integration_incident_snapshot.sh
 
