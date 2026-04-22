@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp grep chmod cat tail; do
+for cmd in bash jq mktemp grep chmod cat tail mkdir; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -21,6 +21,46 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE_FILE="$TMP_DIR/cycle_capture.log"
+
+canonical_json() {
+  jq -cS . "$1"
+}
+
+assert_json_files_equal() {
+  local expected_path="$1"
+  local actual_path="$2"
+  local label="$3"
+  local expected_json=""
+  local actual_json=""
+  expected_json="$(canonical_json "$expected_path")"
+  actual_json="$(canonical_json "$actual_path")"
+  if [[ "$expected_json" != "$actual_json" ]]; then
+    echo "$label mismatch"
+    echo "expected path: $expected_path"
+    echo "actual path: $actual_path"
+    echo "expected json: $expected_json"
+    echo "actual json: $actual_json"
+    exit 1
+  fi
+}
+
+assert_text_files_equal() {
+  local expected_path="$1"
+  local actual_path="$2"
+  local label="$3"
+  local expected_text=""
+  local actual_text=""
+  expected_text="$(cat "$expected_path")"
+  actual_text="$(cat "$actual_path")"
+  if [[ "$expected_text" != "$actual_text" ]]; then
+    echo "$label mismatch"
+    echo "expected path: $expected_path"
+    echo "actual path: $actual_path"
+    echo "expected text: $expected_text"
+    echo "actual text: $actual_text"
+    exit 1
+  fi
+}
 
 FAKE_SIGNOFF_SCRIPT="$TMP_DIR/fake_profile_compare_campaign_signoff.sh"
 cat >"$FAKE_SIGNOFF_SCRIPT" <<'EOF_FAKE_SIGNOFF'
@@ -241,6 +281,12 @@ if [[ -n "$capture_file" ]]; then
     "$scenario" "$fail_on_no_go" "$reports_dir" "$summary_list" "$summary_json" "$samples_total" "$missing_samples" >>"$capture_file"
 fi
 
+if [[ "$scenario" == "error_no_summary" ]]; then
+  rm -f "$summary_json"
+  echo "simulated promotion check failure without writing summary json" >&2
+  exit 47
+fi
+
 mkdir -p "$(dirname "$summary_json")"
 
 if [[ "$scenario" == "no_go" ]]; then
@@ -326,6 +372,7 @@ chmod +x "$FAKE_PROMOTION_CHECK_SCRIPT"
 
 echo "[runtime-actuation-promotion-cycle] happy path"
 HAPPY_SUMMARY="$TMP_DIR/cycle_happy_summary.json"
+HAPPY_REPORTS_DIR="$TMP_DIR/happy_reports"
 set +e
 PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
 RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
@@ -334,7 +381,7 @@ FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
 FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
 bash "$SCRIPT_UNDER_TEST" \
   --cycles 3 \
-  --reports-dir "$TMP_DIR/happy_reports" \
+  --reports-dir "$HAPPY_REPORTS_DIR" \
   --fail-on-no-go 1 \
   --summary-json "$HAPPY_SUMMARY" \
   --print-summary-json 0 \
@@ -367,6 +414,35 @@ if ! jq -e '
   cat "$HAPPY_SUMMARY"
   exit 1
 fi
+if ! jq -e --arg reports_dir "$HAPPY_REPORTS_DIR" '
+  .artifacts.latest_aliases.cycle_orchestrator_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_summary.json")
+  and .artifacts.latest_aliases.promotion_check_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json")
+  and .artifacts.latest_aliases.signoff_summary_list == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_signoff_summaries.list")
+' "$HAPPY_SUMMARY" >/dev/null 2>&1; then
+  echo "happy path latest alias metadata mismatch"
+  cat "$HAPPY_SUMMARY"
+  exit 1
+fi
+HAPPY_PROMOTION_SUMMARY="$(jq -r '.artifacts.promotion_summary_json // ""' "$HAPPY_SUMMARY")"
+HAPPY_SIGNOFF_SUMMARY_LIST="$(jq -r '.artifacts.signoff_summary_list // ""' "$HAPPY_SUMMARY")"
+HAPPY_LATEST_CYCLE_ALIAS="$(jq -r '.artifacts.latest_aliases.cycle_orchestrator_summary_json // ""' "$HAPPY_SUMMARY")"
+HAPPY_LATEST_PROMOTION_ALIAS="$(jq -r '.artifacts.latest_aliases.promotion_check_summary_json // ""' "$HAPPY_SUMMARY")"
+HAPPY_LATEST_SIGNOFF_LIST_ALIAS="$(jq -r '.artifacts.latest_aliases.signoff_summary_list // ""' "$HAPPY_SUMMARY")"
+for path in \
+  "$HAPPY_PROMOTION_SUMMARY" \
+  "$HAPPY_SIGNOFF_SUMMARY_LIST" \
+  "$HAPPY_LATEST_CYCLE_ALIAS" \
+  "$HAPPY_LATEST_PROMOTION_ALIAS" \
+  "$HAPPY_LATEST_SIGNOFF_LIST_ALIAS"; do
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "happy path expected alias/output file missing: $path"
+    cat "$HAPPY_SUMMARY"
+    exit 1
+  fi
+done
+assert_json_files_equal "$HAPPY_SUMMARY" "$HAPPY_LATEST_CYCLE_ALIAS" "happy path latest cycle summary alias"
+assert_json_files_equal "$HAPPY_PROMOTION_SUMMARY" "$HAPPY_LATEST_PROMOTION_ALIAS" "happy path latest promotion summary alias"
+assert_text_files_equal "$HAPPY_SIGNOFF_SUMMARY_LIST" "$HAPPY_LATEST_SIGNOFF_LIST_ALIAS" "happy path latest signoff list alias"
 if [[ "$(grep -c '^signoff' "$CAPTURE_FILE" || true)" -ne 3 ]]; then
   echo "expected 3 signoff cycle invocations in capture"
   cat "$CAPTURE_FILE"
@@ -375,6 +451,193 @@ fi
 if ! grep -q $'^promotion_check\t.*\tfail_on_no_go=1\t' "$CAPTURE_FILE"; then
   echo "expected promotion check fail_on_no_go=1 capture not found"
   cat "$CAPTURE_FILE"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] latest alias files refresh from stale preseed"
+STALE_ALIAS_REPORTS_DIR="$TMP_DIR/stale_alias_reports"
+STALE_ALIAS_SUMMARY="$TMP_DIR/stale_alias_summary.json"
+STALE_ALIAS_CYCLE="$STALE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_summary.json"
+STALE_ALIAS_PROMOTION="$STALE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+STALE_ALIAS_SIGNOFF_LIST="$STALE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_signoff_summaries.list"
+mkdir -p "$STALE_ALIAS_REPORTS_DIR"
+printf '%s\n' '{"stale_preseeded":true,"kind":"cycle"}' >"$STALE_ALIAS_CYCLE"
+printf '%s\n' '{"stale_preseeded":true,"kind":"promotion"}' >"$STALE_ALIAS_PROMOTION"
+printf '%s\n' "stale-preseeded-signoff-list-entry" >"$STALE_ALIAS_SIGNOFF_LIST"
+
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$TMP_DIR/stale_alias_capture.log" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 2 \
+  --reports-dir "$STALE_ALIAS_REPORTS_DIR" \
+  --fail-on-no-go 1 \
+  --summary-json "$STALE_ALIAS_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_stale_alias.log 2>&1
+stale_alias_rc=$?
+set -e
+
+if [[ "$stale_alias_rc" -ne 0 ]]; then
+  echo "expected stale alias refresh path rc=0, got rc=$stale_alias_rc"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_stale_alias.log
+  exit 1
+fi
+if ! jq -e --arg reports_dir "$STALE_ALIAS_REPORTS_DIR" '
+  .status == "pass"
+  and .rc == 0
+  and .decision == "GO"
+  and .artifacts.latest_aliases.cycle_orchestrator_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_summary.json")
+  and .artifacts.latest_aliases.promotion_check_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json")
+  and .artifacts.latest_aliases.signoff_summary_list == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_signoff_summaries.list")
+' "$STALE_ALIAS_SUMMARY" >/dev/null 2>&1; then
+  echo "stale alias refresh summary metadata mismatch"
+  cat "$STALE_ALIAS_SUMMARY"
+  exit 1
+fi
+if grep -q 'stale_preseeded' "$STALE_ALIAS_CYCLE"; then
+  echo "stale cycle alias content was not refreshed"
+  cat "$STALE_ALIAS_CYCLE"
+  exit 1
+fi
+if grep -q 'stale_preseeded' "$STALE_ALIAS_PROMOTION"; then
+  echo "stale promotion alias content was not refreshed"
+  cat "$STALE_ALIAS_PROMOTION"
+  exit 1
+fi
+if grep -q 'stale-preseeded-signoff-list-entry' "$STALE_ALIAS_SIGNOFF_LIST"; then
+  echo "stale signoff-list alias content was not refreshed"
+  cat "$STALE_ALIAS_SIGNOFF_LIST"
+  exit 1
+fi
+STALE_CURRENT_PROMOTION_SUMMARY="$(jq -r '.artifacts.promotion_summary_json // ""' "$STALE_ALIAS_SUMMARY")"
+STALE_CURRENT_SIGNOFF_SUMMARY_LIST="$(jq -r '.artifacts.signoff_summary_list // ""' "$STALE_ALIAS_SUMMARY")"
+for path in \
+  "$STALE_CURRENT_PROMOTION_SUMMARY" \
+  "$STALE_CURRENT_SIGNOFF_SUMMARY_LIST" \
+  "$STALE_ALIAS_CYCLE" \
+  "$STALE_ALIAS_PROMOTION" \
+  "$STALE_ALIAS_SIGNOFF_LIST"; do
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "stale alias refresh expected file missing: $path"
+    cat "$STALE_ALIAS_SUMMARY"
+    exit 1
+  fi
+done
+assert_json_files_equal "$STALE_ALIAS_SUMMARY" "$STALE_ALIAS_CYCLE" "stale refresh latest cycle summary alias"
+assert_json_files_equal "$STALE_CURRENT_PROMOTION_SUMMARY" "$STALE_ALIAS_PROMOTION" "stale refresh latest promotion summary alias"
+assert_text_files_equal "$STALE_CURRENT_SIGNOFF_SUMMARY_LIST" "$STALE_ALIAS_SIGNOFF_LIST" "stale refresh latest signoff list alias"
+
+echo "[runtime-actuation-promotion-cycle] promotion-check nonzero without summary stays alias-safe and rc-consistent"
+NO_PROMOTION_SUMMARY_REPORTS_DIR="$TMP_DIR/no_promotion_summary_reports"
+NO_PROMOTION_SUMMARY_SUMMARY="$TMP_DIR/no_promotion_summary_summary.json"
+NO_PROMOTION_SUMMARY_CAPTURE="$TMP_DIR/no_promotion_summary_capture.log"
+NO_PROMOTION_SUMMARY_LATEST_CYCLE_ALIAS="$NO_PROMOTION_SUMMARY_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_summary.json"
+NO_PROMOTION_SUMMARY_LATEST_PROMOTION_ALIAS="$NO_PROMOTION_SUMMARY_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+NO_PROMOTION_SUMMARY_LATEST_SIGNOFF_LIST_ALIAS="$NO_PROMOTION_SUMMARY_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_signoff_summaries.list"
+mkdir -p "$NO_PROMOTION_SUMMARY_REPORTS_DIR"
+printf '%s\n' '{"stale_preseeded":true,"status":"ok","decision":"GO","rc":0,"kind":"cycle"}' >"$NO_PROMOTION_SUMMARY_LATEST_CYCLE_ALIAS"
+printf '%s\n' '{"stale_preseeded":true,"status":"ok","decision":"GO","rc":0,"kind":"promotion"}' >"$NO_PROMOTION_SUMMARY_LATEST_PROMOTION_ALIAS"
+printf '%s\n' "stale-preseeded-signoff-list-entry" >"$NO_PROMOTION_SUMMARY_LATEST_SIGNOFF_LIST_ALIAS"
+
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$NO_PROMOTION_SUMMARY_CAPTURE" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="error_no_summary" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 2 \
+  --reports-dir "$NO_PROMOTION_SUMMARY_REPORTS_DIR" \
+  --fail-on-no-go 1 \
+  --summary-json "$NO_PROMOTION_SUMMARY_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_no_promotion_summary.log 2>&1
+no_promotion_summary_rc=$?
+set -e
+
+if [[ "$no_promotion_summary_rc" -eq 0 ]]; then
+  echo "expected nonzero rc when promotion check fails without summary"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_no_promotion_summary.log
+  exit 1
+fi
+if [[ ! -f "$NO_PROMOTION_SUMMARY_SUMMARY" ]]; then
+  echo "expected cycle summary to be written even when promotion summary is missing"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_no_promotion_summary.log
+  exit 1
+fi
+if ! jq -e --arg reports_dir "$NO_PROMOTION_SUMMARY_REPORTS_DIR" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .stages.promotion_check.attempted == true
+  and .stages.promotion_check.rc != 0
+  and .stages.promotion_check.summary_exists == false
+  and .stages.promotion_check.summary_valid_json == false
+  and .stages.promotion_check.summary_fresh == false
+  and .outcome.should_promote == false
+  and .outcome.action == "hold_promotion_blocked"
+  and .artifacts.latest_aliases.cycle_orchestrator_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_summary.json")
+  and .artifacts.latest_aliases.promotion_check_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json")
+  and .artifacts.latest_aliases.signoff_summary_list == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_signoff_summaries.list")
+' "$NO_PROMOTION_SUMMARY_SUMMARY" >/dev/null 2>&1; then
+  echo "promotion-check nonzero-without-summary summary mismatch"
+  cat "$NO_PROMOTION_SUMMARY_SUMMARY"
+  exit 1
+fi
+NO_PROMOTION_SUMMARY_SUMMARY_RC="$(jq -r '.rc' "$NO_PROMOTION_SUMMARY_SUMMARY")"
+if [[ "$NO_PROMOTION_SUMMARY_SUMMARY_RC" != "$no_promotion_summary_rc" ]]; then
+  echo "rc contract mismatch: process rc=$no_promotion_summary_rc summary rc=$NO_PROMOTION_SUMMARY_SUMMARY_RC"
+  cat "$NO_PROMOTION_SUMMARY_SUMMARY"
+  exit 1
+fi
+NO_PROMOTION_SUMMARY_PROMOTION_SUMMARY_PATH="$(jq -r '.artifacts.promotion_summary_json // ""' "$NO_PROMOTION_SUMMARY_SUMMARY")"
+if [[ -n "$NO_PROMOTION_SUMMARY_PROMOTION_SUMMARY_PATH" && -f "$NO_PROMOTION_SUMMARY_PROMOTION_SUMMARY_PATH" ]]; then
+  echo "expected promotion summary path to be missing in no-summary scenario"
+  ls -l "$NO_PROMOTION_SUMMARY_PROMOTION_SUMMARY_PATH"
+  exit 1
+fi
+NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST="$(jq -r '.artifacts.signoff_summary_list // ""' "$NO_PROMOTION_SUMMARY_SUMMARY")"
+NO_PROMOTION_SUMMARY_CURRENT_CYCLE_ALIAS="$(jq -r '.artifacts.latest_aliases.cycle_orchestrator_summary_json // ""' "$NO_PROMOTION_SUMMARY_SUMMARY")"
+NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS="$(jq -r '.artifacts.latest_aliases.promotion_check_summary_json // ""' "$NO_PROMOTION_SUMMARY_SUMMARY")"
+NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS="$(jq -r '.artifacts.latest_aliases.signoff_summary_list // ""' "$NO_PROMOTION_SUMMARY_SUMMARY")"
+for path in \
+  "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST" \
+  "$NO_PROMOTION_SUMMARY_CURRENT_CYCLE_ALIAS" \
+  "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS" \
+  "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS"; do
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    echo "expected alias/runtime artifact missing in no-summary scenario: $path"
+    cat "$NO_PROMOTION_SUMMARY_SUMMARY"
+    exit 1
+  fi
+done
+assert_json_files_equal "$NO_PROMOTION_SUMMARY_SUMMARY" "$NO_PROMOTION_SUMMARY_CURRENT_CYCLE_ALIAS" "no-summary latest cycle summary alias"
+assert_text_files_equal "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST" "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS" "no-summary latest signoff list alias"
+if grep -q 'stale_preseeded' "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS"; then
+  echo "no-summary latest promotion alias retained stale preseeded GO content"
+  cat "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS"
+  exit 1
+fi
+if jq -e '(.decision | type) == "string" and (.decision | ascii_upcase) == "GO"' "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS" >/dev/null 2>&1; then
+  echo "no-summary latest promotion alias should not remain GO"
+  cat "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS"
+  exit 1
+fi
+if ! jq -e '
+  (.decision | type) == "string"
+  and (.decision | ascii_upcase) == "NO-GO"
+  and ((.status | type) == "string")
+  and ((.status == "fail") or (.status == "warn"))
+' "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS" >/dev/null 2>&1; then
+  echo "no-summary latest promotion alias should be fail-closed NO-GO sentinel"
+  cat "$NO_PROMOTION_SUMMARY_CURRENT_PROMOTION_ALIAS"
+  exit 1
+fi
+if grep -q 'stale-preseeded-signoff-list-entry' "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS"; then
+  echo "no-summary latest signoff list alias retained stale preseeded content"
+  cat "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS"
   exit 1
 fi
 

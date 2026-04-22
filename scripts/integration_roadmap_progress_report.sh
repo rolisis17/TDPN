@@ -6081,6 +6081,399 @@ if ! jq -e --arg src "$FALLBACK_PHASE5_SPARSE_JSON" '
   exit 1
 fi
 
+echo "[roadmap-progress-report] runtime-actuation promotion ingests cycle latest summary alias from manual summary"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_REPORTS_DIR="$TMP_DIR/runtime_actuation_cycle_alias_reports"
+mkdir -p "$RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_REPORTS_DIR"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_SUMMARY_JSON="$RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_SUMMARY_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "decision": "GO",
+    "status": "pass",
+    "rc": 0
+  }
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_SUMMARY
+RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_cycle_alias_summary.json"
+jq --arg rel "runtime_actuation_cycle_alias_reports/runtime_actuation_promotion_cycle_latest_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_cycle: {
+        latest_aliases: {
+          cycle_orchestrator_summary_json: $rel
+        }
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_MANUAL_SUMMARY_JSON"
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_alias_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_alias_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_alias.log 2>&1; then
+  echo "expected success for runtime-actuation cycle latest-alias ingestion path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_alias.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_SUMMARY_JSON" '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.status == "pass"
+  and .vpn_track.runtime_actuation_promotion.decision == "GO"
+  and .vpn_track.runtime_actuation_promotion.go == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == false
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "pass"
+  and .artifacts.runtime_actuation_promotion_summary_json == $src
+' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_alias_summary.json" >/dev/null; then
+  echo "runtime-actuation cycle latest-alias summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_alias_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation promotion ingests cycle latest promotion-check alias from manual summary"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_PROMOTION_JSON="$RUNTIME_ACTUATION_PROMOTION_CYCLE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_PROMOTION_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_PROMOTION'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_check_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "notes": "cycle latest promotion-check alias"
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_PROMOTION
+RUNTIME_ACTUATION_PROMOTION_CYCLE_PROMOTION_ALIAS_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_cycle_promotion_alias_summary.json"
+jq --arg rel "runtime_actuation_cycle_alias_reports/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_cycle: {
+        latest_aliases: {
+          promotion_check_summary_json: $rel
+        }
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_PROMOTION_ALIAS_MANUAL_SUMMARY_JSON"
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_PROMOTION_CYCLE_PROMOTION_ALIAS_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_promotion_alias_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_promotion_alias_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_promotion_alias.log 2>&1; then
+  echo "expected success for runtime-actuation cycle promotion-check latest-alias ingestion path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_promotion_alias.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_PROMOTION_JSON" '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.status == "pass"
+  and .vpn_track.runtime_actuation_promotion.decision == "GO"
+  and .vpn_track.runtime_actuation_promotion.go == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == false
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "pass"
+  and .artifacts.runtime_actuation_promotion_summary_json == $src
+' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_promotion_alias_summary.json" >/dev/null; then
+  echo "runtime-actuation cycle promotion-check latest-alias summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_promotion_alias_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation promotion prefers latest promotion-check alias over cycle summary"
+RUNTIME_ACTUATION_PROMOTION_PREFERENCE_REPORTS_DIR="$TMP_DIR/runtime_actuation_preference_reports"
+mkdir -p "$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_REPORTS_DIR"
+RUNTIME_ACTUATION_PROMOTION_PREFERENCE_CYCLE_JSON="$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_CYCLE_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_PREFERENCE_CYCLE'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "decision": "GO",
+    "status": "pass",
+    "rc": 0
+  }
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_PREFERENCE_CYCLE
+RUNTIME_ACTUATION_PROMOTION_PREFERENCE_PROMOTION_JSON="$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_PROMOTION_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_PREFERENCE_PROMOTION'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_check_summary"
+  },
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "notes": "latest promotion-check alias is authoritative NO-GO",
+  "reasons": [
+    "latest promotion-check alias indicates NO-GO"
+  ]
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_PREFERENCE_PROMOTION
+RUNTIME_ACTUATION_PROMOTION_PREFERENCE_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_preference_summary.json"
+jq --arg rel_cycle "runtime_actuation_preference_reports/runtime_actuation_promotion_cycle_latest_summary.json" \
+   --arg rel_promo "runtime_actuation_preference_reports/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_cycle: {
+        latest_aliases: {
+          cycle_orchestrator_summary_json: $rel_cycle,
+          promotion_check_summary_json: $rel_promo
+        }
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_MANUAL_SUMMARY_JSON"
+
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_preference_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_preference_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_preference.log 2>&1; then
+  echo "expected success for runtime-actuation alias preference path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_preference.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_PREFERENCE_PROMOTION_JSON" '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.status == "fail"
+  and .vpn_track.runtime_actuation_promotion.decision == "NO-GO"
+  and .vpn_track.runtime_actuation_promotion.go == false
+  and .vpn_track.runtime_actuation_promotion.no_go == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
+  and ((.vpn_track.runtime_actuation_promotion.reasons // []) | any(test("latest promotion-check alias indicates NO-GO")))
+  and .artifacts.runtime_actuation_promotion_summary_json == $src
+' "$TMP_DIR/roadmap_progress_runtime_actuation_preference_summary.json" >/dev/null; then
+  echo "runtime-actuation alias preference summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_preference_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation promotion GO+rc!=0 is fail-closed"
+RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY_JSON="$TMP_DIR/runtime_actuation_promotion_contradictory_go_rc_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_check_summary"
+  },
+  "status": "pass",
+  "rc": 7,
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "notes": "contradictory go+rc fixture"
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_contradictory_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_contradictory_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log 2>&1; then
+  echo "expected success for runtime-actuation contradictory go+rc!=0 fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY_JSON" '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.status == "fail"
+  and .vpn_track.runtime_actuation_promotion.decision == "GO"
+  and .vpn_track.runtime_actuation_promotion.go == true
+  and .vpn_track.runtime_actuation_promotion.no_go == false
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
+  and ((.vpn_track.runtime_actuation_promotion.reasons // []) | any(test("go=true with rc!=0")))
+  and ((.vpn_track.runtime_actuation_promotion.next_command_reason // "") | test("go=true with rc!=0"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_contradictory_summary.json" >/dev/null; then
+  echo "runtime-actuation contradictory go+rc!=0 fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_contradictory_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_status=fail .*go=true .*needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log; then
+  echo "expected runtime-actuation contradictory fail-closed status log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation stale latest alias candidate is fail-closed"
+RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR="$TMP_DIR/runtime_actuation_stale_alias_reports"
+RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_LOG_DIR="$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR/isolated_logs"
+mkdir -p "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR" "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_LOG_DIR"
+RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON="$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_check_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS
+stale_runtime_actuation_epoch=$(( $(date -u +%s) - 172800 ))
+touch -d "@$stale_runtime_actuation_epoch" "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON"
+RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_stale_alias_summary.json"
+jq --arg rel "runtime_actuation_stale_alias_reports/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_cycle: {
+        latest_aliases: {
+          promotion_check_summary_json: $rel
+        }
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_MANUAL_SUMMARY_JSON"
+
+if ! ROADMAP_PROGRESS_LOG_DIR="$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_LOG_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log 2>&1; then
+  echo "expected success for runtime-actuation stale latest-alias fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.runtime_actuation_promotion.available == false
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == null
+  and .vpn_track.runtime_actuation_promotion.status == "missing"
+  and .vpn_track.runtime_actuation_promotion.decision == null
+  and .vpn_track.runtime_actuation_promotion.go == null
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "missing"
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-check"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_summary.json" >/dev/null; then
+  echo "runtime-actuation stale latest-alias fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log; then
+  echo "expected runtime-actuation stale latest-alias fail-closed availability log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation cycle stale evidence is fail-closed"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_STALE_SUMMARY_JSON="$TMP_DIR/runtime_actuation_promotion_cycle_stale_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_STALE_SUMMARY_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_STALE_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": false,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "decision": "GO",
+    "status": "pass",
+    "rc": 0
+  }
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_STALE_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_PROMOTION_CYCLE_STALE_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log 2>&1; then
+  echo "expected success for runtime-actuation cycle stale fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.runtime_actuation_promotion.available == false
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == null
+  and .vpn_track.runtime_actuation_promotion.status == "missing"
+  and .vpn_track.runtime_actuation_promotion.decision == null
+  and .vpn_track.runtime_actuation_promotion.go == null
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "missing"
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-check"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_summary.json" >/dev/null; then
+  echo "runtime-actuation cycle stale fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log; then
+  echo "expected runtime-actuation stale fail-closed availability log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log
+  exit 1
+fi
+
 : >"$CAPTURE"
 
 FAKE_FORWARD="$TMP_DIR/fake_roadmap_progress_forward.sh"

@@ -1314,6 +1314,40 @@ resolve_profile_compare_multi_vm_stability_promotion_summary_path() {
   printf '%s' "$candidate"
 }
 
+runtime_actuation_promotion_summary_stale_01() {
+  local path="$1"
+  local stale_flag="null"
+  local max_age_sec="${ROADMAP_PROGRESS_RUNTIME_ACTUATION_PROMOTION_MAX_AGE_SEC:-86400}"
+  local age_sec=""
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '1'
+    return
+  fi
+  stale_flag="$(jq -r '
+    if (.stale | type) == "boolean" then (.stale | tostring)
+    elif (.summary_stale | type) == "boolean" then (.summary_stale | tostring)
+    elif (.fresh | type) == "boolean" then (if .fresh then "false" else "true" end)
+    elif (.summary_fresh | type) == "boolean" then (if .summary_fresh then "false" else "true" end)
+    elif (.stages.promotion_check.summary_fresh | type) == "boolean" then
+      (if .stages.promotion_check.summary_fresh then "false" else "true" end)
+    else "null"
+    end
+  ' "$path" 2>/dev/null || printf '%s' "null")"
+  if [[ "$stale_flag" == "true" ]]; then
+    printf '1'
+    return
+  fi
+  if ! [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
+    max_age_sec=86400
+  fi
+  age_sec="$(summary_age_sec_from_path "$path")"
+  if [[ "$age_sec" =~ ^[0-9]+$ ]] && (( age_sec > max_age_sec )); then
+    printf '1'
+    return
+  fi
+  printf '0'
+}
+
 runtime_actuation_promotion_summary_usable_01() {
   local path="$1"
   if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
@@ -1332,10 +1366,22 @@ runtime_actuation_promotion_summary_usable_01() {
           ((.schema.id // "") == "runtime_actuation_promotion_check_summary")
           or ((.schema.id // "") == "runtime_actuation_promotion_summary")
           or ((.schema.id // "") == "profile_default_gate_runtime_actuation_promotion_check_summary")
+          or ((.schema.id // "") == "runtime_actuation_promotion_cycle_summary")
         )
       )
     )
-  ' "$path" >/dev/null 2>&1; then
+    and (
+      if ((.schema.id // "") == "runtime_actuation_promotion_cycle_summary") then
+        ((.stages.promotion_check.summary_exists // false) == true)
+        and ((.stages.promotion_check.summary_valid_json // false) == true)
+        and ((.stages.promotion_check.summary_fresh // false) == true)
+        and ((.stages.promotion_check.has_usable_decision // false) == true)
+      else
+        true
+      end
+    )
+  ' "$path" >/dev/null 2>&1 \
+    && [[ "$(runtime_actuation_promotion_summary_stale_01 "$path")" == "0" ]]; then
     printf '1'
   else
     printf '0'
@@ -1346,20 +1392,48 @@ resolve_runtime_actuation_promotion_summary_path() {
   local manual_summary_path="$1"
   local reports_dir="$2"
   local candidate=""
+  local fallback_candidate=""
+  local -a fallback_candidates=()
   if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
     while IFS= read -r candidate; do
       candidate="$(resolve_path_with_base "$candidate" "$manual_summary_path")"
-      if [[ -n "$candidate" ]]; then
+      if [[ -n "$candidate" && "$(runtime_actuation_promotion_summary_usable_01 "$candidate")" == "1" ]]; then
         printf '%s' "$candidate"
         return
       fi
     done < <(jq -r '
       [
+        (.summary.runtime_actuation_promotion_cycle.latest_aliases.promotion_check_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle_latest_promotion_check_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle_promotion_check_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle_promotion_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle.latest_aliases.cycle_orchestrator_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle.latest_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle.summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle_latest_summary_json // ""),
+        (.summary.runtime_actuation_promotion_cycle_summary_json // ""),
         (.summary.runtime_actuation_promotion.summary_json // ""),
+        (.summary.runtime_actuation_promotion.latest_summary_json // ""),
         (.summary.runtime_actuation_promotion_summary_json // ""),
+        (.summary.runtime_actuation_promotion_latest_summary_json // ""),
         (.summary.profile_default_gate.runtime_actuation_promotion_summary_json // ""),
+        (.summary.profile_default_gate.runtime_actuation_promotion_cycle_summary_json // ""),
+        (.summary.profile_default_gate.runtime_actuation_promotion_cycle_latest_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_cycle_latest_promotion_check_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_cycle_promotion_check_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_cycle_promotion_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_cycle_latest_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_cycle_summary_json // ""),
         (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_summary_json // ""),
         (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_check_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_cycle_latest_signoff_summaries_list // ""),
+        (.artifacts.latest_aliases.promotion_check_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_cycle_latest_promotion_check_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_cycle_promotion_check_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_cycle_promotion_summary_json // ""),
+        (.artifacts.latest_aliases.cycle_orchestrator_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_cycle_latest_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_cycle_summary_json // ""),
         (.artifacts.runtime_actuation_promotion_summary_json // ""),
         (.artifacts.runtime_actuation_promotion_check_summary_json // "")
       ]
@@ -1369,7 +1443,18 @@ resolve_runtime_actuation_promotion_summary_path() {
     ' "$manual_summary_path" 2>/dev/null || true)
   fi
   if [[ -n "$reports_dir" ]]; then
-    candidate="$(abs_path "$reports_dir/runtime_actuation_promotion_check_summary.json")"
+    fallback_candidates+=("$reports_dir/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json")
+    fallback_candidates+=("$reports_dir/runtime_actuation_promotion_check_summary.json")
+    fallback_candidates+=("$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json")
+    fallback_candidates+=("$reports_dir/runtime_actuation_promotion_cycle_summary.json")
+    for fallback_candidate in "${fallback_candidates[@]}"; do
+      candidate="$(abs_path "$fallback_candidate")"
+      if [[ "$(runtime_actuation_promotion_summary_usable_01 "$candidate")" == "1" ]]; then
+        printf '%s' "$candidate"
+        return
+      fi
+    done
+    candidate="$(abs_path "$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json")"
   fi
   printf '%s' "$candidate"
 }
@@ -8115,13 +8200,22 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
   runtime_actuation_promotion_available_json="true"
   runtime_actuation_promotion_source_summary_json="$runtime_actuation_promotion_summary_json"
   runtime_actuation_promotion_status_json="$(jq -r '
-    if (.status | type) == "string" then .status else "unknown" end
+    if (.status | type) == "string" then .status
+    elif (.promotion_check.status | type) == "string" then .promotion_check.status
+    else "unknown"
+    end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "unknown")"
   runtime_actuation_promotion_rc_json="$(jq -r '
-    if (.rc | type) == "number" then .rc else "null" end
+    if (.rc | type) == "number" then .rc
+    elif (.promotion_check.rc | type) == "number" then .promotion_check.rc
+    else "null"
+    end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
   runtime_actuation_promotion_decision_json="$(jq -r '
-    if (.decision | type) == "string" then .decision else "" end
+    if (.decision | type) == "string" then .decision
+    elif (.promotion_check.decision | type) == "string" then .promotion_check.decision
+    else ""
+    end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "")"
   runtime_actuation_promotion_go_json="$(jq -r '
     if (.go | type) == "boolean" then (.go | tostring)
@@ -8148,21 +8242,121 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
   runtime_actuation_promotion_reasons_json="$(jq -c '
     if (.reasons | type) == "array" then [.reasons[] | strings]
     elif (.errors | type) == "array" then [.errors[] | strings]
-    else []
+    else
+      ([
+        (if (.failure_reason | type) == "string" then .failure_reason else empty end),
+        (if (.promotion_check.next_operator_action | type) == "string" then .promotion_check.next_operator_action else empty end),
+        (
+          if (.promotion_check.violations | type) == "array" then
+            .promotion_check.violations[]
+            | if (type == "string") then .
+              elif (.message | type) == "string" then .message
+              else empty
+              end
+          else empty
+          end
+        ),
+        (
+          if (.promotion_check.errors | type) == "array" then
+            .promotion_check.errors[] | strings
+          else empty
+          end
+        )
+      ] | map(select((. // "") != "")))
     end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
   runtime_actuation_promotion_notes_json="$(jq -r '
-    if (.notes | type) == "string" then .notes else "" end
+    if (.notes | type) == "string" then .notes
+    elif (.promotion_check.notes | type) == "string" then .promotion_check.notes
+    else ""
+    end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  runtime_actuation_promotion_status_norm="$(printf '%s' "${runtime_actuation_promotion_status_json:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  runtime_actuation_promotion_decision_norm_token="$(printf '%s' "${runtime_actuation_promotion_decision_json:-}" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]_-')"
+  runtime_actuation_promotion_decision_norm=""
+  case "$runtime_actuation_promotion_decision_norm_token" in
+    GO) runtime_actuation_promotion_decision_norm="GO" ;;
+    NOGO) runtime_actuation_promotion_decision_norm="NO-GO" ;;
+    *) runtime_actuation_promotion_decision_norm="" ;;
+  esac
+  runtime_actuation_promotion_consistency_errors_json='[]'
+  runtime_actuation_promotion_consistency_ok_01="1"
+  declare -a runtime_actuation_promotion_consistency_errors=()
+  if [[ "$runtime_actuation_promotion_go_json" == "true" && "$runtime_actuation_promotion_rc_json" != "0" ]]; then
+    runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: go=true with rc!=0")
+  fi
+  if [[ "$runtime_actuation_promotion_go_json" == "true" && "$runtime_actuation_promotion_no_go_json" == "true" ]]; then
+    runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: go=true and no_go=true")
+  fi
+  if [[ "$runtime_actuation_promotion_go_json" == "true" && "$runtime_actuation_promotion_decision_norm" == "NO-GO" ]]; then
+    runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: go=true but decision=NO-GO")
+  fi
+  if [[ "$runtime_actuation_promotion_no_go_json" == "true" && "$runtime_actuation_promotion_decision_norm" == "GO" ]]; then
+    runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: no_go=true but decision=GO")
+  fi
+  if [[ "$runtime_actuation_promotion_decision_norm" == "GO" && "$runtime_actuation_promotion_go_json" == "false" ]]; then
+    runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: decision=GO but go=false")
+  fi
+  if [[ "$runtime_actuation_promotion_status_norm" == "ok" || "$runtime_actuation_promotion_status_norm" == "pass" ]]; then
+    if [[ "$runtime_actuation_promotion_go_json" != "true" ]]; then
+      runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: status pass/ok without go=true")
+    fi
+    if [[ "$runtime_actuation_promotion_rc_json" != "0" ]]; then
+      runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: status pass/ok with rc!=0")
+    fi
+  fi
+  if ((${#runtime_actuation_promotion_consistency_errors[@]} > 0)); then
+    runtime_actuation_promotion_consistency_ok_01="0"
+    runtime_actuation_promotion_consistency_errors_json="$(printf '%s\n' "${runtime_actuation_promotion_consistency_errors[@]}" | jq -R . | jq -s 'map(select(length > 0))')"
+    runtime_actuation_promotion_reasons_json="$(jq -c \
+      --argjson reasons "$runtime_actuation_promotion_reasons_json" \
+      --argjson consistency_errors "$runtime_actuation_promotion_consistency_errors_json" \
+      '($reasons + $consistency_errors) | map(select((type == "string") and (length > 0))) | unique' \
+      <<<"{}" 2>/dev/null || printf '%s' "$runtime_actuation_promotion_reasons_json")"
+    runtime_actuation_promotion_status_json="fail"
+  fi
 
   if [[ "$runtime_actuation_promotion_go_json" == "true" ]] \
-     && [[ "$runtime_actuation_promotion_status_json" == "ok" || "$runtime_actuation_promotion_status_json" == "pass" ]]; then
+     && [[ "$runtime_actuation_promotion_status_norm" == "ok" || "$runtime_actuation_promotion_status_norm" == "pass" ]] \
+     && [[ "$runtime_actuation_promotion_rc_json" == "0" ]] \
+     && [[ "$runtime_actuation_promotion_no_go_json" != "true" ]] \
+     && [[ "$runtime_actuation_promotion_consistency_ok_01" == "1" ]]; then
     runtime_actuation_promotion_needs_attention_json="false"
     runtime_actuation_promotion_next_command=""
     runtime_actuation_promotion_next_command_reason=""
   else
     runtime_actuation_promotion_needs_attention_json="true"
-    first_reason="$(jq -r 'if (.reasons | type) == "array" and (.reasons | length) > 0 then (.reasons[0] // "") elif (.errors | type) == "array" and (.errors | length) > 0 then (.errors[0] // "") else "" end' "$runtime_actuation_promotion_summary_json" 2>/dev/null || true)"
+    if [[ "$runtime_actuation_promotion_consistency_ok_01" == "0" ]]; then
+      first_reason="$(jq -r 'if (. | type) == "array" and (. | length) > 0 then (.[0] // "") else "" end' <<<"$runtime_actuation_promotion_consistency_errors_json" 2>/dev/null || true)"
+    else
+    first_reason="$(jq -r '
+      if (.reasons | type) == "array" and (.reasons | length) > 0 then
+        (.reasons[0] // "")
+      elif (.errors | type) == "array" and (.errors | length) > 0 then
+        (.errors[0] // "")
+      elif (.failure_reason | type) == "string" then
+        .failure_reason
+      elif (.promotion_check.next_operator_action | type) == "string" then
+        .promotion_check.next_operator_action
+      elif (.promotion_check.violations | type) == "array" and (.promotion_check.violations | length) > 0 then
+        if (.promotion_check.violations[0] | type) == "string" then
+          .promotion_check.violations[0]
+        elif (.promotion_check.violations[0].message | type) == "string" then
+          .promotion_check.violations[0].message
+        else
+          ""
+        end
+      elif (.promotion_check.errors | type) == "array" and (.promotion_check.errors | length) > 0 then
+        if (.promotion_check.errors[0] | type) == "string" then
+          .promotion_check.errors[0]
+        else
+          ""
+        end
+      else
+        ""
+      end
+    ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || true)"
+    fi
     if [[ -n "$first_reason" ]]; then
       runtime_actuation_promotion_next_command_reason="$first_reason"
     elif [[ -n "$runtime_actuation_promotion_notes_json" ]]; then

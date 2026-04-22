@@ -145,6 +145,144 @@ array_to_json() {
   printf '%s\n' "$@" | jq -R . | jq -s '.'
 }
 
+write_alias_content_atomic() {
+  local alias_path="$1"
+  local label="$2"
+  local tmp_alias=""
+
+  mkdir -p "$(dirname "$alias_path")"
+  tmp_alias="$(mktemp "${alias_path}.tmp.XXXXXX")"
+  if ! cat >"$tmp_alias"; then
+    rm -f "$tmp_alias" 2>/dev/null || true
+    echo "failed to write $label temp file: $tmp_alias"
+    return 1
+  fi
+  mv -f "$tmp_alias" "$alias_path"
+}
+
+refresh_alias_atomic() {
+  local source_path="$1"
+  local alias_path="$2"
+  local label="$3"
+  local tmp_alias=""
+
+  if [[ "$source_path" == "$alias_path" ]]; then
+    return 0
+  fi
+  if [[ -z "$source_path" || ! -f "$source_path" ]]; then
+    echo "missing $label source for alias refresh: $source_path"
+    return 1
+  fi
+
+  if ! cat "$source_path" | write_alias_content_atomic "$alias_path" "$label latest alias"; then
+    return 1
+  fi
+}
+
+invalidate_latest_aliases_fail_closed() {
+  local run_id="$1"
+  local invalidated_at_utc="$2"
+  local reason_text="latest aliases invalidated for new runtime_actuation_promotion_cycle run; waiting for refreshed outputs"
+  local signoff_failclosed_path="$reports_dir/runtime_actuation_promotion_cycle_latest_signoff_incomplete.json"
+
+  # Clear previous aliases first so stale GO artifacts are not preserved if
+  # this invalidation sequence fails part-way through.
+  if ! rm -f "$latest_cycle_summary_alias" "$latest_promotion_summary_alias" "$latest_signoff_summary_list_alias" "$signoff_failclosed_path"; then
+    echo "failed to clear one or more latest aliases before fail-closed invalidation"
+    return 1
+  fi
+
+  if ! jq -n \
+    --arg generated_at_utc "$invalidated_at_utc" \
+    --arg reason "$reason_text" \
+    --arg run_id "$run_id" \
+    '{
+      version: 1,
+      schema: {
+        id: "runtime_actuation_promotion_cycle_summary"
+      },
+      generated_at_utc: $generated_at_utc,
+      status: "fail",
+      rc: 1,
+      decision: "NO-GO",
+      failure_stage: "latest_alias_invalidation",
+      failure_reason: $reason,
+      run_id: $run_id,
+      outcome: {
+        should_promote: false,
+        action: "hold_promotion_blocked"
+      }
+    }' | write_alias_content_atomic "$latest_cycle_summary_alias" "cycle orchestrator latest alias invalidation"; then
+    return 1
+  fi
+
+  if ! jq -n \
+    --arg generated_at_utc "$invalidated_at_utc" \
+    --arg reason "$reason_text" \
+    --arg run_id "$run_id" \
+    '{
+      version: 1,
+      schema: {
+        id: "runtime_actuation_promotion_check_summary"
+      },
+      generated_at_utc: $generated_at_utc,
+      status: "fail",
+      rc: 1,
+      decision: "NO-GO",
+      notes: $reason,
+      run_id: $run_id,
+      outcome: {
+        should_promote: false,
+        action: "hold_promotion_blocked",
+        next_operator_action: "rerun runtime_actuation_promotion_cycle to refresh latest aliases"
+      },
+      errors: [
+        "latest promotion summary alias invalidated before run completion"
+      ],
+      violations: []
+    }' | write_alias_content_atomic "$latest_promotion_summary_alias" "promotion-check latest alias invalidation"; then
+    return 1
+  fi
+
+  if ! jq -n \
+    --arg generated_at_utc "$invalidated_at_utc" \
+    --arg reason "$reason_text" \
+    --arg run_id "$run_id" \
+    '{
+      version: 1,
+      generated_at_utc: $generated_at_utc,
+      status: "fail",
+      final_rc: 1,
+      decision: {
+        decision: "NO-GO",
+        next_operator_action: $reason
+      },
+      run_id: $run_id
+    }' | write_alias_content_atomic "$signoff_failclosed_path" "signoff latest fail-closed sentinel"; then
+    return 1
+  fi
+
+  if ! printf '%s\n' "$signoff_failclosed_path" | write_alias_content_atomic "$latest_signoff_summary_list_alias" "signoff summary-list latest alias invalidation"; then
+    return 1
+  fi
+}
+
+attempt_alias_refresh_nonfatal() {
+  local source_path="$1"
+  local alias_path="$2"
+  local label="$3"
+
+  if refresh_alias_atomic "$source_path" "$alias_path" "$label"; then
+    echo "[runtime-actuation-promotion-cycle] latest-alias refreshed label=$label alias=$alias_path"
+    return 0
+  fi
+
+  alias_refresh_failures=$((alias_refresh_failures + 1))
+  alias_refresh_errors+=("$label: source=$source_path alias=$alias_path")
+  echo "[runtime-actuation-promotion-cycle] warning: latest-alias refresh failed label=$label source=$source_path alias=$alias_path"
+  return 0
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
@@ -305,10 +443,20 @@ if [[ -z "$promotion_summary_json" ]]; then
   promotion_summary_json="$reports_dir/runtime_actuation_promotion_cycle_${run_stamp}_promotion_check_summary.json"
 fi
 if [[ -z "$summary_json" ]]; then
-  summary_json="$reports_dir/runtime_actuation_promotion_cycle_summary.json"
+  summary_json="$reports_dir/runtime_actuation_promotion_cycle_${run_stamp}_summary.json"
 fi
 
+latest_cycle_summary_alias="$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json"
+latest_promotion_summary_alias="$reports_dir/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+latest_signoff_summary_list_alias="$reports_dir/runtime_actuation_promotion_cycle_latest_signoff_summaries.list"
+
 mkdir -p "$(dirname "$signoff_summary_list")" "$(dirname "$promotion_summary_json")" "$(dirname "$summary_json")"
+mkdir -p "$(dirname "$latest_cycle_summary_alias")" "$(dirname "$latest_promotion_summary_alias")" "$(dirname "$latest_signoff_summary_list_alias")"
+
+if ! invalidate_latest_aliases_fail_closed "$run_stamp" "$(timestamp_utc)"; then
+  echo "failed to invalidate latest aliases at run start"
+  exit 1
+fi
 
 declare -a signoff_summary_paths=()
 declare -a signoff_logs=()
@@ -654,6 +802,9 @@ jq -n \
   --arg signoff_script "$SIGNOFF_SCRIPT" \
   --arg promotion_check_script "$PROMOTION_CHECK_SCRIPT" \
   --arg signoff_summary_list "$signoff_summary_list" \
+  --arg latest_cycle_summary_alias "$latest_cycle_summary_alias" \
+  --arg latest_promotion_summary_alias "$latest_promotion_summary_alias" \
+  --arg latest_signoff_summary_list_alias "$latest_signoff_summary_list_alias" \
   --arg summary_json_path "$summary_json" \
   --arg promotion_summary_json "$promotion_summary_json" \
   --arg promotion_log "$promotion_log" \
@@ -765,9 +916,23 @@ jq -n \
       signoff_summary_paths: $signoff_summary_paths,
       signoff_logs: $signoff_logs,
       promotion_summary_json: $promotion_summary_json,
-      promotion_log: $promotion_log
+      promotion_log: $promotion_log,
+      latest_aliases: {
+        cycle_orchestrator_summary_json: $latest_cycle_summary_alias,
+        promotion_check_summary_json: $latest_promotion_summary_alias,
+        signoff_summary_list: $latest_signoff_summary_list_alias
+      }
     }
   }' >"$summary_json"
+
+alias_refresh_failures=0
+declare -a alias_refresh_errors=()
+attempt_alias_refresh_nonfatal "$summary_json" "$latest_cycle_summary_alias" "cycle orchestrator summary"
+attempt_alias_refresh_nonfatal "$promotion_summary_json" "$latest_promotion_summary_alias" "promotion-check summary"
+attempt_alias_refresh_nonfatal "$signoff_summary_list" "$latest_signoff_summary_list_alias" "signoff summary-list"
+if (( alias_refresh_failures > 0 )); then
+  echo "[runtime-actuation-promotion-cycle] warning: latest-alias refresh failures=$alias_refresh_failures (non-fatal, aliases remain fail-closed where refresh failed)"
+fi
 
 echo "[runtime-actuation-promotion-cycle] status=$status rc=$final_rc decision=${decision:-unset} summary_json=$summary_json"
 if [[ -n "$failure_stage" ]]; then
