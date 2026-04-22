@@ -5053,6 +5053,7 @@ echo "[roadmap-progress-report] multi-VM stability-check summary missing default
 PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR="$TMP_DIR/profile_compare_multi_vm_stability_missing_reports"
 rm -rf "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR"
 PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON="$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR/profile_compare_multi_vm_stability_check_summary.json"
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_MISSING_DEFAULT_JSON="$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
 if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR" run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -5065,7 +5066,7 @@ if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_REPORTS_DIR"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log
   exit 1
 fi
-if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" '
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" --arg promotion_src "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_MISSING_DEFAULT_JSON" '
   .vpn_track.multi_vm_stability.available == false
   and .vpn_track.multi_vm_stability.input_summary_json == $src
   and .vpn_track.multi_vm_stability.source_summary_json == null
@@ -5087,15 +5088,36 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
   and .vpn_track.multi_vm_stability.needs_attention == true
   and ((.vpn_track.multi_vm_stability.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
   and ((.vpn_track.multi_vm_stability.next_command_reason // "") | test("missing"; "i"))
+  and .vpn_track.multi_vm_stability_promotion.available == false
+  and .vpn_track.multi_vm_stability_promotion.input_summary_json == $promotion_src
+  and .vpn_track.multi_vm_stability_promotion.source_summary_json == null
+  and .vpn_track.multi_vm_stability_promotion.status == "missing"
+  and .vpn_track.multi_vm_stability_promotion.rc == null
+  and .vpn_track.multi_vm_stability_promotion.decision == null
+  and .vpn_track.multi_vm_stability_promotion.go == null
+  and .vpn_track.multi_vm_stability_promotion.no_go == null
+  and .vpn_track.multi_vm_stability_promotion.reasons == []
+  and .vpn_track.multi_vm_stability_promotion.notes == null
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
+  and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("promotion-check")) | not)
+  and ((.vpn_track.multi_vm_stability_promotion.next_command_reason // "") | test("promotion cycle"; "i"))
   and ((.next_actions // []) | any(
     .id == "profile_compare_multi_vm_stability"
     and ((.command // "") | test("profile-compare-multi-vm-stability-cycle"))
     and ((.reason // "") | test("missing"; "i"))
   ))
+  and ((.next_actions // []) | any(
+    .id == "profile_compare_multi_vm_stability_promotion"
+    and ((.command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
+    and (((.command // "") | test("promotion-check")) | not)
+    and ((.reason // "") | test("promotion cycle"; "i"))
+  ))
   and (
     ((.next_actions // []) | map(.id) | index("profile_default_gate")) as $profile_idx
     | ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability")) as $multi_vm_idx
-    | ($profile_idx != null and $multi_vm_idx != null and $multi_vm_idx > $profile_idx)
+    | ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability_promotion")) as $multi_vm_promotion_idx
+    | ($profile_idx != null and $multi_vm_idx != null and $multi_vm_promotion_idx != null and $multi_vm_idx > $profile_idx and $multi_vm_promotion_idx > $multi_vm_idx)
   )
   and .artifacts.profile_compare_multi_vm_stability_summary_json == null
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json" >/dev/null; then
@@ -5106,6 +5128,165 @@ fi
 if ! rg -q '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log; then
   echo "expected multi-VM stability availability log line in missing-default scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] multi-VM promotion contradictory GO tuple is fail-closed"
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INCONSISTENT_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_promotion_inconsistent_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INCONSISTENT_SUMMARY_JSON" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INCONSISTENT_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_check_summary"
+  },
+  "status": "pass",
+  "rc": 1,
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": []
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INCONSISTENT_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INCONSISTENT_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_inconsistent_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_inconsistent_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_inconsistent.log 2>&1; then
+  echo "expected success for multi-VM promotion contradiction fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_inconsistent.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INCONSISTENT_SUMMARY_JSON" '
+  .vpn_track.multi_vm_stability_promotion.available == true
+  and .vpn_track.multi_vm_stability_promotion.input_summary_json == $src
+  and .vpn_track.multi_vm_stability_promotion.source_summary_json == $src
+  and .vpn_track.multi_vm_stability_promotion.status == "fail"
+  and .vpn_track.multi_vm_stability_promotion.rc == 1
+  and .vpn_track.multi_vm_stability_promotion.decision == "GO"
+  and .vpn_track.multi_vm_stability_promotion.go == true
+  and .vpn_track.multi_vm_stability_promotion.no_go == false
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and ((.vpn_track.multi_vm_stability_promotion.reasons // []) | any(test("inconsistent"; "i")))
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion == "fail"
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
+  and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("promotion-check")) | not)
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_inconsistent_summary.json" >/dev/null; then
+  echo "multi-VM promotion contradiction fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_inconsistent_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] multi-VM promotion cycle summary top-level/nested mismatch is fail-closed"
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_MISMATCH_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_promotion_cycle_mismatch_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_MISMATCH_SUMMARY_JSON" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_MISMATCH_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "NO-GO",
+    "status": "fail",
+    "rc": 1,
+    "operator_next_action": "Hold promotion and investigate mismatch"
+  }
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_MISMATCH_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_MISMATCH_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_cycle_mismatch_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_cycle_mismatch_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_cycle_mismatch.log 2>&1; then
+  echo "expected success for multi-VM promotion cycle mismatch fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_cycle_mismatch.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_MISMATCH_SUMMARY_JSON" '
+  .vpn_track.multi_vm_stability_promotion.available == true
+  and .vpn_track.multi_vm_stability_promotion.input_summary_json == $src
+  and .vpn_track.multi_vm_stability_promotion.source_summary_json == $src
+  and .vpn_track.multi_vm_stability_promotion.status == "fail"
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and ((.vpn_track.multi_vm_stability_promotion.reasons // []) | any(test("disagrees"; "i")))
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion == "fail"
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
+  and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("promotion-check")) | not)
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_cycle_mismatch_summary.json" >/dev/null; then
+  echo "multi-VM promotion cycle mismatch fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_cycle_mismatch_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] multi-VM promotion stale summary is fail-closed"
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_promotion_stale_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stale": true,
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "GO",
+    "status": "pass",
+    "rc": 0
+  }
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_stale_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_stale_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_stale.log 2>&1; then
+  echo "expected success for multi-VM promotion stale fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_stale.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON" '
+  .vpn_track.multi_vm_stability_promotion.input_summary_json == $src
+  and .vpn_track.multi_vm_stability_promotion.available == false
+  and .vpn_track.multi_vm_stability_promotion.source_summary_json == null
+  and .vpn_track.multi_vm_stability_promotion.status == "missing"
+  and .vpn_track.multi_vm_stability_promotion.decision == null
+  and .vpn_track.multi_vm_stability_promotion.go == null
+  and .vpn_track.multi_vm_stability_promotion.no_go == null
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion == "missing"
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
+  and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("promotion-check")) | not)
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_stale_summary.json" >/dev/null; then
+  echo "multi-VM promotion stale fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_stale_summary.json"
   exit 1
 fi
 
@@ -6139,9 +6320,13 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_SUMMARY_JSON" '
   .vpn_track.runtime_actuation_promotion.available == true
   and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
   and .vpn_track.runtime_actuation_promotion.status == "pass"
+  and .vpn_track.runtime_actuation_promotion.rc == 0
   and .vpn_track.runtime_actuation_promotion.decision == "GO"
   and .vpn_track.runtime_actuation_promotion.go == true
+  and .vpn_track.runtime_actuation_promotion.no_go == false
   and .vpn_track.runtime_actuation_promotion.needs_attention == false
+  and .vpn_track.runtime_actuation_promotion.next_command == null
+  and .vpn_track.runtime_actuation_promotion.next_command_reason == null
   and .vpn_track.optional_gate_status.runtime_actuation_promotion == "pass"
   and .artifacts.runtime_actuation_promotion_summary_json == $src
 ' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_alias_summary.json" >/dev/null; then
@@ -6196,14 +6381,123 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_LATEST_PROMOTION_JSON" 
   .vpn_track.runtime_actuation_promotion.available == true
   and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
   and .vpn_track.runtime_actuation_promotion.status == "pass"
+  and .vpn_track.runtime_actuation_promotion.rc == 0
   and .vpn_track.runtime_actuation_promotion.decision == "GO"
   and .vpn_track.runtime_actuation_promotion.go == true
+  and .vpn_track.runtime_actuation_promotion.no_go == false
   and .vpn_track.runtime_actuation_promotion.needs_attention == false
+  and .vpn_track.runtime_actuation_promotion.next_command == null
+  and .vpn_track.runtime_actuation_promotion.next_command_reason == null
   and .vpn_track.optional_gate_status.runtime_actuation_promotion == "pass"
   and .artifacts.runtime_actuation_promotion_summary_json == $src
 ' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_promotion_alias_summary.json" >/dev/null; then
   echo "runtime-actuation cycle promotion-check latest-alias summary mismatch"
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_promotion_alias_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation cycle summary top-level/nested mismatch is fail-closed"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_MISMATCH_JSON="$TMP_DIR/runtime_actuation_promotion_cycle_mismatch_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_MISMATCH_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_MISMATCH'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "status": "fail",
+    "rc": 1,
+    "decision": "NO-GO"
+  }
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_MISMATCH
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_PROMOTION_CYCLE_MISMATCH_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_mismatch_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_mismatch_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_mismatch.log 2>&1; then
+  echo "expected success for runtime-actuation cycle mismatch fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_mismatch.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_MISMATCH_JSON" '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.input_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.status == "fail"
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and ((.vpn_track.runtime_actuation_promotion.reasons // []) | any(test("disagrees"; "i")))
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-cycle"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_mismatch_summary.json" >/dev/null; then
+  echo "runtime-actuation cycle mismatch fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_mismatch_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation cycle summary without promotion_check payload is fail-closed"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED_JSON="$TMP_DIR/runtime_actuation_promotion_cycle_malformed_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  }
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_malformed_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_malformed_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_malformed.log 2>&1; then
+  echo "expected success for runtime-actuation cycle malformed fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_malformed.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED_JSON" '
+  .vpn_track.runtime_actuation_promotion.input_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.available == false
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == null
+  and .vpn_track.runtime_actuation_promotion.status == "missing"
+  and .vpn_track.runtime_actuation_promotion.decision == null
+  and .vpn_track.runtime_actuation_promotion.go == null
+  and .vpn_track.runtime_actuation_promotion.no_go == null
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "missing"
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-cycle"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_malformed_summary.json" >/dev/null; then
+  echo "runtime-actuation cycle malformed fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_malformed_summary.json"
   exit 1
 fi
 
