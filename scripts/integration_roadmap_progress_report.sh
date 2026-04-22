@@ -6403,7 +6403,7 @@ if ! jq -e '
   and .vpn_track.runtime_actuation_promotion.go == null
   and .vpn_track.runtime_actuation_promotion.needs_attention == true
   and .vpn_track.optional_gate_status.runtime_actuation_promotion == "missing"
-  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-check"))
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-cycle"))
 ' "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_summary.json" >/dev/null; then
   echo "runtime-actuation stale latest-alias fail-closed summary mismatch"
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_summary.json"
@@ -6462,7 +6462,7 @@ if ! jq -e '
   and .vpn_track.runtime_actuation_promotion.go == null
   and .vpn_track.runtime_actuation_promotion.needs_attention == true
   and .vpn_track.optional_gate_status.runtime_actuation_promotion == "missing"
-  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-check"))
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-cycle"))
 ' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_summary.json" >/dev/null; then
   echo "runtime-actuation cycle stale fail-closed summary mismatch"
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_summary.json"

@@ -8193,8 +8193,8 @@ runtime_actuation_promotion_no_go_json="null"
 runtime_actuation_promotion_reasons_json='[]'
 runtime_actuation_promotion_notes_json=""
 runtime_actuation_promotion_needs_attention_json="true"
-runtime_actuation_promotion_next_command="./scripts/easy_node.sh runtime-actuation-promotion-check --reports-dir .easy-node-logs --fail-on-no-go 0 --summary-json .easy-node-logs/runtime_actuation_promotion_check_summary.json --print-summary-json 1"
-runtime_actuation_promotion_next_command_reason="runtime-actuation promotion evidence is missing; run promotion check to produce fail-closed GO/NO-GO evidence"
+runtime_actuation_promotion_next_command="./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --cycles 3 --fail-on-no-go 0 --summary-json .easy-node-logs/runtime_actuation_promotion_cycle_latest_summary.json --print-summary-json 1"
+runtime_actuation_promotion_next_command_reason="runtime-actuation promotion evidence is missing; run promotion cycle to produce fresh fail-closed GO/NO-GO evidence"
 if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
    && [[ "$(runtime_actuation_promotion_summary_usable_01 "$runtime_actuation_promotion_summary_json")" == "1" ]]; then
   runtime_actuation_promotion_available_json="true"
