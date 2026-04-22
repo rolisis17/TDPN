@@ -227,7 +227,7 @@ assert_contains "$success_line_sp" "--campaign-bootstrap-directory https://dir-a
 assert_contains "$success_line_sp" "--refresh-campaign 1" "missing default refresh forwarding"
 assert_contains "$success_line_sp" "--campaign-execution-mode docker" "missing docker execution mode default"
 assert_contains "$success_line_sp" "--campaign-start-local-stack 0" "missing start-local-stack default"
-assert_contains "$success_line_sp" "--fail-on-no-go 0" "missing optional fail-on-no-go default"
+assert_contains "$success_line_sp" "--fail-on-no-go 1" "missing fail-closed fail-on-no-go default"
 assert_contains "$success_line_sp" "--campaign-timeout-sec 2400" "missing default campaign timeout forwarding"
 assert_contains "$success_line_sp" "--require-selection-policy-present 1" "missing default require-selection-policy-present forwarding"
 assert_contains "$success_line_sp" "--require-selection-policy-valid 1" "missing default require-selection-policy-valid forwarding"
@@ -241,6 +241,37 @@ assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "mi
 assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-progress elapsed_sec=0 state=campaign_start_pending" "missing immediate signoff progress marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
+
+echo "[profile-default-gate-run] explicit fail-on-no-go override forwards zero"
+: >"$SIGNOFF_CAPTURE"
+FAIL_ON_NO_GO_OVERRIDE_LOG="$TMP_DIR/profile_default_gate_run_fail_on_no_go_override.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_fail_on_no_go_override.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-fail-on-no-go-override" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --fail-on-no-go 0 >"$FAIL_ON_NO_GO_OVERRIDE_LOG" 2>&1
+fail_on_no_go_override_rc=$?
+set -e
+if [[ "$fail_on_no_go_override_rc" -ne 0 ]]; then
+  echo "expected explicit fail-on-no-go override path rc=0, got rc=$fail_on_no_go_override_rc"
+  cat "$FAIL_ON_NO_GO_OVERRIDE_LOG"
+  exit 1
+fi
+fail_on_no_go_override_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$fail_on_no_go_override_line" ]]; then
+  echo "missing captured signoff invocation in explicit fail-on-no-go override path"
+  cat "$FAIL_ON_NO_GO_OVERRIDE_LOG"
+  exit 1
+fi
+fail_on_no_go_override_line_sp="${fail_on_no_go_override_line//$'\t'/ }"
+assert_contains "$fail_on_no_go_override_line_sp" "--fail-on-no-go 0" "missing explicit fail-on-no-go override forwarding"
+assert_not_contains "$fail_on_no_go_override_line_sp" "--fail-on-no-go 1" "unexpected fail-closed default injected when explicit override is set"
 
 echo "[profile-default-gate-run] endpoint-wait-timeout-sec=0 is unbounded (no immediate timeout)"
 : >"$SIGNOFF_CAPTURE"

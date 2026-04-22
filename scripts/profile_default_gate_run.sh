@@ -52,7 +52,7 @@ Notes:
     --refresh-campaign 1
     --campaign-execution-mode docker
     --campaign-start-local-stack 0
-    --fail-on-no-go 0
+    --fail-on-no-go 1
     --campaign-timeout-sec 2400
   - This wrapper defaults selection-policy evidence checks to strict:
     --require-selection-policy-present 1
@@ -1208,7 +1208,7 @@ if ! array_has_arg_or_equals_prefix "--campaign-start-local-stack" "${signoff_pa
   signoff_passthrough+=(--campaign-start-local-stack 0)
 fi
 if ! array_has_arg_or_equals_prefix "--fail-on-no-go" "${signoff_passthrough[@]}"; then
-  signoff_passthrough+=(--fail-on-no-go 0)
+  signoff_passthrough+=(--fail-on-no-go 1)
 fi
 if ! array_has_arg_or_equals_prefix "--campaign-timeout-sec" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-timeout-sec "$campaign_timeout_default_sec")

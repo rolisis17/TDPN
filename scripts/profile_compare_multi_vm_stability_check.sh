@@ -130,9 +130,9 @@ require_status_pass="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_STATUS_P
 require_min_runs_requested="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
 require_min_runs_completed="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED:-${REQUIRE_MIN_RUNS_COMPLETED:-3}}"
 require_max_runs_fail="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL:-${REQUIRE_MAX_RUNS_FAIL:-0}}"
-require_decision_consensus="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS:-${REQUIRE_DECISION_CONSENSUS:-0}}"
+require_decision_consensus="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS:-${REQUIRE_DECISION_CONSENSUS:-1}}"
 require_modal_decision="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-GO}}"
-require_modal_decision_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-0}}"
+require_modal_decision_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-67}}"
 require_recommended_profile="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE:-${REQUIRE_RECOMMENDED_PROFILE:-}}"
 allow_recommended_profiles="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES:-${ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}}"
 require_modal_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_SUPPORT_RATE_PCT:-60}}"
@@ -571,8 +571,24 @@ if [[ "$schema_valid" == "1" ]]; then
   ' "$stability_summary_json" 2>/dev/null || printf '{}')"
 
   observed_decision_total_json="$(jq -r '[.[]] | add // 0' <<<"$observed_decision_counts_json")"
-  observed_modal_decision="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$observed_decision_counts_json")"
-  observed_modal_decision_count_json="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$observed_decision_counts_json")"
+  observed_modal_decision="$(jq -r '
+    to_entries
+    | sort_by(
+        -.value,
+        (if .key == "NO-GO" then 0 elif .key == "GO" then 1 else 2 end),
+        .key
+      )
+    | .[0].key // ""
+  ' <<<"$observed_decision_counts_json")"
+  observed_modal_decision_count_json="$(jq -r '
+    to_entries
+    | sort_by(
+        -.value,
+        (if .key == "NO-GO" then 0 elif .key == "GO" then 1 else 2 end),
+        .key
+      )
+    | .[0].value // 0
+  ' <<<"$observed_decision_counts_json")"
   observed_modal_decision_support_rate_pct_json="$(jq -n \
     --argjson total "$observed_decision_total_json" \
     --argjson modal "$observed_modal_decision_count_json" \

@@ -169,6 +169,21 @@ case "$scenario" in
       rc=0
     fi
     ;;
+  split_decision)
+    if (( run_index == 1 )); then
+      status="pass"
+      decision="GO"
+      profile="balanced"
+      support="80"
+      rc=0
+    else
+      status="pass"
+      decision="NO-GO"
+      profile="private"
+      support="20"
+      rc=0
+    fi
+    ;;
   *)
     echo "unsupported fake scenario: $scenario" >&2
     exit 2
@@ -328,6 +343,43 @@ if ! jq -e '
 ' "$PARTIAL_SUMMARY" >/dev/null 2>&1; then
   echo "partial summary missing expected fields"
   cat "$PARTIAL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] split decision fail-closed safety"
+SPLIT_SUMMARY="$TMP_DIR/split_summary.json"
+SPLIT_COUNTER="$TMP_DIR/split_counter.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$SPLIT_COUNTER" \
+FAKE_CYCLE_SCENARIO="split_decision" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 2 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/reports_split" \
+  --summary-json "$SPLIT_SUMMARY" \
+  --vm-command "vm_a::echo vm-a" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_split.log 2>&1
+split_rc=$?
+set -e
+
+if [[ "$split_rc" -eq 0 ]]; then
+  echo "expected split-decision run rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_split.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .decision == "NO-GO"
+  and .decision_consensus == false
+  and .decision_split_detected == true
+  and .modal.decision == "NO-GO"
+  and .modal.decision_tie_break == "prefer_no_go"
+  and .histograms.decision_counts == {"GO":1,"NO-GO":1}
+' "$SPLIT_SUMMARY" >/dev/null 2>&1; then
+  echo "split summary missing fail-closed tie-break fields"
+  cat "$SPLIT_SUMMARY"
   exit 1
 fi
 

@@ -109,6 +109,59 @@ cat >"$RUN_STYLE_SUMMARY" <<'EOF_RUN_STYLE_SUMMARY'
 }
 EOF_RUN_STYLE_SUMMARY
 
+TIE_SUMMARY="$TMP_DIR/stability_tie_summary.json"
+cat >"$TIE_SUMMARY" <<'EOF_TIE_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_summary"
+  },
+  "status": "pass",
+  "runs_requested": 2,
+  "runs_completed": 2,
+  "runs_fail": 0,
+  "decision_consensus": false,
+  "recommended_profile_counts": {
+    "balanced": 1,
+    "private": 1
+  },
+  "modal_recommended_profile": "balanced",
+  "modal_support_rate_pct": 50,
+  "decision_counts": {
+    "GO": 1,
+    "NO-GO": 1
+  },
+  "modal_decision": "GO",
+  "modal_decision_support_rate_pct": 50
+}
+EOF_TIE_SUMMARY
+
+SPLIT_GO_SUMMARY="$TMP_DIR/stability_split_go_summary.json"
+cat >"$SPLIT_GO_SUMMARY" <<'EOF_SPLIT_GO_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_summary"
+  },
+  "status": "pass",
+  "runs_requested": 3,
+  "runs_completed": 3,
+  "runs_fail": 0,
+  "decision_consensus": false,
+  "recommended_profile_counts": {
+    "balanced": 3
+  },
+  "modal_recommended_profile": "balanced",
+  "modal_support_rate_pct": 100,
+  "decision_counts": {
+    "GO": 2,
+    "NO-GO": 1
+  },
+  "modal_decision": "GO",
+  "modal_decision_support_rate_pct": 66.67
+}
+EOF_SPLIT_GO_SUMMARY
+
 echo "[profile-compare-multi-vm-stability-check] strict happy path"
 STRICT_SUMMARY="$TMP_DIR/check_strict_summary.json"
 set +e
@@ -262,6 +315,73 @@ if ! jq -e '
 ' "$OPTIONAL_SUMMARY" >/dev/null 2>&1; then
   echo "optional-consensus summary JSON mismatch"
   cat "$OPTIONAL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-check] modal decision tie-break prefers NO-GO"
+TIE_CHECK_SUMMARY="$TMP_DIR/check_tie_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$TIE_SUMMARY" \
+  --require-status-pass 1 \
+  --require-min-runs-requested 2 \
+  --require-min-runs-completed 2 \
+  --require-max-runs-fail 0 \
+  --require-decision-consensus 0 \
+  --require-modal-decision NO-GO \
+  --require-modal-decision-support-rate-pct 50 \
+  --allow-recommended-profiles balanced,private \
+  --require-modal-support-rate-pct 50 \
+  --fail-on-no-go 1 \
+  --summary-json "$TIE_CHECK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_check_tie.log 2>&1
+tie_rc=$?
+set -e
+
+if [[ "$tie_rc" -ne 0 ]]; then
+  echo "expected tie-break path rc=0, got rc=$tie_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_check_tie.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "GO"
+  and .status == "ok"
+  and .rc == 0
+  and .observed.modal_decision == "NO-GO"
+  and .observed.modal_decision_count == 1
+  and .observed.modal_decision_support_rate_pct == 50
+' "$TIE_CHECK_SUMMARY" >/dev/null 2>&1; then
+  echo "tie-break summary JSON mismatch"
+  cat "$TIE_CHECK_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-check] tightened default split safety"
+DEFAULT_SPLIT_SUMMARY="$TMP_DIR/check_default_split_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$SPLIT_GO_SUMMARY" \
+  --fail-on-no-go 0 \
+  --summary-json "$DEFAULT_SPLIT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_check_default_split.log 2>&1
+default_split_rc=$?
+set -e
+
+if [[ "$default_split_rc" -ne 0 ]]; then
+  echo "expected default split safety soft path rc=0, got rc=$default_split_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_check_default_split.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc == 0
+  and .inputs.policy.require_decision_consensus == true
+  and .inputs.policy.require_modal_decision_support_rate_pct == 67
+  and ((.errors | map(test("decision_consensus|modal decision support rate")) | any) == true)
+' "$DEFAULT_SPLIT_SUMMARY" >/dev/null 2>&1; then
+  echo "default split safety summary JSON mismatch"
+  cat "$DEFAULT_SPLIT_SUMMARY"
   exit 1
 fi
 

@@ -1054,10 +1054,12 @@ profile_default_gate_rc=0
 profile_default_gate_command_rc=0
 profile_default_gate_contract_valid="null"
 profile_default_gate_contract_error=""
+profile_default_gate_policy_error=""
 profile_default_gate_summary_exists="false"
 profile_default_gate_log="$reports_dir/profile_default_gate_refresh.log"
 profile_default_gate_command=""
 profile_default_gate_decision=""
+profile_default_gate_go_json="null"
 profile_default_gate_recommended_profile=""
 
 roadmap_status="skip"
@@ -1080,6 +1082,14 @@ execution_mode="sequential"
 if [[ "$parallel" == "1" ]]; then
   execution_mode="parallel"
 fi
+
+gate_first_runtime_required="0"
+if [[ "$run_runtime_fix_record" == "1" ]] \
+   && [[ "$run_profile_default_gate_refresh" == "1" ]] \
+   && [[ "$profile_default_gate_fail_closed" == "1" ]]; then
+  gate_first_runtime_required="1"
+fi
+runtime_deferred_for_gate="$gate_first_runtime_required"
 
 finalize_runtime_stage() {
   runtime_rc="$runtime_command_rc"
@@ -1168,12 +1178,34 @@ finalize_phase4_stage() {
 }
 
 finalize_profile_default_gate_stage() {
+  local profile_default_gate_go=""
   profile_default_gate_rc="$profile_default_gate_command_rc"
+  profile_default_gate_policy_error=""
+  profile_default_gate_go_json="null"
   if profile_default_gate_summary_contract_valid "$profile_default_gate_summary_json"; then
     profile_default_gate_contract_valid="1"
     profile_default_gate_summary_exists="true"
     profile_default_gate_decision="$(json_string_field_or_empty "$profile_default_gate_summary_json" '.decision.decision // ""')"
+    profile_default_gate_go="$(json_string_field_or_empty "$profile_default_gate_summary_json" '
+      if (.decision.go | type) == "boolean" then (.decision.go | tostring)
+      else ""
+      end
+    ')"
+    if [[ "$profile_default_gate_go" == "true" || "$profile_default_gate_go" == "false" ]]; then
+      profile_default_gate_go_json="$profile_default_gate_go"
+    fi
     profile_default_gate_recommended_profile="$(json_string_field_or_empty "$profile_default_gate_summary_json" '.decision.recommended_profile // ""')"
+    if [[ "$profile_default_gate_go_json" == "false" ]]; then
+      profile_default_gate_policy_error="profile-default gate decision.go=false (NO-GO)"
+      if (( profile_default_gate_rc == 0 )); then
+        profile_default_gate_rc=4
+      fi
+      if [[ "$profile_default_gate_fail_closed" == "1" ]]; then
+        profile_default_gate_status="fail"
+      else
+        profile_default_gate_status="warn"
+      fi
+    fi
   else
     profile_default_gate_contract_valid="0"
     profile_default_gate_contract_error="profile-default gate summary JSON is missing required fields or uses an incompatible schema"
@@ -1195,12 +1227,36 @@ finalize_profile_default_gate_stage() {
   fi
 }
 
+profile_default_gate_verdict_allows_runtime_01() {
+  if [[ "$run_profile_default_gate_refresh" != "1" ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$profile_default_gate_fail_closed" != "1" ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$profile_default_gate_status" != "pass" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$profile_default_gate_go_json" != "true" ]]; then
+    printf '0'
+    return
+  fi
+  printf '1'
+}
+
 if [[ "$parallel" == "1" ]]; then
   if [[ "$run_runtime_fix_record" == "1" ]]; then
     runtime_command="$(print_cmd "${runtime_cmd[@]}")"
-    echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=running mode=parallel"
-    ("${runtime_cmd[@]}" >"$runtime_log" 2>&1) &
-    runtime_pid="$!"
+    if [[ "$runtime_deferred_for_gate" == "1" ]]; then
+      echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=deferred reason=profile_default_gate_fail_closed_gate_first mode=parallel"
+    else
+      echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=running mode=parallel"
+      ("${runtime_cmd[@]}" >"$runtime_log" 2>&1) &
+      runtime_pid="$!"
+    fi
   else
     echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=skip reason=disabled"
   fi
@@ -1324,14 +1380,18 @@ if [[ "$parallel" == "1" ]]; then
 else
   if [[ "$run_runtime_fix_record" == "1" ]]; then
     runtime_command="$(print_cmd "${runtime_cmd[@]}")"
-    if run_stage_capture "runtime_fix_record" "$runtime_log" "${runtime_cmd[@]}"; then
-      runtime_command_rc=0
-      runtime_status="pass"
+    if [[ "$runtime_deferred_for_gate" == "1" ]]; then
+      echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=deferred reason=profile_default_gate_fail_closed_gate_first mode=sequential"
     else
-      runtime_command_rc=$?
-      runtime_status="fail"
+      if run_stage_capture "runtime_fix_record" "$runtime_log" "${runtime_cmd[@]}"; then
+        runtime_command_rc=0
+        runtime_status="pass"
+      else
+        runtime_command_rc=$?
+        runtime_status="fail"
+      fi
+      finalize_runtime_stage
     fi
-    finalize_runtime_stage
   else
     echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=skip reason=disabled"
   fi
@@ -1407,6 +1467,27 @@ else
   fi
 fi
 
+if [[ "$run_runtime_fix_record" == "1" ]] && [[ "$runtime_deferred_for_gate" == "1" ]]; then
+  if [[ "$(profile_default_gate_verdict_allows_runtime_01)" == "1" ]]; then
+    if run_stage_capture "runtime_fix_record" "$runtime_log" "${runtime_cmd[@]}"; then
+      runtime_command_rc=0
+      runtime_status="pass"
+    else
+      runtime_command_rc=$?
+      runtime_status="fail"
+    fi
+    finalize_runtime_stage
+  else
+    runtime_status="skip"
+    runtime_rc=0
+    runtime_command_rc=0
+    runtime_contract_valid="null"
+    runtime_summary_exists="false"
+    runtime_contract_error="runtime_fix_record skipped by profile-default fail-closed gate verdict"
+    echo "[vpn-non-blockchain-fastlane] stage=runtime_fix_record status=skip reason=profile_default_gate_verdict_no_go mode=gate-first"
+  fi
+fi
+
 if [[ "$run_roadmap_progress_report" == "1" ]]; then
   resolve_roadmap_resilience_summary_path
   build_roadmap_cmd
@@ -1474,6 +1555,7 @@ jq -n \
   --argjson run_phase4_windows_full_parity_handoff_run "$run_phase4_windows_full_parity_handoff_run" \
   --argjson run_profile_default_gate_refresh "$run_profile_default_gate_refresh" \
   --argjson profile_default_gate_fail_closed "$profile_default_gate_fail_closed" \
+  --argjson gate_first_runtime_required "$gate_first_runtime_required" \
   --argjson run_roadmap_progress_report "$run_roadmap_progress_report" \
   --argjson parallel "$parallel" \
   --argjson allow_policy_no_go "$allow_policy_no_go" \
@@ -1541,7 +1623,9 @@ jq -n \
   --arg profile_default_gate_summary_exists "$profile_default_gate_summary_exists" \
   --arg profile_default_gate_log "$profile_default_gate_log" \
   --arg profile_default_gate_decision "$profile_default_gate_decision" \
+  --arg profile_default_gate_go "$profile_default_gate_go_json" \
   --arg profile_default_gate_recommended_profile "$profile_default_gate_recommended_profile" \
+  --arg profile_default_gate_policy_error "$profile_default_gate_policy_error" \
   --arg roadmap_status "$roadmap_status" \
   --argjson roadmap_rc "$roadmap_rc" \
   --argjson roadmap_command_rc "$roadmap_command_rc" \
@@ -1585,6 +1669,7 @@ jq -n \
       run_phase4_windows_full_parity_handoff_run: ($run_phase4_windows_full_parity_handoff_run == 1),
       run_profile_default_gate_refresh: ($run_profile_default_gate_refresh == 1),
       profile_default_gate_fail_closed: ($profile_default_gate_fail_closed == 1),
+      gate_first_runtime_required: ($gate_first_runtime_required == 1),
       run_roadmap_progress_report: ($run_roadmap_progress_report == 1),
       allow_policy_no_go: ($allow_policy_no_go == 1),
       runtime_passthrough_args: $runtime_passthrough_args,
@@ -1751,8 +1836,15 @@ jq -n \
           end
         ),
         contract_error: (if $profile_default_gate_contract_error == "" then null else $profile_default_gate_contract_error end),
+        policy_error: (if $profile_default_gate_policy_error == "" then null else $profile_default_gate_policy_error end),
         decision: {
           decision: (if $profile_default_gate_decision == "" then null else $profile_default_gate_decision end),
+          go: (
+            if $profile_default_gate_go == "true" then true
+            elif $profile_default_gate_go == "false" then false
+            else null
+            end
+          ),
           recommended_profile: (if $profile_default_gate_recommended_profile == "" then null else $profile_default_gate_recommended_profile end)
         },
         artifacts: {

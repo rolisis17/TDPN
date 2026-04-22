@@ -103,21 +103,55 @@ cat >"$CAMPAIGN_JSON" <<EOF_CAMPAIGN
 }
 EOF_CAMPAIGN
 
-echo "[profile-compare-campaign-check] baseline pass"
-BASELINE_SUMMARY="$TMP_DIR/campaign_check_baseline.json"
+echo "[profile-compare-campaign-check] baseline default m4 policy is fail-closed"
+BASELINE_SUMMARY="$TMP_DIR/campaign_check_baseline_default_m4_fail_closed.json"
+set +e
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_JSON" \
   --summary-json "$BASELINE_SUMMARY" \
   --print-summary-json 1 >/tmp/integration_profile_compare_campaign_check_baseline.log 2>&1
-
-if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_baseline.log; then
-  echo "expected GO baseline output not found"
+baseline_rc=$?
+set -e
+if [[ "$baseline_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for baseline default m4 fail-closed path"
   cat /tmp/integration_profile_compare_campaign_check_baseline.log
   exit 1
 fi
-if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | length) == 0 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .observed.selection_policy_evidence.selected_summaries_total == 1 and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == false and .inputs.policy.require_micro_relay_quality_status_pass == false and .inputs.policy.require_micro_relay_demotion_policy == false and .inputs.policy.require_micro_relay_promotion_policy == false and .inputs.policy.require_trust_tier_port_unlock_policy == false and .decision_diagnostics.m4_policy.gate_summary.required_total == 0 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "not-required"' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
-  echo "baseline summary missing expected fields"
+if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=1' /tmp/integration_profile_compare_campaign_check_baseline.log; then
+  echo "expected NO-GO baseline default m4 fail-closed output not found"
+  cat /tmp/integration_profile_compare_campaign_check_baseline.log
+  exit 1
+fi
+if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 1 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .observed.selection_policy_evidence.selected_summaries_total == 1 and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_quality_evidence")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("micro_relay_quality_status_not_pass")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_demotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_promotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_trust_tier_port_unlock_policy")) != null and .decision_diagnostics.m4_policy.gate_summary.required_total == 5 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 5 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 5 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_status_pass.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_promotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "fail"' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
+  echo "baseline default m4 fail-closed summary missing expected fields"
   cat "$BASELINE_SUMMARY"
+  exit 1
+fi
+if ! rg -q 'micro-relay quality evidence is required but not present' /tmp/integration_profile_compare_campaign_check_baseline.log; then
+  echo "expected baseline default m4 quality evidence failure reason missing"
+  cat /tmp/integration_profile_compare_campaign_check_baseline.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] explicit m4 policy opt-out preserves compatibility"
+M4_OPT_OUT_SUMMARY="$TMP_DIR/campaign_check_m4_opt_out_baseline.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --summary-json "$M4_OPT_OUT_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_opt_out.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_m4_opt_out.log; then
+  echo "expected GO output for explicit m4 policy opt-out not found"
+  cat /tmp/integration_profile_compare_campaign_check_m4_opt_out.log
+  exit 1
+fi
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | length) == 0 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .inputs.policy.require_micro_relay_quality_evidence == false and .inputs.policy.require_micro_relay_quality_status_pass == false and .inputs.policy.require_micro_relay_demotion_policy == false and .inputs.policy.require_micro_relay_promotion_policy == false and .inputs.policy.require_trust_tier_port_unlock_policy == false and .decision_diagnostics.m4_policy.gate_summary.required_total == 0 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "not-required"' "$M4_OPT_OUT_SUMMARY" >/dev/null 2>&1; then
+  echo "explicit m4 policy opt-out summary missing expected fields"
+  cat "$M4_OPT_OUT_SUMMARY"
   exit 1
 fi
 
@@ -451,7 +485,11 @@ echo "[profile-compare-campaign-check] m4 policy warn/non-blocking"
 M4_WARN_SUMMARY="$TMP_DIR/campaign_check_m4_warn.json"
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_M4_WARN_JSON" \
+  --require-micro-relay-quality-evidence 0 \
   --require-micro-relay-quality-status-pass 1 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
   --fail-on-no-go 0 \
   --summary-json "$M4_WARN_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_warn.log 2>&1
 if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' /tmp/integration_profile_compare_campaign_check_m4_warn.log; then

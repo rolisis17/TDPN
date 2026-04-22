@@ -646,12 +646,38 @@ support_rate_counts_json="$(jq '
   | add // {}
 ' <<<"$runs_json")"
 
-modal_decision="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$decision_counts_json")"
-modal_decision_count="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$decision_counts_json")"
+modal_decision="$(jq -r '
+  to_entries
+  | sort_by(
+      -.value,
+      (if .key == "NO-GO" then 0 elif .key == "GO" then 1 else 2 end),
+      .key
+    )
+  | .[0].key // ""
+' <<<"$decision_counts_json")"
+modal_decision_count="$(jq -r '
+  to_entries
+  | sort_by(
+      -.value,
+      (if .key == "NO-GO" then 0 elif .key == "GO" then 1 else 2 end),
+      .key
+    )
+  | .[0].value // 0
+' <<<"$decision_counts_json")"
 modal_profile="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$profile_counts_json")"
 modal_profile_count="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$profile_counts_json")"
 modal_support_rate_raw="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].key // ""' <<<"$support_rate_counts_json")"
 modal_support_rate_count="$(jq -r 'to_entries | sort_by(-.value, .key) | .[0].value // 0' <<<"$support_rate_counts_json")"
+decision_counts_total="$(jq -r '[.[]] | add // 0' <<<"$decision_counts_json")"
+decision_unique_count="$(jq -r 'keys | length' <<<"$decision_counts_json")"
+decision_consensus="false"
+decision_split_detected="0"
+if (( decision_counts_total > 0 && decision_unique_count == 1 )); then
+  decision_consensus="true"
+fi
+if (( decision_counts_total > 0 && decision_unique_count > 1 )); then
+  decision_split_detected="1"
+fi
 
 modal_decision_support_rate_pct="$(format_pct "$modal_decision_count" "$completed_runs")"
 modal_profile_support_rate_pct="$(format_pct "$modal_profile_count" "$completed_runs")"
@@ -663,7 +689,7 @@ if [[ -n "$modal_support_rate_raw" ]] && is_non_negative_decimal "$modal_support
 fi
 
 overall_decision="$modal_decision"
-if [[ -z "$overall_decision" ]]; then
+if [[ -z "$overall_decision" || "$decision_split_detected" == "1" ]]; then
   overall_decision="NO-GO"
 fi
 
@@ -671,18 +697,31 @@ overall_status="pass"
 notes="all cycle runs passed"
 overall_rc=0
 
-if (( fail_runs == 0 && warn_runs == 0 && completed_runs == requested_runs )); then
+if (( fail_runs == 0 && warn_runs == 0 && completed_runs == requested_runs )) \
+   && [[ "$decision_split_detected" != "1" ]]; then
   overall_status="pass"
   notes="all cycle runs passed"
 else
-  if [[ "$allow_partial" == "1" && "$completed_runs" -ge "$min_completed_runs" && "$pass_runs" -ge "$min_pass_runs" ]]; then
-    overall_status="warn"
-    notes="partial stability thresholds satisfied"
-    overall_rc=0
+  if [[ "$decision_split_detected" == "1" ]]; then
+    if [[ "$allow_partial" == "1" && "$completed_runs" -ge "$min_completed_runs" && "$pass_runs" -ge "$min_pass_runs" ]]; then
+      overall_status="warn"
+      notes="split decision outcomes detected; fail-closed NO-GO applied"
+      overall_rc=0
+    else
+      overall_status="fail"
+      notes="split decision outcomes detected; fail-closed NO-GO applied"
+      overall_rc=1
+    fi
   else
-    overall_status="fail"
-    notes="stability thresholds not satisfied"
-    overall_rc=1
+    if [[ "$allow_partial" == "1" && "$completed_runs" -ge "$min_completed_runs" && "$pass_runs" -ge "$min_pass_runs" ]]; then
+      overall_status="warn"
+      notes="partial stability thresholds satisfied"
+      overall_rc=0
+    else
+      overall_status="fail"
+      notes="stability thresholds not satisfied"
+      overall_rc=1
+    fi
   fi
 fi
 
@@ -691,6 +730,7 @@ jq -n \
   --arg status "$overall_status" \
   --arg decision "$overall_decision" \
   --arg modal_decision "$modal_decision" \
+  --arg decision_consensus "$decision_consensus" \
   --arg modal_profile "$modal_profile" \
   --arg notes "$notes" \
   --arg reports_dir "$reports_dir" \
@@ -720,6 +760,9 @@ jq -n \
   --argjson modal_decision_support_rate_pct "$modal_decision_support_rate_pct" \
   --argjson modal_profile_support_rate_pct "$modal_profile_support_rate_pct" \
   --argjson modal_support_support_rate_pct "$modal_support_support_rate_pct" \
+  --argjson decision_counts_total "$decision_counts_total" \
+  --argjson decision_unique_count "$decision_unique_count" \
+  --argjson decision_split_detected "$decision_split_detected" \
   --argjson decision_counts "$decision_counts_json" \
   --argjson profile_counts "$profile_counts_json" \
   --argjson support_rate_counts "$support_rate_counts_json" \
@@ -736,6 +779,8 @@ jq -n \
     status: $status,
     rc: $rc,
     decision: (if $decision == "" then null else $decision end),
+    decision_consensus: ($decision_consensus == "true"),
+    decision_split_detected: ($decision_split_detected == 1),
     notes: $notes,
     inputs: {
       reports_dir: $reports_dir,
@@ -762,6 +807,7 @@ jq -n \
     },
     modal: {
       decision: (if $modal_decision == "" then null else $modal_decision end),
+      decision_tie_break: "prefer_no_go",
       decision_count: $modal_decision_count,
       decision_support_rate_pct: $modal_decision_support_rate_pct,
       recommended_profile: (if $modal_profile == "" then null else $modal_profile end),
@@ -773,6 +819,8 @@ jq -n \
     },
     histograms: {
       decision_counts: $decision_counts,
+      decision_counts_total: $decision_counts_total,
+      decision_unique_count: $decision_unique_count,
       recommended_profile_counts: $profile_counts,
       support_rate_counts: $support_rate_counts
     },
