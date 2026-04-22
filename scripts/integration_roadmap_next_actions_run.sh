@@ -259,6 +259,15 @@ JSON
 }
 JSON
     ;;
+  multi_vm_stability_action)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_compare_multi_vm_stability","label":"Profile compare multi-VM stability cycle","command":"bash \"$PASS1\"","reason":"test-multi-vm-stability"}
+  ]
+}
+JSON
+    ;;
   no_actions)
     cat >"$summary_json" <<JSON
 {
@@ -435,6 +444,35 @@ if ! jq -e '
 ' "$SUMMARY_PASS" >/dev/null; then
   echo "success path summary mismatch"
   cat "$SUMMARY_PASS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] multi-VM stability action path"
+SUMMARY_MULTI_VM_STABILITY="$TMP_DIR/summary_multi_vm_stability.json"
+REPORTS_MULTI_VM_STABILITY="$TMP_DIR/reports_multi_vm_stability"
+ROADMAP_NEXT_ACTIONS_SCENARIO=multi_vm_stability_action \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_MULTI_VM_STABILITY" \
+  --summary-json "$SUMMARY_MULTI_VM_STABILITY" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.generated_this_run == true
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["profile_compare_multi_vm_stability"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_compare_multi_vm_stability"
+  and .actions[0].status == "pass"
+' "$SUMMARY_MULTI_VM_STABILITY" >/dev/null; then
+  echo "multi-VM stability action summary mismatch"
+  cat "$SUMMARY_MULTI_VM_STABILITY"
   exit 1
 fi
 

@@ -1501,13 +1501,30 @@ if ! jq -e '
   and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_requested == true
   and .inputs.profile_compare_campaign_signoff_require_selection_policy_present_effective == true
   and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_effective == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_evidence_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_demotion_policy_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_promotion_policy_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_requested == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective == true
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective == true
+  and .inputs.profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective == true
 ' "$PROFILE_SIGNOFF_SUMMARY" >/dev/null; then
   echo "profile compare campaign signoff summary JSON missing expected fields"
   cat "$PROFILE_SIGNOFF_LOG"
   cat "$PROFILE_SIGNOFF_SUMMARY"
   exit 1
 fi
-for expected in '--require-selection-policy-present 1' '--require-selection-policy-valid 1'; do
+for expected in \
+  '--require-selection-policy-present 1' \
+  '--require-selection-policy-valid 1' \
+  '--require-micro-relay-quality-evidence 1' \
+  '--require-micro-relay-quality-status-pass 1' \
+  '--require-micro-relay-demotion-policy 1' \
+  '--require-micro-relay-promotion-policy 1' \
+  '--require-trust-tier-port-unlock-policy 1'; do
   if ! rg -q -- "$expected" "$PROFILE_SIGNOFF_ARGS_LOG"; then
     echo "profile signoff invocation missing $expected"
     cat "$PROFILE_SIGNOFF_ARGS_LOG"
@@ -1547,6 +1564,11 @@ FAKE_PROFILE_SIGNOFF_SELECTION_POLICY_VALID=0 \
   --profile-compare-campaign-signoff-refresh-campaign 0 \
   --profile-compare-campaign-signoff-require-selection-policy-present 0 \
   --profile-compare-campaign-signoff-require-selection-policy-valid 0 \
+  --profile-compare-campaign-signoff-require-micro-relay-quality-evidence 0 \
+  --profile-compare-campaign-signoff-require-micro-relay-quality-status-pass 0 \
+  --profile-compare-campaign-signoff-require-micro-relay-demotion-policy 0 \
+  --profile-compare-campaign-signoff-require-micro-relay-promotion-policy 0 \
+  --profile-compare-campaign-signoff-require-trust-tier-port-unlock-policy 0 \
   --profile-compare-campaign-signoff-summary-json "$TMP_DIR/profile_compare_campaign_signoff_selection_policy_override_source_summary.json" \
   --summary-json "$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_SUMMARY" \
   --print-summary-json 0 >"$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_LOG"
@@ -1558,6 +1580,16 @@ if ! jq -e '
   and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_requested == false
   and .inputs.profile_compare_campaign_signoff_require_selection_policy_present_effective == false
   and .inputs.profile_compare_campaign_signoff_require_selection_policy_valid_effective == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_evidence_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_demotion_policy_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_promotion_policy_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_requested == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective == false
+  and .inputs.profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective == false
+  and .inputs.profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective == false
   and .summary.profile_compare_campaign_signoff.selection_policy_evidence.available == true
   and .summary.profile_compare_campaign_signoff.selection_policy_evidence.present == false
   and .summary.profile_compare_campaign_signoff.selection_policy_evidence.valid == false
@@ -1567,7 +1599,14 @@ if ! jq -e '
   cat "$PROFILE_SIGNOFF_SELECTION_POLICY_OVERRIDE_SUMMARY"
   exit 1
 fi
-for expected in '--require-selection-policy-present 0' '--require-selection-policy-valid 0'; do
+for expected in \
+  '--require-selection-policy-present 0' \
+  '--require-selection-policy-valid 0' \
+  '--require-micro-relay-quality-evidence 0' \
+  '--require-micro-relay-quality-status-pass 0' \
+  '--require-micro-relay-demotion-policy 0' \
+  '--require-micro-relay-promotion-policy 0' \
+  '--require-trust-tier-port-unlock-policy 0'; do
   if ! rg -q -- "$expected" "$PROFILE_SIGNOFF_ARGS_LOG"; then
     echo "profile signoff override invocation missing $expected"
     cat "$PROFILE_SIGNOFF_ARGS_LOG"

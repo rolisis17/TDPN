@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default desktop capability for Global Private Mesh (GPM) scaffold with legacy TDPN compatibility",
+  "description": "Default desktop capability for Global Private Mesh (GPM) scaffold with legacy TDPN alias compatibility",
   "windows": ["main"],
   "permissions": [
     "core:webview:deny-internal-toggle-devtools",

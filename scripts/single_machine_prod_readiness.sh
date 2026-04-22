@@ -29,6 +29,11 @@ Usage:
     [--profile-compare-campaign-signoff-fail-on-no-go 0|1] \
     [--profile-compare-campaign-signoff-require-selection-policy-present 0|1] \
     [--profile-compare-campaign-signoff-require-selection-policy-valid 0|1] \
+    [--profile-compare-campaign-signoff-require-micro-relay-quality-evidence 0|1] \
+    [--profile-compare-campaign-signoff-require-micro-relay-quality-status-pass 0|1] \
+    [--profile-compare-campaign-signoff-require-micro-relay-demotion-policy 0|1] \
+    [--profile-compare-campaign-signoff-require-micro-relay-promotion-policy 0|1] \
+    [--profile-compare-campaign-signoff-require-trust-tier-port-unlock-policy 0|1] \
     [--profile-compare-campaign-signoff-reports-dir PATH] \
     [--profile-compare-campaign-signoff-summary-json PATH] \
     [--profile-compare-campaign-signoff-summary-max-age-sec N] \
@@ -87,6 +92,15 @@ bool_arg_or_die() {
     echo "$name must be 0 or 1"
     exit 2
   fi
+}
+
+optional_bool_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  bool_arg_or_die "$name" "$value"
 }
 
 tri_state_or_die() {
@@ -190,6 +204,11 @@ profile_compare_campaign_signoff_refresh_campaign="0"
 profile_compare_campaign_signoff_fail_on_no_go="1"
 profile_compare_campaign_signoff_require_selection_policy_present="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
 profile_compare_campaign_signoff_require_selection_policy_valid="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_VALID:-1}"
+profile_compare_campaign_signoff_require_micro_relay_quality_evidence="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_QUALITY_EVIDENCE:-1}"
+profile_compare_campaign_signoff_require_micro_relay_quality_status_pass="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_QUALITY_STATUS_PASS:-1}"
+profile_compare_campaign_signoff_require_micro_relay_demotion_policy="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-1}"
+profile_compare_campaign_signoff_require_micro_relay_promotion_policy="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-1}"
+profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-1}"
 profile_compare_campaign_signoff_reports_dir="$ROOT_DIR/.easy-node-logs"
 profile_compare_campaign_signoff_summary_json=""
 profile_compare_campaign_signoff_summary_max_age_sec="${SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SUMMARY_MAX_AGE_SEC:-21600}"
@@ -293,6 +312,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profile-compare-campaign-signoff-require-selection-policy-valid)
       profile_compare_campaign_signoff_require_selection_policy_valid="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-micro-relay-quality-evidence)
+      profile_compare_campaign_signoff_require_micro_relay_quality_evidence="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-micro-relay-quality-status-pass)
+      profile_compare_campaign_signoff_require_micro_relay_quality_status_pass="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-micro-relay-demotion-policy)
+      profile_compare_campaign_signoff_require_micro_relay_demotion_policy="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-micro-relay-promotion-policy)
+      profile_compare_campaign_signoff_require_micro_relay_promotion_policy="${2:-}"
+      shift 2
+      ;;
+    --profile-compare-campaign-signoff-require-trust-tier-port-unlock-policy)
+      profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy="${2:-}"
       shift 2
       ;;
     --profile-compare-campaign-signoff-reports-dir)
@@ -429,6 +468,11 @@ bool_arg_or_die "--profile-compare-campaign-signoff-refresh-campaign" "$profile_
 bool_arg_or_die "--profile-compare-campaign-signoff-fail-on-no-go" "$profile_compare_campaign_signoff_fail_on_no_go"
 bool_arg_or_die "--profile-compare-campaign-signoff-require-selection-policy-present" "$profile_compare_campaign_signoff_require_selection_policy_present"
 bool_arg_or_die "--profile-compare-campaign-signoff-require-selection-policy-valid" "$profile_compare_campaign_signoff_require_selection_policy_valid"
+optional_bool_arg_or_die "--profile-compare-campaign-signoff-require-micro-relay-quality-evidence" "$profile_compare_campaign_signoff_require_micro_relay_quality_evidence"
+optional_bool_arg_or_die "--profile-compare-campaign-signoff-require-micro-relay-quality-status-pass" "$profile_compare_campaign_signoff_require_micro_relay_quality_status_pass"
+optional_bool_arg_or_die "--profile-compare-campaign-signoff-require-micro-relay-demotion-policy" "$profile_compare_campaign_signoff_require_micro_relay_demotion_policy"
+optional_bool_arg_or_die "--profile-compare-campaign-signoff-require-micro-relay-promotion-policy" "$profile_compare_campaign_signoff_require_micro_relay_promotion_policy"
+optional_bool_arg_or_die "--profile-compare-campaign-signoff-require-trust-tier-port-unlock-policy" "$profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy"
 if ! [[ "$profile_compare_campaign_signoff_summary_max_age_sec" =~ ^[0-9]+$ ]]; then
   echo "--profile-compare-campaign-signoff-summary-max-age-sec must be an integer"
   exit 2
@@ -740,6 +784,11 @@ profile_compare_campaign_signoff_campaign_exit_url_effective="$profile_compare_c
 profile_compare_campaign_signoff_campaign_start_local_stack_effective="$profile_compare_campaign_signoff_campaign_start_local_stack"
 profile_compare_campaign_signoff_require_selection_policy_present_effective="$profile_compare_campaign_signoff_require_selection_policy_present"
 profile_compare_campaign_signoff_require_selection_policy_valid_effective="$profile_compare_campaign_signoff_require_selection_policy_valid"
+profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective="$profile_compare_campaign_signoff_require_micro_relay_quality_evidence"
+profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective="$profile_compare_campaign_signoff_require_micro_relay_quality_status_pass"
+profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective="$profile_compare_campaign_signoff_require_micro_relay_demotion_policy"
+profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective="$profile_compare_campaign_signoff_require_micro_relay_promotion_policy"
+profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective="$profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy"
 
 profile_compare_campaign_summary_available="0"
 if [[ -f "$profile_compare_campaign_summary_json" ]] && jq -e . "$profile_compare_campaign_summary_json" >/dev/null 2>&1; then
@@ -844,6 +893,21 @@ build_profile_compare_campaign_signoff_cmd() {
     --summary-json "$profile_compare_campaign_signoff_summary_json"
     --print-summary-json 0
   )
+  if [[ -n "$profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective" ]]; then
+    cmd+=(--require-micro-relay-quality-evidence "$profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective")
+  fi
+  if [[ -n "$profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective" ]]; then
+    cmd+=(--require-micro-relay-quality-status-pass "$profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective")
+  fi
+  if [[ -n "$profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective" ]]; then
+    cmd+=(--require-micro-relay-demotion-policy "$profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective")
+  fi
+  if [[ -n "$profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective" ]]; then
+    cmd+=(--require-micro-relay-promotion-policy "$profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective")
+  fi
+  if [[ -n "$profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective" ]]; then
+    cmd+=(--require-trust-tier-port-unlock-policy "$profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective")
+  fi
 
   if [[ -n "$profile_compare_campaign_signoff_campaign_execution_mode_effective" ]]; then
     cmd+=(--campaign-execution-mode "$profile_compare_campaign_signoff_campaign_execution_mode_effective")
@@ -1326,6 +1390,16 @@ summary_payload="$({
     --arg profile_compare_campaign_signoff_require_selection_policy_valid "$profile_compare_campaign_signoff_require_selection_policy_valid" \
     --arg profile_compare_campaign_signoff_require_selection_policy_present_effective "$profile_compare_campaign_signoff_require_selection_policy_present_effective" \
     --arg profile_compare_campaign_signoff_require_selection_policy_valid_effective "$profile_compare_campaign_signoff_require_selection_policy_valid_effective" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_quality_evidence "$profile_compare_campaign_signoff_require_micro_relay_quality_evidence" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_quality_status_pass "$profile_compare_campaign_signoff_require_micro_relay_quality_status_pass" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_demotion_policy "$profile_compare_campaign_signoff_require_micro_relay_demotion_policy" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_promotion_policy "$profile_compare_campaign_signoff_require_micro_relay_promotion_policy" \
+    --arg profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy "$profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective "$profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective "$profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective "$profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective" \
+    --arg profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective "$profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective" \
+    --arg profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective "$profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective" \
     --arg profile_compare_campaign_summary_available "$profile_compare_campaign_summary_available" \
     --arg profile_compare_campaign_signoff_existing_summary_available "$profile_compare_campaign_signoff_existing_summary_available" \
     --arg profile_compare_campaign_signoff_existing_summary_valid "$profile_compare_campaign_signoff_existing_summary_valid" \
@@ -1466,6 +1540,56 @@ summary_payload="$({
         profile_compare_campaign_signoff_require_selection_policy_valid_requested: ($profile_compare_campaign_signoff_require_selection_policy_valid == "1"),
         profile_compare_campaign_signoff_require_selection_policy_present_effective: ($profile_compare_campaign_signoff_require_selection_policy_present_effective == "1"),
         profile_compare_campaign_signoff_require_selection_policy_valid_effective: ($profile_compare_campaign_signoff_require_selection_policy_valid_effective == "1"),
+        profile_compare_campaign_signoff_require_micro_relay_quality_evidence_requested: (
+          if $profile_compare_campaign_signoff_require_micro_relay_quality_evidence == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_quality_evidence == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_requested: (
+          if $profile_compare_campaign_signoff_require_micro_relay_quality_status_pass == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_quality_status_pass == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_demotion_policy_requested: (
+          if $profile_compare_campaign_signoff_require_micro_relay_demotion_policy == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_demotion_policy == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_promotion_policy_requested: (
+          if $profile_compare_campaign_signoff_require_micro_relay_promotion_policy == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_promotion_policy == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_requested: (
+          if $profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy == "" then null
+          else ($profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective: (
+          if $profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_quality_evidence_effective == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective: (
+          if $profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_quality_status_pass_effective == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective: (
+          if $profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_demotion_policy_effective == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective: (
+          if $profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective == "" then null
+          else ($profile_compare_campaign_signoff_require_micro_relay_promotion_policy_effective == "1")
+          end
+        ),
+        profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective: (
+          if $profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective == "" then null
+          else ($profile_compare_campaign_signoff_require_trust_tier_port_unlock_policy_effective == "1")
+          end
+        ),
         profile_compare_campaign_summary_available: ($profile_compare_campaign_summary_available == "1"),
         profile_compare_campaign_signoff_existing_summary: {
           available: ($profile_compare_campaign_signoff_existing_summary_available == "1"),

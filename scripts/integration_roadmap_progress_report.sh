@@ -4984,6 +4984,7 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY_JSON" 
   and .vpn_track.multi_vm_stability.needs_attention == false
   and .vpn_track.multi_vm_stability.next_command == null
   and .vpn_track.multi_vm_stability.next_command_reason == null
+  and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and .artifacts.profile_compare_multi_vm_stability_summary_json == $src
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_default_summary.json" >/dev/null; then
   echo "multi-VM stability default-artifact summary mismatch"
@@ -5036,6 +5037,16 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
   and .vpn_track.multi_vm_stability.needs_attention == true
   and ((.vpn_track.multi_vm_stability.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
   and ((.vpn_track.multi_vm_stability.next_command_reason // "") | test("missing"; "i"))
+  and ((.next_actions // []) | any(
+    .id == "profile_compare_multi_vm_stability"
+    and ((.command // "") | test("profile-compare-multi-vm-stability-cycle"))
+    and ((.reason // "") | test("missing"; "i"))
+  ))
+  and (
+    ((.next_actions // []) | map(.id) | index("profile_default_gate")) as $profile_idx
+    | ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability")) as $multi_vm_idx
+    | ($profile_idx != null and $multi_vm_idx != null and $multi_vm_idx > $profile_idx)
+  )
   and .artifacts.profile_compare_multi_vm_stability_summary_json == null
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json" >/dev/null; then
   echo "multi-VM stability missing-default summary mismatch"

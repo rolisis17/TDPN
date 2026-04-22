@@ -1,12 +1,15 @@
-# TDPN Full Execution Plan (VPN -> Windows Native -> Cosmos L1)
+# Global Private Mesh (GPM) Full Execution Plan (VPN -> Windows Native -> Cosmos L1)
 
 Last updated: 2026-04-16
 
-This is the implementation baseline for the next stages of TDPN.
+This is the implementation baseline for the next stages of Global Private Mesh (GPM).
 
 Canonical status:
 - this document is the authoritative source for sequencing across VPN, client-platform, and blockchain tracks.
 - roadmap docs and automation recommendations must remain aligned with this plan.
+
+Compatibility note:
+- legacy TDPN aliases remain supported where documented (for example env/path compatibility surfaces), while GPM naming is preferred.
 
 ## Priority Lock
 

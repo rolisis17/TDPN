@@ -206,7 +206,21 @@ if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
   throw "missing bootstrap script: $bootstrapScript"
 }
 
+$firstRunRemediationScript = Join-Path $scriptDir "desktop_first_run_remediation.ps1"
+
 Show-ExecutionPolicyStatus
+
+if (Test-Path -LiteralPath $firstRunRemediationScript -PathType Leaf) {
+  Write-Step "running first-run blocker helper (non-blocking)"
+  try {
+    $firstRunHelperExitCode = Invoke-BypassScript -ScriptPath $firstRunRemediationScript -Arguments @("-Compact")
+    if ($firstRunHelperExitCode -ne 0) {
+      Write-Step ("first-run blocker helper exit code: {0} (continuing)" -f $firstRunHelperExitCode)
+    }
+  } catch {
+    Write-Step ("first-run blocker helper failed unexpectedly (continuing): {0}" -f $_.Exception.Message)
+  }
+}
 
 $doctorInvokeArgs = @("-Mode", "check")
 $installMissingSpecified = Test-ArgSpecified -Args $BootstrapArgs -Name "-InstallMissing"

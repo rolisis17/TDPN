@@ -152,6 +152,11 @@ FAKE_CHECK_DECISION=GO \
   --require-min-runs-total 5 \
   --require-selection-policy-present 1 \
   --require-selection-policy-valid 1 \
+  --require-micro-relay-quality-evidence 1 \
+  --require-micro-relay-quality-status-pass 1 \
+  --require-micro-relay-demotion-policy 1 \
+  --require-micro-relay-promotion-policy 1 \
+  --require-trust-tier-port-unlock-policy 1 \
   --campaign-execution-mode docker \
   --campaign-directory-urls "http://127.0.0.1:18081,http://127.0.0.1:28081" \
   --campaign-bootstrap-directory "http://127.0.0.1:18081" \
@@ -179,7 +184,7 @@ if ! rg -q 'campaign refresh completed attempt=initial' /tmp/integration_profile
   cat /tmp/integration_profile_compare_campaign_signoff_success.log
   exit 1
 fi
-if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == 1 and .inputs.policy.require_micro_relay_quality_status_pass == 1 and .inputs.policy.require_micro_relay_demotion_policy == 1 and .inputs.policy.require_micro_relay_promotion_policy == 1 and .inputs.policy.require_trust_tier_port_unlock_policy == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing expected fields"
   cat "$SUCCESS_SUMMARY"
   exit 1
@@ -201,7 +206,14 @@ if ! rg -q -- '--require-min-runs-total 5' "$SIGNOFF_CAPTURE"; then
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
-for expected in '--require-selection-policy-present 1' '--require-selection-policy-valid 1'; do
+for expected in \
+  '--require-selection-policy-present 1' \
+  '--require-selection-policy-valid 1' \
+  '--require-micro-relay-quality-evidence 1' \
+  '--require-micro-relay-quality-status-pass 1' \
+  '--require-micro-relay-demotion-policy 1' \
+  '--require-micro-relay-promotion-policy 1' \
+  '--require-trust-tier-port-unlock-policy 1'; do
   if ! rg -q -- "$expected" "$SIGNOFF_CAPTURE"; then
     echo "expected check forwarding flag missing: $expected"
     cat "$SIGNOFF_CAPTURE"

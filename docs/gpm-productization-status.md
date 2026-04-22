@@ -3,11 +3,11 @@
 Last updated: 2026-04-22
 
 Scope:
-- Global Privacy Mesh track only.
+- Global Private Mesh (GPM) track only.
 - Status labels below are based on repository evidence, not intent.
 
 Compatibility note:
-- TDPN path aliases are retained.
+- legacy TDPN path aliases are retained for backward compatibility.
 - Public route/profile naming stays `1hop|2hop|3hop`, with compatibility aliases `speed|balanced|private` and legacy `fast|privacy`; `speed-1hop` remains the explicit experimental alias.
 
 ## Completed

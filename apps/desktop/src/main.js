@@ -4230,7 +4230,7 @@ function updateLegacyAliasRuntimeHint() {
     return;
   }
   const aliasSummary = summarizeLegacyAliasNames(aliases);
-  let hintText = `Legacy TDPN_* env aliases are active (${aliasCount})`;
+  let hintText = `GPM runtime detected legacy TDPN_* env aliases (${aliasCount})`;
   if (aliasSummary) {
     hintText = `${hintText}: ${aliasSummary}.`;
   } else {

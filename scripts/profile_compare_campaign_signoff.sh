@@ -32,6 +32,11 @@ Usage:
     [--require-trend-source CSV] \
     [--require-selection-policy-present [0|1]] \
     [--require-selection-policy-valid [0|1]] \
+    [--require-micro-relay-quality-evidence [0|1]] \
+    [--require-micro-relay-quality-status-pass [0|1]] \
+    [--require-micro-relay-demotion-policy [0|1]] \
+    [--require-micro-relay-promotion-policy [0|1]] \
+    [--require-trust-tier-port-unlock-policy [0|1]] \
     [--campaign-execution-mode docker|local] \
     [--campaign-directory-urls URL[,URL...]] \
     [--campaign-bootstrap-directory URL] \
@@ -568,6 +573,11 @@ disallow_experimental_default="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_DISALLOW_EXPER
 require_trend_source="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TREND_SOURCE:-}"
 require_selection_policy_present="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_PRESENT:-}"
 require_selection_policy_valid="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_SELECTION_POLICY_VALID:-}"
+require_micro_relay_quality_evidence="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_QUALITY_EVIDENCE:-}"
+require_micro_relay_quality_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_QUALITY_STATUS_PASS:-}"
+require_micro_relay_demotion_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-}"
+require_micro_relay_promotion_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-}"
+require_trust_tier_port_unlock_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-}"
 campaign_execution_mode="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXECUTION_MODE:-}"
 campaign_directory_urls="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_DIRECTORY_URLS:-}"
 campaign_bootstrap_directory="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_BOOTSTRAP_DIRECTORY:-}"
@@ -759,6 +769,51 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-micro-relay-quality-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_quality_evidence="${2:-}"
+        shift 2
+      else
+        require_micro_relay_quality_evidence="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-quality-status-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_quality_status_pass="${2:-}"
+        shift 2
+      else
+        require_micro_relay_quality_status_pass="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-demotion-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_demotion_policy="${2:-}"
+        shift 2
+      else
+        require_micro_relay_demotion_policy="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-promotion-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_promotion_policy="${2:-}"
+        shift 2
+      else
+        require_micro_relay_promotion_policy="1"
+        shift
+      fi
+      ;;
+    --require-trust-tier-port-unlock-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trust_tier_port_unlock_policy="${2:-}"
+        shift 2
+      else
+        require_trust_tier_port_unlock_policy="1"
+        shift
+      fi
+      ;;
     --campaign-execution-mode)
       campaign_execution_mode="${2:-}"
       shift 2
@@ -916,6 +971,11 @@ optional_bool_arg_or_die "--require-trend-status-pass" "$require_trend_status_pa
 optional_bool_arg_or_die "--disallow-experimental-default" "$disallow_experimental_default"
 optional_bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
 optional_bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
+optional_bool_arg_or_die "--require-micro-relay-quality-evidence" "$require_micro_relay_quality_evidence"
+optional_bool_arg_or_die "--require-micro-relay-quality-status-pass" "$require_micro_relay_quality_status_pass"
+optional_bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro_relay_demotion_policy"
+optional_bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
+optional_bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
 
 for int_arg in "$require_min_runs_total" "$require_max_runs_fail" "$require_max_runs_warn" "$require_min_runs_with_summary"; do
   if [[ -n "$int_arg" && ! "$int_arg" =~ ^[0-9]+$ ]]; then
@@ -1387,6 +1447,21 @@ fi
 if [[ -n "$require_selection_policy_valid" ]]; then
   check_cmd+=(--require-selection-policy-valid "$require_selection_policy_valid")
 fi
+if [[ -n "$require_micro_relay_quality_evidence" ]]; then
+  check_cmd+=(--require-micro-relay-quality-evidence "$require_micro_relay_quality_evidence")
+fi
+if [[ -n "$require_micro_relay_quality_status_pass" ]]; then
+  check_cmd+=(--require-micro-relay-quality-status-pass "$require_micro_relay_quality_status_pass")
+fi
+if [[ -n "$require_micro_relay_demotion_policy" ]]; then
+  check_cmd+=(--require-micro-relay-demotion-policy "$require_micro_relay_demotion_policy")
+fi
+if [[ -n "$require_micro_relay_promotion_policy" ]]; then
+  check_cmd+=(--require-micro-relay-promotion-policy "$require_micro_relay_promotion_policy")
+fi
+if [[ -n "$require_trust_tier_port_unlock_policy" ]]; then
+  check_cmd+=(--require-trust-tier-port-unlock-policy "$require_trust_tier_port_unlock_policy")
+fi
 
 check_cmd_line="$(quote_cmd "${check_cmd[@]}")"
 
@@ -1671,6 +1746,11 @@ jq -n \
   --arg require_trend_source "$require_trend_source" \
   --arg require_selection_policy_present "$require_selection_policy_present" \
   --arg require_selection_policy_valid "$require_selection_policy_valid" \
+  --arg require_micro_relay_quality_evidence "$require_micro_relay_quality_evidence" \
+  --arg require_micro_relay_quality_status_pass "$require_micro_relay_quality_status_pass" \
+  --arg require_micro_relay_demotion_policy "$require_micro_relay_demotion_policy" \
+  --arg require_micro_relay_promotion_policy "$require_micro_relay_promotion_policy" \
+  --arg require_trust_tier_port_unlock_policy "$require_trust_tier_port_unlock_policy" \
   --arg campaign_execution_mode "$campaign_execution_mode" \
   --arg campaign_execution_mode_effective "$campaign_execution_mode_effective" \
   --arg campaign_directory_urls "$campaign_directory_urls" \
@@ -1759,7 +1839,12 @@ jq -n \
         disallow_experimental_default: (if $disallow_experimental_default == "" then null else ($disallow_experimental_default | tonumber) end),
         require_trend_source: (if $require_trend_source == "" then null else ($require_trend_source | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0))) end),
         require_selection_policy_present: (if $require_selection_policy_present == "" then null else ($require_selection_policy_present | tonumber) end),
-        require_selection_policy_valid: (if $require_selection_policy_valid == "" then null else ($require_selection_policy_valid | tonumber) end)
+        require_selection_policy_valid: (if $require_selection_policy_valid == "" then null else ($require_selection_policy_valid | tonumber) end),
+        require_micro_relay_quality_evidence: (if $require_micro_relay_quality_evidence == "" then null else ($require_micro_relay_quality_evidence | tonumber) end),
+        require_micro_relay_quality_status_pass: (if $require_micro_relay_quality_status_pass == "" then null else ($require_micro_relay_quality_status_pass | tonumber) end),
+        require_micro_relay_demotion_policy: (if $require_micro_relay_demotion_policy == "" then null else ($require_micro_relay_demotion_policy | tonumber) end),
+        require_micro_relay_promotion_policy: (if $require_micro_relay_promotion_policy == "" then null else ($require_micro_relay_promotion_policy | tonumber) end),
+        require_trust_tier_port_unlock_policy: (if $require_trust_tier_port_unlock_policy == "" then null else ($require_trust_tier_port_unlock_policy | tonumber) end)
       },
       campaign_refresh_overrides: {
         execution_mode: (if $campaign_execution_mode == "" then null else $campaign_execution_mode end),
