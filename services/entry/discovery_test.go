@@ -276,6 +276,105 @@ func TestResolveExitRouteVoteThresholdDedupByOperator(t *testing.T) {
 	}
 }
 
+func TestResolveRelayDescriptorPrefersMiddleCapableVariantWhenRelayIDShared(t *testing.T) {
+	d1 := "http://d1.local"
+	d2 := "http://d2.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	sharedExit := proto.RelayDescriptor{
+		RelayID:    "relay-shared",
+		Role:       "exit",
+		Endpoint:   "10.0.0.20:51821",
+		ControlURL: "https://10.0.0.20:8084",
+		OperatorID: "op-exit",
+	}
+	sharedMiddle := proto.RelayDescriptor{
+		RelayID:      "relay-shared",
+		Role:         "micro-relay",
+		Endpoint:     "10.0.0.21:51822",
+		ControlURL:   "https://10.0.0.21:8084",
+		OperatorID:   "op-middle",
+		Capabilities: []string{"relay"},
+		HopRoles:     []string{"middle"},
+	}
+	addDirectoryFixtureWithOperator(t, handlers, d1, "operator-a", []proto.RelayDescriptor{sharedExit, sharedMiddle})
+	addDirectoryFixtureWithOperator(t, handlers, d2, "operator-b", []proto.RelayDescriptor{sharedExit, sharedMiddle})
+
+	s := &Service{
+		directoryURLs:         []string{d1, d2},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     2,
+		routeTTL:              time.Minute,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		relayDescCache:        map[string]cachedRelayDescriptor{},
+	}
+
+	desc, err := s.resolveRelayDescriptor(context.Background(), "relay-shared")
+	if err != nil {
+		t.Fatalf("resolve relay descriptor: %v", err)
+	}
+	if !relaySupportsMiddleDescriptor(desc) {
+		t.Fatalf("expected middle-capable descriptor, got role=%q hop_roles=%v capabilities=%v", desc.Role, desc.HopRoles, desc.Capabilities)
+	}
+	if desc.Role != "micro-relay" {
+		t.Fatalf("expected micro-relay variant selected, got %q", desc.Role)
+	}
+}
+
+func TestResolveRelayDescriptorMergesMiddleAliasVotesForQuorum(t *testing.T) {
+	d1 := "http://d1.local"
+	d2 := "http://d2.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	sharedExit := proto.RelayDescriptor{
+		RelayID:    "relay-shared",
+		Role:       "exit",
+		Endpoint:   "10.0.0.20:51821",
+		ControlURL: "https://10.0.0.20:8084",
+		OperatorID: "op-exit",
+	}
+	sharedMiddleAliasA := proto.RelayDescriptor{
+		RelayID:      "relay-shared",
+		Role:         "relay",
+		Endpoint:     "10.0.0.21:51822",
+		ControlURL:   "https://10.0.0.21:8084",
+		OperatorID:   "op-middle",
+		Capabilities: []string{"relay"},
+		HopRoles:     []string{"relay"},
+	}
+	sharedMiddleAliasB := proto.RelayDescriptor{
+		RelayID:      "relay-shared",
+		Role:         "micro_relay",
+		Endpoint:     "10.0.0.21:51822",
+		ControlURL:   "https://10.0.0.21:8084",
+		OperatorID:   "op-middle",
+		Capabilities: []string{"micro_relay"},
+		HopRoles:     []string{"middle"},
+	}
+	addDirectoryFixtureWithOperator(t, handlers, d1, "operator-a", []proto.RelayDescriptor{sharedExit, sharedMiddleAliasA})
+	addDirectoryFixtureWithOperator(t, handlers, d2, "operator-b", []proto.RelayDescriptor{sharedExit, sharedMiddleAliasB})
+
+	s := &Service{
+		directoryURLs:         []string{d1, d2},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     2,
+		routeTTL:              time.Minute,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		relayDescCache:        map[string]cachedRelayDescriptor{},
+	}
+
+	desc, err := s.resolveRelayDescriptor(context.Background(), "relay-shared")
+	if err != nil {
+		t.Fatalf("resolve relay descriptor: %v", err)
+	}
+	if !relaySupportsMiddleDescriptor(desc) {
+		t.Fatalf("expected middle-capable descriptor, got role=%q hop_roles=%v capabilities=%v", desc.Role, desc.HopRoles, desc.Capabilities)
+	}
+	if desc.Role != "relay" && desc.Role != "micro_relay" && desc.Role != "micro-relay" {
+		t.Fatalf("expected one of middle alias descriptors selected, got role=%q", desc.Role)
+	}
+}
+
 func TestResolveExitRouteStrictTrustRejectsUnknownKey(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))

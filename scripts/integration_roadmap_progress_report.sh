@@ -739,6 +739,11 @@ if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REP
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
+if ! rg -q '\[roadmap-progress-report\] profile_default_gate_runtime_actuation_ready=false runtime_actuation_status=pending runtime_actuation_reason=runtime-actuation readiness pending:' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected runtime-actuation stdout line in success path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
 if [[ ! -f "$SUMMARY_JSON" || ! -f "$REPORT_MD" ]]; then
   echo "expected roadmap progress artifacts missing"
   ls -la "$TMP_DIR"
@@ -806,6 +811,9 @@ if ! jq -e '
   and (.vpn_track.profile_default_gate | has("micro_relay_promotion_policy_present"))
   and (.vpn_track.profile_default_gate | has("trust_tier_port_unlock_policy_present"))
   and (.vpn_track.profile_default_gate | has("micro_relay_evidence_note"))
+  and (.vpn_track.profile_default_gate | has("runtime_actuation_ready"))
+  and (.vpn_track.profile_default_gate | has("runtime_actuation_status"))
+  and (.vpn_track.profile_default_gate | has("runtime_actuation_reason"))
   and (
     (.vpn_track.profile_default_gate.selection_policy_evidence_present == null)
     or ((.vpn_track.profile_default_gate.selection_policy_evidence_present | type) == "boolean")
@@ -825,6 +833,13 @@ if ! jq -e '
   and (
     (.vpn_track.profile_default_gate.micro_relay_evidence_note == null)
     or ((.vpn_track.profile_default_gate.micro_relay_evidence_note | type) == "string")
+  )
+  and ((.vpn_track.profile_default_gate.runtime_actuation_ready | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.runtime_actuation_status == "pass") or (.vpn_track.profile_default_gate.runtime_actuation_status == "pending"))
+  and ((.vpn_track.profile_default_gate.runtime_actuation_reason | type) == "string")
+  and (
+    (.vpn_track.profile_default_gate.runtime_actuation_ready == true and .vpn_track.profile_default_gate.runtime_actuation_status == "pass" and .vpn_track.profile_default_gate.runtime_actuation_reason == "")
+    or (.vpn_track.profile_default_gate.runtime_actuation_ready == false and .vpn_track.profile_default_gate.runtime_actuation_status == "pending" and ((.vpn_track.profile_default_gate.runtime_actuation_reason | length) > 0))
   )
   and .refresh.manual_validation_report.status == "pass"
   and .refresh.manual_validation_report.timed_out == false
@@ -1205,6 +1220,21 @@ if ! rg -q 'Profile gate selection-policy evidence present: null' "$REPORT_MD"; 
 fi
 if ! rg -q 'Profile gate selection-policy evidence note: selection-policy evidence unavailable' "$REPORT_MD"; then
   echo "report markdown missing profile gate selection-policy evidence guidance note"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Profile gate runtime-actuation ready: false' "$REPORT_MD"; then
+  echo "report markdown missing profile gate runtime-actuation ready line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Profile gate runtime-actuation status: pending' "$REPORT_MD"; then
+  echo "report markdown missing profile gate runtime-actuation status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Profile gate runtime-actuation reason: runtime-actuation readiness pending:' "$REPORT_MD"; then
+  echo "report markdown missing profile gate runtime-actuation reason line"
   cat "$REPORT_MD"
   exit 1
 fi
@@ -4145,6 +4175,9 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
   and .vpn_track.profile_default_gate.micro_relay_promotion_policy_present == false
   and .vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present == false
   and ((.vpn_track.profile_default_gate.micro_relay_evidence_note // "") | test("micro-relay M4 evidence unavailable"))
+  and .vpn_track.profile_default_gate.runtime_actuation_ready == false
+  and .vpn_track.profile_default_gate.runtime_actuation_status == "pending"
+  and ((.vpn_track.profile_default_gate.runtime_actuation_reason // "") | test("^runtime-actuation readiness pending: micro-relay M4 evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json" >/dev/null; then
   echo "NO-GO profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_summary.json"
@@ -4209,6 +4242,9 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" '
   and .vpn_track.profile_default_gate.micro_relay_promotion_policy_present == true
   and .vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present == true
   and .vpn_track.profile_default_gate.micro_relay_evidence_note == null
+  and .vpn_track.profile_default_gate.runtime_actuation_ready == true
+  and .vpn_track.profile_default_gate.runtime_actuation_status == "pass"
+  and .vpn_track.profile_default_gate.runtime_actuation_reason == ""
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_m4_present_summary.json" >/dev/null; then
   echo "micro-relay evidence profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_m4_present_summary.json"
@@ -4216,6 +4252,11 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" '
 fi
 if ! grep -q '\[roadmap-progress-report\] profile_default_gate_micro_relay_evidence_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log; then
   echo "expected micro-relay evidence stdout line not found"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log
+  exit 1
+fi
+if ! grep -q '\[roadmap-progress-report\] profile_default_gate_runtime_actuation_ready=true runtime_actuation_status=pass' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log; then
+  echo "expected runtime-actuation stdout pass line not found"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log
   exit 1
 fi
@@ -4290,6 +4331,9 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" '
   and .vpn_track.profile_default_gate.micro_relay_promotion_policy_present == false
   and .vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present == false
   and ((.vpn_track.profile_default_gate.micro_relay_evidence_note // "") | test("micro-relay M4 evidence unavailable"))
+  and .vpn_track.profile_default_gate.runtime_actuation_ready == false
+  and .vpn_track.profile_default_gate.runtime_actuation_status == "pending"
+  and ((.vpn_track.profile_default_gate.runtime_actuation_reason // "") | test("^runtime-actuation readiness pending: micro-relay M4 evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json" >/dev/null; then
   echo "NO-GO insufficient evidence profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_no_go_insufficient_summary.json"
@@ -4327,6 +4371,9 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
+  and .vpn_track.profile_default_gate.runtime_actuation_ready == false
+  and .vpn_track.profile_default_gate.runtime_actuation_status == "pending"
+  and ((.vpn_track.profile_default_gate.runtime_actuation_reason // "") | test("^runtime-actuation readiness pending: micro-relay M4 evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json" >/dev/null; then
   echo "pending profile default gate summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_pending_summary.json"
@@ -4355,6 +4402,9 @@ if ! jq -e '
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == null
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == null
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence unavailable"))
+  and .vpn_track.profile_default_gate.runtime_actuation_ready == false
+  and .vpn_track.profile_default_gate.runtime_actuation_status == "pending"
+  and ((.vpn_track.profile_default_gate.runtime_actuation_reason // "") | test("^runtime-actuation readiness pending: micro-relay M4 evidence unavailable"))
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json" >/dev/null; then
   echo "missing profile default gate fallback summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_missing_summary.json"

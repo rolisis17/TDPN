@@ -158,6 +158,91 @@ func TestHandleProviderRelayUpsertAcceptsProviderToken(t *testing.T) {
 	}
 }
 
+func TestHandleProviderRelayUpsertStoresScoresForMicroRelayRole(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("directory keygen: %v", err)
+	}
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	issuerID := "issuer-local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  issuerID,
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+
+	s := &Service{
+		operatorID:          "op-local",
+		pubKey:              dirPub,
+		privKey:             dirPriv,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:      []string{"127.0.0.1:51820"},
+		endpointRotateSec:   30,
+		providerIssuerURLs:  []string{issuerURL},
+		providerRelayMaxTTL: 3 * time.Minute,
+		providerRelays:      make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     issuerID,
+		Audience:   "provider",
+		Subject:    "provider-op-micro",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-micro",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:       "middle-provider-1",
+		Role:          "micro_relay",
+		PubKey:        base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:      "127.0.0.1:52822",
+		ControlURL:    "http://127.0.0.1:9285",
+		Reputation:    0.82,
+		Uptime:        0.93,
+		Capacity:      0.74,
+		AbusePenalty:  0.08,
+		BondScore:     0.61,
+		StakeScore:    0.52,
+		Capabilities:  []string{"wg", "relay"},
+		GeoConfidence: 0.95,
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for micro-relay upsert, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	stored, ok := s.providerRelays[relayKey("middle-provider-1", "micro-relay")]
+	if !ok {
+		t.Fatalf("expected canonicalized micro-relay descriptor stored")
+	}
+	if stored.Role != "micro-relay" {
+		t.Fatalf("expected canonical role micro-relay, got %q", stored.Role)
+	}
+	if stored.Reputation != 0.82 || stored.Uptime != 0.93 || stored.Capacity != 0.74 {
+		t.Fatalf("expected quality scores persisted for micro-relay role, got rep=%.2f up=%.2f cap=%.2f", stored.Reputation, stored.Uptime, stored.Capacity)
+	}
+	if stored.AbusePenalty != 0.08 || stored.BondScore != 0.61 || stored.StakeScore != 0.52 {
+		t.Fatalf("expected abuse/bond/stake scores persisted for micro-relay role, got abuse=%.2f bond=%.2f stake=%.2f", stored.AbusePenalty, stored.BondScore, stored.StakeScore)
+	}
+}
+
 func TestHandleProviderRelayUpsertRejectsUnanchoredProviderIssuerKey(t *testing.T) {
 	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -687,6 +772,75 @@ func TestHandleProviderRelayUpsertDangerousOverrideAllowsMissingCNFAndProof(t *t
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected dangerous override to allow missing cnf/proof, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertStrictIgnoresDangerousBypassOverride(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("directory keygen: %v", err)
+	}
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "https://issuer.example"
+	issuerID := "issuer-public"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  issuerID,
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+
+	s := &Service{
+		betaStrict:          true,
+		operatorID:          "op-local",
+		pubKey:              dirPub,
+		privKey:             dirPriv,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:      []string{"127.0.0.1:51820"},
+		endpointRotateSec:   30,
+		providerIssuerURLs:  []string{issuerURL},
+		providerRelayMaxTTL: 3 * time.Minute,
+		providerRelays:      make(map[string]proto.RelayDescriptor),
+		issuerTrustedKeys:   []ed25519.PublicKey{issuerPub},
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     issuerID,
+		Audience:   "provider",
+		Subject:    "provider-op-strict-bypass",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-strict-bypass",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:    "exit-provider-strict-bypass",
+		Role:       "exit",
+		PubKey:     base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:   "8.8.8.8:52821",
+		ControlURL: "https://8.8.8.8:9284",
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected strict mode to reject missing cnf/proof despite dangerous bypass env, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "cnf_ed25519 missing") {
+		t.Fatalf("expected missing cnf error in strict mode, got %q", rr.Body.String())
 	}
 }
 
@@ -1281,7 +1435,7 @@ func TestHandleProviderRelayUpsertCanonicalizesMicroRelayAliases(t *testing.T) {
 		TokenID:    "provider-token-alias",
 	})
 
-	aliases := []string{"micro_relay", "middle", "relay"}
+	aliases := []string{"micro_relay", "middle", "relay", "transit", "three-hop-middle"}
 	for idx, alias := range aliases {
 		t.Run(alias, func(t *testing.T) {
 			relayPub, _, err := crypto.GenerateEd25519Keypair()

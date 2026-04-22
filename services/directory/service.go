@@ -1840,19 +1840,28 @@ func (s *Service) fetchPeerRelaysWithPubs(ctx context.Context, peerURL string, p
 		return nil, err
 	}
 	verified := make([]proto.RelayDescriptor, 0, len(out.Relays))
+	var firstVerifyErr error
 	now := time.Now().UTC()
 	for _, desc := range out.Relays {
-		if desc.RelayID == "" || (desc.Role != "entry" && desc.Role != "exit") {
+		role, err := canonicalizePeerRelayRole(desc.Role)
+		if desc.RelayID == "" || err != nil {
 			continue
 		}
 		if err := verifyRelayDescriptorAny(desc, pubs); err != nil {
-			return nil, fmt.Errorf("verify peer descriptor relay=%s: %w", desc.RelayID, err)
+			if firstVerifyErr == nil {
+				firstVerifyErr = fmt.Errorf("verify peer descriptor relay=%s: %w", desc.RelayID, err)
+			}
+			continue
 		}
 		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
 			continue
 		}
+		desc.Role = role
 		desc.Signature = ""
 		verified = append(verified, desc)
+	}
+	if len(verified) == 0 && firstVerifyErr != nil {
+		return nil, firstVerifyErr
 	}
 	s.setPeerRelayCache(peerURL, resp.Header.Get("ETag"), verified)
 	return verified, nil
@@ -3200,7 +3209,7 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(desc.RelayID) == "" {
 			continue
 		}
-		if desc.Role != "entry" && desc.Role != "exit" {
+		if _, err := canonicalizePeerRelayRole(desc.Role); err != nil {
 			continue
 		}
 		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
@@ -3223,6 +3232,11 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		if err := crypto.VerifyRelayDescriptor(desc, pub); err != nil {
 			continue
 		}
+		role, err := canonicalizePeerRelayRole(desc.Role)
+		if err != nil {
+			continue
+		}
+		desc.Role = role
 		desc.Signature = ""
 		normalized, ok := s.preparePeerDescriptor(desc)
 		if !ok {
@@ -3308,10 +3322,22 @@ func canonicalizeProviderRelayRole(raw string) (string, error) {
 	switch role {
 	case "entry", "exit", "micro-relay":
 		return role, nil
-	case "micro_relay", "middle", "relay":
+	case "micro_relay", "middle", "relay", "transit", "three-hop-middle":
 		return "micro-relay", nil
 	default:
-		return "", fmt.Errorf("provider relay role must be entry, exit, or micro-relay (aliases: micro_relay, middle, relay)")
+		return "", fmt.Errorf("provider relay role must be entry, exit, or micro-relay (aliases: micro_relay, middle, relay, transit, three-hop-middle)")
+	}
+}
+
+func canonicalizePeerRelayRole(raw string) (string, error) {
+	role := strings.TrimSpace(strings.ToLower(raw))
+	switch role {
+	case "entry", "exit", "micro-relay":
+		return role, nil
+	case "micro_relay", "middle", "relay", "transit", "three-hop-middle":
+		return "micro-relay", nil
+	default:
+		return "", fmt.Errorf("relay role must be entry, exit, or micro-relay (aliases: micro_relay, middle, relay, transit, three-hop-middle)")
 	}
 }
 
@@ -4028,14 +4054,12 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 		HopRoles:       normalizeHopRoles(req.HopRoles),
 		ValidUntil:     now.Add(ttl),
 	}
-	if role == "exit" {
-		desc.Reputation = clampScore(req.Reputation)
-		desc.Uptime = clampScore(req.Uptime)
-		desc.Capacity = clampScore(req.Capacity)
-		desc.AbusePenalty = clampScore(req.AbusePenalty)
-		desc.BondScore = clampScore(req.BondScore)
-		desc.StakeScore = clampScore(req.StakeScore)
-	}
+	desc.Reputation = clampScore(req.Reputation)
+	desc.Uptime = clampScore(req.Uptime)
+	desc.Capacity = clampScore(req.Capacity)
+	desc.AbusePenalty = clampScore(req.AbusePenalty)
+	desc.BondScore = clampScore(req.BondScore)
+	desc.StakeScore = clampScore(req.StakeScore)
 	return desc, nil
 }
 
@@ -5171,6 +5195,14 @@ func peerDescriptorFingerprint(desc proto.RelayDescriptor) (string, error) {
 	clone := desc
 	clone.Signature = ""
 	clone.ValidUntil = time.Time{}
+	// Keep descriptor variant quorum stable when operators publish role-agnostic
+	// quality scores. These scores have dedicated consensus in selection feeds.
+	clone.Reputation = 0
+	clone.Uptime = 0
+	clone.Capacity = 0
+	clone.AbusePenalty = 0
+	clone.BondScore = 0
+	clone.StakeScore = 0
 	caps := append([]string(nil), clone.Capabilities...)
 	sort.Strings(caps)
 	clone.Capabilities = caps

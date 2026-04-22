@@ -872,6 +872,20 @@ profile_default_gate_micro_relay_evidence_note_text() {
   printf '%s' "$joined"
 }
 
+profile_default_gate_runtime_actuation_reason_text() {
+  local ready="$1"
+  local micro_relay_evidence_note="$2"
+  if [[ "$ready" == "true" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ -n "$micro_relay_evidence_note" ]]; then
+    printf '%s' "runtime-actuation readiness pending: $micro_relay_evidence_note"
+    return
+  fi
+  printf '%s' "runtime-actuation readiness pending: micro-relay/trust-tier policy evidence incomplete; rerun profile-compare-campaign-signoff with --refresh-campaign 1 and verify M4 policy diagnostics"
+}
+
 profile_default_gate_selection_policy_evidence_from_signoff() {
   local signoff_summary_path="$1"
   local present="null"
@@ -7937,6 +7951,21 @@ profile_default_gate_micro_relay_evidence_note="$(
     "$profile_default_gate_micro_relay_promotion_policy_present_json" \
     "$profile_default_gate_trust_tier_port_unlock_policy_present_json"
 )"
+profile_default_gate_runtime_actuation_ready_json="false"
+profile_default_gate_runtime_actuation_status_json="pending"
+if [[ "$profile_default_gate_micro_relay_evidence_available_json" == "true" ]] \
+   && [[ "$profile_default_gate_micro_relay_quality_status_pass_json" == "true" ]] \
+   && [[ "$profile_default_gate_micro_relay_demotion_policy_present_json" == "true" ]] \
+   && [[ "$profile_default_gate_micro_relay_promotion_policy_present_json" == "true" ]] \
+   && [[ "$profile_default_gate_trust_tier_port_unlock_policy_present_json" == "true" ]]; then
+  profile_default_gate_runtime_actuation_ready_json="true"
+  profile_default_gate_runtime_actuation_status_json="pass"
+fi
+profile_default_gate_runtime_actuation_reason="$(
+  profile_default_gate_runtime_actuation_reason_text \
+    "$profile_default_gate_runtime_actuation_ready_json" \
+    "$profile_default_gate_micro_relay_evidence_note"
+)"
 profile_default_gate_next_command_host_a_effective="$(trim "${A_HOST:-}")"
 profile_default_gate_next_command_host_b_effective="$(trim "${B_HOST:-}")"
 if [[ -n "$profile_default_gate_next_command_host_a_effective" ]] \
@@ -8658,6 +8687,9 @@ summary_payload="$(jq -n \
   --argjson profile_default_gate_micro_relay_promotion_policy_present "$profile_default_gate_micro_relay_promotion_policy_present_json" \
   --argjson profile_default_gate_trust_tier_port_unlock_policy_present "$profile_default_gate_trust_tier_port_unlock_policy_present_json" \
   --arg profile_default_gate_micro_relay_evidence_note "$profile_default_gate_micro_relay_evidence_note" \
+  --argjson profile_default_gate_runtime_actuation_ready "$profile_default_gate_runtime_actuation_ready_json" \
+  --arg profile_default_gate_runtime_actuation_status "$profile_default_gate_runtime_actuation_status_json" \
+  --arg profile_default_gate_runtime_actuation_reason "$profile_default_gate_runtime_actuation_reason" \
   --arg profile_default_gate_stability_summary_json "$profile_default_gate_stability_summary_json" \
   --argjson profile_default_gate_stability_summary_available "$profile_default_gate_stability_summary_available_json" \
   --arg profile_default_gate_stability_status "$profile_default_gate_stability_status_json" \
@@ -8947,7 +8979,10 @@ summary_payload="$(jq -n \
         micro_relay_demotion_policy_present: $profile_default_gate_micro_relay_demotion_policy_present,
         micro_relay_promotion_policy_present: $profile_default_gate_micro_relay_promotion_policy_present,
         trust_tier_port_unlock_policy_present: $profile_default_gate_trust_tier_port_unlock_policy_present,
-        micro_relay_evidence_note: (if $profile_default_gate_micro_relay_evidence_note == "" then null else $profile_default_gate_micro_relay_evidence_note end)
+        micro_relay_evidence_note: (if $profile_default_gate_micro_relay_evidence_note == "" then null else $profile_default_gate_micro_relay_evidence_note end),
+        runtime_actuation_ready: $profile_default_gate_runtime_actuation_ready,
+        runtime_actuation_status: $profile_default_gate_runtime_actuation_status,
+        runtime_actuation_reason: $profile_default_gate_runtime_actuation_reason
       },
       multi_vm_stability: {
         available: $profile_compare_multi_vm_stability_available,
@@ -9298,6 +9333,9 @@ cat >"$report_tmp" <<EOF_MD
 - Profile gate micro-relay promotion policy present: $(jq -r '.vpn_track.profile_default_gate.micro_relay_promotion_policy_present | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate trust-tier port-unlock policy present: $(jq -r '.vpn_track.profile_default_gate.trust_tier_port_unlock_policy_present | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate micro-relay evidence note: $(jq -r '.vpn_track.profile_default_gate.micro_relay_evidence_note // "none"' "$summary_json")
+- Profile gate runtime-actuation ready: $(jq -r '.vpn_track.profile_default_gate.runtime_actuation_ready | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate runtime-actuation status: $(jq -r '.vpn_track.profile_default_gate.runtime_actuation_status // "none"' "$summary_json")
+- Profile gate runtime-actuation reason: $(jq -r '.vpn_track.profile_default_gate.runtime_actuation_reason | if . == null or . == "" then "none" else . end' "$summary_json")
 - Profile gate stability summary: $(jq -r '.vpn_track.profile_default_gate.stability_summary_json // "none"' "$summary_json")
 - Profile gate stability available: $(jq -r '.vpn_track.profile_default_gate.stability_summary_available | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate stability status: $(jq -r '.vpn_track.profile_default_gate.stability_status // "none"' "$summary_json")
@@ -9519,6 +9557,7 @@ echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gat
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_selection_policy_evidence_present=$profile_default_gate_selection_policy_evidence_present_json selection_policy_evidence_valid=$profile_default_gate_selection_policy_evidence_valid_json selection_policy_evidence_note=${profile_default_gate_selection_policy_evidence_note:-}"
 echo "[roadmap-progress-report] profile_default_gate_micro_relay_evidence_available=$profile_default_gate_micro_relay_evidence_available_json micro_relay_quality_status_pass=$profile_default_gate_micro_relay_quality_status_pass_json micro_relay_demotion_policy_present=$profile_default_gate_micro_relay_demotion_policy_present_json micro_relay_promotion_policy_present=$profile_default_gate_micro_relay_promotion_policy_present_json trust_tier_port_unlock_policy_present=$profile_default_gate_trust_tier_port_unlock_policy_present_json micro_relay_evidence_note=${profile_default_gate_micro_relay_evidence_note:-}"
+echo "[roadmap-progress-report] profile_default_gate_runtime_actuation_ready=$profile_default_gate_runtime_actuation_ready_json runtime_actuation_status=${profile_default_gate_runtime_actuation_status_json:-} runtime_actuation_reason=${profile_default_gate_runtime_actuation_reason:-}"
 echo "[roadmap-progress-report] profile_default_gate_stability_summary_json=${profile_default_gate_stability_summary_json:-} stability_summary_available=$profile_default_gate_stability_summary_available_json stability_status=${profile_default_gate_stability_status_json:-} stability_rc=$profile_default_gate_stability_rc_json stability_runs_requested=$profile_default_gate_stability_runs_requested_json stability_runs_completed=$profile_default_gate_stability_runs_completed_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_selection_policy_present_all=$profile_default_gate_stability_selection_policy_present_all_json stability_consistent_selection_policy=$profile_default_gate_stability_consistent_selection_policy_json stability_ok=$profile_default_gate_stability_ok_json stability_recommended_profile_counts=$profile_default_gate_stability_recommended_profile_counts_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_check_summary_json=${profile_default_gate_stability_check_summary_json:-} stability_check_summary_available=$profile_default_gate_stability_check_summary_available_json stability_check_decision=${profile_default_gate_stability_check_decision_json:-} stability_check_status=${profile_default_gate_stability_check_status_json:-} stability_check_rc=$profile_default_gate_stability_check_rc_json stability_check_modal_recommended_profile=${profile_default_gate_stability_check_modal_recommended_profile_json:-} stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct_json"

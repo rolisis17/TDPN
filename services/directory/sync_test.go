@@ -67,6 +67,149 @@ func TestFetchPeerRelaysVerifiesSignature(t *testing.T) {
 	}
 }
 
+func TestFetchPeerRelaysCanonicalizesMicroRelayRoleAlias(t *testing.T) {
+	aliases := []string{"relay", "transit", "three-hop-middle"}
+	for idx, alias := range aliases {
+		t.Run(alias, func(t *testing.T) {
+			peerURL := "http://peer-a.local"
+			pub, priv, err := crypto.GenerateEd25519Keypair()
+			if err != nil {
+				t.Fatalf("keygen: %v", err)
+			}
+			desc := signedDescriptor(t, proto.RelayDescriptor{
+				RelayID:    "middle-peer-" + string(rune('a'+idx)),
+				Role:       alias,
+				Endpoint:   "127.0.0.1:51822",
+				ValidUntil: time.Now().Add(time.Minute),
+			}, priv)
+			handlers := map[string]func(*http.Request) (*http.Response, error){
+				peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+				peerURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{desc}}),
+			}
+
+			s := &Service{httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}}}
+			got, err := s.fetchPeerRelays(context.Background(), peerURL)
+			if err != nil {
+				t.Fatalf("fetchPeerRelays: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("expected one relay, got %d", len(got))
+			}
+			if got[0].Role != "micro-relay" {
+				t.Fatalf("expected role canonicalized to micro-relay, got %q", got[0].Role)
+			}
+		})
+	}
+}
+
+func TestFetchPeerRelaysSkipsInvalidDescriptorWhenOtherDescriptorsVerify(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	_, badPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("bad keygen: %v", err)
+	}
+	valid := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-valid",
+		Role:       "exit",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	invalid := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "middle-invalid",
+		Role:       "relay",
+		Endpoint:   "127.0.0.1:51822",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, badPriv)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		peerURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{invalid, valid}}),
+	}
+
+	s := &Service{httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}}}
+	got, err := s.fetchPeerRelays(context.Background(), peerURL)
+	if err != nil {
+		t.Fatalf("fetchPeerRelays: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one verified relay, got %d", len(got))
+	}
+	if got[0].RelayID != "exit-valid" {
+		t.Fatalf("expected only valid descriptor kept, got relay=%q", got[0].RelayID)
+	}
+}
+
+func TestFetchPeerRelaysErrorsWhenAllDescriptorsFailVerification(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	_, badPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("bad keygen: %v", err)
+	}
+	invalid := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-invalid",
+		Role:       "exit",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, badPriv)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		peerURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{invalid}}),
+	}
+
+	s := &Service{httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}}}
+	if _, err := s.fetchPeerRelays(context.Background(), peerURL); err == nil {
+		t.Fatalf("expected verification error when all descriptors are invalid")
+	}
+}
+
+func TestPeerDescriptorFingerprintIgnoresScoreFields(t *testing.T) {
+	base := proto.RelayDescriptor{
+		RelayID:      "entry-1",
+		Role:         "entry",
+		OperatorID:   "operator-a",
+		ControlURL:   "http://127.0.0.1:8081",
+		Endpoint:     "127.0.0.1:51820",
+		CountryCode:  "US",
+		Region:       "na",
+		Capabilities: []string{"wg"},
+		HopRoles:     []string{"entry"},
+	}
+	a := base
+	a.Reputation = 0.9
+	a.Uptime = 0.8
+	a.Capacity = 0.7
+	a.AbusePenalty = 0.1
+	a.BondScore = 0.6
+	a.StakeScore = 0.5
+
+	b := base
+	b.Reputation = 0.1
+	b.Uptime = 0.2
+	b.Capacity = 0.3
+	b.AbusePenalty = 0.4
+	b.BondScore = 0.5
+	b.StakeScore = 0.6
+
+	fa, err := peerDescriptorFingerprint(a)
+	if err != nil {
+		t.Fatalf("fingerprint a: %v", err)
+	}
+	fb, err := peerDescriptorFingerprint(b)
+	if err != nil {
+		t.Fatalf("fingerprint b: %v", err)
+	}
+	if fa != fb {
+		t.Fatalf("expected score-only descriptor differences to produce same fingerprint")
+	}
+}
+
 func TestFetchPeerPubKeysStrictRejectsLegacyFallback(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pub, _, err := crypto.GenerateEd25519Keypair()
@@ -2535,6 +2678,48 @@ func TestHandleGossipRelaysImportsVerifiedDescriptors(t *testing.T) {
 	}
 	if relays[0].HopCount != 1 {
 		t.Fatalf("expected hop-count increment to 1, got %d", relays[0].HopCount)
+	}
+}
+
+func TestHandleGossipRelaysImportsMicroRelayAliasDescriptors(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	desc := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "middle-peer-gossip",
+		Role:       "middle",
+		OperatorID: "op-peer",
+		Endpoint:   "127.0.0.1:51822",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+	}
+	s := &Service{
+		operatorID:  "op-local",
+		peerURLs:    []string{peerURL},
+		peerRelays:  make(map[string]proto.RelayDescriptor),
+		peerMaxHops: 3,
+		httpClient:  &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	body, _ := json.Marshal(proto.RelayGossipPushRequest{
+		PeerURL: peerURL,
+		Relays:  []proto.RelayDescriptor{desc},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	relays := s.snapshotPeerRelays()
+	if len(relays) != 1 {
+		t.Fatalf("expected one relay in peer store, got %d", len(relays))
+	}
+	if relays[0].Role != "micro-relay" {
+		t.Fatalf("expected canonicalized micro-relay role, got %q", relays[0].Role)
 	}
 }
 

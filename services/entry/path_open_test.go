@@ -2,6 +2,8 @@ package entry
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -119,6 +121,58 @@ func TestHandlePathOpenStrictRejectsMalformedTokenProof(t *testing.T) {
 	}
 	if out.Reason != "token-proof-invalid" {
 		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+}
+
+func TestHandlePathOpenStrictRejectsEmptyExitIDBeforeForwarding(t *testing.T) {
+	exitCalls := 0
+	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exitCalls++
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: true})
+	}))
+	defer exitSrv.Close()
+
+	s := &Service{
+		betaStrict:     true,
+		dataAddr:       "127.0.0.1:51820",
+		exitControlURL: exitSrv.URL,
+		exitDataAddr:   "127.0.0.1:51821",
+		httpClient:     exitSrv.Client(),
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{},
+		buckets:        map[string]rateBucket{},
+		abuse:          map[string]abuseState{},
+		openRPS:        100,
+		routeTTL:       time.Minute,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		TokenProof:      base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, ed25519.SignatureSize)),
+		TokenProofNonce: "nonce-strict-empty-exit",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:40002"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open without exit id in strict mode")
+	}
+	if out.Reason != "unknown-exit" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit when strict empty exit id is rejected, got %d", exitCalls)
 	}
 }
 

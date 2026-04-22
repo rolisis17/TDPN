@@ -1237,6 +1237,13 @@ func (s *Service) resolveRelayDescriptor(ctx context.Context, relayID string) (p
 			relayID, len(successOperators), requiredOperators, lastErr)
 	}
 	best, ok := pickBestRelayDescriptor(candidates, requiredVotes)
+	if ok && !relaySupportsMiddleDescriptor(best) {
+		if middleBest, middleOK := pickBestRelayDescriptorWithFilter(candidates, requiredVotes, relaySupportsMiddleDescriptor); middleOK {
+			if relayDescriptorVotes(candidates, middleBest) >= relayDescriptorVotes(candidates, best) {
+				best = middleBest
+			}
+		}
+	}
 	if !ok {
 		return proto.RelayDescriptor{}, fmt.Errorf("no relay descriptor met vote threshold for %s: required_votes=%d", relayID, requiredVotes)
 	}
@@ -1254,7 +1261,7 @@ func relayDescriptorVoteKey(desc proto.RelayDescriptor) string {
 	capabilities := normalizeDescriptorList(desc.Capabilities)
 	return strings.Join([]string{
 		strings.TrimSpace(desc.RelayID),
-		strings.ToLower(strings.TrimSpace(desc.Role)),
+		canonicalizeMiddleRoleAlias(strings.ToLower(strings.TrimSpace(desc.Role))),
 		strings.TrimSpace(desc.OperatorID),
 		normalizeHTTPURL(desc.ControlURL),
 		strings.TrimSpace(desc.Endpoint),
@@ -1272,7 +1279,7 @@ func normalizeDescriptorList(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, value := range values {
-		v := strings.ToLower(strings.TrimSpace(value))
+		v := canonicalizeMiddleRoleAlias(strings.ToLower(strings.TrimSpace(value)))
 		if v == "" {
 			continue
 		}
@@ -1287,11 +1294,22 @@ func normalizeDescriptorList(values []string) []string {
 }
 
 func pickBestRelayDescriptor(candidates map[string]relayDescriptorCandidate, minVotes int) (proto.RelayDescriptor, bool) {
+	return pickBestRelayDescriptorWithFilter(candidates, minVotes, nil)
+}
+
+func pickBestRelayDescriptorWithFilter(
+	candidates map[string]relayDescriptorCandidate,
+	minVotes int,
+	filter func(proto.RelayDescriptor) bool,
+) (proto.RelayDescriptor, bool) {
 	bestVotes := 0
 	bestKey := ""
 	var bestDesc proto.RelayDescriptor
 	for key, candidate := range candidates {
 		if candidate.votes < minVotes {
+			continue
+		}
+		if filter != nil && !filter(candidate.desc) {
 			continue
 		}
 		if candidate.votes > bestVotes || (candidate.votes == bestVotes && (bestKey == "" || key < bestKey)) {
@@ -1304,6 +1322,13 @@ func pickBestRelayDescriptor(candidates map[string]relayDescriptorCandidate, min
 		return proto.RelayDescriptor{}, false
 	}
 	return bestDesc, true
+}
+
+func relayDescriptorVotes(candidates map[string]relayDescriptorCandidate, desc proto.RelayDescriptor) int {
+	if candidate, ok := candidates[relayDescriptorVoteKey(desc)]; ok {
+		return candidate.votes
+	}
+	return 0
 }
 
 func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
@@ -1324,11 +1349,20 @@ func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
 }
 
 func hopRoleIsMiddleDescriptor(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+	switch canonicalizeMiddleRoleAlias(strings.ToLower(strings.TrimSpace(raw))) {
+	case "micro-relay":
 		return true
 	default:
 		return false
+	}
+}
+
+func canonicalizeMiddleRoleAlias(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "middle", "relay", "micro_relay", "transit", "three-hop-middle":
+		return "micro-relay"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
 	}
 }
 
