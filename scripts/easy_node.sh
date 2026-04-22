@@ -280,12 +280,14 @@ Usage:
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-run [profile_compare_multi_vm_stability_run args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-check [profile_compare_multi_vm_stability_check args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle [profile_compare_multi_vm_stability_cycle args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-check [profile_compare_multi_vm_stability_promotion_check args...]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [--allow-remote-http-probe [0|1]] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL|--directory-a-url URL] [--host-b HOST|--directory-b HOST_OR_URL|--directory-b-url URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--allow-remote-http-probe [0|1]] [--heartbeat-interval-sec N] [profile-default-gate-run args...]
 ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
 ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-promotion-check [--cycle-summary-json PATH]... [--cycle-summary-list FILE] [--reports-dir DIR] [--require-min-cycles N] [--require-min-pass-cycles N] [--require-max-fail-cycles N] [--require-max-warn-cycles N] [--require-min-pass-rate-pct N] [--require-min-go-decision-rate-pct N] [--require-check-schema-valid [0|1]] [--require-check-usable-decision [0|1]] [--require-check-policy-modal-decision GO|NO-GO] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh runtime-actuation-promotion-check [runtime_actuation_promotion_check args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
@@ -407,6 +409,7 @@ Usage:
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-run [profile_compare_multi_vm_stability_run args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-check [profile_compare_multi_vm_stability_check args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle [profile_compare_multi_vm_stability_cycle args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-check [profile_compare_multi_vm_stability_promotion_check args...]
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--require-runtime-actuation-status-pass [0|1]] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--require-runtime-actuation-status-pass [0|1]] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--campaign-anon-cred TOKEN] [--subject ID (alias for --campaign-subject)|--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [--allow-remote-http-probe [0|1]] [profile-compare-campaign-signoff args...]
@@ -415,6 +418,7 @@ Usage:
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
 ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-promotion-check [--cycle-summary-json PATH]... [--cycle-summary-list FILE] [--reports-dir DIR] [--require-min-cycles N] [--require-min-pass-cycles N] [--require-max-fail-cycles N] [--require-max-warn-cycles N] [--require-min-pass-rate-pct N] [--require-min-go-decision-rate-pct N] [--require-check-schema-valid [0|1]] [--require-check-usable-decision [0|1]] [--require-check-policy-modal-decision GO|NO-GO] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh runtime-actuation-promotion-check [runtime_actuation_promotion_check args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
@@ -626,10 +630,12 @@ Notes:
   - profile-compare-multi-vm-stability-run executes repeated multi-VM cycle runs and emits stability evidence artifacts.
   - profile-compare-multi-vm-stability-check evaluates multi-VM stability evidence against fail-closed policy requirements and emits one GO/NO-GO summary.
   - profile-compare-multi-vm-stability-cycle runs multi-VM stability run + stability check in one command for operational evidence gating.
+  - profile-compare-multi-vm-stability-promotion-check evaluates multi-VM stability-cycle evidence for promotion readiness and emits one fail-closed GO/NO-GO summary.
   - profile-compare-campaign-check applies fail-closed policy gates to campaign artifacts and emits one GO/NO-GO decision for default-profile readiness.
   - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff. In invite-key flows, prefer `--campaign-subject` (alias `--subject`) with a real key value; fallback order is `CAMPAIGN_SUBJECT` then `INVITE_KEY`.
   - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. Auth mode supports invite-key subject flags or anon-credential pass-through flags, and rejects mixed subject+anon modes.
   - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, supports explicit directory endpoint overrides via `--directory-a-url/--directory-b-url`, auto-enables remote HTTP probe opt-in only when resolved directory URLs are non-loopback `http://`, and calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping when explicit URLs are not provided.
+  - runtime-actuation-promotion-check evaluates runtime-actuation promotion readiness and emits one fail-closed GO/NO-GO summary for roadmap/default-gate surfacing.
   - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
   - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
@@ -9696,6 +9702,11 @@ profile_compare_multi_vm_stability_cycle() {
   "$stability_cycle_script" "$@"
 }
 
+profile_compare_multi_vm_stability_promotion_check() {
+  local stability_promotion_check_script="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_promotion_check.sh}"
+  "$stability_promotion_check_script" "$@"
+}
+
 profile_compare_campaign_check() {
   local campaign_check_script="${PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_campaign_check.sh}"
   "$campaign_check_script" "$@"
@@ -9806,6 +9817,11 @@ profile_default_gate_stability_cycle() {
 profile_default_gate_stability_promotion_check() {
   local profile_default_gate_stability_promotion_check_script="${PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_stability_promotion_check.sh}"
   "$profile_default_gate_stability_promotion_check_script" "$@"
+}
+
+runtime_actuation_promotion_check() {
+  local runtime_actuation_promotion_check_script="${RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT:-$ROOT_DIR/scripts/runtime_actuation_promotion_check.sh}"
+  "$runtime_actuation_promotion_check_script" "$@"
 }
 
 profile_default_gate_token_probe() {
@@ -16775,6 +16791,10 @@ main() {
       shift
       profile_compare_multi_vm_stability_cycle "$@"
       ;;
+    profile-compare-multi-vm-stability-promotion-check)
+      shift
+      profile_compare_multi_vm_stability_promotion_check "$@"
+      ;;
     profile-compare-campaign-check)
       shift
       profile_compare_campaign_check "$@"
@@ -16802,6 +16822,10 @@ main() {
     profile-default-gate-stability-promotion-check)
       shift
       profile_default_gate_stability_promotion_check "$@"
+      ;;
+    runtime-actuation-promotion-check)
+      shift
+      runtime_actuation_promotion_check "$@"
       ;;
     profile-default-gate-live)
       shift

@@ -407,18 +407,20 @@ observed_modal_decision=""
 observed_modal_decision_count_json="0"
 observed_modal_decision_support_rate_pct_json="0"
 observed_decision_consensus=""
+observed_decision_consensus_reported=""
+observed_decision_consensus_computed=""
 
 if [[ "$schema_valid" == "1" ]]; then
   observed_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$stability_summary_json" 2>/dev/null || true)"
 
   observed_runs_requested_candidate="$(jq -r '
-    if (.runs_requested | type) == "number" then .runs_requested
+    if (.runs_requested | type) == "number" and .runs_requested >= 0 and (.runs_requested | floor == .) then .runs_requested
     elif (.runs_requested | type) == "string" and (.runs_requested | test("^[0-9]+$")) then (.runs_requested | tonumber)
-    elif (.counts.requested | type) == "number" then .counts.requested
+    elif (.counts.requested | type) == "number" and .counts.requested >= 0 and (.counts.requested | floor == .) then .counts.requested
     elif (.counts.requested | type) == "string" and (.counts.requested | test("^[0-9]+$")) then (.counts.requested | tonumber)
-    elif (.inputs.runs_requested | type) == "number" then .inputs.runs_requested
+    elif (.inputs.runs_requested | type) == "number" and .inputs.runs_requested >= 0 and (.inputs.runs_requested | floor == .) then .inputs.runs_requested
     elif (.inputs.runs_requested | type) == "string" and (.inputs.runs_requested | test("^[0-9]+$")) then (.inputs.runs_requested | tonumber)
-    elif (.inputs.runs | type) == "number" then .inputs.runs
+    elif (.inputs.runs | type) == "number" and .inputs.runs >= 0 and (.inputs.runs | floor == .) then .inputs.runs
     elif (.inputs.runs | type) == "string" and (.inputs.runs | test("^[0-9]+$")) then (.inputs.runs | tonumber)
     else ""
     end
@@ -428,9 +430,9 @@ if [[ "$schema_valid" == "1" ]]; then
   fi
 
   observed_runs_completed_candidate="$(jq -r '
-    if (.runs_completed | type) == "number" then .runs_completed
+    if (.runs_completed | type) == "number" and .runs_completed >= 0 and (.runs_completed | floor == .) then .runs_completed
     elif (.runs_completed | type) == "string" and (.runs_completed | test("^[0-9]+$")) then (.runs_completed | tonumber)
-    elif (.counts.completed | type) == "number" then .counts.completed
+    elif (.counts.completed | type) == "number" and .counts.completed >= 0 and (.counts.completed | floor == .) then .counts.completed
     elif (.counts.completed | type) == "string" and (.counts.completed | test("^[0-9]+$")) then (.counts.completed | tonumber)
     else ""
     end
@@ -440,11 +442,11 @@ if [[ "$schema_valid" == "1" ]]; then
   fi
 
   observed_runs_fail_candidate="$(jq -r '
-    if (.runs_fail | type) == "number" then .runs_fail
+    if (.runs_fail | type) == "number" and .runs_fail >= 0 and (.runs_fail | floor == .) then .runs_fail
     elif (.runs_fail | type) == "string" and (.runs_fail | test("^[0-9]+$")) then (.runs_fail | tonumber)
-    elif (.counts.fail | type) == "number" then .counts.fail
+    elif (.counts.fail | type) == "number" and .counts.fail >= 0 and (.counts.fail | floor == .) then .counts.fail
     elif (.counts.fail | type) == "string" and (.counts.fail | test("^[0-9]+$")) then (.counts.fail | tonumber)
-    elif (.counts.runs_fail | type) == "number" then .counts.runs_fail
+    elif (.counts.runs_fail | type) == "number" and .counts.runs_fail >= 0 and (.counts.runs_fail | floor == .) then .counts.runs_fail
     elif (.counts.runs_fail | type) == "string" and (.counts.runs_fail | test("^[0-9]+$")) then (.counts.runs_fail | tonumber)
     else ""
     end
@@ -594,7 +596,15 @@ if [[ "$schema_valid" == "1" ]]; then
     --argjson modal "$observed_modal_decision_count_json" \
     'if $total > 0 then (($modal * 100) / $total) else 0 end')"
 
-  observed_decision_consensus="$(jq -r '
+  observed_decision_consensus_reported="$(jq -r '
+    if (.decision_consensus | type) == "boolean" then
+      if .decision_consensus then "true" else "false" end
+    else
+      ""
+    end
+  ' "$stability_summary_json" 2>/dev/null || printf '%s' "")"
+
+  observed_decision_consensus_computed="$(jq -r '
     def normalize_decision:
       ascii_upcase
       | gsub("\\s+"; "")
@@ -602,59 +612,61 @@ if [[ "$schema_valid" == "1" ]]; then
         elif . == "NO-GO" or . == "NOGO" or . == "NO_GO" then "NO-GO"
         else .
         end;
-    if (.decision_consensus | type) == "boolean" then
-      if .decision_consensus then "true" else "false" end
-    else
-      (
-        if (.decision_counts | type) == "object" then
-          reduce (.decision_counts | to_entries[]) as $entry
-            ({};
-              ($entry.key | tostring | normalize_decision) as $k
-              | ($entry.value
-                 | if type == "number" then .
-                   elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
-                   else null
-                   end) as $v
-              | if ($k | length) == 0 or $v == null or $v < 0 then .
-                else .[$k] = ((.[$k] // 0) + $v)
-                end
-            )
-        elif (.histograms.decision_counts | type) == "object" then
-          reduce (.histograms.decision_counts | to_entries[]) as $entry
-            ({};
-              ($entry.key | tostring | normalize_decision) as $k
-              | ($entry.value
-                 | if type == "number" then .
-                   elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
-                   else null
-                   end) as $v
-              | if ($k | length) == 0 or $v == null or $v < 0 then .
-                else .[$k] = ((.[$k] // 0) + $v)
-                end
-            )
-        elif (.runs | type) == "array" then
-          [ .runs[]
-            | select(.completed == true)
-            | if (.decision | type) == "string" then .decision else (.decision.decision // empty) end
-            | strings
-            | gsub("^\\s+|\\s+$"; "")
-            | select(length > 0)
-            | normalize_decision
-          ]
-          | group_by(.)
-          | map({ (.[0]): length })
-          | add // {}
-        else
-          {}
-        end
-      ) as $counts
-      | ([$counts[]] | add // 0) as $total
-      | if $total == 0 then ""
-        elif (($counts | keys | length) == 1) then "true"
-        else "false"
-        end
-    end
+    (
+      if (.decision_counts | type) == "object" then
+        reduce (.decision_counts | to_entries[]) as $entry
+          ({};
+            ($entry.key | tostring | normalize_decision) as $k
+            | ($entry.value
+               | if type == "number" then .
+                 elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+                 else null
+                 end) as $v
+            | if ($k | length) == 0 or $v == null or $v < 0 then .
+              else .[$k] = ((.[$k] // 0) + $v)
+              end
+          )
+      elif (.histograms.decision_counts | type) == "object" then
+        reduce (.histograms.decision_counts | to_entries[]) as $entry
+          ({};
+            ($entry.key | tostring | normalize_decision) as $k
+            | ($entry.value
+               | if type == "number" then .
+                 elif type == "string" and test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+                 else null
+                 end) as $v
+            | if ($k | length) == 0 or $v == null or $v < 0 then .
+              else .[$k] = ((.[$k] // 0) + $v)
+              end
+          )
+      elif (.runs | type) == "array" then
+        [ .runs[]
+          | select(.completed == true)
+          | if (.decision | type) == "string" then .decision else (.decision.decision // empty) end
+          | strings
+          | gsub("^\\s+|\\s+$"; "")
+          | select(length > 0)
+          | normalize_decision
+        ]
+        | group_by(.)
+        | map({ (.[0]): length })
+        | add // {}
+      else
+        {}
+      end
+    ) as $counts
+    | ([$counts[]] | add // 0) as $total
+    | if $total == 0 then ""
+      elif (($counts | keys | length) == 1) then "true"
+      else "false"
+      end
   ' "$stability_summary_json" 2>/dev/null || printf '%s' "")"
+
+  if [[ -n "$observed_decision_consensus_reported" ]]; then
+    observed_decision_consensus="$observed_decision_consensus_reported"
+  else
+    observed_decision_consensus="$observed_decision_consensus_computed"
+  fi
 fi
 
 if [[ "$schema_valid" == "1" ]]; then
@@ -678,6 +690,11 @@ if [[ "$schema_valid" == "1" ]]; then
     errors+=("runs_fail is missing or invalid")
   elif (( observed_runs_fail_json > require_max_runs_fail )); then
     errors+=("runs_fail exceeds allowed maximum (actual=$observed_runs_fail_json max=$require_max_runs_fail)")
+  fi
+
+  if [[ -n "$observed_decision_consensus_reported" && -n "$observed_decision_consensus_computed" ]] \
+    && [[ "$observed_decision_consensus_reported" != "$observed_decision_consensus_computed" ]]; then
+    errors+=("decision_consensus mismatch between reported and computed values (reported=$observed_decision_consensus_reported computed=$observed_decision_consensus_computed)")
   fi
 
   if [[ "$require_decision_consensus" == "1" && "$observed_decision_consensus" != "true" ]]; then
@@ -757,6 +774,8 @@ jq -n \
   --argjson observed_modal_decision_count "$observed_modal_decision_count_json" \
   --argjson observed_modal_decision_support_rate_pct "$observed_modal_decision_support_rate_pct_json" \
   --arg observed_decision_consensus "$observed_decision_consensus" \
+  --arg observed_decision_consensus_reported "$observed_decision_consensus_reported" \
+  --arg observed_decision_consensus_computed "$observed_decision_consensus_computed" \
   --argjson require_status_pass "$require_status_pass" \
   --argjson require_min_runs_requested "$require_min_runs_requested" \
   --argjson require_min_runs_completed "$require_min_runs_completed" \
@@ -837,6 +856,18 @@ jq -n \
       decision_consensus: (
         if $observed_decision_consensus == "true" then true
         elif $observed_decision_consensus == "false" then false
+        else null
+        end
+      ),
+      decision_consensus_reported: (
+        if $observed_decision_consensus_reported == "true" then true
+        elif $observed_decision_consensus_reported == "false" then false
+        else null
+        end
+      ),
+      decision_consensus_computed: (
+        if $observed_decision_consensus_computed == "true" then true
+        elif $observed_decision_consensus_computed == "false" then false
         else null
         end
       )

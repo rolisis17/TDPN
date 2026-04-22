@@ -162,6 +162,57 @@ cat >"$SPLIT_GO_SUMMARY" <<'EOF_SPLIT_GO_SUMMARY'
 }
 EOF_SPLIT_GO_SUMMARY
 
+FRACTIONAL_RUNS_SUMMARY="$TMP_DIR/stability_fractional_runs_summary.json"
+cat >"$FRACTIONAL_RUNS_SUMMARY" <<'EOF_FRACTIONAL_RUNS_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_summary"
+  },
+  "status": "pass",
+  "runs_requested": 3.5,
+  "runs_completed": 3,
+  "runs_fail": 0,
+  "decision_consensus": true,
+  "recommended_profile_counts": {
+    "balanced": 3
+  },
+  "modal_recommended_profile": "balanced",
+  "modal_support_rate_pct": 100,
+  "decision_counts": {
+    "GO": 3
+  },
+  "modal_decision": "GO",
+  "modal_decision_support_rate_pct": 100
+}
+EOF_FRACTIONAL_RUNS_SUMMARY
+
+CONSENSUS_MISMATCH_SUMMARY="$TMP_DIR/stability_consensus_mismatch_summary.json"
+cat >"$CONSENSUS_MISMATCH_SUMMARY" <<'EOF_CONSENSUS_MISMATCH_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_summary"
+  },
+  "status": "pass",
+  "runs_requested": 3,
+  "runs_completed": 3,
+  "runs_fail": 0,
+  "decision_consensus": true,
+  "recommended_profile_counts": {
+    "balanced": 3
+  },
+  "modal_recommended_profile": "balanced",
+  "modal_support_rate_pct": 100,
+  "decision_counts": {
+    "GO": 2,
+    "NO-GO": 1
+  },
+  "modal_decision": "GO",
+  "modal_decision_support_rate_pct": 66.67
+}
+EOF_CONSENSUS_MISMATCH_SUMMARY
+
 echo "[profile-compare-multi-vm-stability-check] strict happy path"
 STRICT_SUMMARY="$TMP_DIR/check_strict_summary.json"
 set +e
@@ -382,6 +433,68 @@ if ! jq -e '
 ' "$DEFAULT_SPLIT_SUMMARY" >/dev/null 2>&1; then
   echo "default split safety summary JSON mismatch"
   cat "$DEFAULT_SPLIT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-check] fractional runs fail closed"
+FRACTIONAL_RUNS_CHECK_SUMMARY="$TMP_DIR/check_fractional_runs_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$FRACTIONAL_RUNS_SUMMARY" \
+  --fail-on-no-go 0 \
+  --summary-json "$FRACTIONAL_RUNS_CHECK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_check_fractional_runs.log 2>&1
+fractional_runs_rc=$?
+set -e
+
+if [[ "$fractional_runs_rc" -ne 0 ]]; then
+  echo "expected fractional-runs soft path rc=0, got rc=$fractional_runs_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_check_fractional_runs.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc == 0
+  and ((.errors | map(test("runs_requested is missing or invalid")) | any) == true)
+' "$FRACTIONAL_RUNS_CHECK_SUMMARY" >/dev/null 2>&1; then
+  echo "fractional-runs fail-closed summary mismatch"
+  cat "$FRACTIONAL_RUNS_CHECK_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-check] reported/computed consensus mismatch fails closed"
+CONSENSUS_MISMATCH_CHECK_SUMMARY="$TMP_DIR/check_consensus_mismatch_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$CONSENSUS_MISMATCH_SUMMARY" \
+  --require-decision-consensus 0 \
+  --require-modal-decision GO \
+  --require-modal-decision-support-rate-pct 60 \
+  --require-recommended-profile balanced \
+  --allow-recommended-profiles balanced,speed,private \
+  --require-modal-support-rate-pct 60 \
+  --fail-on-no-go 0 \
+  --summary-json "$CONSENSUS_MISMATCH_CHECK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_check_consensus_mismatch.log 2>&1
+consensus_mismatch_rc=$?
+set -e
+
+if [[ "$consensus_mismatch_rc" -ne 0 ]]; then
+  echo "expected consensus-mismatch soft path rc=0, got rc=$consensus_mismatch_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_check_consensus_mismatch.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc == 0
+  and .observed.decision_consensus_reported == true
+  and .observed.decision_consensus_computed == false
+  and ((.errors | map(test("decision_consensus mismatch between reported and computed")) | any) == true)
+' "$CONSENSUS_MISMATCH_CHECK_SUMMARY" >/dev/null 2>&1; then
+  echo "consensus-mismatch fail-closed summary mismatch"
+  cat "$CONSENSUS_MISMATCH_CHECK_SUMMARY"
   exit 1
 fi
 

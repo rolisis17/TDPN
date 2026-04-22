@@ -16,6 +16,8 @@ Usage:
     [--manual-validation-report-md PATH] \
     [--profile-compare-signoff-summary-json PATH] \
     [--profile-compare-multi-vm-stability-check-summary-json PATH] \
+    [--profile-compare-multi-vm-stability-promotion-summary-json PATH] \
+    [--runtime-actuation-promotion-summary-json PATH] \
     [--single-machine-summary-json PATH] \
     [--phase0-summary-json PATH] \
     [--phase1-resilience-handoff-summary-json PATH] \
@@ -1252,6 +1254,124 @@ profile_compare_multi_vm_stability_summary_kind_from_path() {
     profile_compare_multi_vm_stability_summary.json) printf '%s' "run" ; return ;;
   esac
   printf '%s' "check"
+}
+
+profile_compare_multi_vm_stability_promotion_summary_usable_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (.version == 1)
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and (
+      (.schema == null)
+      or (
+        (.schema | type) == "object"
+        and (
+          ((.schema.id // "") == "profile_compare_multi_vm_stability_promotion_check_summary")
+          or ((.schema.id // "") == "profile_compare_multi_vm_stability_promotion_summary")
+        )
+      )
+    )
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+resolve_profile_compare_multi_vm_stability_promotion_summary_path() {
+  local manual_summary_path="$1"
+  local reports_dir="$2"
+  local candidate=""
+  if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
+    while IFS= read -r candidate; do
+      candidate="$(resolve_path_with_base "$candidate" "$manual_summary_path")"
+      if [[ -n "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return
+      fi
+    done < <(jq -r '
+      [
+        (.summary.profile_compare_multi_vm_stability_promotion.summary_json // ""),
+        (.summary.profile_compare_multi_vm_stability_promotion_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_promotion_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_promotion_check_summary_json // ""),
+        (.artifacts.profile_compare_multi_vm_stability_promotion_summary_json // ""),
+        (.artifacts.profile_compare_multi_vm_stability_promotion_check_summary_json // "")
+      ]
+      | .[]
+      | strings
+      | select(length > 0)
+    ' "$manual_summary_path" 2>/dev/null || true)
+  fi
+  if [[ -n "$reports_dir" ]]; then
+    candidate="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_promotion_check_summary.json")"
+  fi
+  printf '%s' "$candidate"
+}
+
+runtime_actuation_promotion_summary_usable_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    (.version == 1)
+    and ((.decision | type) == "string")
+    and ((.status | type) == "string")
+    and (
+      (.schema == null)
+      or (
+        (.schema | type) == "object"
+        and (
+          ((.schema.id // "") == "runtime_actuation_promotion_check_summary")
+          or ((.schema.id // "") == "runtime_actuation_promotion_summary")
+          or ((.schema.id // "") == "profile_default_gate_runtime_actuation_promotion_check_summary")
+        )
+      )
+    )
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+resolve_runtime_actuation_promotion_summary_path() {
+  local manual_summary_path="$1"
+  local reports_dir="$2"
+  local candidate=""
+  if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
+    while IFS= read -r candidate; do
+      candidate="$(resolve_path_with_base "$candidate" "$manual_summary_path")"
+      if [[ -n "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return
+      fi
+    done < <(jq -r '
+      [
+        (.summary.runtime_actuation_promotion.summary_json // ""),
+        (.summary.runtime_actuation_promotion_summary_json // ""),
+        (.summary.profile_default_gate.runtime_actuation_promotion_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_check_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_summary_json // ""),
+        (.artifacts.runtime_actuation_promotion_check_summary_json // "")
+      ]
+      | .[]
+      | strings
+      | select(length > 0)
+    ' "$manual_summary_path" 2>/dev/null || true)
+  fi
+  if [[ -n "$reports_dir" ]]; then
+    candidate="$(abs_path "$reports_dir/runtime_actuation_promotion_check_summary.json")"
+  fi
+  printf '%s' "$candidate"
 }
 
 profile_default_gate_command_supports_subject_placeholder_01() {
@@ -4693,6 +4813,16 @@ if [[ -n "$(trim "$profile_compare_multi_vm_stability_check_summary_json")" ]]; 
   path_arg_or_die "--profile-compare-multi-vm-stability-check-summary-json" "$profile_compare_multi_vm_stability_check_summary_json"
 fi
 profile_compare_multi_vm_stability_check_summary_json="$(abs_path "$profile_compare_multi_vm_stability_check_summary_json")"
+profile_compare_multi_vm_stability_promotion_summary_json="${ROADMAP_PROGRESS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_SUMMARY_JSON:-}"
+if [[ -n "$(trim "$profile_compare_multi_vm_stability_promotion_summary_json")" ]]; then
+  path_arg_or_die "--profile-compare-multi-vm-stability-promotion-summary-json" "$profile_compare_multi_vm_stability_promotion_summary_json"
+fi
+profile_compare_multi_vm_stability_promotion_summary_json="$(abs_path "$profile_compare_multi_vm_stability_promotion_summary_json")"
+runtime_actuation_promotion_summary_json="${ROADMAP_PROGRESS_RUNTIME_ACTUATION_PROMOTION_SUMMARY_JSON:-}"
+if [[ -n "$(trim "$runtime_actuation_promotion_summary_json")" ]]; then
+  path_arg_or_die "--runtime-actuation-promotion-summary-json" "$runtime_actuation_promotion_summary_json"
+fi
+runtime_actuation_promotion_summary_json="$(abs_path "$runtime_actuation_promotion_summary_json")"
 single_machine_summary_json="$default_log_dir/single_machine_prod_readiness_latest.json"
 phase0_summary_json="${ROADMAP_PROGRESS_PHASE0_SUMMARY_JSON:-$default_log_dir/ci_phase0_summary.json}"
 phase1_resilience_handoff_summary_json="${ROADMAP_PROGRESS_PHASE1_RESILIENCE_HANDOFF_SUMMARY_JSON:-}"
@@ -4770,6 +4900,16 @@ while [[ $# -gt 0 ]]; do
     --profile-compare-multi-vm-stability-check-summary-json)
       optional_path_arg_or_die "--profile-compare-multi-vm-stability-check-summary-json" "$#" "${2:-}"
       profile_compare_multi_vm_stability_check_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --profile-compare-multi-vm-stability-promotion-summary-json)
+      optional_path_arg_or_die "--profile-compare-multi-vm-stability-promotion-summary-json" "$#" "${2:-}"
+      profile_compare_multi_vm_stability_promotion_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --runtime-actuation-promotion-summary-json)
+      optional_path_arg_or_die "--runtime-actuation-promotion-summary-json" "$#" "${2:-}"
+      runtime_actuation_promotion_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --single-machine-summary-json)
@@ -7872,6 +8012,166 @@ if [[ -n "$profile_compare_multi_vm_stability_check_summary_json" ]] \
     fi
   fi
 fi
+if [[ -z "$profile_compare_multi_vm_stability_promotion_summary_json" ]]; then
+  profile_compare_multi_vm_stability_promotion_summary_json="$(
+    resolve_profile_compare_multi_vm_stability_promotion_summary_path "$manual_validation_summary_json" "$default_log_dir"
+  )"
+fi
+multi_vm_stability_promotion_available_json="false"
+multi_vm_stability_promotion_input_summary_json="$profile_compare_multi_vm_stability_promotion_summary_json"
+multi_vm_stability_promotion_source_summary_json=""
+multi_vm_stability_promotion_status_json="missing"
+multi_vm_stability_promotion_rc_json="null"
+multi_vm_stability_promotion_decision_json=""
+multi_vm_stability_promotion_go_json="null"
+multi_vm_stability_promotion_no_go_json="null"
+multi_vm_stability_promotion_reasons_json='[]'
+multi_vm_stability_promotion_notes_json=""
+multi_vm_stability_promotion_needs_attention_json="true"
+multi_vm_stability_promotion_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-check --reports-dir .easy-node-logs --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_check_summary.json --print-summary-json 1"
+multi_vm_stability_promotion_next_command_reason="multi-VM stability promotion evidence is missing; run promotion check to produce fail-closed GO/NO-GO evidence"
+if [[ -n "$profile_compare_multi_vm_stability_promotion_summary_json" ]] \
+   && [[ "$(profile_compare_multi_vm_stability_promotion_summary_usable_01 "$profile_compare_multi_vm_stability_promotion_summary_json")" == "1" ]]; then
+  multi_vm_stability_promotion_available_json="true"
+  multi_vm_stability_promotion_source_summary_json="$profile_compare_multi_vm_stability_promotion_summary_json"
+  multi_vm_stability_promotion_status_json="$(jq -r '
+    if (.status | type) == "string" then .status else "unknown" end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' "unknown")"
+  multi_vm_stability_promotion_rc_json="$(jq -r '
+    if (.rc | type) == "number" then .rc else "null" end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_promotion_decision_json="$(jq -r '
+    if (.decision | type) == "string" then .decision else "" end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  multi_vm_stability_promotion_go_json="$(jq -r '
+    if (.go | type) == "boolean" then (.go | tostring)
+    elif (.decision | type) == "string" then
+      ((.decision | ascii_upcase | gsub("[[:space:]_-]"; "")) as $d
+      | if $d == "GO" then "true"
+        elif $d == "NOGO" then "false"
+        else "null"
+        end)
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_promotion_no_go_json="$(jq -r '
+    if (.no_go | type) == "boolean" then (.no_go | tostring)
+    elif (.decision | type) == "string" then
+      ((.decision | ascii_upcase | gsub("[[:space:]_-]"; "")) as $d
+      | if $d == "NOGO" then "true"
+        elif $d == "GO" then "false"
+        else "null"
+        end)
+    else "null"
+    end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  multi_vm_stability_promotion_reasons_json="$(jq -c '
+    if (.reasons | type) == "array" then [.reasons[] | strings]
+    elif (.errors | type) == "array" then [.errors[] | strings]
+    else []
+    end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
+  multi_vm_stability_promotion_notes_json="$(jq -r '
+    if (.notes | type) == "string" then .notes else "" end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || printf '%s' "")"
+
+  if [[ "$multi_vm_stability_promotion_go_json" == "true" ]] \
+     && [[ "$multi_vm_stability_promotion_status_json" == "ok" || "$multi_vm_stability_promotion_status_json" == "pass" ]]; then
+    multi_vm_stability_promotion_needs_attention_json="false"
+    multi_vm_stability_promotion_next_command=""
+    multi_vm_stability_promotion_next_command_reason=""
+  else
+    multi_vm_stability_promotion_needs_attention_json="true"
+    first_reason="$(jq -r 'if (.reasons | type) == "array" and (.reasons | length) > 0 then (.reasons[0] // "") elif (.errors | type) == "array" and (.errors | length) > 0 then (.errors[0] // "") else "" end' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || true)"
+    if [[ -n "$first_reason" ]]; then
+      multi_vm_stability_promotion_next_command_reason="$first_reason"
+    elif [[ -n "$multi_vm_stability_promotion_notes_json" ]]; then
+      multi_vm_stability_promotion_next_command_reason="$multi_vm_stability_promotion_notes_json"
+    else
+      multi_vm_stability_promotion_next_command_reason="multi-VM stability promotion is pending or NO-GO; rerun promotion check after fresh cycle evidence"
+    fi
+  fi
+fi
+if [[ -z "$runtime_actuation_promotion_summary_json" ]]; then
+  runtime_actuation_promotion_summary_json="$(
+    resolve_runtime_actuation_promotion_summary_path "$manual_validation_summary_json" "$default_log_dir"
+  )"
+fi
+runtime_actuation_promotion_available_json="false"
+runtime_actuation_promotion_input_summary_json="$runtime_actuation_promotion_summary_json"
+runtime_actuation_promotion_source_summary_json=""
+runtime_actuation_promotion_status_json="missing"
+runtime_actuation_promotion_rc_json="null"
+runtime_actuation_promotion_decision_json=""
+runtime_actuation_promotion_go_json="null"
+runtime_actuation_promotion_no_go_json="null"
+runtime_actuation_promotion_reasons_json='[]'
+runtime_actuation_promotion_notes_json=""
+runtime_actuation_promotion_needs_attention_json="true"
+runtime_actuation_promotion_next_command="./scripts/easy_node.sh runtime-actuation-promotion-check --reports-dir .easy-node-logs --fail-on-no-go 0 --summary-json .easy-node-logs/runtime_actuation_promotion_check_summary.json --print-summary-json 1"
+runtime_actuation_promotion_next_command_reason="runtime-actuation promotion evidence is missing; run promotion check to produce fail-closed GO/NO-GO evidence"
+if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
+   && [[ "$(runtime_actuation_promotion_summary_usable_01 "$runtime_actuation_promotion_summary_json")" == "1" ]]; then
+  runtime_actuation_promotion_available_json="true"
+  runtime_actuation_promotion_source_summary_json="$runtime_actuation_promotion_summary_json"
+  runtime_actuation_promotion_status_json="$(jq -r '
+    if (.status | type) == "string" then .status else "unknown" end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "unknown")"
+  runtime_actuation_promotion_rc_json="$(jq -r '
+    if (.rc | type) == "number" then .rc else "null" end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  runtime_actuation_promotion_decision_json="$(jq -r '
+    if (.decision | type) == "string" then .decision else "" end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  runtime_actuation_promotion_go_json="$(jq -r '
+    if (.go | type) == "boolean" then (.go | tostring)
+    elif (.decision | type) == "string" then
+      ((.decision | ascii_upcase | gsub("[[:space:]_-]"; "")) as $d
+      | if $d == "GO" then "true"
+        elif $d == "NOGO" then "false"
+        else "null"
+        end)
+    else "null"
+    end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  runtime_actuation_promotion_no_go_json="$(jq -r '
+    if (.no_go | type) == "boolean" then (.no_go | tostring)
+    elif (.decision | type) == "string" then
+      ((.decision | ascii_upcase | gsub("[[:space:]_-]"; "")) as $d
+      | if $d == "NOGO" then "true"
+        elif $d == "GO" then "false"
+        else "null"
+        end)
+    else "null"
+    end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  runtime_actuation_promotion_reasons_json="$(jq -c '
+    if (.reasons | type) == "array" then [.reasons[] | strings]
+    elif (.errors | type) == "array" then [.errors[] | strings]
+    else []
+    end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
+  runtime_actuation_promotion_notes_json="$(jq -r '
+    if (.notes | type) == "string" then .notes else "" end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "")"
+
+  if [[ "$runtime_actuation_promotion_go_json" == "true" ]] \
+     && [[ "$runtime_actuation_promotion_status_json" == "ok" || "$runtime_actuation_promotion_status_json" == "pass" ]]; then
+    runtime_actuation_promotion_needs_attention_json="false"
+    runtime_actuation_promotion_next_command=""
+    runtime_actuation_promotion_next_command_reason=""
+  else
+    runtime_actuation_promotion_needs_attention_json="true"
+    first_reason="$(jq -r 'if (.reasons | type) == "array" and (.reasons | length) > 0 then (.reasons[0] // "") elif (.errors | type) == "array" and (.errors | length) > 0 then (.errors[0] // "") else "" end' "$runtime_actuation_promotion_summary_json" 2>/dev/null || true)"
+    if [[ -n "$first_reason" ]]; then
+      runtime_actuation_promotion_next_command_reason="$first_reason"
+    elif [[ -n "$runtime_actuation_promotion_notes_json" ]]; then
+      runtime_actuation_promotion_next_command_reason="$runtime_actuation_promotion_notes_json"
+    else
+      runtime_actuation_promotion_next_command_reason="runtime-actuation promotion is pending or NO-GO; refresh runtime-actuation evidence and rerun promotion check"
+    fi
+  fi
+fi
 profile_default_gate_signoff_resolution="$(resolve_profile_default_gate_signoff_status "$profile_compare_signoff_summary_json" "$manual_validation_summary_json")"
 profile_default_gate_signoff_status="${profile_default_gate_signoff_resolution%%$'\x1f'*}"
 profile_default_gate_signoff_source=""
@@ -8377,7 +8677,7 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
+next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -8407,6 +8707,18 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       label: "Profile compare multi-VM stability cycle",
       command: $multi_vm_stability_next_command,
       reason: (if ($multi_vm_stability_next_command_reason // "") != "" then $multi_vm_stability_next_command_reason else "multi-VM stability evidence requires refresh; rerun stability cycle and review check summary" end)
+    } else empty end),
+    (if ($multi_vm_stability_promotion_needs_attention == true and ($multi_vm_stability_promotion_next_command // "") != "") then {
+      id: "profile_compare_multi_vm_stability_promotion",
+      label: "Profile compare multi-VM stability promotion check",
+      command: $multi_vm_stability_promotion_next_command,
+      reason: (if ($multi_vm_stability_promotion_next_command_reason // "") != "" then $multi_vm_stability_promotion_next_command_reason else "multi-VM stability promotion evidence requires refresh; rerun promotion check" end)
+    } else empty end),
+    (if ($runtime_actuation_promotion_needs_attention == true and ($runtime_actuation_promotion_next_command // "") != "") then {
+      id: "runtime_actuation_promotion",
+      label: "Runtime-actuation promotion check",
+      command: $runtime_actuation_promotion_next_command,
+      reason: (if ($runtime_actuation_promotion_next_command_reason // "") != "" then $runtime_actuation_promotion_next_command_reason else "runtime-actuation promotion evidence requires refresh; rerun promotion check" end)
     } else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and (($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" or ($blockchain_mainnet_activation_missing_metrics_action_operator_pack_command // "") != "")) then {
       id: "blockchain_mainnet_activation_missing_metrics",
@@ -8735,6 +9047,32 @@ summary_payload="$(jq -n \
   --argjson profile_compare_multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" \
   --arg profile_compare_multi_vm_stability_next_command "$multi_vm_stability_next_command" \
   --arg profile_compare_multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" \
+  --arg profile_compare_multi_vm_stability_promotion_input_summary_json "$multi_vm_stability_promotion_input_summary_json" \
+  --argjson profile_compare_multi_vm_stability_promotion_available "$multi_vm_stability_promotion_available_json" \
+  --arg profile_compare_multi_vm_stability_promotion_source_summary_json "$multi_vm_stability_promotion_source_summary_json" \
+  --arg profile_compare_multi_vm_stability_promotion_status "$multi_vm_stability_promotion_status_json" \
+  --argjson profile_compare_multi_vm_stability_promotion_rc "$multi_vm_stability_promotion_rc_json" \
+  --arg profile_compare_multi_vm_stability_promotion_decision "$multi_vm_stability_promotion_decision_json" \
+  --argjson profile_compare_multi_vm_stability_promotion_go "$multi_vm_stability_promotion_go_json" \
+  --argjson profile_compare_multi_vm_stability_promotion_no_go "$multi_vm_stability_promotion_no_go_json" \
+  --argjson profile_compare_multi_vm_stability_promotion_reasons "$multi_vm_stability_promotion_reasons_json" \
+  --arg profile_compare_multi_vm_stability_promotion_notes "$multi_vm_stability_promotion_notes_json" \
+  --argjson profile_compare_multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" \
+  --arg profile_compare_multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" \
+  --arg profile_compare_multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" \
+  --arg runtime_actuation_promotion_input_summary_json "$runtime_actuation_promotion_input_summary_json" \
+  --argjson runtime_actuation_promotion_available "$runtime_actuation_promotion_available_json" \
+  --arg runtime_actuation_promotion_source_summary_json "$runtime_actuation_promotion_source_summary_json" \
+  --arg runtime_actuation_promotion_status "$runtime_actuation_promotion_status_json" \
+  --argjson runtime_actuation_promotion_rc "$runtime_actuation_promotion_rc_json" \
+  --arg runtime_actuation_promotion_decision "$runtime_actuation_promotion_decision_json" \
+  --argjson runtime_actuation_promotion_go "$runtime_actuation_promotion_go_json" \
+  --argjson runtime_actuation_promotion_no_go "$runtime_actuation_promotion_no_go_json" \
+  --argjson runtime_actuation_promotion_reasons "$runtime_actuation_promotion_reasons_json" \
+  --arg runtime_actuation_promotion_notes "$runtime_actuation_promotion_notes_json" \
+  --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" \
+  --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" \
+  --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" \
   --arg docker_rehearsal_status "$docker_rehearsal_status" \
   --arg real_wg_privileged_status "$real_wg_privileged_status" \
   --argjson total_checks "$counts_total" \
@@ -9015,8 +9353,48 @@ summary_payload="$(jq -n \
           end
         )
       },
+      multi_vm_stability_promotion: {
+        available: $profile_compare_multi_vm_stability_promotion_available,
+        input_summary_json: (if $profile_compare_multi_vm_stability_promotion_input_summary_json == "" then null else $profile_compare_multi_vm_stability_promotion_input_summary_json end),
+        source_summary_json: (if $profile_compare_multi_vm_stability_promotion_source_summary_json == "" then null else $profile_compare_multi_vm_stability_promotion_source_summary_json end),
+        status: (if $profile_compare_multi_vm_stability_promotion_status == "" then null else $profile_compare_multi_vm_stability_promotion_status end),
+        rc: $profile_compare_multi_vm_stability_promotion_rc,
+        decision: (if $profile_compare_multi_vm_stability_promotion_decision == "" then null else $profile_compare_multi_vm_stability_promotion_decision end),
+        go: $profile_compare_multi_vm_stability_promotion_go,
+        no_go: $profile_compare_multi_vm_stability_promotion_no_go,
+        reasons: $profile_compare_multi_vm_stability_promotion_reasons,
+        notes: (if $profile_compare_multi_vm_stability_promotion_notes == "" then null else $profile_compare_multi_vm_stability_promotion_notes end),
+        needs_attention: $profile_compare_multi_vm_stability_promotion_needs_attention,
+        next_command: (if $profile_compare_multi_vm_stability_promotion_next_command == "" then null else $profile_compare_multi_vm_stability_promotion_next_command end),
+        next_command_reason: (
+          if $profile_compare_multi_vm_stability_promotion_next_command_reason == "" then null
+          else $profile_compare_multi_vm_stability_promotion_next_command_reason
+          end
+        )
+      },
+      runtime_actuation_promotion: {
+        available: $runtime_actuation_promotion_available,
+        input_summary_json: (if $runtime_actuation_promotion_input_summary_json == "" then null else $runtime_actuation_promotion_input_summary_json end),
+        source_summary_json: (if $runtime_actuation_promotion_source_summary_json == "" then null else $runtime_actuation_promotion_source_summary_json end),
+        status: (if $runtime_actuation_promotion_status == "" then null else $runtime_actuation_promotion_status end),
+        rc: $runtime_actuation_promotion_rc,
+        decision: (if $runtime_actuation_promotion_decision == "" then null else $runtime_actuation_promotion_decision end),
+        go: $runtime_actuation_promotion_go,
+        no_go: $runtime_actuation_promotion_no_go,
+        reasons: $runtime_actuation_promotion_reasons,
+        notes: (if $runtime_actuation_promotion_notes == "" then null else $runtime_actuation_promotion_notes end),
+        needs_attention: $runtime_actuation_promotion_needs_attention,
+        next_command: (if $runtime_actuation_promotion_next_command == "" then null else $runtime_actuation_promotion_next_command end),
+        next_command_reason: (
+          if $runtime_actuation_promotion_next_command_reason == "" then null
+          else $runtime_actuation_promotion_next_command_reason
+          end
+        )
+      },
       optional_gate_status: {
         profile_default_gate: $profile_default_gate_status,
+        profile_compare_multi_vm_stability_promotion: (if $profile_compare_multi_vm_stability_promotion_status == "" then "missing" else $profile_compare_multi_vm_stability_promotion_status end),
+        runtime_actuation_promotion: (if $runtime_actuation_promotion_status == "" then "missing" else $runtime_actuation_promotion_status end),
         docker_rehearsal_gate: $docker_rehearsal_status,
         real_wg_privileged_gate: $real_wg_privileged_status
       }
@@ -9170,6 +9548,8 @@ summary_payload="$(jq -n \
       manual_validation_report_md: $manual_validation_report_md,
       profile_compare_signoff_summary_json: (if $profile_compare_signoff_summary_json == "" then null else $profile_compare_signoff_summary_json end),
       profile_compare_multi_vm_stability_summary_json: (if $profile_compare_multi_vm_stability_source_summary_json == "" then null else $profile_compare_multi_vm_stability_source_summary_json end),
+      profile_compare_multi_vm_stability_promotion_summary_json: (if $profile_compare_multi_vm_stability_promotion_source_summary_json == "" then null else $profile_compare_multi_vm_stability_promotion_source_summary_json end),
+      runtime_actuation_promotion_summary_json: (if $runtime_actuation_promotion_source_summary_json == "" then null else $runtime_actuation_promotion_source_summary_json end),
       single_machine_summary_json: $single_machine_summary_json,
       phase0_summary_json: (if $phase0_product_surface_source_summary_json == "" then $phase0_product_surface_input_summary_json else $phase0_product_surface_source_summary_json end),
       phase1_resilience_handoff_summary_json: (if $phase1_resilience_handoff_source_summary_json == "" then null else $phase1_resilience_handoff_source_summary_json end),
@@ -9315,7 +9695,7 @@ cat >"$report_tmp" <<EOF_MD
 - Checks: total=$(jq -r '.vpn_track.counts.total_checks' "$summary_json"), pass=$(jq -r '.vpn_track.counts.pass_checks' "$summary_json"), warn=$(jq -r '.vpn_track.counts.warn_checks' "$summary_json"), fail=$(jq -r '.vpn_track.counts.fail_checks' "$summary_json"), pending=$(jq -r '.vpn_track.counts.pending_checks' "$summary_json")
 - Blocking checks: $(jq -r '(.vpn_track.blocking_check_ids // []) | if length == 0 then "none" else join(",") end' "$summary_json")
 - Pending real-host checks: $(jq -r '(.vpn_track.pending_real_host_checks // []) | if length == 0 then "none" else map(.check_id) | join(",") end' "$summary_json")
-- Optional gate status: profile=$(jq -r '.vpn_track.optional_gate_status.profile_default_gate' "$summary_json"), docker-rehearsal=$(jq -r '.vpn_track.optional_gate_status.docker_rehearsal_gate' "$summary_json"), real-wg=$(jq -r '.vpn_track.optional_gate_status.real_wg_privileged_gate' "$summary_json")
+- Optional gate status: profile=$(jq -r '.vpn_track.optional_gate_status.profile_default_gate' "$summary_json"), multi-vm-promotion=$(jq -r '.vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion' "$summary_json"), runtime-actuation-promotion=$(jq -r '.vpn_track.optional_gate_status.runtime_actuation_promotion' "$summary_json"), docker-rehearsal=$(jq -r '.vpn_track.optional_gate_status.docker_rehearsal_gate' "$summary_json"), real-wg=$(jq -r '.vpn_track.optional_gate_status.real_wg_privileged_gate' "$summary_json")
 - Profile gate next command: $(jq -r '.vpn_track.profile_default_gate.next_command // "none"' "$summary_json")
 - Profile gate sudo fallback: $(jq -r '.vpn_track.profile_default_gate.next_command_sudo // "none"' "$summary_json")
 - Profile gate command source: $(jq -r '.vpn_track.profile_default_gate.next_command_source // "none"' "$summary_json")
@@ -9367,6 +9747,20 @@ cat >"$report_tmp" <<EOF_MD
 - Multi-VM stability needs attention: $(jq -r '.vpn_track.multi_vm_stability.needs_attention | if . == null then "null" else tostring end' "$summary_json")
 - Multi-VM stability next command: $(jq -r '.vpn_track.multi_vm_stability.next_command // "none"' "$summary_json")
 - Multi-VM stability next command reason: $(jq -r '.vpn_track.multi_vm_stability.next_command_reason // "none"' "$summary_json")
+- Multi-VM stability promotion available: $(jq -r '.vpn_track.multi_vm_stability_promotion.available | if . == null then "null" else tostring end' "$summary_json")
+- Multi-VM stability promotion input/source: input=$(jq -r '.vpn_track.multi_vm_stability_promotion.input_summary_json // "none"' "$summary_json"), source=$(jq -r '.vpn_track.multi_vm_stability_promotion.source_summary_json // "none"' "$summary_json")
+- Multi-VM stability promotion status/decision: status=$(jq -r '.vpn_track.multi_vm_stability_promotion.status // "none"' "$summary_json"), decision=$(jq -r '.vpn_track.multi_vm_stability_promotion.decision // "none"' "$summary_json")
+- Multi-VM stability promotion go/no-go: go=$(jq -r '.vpn_track.multi_vm_stability_promotion.go | if . == null then "null" else tostring end' "$summary_json"), no_go=$(jq -r '.vpn_track.multi_vm_stability_promotion.no_go | if . == null then "null" else tostring end' "$summary_json")
+- Multi-VM stability promotion reasons/notes: reasons=$(jq -r '.vpn_track.multi_vm_stability_promotion.reasons | if . == null or length == 0 then "none" else join("; ") end' "$summary_json"), notes=$(jq -r '.vpn_track.multi_vm_stability_promotion.notes // "none"' "$summary_json")
+- Multi-VM stability promotion needs attention: $(jq -r '.vpn_track.multi_vm_stability_promotion.needs_attention | if . == null then "null" else tostring end' "$summary_json")
+- Multi-VM stability promotion next command/reason: command=$(jq -r '.vpn_track.multi_vm_stability_promotion.next_command // "none"' "$summary_json"), reason=$(jq -r '.vpn_track.multi_vm_stability_promotion.next_command_reason // "none"' "$summary_json")
+- Runtime-actuation promotion available: $(jq -r '.vpn_track.runtime_actuation_promotion.available | if . == null then "null" else tostring end' "$summary_json")
+- Runtime-actuation promotion input/source: input=$(jq -r '.vpn_track.runtime_actuation_promotion.input_summary_json // "none"' "$summary_json"), source=$(jq -r '.vpn_track.runtime_actuation_promotion.source_summary_json // "none"' "$summary_json")
+- Runtime-actuation promotion status/decision: status=$(jq -r '.vpn_track.runtime_actuation_promotion.status // "none"' "$summary_json"), decision=$(jq -r '.vpn_track.runtime_actuation_promotion.decision // "none"' "$summary_json")
+- Runtime-actuation promotion go/no-go: go=$(jq -r '.vpn_track.runtime_actuation_promotion.go | if . == null then "null" else tostring end' "$summary_json"), no_go=$(jq -r '.vpn_track.runtime_actuation_promotion.no_go | if . == null then "null" else tostring end' "$summary_json")
+- Runtime-actuation promotion reasons/notes: reasons=$(jq -r '.vpn_track.runtime_actuation_promotion.reasons | if . == null or length == 0 then "none" else join("; ") end' "$summary_json"), notes=$(jq -r '.vpn_track.runtime_actuation_promotion.notes // "none"' "$summary_json")
+- Runtime-actuation promotion needs attention: $(jq -r '.vpn_track.runtime_actuation_promotion.needs_attention | if . == null then "null" else tostring end' "$summary_json")
+- Runtime-actuation promotion next command/reason: command=$(jq -r '.vpn_track.runtime_actuation_promotion.next_command // "none"' "$summary_json"), reason=$(jq -r '.vpn_track.runtime_actuation_promotion.next_command_reason // "none"' "$summary_json")
 - Primary next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
 
 ## Pending Real-Host Checks
@@ -9565,6 +9959,12 @@ echo "[roadmap-progress-report] profile_default_gate_stability_cycle_summary_jso
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_available=$multi_vm_stability_available_json input_summary_json=${multi_vm_stability_input_summary_json:-} source_summary_json=${multi_vm_stability_source_summary_json:-} source_kind=${multi_vm_stability_source_summary_kind:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_status=${multi_vm_stability_status_json:-} rc=$multi_vm_stability_rc_json decision=${multi_vm_stability_decision_json:-} go=$multi_vm_stability_go_json no_go=$multi_vm_stability_no_go_json recommended_profile=${multi_vm_stability_recommended_profile_json:-} support_rate_pct=$multi_vm_stability_support_rate_pct_json runs_requested=$multi_vm_stability_runs_requested_json runs_completed=$multi_vm_stability_runs_completed_json runs_fail=$multi_vm_stability_runs_fail_json needs_attention=$multi_vm_stability_needs_attention_json next_command=${multi_vm_stability_next_command:-} next_command_reason=${multi_vm_stability_next_command_reason:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_decision_counts=$multi_vm_stability_decision_counts_json recommended_profile_counts=$multi_vm_stability_recommended_profile_counts_json reasons=$multi_vm_stability_reasons_json notes=${multi_vm_stability_notes_json:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_available=$multi_vm_stability_promotion_available_json input_summary_json=${multi_vm_stability_promotion_input_summary_json:-} source_summary_json=${multi_vm_stability_promotion_source_summary_json:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_status=${multi_vm_stability_promotion_status_json:-} rc=$multi_vm_stability_promotion_rc_json decision=${multi_vm_stability_promotion_decision_json:-} go=$multi_vm_stability_promotion_go_json no_go=$multi_vm_stability_promotion_no_go_json needs_attention=$multi_vm_stability_promotion_needs_attention_json next_command=${multi_vm_stability_promotion_next_command:-} next_command_reason=${multi_vm_stability_promotion_next_command_reason:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_reasons=$multi_vm_stability_promotion_reasons_json notes=${multi_vm_stability_promotion_notes_json:-}"
+echo "[roadmap-progress-report] runtime_actuation_promotion_available=$runtime_actuation_promotion_available_json input_summary_json=${runtime_actuation_promotion_input_summary_json:-} source_summary_json=${runtime_actuation_promotion_source_summary_json:-}"
+echo "[roadmap-progress-report] runtime_actuation_promotion_status=${runtime_actuation_promotion_status_json:-} rc=$runtime_actuation_promotion_rc_json decision=${runtime_actuation_promotion_decision_json:-} go=$runtime_actuation_promotion_go_json no_go=$runtime_actuation_promotion_no_go_json needs_attention=$runtime_actuation_promotion_needs_attention_json next_command=${runtime_actuation_promotion_next_command:-} next_command_reason=${runtime_actuation_promotion_next_command_reason:-}"
+echo "[roadmap-progress-report] runtime_actuation_promotion_reasons=$runtime_actuation_promotion_reasons_json notes=${runtime_actuation_promotion_notes_json:-}"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

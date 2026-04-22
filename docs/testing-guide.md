@@ -693,6 +693,22 @@ One-command campaign signoff (optional refresh + fail-closed check artifact):
   --print-summary-json 1
 ```
 
+Runtime-actuation promotion gate (reduce repeated campaign-check/signoff artifacts):
+
+```bash
+./scripts/runtime_actuation_promotion_check.sh \
+  --campaign-check-summary-json .easy-node-logs/profile_compare_campaign_check_summary.json \
+  --signoff-summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --require-min-samples 3 \
+  --require-min-pass-samples 3 \
+  --require-max-fail-samples 0 \
+  --require-max-warn-samples 0 \
+  --require-min-ready-rate-pct 100 \
+  --require-modal-runtime-actuation-status pass \
+  --summary-json .easy-node-logs/runtime_actuation_promotion_check_summary.json \
+  --print-summary-json 1
+```
+
 No-sudo deterministic fallback (when docker rehearsal endpoints are known):
 
 ```bash
@@ -1574,6 +1590,20 @@ Multi-VM promotion-ready reducer/cycle artifacts:
   --vm-command-file <path/to/vm_commands.txt> \
   --reducer-min-support-rate-pct 60 \
   --summary-json .easy-node-logs/profile_compare_multi_vm_cycle_summary.json
+
+./scripts/profile_compare_multi_vm_stability_promotion_check.sh \
+  --cycle-summary-list <path/to/stability_cycle_summaries.list> \
+  --require-min-cycles 3 \
+  --require-min-pass-cycles 3 \
+  --require-max-fail-cycles 0 \
+  --require-max-warn-cycles 0 \
+  --require-min-pass-rate-pct 100 \
+  --require-min-go-decision-rate-pct 100 \
+  --require-cycle-schema-valid 1 \
+  --require-check-modal-decision GO \
+  --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_check_summary.json
+
+./scripts/integration_profile_compare_multi_vm_stability_promotion_check.sh
 ```
 
 Promotion gate output fields (deterministic promotion decisioning):
