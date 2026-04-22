@@ -748,12 +748,27 @@ func TestSyncPeerRelaysAggregatesPeerSelectionScores(t *testing.T) {
 		Endpoint:   "127.0.0.1:51821",
 		ValidUntil: now.Add(time.Minute),
 	}, privB)
+	relayAMiddle := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "middle-shared",
+		Role:       "micro-relay",
+		OperatorID: "op-middle-shared",
+		Endpoint:   "127.0.0.1:51823",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	relayBMiddle := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "middle-shared",
+		Role:       "micro-relay",
+		OperatorID: "op-middle-shared",
+		Endpoint:   "127.0.0.1:51823",
+		ValidUntil: now.Add(time.Minute),
+	}, privB)
 	feedA := proto.RelaySelectionFeedResponse{
 		Operator:    "op-a",
 		GeneratedAt: now.Unix(),
 		ExpiresAt:   now.Add(30 * time.Second).Unix(),
 		Scores: []proto.RelaySelectionScore{
 			{RelayID: "exit-shared", Role: "exit", Reputation: 0.9, Uptime: 0.8, Capacity: 0.7, AbusePenalty: 0.1},
+			{RelayID: "middle-shared", Role: "micro-relay", Reputation: 0.5, Uptime: 0.4, Capacity: 0.3, AbusePenalty: 0.2},
 		},
 	}
 	feedASig, err := crypto.SignRelaySelectionFeed(feedA, privA)
@@ -767,6 +782,7 @@ func TestSyncPeerRelaysAggregatesPeerSelectionScores(t *testing.T) {
 		ExpiresAt:   now.Add(30 * time.Second).Unix(),
 		Scores: []proto.RelaySelectionScore{
 			{RelayID: "exit-shared", Role: "exit", Reputation: 0.7, Uptime: 0.6, Capacity: 0.5, AbusePenalty: 0.2},
+			{RelayID: "middle-shared", Role: "micro-relay", Reputation: 0.4, Uptime: 0.3, Capacity: 0.2, AbusePenalty: 0.25},
 		},
 	}
 	feedBSig, err := crypto.SignRelaySelectionFeed(feedB, privB)
@@ -776,10 +792,10 @@ func TestSyncPeerRelaysAggregatesPeerSelectionScores(t *testing.T) {
 	feedB.Signature = feedBSig
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		urlA + "/v1/pubkey":         jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
-		urlA + "/v1/relays":         jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/relays":         jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA, relayAMiddle}}),
 		urlA + "/v1/selection-feed": jsonResp(feedA),
 		urlB + "/v1/pubkey":         jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubB)}),
-		urlB + "/v1/relays":         jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
+		urlB + "/v1/relays":         jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB, relayBMiddle}}),
 		urlB + "/v1/selection-feed": jsonResp(feedB),
 	}
 	s := &Service{
@@ -798,6 +814,17 @@ func TestSyncPeerRelaysAggregatesPeerSelectionScores(t *testing.T) {
 	}
 	if err := s.syncPeerRelays(context.Background()); err != nil {
 		t.Fatalf("syncPeerRelays: %v", err)
+	}
+	relays := s.snapshotPeerRelays()
+	foundMiddle := false
+	for _, desc := range relays {
+		if desc.RelayID == "middle-shared" && desc.Role == "micro-relay" {
+			foundMiddle = true
+			break
+		}
+	}
+	if !foundMiddle {
+		t.Fatalf("expected micro-relay descriptor to be retained from peer sync")
 	}
 	scores := s.snapshotPeerScores()
 	score, ok := scores[relayKey("exit-shared", "exit")]
@@ -835,6 +862,20 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 		Endpoint:   "127.0.0.1:51821",
 		ValidUntil: now.Add(time.Minute),
 	}, privB)
+	relayAMiddle := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "middle-shared",
+		Role:       "micro-relay",
+		OperatorID: "op-middle-shared",
+		Endpoint:   "127.0.0.1:51823",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	relayBMiddle := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "middle-shared",
+		Role:       "micro-relay",
+		OperatorID: "op-middle-shared",
+		Endpoint:   "127.0.0.1:51823",
+		ValidUntil: now.Add(time.Minute),
+	}, privB)
 	trustA := proto.RelayTrustAttestationFeedResponse{
 		Operator:    "op-a",
 		GeneratedAt: now.Unix(),
@@ -851,6 +892,18 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 				BondScore:    0.5,
 				StakeScore:   0.4,
 				Confidence:   0.9,
+			},
+			{
+				RelayID:      "middle-shared",
+				Role:         "micro-relay",
+				OperatorID:   "op-middle-shared",
+				Reputation:   0.4,
+				Uptime:       0.3,
+				Capacity:     0.2,
+				AbusePenalty: 0.2,
+				BondScore:    0.3,
+				StakeScore:   0.2,
+				Confidence:   0.7,
 			},
 		},
 	}
@@ -876,6 +929,18 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 				StakeScore:   0.2,
 				Confidence:   0.8,
 			},
+			{
+				RelayID:      "middle-shared",
+				Role:         "micro-relay",
+				OperatorID:   "op-middle-shared",
+				Reputation:   0.5,
+				Uptime:       0.4,
+				Capacity:     0.3,
+				AbusePenalty: 0.25,
+				BondScore:    0.35,
+				StakeScore:   0.25,
+				Confidence:   0.75,
+			},
 		},
 	}
 	trustBSig, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
@@ -885,10 +950,10 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 	trustB.Signature = trustBSig
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
-		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA, relayAMiddle}}),
 		urlA + "/v1/trust-attestations": jsonResp(trustA),
 		urlB + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubB)}),
-		urlB + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
+		urlB + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB, relayBMiddle}}),
 		urlB + "/v1/trust-attestations": jsonResp(trustB),
 	}
 	s := &Service{
@@ -910,6 +975,17 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 	}
 	if err := s.syncPeerRelays(context.Background()); err != nil {
 		t.Fatalf("syncPeerRelays: %v", err)
+	}
+	relays := s.snapshotPeerRelays()
+	foundMiddle := false
+	for _, desc := range relays {
+		if desc.RelayID == "middle-shared" && desc.Role == "micro-relay" {
+			foundMiddle = true
+			break
+		}
+	}
+	if !foundMiddle {
+		t.Fatalf("expected micro-relay descriptor to be retained from peer sync")
 	}
 	att := s.snapshotPeerTrust()
 	got, ok := att[relayKey("exit-shared", "exit")]
