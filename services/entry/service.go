@@ -1140,7 +1140,8 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 	if exitID != "" && middleRelayID == exitID {
 		return "middle-relay-equals-exit"
 	}
-	desc, err := s.resolveRelayDescriptor(ctx, middleRelayID)
+	useCache := !(s.betaStrict || s.prodStrict)
+	desc, err := s.resolveRelayDescriptorWithCachePolicy(ctx, middleRelayID, useCache)
 	if err != nil {
 		return "unknown-middle-relay"
 	}
@@ -1163,6 +1164,10 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 }
 
 func (s *Service) resolveRelayDescriptor(ctx context.Context, relayID string) (proto.RelayDescriptor, error) {
+	return s.resolveRelayDescriptorWithCachePolicy(ctx, relayID, true)
+}
+
+func (s *Service) resolveRelayDescriptorWithCachePolicy(ctx context.Context, relayID string, useCache bool) (proto.RelayDescriptor, error) {
 	relayID = strings.TrimSpace(relayID)
 	if relayID == "" {
 		return proto.RelayDescriptor{}, fmt.Errorf("relay id required")
@@ -1172,11 +1177,13 @@ func (s *Service) resolveRelayDescriptor(ctx context.Context, relayID string) (p
 	requiredOperators := maxInt(1, s.directoryMinOperators)
 	requiredVotes := maxInt(1, s.directoryMinVotes)
 
-	s.mu.RLock()
-	cached, ok := s.relayDescCache[relayID]
-	s.mu.RUnlock()
-	if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
-		return cached.desc, nil
+	if useCache {
+		s.mu.RLock()
+		cached, ok := s.relayDescCache[relayID]
+		s.mu.RUnlock()
+		if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
+			return cached.desc, nil
+		}
 	}
 
 	candidates := make(map[string]relayDescriptorCandidate)
