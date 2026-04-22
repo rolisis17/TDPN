@@ -122,7 +122,7 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=1' 
   cat /tmp/integration_profile_compare_campaign_check_baseline.log
   exit 1
 fi
-if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 1 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .observed.selection_policy_evidence.selected_summaries_total == 1 and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_quality_evidence")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("micro_relay_quality_status_not_pass")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_demotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_promotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_trust_tier_port_unlock_policy")) != null and .decision_diagnostics.m4_policy.gate_summary.required_total == 5 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 5 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 5 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_status_pass.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_promotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "fail"' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 1 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .observed.selection_policy_evidence.selected_summaries_total == 1 and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and .inputs.policy.require_runtime_actuation_status_pass == true and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_quality_evidence")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("micro_relay_quality_status_not_pass")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_demotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_promotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_trust_tier_port_unlock_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .decision_diagnostics.m4_policy.gate_summary.required_total == 6 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 6 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 6 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_status_pass.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_promotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail"' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
   echo "baseline default m4 fail-closed summary missing expected fields"
   cat "$BASELINE_SUMMARY"
   exit 1
@@ -142,6 +142,7 @@ M4_OPT_OUT_SUMMARY="$TMP_DIR/campaign_check_m4_opt_out_baseline.json"
   --require-micro-relay-demotion-policy 0 \
   --require-micro-relay-promotion-policy 0 \
   --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 0 \
   --summary-json "$M4_OPT_OUT_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_opt_out.log 2>&1
 
 if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_m4_opt_out.log; then
@@ -149,7 +150,7 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/
   cat /tmp/integration_profile_compare_campaign_check_m4_opt_out.log
   exit 1
 fi
-if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | length) == 0 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .inputs.policy.require_micro_relay_quality_evidence == false and .inputs.policy.require_micro_relay_quality_status_pass == false and .inputs.policy.require_micro_relay_demotion_policy == false and .inputs.policy.require_micro_relay_promotion_policy == false and .inputs.policy.require_trust_tier_port_unlock_policy == false and .decision_diagnostics.m4_policy.gate_summary.required_total == 0 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "not-required"' "$M4_OPT_OUT_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | length) == 0 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .inputs.policy.require_micro_relay_quality_evidence == false and .inputs.policy.require_micro_relay_quality_status_pass == false and .inputs.policy.require_micro_relay_demotion_policy == false and .inputs.policy.require_micro_relay_promotion_policy == false and .inputs.policy.require_trust_tier_port_unlock_policy == false and .inputs.policy.require_runtime_actuation_status_pass == false and .decision_diagnostics.m4_policy.gate_summary.required_total == 0 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "not-required" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "not-required"' "$M4_OPT_OUT_SUMMARY" >/dev/null 2>&1; then
   echo "explicit m4 policy opt-out summary missing expected fields"
   cat "$M4_OPT_OUT_SUMMARY"
   exit 1
@@ -361,6 +362,7 @@ M4_PASS_SUMMARY="$TMP_DIR/campaign_check_m4_pass.json"
   --require-micro-relay-demotion-policy 1 \
   --require-micro-relay-promotion-policy 1 \
   --require-trust-tier-port-unlock-policy 1 \
+  --require-runtime-actuation-status-pass 1 \
   --summary-json "$M4_PASS_SUMMARY" \
   --print-summary-json 1 >/tmp/integration_profile_compare_campaign_check_m4_pass.log 2>&1
 if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_m4_pass.log; then
@@ -368,7 +370,7 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/
   cat /tmp/integration_profile_compare_campaign_check_m4_pass.log
   exit 1
 fi
-if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and .observed.micro_relay_policy_evidence.quality_evidence_present == true and .observed.micro_relay_policy_evidence.quality_status_pass == true and .observed.micro_relay_policy_evidence.demotion_policy_present == true and .observed.micro_relay_policy_evidence.promotion_policy_present == true and .observed.micro_relay_policy_evidence.trust_tier_port_unlock_policy_present == true and (.decision_diagnostics.m4_policy.unmet_requirements | length) == 0 and .decision_diagnostics.m4_policy.gate_summary.required_total == 5 and .decision_diagnostics.m4_policy.gate_summary.required_passed == 5 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.selected_summaries_total == 0' "$M4_PASS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and .inputs.policy.require_runtime_actuation_status_pass == true and .observed.micro_relay_policy_evidence.quality_evidence_present == true and .observed.micro_relay_policy_evidence.quality_status_pass == true and .observed.micro_relay_policy_evidence.demotion_policy_present == true and .observed.micro_relay_policy_evidence.promotion_policy_present == true and .observed.micro_relay_policy_evidence.trust_tier_port_unlock_policy_present == true and .observed.micro_relay_policy_evidence.runtime_actuation_status_pass == true and (.decision_diagnostics.m4_policy.unmet_requirements | length) == 0 and .decision_diagnostics.m4_policy.gate_summary.required_total == 6 and .decision_diagnostics.m4_policy.gate_summary.required_passed == 6 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.observed == true' "$M4_PASS_SUMMARY" >/dev/null 2>&1; then
   echo "m4 pass summary missing expected fields"
   cat "$M4_PASS_SUMMARY"
   exit 1
@@ -490,6 +492,7 @@ M4_WARN_SUMMARY="$TMP_DIR/campaign_check_m4_warn.json"
   --require-micro-relay-demotion-policy 0 \
   --require-micro-relay-promotion-policy 0 \
   --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 0 \
   --fail-on-no-go 0 \
   --summary-json "$M4_WARN_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_warn.log 2>&1
 if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' /tmp/integration_profile_compare_campaign_check_m4_warn.log; then
@@ -689,6 +692,29 @@ fi
 if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.observed == false and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.selected_summaries_total == 2 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.selected_summaries_with_signal == 1 and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_demotion_policy")) != null' "$M4_PARTIAL_SELECTED_SUMMARY" >/dev/null 2>&1; then
   echo "m4 partial selected-summary coverage did not fail-close as expected"
   cat "$M4_PARTIAL_SELECTED_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] runtime actuation gate fail-close"
+M4_RUNTIME_ACTUATION_ONLY_SUMMARY="$TMP_DIR/campaign_check_m4_runtime_actuation_only_fail.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_M4_WARN_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --fail-on-no-go 0 \
+  --summary-json "$M4_RUNTIME_ACTUATION_ONLY_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_runtime_actuation_only.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' /tmp/integration_profile_compare_campaign_check_m4_runtime_actuation_only.log; then
+  echo "expected NO-GO non-blocking output for runtime-actuation-only run not found"
+  cat /tmp/integration_profile_compare_campaign_check_m4_runtime_actuation_only.log
+  exit 1
+fi
+if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 0 and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .decision_diagnostics.m4_policy.gate_summary.required_total == 1 and .decision_diagnostics.m4_policy.gate_summary.required_passed == 0 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 1 and .decision_diagnostics.m4_policy.gate_summary.failed_gate_ids == ["runtime_actuation_status_pass"] and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail"' "$M4_RUNTIME_ACTUATION_ONLY_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime-actuation-only summary missing expected fail-close fields"
+  cat "$M4_RUNTIME_ACTUATION_ONLY_SUMMARY"
   exit 1
 fi
 

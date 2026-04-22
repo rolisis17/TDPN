@@ -29,6 +29,7 @@ Usage:
     [--require-micro-relay-demotion-policy [0|1]] \
     [--require-micro-relay-promotion-policy [0|1]] \
     [--require-trust-tier-port-unlock-policy [0|1]] \
+    [--require-runtime-actuation-status-pass [0|1]] \
     [--fail-on-no-go [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -555,6 +556,7 @@ require_micro_relay_quality_status_pass="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIR
 require_micro_relay_demotion_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-1}"
 require_micro_relay_promotion_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-1}"
 require_trust_tier_port_unlock_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-1}"
+require_runtime_actuation_status_pass="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_RUNTIME_ACTUATION_STATUS_PASS:-1}"
 fail_on_no_go="${PROFILE_COMPARE_CAMPAIGN_CHECK_FAIL_ON_NO_GO:-1}"
 show_json="${PROFILE_COMPARE_CAMPAIGN_CHECK_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_CHECK_PRINT_SUMMARY_JSON:-0}"
@@ -696,6 +698,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-runtime-actuation-status-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_runtime_actuation_status_pass="${2:-}"
+        shift 2
+      else
+        require_runtime_actuation_status_pass="1"
+        shift
+      fi
+      ;;
     --fail-on-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_no_go="${2:-}"
@@ -749,6 +760,7 @@ bool_arg_or_die "--require-micro-relay-quality-status-pass" "$require_micro_rela
 bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro_relay_demotion_policy"
 bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
 bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
+bool_arg_or_die "--require-runtime-actuation-status-pass" "$require_runtime_actuation_status_pass"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -1065,6 +1077,15 @@ elif ((selection_policy_selected_summaries_total > 0 \
   trust_tier_port_unlock_policy_present=1
 fi
 
+runtime_actuation_status_pass=0
+if ((micro_relay_quality_evidence_present == 1 \
+    && micro_relay_quality_status_pass == 1 \
+    && micro_relay_demotion_policy_present == 1 \
+    && micro_relay_promotion_policy_present == 1 \
+    && trust_tier_port_unlock_policy_present == 1)); then
+  runtime_actuation_status_pass=1
+fi
+
 declare -a errors=()
 if ((${#numeric_validation_issues[@]} > 0)); then
   errors+=("campaign/trend numeric fields invalid or non-numeric: $(IFS=,; echo "${numeric_validation_issues[*]}")")
@@ -1148,6 +1169,10 @@ if [[ "$require_trust_tier_port_unlock_policy" == "1" && "$trust_tier_port_unloc
   errors+=("trust-tier port-unlock policy evidence is required but not present")
   m4_policy_issues+=("missing_trust_tier_port_unlock_policy")
 fi
+if [[ "$require_runtime_actuation_status_pass" == "1" && "$runtime_actuation_status_pass" != "1" ]]; then
+  errors+=("runtime actuation status must be pass (micro_relay_quality_evidence_present=$micro_relay_quality_evidence_present micro_relay_quality_status_pass=$micro_relay_quality_status_pass micro_relay_demotion_policy_present=$micro_relay_demotion_policy_present micro_relay_promotion_policy_present=$micro_relay_promotion_policy_present trust_tier_port_unlock_policy_present=$trust_tier_port_unlock_policy_present)")
+  m4_policy_issues+=("runtime_actuation_status_not_pass")
+fi
 
 decision="GO"
 status="ok"
@@ -1221,6 +1246,7 @@ jq -n \
   --argjson require_micro_relay_demotion_policy "$require_micro_relay_demotion_policy" \
   --argjson require_micro_relay_promotion_policy "$require_micro_relay_promotion_policy" \
   --argjson require_trust_tier_port_unlock_policy "$require_trust_tier_port_unlock_policy" \
+  --argjson require_runtime_actuation_status_pass "$require_runtime_actuation_status_pass" \
   --argjson selection_policy_evidence_present "$selection_policy_evidence_present" \
   --argjson selection_policy_evidence_valid "$selection_policy_evidence_valid" \
   --argjson campaign_selection_policy_present "$campaign_selection_policy_present" \
@@ -1238,6 +1264,7 @@ jq -n \
   --argjson micro_relay_demotion_policy_present "$micro_relay_demotion_policy_present" \
   --argjson micro_relay_promotion_policy_present "$micro_relay_promotion_policy_present" \
   --argjson trust_tier_port_unlock_policy_present "$trust_tier_port_unlock_policy_present" \
+  --argjson runtime_actuation_status_pass "$runtime_actuation_status_pass" \
   --argjson campaign_micro_relay_quality_evidence_present "$campaign_micro_relay_quality_evidence_present" \
   --argjson campaign_micro_relay_quality_status_pass "$campaign_micro_relay_quality_status_pass" \
   --argjson campaign_micro_relay_demotion_policy_present "$campaign_micro_relay_demotion_policy_present" \
@@ -1284,6 +1311,7 @@ jq -n \
         require_micro_relay_demotion_policy: ($require_micro_relay_demotion_policy == 1),
         require_micro_relay_promotion_policy: ($require_micro_relay_promotion_policy == 1),
         require_trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1),
+        require_runtime_actuation_status_pass: ($require_runtime_actuation_status_pass == 1),
         fail_on_no_go: ($fail_on_no_go == 1)
       }
     },
@@ -1322,6 +1350,7 @@ jq -n \
         demotion_policy_present: ($micro_relay_demotion_policy_present == 1),
         promotion_policy_present: ($micro_relay_promotion_policy_present == 1),
         trust_tier_port_unlock_policy_present: ($trust_tier_port_unlock_policy_present == 1),
+        runtime_actuation_status_pass: ($runtime_actuation_status_pass == 1),
         campaign_summary_quality_evidence_present: ($campaign_micro_relay_quality_evidence_present == 1),
         campaign_summary_quality_status_pass: ($campaign_micro_relay_quality_status_pass == 1),
         campaign_summary_demotion_policy_present: ($campaign_micro_relay_demotion_policy_present == 1),
@@ -1344,7 +1373,8 @@ jq -n \
             quality_status_pass: ($require_micro_relay_quality_status_pass == 1),
             demotion_policy: ($require_micro_relay_demotion_policy == 1),
             promotion_policy: ($require_micro_relay_promotion_policy == 1),
-            trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1)
+            trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1),
+            runtime_actuation_status_pass: ($require_runtime_actuation_status_pass == 1)
           },
           observed_details: {
             campaign_summary: $campaign_m4_observed,
@@ -1467,6 +1497,25 @@ jq -n \
               actionable_reason: (
                 if ($require_trust_tier_port_unlock_policy == 1 and $trust_tier_port_unlock_policy_present != 1) then
                   "trust-tier port-unlock policy evidence missing; wire trust-tier port-unlock policy evidence and rerun campaign-check"
+                else
+                  null
+                end
+              )
+            },
+            runtime_actuation_status_pass: {
+              required: ($require_runtime_actuation_status_pass == 1),
+              observed: ($runtime_actuation_status_pass == 1),
+              status: (
+                if ($require_runtime_actuation_status_pass == 1) then
+                  (if ($runtime_actuation_status_pass == 1) then "pass" else "fail" end)
+                else
+                  "not-required"
+                end
+              ),
+              blocking: ($require_runtime_actuation_status_pass == 1 and $runtime_actuation_status_pass != 1),
+              actionable_reason: (
+                if ($require_runtime_actuation_status_pass == 1 and $runtime_actuation_status_pass != 1) then
+                  "runtime actuation status is not pass; ensure micro-relay quality evidence/status, adaptive demotion/promotion policies, and trust-tier port-unlock policy are all present and passing, then rerun campaign-check"
                 else
                   null
                 end

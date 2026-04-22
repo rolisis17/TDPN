@@ -37,6 +37,7 @@ Usage:
     [--require-micro-relay-demotion-policy [0|1]] \
     [--require-micro-relay-promotion-policy [0|1]] \
     [--require-trust-tier-port-unlock-policy [0|1]] \
+    [--require-runtime-actuation-status-pass [0|1]] \
     [--campaign-execution-mode docker|local] \
     [--campaign-directory-urls URL[,URL...]] \
     [--campaign-bootstrap-directory URL] \
@@ -578,6 +579,7 @@ require_micro_relay_quality_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQU
 require_micro_relay_demotion_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-}"
 require_micro_relay_promotion_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-}"
 require_trust_tier_port_unlock_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-}"
+require_runtime_actuation_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_RUNTIME_ACTUATION_STATUS_PASS:-}"
 campaign_execution_mode="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXECUTION_MODE:-}"
 campaign_directory_urls="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_DIRECTORY_URLS:-}"
 campaign_bootstrap_directory="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_BOOTSTRAP_DIRECTORY:-}"
@@ -814,6 +816,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-runtime-actuation-status-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_runtime_actuation_status_pass="${2:-}"
+        shift 2
+      else
+        require_runtime_actuation_status_pass="1"
+        shift
+      fi
+      ;;
     --campaign-execution-mode)
       campaign_execution_mode="${2:-}"
       shift 2
@@ -976,6 +987,7 @@ optional_bool_arg_or_die "--require-micro-relay-quality-status-pass" "$require_m
 optional_bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro_relay_demotion_policy"
 optional_bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
 optional_bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
+optional_bool_arg_or_die "--require-runtime-actuation-status-pass" "$require_runtime_actuation_status_pass"
 
 for int_arg in "$require_min_runs_total" "$require_max_runs_fail" "$require_max_runs_warn" "$require_min_runs_with_summary"; do
   if [[ -n "$int_arg" && ! "$int_arg" =~ ^[0-9]+$ ]]; then
@@ -1462,6 +1474,9 @@ fi
 if [[ -n "$require_trust_tier_port_unlock_policy" ]]; then
   check_cmd+=(--require-trust-tier-port-unlock-policy "$require_trust_tier_port_unlock_policy")
 fi
+if [[ -n "$require_runtime_actuation_status_pass" ]]; then
+  check_cmd+=(--require-runtime-actuation-status-pass "$require_runtime_actuation_status_pass")
+fi
 
 check_cmd_line="$(quote_cmd "${check_cmd[@]}")"
 
@@ -1751,6 +1766,7 @@ jq -n \
   --arg require_micro_relay_demotion_policy "$require_micro_relay_demotion_policy" \
   --arg require_micro_relay_promotion_policy "$require_micro_relay_promotion_policy" \
   --arg require_trust_tier_port_unlock_policy "$require_trust_tier_port_unlock_policy" \
+  --arg require_runtime_actuation_status_pass "$require_runtime_actuation_status_pass" \
   --arg campaign_execution_mode "$campaign_execution_mode" \
   --arg campaign_execution_mode_effective "$campaign_execution_mode_effective" \
   --arg campaign_directory_urls "$campaign_directory_urls" \
@@ -1844,7 +1860,8 @@ jq -n \
         require_micro_relay_quality_status_pass: (if $require_micro_relay_quality_status_pass == "" then null else ($require_micro_relay_quality_status_pass | tonumber) end),
         require_micro_relay_demotion_policy: (if $require_micro_relay_demotion_policy == "" then null else ($require_micro_relay_demotion_policy | tonumber) end),
         require_micro_relay_promotion_policy: (if $require_micro_relay_promotion_policy == "" then null else ($require_micro_relay_promotion_policy | tonumber) end),
-        require_trust_tier_port_unlock_policy: (if $require_trust_tier_port_unlock_policy == "" then null else ($require_trust_tier_port_unlock_policy | tonumber) end)
+        require_trust_tier_port_unlock_policy: (if $require_trust_tier_port_unlock_policy == "" then null else ($require_trust_tier_port_unlock_policy | tonumber) end),
+        require_runtime_actuation_status_pass: (if $require_runtime_actuation_status_pass == "" then null else ($require_runtime_actuation_status_pass | tonumber) end)
       },
       campaign_refresh_overrides: {
         execution_mode: (if $campaign_execution_mode == "" then null else $campaign_execution_mode end),
