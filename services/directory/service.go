@@ -200,6 +200,10 @@ const directoryProviderReplayStoreMaxBytes int64 = 4 * 1024 * 1024
 const defaultProviderIssuerPubCacheTTL = 30 * time.Second
 const peerGossipPubKeyCacheTTL = 5 * time.Minute
 const peerGossipPubKeyFetchMinInterval = 15 * time.Second
+const microRelayMinReputationScore = 0.5
+const microRelayMinUptimeScore = 0.5
+const microRelayMinCapacityScore = 0.5
+const microRelayMaxAbusePenalty = 0.5
 
 var errProviderRelayOwnershipConflict = errors.New("provider relay owned by different operator")
 
@@ -1173,14 +1177,12 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			}
 			candidates[key][fingerprint] = cand
 		}
-		for key, score := range scores {
-			role := strings.TrimSpace(score.Role)
-			if role == "" {
-				role = "exit"
-			}
-			if role != "exit" || strings.TrimSpace(score.RelayID) == "" {
+		for _, score := range scores {
+			role, ok := canonicalizeSignalRole(score.Role)
+			if !ok || strings.TrimSpace(score.RelayID) == "" {
 				continue
 			}
+			key := relayKey(score.RelayID, role)
 			if !markCandidateVoter(scoreVoters, key, sourceOperator) {
 				continue
 			}
@@ -1196,14 +1198,12 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			cand.stakeScore += clampScore(score.StakeScore)
 			scoreCandidates[key] = cand
 		}
-		for key, att := range attestations {
-			role := strings.TrimSpace(att.Role)
-			if role == "" {
-				role = "exit"
-			}
-			if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+		for _, att := range attestations {
+			role, ok := canonicalizeSignalRole(att.Role)
+			if !ok || strings.TrimSpace(att.RelayID) == "" {
 				continue
 			}
+			key := relayKey(att.RelayID, role)
 			if !markCandidateVoter(trustVoters, key, sourceOperator) {
 				continue
 			}
@@ -1483,14 +1483,12 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 		}
 		success++
 		successOperators[sourceOperator] = struct{}{}
-		for key, att := range attestations {
-			role := strings.TrimSpace(att.Role)
-			if role == "" {
-				role = "exit"
-			}
-			if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+		for _, att := range attestations {
+			role, ok := canonicalizeSignalRole(att.Role)
+			if !ok || strings.TrimSpace(att.RelayID) == "" {
 				continue
 			}
+			key := relayKey(att.RelayID, role)
 			if !markCandidateVoter(trustVoters, key, sourceOperator) {
 				continue
 			}
@@ -1687,11 +1685,8 @@ func (s *Service) fetchIssuerTrustAttestations(ctx context.Context, issuerURL st
 	}
 	out := make(map[string]proto.RelayTrustAttestation, len(feed.Attestations))
 	for _, att := range feed.Attestations {
-		role := strings.TrimSpace(att.Role)
-		if role == "" {
-			role = "exit"
-		}
-		if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+		role, ok := canonicalizeSignalRole(att.Role)
+		if !ok || strings.TrimSpace(att.RelayID) == "" {
 			continue
 		}
 		key := relayKey(att.RelayID, role)
@@ -1901,11 +1896,8 @@ func (s *Service) fetchPeerSelectionScores(ctx context.Context, peerURL string, 
 	}
 	out := make(map[string]proto.RelaySelectionScore, len(feed.Scores))
 	for _, score := range feed.Scores {
-		role := strings.TrimSpace(score.Role)
-		if role == "" {
-			role = "exit"
-		}
-		if role != "exit" || strings.TrimSpace(score.RelayID) == "" {
+		role, ok := canonicalizeSignalRole(score.Role)
+		if !ok || strings.TrimSpace(score.RelayID) == "" {
 			continue
 		}
 		key := relayKey(score.RelayID, role)
@@ -1956,11 +1948,8 @@ func (s *Service) fetchPeerTrustAttestations(ctx context.Context, peerURL string
 	}
 	out := make(map[string]proto.RelayTrustAttestation, len(feed.Attestations))
 	for _, att := range feed.Attestations {
-		role := strings.TrimSpace(att.Role)
-		if role == "" {
-			role = "exit"
-		}
-		if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+		role, ok := canonicalizeSignalRole(att.Role)
+		if !ok || strings.TrimSpace(att.RelayID) == "" {
 			continue
 		}
 		key := relayKey(att.RelayID, role)
@@ -3341,6 +3330,21 @@ func canonicalizePeerRelayRole(raw string) (string, error) {
 	}
 }
 
+func canonicalizeSignalRole(raw string) (string, bool) {
+	role := strings.TrimSpace(raw)
+	if role == "" {
+		role = "exit"
+	}
+	canonicalRole, err := canonicalizePeerRelayRole(role)
+	if err != nil {
+		return "", false
+	}
+	if canonicalRole != "exit" && canonicalRole != "micro-relay" {
+		return "", false
+	}
+	return canonicalRole, true
+}
+
 func validateProviderRelayUpsertShape(req proto.ProviderRelayUpsertRequest) error {
 	if _, err := canonicalizeProviderRelayRole(req.Role); err != nil {
 		return err
@@ -4279,7 +4283,63 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 		seen[key] = struct{}{}
 		merged = append(merged, desc)
 	}
-	return merged
+	peerScores := s.snapshotPeerScores()
+	peerTrust := s.snapshotPeerTrust()
+	issuerTrust := s.snapshotIssuerTrust()
+	nowUnix := now.Unix()
+	actuated := make([]proto.RelayDescriptor, 0, len(merged))
+	for _, desc := range merged {
+		if desc.Role == "micro-relay" &&
+			!s.microRelayEligibleForPublication(desc.RelayID, nowUnix, peerScores, peerTrust, issuerTrust) {
+			continue
+		}
+		actuated = append(actuated, desc)
+	}
+	return actuated
+}
+
+func (s *Service) microRelayEligibleForPublication(
+	relayID string,
+	nowUnix int64,
+	peerScores map[string]proto.RelaySelectionScore,
+	peerTrust map[string]proto.RelayTrustAttestation,
+	issuerTrust map[string]proto.RelayTrustAttestation,
+) bool {
+	relayID = strings.TrimSpace(relayID)
+	if relayID == "" {
+		return false
+	}
+	key := relayKey(relayID, "micro-relay")
+	if score, ok := peerScores[key]; ok && !microRelayScoreEligible(score) {
+		return false
+	}
+	if att, ok := peerTrust[key]; ok {
+		if _, _, disputed := s.activeDispute(att, nowUnix); disputed {
+			return false
+		}
+	}
+	if att, ok := issuerTrust[key]; ok {
+		if _, _, disputed := s.activeDispute(att, nowUnix); disputed {
+			return false
+		}
+	}
+	return true
+}
+
+func microRelayScoreEligible(score proto.RelaySelectionScore) bool {
+	if score.Reputation > 0 && score.Reputation < microRelayMinReputationScore {
+		return false
+	}
+	if score.Uptime > 0 && score.Uptime < microRelayMinUptimeScore {
+		return false
+	}
+	if score.Capacity > 0 && score.Capacity < microRelayMinCapacityScore {
+		return false
+	}
+	if score.AbusePenalty > 0 && score.AbusePenalty > microRelayMaxAbusePenalty {
+		return false
+	}
+	return true
 }
 
 func (s *Service) buildSelectionScores(relays []proto.RelayDescriptor) []proto.RelaySelectionScore {
