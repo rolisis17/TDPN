@@ -718,6 +718,466 @@ if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 0 and (.decisi
   exit 1
 fi
 
+echo "[profile-compare-campaign-check] runtime actuation explicit pass overrides composite"
+CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS_JSON="$TMP_DIR/profile_compare_campaign_summary_m4_runtime_explicit_pass.json"
+cat >"$CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS_JSON" <<EOF_CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass",
+  "summary": {
+    "runs_total": 5,
+    "runs_pass": 5,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 5,
+    "m4_micro_relay_evidence": {
+      "available": true,
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "poor",
+        "quality_score": 32,
+        "quality_score_avg": 32
+      },
+      "adaptive_demotion_promotion": {
+        "available": false
+      },
+      "trust_tier_port_unlock_wiring": {
+        "present": false,
+        "evidence_hits": 0
+      },
+      "runtime_actuation": {
+        "available": true,
+        "status": "pass",
+        "status_pass": true,
+        "source": "runtime-controller"
+      }
+    }
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced remains best"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass",
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [],
+  "runs": []
+}
+EOF_CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS
+
+M4_RUNTIME_EXPLICIT_PASS_SUMMARY="$TMP_DIR/campaign_check_m4_runtime_explicit_pass.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --summary-json "$M4_RUNTIME_EXPLICIT_PASS_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_runtime_explicit_pass.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_m4_runtime_explicit_pass.log; then
+  echo "expected GO output for runtime-explicit-pass run not found"
+  cat /tmp/integration_profile_compare_campaign_check_m4_runtime_explicit_pass.log
+  exit 1
+fi
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .observed.micro_relay_policy_evidence.runtime_actuation_status_pass == true and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_campaign_summary" and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_observed == true and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_pass == true and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_campaign_summary"' "$M4_RUNTIME_EXPLICIT_PASS_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime explicit pass summary missing expected fields"
+  cat "$M4_RUNTIME_EXPLICIT_PASS_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] runtime actuation explicit fail overrides composite"
+CAMPAIGN_M4_RUNTIME_EXPLICIT_FAIL_JSON="$TMP_DIR/profile_compare_campaign_summary_m4_runtime_explicit_fail.json"
+cat >"$CAMPAIGN_M4_RUNTIME_EXPLICIT_FAIL_JSON" <<EOF_CAMPAIGN_M4_RUNTIME_EXPLICIT_FAIL
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass",
+  "summary": {
+    "runs_total": 5,
+    "runs_pass": 5,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 5,
+    "m4_micro_relay_evidence": {
+      "available": true,
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "good",
+        "quality_score": 91,
+        "quality_score_avg": 91
+      },
+      "adaptive_demotion_promotion": {
+        "available": true,
+        "demotion_signal_count": 0,
+        "promotion_signal_count": 4,
+        "demotion_candidate": false,
+        "promotion_candidate": true
+      },
+      "trust_tier_port_unlock_wiring": {
+        "present": true,
+        "evidence_hits": 2
+      },
+      "runtime_actuation": {
+        "available": true,
+        "status": "fail",
+        "status_pass": false,
+        "source": "runtime-controller"
+      }
+    }
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced remains best"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass",
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [],
+  "runs": []
+}
+EOF_CAMPAIGN_M4_RUNTIME_EXPLICIT_FAIL
+
+M4_RUNTIME_EXPLICIT_FAIL_SUMMARY="$TMP_DIR/campaign_check_m4_runtime_explicit_fail.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_M4_RUNTIME_EXPLICIT_FAIL_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --fail-on-no-go 0 \
+  --summary-json "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY" >/tmp/integration_profile_compare_campaign_check_m4_runtime_explicit_fail.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' /tmp/integration_profile_compare_campaign_check_m4_runtime_explicit_fail.log; then
+  echo "expected NO-GO output for runtime-explicit-fail run not found"
+  cat /tmp/integration_profile_compare_campaign_check_m4_runtime_explicit_fail.log
+  exit 1
+fi
+if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 0 and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_campaign_summary" and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_observed == true and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_pass == false and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_campaign_summary"' "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime explicit fail summary missing expected fields"
+  cat "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] runtime actuation explicit root signal without m4 object"
+CAMPAIGN_RUNTIME_ROOT_SIGNAL_JSON="$TMP_DIR/profile_compare_campaign_summary_runtime_root_signal.json"
+cat >"$CAMPAIGN_RUNTIME_ROOT_SIGNAL_JSON" <<EOF_CAMPAIGN_RUNTIME_ROOT_SIGNAL
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "summary": {
+    "runs_total": 3,
+    "runs_pass": 3,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 3,
+    "runtime_actuation": {
+      "available": true,
+      "status": "pass",
+      "status_pass": true,
+      "source": "runtime-controller"
+    }
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [],
+  "runs": []
+}
+EOF_CAMPAIGN_RUNTIME_ROOT_SIGNAL
+
+RUNTIME_ROOT_SIGNAL_SUMMARY="$TMP_DIR/campaign_check_runtime_root_signal.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_RUNTIME_ROOT_SIGNAL_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --summary-json "$RUNTIME_ROOT_SIGNAL_SUMMARY" >/tmp/integration_profile_compare_campaign_check_runtime_root_signal.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_runtime_root_signal.log; then
+  echo "expected GO output for runtime root signal run not found"
+  cat /tmp/integration_profile_compare_campaign_check_runtime_root_signal.log
+  exit 1
+fi
+if ! jq -e '.decision == "GO" and .status == "ok" and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_campaign_summary" and .observed.micro_relay_policy_evidence.runtime_actuation_status_pass == true and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_campaign_summary" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "pass"' "$RUNTIME_ROOT_SIGNAL_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime root signal summary missing expected explicit fields"
+  cat "$RUNTIME_ROOT_SIGNAL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] runtime actuation placeholder does not shadow explicit fail"
+CAMPAIGN_RUNTIME_PLACEHOLDER_SHADOW_JSON="$TMP_DIR/profile_compare_campaign_summary_runtime_placeholder_shadow.json"
+cat >"$CAMPAIGN_RUNTIME_PLACEHOLDER_SHADOW_JSON" <<EOF_CAMPAIGN_RUNTIME_PLACEHOLDER_SHADOW
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "summary": {
+    "runs_total": 3,
+    "runs_pass": 3,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 3,
+    "m4_micro_relay_evidence": {
+      "runtime_actuation": {},
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "good",
+        "quality_score": 90
+      }
+    },
+    "runtime_actuation": {
+      "available": true,
+      "status": "fail",
+      "status_pass": false,
+      "source": "runtime-controller"
+    }
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [],
+  "runs": []
+}
+EOF_CAMPAIGN_RUNTIME_PLACEHOLDER_SHADOW
+
+RUNTIME_PLACEHOLDER_SHADOW_SUMMARY="$TMP_DIR/campaign_check_runtime_placeholder_shadow.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_RUNTIME_PLACEHOLDER_SHADOW_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --fail-on-no-go 0 \
+  --summary-json "$RUNTIME_PLACEHOLDER_SHADOW_SUMMARY" >/tmp/integration_profile_compare_campaign_check_runtime_placeholder_shadow.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' /tmp/integration_profile_compare_campaign_check_runtime_placeholder_shadow.log; then
+  echo "expected NO-GO output for runtime placeholder shadow run not found"
+  cat /tmp/integration_profile_compare_campaign_check_runtime_placeholder_shadow.log
+  exit 1
+fi
+if ! jq -e '.decision == "NO-GO" and .status == "fail" and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_campaign_summary" and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_observed == true and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_pass == false and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_campaign_summary" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail"' "$RUNTIME_PLACEHOLDER_SHADOW_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime placeholder shadow summary missing expected explicit fail fields"
+  cat "$RUNTIME_PLACEHOLDER_SHADOW_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] runtime actuation selected-summary partial explicit fail is fail-closed"
+SELECTED_RUNTIME_FAIL="$TMP_DIR/profile_compare_selected_runtime_fail.json"
+cat >"$SELECTED_RUNTIME_FAIL" <<'EOF_SELECTED_RUNTIME_FAIL'
+{
+  "summary": {
+    "m4_micro_relay_evidence": {
+      "runtime_actuation": {
+        "available": true,
+        "status": "fail",
+        "status_pass": false,
+        "source": "runtime-controller"
+      }
+    }
+  }
+}
+EOF_SELECTED_RUNTIME_FAIL
+
+SELECTED_RUNTIME_MISSING="$TMP_DIR/profile_compare_selected_runtime_missing.json"
+cat >"$SELECTED_RUNTIME_MISSING" <<'EOF_SELECTED_RUNTIME_MISSING'
+{
+  "summary": {
+    "m4_micro_relay_evidence": {
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "good",
+        "quality_score": 90
+      }
+    }
+  }
+}
+EOF_SELECTED_RUNTIME_MISSING
+
+CAMPAIGN_RUNTIME_PARTIAL_SELECTED_JSON="$TMP_DIR/profile_compare_campaign_summary_runtime_partial_selected.json"
+cat >"$CAMPAIGN_RUNTIME_PARTIAL_SELECTED_JSON" <<EOF_CAMPAIGN_RUNTIME_PARTIAL_SELECTED
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "summary": {
+    "runs_total": 3,
+    "runs_pass": 3,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 3,
+    "m4_micro_relay_evidence": {
+      "available": true,
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "good",
+        "quality_score": 90,
+        "quality_score_avg": 90
+      },
+      "adaptive_demotion_promotion": {
+        "available": true,
+        "demotion_signal_count": 0,
+        "promotion_signal_count": 1,
+        "demotion_candidate": false,
+        "promotion_candidate": true
+      },
+      "trust_tier_port_unlock_wiring": {
+        "present": true,
+        "evidence_hits": 1
+      }
+    }
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [
+    "$SELECTED_RUNTIME_FAIL",
+    "$SELECTED_RUNTIME_MISSING"
+  ],
+  "runs": []
+}
+EOF_CAMPAIGN_RUNTIME_PARTIAL_SELECTED
+
+RUNTIME_PARTIAL_SELECTED_SUMMARY="$TMP_DIR/campaign_check_runtime_partial_selected.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_RUNTIME_PARTIAL_SELECTED_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --fail-on-no-go 0 \
+  --summary-json "$RUNTIME_PARTIAL_SELECTED_SUMMARY" >/tmp/integration_profile_compare_campaign_check_runtime_partial_selected.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' /tmp/integration_profile_compare_campaign_check_runtime_partial_selected.log; then
+  echo "expected NO-GO output for runtime partial selected run not found"
+  cat /tmp/integration_profile_compare_campaign_check_runtime_partial_selected.log
+  exit 1
+fi
+if ! jq -e '.decision == "NO-GO" and .status == "fail" and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_selected_summaries_partial_fail" and .observed.micro_relay_policy_evidence.selected_summaries_with_runtime_actuation_explicit_present == 1 and .observed.micro_relay_policy_evidence.selected_summaries_with_runtime_actuation_explicit_pass == 0 and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_selected_summaries_partial_fail" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail"' "$RUNTIME_PARTIAL_SELECTED_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime partial selected summary missing expected fail-closed explicit fields"
+  cat "$RUNTIME_PARTIAL_SELECTED_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] runtime actuation selected-summaries explicit pass"
+SELECTED_RUNTIME_PASS_A="$TMP_DIR/profile_compare_selected_runtime_pass_a.json"
+cat >"$SELECTED_RUNTIME_PASS_A" <<'EOF_SELECTED_RUNTIME_PASS_A'
+{
+  "summary": {
+    "m4_micro_relay_evidence": {
+      "runtime_actuation": {
+        "available": true,
+        "status": "pass",
+        "status_pass": true,
+        "source": "runtime-controller"
+      }
+    }
+  }
+}
+EOF_SELECTED_RUNTIME_PASS_A
+
+SELECTED_RUNTIME_PASS_B="$TMP_DIR/profile_compare_selected_runtime_pass_b.json"
+cat >"$SELECTED_RUNTIME_PASS_B" <<'EOF_SELECTED_RUNTIME_PASS_B'
+{
+  "summary": {
+    "m4_micro_relay_evidence": {
+      "runtime_actuation": {
+        "available": true,
+        "status": "ok",
+        "status_pass": true,
+        "source": "runtime-controller"
+      }
+    }
+  }
+}
+EOF_SELECTED_RUNTIME_PASS_B
+
+CAMPAIGN_RUNTIME_SELECTED_PASS_JSON="$TMP_DIR/profile_compare_campaign_summary_runtime_selected_pass.json"
+cat >"$CAMPAIGN_RUNTIME_SELECTED_PASS_JSON" <<EOF_CAMPAIGN_RUNTIME_SELECTED_PASS
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "summary": {
+    "runs_total": 3,
+    "runs_pass": 3,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 3
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [
+    "$SELECTED_RUNTIME_PASS_A",
+    "$SELECTED_RUNTIME_PASS_B"
+  ],
+  "runs": []
+}
+EOF_CAMPAIGN_RUNTIME_SELECTED_PASS
+
+RUNTIME_SELECTED_PASS_SUMMARY="$TMP_DIR/campaign_check_runtime_selected_pass.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_RUNTIME_SELECTED_PASS_JSON" \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 1 \
+  --summary-json "$RUNTIME_SELECTED_PASS_SUMMARY" >/tmp/integration_profile_compare_campaign_check_runtime_selected_pass.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_runtime_selected_pass.log; then
+  echo "expected GO output for runtime selected-summaries pass run not found"
+  cat /tmp/integration_profile_compare_campaign_check_runtime_selected_pass.log
+  exit 1
+fi
+if ! jq -e '.decision == "GO" and .status == "ok" and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_selected_summaries" and .observed.micro_relay_policy_evidence.selected_summaries_with_runtime_actuation_explicit_present == 2 and .observed.micro_relay_policy_evidence.selected_summaries_with_runtime_actuation_explicit_pass == 2 and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_selected_summaries" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "pass"' "$RUNTIME_SELECTED_PASS_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime selected-summaries pass summary missing expected explicit fields"
+  cat "$RUNTIME_SELECTED_PASS_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-check] experimental default fail-close"
 CAMPAIGN_EXP_JSON="$TMP_DIR/profile_compare_campaign_summary_exp.json"
 cat >"$CAMPAIGN_EXP_JSON" <<EOF_CAMPAIGN_EXP

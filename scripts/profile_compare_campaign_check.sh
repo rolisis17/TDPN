@@ -324,12 +324,22 @@ extract_m4_policy_observed_from_summary() {
         present_flag: null,
         evidence_hits: null,
         reason: "summary_missing"
+      },
+      runtime_actuation: {
+        present: false,
+        status_pass: false,
+        available: null,
+        status: null,
+        source: null,
+        reason: "summary_missing"
       }
     }'
     return
   fi
 
   observed_json="$(jq -c '
+    def first_non_null($values):
+      reduce $values[] as $value (null; if . == null and $value != null then $value else . end);
     def bool_or_null($value):
       if $value == null then null
       elif ($value | type) == "boolean" then $value
@@ -358,6 +368,71 @@ extract_m4_policy_observed_from_summary() {
         (($value | ascii_downcase) as $status |
           ($status == "pass" or $status == "ok" or $status == "go" or $status == "healthy"))
       end;
+    def runtime_observed($candidate):
+      (str_or_null($candidate.status) // str_or_null($candidate.runtime_status) // str_or_null($candidate.state) // str_or_null($candidate)) as $runtime_status
+      | (str_or_null($candidate.source) // str_or_null($candidate.provider) // str_or_null($candidate.origin)) as $runtime_source
+      | {
+          present: (
+            if $candidate == null then false
+            elif ($candidate | type) == "object" then
+              (
+                bool_or_null($candidate.available) == true
+                or $runtime_status != null
+                or bool_or_null($candidate.status_pass) != null
+                or bool_or_null($candidate.pass) != null
+                or bool_or_null($candidate.ok) != null
+                or bool_or_null($candidate.healthy) != null
+              )
+            else
+              (bool_or_null($candidate) != null or $runtime_status != null)
+            end
+          ),
+          status_pass: (
+            if $candidate == null then false
+            elif ($candidate | type) == "object" then
+              (
+                bool_or_null($candidate.status_pass) == true
+                or bool_or_null($candidate.pass) == true
+                or bool_or_null($candidate.ok) == true
+                or bool_or_null($candidate.healthy) == true
+                or status_pass($runtime_status)
+              )
+            else
+              (bool_or_null($candidate) == true or status_pass($runtime_status))
+            end
+          ),
+          available: (
+            if ($candidate | type) == "object" then bool_or_null($candidate.available)
+            else null
+            end
+          ),
+          status: $runtime_status,
+          source: $runtime_source,
+          reason: (if ($candidate | type) == "object" then (str_or_null($candidate.reason) // null) else null end)
+        };
+    def first_runtime_candidate($values):
+      reduce $values[] as $value (
+        null;
+        if . != null then .
+        elif $value == null then null
+        elif (runtime_observed($value).present == true) then $value
+        else null
+        end
+      );
+    first_runtime_candidate([
+      .summary.m4_micro_relay_evidence.runtime_actuation,
+      .m4_micro_relay_evidence.runtime_actuation,
+      .summary.m4.micro_relay_evidence.runtime_actuation,
+      .m4.micro_relay_evidence.runtime_actuation,
+      .summary.runtime_actuation,
+      .runtime_actuation,
+      .summary.m4.runtime_actuation,
+      .m4.runtime_actuation,
+      (if .summary.runtime_actuation_status? != null then {status: .summary.runtime_actuation_status} else null end),
+      (if .runtime_actuation_status? != null then {status: .runtime_actuation_status} else null end)
+    ]) as $runtime_actuation_candidate
+    | runtime_observed($runtime_actuation_candidate) as $runtime_actuation_observed
+    | 
     (.summary.m4_micro_relay_evidence // .m4_micro_relay_evidence // .summary.m4.micro_relay_evidence // .m4.micro_relay_evidence // null) as $m4
     | if ($m4 | type) != "object" then
         {
@@ -389,6 +464,20 @@ extract_m4_policy_observed_from_summary() {
             present_flag: null,
             evidence_hits: null,
             reason: "m4_evidence_missing"
+          },
+          runtime_actuation: {
+            present: $runtime_actuation_observed.present,
+            status_pass: $runtime_actuation_observed.status_pass,
+            available: $runtime_actuation_observed.available,
+            status: $runtime_actuation_observed.status,
+            source: $runtime_actuation_observed.source,
+            reason: (
+              if $runtime_actuation_observed.present then
+                $runtime_actuation_observed.reason
+              else
+                "m4_evidence_missing"
+              end
+            )
           }
         }
       else
@@ -487,6 +576,14 @@ extract_m4_policy_observed_from_summary() {
               present_flag: bool_or_null($trust.present),
               evidence_hits: $trust_evidence_hits,
               reason: str_or_null($trust.reason)
+            },
+            runtime_actuation: {
+              present: $runtime_actuation_observed.present,
+              status_pass: $runtime_actuation_observed.status_pass,
+              available: $runtime_actuation_observed.available,
+              status: $runtime_actuation_observed.status,
+              source: $runtime_actuation_observed.source,
+              reason: $runtime_actuation_observed.reason
             }
           }
       end
@@ -521,6 +618,14 @@ extract_m4_policy_observed_from_summary() {
         evaluated: null,
         present_flag: null,
         evidence_hits: null,
+        reason: "summary_parse_error"
+      },
+      runtime_actuation: {
+        present: false,
+        status_pass: false,
+        available: null,
+        status: null,
+        source: null,
         reason: "summary_parse_error"
       }
     }'
@@ -923,6 +1028,8 @@ m4_selected_summaries_quality_status_pass_count=0
 m4_selected_summaries_demotion_policy_present_count=0
 m4_selected_summaries_promotion_policy_present_count=0
 m4_selected_summaries_trust_tier_port_unlock_policy_present_count=0
+m4_selected_summaries_runtime_actuation_present_count=0
+m4_selected_summaries_runtime_actuation_status_pass_count=0
 selected_m4_observed_lines=""
 while IFS= read -r selected_summary_path; do
   selected_summary_path="$(abs_path "$selected_summary_path")"
@@ -965,6 +1072,12 @@ while IFS= read -r selected_summary_path; do
   if [[ "$m4_selected_trust_tier_port_unlock_present" == "1" ]]; then
     m4_selected_summaries_trust_tier_port_unlock_policy_present_count=$((m4_selected_summaries_trust_tier_port_unlock_policy_present_count + 1))
   fi
+  if jq -e '.runtime_actuation.present == true' <<<"$m4_selected_observed_json" >/dev/null 2>&1; then
+    m4_selected_summaries_runtime_actuation_present_count=$((m4_selected_summaries_runtime_actuation_present_count + 1))
+  fi
+  if jq -e '.runtime_actuation.status_pass == true' <<<"$m4_selected_observed_json" >/dev/null 2>&1; then
+    m4_selected_summaries_runtime_actuation_status_pass_count=$((m4_selected_summaries_runtime_actuation_status_pass_count + 1))
+  fi
 done < <(jq -r '.selected_summaries[]? | select(type == "string" and length > 0)' "$campaign_summary_json" 2>/dev/null || true)
 
 selected_m4_observed_aggregate_json="$(printf '%s' "$selected_m4_observed_lines" | jq -cs '
@@ -980,6 +1093,9 @@ selected_m4_observed_aggregate_json="$(printf '%s' "$selected_m4_observed_lines"
   | [$rows[] | .trust_tier.present_flag | select(type == "boolean")] as $trust_present_flags
   | [$rows[] | .trust_tier.evaluated | select(type == "boolean")] as $trust_evaluated_flags
   | [$rows[] | .trust_tier.evidence_hits | select(type == "number")] as $trust_evidence_hits
+  | [$rows[] | .runtime_actuation.present | select(type == "boolean")] as $runtime_present_flags
+  | [$rows[] | .runtime_actuation.status_pass | select(type == "boolean")] as $runtime_status_pass_flags
+  | [$rows[] | .runtime_actuation.status | select(type == "string" and length > 0) | ascii_downcase] as $runtime_status_values
   | {
       summaries_count: ($rows | length),
       quality: {
@@ -1010,6 +1126,18 @@ selected_m4_observed_aggregate_json="$(printf '%s' "$selected_m4_observed_lines"
         present_true_count: ([$trust_present_flags[] | select(. == true)] | length),
         evaluated_true_count: ([$trust_evaluated_flags[] | select(. == true)] | length),
         evidence_hits_total: ($trust_evidence_hits | add // 0)
+      },
+      runtime_actuation: {
+        present_true_count: ([$runtime_present_flags[] | select(. == true)] | length),
+        status_pass_true_count: ([$runtime_status_pass_flags[] | select(. == true)] | length),
+        with_status: ($runtime_status_values | length),
+        status_counts: (
+          if ($runtime_status_values | length) > 0 then
+            ($runtime_status_values | sort | group_by(.) | map({status: .[0], count: length}))
+          else
+            []
+          end
+        )
       }
     }
 ')"
@@ -1077,13 +1205,49 @@ elif ((selection_policy_selected_summaries_total > 0 \
   trust_tier_port_unlock_policy_present=1
 fi
 
+campaign_runtime_actuation_explicit_present="$(jq -r 'if .runtime_actuation.present == true then 1 else 0 end' <<<"$campaign_m4_observed_json" 2>/dev/null || printf '0')"
+campaign_runtime_actuation_explicit_pass="$(jq -r 'if .runtime_actuation.status_pass == true then 1 else 0 end' <<<"$campaign_m4_observed_json" 2>/dev/null || printf '0')"
+if [[ "$campaign_runtime_actuation_explicit_present" != "1" ]]; then
+  campaign_runtime_actuation_explicit_present="0"
+fi
+if [[ "$campaign_runtime_actuation_explicit_pass" != "1" ]]; then
+  campaign_runtime_actuation_explicit_pass="0"
+fi
+
+runtime_actuation_explicit_observed=0
+runtime_actuation_explicit_pass=0
+runtime_actuation_status_source="composite"
+if ((campaign_runtime_actuation_explicit_present == 1)); then
+  runtime_actuation_explicit_observed=1
+  runtime_actuation_explicit_pass=$campaign_runtime_actuation_explicit_pass
+  runtime_actuation_status_source="explicit_campaign_summary"
+elif ((selection_policy_selected_summaries_total > 0 \
+    && selection_policy_selected_summaries_found == selection_policy_selected_summaries_total \
+    && m4_selected_summaries_runtime_actuation_present_count > 0)); then
+  if ((m4_selected_summaries_runtime_actuation_status_pass_count < m4_selected_summaries_runtime_actuation_present_count)); then
+    runtime_actuation_explicit_observed=1
+    runtime_actuation_status_source="explicit_selected_summaries_partial_fail"
+  elif ((m4_selected_summaries_runtime_actuation_present_count == selection_policy_selected_summaries_total \
+      && m4_selected_summaries_runtime_actuation_status_pass_count == selection_policy_selected_summaries_total)); then
+    runtime_actuation_explicit_observed=1
+    runtime_actuation_explicit_pass=1
+    runtime_actuation_status_source="explicit_selected_summaries"
+  fi
+fi
+
 runtime_actuation_status_pass=0
-if ((micro_relay_quality_evidence_present == 1 \
+if ((runtime_actuation_explicit_observed == 1)); then
+  runtime_actuation_status_pass=$runtime_actuation_explicit_pass
+elif ((micro_relay_quality_evidence_present == 1 \
     && micro_relay_quality_status_pass == 1 \
     && micro_relay_demotion_policy_present == 1 \
     && micro_relay_promotion_policy_present == 1 \
     && trust_tier_port_unlock_policy_present == 1)); then
   runtime_actuation_status_pass=1
+fi
+
+if ((runtime_actuation_explicit_observed == 0)) && [[ "$runtime_actuation_status_source" != "explicit_campaign_summary" ]]; then
+  runtime_actuation_status_source="composite"
 fi
 
 declare -a errors=()
@@ -1170,7 +1334,7 @@ if [[ "$require_trust_tier_port_unlock_policy" == "1" && "$trust_tier_port_unloc
   m4_policy_issues+=("missing_trust_tier_port_unlock_policy")
 fi
 if [[ "$require_runtime_actuation_status_pass" == "1" && "$runtime_actuation_status_pass" != "1" ]]; then
-  errors+=("runtime actuation status must be pass (micro_relay_quality_evidence_present=$micro_relay_quality_evidence_present micro_relay_quality_status_pass=$micro_relay_quality_status_pass micro_relay_demotion_policy_present=$micro_relay_demotion_policy_present micro_relay_promotion_policy_present=$micro_relay_promotion_policy_present trust_tier_port_unlock_policy_present=$trust_tier_port_unlock_policy_present)")
+  errors+=("runtime actuation status must be pass (source=$runtime_actuation_status_source explicit_observed=$runtime_actuation_explicit_observed explicit_pass=$runtime_actuation_explicit_pass micro_relay_quality_evidence_present=$micro_relay_quality_evidence_present micro_relay_quality_status_pass=$micro_relay_quality_status_pass micro_relay_demotion_policy_present=$micro_relay_demotion_policy_present micro_relay_promotion_policy_present=$micro_relay_promotion_policy_present trust_tier_port_unlock_policy_present=$trust_tier_port_unlock_policy_present)")
   m4_policy_issues+=("runtime_actuation_status_not_pass")
 fi
 
@@ -1265,16 +1429,23 @@ jq -n \
   --argjson micro_relay_promotion_policy_present "$micro_relay_promotion_policy_present" \
   --argjson trust_tier_port_unlock_policy_present "$trust_tier_port_unlock_policy_present" \
   --argjson runtime_actuation_status_pass "$runtime_actuation_status_pass" \
+  --arg runtime_actuation_status_source "$runtime_actuation_status_source" \
+  --argjson runtime_actuation_explicit_observed "$runtime_actuation_explicit_observed" \
+  --argjson runtime_actuation_explicit_pass "$runtime_actuation_explicit_pass" \
   --argjson campaign_micro_relay_quality_evidence_present "$campaign_micro_relay_quality_evidence_present" \
   --argjson campaign_micro_relay_quality_status_pass "$campaign_micro_relay_quality_status_pass" \
   --argjson campaign_micro_relay_demotion_policy_present "$campaign_micro_relay_demotion_policy_present" \
   --argjson campaign_micro_relay_promotion_policy_present "$campaign_micro_relay_promotion_policy_present" \
   --argjson campaign_trust_tier_port_unlock_policy_present "$campaign_trust_tier_port_unlock_policy_present" \
+  --argjson campaign_runtime_actuation_explicit_present "$campaign_runtime_actuation_explicit_present" \
+  --argjson campaign_runtime_actuation_explicit_pass "$campaign_runtime_actuation_explicit_pass" \
   --argjson m4_selected_summaries_quality_evidence_present_count "$m4_selected_summaries_quality_evidence_present_count" \
   --argjson m4_selected_summaries_quality_status_pass_count "$m4_selected_summaries_quality_status_pass_count" \
   --argjson m4_selected_summaries_demotion_policy_present_count "$m4_selected_summaries_demotion_policy_present_count" \
   --argjson m4_selected_summaries_promotion_policy_present_count "$m4_selected_summaries_promotion_policy_present_count" \
   --argjson m4_selected_summaries_trust_tier_port_unlock_policy_present_count "$m4_selected_summaries_trust_tier_port_unlock_policy_present_count" \
+  --argjson m4_selected_summaries_runtime_actuation_present_count "$m4_selected_summaries_runtime_actuation_present_count" \
+  --argjson m4_selected_summaries_runtime_actuation_status_pass_count "$m4_selected_summaries_runtime_actuation_status_pass_count" \
   --argjson campaign_m4_observed "$campaign_m4_observed_json" \
   --argjson selected_m4_observed_aggregate "$selected_m4_observed_aggregate_json" \
   --argjson fail_on_no_go "$fail_on_no_go" \
@@ -1351,16 +1522,23 @@ jq -n \
         promotion_policy_present: ($micro_relay_promotion_policy_present == 1),
         trust_tier_port_unlock_policy_present: ($trust_tier_port_unlock_policy_present == 1),
         runtime_actuation_status_pass: ($runtime_actuation_status_pass == 1),
+        runtime_actuation_status_source: $runtime_actuation_status_source,
+        runtime_actuation_explicit_observed: ($runtime_actuation_explicit_observed == 1),
+        runtime_actuation_explicit_pass: ($runtime_actuation_explicit_pass == 1),
         campaign_summary_quality_evidence_present: ($campaign_micro_relay_quality_evidence_present == 1),
         campaign_summary_quality_status_pass: ($campaign_micro_relay_quality_status_pass == 1),
         campaign_summary_demotion_policy_present: ($campaign_micro_relay_demotion_policy_present == 1),
         campaign_summary_promotion_policy_present: ($campaign_micro_relay_promotion_policy_present == 1),
         campaign_summary_trust_tier_port_unlock_policy_present: ($campaign_trust_tier_port_unlock_policy_present == 1),
+        campaign_summary_runtime_actuation_explicit_present: ($campaign_runtime_actuation_explicit_present == 1),
+        campaign_summary_runtime_actuation_explicit_pass: ($campaign_runtime_actuation_explicit_pass == 1),
         selected_summaries_with_quality_evidence_present: $m4_selected_summaries_quality_evidence_present_count,
         selected_summaries_with_quality_status_pass: $m4_selected_summaries_quality_status_pass_count,
         selected_summaries_with_demotion_policy_present: $m4_selected_summaries_demotion_policy_present_count,
         selected_summaries_with_promotion_policy_present: $m4_selected_summaries_promotion_policy_present_count,
         selected_summaries_with_trust_tier_port_unlock_policy_present: $m4_selected_summaries_trust_tier_port_unlock_policy_present_count,
+        selected_summaries_with_runtime_actuation_explicit_present: $m4_selected_summaries_runtime_actuation_present_count,
+        selected_summaries_with_runtime_actuation_explicit_pass: $m4_selected_summaries_runtime_actuation_status_pass_count,
         campaign_summary_details: $campaign_m4_observed,
         selected_summaries_aggregate: $selected_m4_observed_aggregate
       }
@@ -1505,6 +1683,15 @@ jq -n \
             runtime_actuation_status_pass: {
               required: ($require_runtime_actuation_status_pass == 1),
               observed: ($runtime_actuation_status_pass == 1),
+              source: $runtime_actuation_status_source,
+              explicit_observed: ($runtime_actuation_explicit_observed == 1),
+              explicit_status_pass: ($runtime_actuation_explicit_pass == 1),
+              campaign_summary_explicit_observed: ($campaign_runtime_actuation_explicit_present == 1),
+              campaign_summary_explicit_status_pass: ($campaign_runtime_actuation_explicit_pass == 1),
+              selected_summaries_total: $selection_policy_selected_summaries_total,
+              selected_summaries_found: $selection_policy_selected_summaries_found,
+              selected_summaries_with_explicit_signal: $m4_selected_summaries_runtime_actuation_present_count,
+              selected_summaries_with_explicit_pass: $m4_selected_summaries_runtime_actuation_status_pass_count,
               status: (
                 if ($require_runtime_actuation_status_pass == 1) then
                   (if ($runtime_actuation_status_pass == 1) then "pass" else "fail" end)
@@ -1515,7 +1702,11 @@ jq -n \
               blocking: ($require_runtime_actuation_status_pass == 1 and $runtime_actuation_status_pass != 1),
               actionable_reason: (
                 if ($require_runtime_actuation_status_pass == 1 and $runtime_actuation_status_pass != 1) then
-                  "runtime actuation status is not pass; ensure micro-relay quality evidence/status, adaptive demotion/promotion policies, and trust-tier port-unlock policy are all present and passing, then rerun campaign-check"
+                  (if ($runtime_actuation_status_source == "explicit_campaign_summary" or $runtime_actuation_status_source == "explicit_selected_summaries") then
+                    "runtime actuation explicit status is fail/not-pass; correct runtime actuation state in campaign evidence and rerun campaign-check"
+                  else
+                    "runtime actuation status is not pass; ensure micro-relay quality evidence/status, adaptive demotion/promotion policies, and trust-tier port-unlock policy are all present and passing, then rerun campaign-check"
+                  end)
                 else
                   null
                 end
