@@ -91,19 +91,90 @@ discover_latest_stage_summary() {
   local dir_prefix="$2"
   local summary_filename="$3"
   local dir_name_re
-  local dir
+  local summary_path
+  local candidate_dir_name
+  local embedded_meta
+  local embedded_status
+  local embedded_epoch
+  local mtime
 
   dir_name_re="^${dir_prefix}[0-9]{8}_[0-9]{6}$"
 
+  local -a embedded_timestamp_candidates=()
   local -a timestamp_candidates=()
-  shopt -s nullglob
-  for dir in "$base_dir"/"${dir_prefix}"*; do
-    [[ -d "$dir" ]] || continue
-    if [[ "$(basename "$dir")" =~ $dir_name_re && -f "$dir/$summary_filename" ]]; then
-      timestamp_candidates+=("$(basename "$dir")|$dir/$summary_filename")
+  local -a mtime_candidates=()
+
+  while IFS= read -r summary_path; do
+    [[ -n "$summary_path" ]] || continue
+    candidate_dir_name="$(basename "$(dirname "$summary_path")")"
+
+    embedded_meta="$(
+      jq -r '
+        def candidate_ts:
+          .generated_at_utc
+          // .generated_at
+          // .summary_generated_at_utc
+          // .summary_generated_at;
+        (candidate_ts) as $raw
+        | if $raw == null then
+            "missing|"
+          elif ($raw | type) != "string" then
+            "invalid|"
+          else
+            (($raw | gsub("^\\s+|\\s+$"; "")) as $trimmed
+            | if $trimmed == "" then
+                "invalid|"
+              else
+                (
+                  try ($trimmed | fromdateiso8601 | floor) catch null
+                ) as $epoch
+                | if $epoch == null then
+                    "invalid|"
+                  else
+                    "valid|\($epoch)"
+                  end
+              end)
+          end
+      ' "$summary_path" 2>/dev/null || printf 'missing|'
+    )"
+    embedded_status="${embedded_meta%%|*}"
+    embedded_epoch="${embedded_meta#*|}"
+
+    if [[ "$embedded_status" == "valid" && "$embedded_epoch" =~ ^-?[0-9]+$ ]]; then
+      embedded_timestamp_candidates+=("${embedded_epoch}|${summary_path}")
     fi
-  done
-  shopt -u nullglob
+
+    if [[ "$embedded_status" == "invalid" ]]; then
+      continue
+    fi
+
+    if [[ "$candidate_dir_name" =~ $dir_name_re ]]; then
+      timestamp_candidates+=("${candidate_dir_name}|${summary_path}")
+    fi
+
+    mtime="$(stat -c %Y "$summary_path" 2>/dev/null || stat -f %m "$summary_path" 2>/dev/null || true)"
+    if [[ "$mtime" =~ ^[0-9]+$ ]]; then
+      mtime_candidates+=("${mtime}|${summary_path}")
+    fi
+  done < <(find "$base_dir" -maxdepth 2 -type f -name "$summary_filename" -path "$base_dir/${dir_prefix}*/$summary_filename" 2>/dev/null | LC_ALL=C sort)
+
+  if ((${#embedded_timestamp_candidates[@]} > 0)); then
+    local best_embedded_path
+    local best_embedded_dir_name
+    best_embedded_path="$(
+      printf '%s\n' "${embedded_timestamp_candidates[@]}" \
+        | LC_ALL=C sort -t'|' -k1,1n -k2,2 \
+        | tail -n 1 \
+        | cut -d'|' -f2-
+    )"
+    best_embedded_dir_name="$(basename "$(dirname "$best_embedded_path")")"
+    if [[ "$best_embedded_dir_name" =~ $dir_name_re ]]; then
+      printf 'discovered_timestamp_dir|%s' "$best_embedded_path"
+    else
+      printf 'discovered_mtime|%s' "$best_embedded_path"
+    fi
+    return 0
+  fi
 
   if ((${#timestamp_candidates[@]} > 0)); then
     local best_timestamp_path
@@ -111,17 +182,6 @@ discover_latest_stage_summary() {
     printf 'discovered_timestamp_dir|%s' "$best_timestamp_path"
     return 0
   fi
-
-  local -a mtime_candidates=()
-  local summary_path
-  while IFS= read -r summary_path; do
-    [[ -n "$summary_path" ]] || continue
-    local mtime
-    mtime="$(stat -c %Y "$summary_path" 2>/dev/null || stat -f %m "$summary_path" 2>/dev/null || true)"
-    if [[ "$mtime" =~ ^[0-9]+$ ]]; then
-      mtime_candidates+=("${mtime}|${summary_path}")
-    fi
-  done < <(find "$base_dir" -maxdepth 2 -type f -name "$summary_filename" -path "$base_dir/${dir_prefix}*/$summary_filename" 2>/dev/null | LC_ALL=C sort)
 
   if ((${#mtime_candidates[@]} > 0)); then
     local best_mtime_path

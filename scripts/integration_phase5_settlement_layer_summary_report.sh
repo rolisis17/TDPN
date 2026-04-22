@@ -53,6 +53,18 @@ FALLBACK_HANDOFF_RUN_OLD_DIR="$FALLBACK_REPORTS_DIR/phase5_settlement_layer_hand
 FALLBACK_HANDOFF_RUN_NEW_DIR="$FALLBACK_REPORTS_DIR/phase5_settlement_layer_handoff_run_20260416_170700"
 FALLBACK_HANDOFF_CHECK_FROM_HANDOFF_RUN="$FALLBACK_HANDOFF_RUN_NEW_DIR/phase5_settlement_layer_handoff_check_fallback.json"
 
+EMBEDDED_TS_REPORTS_DIR="$TMP_DIR/embedded_timestamp_reports"
+EMBEDDED_TS_REPORT_JSON="$TMP_DIR/report_embedded_timestamp.json"
+EMBEDDED_TS_LOG="$TMP_DIR/embedded_timestamp.log"
+EMBEDDED_TS_CI_HIGH_TS_OLDER_DIR="$EMBEDDED_TS_REPORTS_DIR/ci_phase5_settlement_layer_20260416_170000"
+EMBEDDED_TS_CI_LOW_TS_NEWER_DIR="$EMBEDDED_TS_REPORTS_DIR/ci_phase5_settlement_layer_20260416_170100"
+EMBEDDED_TS_CI_INVALID_TS_NEWEST_DIR="$EMBEDDED_TS_REPORTS_DIR/ci_phase5_settlement_layer_20260416_170200"
+EMBEDDED_TS_CI_CONFLICT_TS_NEWEST_DIR="$EMBEDDED_TS_REPORTS_DIR/ci_phase5_settlement_layer_20260416_170300"
+EMBEDDED_TS_CHECK="$EMBEDDED_TS_REPORTS_DIR/phase5_settlement_layer_check_summary.json"
+EMBEDDED_TS_RUN="$EMBEDDED_TS_REPORTS_DIR/phase5_settlement_layer_run_summary.json"
+EMBEDDED_TS_HANDOFF_CHECK="$EMBEDDED_TS_REPORTS_DIR/phase5_settlement_layer_handoff_check_summary.json"
+EMBEDDED_TS_HANDOFF_RUN="$EMBEDDED_TS_REPORTS_DIR/phase5_settlement_layer_handoff_run_summary.json"
+
 # Isolation default: prevent fail/missing/fallback paths from clobbering
 # canonical summary artifacts under repository .easy-node-logs.
 DEFAULT_CANONICAL_REPORT_JSON="$TMP_DIR/default_canonical_report.json"
@@ -794,5 +806,156 @@ if ! jq -e \
   exit 1
 fi
 assert_default_canonical_report "$FALLBACK_REPORT_JSON" "$FALLBACK_LOG" "fallback discovery path"
+
+mkdir -p "$EMBEDDED_TS_REPORTS_DIR"
+mkdir -p "$EMBEDDED_TS_CI_HIGH_TS_OLDER_DIR" "$EMBEDDED_TS_CI_LOW_TS_NEWER_DIR" "$EMBEDDED_TS_CI_INVALID_TS_NEWEST_DIR" "$EMBEDDED_TS_CI_CONFLICT_TS_NEWEST_DIR"
+
+cat >"$EMBEDDED_TS_CI_HIGH_TS_OLDER_DIR/ci_phase5_settlement_layer_summary.json" <<'EOF_EMBEDDED_TS_CI_HIGH_TS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-16T17:30:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_CI_HIGH_TS
+
+cat >"$EMBEDDED_TS_CI_LOW_TS_NEWER_DIR/ci_phase5_settlement_layer_summary.json" <<'EOF_EMBEDDED_TS_CI_LOW_TS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-16T17:05:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_CI_LOW_TS
+
+cat >"$EMBEDDED_TS_CI_INVALID_TS_NEWEST_DIR/ci_phase5_settlement_layer_summary.json" <<'EOF_EMBEDDED_TS_CI_INVALID_TS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "definitely-not-a-utc-timestamp",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_CI_INVALID_TS
+
+cat >"$EMBEDDED_TS_CI_CONFLICT_TS_NEWEST_DIR/ci_phase5_settlement_layer_summary.json" <<'EOF_EMBEDDED_TS_CI_CONFLICT_TS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase5_settlement_layer_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-16T17:40:00Z",
+  "summary_generated_at_utc": "2026-04-16T17:10:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_CI_CONFLICT_TS
+
+cat >"$EMBEDDED_TS_CHECK" <<'EOF_EMBEDDED_TS_CHECK'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase5_settlement_layer_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_CHECK
+
+cat >"$EMBEDDED_TS_RUN" <<'EOF_EMBEDDED_TS_RUN'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase5_settlement_layer_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_RUN
+
+cat >"$EMBEDDED_TS_HANDOFF_CHECK" <<'EOF_EMBEDDED_TS_HANDOFF_CHECK'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_HANDOFF_CHECK
+
+cat >"$EMBEDDED_TS_HANDOFF_RUN" <<'EOF_EMBEDDED_TS_HANDOFF_RUN'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase5_settlement_layer_handoff_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_TS_HANDOFF_RUN
+
+echo "[phase5-settlement-summary-report] embedded timestamp precedence with invalid fail-closed path"
+"$SCRIPT_UNDER_TEST" \
+  --reports-dir "$EMBEDDED_TS_REPORTS_DIR" \
+  --summary-json "$EMBEDDED_TS_REPORT_JSON" \
+  --print-summary-json 0 >"$EMBEDDED_TS_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_ci_path "$EMBEDDED_TS_CI_HIGH_TS_OLDER_DIR/ci_phase5_settlement_layer_summary.json" \
+  --arg rejected_low_ts_path "$EMBEDDED_TS_CI_LOW_TS_NEWER_DIR/ci_phase5_settlement_layer_summary.json" \
+  --arg rejected_invalid_ts_path "$EMBEDDED_TS_CI_INVALID_TS_NEWEST_DIR/ci_phase5_settlement_layer_summary.json" \
+  --arg rejected_conflict_ts_path "$EMBEDDED_TS_CI_CONFLICT_TS_NEWEST_DIR/ci_phase5_settlement_layer_summary.json" \
+  --arg expected_check_path "$EMBEDDED_TS_CHECK" \
+  --arg expected_run_path "$EMBEDDED_TS_RUN" \
+  --arg expected_handoff_check_path "$EMBEDDED_TS_HANDOFF_CHECK" \
+  --arg expected_handoff_run_path "$EMBEDDED_TS_HANDOFF_RUN" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .counts.configured == 5
+  and .counts.pass == 5
+  and .counts.fail == 0
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .summaries.ci_phase5_settlement_layer_summary.path == $expected_ci_path
+  and .summaries.ci_phase5_settlement_layer_summary.path != $rejected_low_ts_path
+  and .summaries.ci_phase5_settlement_layer_summary.path != $rejected_invalid_ts_path
+  and .summaries.ci_phase5_settlement_layer_summary.path != $rejected_conflict_ts_path
+  and .summaries.phase5_settlement_layer_check_summary.path == $expected_check_path
+  and .summaries.phase5_settlement_layer_run_summary.path == $expected_run_path
+  and .summaries.phase5_settlement_layer_handoff_check_summary.path == $expected_handoff_check_path
+  and .summaries.phase5_settlement_layer_handoff_run_summary.path == $expected_handoff_run_path
+' "$EMBEDDED_TS_REPORT_JSON" >/dev/null; then
+  echo "phase5 summary report embedded timestamp precedence/invalid fail-closed mismatch"
+  cat "$EMBEDDED_TS_REPORT_JSON"
+  cat "$EMBEDDED_TS_LOG"
+  exit 1
+fi
+assert_default_canonical_report "$EMBEDDED_TS_REPORT_JSON" "$EMBEDDED_TS_LOG" "embedded timestamp precedence path"
 
 echo "phase5 settlement layer summary report integration ok"

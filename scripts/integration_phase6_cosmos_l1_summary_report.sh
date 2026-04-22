@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat cmp; do
+for cmd in bash jq mktemp chmod grep cat cmp touch; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -59,6 +59,24 @@ FALLBACK_CONTRACTS_OLD_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_
 FALLBACK_CONTRACTS_NEW_DIR="$FALLBACK_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_20260415_170700"
 FALLBACK_SUITE_OLD_DIR="$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_20260415_170100"
 FALLBACK_SUITE_NEW_DIR="$FALLBACK_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_20260415_170300"
+
+EMBEDDED_FAIL_CLOSED_REPORTS_DIR="$TMP_DIR/fallback_reports_embedded_fail_closed"
+EMBEDDED_FAIL_CLOSED_REPORT_JSON="$TMP_DIR/report_fallback_embedded_fail_closed.json"
+EMBEDDED_FAIL_CLOSED_CANONICAL_REPORT_JSON="$TMP_DIR/report_fallback_embedded_fail_closed_canonical.json"
+EMBEDDED_FAIL_CLOSED_LOG="$TMP_DIR/fallback_embedded_fail_closed.log"
+EMBEDDED_FAIL_CLOSED_CI_INVALID_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_invalid_fresh_mtime"
+EMBEDDED_FAIL_CLOSED_CI_VALID_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_valid_stale_mtime"
+EMBEDDED_FAIL_CLOSED_CONTRACTS_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_fixture"
+EMBEDDED_FAIL_CLOSED_SUITE_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_fixture"
+
+EMBEDDED_PRECEDENCE_REPORTS_DIR="$TMP_DIR/fallback_reports_embedded_precedence"
+EMBEDDED_PRECEDENCE_REPORT_JSON="$TMP_DIR/report_fallback_embedded_precedence.json"
+EMBEDDED_PRECEDENCE_CANONICAL_REPORT_JSON="$TMP_DIR/report_fallback_embedded_precedence_canonical.json"
+EMBEDDED_PRECEDENCE_LOG="$TMP_DIR/fallback_embedded_precedence.log"
+EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_DIR="$EMBEDDED_PRECEDENCE_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_newer_embedded_stale_mtime"
+EMBEDDED_PRECEDENCE_CI_OLDER_EMBEDDED_DIR="$EMBEDDED_PRECEDENCE_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_older_embedded_fresh_mtime"
+EMBEDDED_PRECEDENCE_CONTRACTS_DIR="$EMBEDDED_PRECEDENCE_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_fixture"
+EMBEDDED_PRECEDENCE_SUITE_DIR="$EMBEDDED_PRECEDENCE_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_fixture"
 
 cat >"$PASS_CI" <<'EOF_PASS_CI'
 {
@@ -579,6 +597,200 @@ if ! jq -e \
   echo "phase6 summary report fallback-discovery contract mismatch"
   cat "$FALLBACK_REPORT_JSON"
   cat "$FALLBACK_LOG"
+  exit 1
+fi
+
+mkdir -p "$EMBEDDED_FAIL_CLOSED_REPORTS_DIR"
+mkdir -p "$EMBEDDED_FAIL_CLOSED_CI_INVALID_DIR" "$EMBEDDED_FAIL_CLOSED_CI_VALID_DIR" "$EMBEDDED_FAIL_CLOSED_CONTRACTS_DIR" "$EMBEDDED_FAIL_CLOSED_SUITE_DIR"
+
+EMBEDDED_FAIL_CLOSED_CI_INVALID_PATH="$EMBEDDED_FAIL_CLOSED_CI_INVALID_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json"
+EMBEDDED_FAIL_CLOSED_CI_VALID_PATH="$EMBEDDED_FAIL_CLOSED_CI_VALID_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json"
+EMBEDDED_FAIL_CLOSED_CONTRACTS_PATH="$EMBEDDED_FAIL_CLOSED_CONTRACTS_DIR/ci_phase6_cosmos_l1_contracts_summary.json"
+EMBEDDED_FAIL_CLOSED_SUITE_PATH="$EMBEDDED_FAIL_CLOSED_SUITE_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json"
+
+cat >"$EMBEDDED_FAIL_CLOSED_CI_INVALID_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_CI_INVALID'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "not-a-real-utc-timestamp",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_CI_INVALID
+
+cat >"$EMBEDDED_FAIL_CLOSED_CI_VALID_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_CI_VALID'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T17:00:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_CI_VALID
+
+cat >"$EMBEDDED_FAIL_CLOSED_CONTRACTS_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_CONTRACTS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_contracts_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T17:10:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_CONTRACTS
+
+cat >"$EMBEDDED_FAIL_CLOSED_SUITE_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_SUITE'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase6_cosmos_l1_build_testnet_suite_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T17:20:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_SUITE
+
+touch -t 202604151200 "$EMBEDDED_FAIL_CLOSED_CI_VALID_PATH"
+touch -t 202604151300 "$EMBEDDED_FAIL_CLOSED_CI_INVALID_PATH"
+
+echo "[phase6-cosmos-l1-summary-report] fallback discovery fail-closed invalid embedded timestamp"
+PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$EMBEDDED_FAIL_CLOSED_CANONICAL_REPORT_JSON" \
+"$SCRIPT_UNDER_TEST" \
+  --reports-dir "$EMBEDDED_FAIL_CLOSED_REPORTS_DIR" \
+  --summary-json "$EMBEDDED_FAIL_CLOSED_REPORT_JSON" \
+  --print-report 0 \
+  --show-json 0 >"$EMBEDDED_FAIL_CLOSED_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_ci_path "$EMBEDDED_FAIL_CLOSED_CI_VALID_PATH" \
+  --arg expected_contracts_path "$EMBEDDED_FAIL_CLOSED_CONTRACTS_PATH" \
+  --arg expected_suite_path "$EMBEDDED_FAIL_CLOSED_SUITE_PATH" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .counts.configured == 3
+  and .counts.pass == 3
+  and .counts.fail == 0
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .summaries.build_testnet_ci.path == $expected_ci_path
+  and .summaries.contracts_ci.path == $expected_contracts_path
+  and .summaries.build_testnet_suite.path == $expected_suite_path
+' "$EMBEDDED_FAIL_CLOSED_REPORT_JSON" >/dev/null; then
+  echo "phase6 summary report fail-closed embedded timestamp discovery mismatch"
+  cat "$EMBEDDED_FAIL_CLOSED_REPORT_JSON"
+  cat "$EMBEDDED_FAIL_CLOSED_LOG"
+  exit 1
+fi
+
+mkdir -p "$EMBEDDED_PRECEDENCE_REPORTS_DIR"
+mkdir -p "$EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_DIR" "$EMBEDDED_PRECEDENCE_CI_OLDER_EMBEDDED_DIR" "$EMBEDDED_PRECEDENCE_CONTRACTS_DIR" "$EMBEDDED_PRECEDENCE_SUITE_DIR"
+
+EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_PATH="$EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json"
+EMBEDDED_PRECEDENCE_CI_OLDER_EMBEDDED_PATH="$EMBEDDED_PRECEDENCE_CI_OLDER_EMBEDDED_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json"
+EMBEDDED_PRECEDENCE_CONTRACTS_PATH="$EMBEDDED_PRECEDENCE_CONTRACTS_DIR/ci_phase6_cosmos_l1_contracts_summary.json"
+EMBEDDED_PRECEDENCE_SUITE_PATH="$EMBEDDED_PRECEDENCE_SUITE_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json"
+
+cat >"$EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_PATH" <<'EOF_EMBEDDED_PRECEDENCE_CI_NEWER'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T19:00:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_PRECEDENCE_CI_NEWER
+
+cat >"$EMBEDDED_PRECEDENCE_CI_OLDER_EMBEDDED_PATH" <<'EOF_EMBEDDED_PRECEDENCE_CI_OLDER'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T18:00:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_PRECEDENCE_CI_OLDER
+
+cat >"$EMBEDDED_PRECEDENCE_CONTRACTS_PATH" <<'EOF_EMBEDDED_PRECEDENCE_CONTRACTS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_contracts_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T19:10:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_PRECEDENCE_CONTRACTS
+
+cat >"$EMBEDDED_PRECEDENCE_SUITE_PATH" <<'EOF_EMBEDDED_PRECEDENCE_SUITE'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase6_cosmos_l1_build_testnet_suite_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T19:20:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_PRECEDENCE_SUITE
+
+touch -t 202604151100 "$EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_PATH"
+touch -t 202604151400 "$EMBEDDED_PRECEDENCE_CI_OLDER_EMBEDDED_PATH"
+
+echo "[phase6-cosmos-l1-summary-report] fallback discovery valid embedded timestamp precedence over mtime"
+PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$EMBEDDED_PRECEDENCE_CANONICAL_REPORT_JSON" \
+"$SCRIPT_UNDER_TEST" \
+  --reports-dir "$EMBEDDED_PRECEDENCE_REPORTS_DIR" \
+  --summary-json "$EMBEDDED_PRECEDENCE_REPORT_JSON" \
+  --print-report 0 \
+  --show-json 0 >"$EMBEDDED_PRECEDENCE_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_ci_path "$EMBEDDED_PRECEDENCE_CI_NEWER_EMBEDDED_PATH" \
+  --arg expected_contracts_path "$EMBEDDED_PRECEDENCE_CONTRACTS_PATH" \
+  --arg expected_suite_path "$EMBEDDED_PRECEDENCE_SUITE_PATH" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .counts.configured == 3
+  and .counts.pass == 3
+  and .counts.fail == 0
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .summaries.build_testnet_ci.path == $expected_ci_path
+  and .summaries.contracts_ci.path == $expected_contracts_path
+  and .summaries.build_testnet_suite.path == $expected_suite_path
+' "$EMBEDDED_PRECEDENCE_REPORT_JSON" >/dev/null; then
+  echo "phase6 summary report embedded timestamp precedence mismatch"
+  cat "$EMBEDDED_PRECEDENCE_REPORT_JSON"
+  cat "$EMBEDDED_PRECEDENCE_LOG"
   exit 1
 fi
 

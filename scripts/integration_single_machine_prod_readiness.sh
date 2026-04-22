@@ -36,6 +36,10 @@ AUTO_REFRESH_STALE_GO_SUMMARY="$TMP_DIR/auto_refresh_stale_go_summary.json"
 AUTO_REFRESH_STALE_GO_LOG="$TMP_DIR/auto_refresh_stale_go.log"
 AUTO_REUSE_FRESH_SUMMARY="$TMP_DIR/auto_reuse_fresh_summary.json"
 AUTO_REUSE_FRESH_LOG="$TMP_DIR/auto_reuse_fresh.log"
+AUTO_REFRESH_INVALID_GENERATED_AT_SUMMARY="$TMP_DIR/auto_refresh_invalid_generated_at_summary.json"
+AUTO_REFRESH_INVALID_GENERATED_AT_LOG="$TMP_DIR/auto_refresh_invalid_generated_at.log"
+AUTO_REFRESH_FUTURE_GENERATED_AT_SUMMARY="$TMP_DIR/auto_refresh_future_generated_at_summary.json"
+AUTO_REFRESH_FUTURE_GENERATED_AT_LOG="$TMP_DIR/auto_refresh_future_generated_at.log"
 AUTO_REFRESH_STALE_SIGNOFF_SUMMARY="$TMP_DIR/auto_refresh_stale_signoff_summary.json"
 AUTO_REFRESH_STALE_SIGNOFF_LOG="$TMP_DIR/auto_refresh_stale_signoff.log"
 AUTO_REFRESH_NON_ROOT_SKIP_SUMMARY="$TMP_DIR/auto_refresh_non_root_skip_summary.json"
@@ -1938,6 +1942,162 @@ if ! jq -e '
 fi
 if ! rg -q -- '--refresh-campaign 0' "$PROFILE_SIGNOFF_ARGS_LOG"; then
   echo "fresh signoff reuse path did not keep --refresh-campaign 0"
+  cat "$PROFILE_SIGNOFF_ARGS_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] auto refresh invalid generated_at_utc does not fallback to mtime"
+rm -rf "$TMP_DIR/auto_refresh_invalid_generated_at_reports"
+mkdir -p "$TMP_DIR/auto_refresh_invalid_generated_at_reports"
+cat >"$TMP_DIR/auto_refresh_invalid_generated_at_reports/profile_compare_campaign_signoff_summary.json" <<'EOF_INVALID_GENERATED_AT_SIGNOFF'
+{
+  "version": 1,
+  "generated_at_utc": "not-a-timestamp",
+  "status": "ok",
+  "final_rc": 0,
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_INVALID_GENERATED_AT_SIGNOFF
+# Keep filesystem mtime fresh to prove invalid embedded timestamps fail closed.
+touch "$TMP_DIR/auto_refresh_invalid_generated_at_reports/profile_compare_campaign_signoff_summary.json"
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+FAKE_PROFILE_SIGNOFF_RC=0 \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff auto \
+  --profile-compare-campaign-signoff-refresh-campaign 0 \
+  --profile-compare-campaign-signoff-summary-max-age-sec 3600 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/auto_refresh_invalid_generated_at_reports" \
+  --profile-compare-campaign-signoff-summary-json "$TMP_DIR/auto_refresh_invalid_generated_at_reports/profile_compare_campaign_signoff_summary.json" \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$AUTO_REFRESH_INVALID_GENERATED_AT_SUMMARY" \
+  --print-summary-json 0 >"$AUTO_REFRESH_INVALID_GENERATED_AT_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.profile_compare_campaign_signoff_summary_max_age_sec == 3600
+  and .inputs.profile_compare_campaign_signoff_refresh_campaign == false
+  and .inputs.profile_compare_campaign_signoff_refresh_effective == true
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.valid_json == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.status == "ok"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.decision == "GO"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.refresh_campaign == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.generated_at_utc == "not-a-timestamp"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_source == null
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_available == false
+  and .inputs.profile_compare_campaign_signoff_existing_summary.fresh == null
+  and .inputs.profile_compare_campaign_signoff_existing_summary.requires_refresh == true
+  and ((.inputs.profile_compare_campaign_signoff_existing_summary.refresh_reason // "") | startswith("invalid generated_at_utc in signoff summary"))
+  and (.steps[] | select(.step_id == "profile_compare_campaign_signoff") | .status == "pass")
+' "$AUTO_REFRESH_INVALID_GENERATED_AT_SUMMARY" >/dev/null; then
+  echo "invalid generated_at_utc freshness path should fail closed despite fresh mtime"
+  cat "$AUTO_REFRESH_INVALID_GENERATED_AT_LOG"
+  cat "$AUTO_REFRESH_INVALID_GENERATED_AT_SUMMARY"
+  exit 1
+fi
+if ! rg -q -- '--refresh-campaign 1' "$PROFILE_SIGNOFF_ARGS_LOG"; then
+  echo "invalid generated_at_utc path did not force --refresh-campaign 1"
+  cat "$PROFILE_SIGNOFF_ARGS_LOG"
+  exit 1
+fi
+
+echo "[single-machine-prod-readiness] auto refresh future generated_at_utc fails closed"
+rm -rf "$TMP_DIR/auto_refresh_future_generated_at_reports"
+mkdir -p "$TMP_DIR/auto_refresh_future_generated_at_reports"
+cat >"$TMP_DIR/auto_refresh_future_generated_at_reports/profile_compare_campaign_signoff_summary.json" <<'EOF_FUTURE_GENERATED_AT_SIGNOFF'
+{
+  "version": 1,
+  "generated_at_utc": "2099-01-01T00:00:00Z",
+  "status": "ok",
+  "final_rc": 0,
+  "inputs": {
+    "refresh_campaign": true
+  },
+  "decision": {
+    "decision": "GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_FUTURE_GENERATED_AT_SIGNOFF
+: >"$PROFILE_SIGNOFF_ARGS_LOG"
+FAKE_MANUAL_REPORT_MODE=pending_multi \
+SINGLE_MACHINE_CI_LOCAL_SCRIPT="$FAKE_CI" \
+SINGLE_MACHINE_BETA_PREFLIGHT_SCRIPT="$FAKE_BETA" \
+SINGLE_MACHINE_DEEP_TEST_SUITE_SCRIPT="$FAKE_DEEP_OK" \
+SINGLE_MACHINE_RUNTIME_FIX_RECORD_SCRIPT="$FAKE_RUNTIME_FIX_RECORD" \
+SINGLE_MACHINE_THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_THREE_MACHINE_DOCKER_READINESS" \
+SINGLE_MACHINE_PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_PROFILE_SIGNOFF" \
+SINGLE_MACHINE_PRE_REAL_HOST_READINESS_SCRIPT="$FAKE_PRE_REAL" \
+SINGLE_MACHINE_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+FAKE_PROFILE_SIGNOFF_RC=0 \
+FAKE_PROFILE_SIGNOFF_ARGS_LOG="$PROFILE_SIGNOFF_ARGS_LOG" \
+./scripts/single_machine_prod_readiness.sh \
+  --run-ci-local 0 \
+  --run-beta-preflight 0 \
+  --run-deep-suite 0 \
+  --run-runtime-fix-record 0 \
+  --run-three-machine-docker-readiness 0 \
+  --run-profile-compare-campaign-signoff auto \
+  --profile-compare-campaign-signoff-refresh-campaign 0 \
+  --profile-compare-campaign-signoff-summary-max-age-sec 3600 \
+  --profile-compare-campaign-signoff-reports-dir "$TMP_DIR/auto_refresh_future_generated_at_reports" \
+  --profile-compare-campaign-signoff-summary-json "$TMP_DIR/auto_refresh_future_generated_at_reports/profile_compare_campaign_signoff_summary.json" \
+  --run-pre-real-host-readiness 0 \
+  --run-real-wg-privileged-matrix 0 \
+  --summary-json "$AUTO_REFRESH_FUTURE_GENERATED_AT_SUMMARY" \
+  --print-summary-json 0 >"$AUTO_REFRESH_FUTURE_GENERATED_AT_LOG"
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.profile_compare_campaign_signoff_summary_max_age_sec == 3600
+  and .inputs.profile_compare_campaign_signoff_refresh_campaign == false
+  and .inputs.profile_compare_campaign_signoff_refresh_effective == true
+  and .inputs.profile_compare_campaign_signoff_auto_refreshed == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.available == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.valid_json == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.status == "ok"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.decision == "GO"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.refresh_campaign == true
+  and .inputs.profile_compare_campaign_signoff_existing_summary.generated_at_utc == "2099-01-01T00:00:00Z"
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_source == null
+  and .inputs.profile_compare_campaign_signoff_existing_summary.freshness_available == false
+  and .inputs.profile_compare_campaign_signoff_existing_summary.fresh == null
+  and .inputs.profile_compare_campaign_signoff_existing_summary.requires_refresh == true
+  and ((.inputs.profile_compare_campaign_signoff_existing_summary.refresh_reason // "") | startswith("future generated_at_utc in signoff summary"))
+  and (.steps[] | select(.step_id == "profile_compare_campaign_signoff") | .status == "pass")
+' "$AUTO_REFRESH_FUTURE_GENERATED_AT_SUMMARY" >/dev/null; then
+  echo "future generated_at_utc freshness path should fail closed"
+  cat "$AUTO_REFRESH_FUTURE_GENERATED_AT_LOG"
+  cat "$AUTO_REFRESH_FUTURE_GENERATED_AT_SUMMARY"
+  exit 1
+fi
+if ! rg -q -- '--refresh-campaign 1' "$PROFILE_SIGNOFF_ARGS_LOG"; then
+  echo "future generated_at_utc path did not force --refresh-campaign 1"
   cat "$PROFILE_SIGNOFF_ARGS_LOG"
   exit 1
 fi

@@ -266,42 +266,130 @@ resolve_tdpnd_comet_runtime_smoke_signal() {
   printf '%s|%s|%s|%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source" "$source_field" "$source_path" "$source_priority_index"
 }
 
+timestamp_epoch_utc_or_empty() {
+  local timestamp
+  local epoch=""
+  timestamp="$(trim "${1:-}")"
+
+  if [[ -z "$timestamp" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?([Zz]|[+]00:00|[+]0000|[+]00)$ ]]; then
+    printf '%s' ""
+    return
+  fi
+  if epoch="$(date -u -d "$timestamp" +%s 2>/dev/null)" && [[ "$epoch" =~ ^-?[0-9]+$ ]]; then
+    printf '%s' "$epoch"
+    return
+  fi
+
+  printf '%s' ""
+}
+
+summary_embedded_timestamp_epoch() {
+  local path="$1"
+  local known_timestamp_present="0"
+  local known_timestamp_invalid="0"
+  local newest_epoch=""
+  local timestamp_field
+  local timestamp_raw=""
+  local timestamp_epoch=""
+
+  for timestamp_field in generated_at_utc generated_at summary_generated_at_utc summary_generated_at; do
+    if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
+      known_timestamp_present="1"
+      timestamp_raw="$(jq -r --arg field "$timestamp_field" '
+        .[$field]
+        | if type == "string" then . else "" end
+      ' "$path" 2>/dev/null || true)"
+      timestamp_raw="$(trim "$timestamp_raw")"
+      timestamp_epoch="$(timestamp_epoch_utc_or_empty "$timestamp_raw")"
+      if [[ -n "$timestamp_epoch" ]]; then
+        if [[ -z "$newest_epoch" || "$timestamp_epoch" -gt "$newest_epoch" ]]; then
+          newest_epoch="$timestamp_epoch"
+        fi
+      else
+        known_timestamp_invalid="1"
+      fi
+    fi
+  done
+
+  if [[ "$known_timestamp_invalid" == "1" ]]; then
+    printf '%s|' "invalid"
+    return
+  fi
+  if [[ -n "$newest_epoch" ]]; then
+    printf 'valid|%s' "$newest_epoch"
+    return
+  fi
+  if [[ "$known_timestamp_present" == "1" ]]; then
+    printf '%s|' "invalid"
+    return
+  fi
+
+  printf '%s|' "absent"
+}
+
 discover_latest_stage_summary() {
   local base_dir="$1"
   local dir_prefix="$2"
   local summary_filename="$3"
   local dir_name_re
-  local dir
+  local summary_path
 
   dir_name_re="^${dir_prefix}[0-9]{8}_[0-9]{6}$"
 
-  # Prefer deterministic timestamp-name ordering when matching directories exist.
-  local -a timestamp_candidates=()
-  shopt -s nullglob
-  for dir in "$base_dir"/"${dir_prefix}"*; do
-    [[ -d "$dir" ]] || continue
-    if [[ "$(basename "$dir")" =~ $dir_name_re && -f "$dir/$summary_filename" ]]; then
-      timestamp_candidates+=("$(basename "$dir")|$dir/$summary_filename")
-    fi
-  done
-  shopt -u nullglob
-
-  if ((${#timestamp_candidates[@]} > 0)); then
-    printf '%s\n' "${timestamp_candidates[@]}" | LC_ALL=C sort | tail -n 1 | cut -d'|' -f2-
-    return 0
-  fi
-
-  # Fallback: choose latest by mtime, tie-broken by path for determinism.
+  # Selection priority:
+  #  1) valid embedded timestamp epoch (latest wins; tie -> path)
+  #  2) deterministic timestamp-directory name (latest wins; tie -> path)
+  #  3) mtime (latest wins; tie -> path)
+  # Candidates with a known timestamp field present but invalid are excluded
+  # from freshness selection (fail-closed).
+  local -a embedded_candidates=()
+  local -a dir_timestamp_candidates=()
   local -a mtime_candidates=()
-  local summary_path
   while IFS= read -r summary_path; do
     [[ -n "$summary_path" ]] || continue
+
+    local embedded_meta=""
+    local embedded_state=""
+    local embedded_epoch=""
+    embedded_meta="$(summary_embedded_timestamp_epoch "$summary_path")"
+    embedded_state="${embedded_meta%%|*}"
+    embedded_epoch="${embedded_meta#*|}"
+
+    if [[ "$embedded_state" == "invalid" ]]; then
+      continue
+    fi
+    if [[ "$embedded_state" == "valid" && "$embedded_epoch" =~ ^-?[0-9]+$ ]]; then
+      embedded_candidates+=("${embedded_epoch}|${summary_path}")
+      continue
+    fi
+
+    local candidate_dir_basename
+    candidate_dir_basename="$(basename "$(dirname "$summary_path")")"
+    if [[ "$candidate_dir_basename" =~ $dir_name_re ]]; then
+      dir_timestamp_candidates+=("${candidate_dir_basename}|${summary_path}")
+      continue
+    fi
+
     local mtime
     mtime="$(stat -c %Y "$summary_path" 2>/dev/null || stat -f %m "$summary_path" 2>/dev/null || true)"
     if [[ "$mtime" =~ ^[0-9]+$ ]]; then
       mtime_candidates+=("${mtime}|${summary_path}")
     fi
   done < <(find "$base_dir" -maxdepth 2 -type f -name "$summary_filename" -path "$base_dir/${dir_prefix}*/$summary_filename" 2>/dev/null | LC_ALL=C sort)
+
+  if ((${#embedded_candidates[@]} > 0)); then
+    printf '%s\n' "${embedded_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1n -k2,2 | tail -n 1 | cut -d'|' -f2-
+    return 0
+  fi
+
+  if ((${#dir_timestamp_candidates[@]} > 0)); then
+    printf '%s\n' "${dir_timestamp_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1 -k2,2 | tail -n 1 | cut -d'|' -f2-
+    return 0
+  fi
 
   if ((${#mtime_candidates[@]} > 0)); then
     printf '%s\n' "${mtime_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1n -k2,2 | tail -n 1 | cut -d'|' -f2-

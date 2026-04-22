@@ -816,6 +816,9 @@ if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
     summary_reference_epoch=""
     summary_generated_at_epoch=""
     summary_mtime_epoch=""
+    summary_generated_at_field_present="0"
+    summary_generated_at_invalid="0"
+    summary_generated_at_invalid_reason=""
     current_epoch_value="$current_epoch_utc"
     if ! [[ "$current_epoch_value" =~ ^[0-9]+$ ]]; then
       current_epoch_value="$(jq -nr 'now | floor')"
@@ -829,15 +832,26 @@ if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
       profile_compare_campaign_signoff_existing_summary_final_rc="0"
     fi
     profile_compare_campaign_signoff_existing_summary_failure_stage="$(jq -r '.failure_stage // ""' "$profile_compare_campaign_signoff_summary_json")"
+    if jq -e 'has("generated_at_utc")' "$profile_compare_campaign_signoff_summary_json" >/dev/null 2>&1; then
+      summary_generated_at_field_present="1"
+    fi
     profile_compare_campaign_signoff_existing_summary_generated_at_utc="$(jq -r '.generated_at_utc // ""' "$profile_compare_campaign_signoff_summary_json")"
-    if [[ -n "$profile_compare_campaign_signoff_existing_summary_generated_at_utc" ]]; then
+    if [[ "$summary_generated_at_field_present" == "1" ]]; then
       summary_generated_at_epoch="$(iso8601_to_epoch "$profile_compare_campaign_signoff_existing_summary_generated_at_utc" 2>/dev/null || true)"
       if [[ "$summary_generated_at_epoch" =~ ^[0-9]+$ ]]; then
-        summary_reference_epoch="$summary_generated_at_epoch"
-        profile_compare_campaign_signoff_existing_summary_freshness_source="generated_at_utc"
+        if (( summary_generated_at_epoch <= current_epoch_value )); then
+          summary_reference_epoch="$summary_generated_at_epoch"
+          profile_compare_campaign_signoff_existing_summary_freshness_source="generated_at_utc"
+        else
+          summary_generated_at_invalid="1"
+          summary_generated_at_invalid_reason="future generated_at_utc in signoff summary"
+        fi
+      else
+        summary_generated_at_invalid="1"
+        summary_generated_at_invalid_reason="invalid generated_at_utc in signoff summary"
       fi
     fi
-    if [[ -z "$summary_reference_epoch" ]]; then
+    if [[ -z "$summary_reference_epoch" && "$summary_generated_at_field_present" != "1" ]]; then
       summary_mtime_epoch="$(file_mtime_epoch "$profile_compare_campaign_signoff_summary_json")"
       if [[ "$summary_mtime_epoch" =~ ^[0-9]+$ ]]; then
         summary_reference_epoch="$summary_mtime_epoch"
@@ -845,13 +859,12 @@ if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
       fi
     fi
     if [[ "$summary_reference_epoch" =~ ^[0-9]+$ && "$current_epoch_value" =~ ^[0-9]+$ ]]; then
-      profile_compare_campaign_signoff_existing_summary_freshness_available="1"
       profile_compare_campaign_signoff_existing_summary_age_sec="$((current_epoch_value - summary_reference_epoch))"
-      if (( profile_compare_campaign_signoff_existing_summary_age_sec < 0 )); then
-        profile_compare_campaign_signoff_existing_summary_age_sec="0"
-      fi
-      if (( profile_compare_campaign_signoff_existing_summary_age_sec <= profile_compare_campaign_signoff_summary_max_age_sec )); then
-        profile_compare_campaign_signoff_existing_summary_fresh="1"
+      if (( profile_compare_campaign_signoff_existing_summary_age_sec >= 0 )); then
+        profile_compare_campaign_signoff_existing_summary_freshness_available="1"
+        if (( profile_compare_campaign_signoff_existing_summary_age_sec <= profile_compare_campaign_signoff_summary_max_age_sec )); then
+          profile_compare_campaign_signoff_existing_summary_fresh="1"
+        fi
       fi
     fi
     profile_compare_campaign_signoff_existing_summary_requires_refresh="0"
@@ -865,7 +878,11 @@ if [[ -f "$profile_compare_campaign_signoff_summary_json" ]]; then
     if [[ "$profile_compare_campaign_signoff_existing_summary_requires_refresh" != "1" ]]; then
       if [[ "$profile_compare_campaign_signoff_existing_summary_freshness_available" != "1" ]]; then
         profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
-        profile_compare_campaign_signoff_existing_summary_refresh_reason="signoff summary freshness unavailable (missing/invalid generated_at_utc and mtime)"
+        if [[ "$summary_generated_at_invalid" == "1" ]]; then
+          profile_compare_campaign_signoff_existing_summary_refresh_reason="$summary_generated_at_invalid_reason"
+        else
+          profile_compare_campaign_signoff_existing_summary_refresh_reason="signoff summary freshness unavailable (missing/invalid generated_at_utc and mtime)"
+        fi
       elif [[ "$profile_compare_campaign_signoff_existing_summary_fresh" != "1" ]]; then
         profile_compare_campaign_signoff_existing_summary_requires_refresh="1"
         profile_compare_campaign_signoff_existing_summary_refresh_reason="stale signoff summary artifact (source=${profile_compare_campaign_signoff_existing_summary_freshness_source:-unknown} age_sec=${profile_compare_campaign_signoff_existing_summary_age_sec:-unknown} max_age_sec=${profile_compare_campaign_signoff_summary_max_age_sec})"

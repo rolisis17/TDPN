@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep cat cmp; do
+for cmd in bash jq mktemp chmod grep cat cmp touch; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -64,6 +64,26 @@ FALLBACK_HANDOFF_CHECK_OLD_DIR="$FALLBACK_REPORTS_DIR/phase7_mainnet_cutover_han
 FALLBACK_HANDOFF_CHECK_NEW_DIR="$FALLBACK_REPORTS_DIR/phase7_mainnet_cutover_handoff_check_20260415_170500"
 FALLBACK_HANDOFF_RUN_OLD_DIR="$FALLBACK_REPORTS_DIR/phase7_mainnet_cutover_handoff_run_20260415_170600"
 FALLBACK_HANDOFF_RUN_NEW_DIR="$FALLBACK_REPORTS_DIR/phase7_mainnet_cutover_handoff_run_20260415_170700"
+
+EMBEDDED_INVALID_REPORTS_DIR="$TMP_DIR/embedded_invalid_reports"
+EMBEDDED_INVALID_REPORT_JSON="$TMP_DIR/report_embedded_invalid.json"
+EMBEDDED_INVALID_CANONICAL_REPORT_JSON="$TMP_DIR/report_embedded_invalid_canonical.json"
+EMBEDDED_INVALID_LOG="$TMP_DIR/embedded_invalid.log"
+EMBEDDED_INVALID_CHECK_OLDER_DIR="$EMBEDDED_INVALID_REPORTS_DIR/phase7_mainnet_cutover_check_20260415_175900"
+EMBEDDED_INVALID_CHECK_INVALID_NEWER_DIR="$EMBEDDED_INVALID_REPORTS_DIR/phase7_mainnet_cutover_check_20260415_180000"
+EMBEDDED_INVALID_RUN_DEFAULT="$EMBEDDED_INVALID_REPORTS_DIR/phase7_mainnet_cutover_run_summary.json"
+EMBEDDED_INVALID_HANDOFF_CHECK_DEFAULT="$EMBEDDED_INVALID_REPORTS_DIR/phase7_mainnet_cutover_handoff_check_summary.json"
+EMBEDDED_INVALID_HANDOFF_RUN_DEFAULT="$EMBEDDED_INVALID_REPORTS_DIR/phase7_mainnet_cutover_handoff_run_summary.json"
+
+EMBEDDED_VALID_REPORTS_DIR="$TMP_DIR/embedded_valid_reports"
+EMBEDDED_VALID_REPORT_JSON="$TMP_DIR/report_embedded_valid.json"
+EMBEDDED_VALID_CANONICAL_REPORT_JSON="$TMP_DIR/report_embedded_valid_canonical.json"
+EMBEDDED_VALID_LOG="$TMP_DIR/embedded_valid.log"
+EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS_DIR="$EMBEDDED_VALID_REPORTS_DIR/phase7_mainnet_cutover_check_20260415_180100"
+EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS_DIR="$EMBEDDED_VALID_REPORTS_DIR/phase7_mainnet_cutover_check_20260415_180200"
+EMBEDDED_VALID_RUN_DEFAULT="$EMBEDDED_VALID_REPORTS_DIR/phase7_mainnet_cutover_run_summary.json"
+EMBEDDED_VALID_HANDOFF_CHECK_DEFAULT="$EMBEDDED_VALID_REPORTS_DIR/phase7_mainnet_cutover_handoff_check_summary.json"
+EMBEDDED_VALID_HANDOFF_RUN_DEFAULT="$EMBEDDED_VALID_REPORTS_DIR/phase7_mainnet_cutover_handoff_run_summary.json"
 
 assert_canonical_path_hygiene() {
   local summary_json="${1:?summary json required}"
@@ -854,5 +874,238 @@ if ! cmp -s "$FALLBACK_REPORT_JSON" "$FALLBACK_CANONICAL_REPORT_JSON"; then
   exit 1
 fi
 assert_canonical_path_hygiene "$FALLBACK_REPORT_JSON" "$FALLBACK_CANONICAL_REPORT_JSON" "fallback-discovery"
+
+mkdir -p "$EMBEDDED_INVALID_REPORTS_DIR" "$EMBEDDED_INVALID_CHECK_OLDER_DIR" "$EMBEDDED_INVALID_CHECK_INVALID_NEWER_DIR"
+
+cat >"$EMBEDDED_INVALID_CHECK_OLDER_DIR/phase7_mainnet_cutover_check_summary.json" <<'EOF_EMBEDDED_INVALID_CHECK_OLDER'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_INVALID_CHECK_OLDER
+
+cat >"$EMBEDDED_INVALID_CHECK_INVALID_NEWER_DIR/phase7_mainnet_cutover_check_summary.json" <<'EOF_EMBEDDED_INVALID_CHECK_INVALID_NEWER'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "summary_generated_at": "not-a-real-timestamp",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_INVALID_CHECK_INVALID_NEWER
+
+cat >"$EMBEDDED_INVALID_RUN_DEFAULT" <<'EOF_EMBEDDED_INVALID_RUN_DEFAULT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_INVALID_RUN_DEFAULT
+
+cat >"$EMBEDDED_INVALID_HANDOFF_CHECK_DEFAULT" <<'EOF_EMBEDDED_INVALID_HANDOFF_CHECK_DEFAULT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_INVALID_HANDOFF_CHECK_DEFAULT
+
+cat >"$EMBEDDED_INVALID_HANDOFF_RUN_DEFAULT" <<'EOF_EMBEDDED_INVALID_HANDOFF_RUN_DEFAULT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_handoff_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_INVALID_HANDOFF_RUN_DEFAULT
+
+touch -t 202604151201.00 "$EMBEDDED_INVALID_CHECK_OLDER_DIR/phase7_mainnet_cutover_check_summary.json"
+touch -t 202604151259.00 "$EMBEDDED_INVALID_CHECK_INVALID_NEWER_DIR/phase7_mainnet_cutover_check_summary.json"
+
+echo "[phase7-mainnet-cutover-summary-report] invalid-embedded-fail-closed path"
+PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$EMBEDDED_INVALID_CANONICAL_REPORT_JSON" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$EMBEDDED_INVALID_REPORTS_DIR" \
+  --summary-json "$EMBEDDED_INVALID_REPORT_JSON" \
+  --print-report 0 \
+  --show-json 0 >"$EMBEDDED_INVALID_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_check_path "$EMBEDDED_INVALID_CHECK_OLDER_DIR/phase7_mainnet_cutover_check_summary.json" \
+  --arg rejected_check_path "$EMBEDDED_INVALID_CHECK_INVALID_NEWER_DIR/phase7_mainnet_cutover_check_summary.json" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .counts.configured == 4
+  and .counts.pass == 4
+  and .counts.fail == 0
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .summaries.check.status == "pass"
+  and .summaries.check.source_kind == "discovered_timestamp_dir"
+  and .summaries.check.source_path == $expected_check_path
+  and .summaries.check.source_path != $rejected_check_path
+  and .summaries.run.source_kind == "default"
+  and .summaries.handoff_check.source_kind == "default"
+  and .summaries.handoff_run.source_kind == "default"
+' "$EMBEDDED_INVALID_REPORT_JSON" >/dev/null; then
+  echo "phase7 summary report invalid-embedded-fail-closed contract mismatch"
+  cat "$EMBEDDED_INVALID_REPORT_JSON"
+  cat "$EMBEDDED_INVALID_LOG"
+  exit 1
+fi
+if [[ ! -f "$EMBEDDED_INVALID_CANONICAL_REPORT_JSON" ]]; then
+  echo "missing invalid-embedded canonical summary report: $EMBEDDED_INVALID_CANONICAL_REPORT_JSON"
+  cat "$EMBEDDED_INVALID_LOG"
+  exit 1
+fi
+if ! cmp -s "$EMBEDDED_INVALID_REPORT_JSON" "$EMBEDDED_INVALID_CANONICAL_REPORT_JSON"; then
+  echo "invalid-embedded summary and canonical summary mismatch"
+  cat "$EMBEDDED_INVALID_REPORT_JSON"
+  cat "$EMBEDDED_INVALID_CANONICAL_REPORT_JSON"
+  exit 1
+fi
+assert_canonical_path_hygiene "$EMBEDDED_INVALID_REPORT_JSON" "$EMBEDDED_INVALID_CANONICAL_REPORT_JSON" "invalid-embedded-fail-closed"
+
+mkdir -p "$EMBEDDED_VALID_REPORTS_DIR" "$EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS_DIR" "$EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS_DIR"
+
+cat >"$EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS_DIR/phase7_mainnet_cutover_check_summary.json" <<'EOF_EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T12:00:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS
+
+cat >"$EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS_DIR/phase7_mainnet_cutover_check_summary.json" <<'EOF_EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "summary_generated_at_utc": "2026-04-15T12:30:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS
+
+cat >"$EMBEDDED_VALID_RUN_DEFAULT" <<'EOF_EMBEDDED_VALID_RUN_DEFAULT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_VALID_RUN_DEFAULT
+
+cat >"$EMBEDDED_VALID_HANDOFF_CHECK_DEFAULT" <<'EOF_EMBEDDED_VALID_HANDOFF_CHECK_DEFAULT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_handoff_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_VALID_HANDOFF_CHECK_DEFAULT
+
+cat >"$EMBEDDED_VALID_HANDOFF_RUN_DEFAULT" <<'EOF_EMBEDDED_VALID_HANDOFF_RUN_DEFAULT'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase7_mainnet_cutover_handoff_run_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_VALID_HANDOFF_RUN_DEFAULT
+
+touch -t 202604151300.00 "$EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS_DIR/phase7_mainnet_cutover_check_summary.json"
+touch -t 202604151200.00 "$EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS_DIR/phase7_mainnet_cutover_check_summary.json"
+
+echo "[phase7-mainnet-cutover-summary-report] valid-embedded-precedence path"
+PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$EMBEDDED_VALID_CANONICAL_REPORT_JSON" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$EMBEDDED_VALID_REPORTS_DIR" \
+  --summary-json "$EMBEDDED_VALID_REPORT_JSON" \
+  --print-report 0 \
+  --show-json 0 >"$EMBEDDED_VALID_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_check_path "$EMBEDDED_VALID_CHECK_OLDER_MTIME_NEWER_TS_DIR/phase7_mainnet_cutover_check_summary.json" \
+  --arg rejected_check_path "$EMBEDDED_VALID_CHECK_NEWER_MTIME_OLDER_TS_DIR/phase7_mainnet_cutover_check_summary.json" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .counts.configured == 4
+  and .counts.pass == 4
+  and .counts.fail == 0
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .summaries.check.status == "pass"
+  and .summaries.check.source_kind == "discovered_timestamp_dir"
+  and .summaries.check.source_path == $expected_check_path
+  and .summaries.check.source_path != $rejected_check_path
+  and .summaries.run.source_kind == "default"
+  and .summaries.handoff_check.source_kind == "default"
+  and .summaries.handoff_run.source_kind == "default"
+' "$EMBEDDED_VALID_REPORT_JSON" >/dev/null; then
+  echo "phase7 summary report valid-embedded-precedence contract mismatch"
+  cat "$EMBEDDED_VALID_REPORT_JSON"
+  cat "$EMBEDDED_VALID_LOG"
+  exit 1
+fi
+if [[ ! -f "$EMBEDDED_VALID_CANONICAL_REPORT_JSON" ]]; then
+  echo "missing valid-embedded canonical summary report: $EMBEDDED_VALID_CANONICAL_REPORT_JSON"
+  cat "$EMBEDDED_VALID_LOG"
+  exit 1
+fi
+if ! cmp -s "$EMBEDDED_VALID_REPORT_JSON" "$EMBEDDED_VALID_CANONICAL_REPORT_JSON"; then
+  echo "valid-embedded summary and canonical summary mismatch"
+  cat "$EMBEDDED_VALID_REPORT_JSON"
+  cat "$EMBEDDED_VALID_CANONICAL_REPORT_JSON"
+  exit 1
+fi
+assert_canonical_path_hygiene "$EMBEDDED_VALID_REPORT_JSON" "$EMBEDDED_VALID_CANONICAL_REPORT_JSON" "valid-embedded-precedence"
 
 echo "phase7 mainnet cutover summary report integration ok"

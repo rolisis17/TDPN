@@ -96,40 +96,151 @@ display_stage_name() {
   esac
 }
 
+file_mtime_epoch_or_empty() {
+  local path="$1"
+  local mtime=""
+  if mtime="$(stat -c %Y "$path" 2>/dev/null)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$mtime"
+    return
+  fi
+  if mtime="$(stat -f %m "$path" 2>/dev/null)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$mtime"
+    return
+  fi
+  if mtime="$(date -r "$path" +%s 2>/dev/null)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$mtime"
+    return
+  fi
+  printf '%s' ""
+}
+
+timestamp_epoch_utc_or_empty() {
+  local timestamp
+  local epoch=""
+  timestamp="$(trim "${1:-}")"
+  if [[ -z "$timestamp" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?([Zz]|[+]00:00|[+]0000|[+]00)$ ]]; then
+    printf '%s' ""
+    return
+  fi
+  if epoch="$(date -u -d "$timestamp" +%s 2>/dev/null)" && [[ "$epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$epoch"
+    return
+  fi
+  printf '%s' ""
+}
+
+summary_timestamp_meta_for_discovery() {
+  local path="$1"
+  local known_timestamp_present="0"
+  local known_timestamp_invalid="0"
+  local reference_epoch=""
+  local timestamp_field=""
+  local timestamp_raw=""
+  local timestamp_epoch=""
+
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '%s|%s|%s\n' "$known_timestamp_present" "$known_timestamp_invalid" "$reference_epoch"
+    return
+  fi
+  if ! jq -e . "$path" >/dev/null 2>&1; then
+    printf '%s|%s|%s\n' "$known_timestamp_present" "$known_timestamp_invalid" "$reference_epoch"
+    return
+  fi
+
+  for timestamp_field in generated_at_utc generated_at summary_generated_at_utc summary_generated_at; do
+    if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
+      known_timestamp_present="1"
+      timestamp_raw="$(jq -r --arg field "$timestamp_field" '
+        .[$field]
+        | if type == "string" then . else "" end
+      ' "$path" 2>/dev/null || true)"
+      timestamp_raw="$(trim "$timestamp_raw")"
+      timestamp_epoch="$(timestamp_epoch_utc_or_empty "$timestamp_raw")"
+      if [[ -n "$timestamp_epoch" ]]; then
+        if [[ -z "$reference_epoch" ]]; then
+          reference_epoch="$timestamp_epoch"
+        elif [[ "$timestamp_epoch" != "$reference_epoch" ]]; then
+          known_timestamp_invalid="1"
+        fi
+      else
+        known_timestamp_invalid="1"
+      fi
+    fi
+  done
+
+  if [[ "$known_timestamp_invalid" == "1" ]]; then
+    reference_epoch=""
+  fi
+
+  printf '%s|%s|%s\n' "$known_timestamp_present" "$known_timestamp_invalid" "$reference_epoch"
+}
+
 discover_latest_stage_summary() {
   local base_dir="$1"
   local dir_prefix="$2"
   local summary_filename="$3"
   local dir_name_re
-  local dir
+  local summary_path=""
+  local dir_basename=""
+  local mtime=""
+  local candidate_meta=""
+  local known_timestamp_present="0"
+  local known_timestamp_invalid="0"
+  local embedded_epoch=""
+  local dir_timestamp_key=""
 
   dir_name_re="^${dir_prefix}[0-9]{8}_[0-9]{6}$"
 
-  local -a timestamp_candidates=()
-  shopt -s nullglob
-  for dir in "$base_dir"/"${dir_prefix}"*; do
-    [[ -d "$dir" ]] || continue
-    if [[ "$(basename "$dir")" =~ $dir_name_re && -f "$dir/$summary_filename" ]]; then
-      timestamp_candidates+=("$(basename "$dir")|$dir/$summary_filename")
-    fi
-  done
-  shopt -u nullglob
+  local -a embedded_timestamp_candidates=()
+  local -a dir_timestamp_candidates=()
+  local -a mtime_candidates=()
+  while IFS= read -r summary_path; do
+    [[ -n "$summary_path" ]] || continue
 
-  if ((${#timestamp_candidates[@]} > 0)); then
-    printf '%s\n' "${timestamp_candidates[@]}" | LC_ALL=C sort | tail -n 1 | cut -d'|' -f2-
+    candidate_meta="$(summary_timestamp_meta_for_discovery "$summary_path")"
+    known_timestamp_present="${candidate_meta%%|*}"
+    candidate_meta="${candidate_meta#*|}"
+    known_timestamp_invalid="${candidate_meta%%|*}"
+    embedded_epoch="${candidate_meta#*|}"
+
+    # Fail closed when known embedded timestamp fields are present but invalid.
+    if [[ "$known_timestamp_invalid" == "1" ]]; then
+      continue
+    fi
+
+    if [[ "$embedded_epoch" =~ ^[0-9]+$ ]]; then
+      embedded_timestamp_candidates+=("${embedded_epoch}|${summary_path}")
+      continue
+    fi
+
+    dir_basename="$(basename "$(dirname "$summary_path")")"
+    if [[ "$dir_basename" =~ $dir_name_re ]]; then
+      dir_timestamp_key="$dir_basename"
+      dir_timestamp_candidates+=("${dir_timestamp_key}|${summary_path}")
+    fi
+
+    # mtime fallback only applies when no known embedded timestamp fields exist.
+    if [[ "$known_timestamp_present" != "1" ]]; then
+      mtime="$(file_mtime_epoch_or_empty "$summary_path")"
+      if [[ "$mtime" =~ ^[0-9]+$ ]]; then
+        mtime_candidates+=("${mtime}|${summary_path}")
+      fi
+    fi
+  done < <(find "$base_dir" -maxdepth 2 -type f -name "$summary_filename" -path "$base_dir/${dir_prefix}*/$summary_filename" 2>/dev/null | LC_ALL=C sort)
+
+  if ((${#embedded_timestamp_candidates[@]} > 0)); then
+    printf '%s\n' "${embedded_timestamp_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1n -k2,2 | tail -n 1 | cut -d'|' -f2-
     return 0
   fi
 
-  local -a mtime_candidates=()
-  local summary_path
-  while IFS= read -r summary_path; do
-    [[ -n "$summary_path" ]] || continue
-    local mtime
-    mtime="$(stat -c %Y "$summary_path" 2>/dev/null || stat -f %m "$summary_path" 2>/dev/null || true)"
-    if [[ "$mtime" =~ ^[0-9]+$ ]]; then
-      mtime_candidates+=("${mtime}|${summary_path}")
-    fi
-  done < <(find "$base_dir" -maxdepth 2 -type f -name "$summary_filename" -path "$base_dir/${dir_prefix}*/$summary_filename" 2>/dev/null | LC_ALL=C sort)
+  if ((${#dir_timestamp_candidates[@]} > 0)); then
+    printf '%s\n' "${dir_timestamp_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1 -k2,2 | tail -n 1 | cut -d'|' -f2-
+    return 0
+  fi
 
   if ((${#mtime_candidates[@]} > 0)); then
     printf '%s\n' "${mtime_candidates[@]}" | LC_ALL=C sort -t'|' -k1,1n -k2,2 | tail -n 1 | cut -d'|' -f2-

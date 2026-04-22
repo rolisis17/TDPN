@@ -269,7 +269,8 @@ summary_age_sec_from_path() {
 
   age_sec="$((now_epoch - reference_epoch))"
   if (( age_sec < 0 )); then
-    age_sec=0
+    printf '%s' ""
+    return
   fi
 
   printf '%s' "$age_sec"
@@ -4371,7 +4372,7 @@ blockchain_gate_summary_freshness_fields() {
   local timestamp_epoch=""
 
   if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
-    for timestamp_field in generated_at_utc generated_at; do
+    for timestamp_field in generated_at_utc generated_at summary_generated_at_utc summary_generated_at; do
       if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
         known_timestamp_present="1"
         timestamp_raw="$(jq -r --arg field "$timestamp_field" '
@@ -4410,9 +4411,9 @@ blockchain_gate_summary_freshness_fields() {
     if [[ "$now_epoch" =~ ^[0-9]+$ ]]; then
       age_sec=$(( now_epoch - reference_epoch ))
       if (( age_sec < 0 )); then
-        age_sec=0
-      fi
-      if [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
+        age_sec=""
+        stale="true"
+      elif [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
         if (( age_sec > max_age_sec )); then
           stale="true"
         else
@@ -4505,10 +4506,12 @@ blockchain_gate_candidate_missing_metrics_no_go_01() {
 find_latest_blockchain_mainnet_activation_gate_summary_json() {
   local logs_root
   local candidate=""
-  local candidate_mtime=0
+  local candidate_age_sec=0
+  local candidate_has_age=0
   local candidate_preferred=1
   local best_path=""
-  local best_mtime=-1
+  local best_age_sec=0
+  local best_has_age=-1
   local best_preferred=-1
   logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
@@ -4522,9 +4525,12 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
     if [[ "$(blockchain_gate_candidate_is_seeded_01 "$candidate")" == "1" ]]; then
       continue
     fi
-    candidate_mtime="$(file_mtime_epoch "$candidate")"
-    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
-      candidate_mtime=0
+    candidate_age_sec="$(summary_age_sec_from_path "$candidate")"
+    if [[ "$candidate_age_sec" =~ ^[0-9]+$ ]]; then
+      candidate_has_age=1
+    else
+      candidate_has_age=0
+      candidate_age_sec=0
     fi
     candidate_preferred=1
     if [[ "$(blockchain_gate_candidate_missing_metrics_no_go_01 "$candidate")" == "1" ]]; then
@@ -4535,13 +4541,26 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
     # invocations without a metrics JSON input.
     if (( candidate_preferred > best_preferred )); then
       best_preferred="$candidate_preferred"
-      best_mtime="$candidate_mtime"
+      best_has_age="$candidate_has_age"
+      best_age_sec="$candidate_age_sec"
       best_path="$candidate"
-    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime > best_mtime )); then
-      best_mtime="$candidate_mtime"
-      best_path="$candidate"
-    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
-      best_path="$candidate"
+    elif (( candidate_preferred == best_preferred )); then
+      if (( candidate_has_age > best_has_age )); then
+        best_has_age="$candidate_has_age"
+        best_age_sec="$candidate_age_sec"
+        best_path="$candidate"
+      elif (( candidate_has_age == best_has_age )); then
+        if (( candidate_has_age == 1 )); then
+          if (( candidate_age_sec < best_age_sec )); then
+            best_age_sec="$candidate_age_sec"
+            best_path="$candidate"
+          elif (( candidate_age_sec == best_age_sec )) && [[ "$candidate" > "$best_path" ]]; then
+            best_path="$candidate"
+          fi
+        elif [[ "$candidate" > "$best_path" ]]; then
+          best_path="$candidate"
+        fi
+      fi
     fi
   done < <(find "$logs_root" -type f \
     \( -name 'blockchain_mainnet_activation_gate_summary.json' \
@@ -4717,10 +4736,12 @@ blockchain_bootstrap_governance_graduation_gate_summary_kind_from_source() {
 find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
   local logs_root
   local candidate=""
-  local candidate_mtime=0
+  local candidate_age_sec=0
+  local candidate_has_age=0
   local candidate_preferred=1
   local best_path=""
-  local best_mtime=-1
+  local best_age_sec=0
+  local best_has_age=-1
   local best_preferred=-1
   logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
@@ -4734,9 +4755,12 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
     if [[ "$(blockchain_gate_candidate_is_seeded_01 "$candidate")" == "1" ]]; then
       continue
     fi
-    candidate_mtime="$(file_mtime_epoch "$candidate")"
-    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
-      candidate_mtime=0
+    candidate_age_sec="$(summary_age_sec_from_path "$candidate")"
+    if [[ "$candidate_age_sec" =~ ^[0-9]+$ ]]; then
+      candidate_has_age=1
+    else
+      candidate_has_age=0
+      candidate_age_sec=0
     fi
     candidate_preferred=1
     if [[ "$(blockchain_gate_candidate_missing_metrics_no_go_01 "$candidate")" == "1" ]]; then
@@ -4744,13 +4768,26 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
     fi
     if (( candidate_preferred > best_preferred )); then
       best_preferred="$candidate_preferred"
-      best_mtime="$candidate_mtime"
+      best_has_age="$candidate_has_age"
+      best_age_sec="$candidate_age_sec"
       best_path="$candidate"
-    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime > best_mtime )); then
-      best_mtime="$candidate_mtime"
-      best_path="$candidate"
-    elif (( candidate_preferred == best_preferred )) && (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
-      best_path="$candidate"
+    elif (( candidate_preferred == best_preferred )); then
+      if (( candidate_has_age > best_has_age )); then
+        best_has_age="$candidate_has_age"
+        best_age_sec="$candidate_age_sec"
+        best_path="$candidate"
+      elif (( candidate_has_age == best_has_age )); then
+        if (( candidate_has_age == 1 )); then
+          if (( candidate_age_sec < best_age_sec )); then
+            best_age_sec="$candidate_age_sec"
+            best_path="$candidate"
+          elif (( candidate_age_sec == best_age_sec )) && [[ "$candidate" > "$best_path" ]]; then
+            best_path="$candidate"
+          fi
+        elif [[ "$candidate" > "$best_path" ]]; then
+          best_path="$candidate"
+        fi
+      fi
     fi
   done < <(find "$logs_root" -type f \
     \( -name 'blockchain_bootstrap_governance_graduation_gate_summary.json' \

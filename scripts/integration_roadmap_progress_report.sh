@@ -954,11 +954,14 @@ EOF_MINIMAL_SUMMARY_GATE
 FRESH_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_fresh_summary.json"
 FRESH_BOOTSTRAP_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_bootstrap_governance_graduation_gate_fresh_summary.json"
 STALE_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_stale_summary.json"
+FUTURE_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_future_summary.json"
 current_epoch="$(date -u +%s)"
 fresh_epoch=$((current_epoch - 3600))
 stale_epoch=$((current_epoch - 172800))
+future_epoch=$((current_epoch + 3600))
 fresh_iso="$(date -u -d "@$fresh_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 stale_iso="$(date -u -d "@$stale_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+future_iso="$(date -u -d "@$future_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 
 cat >"$FRESH_MAINNET_GATE_SUMMARY_JSON" <<EOF_FRESH_MAINNET
 {
@@ -1170,8 +1173,83 @@ if ! rg -q 'blockchain_recommended_gate_id=blockchain_mainnet_activation_refresh
   exit 1
 fi
 
+echo "[roadmap-progress-report] blockchain freshness future generated_at_utc is fail-closed (stale/unknown)"
+cat >"$FUTURE_MAINNET_GATE_SUMMARY_JSON" <<EOF_FUTURE_MAINNET
+{
+  "version": 1,
+  "schema": {
+    "id": "mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$future_iso",
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "future activation evidence fixture"
+    ]
+  },
+  "reasons": [
+    "future activation evidence fixture"
+  ],
+  "source_paths": [
+    "./artifacts/blockchain/mainnet-activation-metrics/metrics.json"
+  ]
+}
+EOF_FUTURE_MAINNET
+touch "$FUTURE_MAINNET_GATE_SUMMARY_JSON"
+
+FUTURE_SUMMARY_JSON="$TMP_DIR/roadmap_progress_mainnet_activation_gate_future_summary.json"
+FUTURE_REPORT_MD="$TMP_DIR/roadmap_progress_mainnet_activation_gate_future_report.md"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-mainnet-activation-gate-summary-json "$FUTURE_MAINNET_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$FUTURE_SUMMARY_JSON" \
+  --report-md "$FUTURE_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log 2>&1; then
+  echo "expected success for future blockchain freshness summary"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log
+  exit 1
+fi
+if ! jq -e --arg future_iso "$future_iso" '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "GO"
+  and .blockchain_track.mainnet_activation_gate.go == true
+  and .blockchain_track.mainnet_activation_gate.no_go == false
+  and .blockchain_track.mainnet_activation_gate.summary_generated_at == $future_iso
+  and .blockchain_track.mainnet_activation_gate.summary_stale == true
+  and .blockchain_track.mainnet_activation_stale_evidence.status == "stale"
+  and .blockchain_track.mainnet_activation_stale_evidence.action_required == true
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.available == true
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.id == "blockchain_mainnet_activation_refresh_evidence"
+  and .blockchain_track.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
+  and ((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence"))
+' "$FUTURE_SUMMARY_JSON" >/dev/null; then
+  echo "future blockchain freshness summary missing fail-closed stale/unknown evidence fields"
+  cat "$FUTURE_SUMMARY_JSON"
+  exit 1
+fi
+if ! rg -q 'mainnet_activation_stale_evidence_status=stale action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log; then
+  echo "future blockchain freshness log missing fail-closed stale operator-action line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log
+  exit 1
+fi
+
 echo "[roadmap-progress-report] blockchain freshness invalid generated_at_utc is fail-closed despite fresh mtime"
 INVALID_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_invalid_generated_at_utc_summary.json"
+INVALID_BOOTSTRAP_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_bootstrap_governance_graduation_gate_invalid_generated_at_utc_summary.json"
 cat >"$INVALID_MAINNET_GATE_SUMMARY_JSON" <<'EOF_INVALID_MAINNET'
 {
   "version": 1,
@@ -1199,6 +1277,30 @@ cat >"$INVALID_MAINNET_GATE_SUMMARY_JSON" <<'EOF_INVALID_MAINNET'
 }
 EOF_INVALID_MAINNET
 touch "$INVALID_MAINNET_GATE_SUMMARY_JSON"
+cat >"$INVALID_BOOTSTRAP_GATE_SUMMARY_JSON" <<'EOF_INVALID_BOOTSTRAP'
+{
+  "version": 1,
+  "schema": {
+    "id": "bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "summary_generated_at_utc": "totally-invalid-utc",
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "invalid bootstrap generated_at_utc fixture"
+    ]
+  },
+  "source_paths": [
+    "./artifacts/blockchain/bootstrap-governance-graduation/summary.json"
+  ]
+}
+EOF_INVALID_BOOTSTRAP
+touch "$INVALID_BOOTSTRAP_GATE_SUMMARY_JSON"
 
 INVALID_SUMMARY_JSON="$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_generated_at_utc_summary.json"
 INVALID_REPORT_MD="$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_generated_at_utc_report.md"
@@ -1210,7 +1312,7 @@ if ! run_roadmap_progress_report \
   --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
   --phase7-mainnet-cutover-summary-json "" \
   --blockchain-mainnet-activation-gate-summary-json "$INVALID_MAINNET_GATE_SUMMARY_JSON" \
-  --blockchain-bootstrap-governance-graduation-gate-summary-json "$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$INVALID_BOOTSTRAP_GATE_SUMMARY_JSON" \
   --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
   --summary-json "$INVALID_SUMMARY_JSON" \
   --report-md "$INVALID_REPORT_MD" \
@@ -1226,11 +1328,14 @@ if ! jq -e '
   and .blockchain_track.mainnet_activation_gate.decision == "GO"
   and .blockchain_track.mainnet_activation_gate.go == true
   and .blockchain_track.mainnet_activation_gate.no_go == false
-  and .blockchain_track.mainnet_activation_stale_evidence.status != "fresh"
-  and (
-    .blockchain_track.mainnet_activation_stale_evidence.status == "stale"
-    or .blockchain_track.mainnet_activation_stale_evidence.status == "unknown"
-  )
+  and .blockchain_track.mainnet_activation_gate.summary_stale == null
+  and .blockchain_track.bootstrap_governance_graduation_gate.available == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.no_go == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_stale == null
+  and .blockchain_track.mainnet_activation_stale_evidence.status == "unknown"
   and .blockchain_track.mainnet_activation_stale_evidence.action_required == true
   and .blockchain_track.mainnet_activation_refresh_evidence_action.available == true
   and .blockchain_track.mainnet_activation_refresh_evidence_action.id == "blockchain_mainnet_activation_refresh_evidence"
@@ -2182,6 +2287,250 @@ if ! jq -e --arg preferred_src "$AUTO_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMA
 ' "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_seeded_ignored_summary.json" >/dev/null; then
   echo "auto-discovered bootstrap governance graduation gate did not ignore seeded summary artifact"
   cat "$TMP_DIR/roadmap_progress_bootstrap_governance_graduation_gate_auto_seeded_ignored_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain gate selector prefers embedded timestamp freshness over mtime"
+BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR="$TMP_DIR/blockchain_selector_embedded_timestamp_precedence"
+mkdir -p "$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR"
+selector_now_epoch="$(date -u +%s)"
+selector_embedded_old_epoch=$((selector_now_epoch - 21600))
+selector_embedded_new_epoch=$((selector_now_epoch - 1800))
+selector_embedded_old_iso="$(date -u -d "@$selector_embedded_old_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+selector_embedded_new_iso="$(date -u -d "@$selector_embedded_new_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR/blockchain_mainnet_activation_gate_embedded_old_new_mtime_summary.json"
+MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR/blockchain_mainnet_activation_gate_embedded_new_old_mtime_summary.json"
+BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR/blockchain_bootstrap_governance_graduation_gate_embedded_old_new_mtime_summary.json"
+BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR/blockchain_bootstrap_governance_graduation_gate_embedded_new_old_mtime_summary.json"
+cat >"$MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" <<EOF_MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$selector_embedded_old_iso",
+  "status": "NO-GO",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": [
+    "older embedded timestamp should lose to newer embedded timestamp"
+  ]
+}
+EOF_MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME
+cat >"$MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" <<EOF_MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$selector_embedded_new_iso",
+  "status": "GO",
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": [
+    "newer embedded timestamp should win despite older mtime"
+  ]
+}
+EOF_MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME
+cat >"$BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" <<EOF_BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$selector_embedded_old_iso",
+  "status": "NO-GO",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": [
+    "older bootstrap embedded timestamp should lose to newer embedded timestamp"
+  ]
+}
+EOF_BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME
+cat >"$BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" <<EOF_BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$selector_embedded_new_iso",
+  "status": "GO",
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": [
+    "newer bootstrap embedded timestamp should win despite older mtime"
+  ]
+}
+EOF_BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME
+touch -d "@$selector_now_epoch" "$MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" "$BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON"
+touch -d "@$((selector_now_epoch - 600))" "$MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" "$BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON"
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR" ROADMAP_PROGRESS_LOG_DIR="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --summary-json "$TMP_DIR/roadmap_progress_blockchain_selector_embedded_timestamp_precedence_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_blockchain_selector_embedded_timestamp_precedence_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_blockchain_selector_embedded_timestamp_precedence.log 2>&1; then
+  echo "expected success for blockchain selector embedded timestamp precedence path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_blockchain_selector_embedded_timestamp_precedence.log
+  exit 1
+fi
+if ! jq -e \
+  --arg mainnet_preferred_src "$MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" \
+  --arg mainnet_rejected_src "$MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" \
+  --arg bootstrap_preferred_src "$BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" \
+  --arg bootstrap_rejected_src "$BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" \
+  --arg preferred_iso "$selector_embedded_new_iso" '
+  .blockchain_track.mainnet_activation_gate.source_summary_json == $mainnet_preferred_src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json != $mainnet_rejected_src
+  and .blockchain_track.mainnet_activation_gate.summary_generated_at == $preferred_iso
+  and .blockchain_track.mainnet_activation_gate.status == "GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "GO"
+  and .blockchain_track.mainnet_activation_gate.go == true
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $bootstrap_preferred_src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json != $bootstrap_rejected_src
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at == $preferred_iso
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == true
+' "$TMP_DIR/roadmap_progress_blockchain_selector_embedded_timestamp_precedence_summary.json" >/dev/null; then
+  echo "blockchain selector did not prefer newer embedded timestamp over mtime"
+  cat "$TMP_DIR/roadmap_progress_blockchain_selector_embedded_timestamp_precedence_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain gate selector fail-closes invalid embedded timestamp despite fresh mtime"
+BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR="$TMP_DIR/blockchain_selector_invalid_embedded_timestamp"
+mkdir -p "$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR"
+selector_invalid_now_epoch="$(date -u +%s)"
+selector_invalid_valid_epoch=$((selector_invalid_now_epoch - 2400))
+selector_invalid_valid_iso="$(date -u -d "@$selector_invalid_valid_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR/blockchain_mainnet_activation_gate_valid_embedded_old_mtime_summary.json"
+MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR/blockchain_mainnet_activation_gate_invalid_embedded_new_mtime_summary.json"
+BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR/blockchain_bootstrap_governance_graduation_gate_valid_embedded_old_mtime_summary.json"
+BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR/blockchain_bootstrap_governance_graduation_gate_invalid_embedded_new_mtime_summary.json"
+cat >"$MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" <<EOF_MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$selector_invalid_valid_iso",
+  "status": "NO-GO",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": [
+    "valid embedded timestamp candidate should win"
+  ]
+}
+EOF_MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME
+cat >"$MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" <<'EOF_MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "invalid-mainnet-selector-timestamp",
+  "status": "GO",
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": [
+    "invalid embedded timestamp candidate should lose despite fresher mtime"
+  ]
+}
+EOF_MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME
+cat >"$BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" <<EOF_BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$selector_invalid_valid_iso",
+  "status": "NO-GO",
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": [
+    "valid bootstrap embedded timestamp candidate should win"
+  ]
+}
+EOF_BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME
+cat >"$BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" <<'EOF_BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_governance_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "summary_generated_at": "invalid-bootstrap-selector-timestamp",
+  "status": "GO",
+  "decision": "GO",
+  "go": true,
+  "no_go": false,
+  "reasons": [
+    "invalid bootstrap embedded timestamp candidate should lose despite fresher mtime"
+  ]
+}
+EOF_BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME
+touch -d "@$((selector_invalid_now_epoch - 1200))" "$MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" "$BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON"
+touch -d "@$selector_invalid_now_epoch" "$MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" "$BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON"
+if ! ROADMAP_PROGRESS_LOGS_ROOT="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR" ROADMAP_PROGRESS_LOG_DIR="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --summary-json "$TMP_DIR/roadmap_progress_blockchain_selector_invalid_embedded_timestamp_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_blockchain_selector_invalid_embedded_timestamp_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_blockchain_selector_invalid_embedded_timestamp.log 2>&1; then
+  echo "expected success for blockchain selector invalid embedded timestamp fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_blockchain_selector_invalid_embedded_timestamp.log
+  exit 1
+fi
+if ! jq -e \
+  --arg mainnet_preferred_src "$MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" \
+  --arg mainnet_rejected_src "$MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" \
+  --arg bootstrap_preferred_src "$BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" \
+  --arg bootstrap_rejected_src "$BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" \
+  --arg preferred_iso "$selector_invalid_valid_iso" '
+  .blockchain_track.mainnet_activation_gate.source_summary_json == $mainnet_preferred_src
+  and .blockchain_track.mainnet_activation_gate.source_summary_json != $mainnet_rejected_src
+  and .blockchain_track.mainnet_activation_gate.summary_generated_at == $preferred_iso
+  and .blockchain_track.mainnet_activation_gate.status == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "NO-GO"
+  and .blockchain_track.mainnet_activation_gate.go == false
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $bootstrap_preferred_src
+  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json != $bootstrap_rejected_src
+  and .blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at == $preferred_iso
+  and .blockchain_track.bootstrap_governance_graduation_gate.status == "NO-GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.decision == "NO-GO"
+  and .blockchain_track.bootstrap_governance_graduation_gate.go == false
+' "$TMP_DIR/roadmap_progress_blockchain_selector_invalid_embedded_timestamp_summary.json" >/dev/null; then
+  echo "blockchain selector did not fail-close invalid embedded timestamp candidate with fresher mtime"
+  cat "$TMP_DIR/roadmap_progress_blockchain_selector_invalid_embedded_timestamp_summary.json"
   exit 1
 fi
 
