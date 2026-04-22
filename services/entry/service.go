@@ -1150,6 +1150,9 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 	}
 	middleOp := strings.TrimSpace(desc.OperatorID)
 	if middleOp == "" {
+		if s.betaStrict || s.prodStrict {
+			return "middle-relay-operator-missing"
+		}
 		return ""
 	}
 	entryOp := strings.TrimSpace(s.operatorID)
