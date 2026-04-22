@@ -114,6 +114,85 @@ if [[ ! -f "$PASS_REPORT" ]]; then
   exit 1
 fi
 
+NOGO_DIR="$TMP_DIR/nogo"
+mkdir -p "$NOGO_DIR"
+NOGO_RUN="$NOGO_DIR/profile_default_gate_stability_summary.json"
+NOGO_CHECK="$NOGO_DIR/profile_default_gate_stability_check_summary.json"
+NOGO_CYCLE="$NOGO_DIR/profile_default_gate_stability_cycle_summary.json"
+NOGO_SOFT_SUMMARY="$NOGO_DIR/evidence_pack_soft_nogo_summary.json"
+NOGO_HARD_SUMMARY="$NOGO_DIR/evidence_pack_hard_nogo_summary.json"
+NOGO_REPORT="$NOGO_DIR/evidence_pack_report.md"
+
+write_valid_run_summary "$NOGO_RUN" "$NOW_UTC"
+write_valid_check_summary "$NOGO_CHECK" "$NOW_UTC" "NO-GO"
+write_valid_cycle_summary "$NOGO_CYCLE" "$NOW_UTC" "NO-GO"
+
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$NOGO_DIR" \
+  --summary-json "$NOGO_SOFT_SUMMARY" \
+  --report-md "$NOGO_REPORT" \
+  --fail-on-no-go 0 \
+  --max-age-sec 3600 \
+  --print-summary-json 0
+
+assert_jq "$NOGO_SOFT_SUMMARY" '.schema.id == "profile_default_gate_stability_evidence_pack_summary"'
+assert_jq "$NOGO_SOFT_SUMMARY" '.decision == "NO-GO"'
+assert_jq "$NOGO_SOFT_SUMMARY" '.status == "warn"'
+assert_jq "$NOGO_SOFT_SUMMARY" '.rc == 0'
+assert_jq "$NOGO_SOFT_SUMMARY" '.evidence.cycle.usable == true'
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$NOGO_DIR" \
+  --summary-json "$NOGO_HARD_SUMMARY" \
+  --report-md "$NOGO_REPORT" \
+  --fail-on-no-go 1 \
+  --max-age-sec 3600 \
+  --print-summary-json 0
+NOGO_HARD_RC=$?
+set -e
+
+if [[ "$NOGO_HARD_RC" -eq 0 ]]; then
+  echo "expected non-zero exit code for usable NO-GO with fail-on-no-go=1"
+  exit 1
+fi
+assert_jq "$NOGO_HARD_SUMMARY" '.decision == "NO-GO"'
+assert_jq "$NOGO_HARD_SUMMARY" '.status == "fail"'
+assert_jq "$NOGO_HARD_SUMMARY" '.rc != 0'
+assert_jq "$NOGO_HARD_SUMMARY" '.evidence.cycle.usable == true'
+
+MISMATCH_DIR="$TMP_DIR/mismatch"
+mkdir -p "$MISMATCH_DIR"
+MISMATCH_RUN="$MISMATCH_DIR/profile_default_gate_stability_summary.json"
+MISMATCH_CHECK="$MISMATCH_DIR/profile_default_gate_stability_check_summary.json"
+MISMATCH_CYCLE="$MISMATCH_DIR/profile_default_gate_stability_cycle_summary.json"
+MISMATCH_SUMMARY="$MISMATCH_DIR/evidence_pack_summary.json"
+MISMATCH_REPORT="$MISMATCH_DIR/evidence_pack_report.md"
+
+write_valid_run_summary "$MISMATCH_RUN" "$NOW_UTC"
+write_valid_check_summary "$MISMATCH_CHECK" "$NOW_UTC" "NO-GO"
+write_valid_cycle_summary "$MISMATCH_CYCLE" "$NOW_UTC" "GO"
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$MISMATCH_DIR" \
+  --summary-json "$MISMATCH_SUMMARY" \
+  --report-md "$MISMATCH_REPORT" \
+  --fail-on-no-go 1 \
+  --max-age-sec 3600 \
+  --print-summary-json 0
+MISMATCH_RC=$?
+set -e
+
+if [[ "$MISMATCH_RC" -eq 0 ]]; then
+  echo "expected non-zero exit code for cycle/check decision mismatch"
+  exit 1
+fi
+assert_jq "$MISMATCH_SUMMARY" '.status == "fail"'
+assert_jq "$MISMATCH_SUMMARY" '.decision == "NO-GO"'
+assert_jq "$MISMATCH_SUMMARY" '.rc != 0'
+assert_jq "$MISMATCH_SUMMARY" '(.reasons | map(test("^decision mismatch between cycle and check summaries")) | any)'
+
 MISSING_DIR="$TMP_DIR/missing"
 mkdir -p "$MISSING_DIR"
 MISSING_RUN="$MISSING_DIR/profile_default_gate_stability_summary.json"

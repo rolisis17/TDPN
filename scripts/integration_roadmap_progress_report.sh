@@ -7977,7 +7977,7 @@ if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=fa
 fi
 
 PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
-if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-evidence-pack")" == "1" ]]; then
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-stability-evidence-pack")" == "1" ]]; then
   PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
 fi
 RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
@@ -8016,8 +8016,10 @@ if ! jq -e \
   and .vpn_track.optional_gate_status.profile_default_gate_evidence_pack == "missing"
   and .vpn_track.optional_gate_status.runtime_actuation_promotion_evidence_pack == "missing"
   and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion_evidence_pack == "missing"
+  and .artifacts.profile_default_gate_stability_evidence_pack_summary_json == .artifacts.profile_default_gate_evidence_pack_summary_json
+  and .artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json == .artifacts.runtime_actuation_promotion_evidence_pack_summary_json
   and (if $expect_profile_action then
-         ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("profile-default-gate-evidence-pack"))
+         ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("profile-default-gate-stability-evidence-pack"))
          and ((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack"))
        else
          (.vpn_track.profile_default_gate_evidence_pack.next_command == null)

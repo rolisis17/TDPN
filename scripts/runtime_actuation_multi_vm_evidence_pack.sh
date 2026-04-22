@@ -516,6 +516,7 @@ jq -n \
   --arg multi_vm_input_summary_json "$multi_vm_input_summary_json" \
   --arg summary_json_path "$summary_json" \
   --arg report_md_path "$report_md" \
+  --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson runtime "$runtime_eval_json" \
   --argjson multi_vm "$multi_vm_eval_json" \
   '
@@ -527,21 +528,31 @@ jq -n \
       and ($gate.rc == 0);
 
   (promote_ok($runtime) and promote_ok($multi_vm)) as $combined_go
-  | (($runtime.usable != true) or ($multi_vm.usable != true)) as $fail_closed
+  | (($runtime.usable == true) and ($multi_vm.usable == true) and (($runtime.decision_normalized // "") == "NO-GO" or ($multi_vm.decision_normalized // "") == "NO-GO")) as $usable_no_go
+  | (($runtime.usable != true) or ($multi_vm.usable != true) or ($usable_no_go and ($fail_on_no_go == 1))) as $fail_closed
   | (
       ((if $runtime.usable != true then ($runtime.reasons // [] | map("runtime_actuation_promotion_cycle:" + .)) else [] end)
-      + (if $multi_vm.usable != true then ($multi_vm.reasons // [] | map("multi_vm_stability_promotion_cycle:" + .)) else [] end))
+      + (if $multi_vm.usable != true then ($multi_vm.reasons // [] | map("multi_vm_stability_promotion_cycle:" + .)) else [] end)
+      + (if $usable_no_go and ($fail_on_no_go == 1) then ["usable_no_go_detected"] else [] end))
     ) as $fail_closed_reasons
   | (
       if $combined_go then
         "Promotion evidence pack is healthy."
       elif $fail_closed then
         (
-          [
-            $runtime.next_operator_action,
-            $multi_vm.next_operator_action,
-            "Refresh promotion-cycle artifacts and rerun runtime_actuation_multi_vm_evidence_pack.sh."
-          ]
+          if $usable_no_go and ($fail_on_no_go == 1) then
+            [
+              $runtime.next_operator_action,
+              $multi_vm.next_operator_action,
+              "Promotion evidence indicates NO-GO. Resolve blockers and rerun promotion cycles."
+            ]
+          else
+            [
+              $runtime.next_operator_action,
+              $multi_vm.next_operator_action,
+              "Refresh promotion-cycle artifacts and rerun runtime_actuation_multi_vm_evidence_pack.sh."
+            ]
+          end
           | map(select(type == "string" and length > 0))
           | .[0]
         )
@@ -581,7 +592,7 @@ jq -n \
       ),
       notes: (
         if $fail_closed then
-          "Fail-closed: one or more promotion-cycle artifacts are missing, invalid, or freshness-unknown/stale."
+          "Fail-closed: one or more promotion-cycle artifacts are missing, invalid, freshness-unknown/stale, or an enabled NO-GO decision must block promotion."
         elif $combined_go then
           "Runtime-actuation and multi-VM promotion evidence are both GO."
         else

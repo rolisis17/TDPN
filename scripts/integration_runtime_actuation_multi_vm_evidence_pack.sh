@@ -138,6 +138,113 @@ if ! grep -F -- '# Runtime Actuation + Multi-VM Promotion Evidence Pack' "$PASS_
   exit 1
 fi
 
+NOGO_REPORTS="$TMP_DIR/nogo_reports"
+NOGO_RUNTIME_SUMMARY="$NOGO_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
+NOGO_MULTI_VM_SUMMARY="$NOGO_REPORTS/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+NOGO_SOFT_SUMMARY="$TMP_DIR/nogo_soft_evidence_pack_summary.json"
+NOGO_HARD_SUMMARY="$TMP_DIR/nogo_hard_evidence_pack_summary.json"
+
+mkdir -p "$NOGO_REPORTS"
+
+cat >"$NOGO_RUNTIME_SUMMARY" <<'EOF_NOGO_RUNTIME'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "NO-GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "decision": "NO-GO",
+    "status": "pass",
+    "rc": 0,
+    "next_operator_action": "Hold promotion."
+  }
+}
+EOF_NOGO_RUNTIME
+
+cat >"$NOGO_MULTI_VM_SUMMARY" <<'EOF_NOGO_MULTI_VM'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "NO-GO",
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "NO-GO",
+    "status": "pass",
+    "rc": 0,
+    "next_operator_action": "Hold promotion."
+  },
+  "next_operator_action": "Hold promotion."
+}
+EOF_NOGO_MULTI_VM
+
+echo "[runtime-actuation-multi-vm-evidence-pack] usable NO-GO soft path"
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$NOGO_REPORTS" \
+  --summary-json "$NOGO_SOFT_SUMMARY" \
+  --report-md "$TMP_DIR/nogo_soft_report.md" \
+  --fail-on-no-go 0 \
+  --print-summary-json 0 \
+  --print-report 0
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .decision == "NO-GO"
+  and .fail_closed == false
+  and .outcome.action == "hold_promotion_warn_only"
+' "$NOGO_SOFT_SUMMARY" >/dev/null 2>&1; then
+  echo "usable NO-GO soft path summary mismatch"
+  cat "$NOGO_SOFT_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-multi-vm-evidence-pack] usable NO-GO hard path"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$NOGO_REPORTS" \
+  --summary-json "$NOGO_HARD_SUMMARY" \
+  --report-md "$TMP_DIR/nogo_hard_report.md" \
+  --fail-on-no-go 1 \
+  --print-summary-json 0 \
+  --print-report 0 >/tmp/integration_runtime_actuation_multi_vm_evidence_pack_nogo_hard.log 2>&1
+nogo_hard_rc=$?
+set -e
+
+if [[ "$nogo_hard_rc" -eq 0 ]]; then
+  echo "expected usable NO-GO hard path rc!=0"
+  cat /tmp/integration_runtime_actuation_multi_vm_evidence_pack_nogo_hard.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .fail_closed == true
+  and ((.reasons | index("usable_no_go_detected")) != null)
+  and .outcome.action == "hold_evidence_pack_blocked"
+' "$NOGO_HARD_SUMMARY" >/dev/null 2>&1; then
+  echo "usable NO-GO hard path summary mismatch"
+  cat "$NOGO_HARD_SUMMARY"
+  exit 1
+fi
+
 FAIL_REPORTS="$TMP_DIR/fail_reports"
 FAIL_RUNTIME_SUMMARY="$FAIL_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
 FAIL_MULTI_VM_SUMMARY="$FAIL_REPORTS/profile_compare_multi_vm_stability_promotion_cycle_summary.json"

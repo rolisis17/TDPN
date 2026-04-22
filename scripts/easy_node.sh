@@ -293,9 +293,9 @@ Usage:
   ./scripts/easy_node.sh runtime-actuation-promotion-check [runtime_actuation_promotion_check args...]
   ./scripts/easy_node.sh runtime-actuation-promotion-cycle [runtime_actuation_promotion_cycle args...]
   ./scripts/easy_node.sh runtime-actuation-multi-vm-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
-  ./scripts/easy_node.sh profile-default-gate-evidence-pack [profile_default_gate_stability_evidence_pack args...]
-  ./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
-  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
+  ./scripts/easy_node.sh profile-default-gate-evidence-pack [compatibility alias for profile-default-gate-stability-evidence-pack]
+  ./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack [runtime_actuation_promotion_evidence_pack args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [profile_compare_multi_vm_stability_promotion_evidence_pack args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
@@ -432,9 +432,9 @@ Usage:
   ./scripts/easy_node.sh runtime-actuation-promotion-check [runtime_actuation_promotion_check args...]
   ./scripts/easy_node.sh runtime-actuation-promotion-cycle [runtime_actuation_promotion_cycle args...]
   ./scripts/easy_node.sh runtime-actuation-multi-vm-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
-  ./scripts/easy_node.sh profile-default-gate-evidence-pack [profile_default_gate_stability_evidence_pack args...]
-  ./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
-  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
+  ./scripts/easy_node.sh profile-default-gate-evidence-pack [compatibility alias for profile-default-gate-stability-evidence-pack]
+  ./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack [runtime_actuation_promotion_evidence_pack args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [profile_compare_multi_vm_stability_promotion_evidence_pack args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
@@ -659,7 +659,7 @@ Notes:
   - runtime-actuation-promotion-check evaluates runtime-actuation promotion readiness and emits one fail-closed GO/NO-GO summary for roadmap/default-gate surfacing.
   - runtime-actuation-promotion-cycle runs repeated profile-compare campaign-signoff evidence cycles and then executes runtime-actuation promotion-check on the produced cycle summary list.
   - runtime-actuation-multi-vm-evidence-pack consolidates runtime-actuation promotion-cycle + multi-VM stability promotion-cycle evidence into one fail-closed summary/report bundle and normalizes combined decision/next-action output.
-  - runtime-actuation-promotion-evidence-pack and profile-compare-multi-vm-stability-promotion-evidence-pack are compatibility aliases that currently dispatch to runtime-actuation-multi-vm-evidence-pack.
+  - runtime-actuation-promotion-evidence-pack and profile-compare-multi-vm-stability-promotion-evidence-pack are compatibility aliases that dispatch to their dedicated evidence-pack scripts while preserving the existing command names.
   - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
   - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
@@ -9878,11 +9878,13 @@ profile_default_gate_evidence_pack() {
 }
 
 runtime_actuation_promotion_evidence_pack() {
-  runtime_actuation_multi_vm_evidence_pack "$@"
+  local runtime_actuation_promotion_evidence_pack_script="${RUNTIME_ACTUATION_PROMOTION_EVIDENCE_PACK_SCRIPT:-$ROOT_DIR/scripts/runtime_actuation_promotion_evidence_pack.sh}"
+  "$runtime_actuation_promotion_evidence_pack_script" "$@"
 }
 
 profile_compare_multi_vm_stability_promotion_evidence_pack() {
-  runtime_actuation_multi_vm_evidence_pack "$@"
+  local profile_compare_multi_vm_stability_promotion_evidence_pack_script="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh}"
+  "$profile_compare_multi_vm_stability_promotion_evidence_pack_script" "$@"
 }
 
 profile_default_gate_token_probe() {

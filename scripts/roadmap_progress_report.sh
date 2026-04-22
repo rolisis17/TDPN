@@ -9035,7 +9035,7 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
   fi
 fi
 
-profile_default_gate_evidence_pack_helper_subcommand="profile-default-gate-evidence-pack"
+profile_default_gate_evidence_pack_helper_subcommand="profile-default-gate-stability-evidence-pack"
 profile_default_gate_evidence_pack_helper_available_json="false"
 if [[ "$(easy_node_supports_subcommand_01 "$profile_default_gate_evidence_pack_helper_subcommand")" == "1" ]]; then
   profile_default_gate_evidence_pack_helper_available_json="true"
@@ -9056,7 +9056,7 @@ profile_default_gate_evidence_pack_needs_attention_json="true"
 profile_default_gate_evidence_pack_next_command=""
 profile_default_gate_evidence_pack_next_command_reason="profile-default evidence-pack summary is missing; publish a fresh evidence pack"
 if [[ "$profile_default_gate_evidence_pack_helper_available_json" == "true" ]]; then
-  profile_default_gate_evidence_pack_next_command="./scripts/easy_node.sh profile-default-gate-evidence-pack --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_default_gate_evidence_pack_summary.json --print-summary-json 1"
+  profile_default_gate_evidence_pack_next_command="./scripts/easy_node.sh profile-default-gate-stability-evidence-pack --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_default_gate_evidence_pack_summary.json --print-summary-json 1"
 else
   profile_default_gate_evidence_pack_next_command_reason="profile-default evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
@@ -10956,9 +10956,11 @@ summary_payload="$(jq -n \
       manual_validation_summary_json: $manual_validation_summary_json,
       manual_validation_report_md: $manual_validation_report_md,
       profile_compare_signoff_summary_json: (if $profile_compare_signoff_summary_json == "" then null else $profile_compare_signoff_summary_json end),
+      profile_default_gate_stability_evidence_pack_summary_json: (if $profile_default_gate_evidence_pack_source_summary_json == "" then null else $profile_default_gate_evidence_pack_source_summary_json end),
       profile_default_gate_evidence_pack_summary_json: (if $profile_default_gate_evidence_pack_source_summary_json == "" then null else $profile_default_gate_evidence_pack_source_summary_json end),
       profile_compare_multi_vm_stability_summary_json: (if $profile_compare_multi_vm_stability_source_summary_json == "" then null else $profile_compare_multi_vm_stability_source_summary_json end),
       profile_compare_multi_vm_stability_promotion_summary_json: (if $profile_compare_multi_vm_stability_promotion_source_summary_json == "" then null else $profile_compare_multi_vm_stability_promotion_source_summary_json end),
+      runtime_actuation_multi_vm_evidence_pack_summary_json: (if $runtime_actuation_promotion_evidence_pack_source_summary_json == "" then null else $runtime_actuation_promotion_evidence_pack_source_summary_json end),
       profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json: (if $multi_vm_stability_promotion_evidence_pack_source_summary_json == "" then null else $multi_vm_stability_promotion_evidence_pack_source_summary_json end),
       runtime_actuation_promotion_summary_json: (if $runtime_actuation_promotion_source_summary_json == "" then null else $runtime_actuation_promotion_source_summary_json end),
       runtime_actuation_promotion_evidence_pack_summary_json: (if $runtime_actuation_promotion_evidence_pack_source_summary_json == "" then null else $runtime_actuation_promotion_evidence_pack_source_summary_json end),
@@ -11313,7 +11315,9 @@ $non_blockchain_actionable_no_sudo_or_github_md
 - Phase-0 summary: $(jq -r '.artifacts.phase0_summary_json // "none"' "$summary_json")
 - Phase-1 resilience handoff summary source: $(jq -r '.artifacts.phase1_resilience_handoff_summary_json // "none"' "$summary_json")
 - Multi-VM stability summary source: $(jq -r '.artifacts.profile_compare_multi_vm_stability_summary_json // "none"' "$summary_json")
+- Profile-default stability evidence-pack summary source: $(jq -r '.artifacts.profile_default_gate_stability_evidence_pack_summary_json // "none"' "$summary_json")
 - Profile-default evidence-pack summary source: $(jq -r '.artifacts.profile_default_gate_evidence_pack_summary_json // "none"' "$summary_json")
+- Runtime-actuation multi-VM evidence-pack summary source: $(jq -r '.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // "none"' "$summary_json")
 - Runtime-actuation evidence-pack summary source: $(jq -r '.artifacts.runtime_actuation_promotion_evidence_pack_summary_json // "none"' "$summary_json")
 - Multi-VM promotion evidence-pack summary source: $(jq -r '.artifacts.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json // "none"' "$summary_json")
 - Phase-2 candidate summary: $(jq -r '.artifacts.phase2_linux_prod_candidate_summary_json // "none"' "$summary_json")

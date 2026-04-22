@@ -7,11 +7,9 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/profile_default_gate_stability_evidence_pack.sh \
+  ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh \
     [--reports-dir DIR] \
-    [--stability-summary-json PATH|--run-summary-json PATH] \
-    [--stability-check-summary-json PATH|--check-summary-json PATH] \
-    [--cycle-summary-json PATH] \
+    [--promotion-cycle-summary-json PATH] \
     [--fail-on-no-go [0|1]] \
     [--max-age-sec N] \
     [--summary-json PATH] \
@@ -19,9 +17,9 @@ Usage:
     [--print-summary-json [0|1]]
 
 Purpose:
-  Build one deterministic profile-default-gate stability evidence pack from
-  run/check/cycle summaries, fail-closed when required evidence is missing,
-  malformed, or has unknown freshness.
+  Build one deterministic multi-VM stability promotion evidence pack from a
+  single promotion-cycle summary, fail-closed when required evidence is
+  missing, malformed, or freshness-unknown/stale.
 USAGE
 }
 
@@ -33,7 +31,7 @@ need_cmd() {
 }
 
 trim() {
-  local value="$1"
+  local value="${1:-}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
@@ -44,25 +42,10 @@ abs_path() {
   path="$(trim "${1:-}")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
-    return
-  fi
-  if [[ "$path" == /* ]]; then
+  elif [[ "$path" == /* ]]; then
     printf '%s' "$path"
   else
     printf '%s' "$ROOT_DIR/$path"
-  fi
-}
-
-timestamp_utc() {
-  date -u +%Y-%m-%dT%H:%M:%SZ
-}
-
-require_value_or_die() {
-  local flag="$1"
-  local argc="$2"
-  if (( argc < 2 )); then
-    echo "$flag requires a value"
-    exit 2
   fi
 }
 
@@ -75,21 +58,35 @@ bool_arg_or_die() {
   fi
 }
 
+require_value_or_die() {
+  local flag="$1"
+  local argc="$2"
+  if (( argc < 2 )); then
+    echo "$flag requires a value"
+    exit 2
+  fi
+}
+
 is_non_negative_integer() {
   [[ "${1:-}" =~ ^[0-9]+$ ]]
 }
 
-json_file_valid_01() {
-  local path="$1"
-  if [[ -z "$path" || ! -f "$path" ]]; then
-    printf '0'
-    return
-  fi
-  if jq -e 'type == "object"' "$path" >/dev/null 2>&1; then
-    printf '1'
-  else
-    printf '0'
-  fi
+normalize_decision() {
+  local decision
+  decision="$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
+  case "$decision" in
+    GO) printf '%s\n' "GO" ;;
+    NO-GO|NOGO|NO_GO) printf '%s\n' "NO-GO" ;;
+    *) printf '%s\n' "$decision" ;;
+  esac
+}
+
+normalize_status() {
+  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
+}
+
+timestamp_utc() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
 iso8601_to_epoch() {
@@ -118,6 +115,27 @@ file_mtime_epoch() {
   fi
 }
 
+json_file_valid_01() {
+  local path="$1"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e 'type == "object"' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+json_array_from_lines() {
+  if [[ $# -eq 0 ]]; then
+    printf '[]'
+    return
+  fi
+  printf '%s\n' "$@" | jq -R . | jq -s .
+}
+
 latest_matching_summary_json() {
   local reports_dir="$1"
   local prefix="$2"
@@ -128,7 +146,10 @@ latest_matching_summary_json() {
   local found_any="0"
 
   shopt -s nullglob
-  local candidates=( "$reports_dir"/"$prefix"*.json )
+  local candidates=(
+    "$reports_dir"/"$prefix"*.json
+    "$reports_dir"/"${prefix%_summary}"*/"$prefix".json
+  )
   shopt -u nullglob
 
   for candidate in "${candidates[@]}"; do
@@ -152,34 +173,29 @@ latest_matching_summary_json() {
   printf '%s' "$best_path"
 }
 
-normalize_decision() {
-  local decision
-  decision="$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
-  case "$decision" in
-    GO) printf '%s\n' "GO" ;;
-    NO-GO|NOGO|NO_GO) printf '%s\n' "NO-GO" ;;
-    *) printf '%s\n' "$decision" ;;
-  esac
-}
+discover_latest_promotion_cycle_summary_path() {
+  local reports_dir="$1"
+  local preferred="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+  local discovered=""
 
-normalize_status() {
-  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
-}
-
-json_array_from_lines() {
-  if [[ $# -eq 0 ]]; then
-    printf '[]'
+  if [[ -f "$preferred" ]]; then
+    printf '%s' "$preferred"
     return
   fi
-  printf '%s\n' "$@" | jq -R . | jq -s .
+
+  discovered="$(latest_matching_summary_json "$reports_dir" "profile_compare_multi_vm_stability_promotion_cycle_summary")"
+  if [[ -n "$discovered" ]]; then
+    printf '%s' "$discovered"
+    return
+  fi
+
+  printf '%s' "$preferred"
 }
 
-collect_artifact_evidence() {
-  local name="$1"
-  local path="$2"
-  local expected_schema_id="$3"
-  local require_decision="$4"
-  local max_age_sec="$5"
+collect_promotion_cycle_evidence() {
+  local path="$1"
+  local expected_schema_id="$2"
+  local max_age_sec="$3"
 
   local exists="0"
   local valid_json="0"
@@ -197,10 +213,10 @@ collect_artifact_evidence() {
   local freshness_known="false"
   local freshness_fresh=""
   local freshness_age_sec=""
+  local next_operator_action=""
   local generated_epoch=""
   local now_epoch
   now_epoch="$(date -u +%s)"
-
   local -a errors=()
 
   if [[ -n "$path" && -f "$path" ]]; then
@@ -227,7 +243,7 @@ collect_artifact_evidence() {
     status_value="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$path" 2>/dev/null || printf '%s' "")"
     status_normalized="$(normalize_status "$status_value")"
     case "$status_normalized" in
-      pass|fail|warn|ok)
+      pass|warn|fail|ok)
         status_valid="true"
         ;;
       *)
@@ -245,6 +261,14 @@ collect_artifact_evidence() {
       rc_valid="true"
     else
       errors+=("rc missing or invalid (expected numeric rc/final_rc)")
+    fi
+
+    decision_value="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$path" 2>/dev/null || printf '%s' "")"
+    decision_normalized="$(normalize_decision "$decision_value")"
+    if [[ "$decision_normalized" == "GO" || "$decision_normalized" == "NO-GO" ]]; then
+      decision_valid="true"
+    else
+      errors+=("decision missing or invalid GO/NO-GO value (actual=${decision_value:-unset})")
     fi
 
     generated_at_utc="$(jq -r 'if (.generated_at_utc | type) == "string" then .generated_at_utc else "" end' "$path" 2>/dev/null || printf '%s' "")"
@@ -270,21 +294,12 @@ collect_artifact_evidence() {
       fi
     fi
 
-    if [[ "$require_decision" == "1" ]]; then
-      decision_value="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$path" 2>/dev/null || printf '%s' "")"
-      decision_normalized="$(normalize_decision "$decision_value")"
-      if [[ "$decision_normalized" == "GO" || "$decision_normalized" == "NO-GO" ]]; then
-        decision_valid="true"
-      else
-        errors+=("decision missing or invalid GO/NO-GO value (actual=${decision_value:-unset})")
-      fi
-    else
-      decision_value="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$path" 2>/dev/null || printf '%s' "")"
-      decision_normalized="$(normalize_decision "$decision_value")"
-      if [[ "$decision_normalized" == "GO" || "$decision_normalized" == "NO-GO" ]]; then
-        decision_valid="true"
-      fi
-    fi
+    next_operator_action="$(jq -r '
+      if (.next_operator_action | type) == "string" and (.next_operator_action | length) > 0 then .next_operator_action
+      elif (.outcome.next_operator_action | type) == "string" and (.outcome.next_operator_action | length) > 0 then .outcome.next_operator_action
+      else ""
+      end
+    ' "$path" 2>/dev/null || printf '%s' "")"
   fi
 
   local errors_json
@@ -296,19 +311,13 @@ collect_artifact_evidence() {
     && "$schema_valid" == "true" \
     && "$status_valid" == "true" \
     && "$rc_valid" == "true" \
+    && "$decision_valid" == "true" \
     && "$freshness_known" == "true" \
     && "$freshness_fresh" == "true" ]]; then
-    if [[ "$require_decision" == "1" ]]; then
-      if [[ "$decision_valid" == "true" ]]; then
-        usable="true"
-      fi
-    else
-      usable="true"
-    fi
+    usable="true"
   fi
 
   jq -n \
-    --arg name "$name" \
     --arg path "$path" \
     --arg expected_schema_id "$expected_schema_id" \
     --arg schema_id "$schema_id" \
@@ -325,14 +334,13 @@ collect_artifact_evidence() {
     --arg freshness_known "$freshness_known" \
     --arg freshness_fresh "$freshness_fresh" \
     --arg freshness_age_sec "$freshness_age_sec" \
-    --argjson max_age_sec "$max_age_sec" \
+    --arg next_operator_action "$next_operator_action" \
     --arg exists "$exists" \
     --arg valid_json "$valid_json" \
-    --arg require_decision "$require_decision" \
     --arg usable "$usable" \
+    --argjson max_age_sec "$max_age_sec" \
     --argjson errors "$errors_json" \
     '{
-      name: $name,
       path: (if $path == "" then null else $path end),
       exists: ($exists == "1"),
       valid_json: ($valid_json == "1"),
@@ -351,14 +359,9 @@ collect_artifact_evidence() {
         valid: ($rc_valid == "true")
       },
       decision: {
-        required: ($require_decision == "1"),
         value: (if $decision_value == "" then null else $decision_value end),
         normalized: (if $decision_normalized == "" then null else $decision_normalized end),
-        valid: (
-          if $require_decision == "1" then ($decision_valid == "true")
-          else (if $decision_value == "" and $decision_normalized == "" then null else ($decision_valid == "true") end)
-          end
-        )
+        valid: ($decision_valid == "true")
       },
       freshness: {
         generated_at_utc: (if $generated_at_utc == "" then null else $generated_at_utc end),
@@ -373,6 +376,7 @@ collect_artifact_evidence() {
         age_sec: (if $freshness_age_sec == "" then null else ($freshness_age_sec | tonumber) end),
         max_age_sec: $max_age_sec
       },
+      next_operator_action: (if $next_operator_action == "" then null else $next_operator_action end),
       usable: ($usable == "true"),
       errors: $errors
     }'
@@ -381,18 +385,16 @@ collect_artifact_evidence() {
 need_cmd jq
 need_cmd date
 need_cmd stat
-need_cmd awk
-need_cmd sort
+need_cmd find
+need_cmd tail
 
-reports_dir="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_REPORTS_DIR:-${REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}}"
-run_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_RUN_SUMMARY_JSON:-}"
-check_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_CHECK_SUMMARY_JSON:-}"
-cycle_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_CYCLE_SUMMARY_JSON:-}"
-max_age_sec="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_MAX_AGE_SEC:-86400}"
-summary_json="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_SUMMARY_JSON:-}"
-report_md="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_REPORT_MD:-}"
-print_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_PRINT_SUMMARY_JSON:-0}"
-fail_on_no_go_compat="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_FAIL_ON_NO_GO:-1}"
+reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_REPORTS_DIR:-${REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}}"
+promotion_cycle_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_PROMOTION_CYCLE_SUMMARY_JSON:-}"
+fail_on_no_go_compat="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_FAIL_ON_NO_GO:-1}"
+max_age_sec="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_MAX_AGE_SEC:-86400}"
+summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_SUMMARY_JSON:-}"
+report_md="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_REPORT_MD:-}"
+print_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_PRINT_SUMMARY_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -405,31 +407,13 @@ while [[ $# -gt 0 ]]; do
       reports_dir="${1#*=}"
       shift
       ;;
-    --stability-summary-json|--run-summary-json)
+    --promotion-cycle-summary-json)
       require_value_or_die "$1" "$#"
-      run_summary_json="${2:-}"
+      promotion_cycle_summary_json="${2:-}"
       shift 2
       ;;
-    --stability-summary-json=*|--run-summary-json=*)
-      run_summary_json="${1#*=}"
-      shift
-      ;;
-    --stability-check-summary-json|--check-summary-json)
-      require_value_or_die "$1" "$#"
-      check_summary_json="${2:-}"
-      shift 2
-      ;;
-    --stability-check-summary-json=*|--check-summary-json=*)
-      check_summary_json="${1#*=}"
-      shift
-      ;;
-    --cycle-summary-json)
-      require_value_or_die "$1" "$#"
-      cycle_summary_json="${2:-}"
-      shift 2
-      ;;
-    --cycle-summary-json=*)
-      cycle_summary_json="${1#*=}"
+    --promotion-cycle-summary-json=*)
+      promotion_cycle_summary_json="${1#*=}"
       shift
       ;;
     --fail-on-no-go)
@@ -498,14 +482,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 reports_dir="$(abs_path "$reports_dir")"
-run_summary_json="$(trim "$run_summary_json")"
-check_summary_json="$(trim "$check_summary_json")"
-cycle_summary_json="$(trim "$cycle_summary_json")"
+promotion_cycle_summary_json="$(trim "$promotion_cycle_summary_json")"
+fail_on_no_go_compat="$(trim "$fail_on_no_go_compat")"
 max_age_sec="$(trim "$max_age_sec")"
 summary_json="$(trim "$summary_json")"
 report_md="$(trim "$report_md")"
 print_summary_json="$(trim "$print_summary_json")"
-fail_on_no_go_compat="$(trim "$fail_on_no_go_compat")"
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go_compat"
@@ -515,107 +497,83 @@ if ! is_non_negative_integer "$max_age_sec"; then
 fi
 
 if [[ -z "$summary_json" ]]; then
-  summary_json="$reports_dir/profile_default_gate_stability_evidence_pack_summary.json"
+  summary_json="$reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json"
 fi
 if [[ -z "$report_md" ]]; then
-  report_md="$reports_dir/profile_default_gate_stability_evidence_pack_report.md"
+  report_md="$reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_report.md"
 fi
 
 summary_json="$(abs_path "$summary_json")"
 report_md="$(abs_path "$report_md")"
 
-if [[ -z "$run_summary_json" ]]; then
-  run_summary_json="$(latest_matching_summary_json "$reports_dir" "profile_default_gate_stability_summary")"
+if [[ -z "$promotion_cycle_summary_json" ]]; then
+  promotion_cycle_summary_json="$(discover_latest_promotion_cycle_summary_path "$reports_dir")"
 fi
-if [[ -z "$run_summary_json" ]]; then
-  run_summary_json="$reports_dir/profile_default_gate_stability_summary.json"
-fi
-run_summary_json="$(abs_path "$run_summary_json")"
+promotion_cycle_summary_json="$(abs_path "$promotion_cycle_summary_json")"
 
-if [[ -z "$check_summary_json" ]]; then
-  check_summary_json="$(latest_matching_summary_json "$reports_dir" "profile_default_gate_stability_check_summary")"
-fi
-if [[ -z "$check_summary_json" ]]; then
-  check_summary_json="$reports_dir/profile_default_gate_stability_check_summary.json"
-fi
-check_summary_json="$(abs_path "$check_summary_json")"
+mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 
-if [[ -z "$cycle_summary_json" ]]; then
-  cycle_summary_json="$(latest_matching_summary_json "$reports_dir" "profile_default_gate_stability_cycle_summary")"
-fi
-if [[ -z "$cycle_summary_json" ]]; then
-  cycle_summary_json="$reports_dir/profile_default_gate_stability_cycle_summary.json"
-fi
-cycle_summary_json="$(abs_path "$cycle_summary_json")"
-
-mkdir -p "$(dirname "$summary_json")"
-mkdir -p "$(dirname "$report_md")"
-
-run_evidence="$(collect_artifact_evidence "run" "$run_summary_json" "profile_default_gate_stability_summary" "0" "$max_age_sec")"
-check_evidence="$(collect_artifact_evidence "check" "$check_summary_json" "profile_default_gate_stability_check_summary" "1" "$max_age_sec")"
-cycle_evidence="$(collect_artifact_evidence "cycle" "$cycle_summary_json" "profile_default_gate_stability_cycle_summary" "1" "$max_age_sec")"
+promotion_cycle_evidence="$(collect_promotion_cycle_evidence "$promotion_cycle_summary_json" "profile_compare_multi_vm_stability_promotion_cycle_summary" "$max_age_sec")"
 
 declare -a reasons=()
-
-for label in run check cycle; do
-  evidence_var="${label}_evidence"
-  evidence_payload="${!evidence_var}"
-  evidence_usable="$(jq -r '.usable' <<<"$evidence_payload")"
-  if [[ "$evidence_usable" != "true" ]]; then
-    while IFS= read -r err_line; do
-      [[ -n "$err_line" ]] || continue
-      reasons+=("${label}: ${err_line}")
-    done < <(jq -r '.errors[]?' <<<"$evidence_payload")
-    if [[ "$(jq -r '.errors | length' <<<"$evidence_payload")" == "0" ]]; then
-      reasons+=("${label}: evidence unusable")
-    fi
+promotion_cycle_usable="$(jq -r '.usable' <<<"$promotion_cycle_evidence")"
+if [[ "$promotion_cycle_usable" != "true" ]]; then
+  while IFS= read -r err_line; do
+    [[ -n "$err_line" ]] || continue
+    reasons+=("promotion_cycle: $err_line")
+  done < <(jq -r '.errors[]?' <<<"$promotion_cycle_evidence")
+  if [[ "$(jq -r '.errors | length' <<<"$promotion_cycle_evidence")" == "0" ]]; then
+    reasons+=("promotion_cycle: evidence unusable")
   fi
-done
-
-cycle_decision="$(jq -r '.decision.normalized // ""' <<<"$cycle_evidence")"
-check_decision="$(jq -r '.decision.normalized // ""' <<<"$check_evidence")"
-
-if [[ "$cycle_decision" == "GO" || "$cycle_decision" == "NO-GO" ]]; then
-  :
-else
-  reasons+=("cycle: decision missing/invalid")
-fi
-if [[ "$check_decision" == "GO" || "$check_decision" == "NO-GO" ]]; then
-  :
-else
-  reasons+=("check: decision missing/invalid")
-fi
-if [[ "$cycle_decision" != "" && "$check_decision" != "" && "$cycle_decision" != "$check_decision" ]]; then
-  reasons+=("decision mismatch between cycle and check summaries (cycle=${cycle_decision} check=${check_decision})")
 fi
 
-operator_next_action_command="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST_A --host-b HOST_B --campaign-subject INVITE_KEY --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_default_gate_stability_cycle_summary.json --print-summary-json 1"
+promotion_cycle_decision="$(jq -r '.decision.normalized // ""' <<<"$promotion_cycle_evidence")"
+promotion_cycle_status="$(jq -r '.status.normalized // ""' <<<"$promotion_cycle_evidence")"
+if [[ "$promotion_cycle_decision" != "GO" && "$promotion_cycle_decision" != "NO-GO" ]]; then
+  reasons+=("promotion_cycle: decision missing/invalid")
+fi
+if [[ "$promotion_cycle_status" != "pass" && "$promotion_cycle_status" != "warn" && "$promotion_cycle_status" != "fail" && "$promotion_cycle_status" != "ok" ]]; then
+  reasons+=("promotion_cycle: status missing/invalid")
+fi
 
-decision="NO-GO"
+input_next_operator_action="$(jq -r '.next_operator_action // ""' <<<"$promotion_cycle_evidence")"
+operator_next_action_command="./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json --print-summary-json 1"
+
 status="fail"
-final_rc=1
+decision="NO-GO"
+rc=1
 failure_reason=""
+next_operator_action=""
 
 if [[ "${#reasons[@]}" -eq 0 ]]; then
-  if [[ "$cycle_decision" == "GO" ]]; then
-    decision="GO"
+  decision="$promotion_cycle_decision"
+  if [[ "$decision" == "GO" ]]; then
     status="ok"
-    final_rc=0
-  elif [[ "$cycle_decision" == "NO-GO" ]]; then
-    decision="NO-GO"
+    rc=0
+  elif [[ "$decision" == "NO-GO" ]]; then
     if [[ "$fail_on_no_go_compat" == "1" ]]; then
       status="fail"
-      final_rc=1
-      failure_reason="cycle decision is NO-GO"
+      rc=1
+      failure_reason="promotion-cycle decision is NO-GO"
     else
       status="warn"
-      final_rc=0
+      rc=0
     fi
   else
-    failure_reason="cycle decision is missing or invalid"
+    status="fail"
+    rc=1
+    failure_reason="promotion-cycle decision is missing or invalid"
+  fi
+  if [[ -n "$input_next_operator_action" ]]; then
+    next_operator_action="$input_next_operator_action"
+  elif [[ "$decision" == "GO" ]]; then
+    next_operator_action="Promotion may proceed. Continue monitoring multi-VM stability promotion cycles."
+  else
+    next_operator_action="Hold promotion. Resolve blockers and rerun profile_compare_multi_vm_stability_promotion_cycle.sh."
   fi
 else
   failure_reason="${reasons[0]}"
+  next_operator_action="Refresh profile_compare_multi_vm_stability_promotion_cycle_summary.json and rerun profile_compare_multi_vm_stability_promotion_evidence_pack.sh."
 fi
 
 reasons_json="$(json_array_from_lines "${reasons[@]:-}")"
@@ -626,22 +584,19 @@ summary_payload="$(jq -n \
   --arg decision "$decision" \
   --arg failure_reason "$failure_reason" \
   --arg reports_dir "$reports_dir" \
-  --arg run_summary_json "$run_summary_json" \
-  --arg check_summary_json "$check_summary_json" \
-  --arg cycle_summary_json "$cycle_summary_json" \
+  --arg promotion_cycle_summary_json "$promotion_cycle_summary_json" \
   --arg summary_json "$summary_json" \
   --arg report_md "$report_md" \
+  --arg next_operator_action "$next_operator_action" \
   --arg operator_next_action_command "$operator_next_action_command" \
-  --argjson rc "$final_rc" \
-  --argjson max_age_sec "$max_age_sec" \
+  --argjson rc "$rc" \
+  --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson reasons "$reasons_json" \
-  --argjson run_evidence "$run_evidence" \
-  --argjson check_evidence "$check_evidence" \
-  --argjson cycle_evidence "$cycle_evidence" \
+  --argjson promotion_cycle_evidence "$promotion_cycle_evidence" \
   '{
     version: 1,
     schema: {
-      id: "profile_default_gate_stability_evidence_pack_summary",
+      id: "profile_compare_multi_vm_stability_promotion_evidence_pack_summary",
       major: 1,
       minor: 0
     },
@@ -653,27 +608,34 @@ summary_payload="$(jq -n \
     reasons: $reasons,
     inputs: {
       reports_dir: $reports_dir,
-      max_age_sec: $max_age_sec
+      fail_on_no_go: ($fail_on_no_go == 1)
     },
     evidence: {
-      run: $run_evidence,
-      check: $check_evidence,
-      cycle: $cycle_evidence
+      promotion_cycle: $promotion_cycle_evidence
     },
+    next_operator_action: $next_operator_action,
     operator_next_action_command: $operator_next_action_command,
+    outcome: {
+      should_promote: ($status == "ok" and $decision == "GO" and $rc == 0),
+      action: (
+        if $status == "ok" and $decision == "GO" and $rc == 0 then "promote_allowed"
+        elif $status == "warn" then "hold_promotion_warn_only"
+        else "hold_evidence_pack_blocked"
+        end
+      ),
+      next_operator_action: $next_operator_action
+    },
     artifacts: {
       summary_json: $summary_json,
       report_md: $report_md,
-      run_summary_json: $run_summary_json,
-      check_summary_json: $check_summary_json,
-      cycle_summary_json: $cycle_summary_json
+      promotion_cycle_summary_json: $promotion_cycle_summary_json
     }
   }')"
 
 printf '%s\n' "$summary_payload" >"$summary_json"
 
 {
-  echo "# Profile Default Gate Stability Evidence Pack"
+  echo "# Profile Compare Multi-VM Stability Promotion Evidence Pack"
   echo
   echo "- Generated at (UTC): $(jq -r '.generated_at_utc' <<<"$summary_payload")"
   echo "- Status: $(jq -r '.status' <<<"$summary_payload")"
@@ -683,9 +645,10 @@ printf '%s\n' "$summary_payload" >"$summary_json"
   echo
   echo "## Evidence"
   echo
-  echo "- Run summary: $run_summary_json"
-  echo "- Check summary: $check_summary_json"
-  echo "- Cycle summary: $cycle_summary_json"
+  echo "- Promotion cycle summary: $promotion_cycle_summary_json"
+  echo "- Usable: $(jq -r '.evidence.promotion_cycle.usable | tostring' <<<"$summary_payload")"
+  echo "- Freshness: $(jq -r '.evidence.promotion_cycle.freshness.fresh | if . == null then "unknown" else tostring end' <<<"$summary_payload")"
+  echo "- Decision/status: $(jq -r '.evidence.promotion_cycle.decision.normalized // "unknown"' <<<"$summary_payload") / $(jq -r '.evidence.promotion_cycle.status.normalized // "unknown"' <<<"$summary_payload")"
   echo
   echo "## Reasons"
   if [[ "$(jq -r '.reasons | length' <<<"$summary_payload")" -eq 0 ]]; then
@@ -699,15 +662,19 @@ printf '%s\n' "$summary_payload" >"$summary_json"
   echo
   echo "## Next Action"
   echo
+  echo "$next_operator_action"
+  echo
+  echo "## Next Action Command"
+  echo
   echo "\`$operator_next_action_command\`"
 } >"$report_md"
 
-echo "[profile-default-gate-stability-evidence-pack] status=$status rc=$final_rc decision=$decision summary_json=$summary_json"
-echo "[profile-default-gate-stability-evidence-pack] report_md=$report_md"
+echo "[profile-compare-multi-vm-stability-promotion-evidence-pack] status=$status rc=$rc decision=$decision summary_json=$summary_json"
+echo "[profile-compare-multi-vm-stability-promotion-evidence-pack] report_md=$report_md"
 
 if [[ "$print_summary_json" == "1" ]]; then
-  echo "[profile-default-gate-stability-evidence-pack] summary_json_payload:"
+  echo "[profile-compare-multi-vm-stability-promotion-evidence-pack] summary_json_payload:"
   cat "$summary_json"
 fi
 
-exit "$final_rc"
+exit "$rc"
