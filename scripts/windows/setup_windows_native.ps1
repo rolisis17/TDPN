@@ -30,8 +30,10 @@ function Get-CommandPath {
   return [string]$cmd.Source
 }
 
-function Normalize-NpmCommandPath {
+function Normalize-NodeCommandPath {
   param(
+    [Parameter(Mandatory = $true)]
+    [string]$CommandName,
     [AllowEmptyString()]
     [string]$PathValue
   )
@@ -40,8 +42,23 @@ function Normalize-NpmCommandPath {
     return ""
   }
 
+  $normalizedCommand = $CommandName.Trim().ToLowerInvariant()
+  if ($normalizedCommand -notin @("npm", "npm.cmd", "npx", "npx.cmd")) {
+    return $PathValue
+  }
+
   $leaf = [System.IO.Path]::GetFileName($PathValue)
-  if (-not $leaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+  $isNpmCommand = $normalizedCommand.StartsWith("npm")
+  $isNpxCommand = $normalizedCommand.StartsWith("npx")
+
+  $isPowerShellShim = $false
+  if ($isNpmCommand -and $leaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $isPowerShellShim = $true
+  } elseif ($isNpxCommand -and $leaf.Equals("npx.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $isPowerShellShim = $true
+  }
+
+  if (-not $isPowerShellShim) {
     return $PathValue
   }
 
@@ -50,7 +67,8 @@ function Normalize-NpmCommandPath {
     return ""
   }
 
-  $siblingCmd = Join-Path $parent "npm.cmd"
+  $siblingLeaf = if ($isNpmCommand) { "npm.cmd" } else { "npx.cmd" }
+  $siblingCmd = Join-Path $parent $siblingLeaf
   if (Test-Path -LiteralPath $siblingCmd -PathType Leaf) {
     return $siblingCmd
   }
@@ -182,8 +200,8 @@ function Resolve-ToolPath {
   $nameLower = $Name.ToLowerInvariant()
   $path = Get-CommandPath $Name
 
-  if ($nameLower -in @("npm", "npm.cmd")) {
-    $path = Normalize-NpmCommandPath -PathValue $path
+  if ($nameLower -in @("npm", "npm.cmd", "npx", "npx.cmd")) {
+    $path = Normalize-NodeCommandPath -CommandName $nameLower -PathValue $path
   }
 
   if (-not [string]::IsNullOrWhiteSpace($path)) {
@@ -219,11 +237,32 @@ function Resolve-ToolPath {
         (Join-Path $systemDrive "nodejs\node.exe")
       )
     }
+    "npm" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
     "npm.cmd" {
       $candidates = @(
         (Join-Path $programFiles "nodejs\npm.cmd"),
         (Join-Path $programFilesX86 "nodejs\npm.cmd"),
         (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "npx" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npx.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npx.cmd"),
+        (Join-Path $systemDrive "nodejs\npx.cmd")
+      )
+    }
+    "npx.cmd" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npx.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npx.cmd"),
+        (Join-Path $systemDrive "nodejs\npx.cmd")
       )
     }
     "rustc" {
@@ -306,6 +345,12 @@ function Get-VersionCheckSpecs {
       tool = "npm"
       args = @("-v")
       fallback_tool = "npm.cmd"
+    },
+    [pscustomobject]@{
+      label = "npx -v"
+      tool = "npx"
+      args = @("-v")
+      fallback_tool = "npx.cmd"
     },
     [pscustomobject]@{
       label = "rustc -V"
@@ -448,9 +493,9 @@ function Get-DependencySpecs {
     },
     [pscustomobject]@{
       id = "OpenJS.NodeJS.LTS"
-      label = "Node.js + npm"
-      check_commands = @("node", "npm.cmd")
-      version_commands = @("node -v", "npm.cmd -v")
+      label = "Node.js + npm/npx"
+      check_commands = @("node", "npm.cmd", "npx.cmd")
+      version_commands = @("node -v", "npm.cmd -v", "npx.cmd -v")
       winget_id = "OpenJS.NodeJS.LTS"
       fallback_commands = @('Start-Process "https://nodejs.org/en/download"')
       required = [bool]$desktopSelected
@@ -559,6 +604,39 @@ function Get-DependencyRemediationHints {
   return @($hints.ToArray())
 }
 
+function Get-DependencyActionableHints {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Dependency,
+    [Parameter(Mandatory = $true)]
+    [string[]]$MissingCommands
+  )
+
+  $hints = New-Object System.Collections.ArrayList
+  switch ([string]$Dependency.id) {
+    "OpenJS.NodeJS.LTS" {
+      if (@($MissingCommands | Where-Object { $_ -in @("npm", "npm.cmd", "npx", "npx.cmd") }).Count -gt 0) {
+        Add-UniqueCommand -Commands $hints -Value "Use .cmd variants in PowerShell to avoid npm.ps1/npx.ps1 execution-policy failures."
+      }
+      Add-UniqueCommand -Commands $hints -Value "npm.cmd -v"
+      Add-UniqueCommand -Commands $hints -Value "npx.cmd -v"
+      Add-UniqueCommand -Commands $hints -Value "scripts\windows\desktop_node.cmd npm install"
+      Add-UniqueCommand -Commands $hints -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
+      Add-UniqueCommand -Commands $hints -Value "scripts\windows\desktop_node.cmd npx --yes create-vite@latest"
+    }
+    "GoLang.Go" {
+      Add-UniqueCommand -Commands $hints -Value "go version"
+      Add-UniqueCommand -Commands $hints -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun"
+    }
+    "Rustlang.Rustup" {
+      Add-UniqueCommand -Commands $hints -Value "rustc -V"
+      Add-UniqueCommand -Commands $hints -Value "cargo -V"
+    }
+  }
+
+  return @($hints.ToArray())
+}
+
 function Show-RemediationHints {
   param(
     [Parameter(Mandatory = $true)]
@@ -572,10 +650,16 @@ function Show-RemediationHints {
   }
 
   Write-Step "remediation hints:"
+  Write-Host "  - PowerShell policy-safe bootstrap"
+  Write-Host "    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"
+  Write-Host ("    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow {0} -InstallMissing -EnablePolicyBypass -NonInteractive" -f $Workflow)
   foreach ($report in $MissingReports) {
     $dependency = $report.dependency
     Write-Host ("  - {0}" -f $dependency.label)
     foreach ($hint in @(Get-DependencyRemediationHints -Dependency $dependency -WingetAvailable $WingetAvailable)) {
+      Write-Host ("    {0}" -f $hint)
+    }
+    foreach ($hint in @(Get-DependencyActionableHints -Dependency $dependency -MissingCommands @($report.missing_commands))) {
       Write-Host ("    {0}" -f $hint)
     }
   }
@@ -726,6 +810,7 @@ function Get-RecommendedCommands {
     Add-UniqueCommand -Commands $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_dev.ps1 -DryRun"
     Add-UniqueCommand -Commands $commands -Value "scripts\windows\desktop_node.cmd npm install"
     Add-UniqueCommand -Commands $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
+    Add-UniqueCommand -Commands $commands -Value "scripts\windows\desktop_node.cmd npx --yes create-vite@latest"
   }
 
   return @($commands.ToArray())

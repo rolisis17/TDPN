@@ -1021,16 +1021,121 @@ jq -n \
       }
     },
     decision_diagnostics: {
-      m4_policy: {
-        required: {
-          quality_evidence: ($require_micro_relay_quality_evidence == 1),
-          quality_status_pass: ($require_micro_relay_quality_status_pass == 1),
-          demotion_policy: ($require_micro_relay_demotion_policy == 1),
-          promotion_policy: ($require_micro_relay_promotion_policy == 1),
-          trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1)
-        },
-        unmet_requirements: $m4_policy_issues
-      }
+      m4_policy: (
+        {
+          required: {
+            quality_evidence: ($require_micro_relay_quality_evidence == 1),
+            quality_status_pass: ($require_micro_relay_quality_status_pass == 1),
+            demotion_policy: ($require_micro_relay_demotion_policy == 1),
+            promotion_policy: ($require_micro_relay_promotion_policy == 1),
+            trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1)
+          },
+          unmet_requirements: $m4_policy_issues,
+          gate_evaluation: {
+            micro_relay_quality_evidence: {
+              required: ($require_micro_relay_quality_evidence == 1),
+              observed: ($micro_relay_quality_evidence_present == 1),
+              status: (
+                if ($require_micro_relay_quality_evidence == 1) then
+                  (if ($micro_relay_quality_evidence_present == 1) then "pass" else "fail" end)
+                else
+                  "not-required"
+                end
+              ),
+              blocking: ($require_micro_relay_quality_evidence == 1 and $micro_relay_quality_evidence_present != 1),
+              actionable_reason: (
+                if ($require_micro_relay_quality_evidence == 1 and $micro_relay_quality_evidence_present != 1) then
+                  "micro-relay quality evidence missing; capture m4 micro-relay quality evidence in campaign or selected summaries and rerun campaign-check"
+                else
+                  null
+                end
+              )
+            },
+            micro_relay_quality_status_pass: {
+              required: ($require_micro_relay_quality_status_pass == 1),
+              observed: ($micro_relay_quality_status_pass == 1),
+              status: (
+                if ($require_micro_relay_quality_status_pass == 1) then
+                  (if ($micro_relay_quality_status_pass == 1) then "pass" else "fail" end)
+                else
+                  "not-required"
+                end
+              ),
+              blocking: ($require_micro_relay_quality_status_pass == 1 and $micro_relay_quality_status_pass != 1),
+              actionable_reason: (
+                if ($require_micro_relay_quality_status_pass == 1 and $micro_relay_quality_status_pass != 1) then
+                  "micro-relay quality status is not pass; improve relay quality scoring evidence and rerun campaign-check"
+                else
+                  null
+                end
+              )
+            },
+            micro_relay_demotion_policy: {
+              required: ($require_micro_relay_demotion_policy == 1),
+              observed: ($micro_relay_demotion_policy_present == 1),
+              status: (
+                if ($require_micro_relay_demotion_policy == 1) then
+                  (if ($micro_relay_demotion_policy_present == 1) then "pass" else "fail" end)
+                else
+                  "not-required"
+                end
+              ),
+              blocking: ($require_micro_relay_demotion_policy == 1 and $micro_relay_demotion_policy_present != 1),
+              actionable_reason: (
+                if ($require_micro_relay_demotion_policy == 1 and $micro_relay_demotion_policy_present != 1) then
+                  "micro-relay demotion policy evidence missing; include adaptive demotion policy evidence and rerun campaign-check"
+                else
+                  null
+                end
+              )
+            },
+            micro_relay_promotion_policy: {
+              required: ($require_micro_relay_promotion_policy == 1),
+              observed: ($micro_relay_promotion_policy_present == 1),
+              status: (
+                if ($require_micro_relay_promotion_policy == 1) then
+                  (if ($micro_relay_promotion_policy_present == 1) then "pass" else "fail" end)
+                else
+                  "not-required"
+                end
+              ),
+              blocking: ($require_micro_relay_promotion_policy == 1 and $micro_relay_promotion_policy_present != 1),
+              actionable_reason: (
+                if ($require_micro_relay_promotion_policy == 1 and $micro_relay_promotion_policy_present != 1) then
+                  "micro-relay promotion policy evidence missing; include adaptive promotion policy evidence and rerun campaign-check"
+                else
+                  null
+                end
+              )
+            },
+            trust_tier_port_unlock_policy: {
+              required: ($require_trust_tier_port_unlock_policy == 1),
+              observed: ($trust_tier_port_unlock_policy_present == 1),
+              status: (
+                if ($require_trust_tier_port_unlock_policy == 1) then
+                  (if ($trust_tier_port_unlock_policy_present == 1) then "pass" else "fail" end)
+                else
+                  "not-required"
+                end
+              ),
+              blocking: ($require_trust_tier_port_unlock_policy == 1 and $trust_tier_port_unlock_policy_present != 1),
+              actionable_reason: (
+                if ($require_trust_tier_port_unlock_policy == 1 and $trust_tier_port_unlock_policy_present != 1) then
+                  "trust-tier port-unlock policy evidence missing; wire trust-tier port-unlock policy evidence and rerun campaign-check"
+                else
+                  null
+                end
+              )
+            }
+          }
+        }
+        | .gate_summary = {
+            required_total: ([.gate_evaluation | to_entries[] | select(.value.required)] | length),
+            required_passed: ([.gate_evaluation | to_entries[] | select(.value.required and .value.status == "pass")] | length),
+            required_failed: ([.gate_evaluation | to_entries[] | select(.value.required and .value.status == "fail")] | length),
+            failed_gate_ids: ([.gate_evaluation | to_entries[] | select(.value.required and .value.status == "fail") | .key])
+          }
+      )
     },
     errors: $errors,
     artifacts: {

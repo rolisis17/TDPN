@@ -319,6 +319,43 @@
             <span id="endpoint_posture_guidance">Refresh server status to load endpoint posture and warnings.</span>
           </div>
         </div>
+        <div id="operator_unlock_plan" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Operator unlock plan</div>
+          <div id="operator_unlock_plan_line" class="status warn">
+            <strong id="operator_unlock_plan_title">Server controls locked</strong>
+            <span id="operator_unlock_plan_detail">Sign in, apply as operator, then complete approval to unlock server controls.</span>
+          </div>
+          <div id="operator_lock_reason_line" class="status warn">
+            <strong id="operator_lock_reason_title">Locked reason: no active session</strong>
+            <span id="operator_lock_reason_detail">Start with wallet challenge and verify to establish a session token.</span>
+          </div>
+          <ul id="operator_unlock_steps" class="onboarding-checklist" aria-label="Operator onboarding checklist">
+            <li id="operator_step_session_item" class="onboarding-checklist__item" data-state="blocked">
+              <span id="operator_step_session_pill" class="onboarding-checklist__pill">Blocked</span>
+              <div class="onboarding-checklist__content">
+                <p class="onboarding-checklist__title">Session token</p>
+                <p id="operator_step_session_detail" class="onboarding-checklist__detail">No active session token is loaded.</p>
+              </div>
+            </li>
+            <li id="operator_step_application_item" class="onboarding-checklist__item" data-state="pending">
+              <span id="operator_step_application_pill" class="onboarding-checklist__pill">Pending</span>
+              <div class="onboarding-checklist__content">
+                <p class="onboarding-checklist__title">Operator application</p>
+                <p id="operator_step_application_detail" class="onboarding-checklist__detail">Apply operator role and wait for approval.</p>
+              </div>
+            </li>
+            <li id="operator_step_lifecycle_item" class="onboarding-checklist__item" data-state="pending">
+              <span id="operator_step_lifecycle_pill" class="onboarding-checklist__pill">Pending</span>
+              <div class="onboarding-checklist__content">
+                <p class="onboarding-checklist__title">Server lifecycle unlock</p>
+                <p id="operator_step_lifecycle_detail" class="onboarding-checklist__detail">Lifecycle actions remain locked until readiness policy is satisfied.</p>
+              </div>
+            </li>
+          </ul>
+          <p id="operator_unlock_next_actions" class="helper-copy">
+            Next actions: Request Challenge; Sign + Verify (Wallet); Apply Operator Role.
+          </p>
+        </div>
         <p class="helper-copy">
           Use the readiness banner to confirm whether the current session can proceed as an operator or needs another sign-in or approval cycle.
         </p>

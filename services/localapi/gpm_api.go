@@ -38,6 +38,7 @@ const (
 	gpmManifestHTTPTimeout         = 6 * time.Second
 	gpmManifestBodyLimit           = 1 << 20
 	gpmManifestCacheBodyLimit      = 2 << 20
+	gpmManifestCacheFutureSkew     = 2 * time.Minute
 	gpmAuthSignatureMaxLen         = 8 * 1024
 	gpmAuthSignatureEnvelopeMaxLen = 16 * 1024
 	gpmAuthVerifierOutputLimit     = 8 * 1024
@@ -2509,6 +2510,25 @@ func (s *Service) verifyGPMAuthSignatureCryptographicProof(signature string, sig
 	hasPublicKeyType := strings.TrimSpace(signatureMetadata.SignaturePublicKeyType) != ""
 	hasSignedMessage := signatureMetadata.HasSignedMessage && signatureMetadata.SignedMessage != ""
 	requireCryptoProof := s.gpmAuthVerifyRequireCryptoProof
+	if !requireCryptoProof && !s.gpmAuthVerifyRequireCommand && strings.TrimSpace(s.gpmAuthVerifyCommand) == "" {
+		// Fail closed when no cryptographic proof policy override and no external verifier path exists.
+		if !hasPublicKey || !hasPublicKeyType || !hasSignedMessage {
+			missing := make([]string, 0, 3)
+			if !hasPublicKey {
+				missing = append(missing, "signature_public_key")
+			}
+			if !hasPublicKeyType {
+				missing = append(missing, "signature_public_key_type")
+			}
+			if !hasSignedMessage {
+				missing = append(missing, "signed_message")
+			}
+			return fmt.Errorf(
+				"cryptographic proof metadata is required when no external verifier is configured: %s",
+				strings.Join(missing, ", "),
+			)
+		}
+	}
 	if !hasPublicKey && !hasPublicKeyType && !hasSignedMessage {
 		if requireCryptoProof {
 			return errors.New("cryptographic proof metadata is required by policy: signature_public_key, signature_public_key_type, signed_message")
@@ -2702,7 +2722,8 @@ func (s *Service) shouldAttemptRemoteManifestRefresh(fetchedAt time.Time) bool {
 	if refreshInterval <= 0 {
 		return false
 	}
-	return time.Since(fetchedAt) >= refreshInterval
+	cacheAge := sanitizedManifestCacheAge(fetchedAt, time.Now().UTC())
+	return cacheAge >= refreshInterval
 }
 
 func (s *Service) shouldFailClosedOnManifestRefreshFailure(fetchedAt time.Time) (bool, time.Duration, time.Duration) {
@@ -2710,11 +2731,16 @@ func (s *Service) shouldFailClosedOnManifestRefreshFailure(fetchedAt time.Time) 
 	if maxAllowedCacheAge <= 0 {
 		return false, 0, maxAllowedCacheAge
 	}
-	cacheAge := time.Since(fetchedAt)
-	if cacheAge < 0 {
-		cacheAge = 0
-	}
+	cacheAge := sanitizedManifestCacheAge(fetchedAt, time.Now().UTC())
 	return cacheAge > maxAllowedCacheAge, cacheAge, maxAllowedCacheAge
+}
+
+func sanitizedManifestCacheAge(fetchedAt time.Time, now time.Time) time.Duration {
+	cacheAge := now.Sub(fetchedAt)
+	if cacheAge < 0 {
+		return 0
+	}
+	return cacheAge
 }
 
 func (s *Service) fetchRemoteManifestWithPolicy(ctx context.Context, manifestURL string) (gpmBootstrapManifest, bool, []byte, string, error) {
@@ -3063,7 +3089,11 @@ func (s *Service) readTrustedBootstrapManifestCache() (gpmTrustedBootstrapManife
 	if err != nil {
 		return gpmTrustedBootstrapManifestCache{}, err
 	}
-	if time.Since(fetchedAt) > s.gpmManifestMaxAge {
+	now := time.Now().UTC()
+	if fetchedAt.After(now.Add(gpmManifestCacheFutureSkew)) {
+		return gpmTrustedBootstrapManifestCache{}, errors.New("cached manifest fetched_at_utc is in the future")
+	}
+	if sanitizedManifestCacheAge(fetchedAt, now) > s.gpmManifestMaxAge {
 		return gpmTrustedBootstrapManifestCache{}, errors.New("cached manifest is stale")
 	}
 	pinnedHost, err := s.pinnedGPMMainDomainHost()

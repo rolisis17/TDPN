@@ -522,6 +522,93 @@ body.page-portal .hero__panel {
   font-size: 0.92rem;
 }
 
+.onboarding-checklist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-checklist__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid rgba(203, 219, 232, 0.9);
+  border-radius: 12px;
+  background: rgba(248, 251, 253, 0.9);
+  padding: 10px 12px;
+}
+
+.onboarding-checklist__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(191, 209, 224, 0.95);
+  background: #f2f8fc;
+  color: #36546c;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.onboarding-checklist__content {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.onboarding-checklist__title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.onboarding-checklist__detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.onboarding-checklist__item[data-state="done"] {
+  border-color: #9dd8bf;
+  background: linear-gradient(180deg, #eefbf5, #e4f8ee);
+}
+
+.onboarding-checklist__item[data-state="done"] .onboarding-checklist__pill {
+  border-color: #73c4a0;
+  background: #dff4e8;
+  color: #1d664d;
+}
+
+.onboarding-checklist__item[data-state="pending"] {
+  border-color: #f1cf95;
+  background: linear-gradient(180deg, #fffaf0, #fff5e0);
+}
+
+.onboarding-checklist__item[data-state="pending"] .onboarding-checklist__pill {
+  border-color: #e2be7e;
+  background: #fff1cd;
+  color: #7b561a;
+}
+
+.onboarding-checklist__item[data-state="blocked"] {
+  border-color: #efb2b2;
+  background: linear-gradient(180deg, #fff7f7, #ffecec);
+}
+
+.onboarding-checklist__item[data-state="blocked"] .onboarding-checklist__pill {
+  border-color: #e19595;
+  background: #ffe0e0;
+  color: #8a2d2d;
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -962,6 +1049,14 @@ pre {
   .grid.cols-3,
   .fields {
     grid-template-columns: 1fr;
+  }
+
+  .onboarding-checklist__item {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-checklist__pill {
+    width: fit-content;
   }
 
   .actions .btn,

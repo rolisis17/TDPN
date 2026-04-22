@@ -33,6 +33,23 @@ const endpointPostureEl = byId("endpoint_posture");
 const endpointPostureLineEl = byId("endpoint_posture_line");
 const endpointPostureStatusEl = byId("endpoint_posture_status");
 const endpointPostureGuidanceEl = byId("endpoint_posture_guidance");
+const operatorUnlockPlanEl = byId("operator_unlock_plan");
+const operatorUnlockPlanLineEl = byId("operator_unlock_plan_line");
+const operatorUnlockPlanTitleEl = byId("operator_unlock_plan_title");
+const operatorUnlockPlanDetailEl = byId("operator_unlock_plan_detail");
+const operatorLockReasonLineEl = byId("operator_lock_reason_line");
+const operatorLockReasonTitleEl = byId("operator_lock_reason_title");
+const operatorLockReasonDetailEl = byId("operator_lock_reason_detail");
+const operatorUnlockNextActionsEl = byId("operator_unlock_next_actions");
+const operatorStepSessionItemEl = byId("operator_step_session_item");
+const operatorStepSessionPillEl = byId("operator_step_session_pill");
+const operatorStepSessionDetailEl = byId("operator_step_session_detail");
+const operatorStepApplicationItemEl = byId("operator_step_application_item");
+const operatorStepApplicationPillEl = byId("operator_step_application_pill");
+const operatorStepApplicationDetailEl = byId("operator_step_application_detail");
+const operatorStepLifecycleItemEl = byId("operator_step_lifecycle_item");
+const operatorStepLifecyclePillEl = byId("operator_step_lifecycle_pill");
+const operatorStepLifecycleDetailEl = byId("operator_step_lifecycle_detail");
 const localApiAuthTokenEl = byId("local_api_auth_token");
 const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
@@ -3667,6 +3684,217 @@ function setOperatorReadiness(kind, statusText, guidanceText) {
   operatorReadinessGuidanceEl.textContent = guidanceText;
 }
 
+function operatorChecklistStateLabel(state) {
+  switch (state) {
+    case "done":
+      return "Done";
+    case "blocked":
+      return "Blocked";
+    default:
+      return "Pending";
+  }
+}
+
+function setOperatorChecklistStep(itemEl, pillEl, detailEl, state, detail) {
+  const normalized = state === "done" || state === "blocked" ? state : "pending";
+  itemEl.dataset.state = normalized;
+  pillEl.textContent = operatorChecklistStateLabel(normalized);
+  detailEl.textContent = detail;
+}
+
+function computeOperatorUnlockPlanModel() {
+  const token = byId("session_token").value.trim();
+  const hasSession = token.length > 0;
+  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
+  const operatorStatus = effectivePortalOperatorApplicationStatus();
+  const readiness = computeOperatorReadiness();
+  const serverTabVisible = isServerTabVisibleRole(role);
+  const lifecycleUnlocked = serverReadiness?.lifecycleActionsUnlocked === true;
+  const lifecycleLocked = serverReadiness?.lifecycleActionsUnlocked === false;
+  const unlockActions = Array.isArray(serverReadiness?.unlockActions) ? serverReadiness.unlockActions : [];
+
+  let planKind = readiness.kind || "warn";
+  let planTitle = lifecycleUnlocked ? "Server controls unlocked" : "Server controls locked";
+  let planDetail = readiness.guidanceText;
+  let lockTitle = "Locked reason: none";
+  let lockDetail = "No lock is active. Continue with server lifecycle actions.";
+
+  if (!lifecycleUnlocked) {
+    if (configEndpointUnavailableFailClosedMode()) {
+      planKind = "bad";
+      lockTitle = "Locked reason: runtime policy unavailable";
+      lockDetail = failClosedMutatingActionStatusDetail();
+    } else if (!hasSession) {
+      lockTitle = "Locked reason: no active session";
+      lockDetail = "Sign in first to establish session_token for operator onboarding.";
+    } else if (!serverTabVisible) {
+      planKind = "bad";
+      lockTitle = "Locked reason: role not eligible";
+      lockDetail =
+        serverReadiness?.lockReason ||
+        "Current role cannot open the Server tab yet. Apply operator role and refresh session after approval.";
+    } else if (operatorStatus === "rejected") {
+      planKind = "bad";
+      lockTitle = "Locked reason: operator application rejected";
+      lockDetail = "Re-apply operator role or update operator details, then request a fresh approval review.";
+    } else if (lifecycleLocked) {
+      lockTitle = "Locked reason: readiness policy";
+      lockDetail =
+        serverReadiness?.lockReason ||
+        "Server lifecycle actions remain locked until approval and strict chain binding are satisfied.";
+    } else {
+      lockTitle = "Locked reason: readiness pending";
+      lockDetail = "Refresh operator/server status to load the latest readiness decision.";
+    }
+  }
+
+  let sessionStepState = "pending";
+  let sessionStepDetail = "Session state pending refresh.";
+  if (!hasSession) {
+    sessionStepState = "blocked";
+    sessionStepDetail = "No active session token. Complete wallet sign-in first.";
+  } else {
+    sessionStepState = "done";
+    sessionStepDetail = "Session token is active.";
+  }
+
+  let applicationStepState = "pending";
+  let applicationStepDetail = "Operator application status pending refresh.";
+  if (!hasSession) {
+    applicationStepState = "blocked";
+    applicationStepDetail = "Sign in first to submit or query operator application.";
+  } else if (role === "admin") {
+    applicationStepState = "done";
+    applicationStepDetail = "Admin role active; operator application gating is already satisfied.";
+  } else if (isServerOnlyRole(role)) {
+    applicationStepState = "done";
+    applicationStepDetail = "Server-only role active; operator application flow is managed outside this session.";
+  } else {
+    switch (operatorStatus) {
+      case "approved":
+        applicationStepState = "done";
+        applicationStepDetail = "Operator application is approved.";
+        break;
+      case "pending":
+        applicationStepState = "pending";
+        applicationStepDetail = "Operator application submitted and waiting for approval review.";
+        break;
+      case "rejected":
+        applicationStepState = "blocked";
+        applicationStepDetail = "Operator application was rejected. Re-apply with updated details.";
+        break;
+      case "not_submitted":
+        applicationStepState = "pending";
+        applicationStepDetail = "Operator application has not been submitted yet.";
+        break;
+      default:
+        applicationStepState = "pending";
+        applicationStepDetail = "Run Check Operator Status to load application state.";
+        break;
+    }
+  }
+
+  let lifecycleStepState = "pending";
+  let lifecycleStepDetail = "Lifecycle lock state pending refresh.";
+  if (!hasSession) {
+    lifecycleStepState = "blocked";
+    lifecycleStepDetail = "Lifecycle unlock requires an active session.";
+  } else if (!serverTabVisible) {
+    lifecycleStepState = "blocked";
+    lifecycleStepDetail =
+      serverReadiness?.lockReason ||
+      "Server tab is locked for this role. Apply and approve operator role first.";
+  } else if (lifecycleUnlocked) {
+    lifecycleStepState = "done";
+    lifecycleStepDetail = "Server lifecycle actions are unlocked.";
+  } else if (operatorStatus === "rejected") {
+    lifecycleStepState = "blocked";
+    lifecycleStepDetail = "Operator rejection blocks lifecycle unlock until re-approval.";
+  } else if (lifecycleLocked) {
+    lifecycleStepState = "pending";
+    lifecycleStepDetail =
+      serverReadiness?.lockReason ||
+      "Approval and strict chain binding are still required before lifecycle actions unlock.";
+  }
+
+  const nextActions = [];
+  if (!hasSession) {
+    pushUniqueNonEmptyString(nextActions, "Request Challenge");
+    pushUniqueNonEmptyString(nextActions, "Sign + Verify (Wallet)");
+  } else {
+    if (operatorStatus === "not_submitted") {
+      pushUniqueNonEmptyString(nextActions, "Apply Operator Role");
+    } else if (operatorStatus === "pending") {
+      pushUniqueNonEmptyString(nextActions, "Check Operator Status");
+      pushUniqueNonEmptyString(nextActions, "Wait for approval decision");
+    } else if (operatorStatus === "rejected") {
+      pushUniqueNonEmptyString(nextActions, "Re-apply operator role");
+    }
+    if (!lifecycleUnlocked) {
+      pushUniqueNonEmptyString(nextActions, "Refresh Session");
+    }
+  }
+  for (const action of unlockActions) {
+    pushUniqueNonEmptyString(nextActions, action);
+  }
+  if (nextActions.length === 0) {
+    pushUniqueNonEmptyString(nextActions, "Use Server tab Start/Stop/Restart controls");
+  }
+
+  return {
+    planKind,
+    planTitle,
+    planDetail,
+    lockTitle,
+    lockDetail,
+    nextActions,
+    sessionStepState,
+    sessionStepDetail,
+    applicationStepState,
+    applicationStepDetail,
+    lifecycleStepState,
+    lifecycleStepDetail
+  };
+}
+
+function refreshOperatorUnlockPlan() {
+  const model = computeOperatorUnlockPlanModel();
+  operatorUnlockPlanEl.dataset.kind = model.planKind || "warn";
+  operatorUnlockPlanLineEl.classList.remove("good", "warn", "bad");
+  operatorLockReasonLineEl.classList.remove("good", "warn", "bad");
+  if (model.planKind) {
+    operatorUnlockPlanLineEl.classList.add(model.planKind);
+  }
+  const lockKind = model.planKind === "good" ? "good" : model.planKind === "bad" ? "bad" : "warn";
+  operatorLockReasonLineEl.classList.add(lockKind);
+  operatorUnlockPlanTitleEl.textContent = model.planTitle;
+  operatorUnlockPlanDetailEl.textContent = model.planDetail;
+  operatorLockReasonTitleEl.textContent = model.lockTitle;
+  operatorLockReasonDetailEl.textContent = model.lockDetail;
+  setOperatorChecklistStep(
+    operatorStepSessionItemEl,
+    operatorStepSessionPillEl,
+    operatorStepSessionDetailEl,
+    model.sessionStepState,
+    model.sessionStepDetail
+  );
+  setOperatorChecklistStep(
+    operatorStepApplicationItemEl,
+    operatorStepApplicationPillEl,
+    operatorStepApplicationDetailEl,
+    model.applicationStepState,
+    model.applicationStepDetail
+  );
+  setOperatorChecklistStep(
+    operatorStepLifecycleItemEl,
+    operatorStepLifecyclePillEl,
+    operatorStepLifecycleDetailEl,
+    model.lifecycleStepState,
+    model.lifecycleStepDetail
+  );
+  operatorUnlockNextActionsEl.textContent = `Next actions: ${model.nextActions.join("; ")}.`;
+}
+
 function formatEndpointPostureLabel(posture) {
   const normalized = nonEmptyString(posture);
   if (!normalized) {
@@ -4129,6 +4357,7 @@ function computeOperatorReadiness() {
 function refreshOperatorReadiness() {
   const readiness = computeOperatorReadiness();
   setOperatorReadiness(readiness.kind, readiness.statusText, readiness.guidanceText);
+  refreshOperatorUnlockPlan();
   refreshEndpointPosture();
   refreshClientReadiness();
 }

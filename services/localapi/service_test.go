@@ -4763,9 +4763,28 @@ func TestGPMAuthChallengeVerifyAndSessionStatus(t *testing.T) {
 	if strings.TrimSpace(challengeID) == "" {
 		t.Fatalf("challenge_id missing: %v", payload)
 	}
+	challengeMessage, _ := payload["message"].(string)
+	if strings.TrimSpace(challengeMessage) == "" {
+		t.Fatalf("challenge message missing: %v", payload)
+	}
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
 
-	verifyBody := `{"wallet_address":"cosmos1testwallet","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
-	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1testwallet",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_kind":            "sign_arbitrary",
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signature_source":          "wallet_extension",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
 	if code != http.StatusOK {
 		t.Fatalf("verify status=%d body=%v", code, payload)
 	}
@@ -4862,6 +4881,7 @@ func TestGPMAuthVerifyUsesCustomSignatureVerifier(t *testing.T) {
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
+	expectedSignature := ""
 
 	verifierCalls := 0
 	svc.gpmAuthSignatureVerifier = func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
@@ -4875,7 +4895,7 @@ func TestGPMAuthVerifyUsesCustomSignatureVerifier(t *testing.T) {
 		if walletProvider != "keplr" {
 			return fmt.Errorf("wallet_provider=%q", walletProvider)
 		}
-		if signature != "signed-proof-value" {
+		if signature != expectedSignature {
 			return fmt.Errorf("signature=%q", signature)
 		}
 		return nil
@@ -4890,9 +4910,27 @@ func TestGPMAuthVerifyUsesCustomSignatureVerifier(t *testing.T) {
 	if strings.TrimSpace(challengeID) == "" {
 		t.Fatalf("challenge_id missing: %v", payload)
 	}
+	challengeMessage, _ := payload["message"].(string)
+	if strings.TrimSpace(challengeMessage) == "" {
+		t.Fatalf("challenge message missing: %v", payload)
+	}
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	expectedSignature = signature
 
-	verifyBody := `{"wallet_address":"cosmos1customverifier","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
-	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1customverifier",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
 	if code != http.StatusOK {
 		t.Fatalf("verify status=%d body=%v", code, payload)
 	}
@@ -4923,9 +4961,26 @@ func TestGPMAuthVerifyCustomSignatureVerifierRejects(t *testing.T) {
 	if strings.TrimSpace(challengeID) == "" {
 		t.Fatalf("challenge_id missing: %v", payload)
 	}
+	challengeMessage, _ := payload["message"].(string)
+	if strings.TrimSpace(challengeMessage) == "" {
+		t.Fatalf("challenge message missing: %v", payload)
+	}
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
 
-	verifyBody := `{"wallet_address":"cosmos1customreject","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
-	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1customreject",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
 	if code != http.StatusUnauthorized {
 		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
 	}
@@ -5562,7 +5617,7 @@ func TestGPMAuthVerifyCryptographicProofWithOptionalMetadata(t *testing.T) {
 		}
 	})
 
-	t.Run("allows missing cryptographic proof metadata when strict crypto policy is disabled", func(t *testing.T) {
+	t.Run("fails closed when cryptographic proof metadata is missing and no external verifier is configured", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
 		svc.gpmRoleDefault = "client"
@@ -5579,13 +5634,15 @@ func TestGPMAuthVerifyCryptographicProofWithOptionalMetadata(t *testing.T) {
 
 		verifyBody := `{"wallet_address":"cosmos1compatmissingproof","wallet_provider":"keplr","challenge_id":"` + challengeID + `","signature":"signed-proof-value"}`
 		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", verifyBody)
-		if code != http.StatusOK {
-			t.Fatalf("verify status=%d body=%v", code, payload)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
 		}
-		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
-			t.Fatalf("session_token missing payload=%v", payload)
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "cryptographic proof metadata is required when no external verifier is configured") {
+			t.Fatalf("error=%q want no-external-verifier cryptographic proof message payload=%v", errMsg, payload)
 		}
 	})
+
 }
 
 func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
@@ -5800,15 +5857,18 @@ func TestGPMAuthVerifyRequireMetadataPolicy(t *testing.T) {
 		if strings.TrimSpace(challengeMessage) == "" {
 			t.Fatalf("message missing: %v", payload)
 		}
+		signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
 
 		verifyRequest := map[string]any{
-			"wallet_address":   "cosmos1policymetadatapass",
-			"wallet_provider":  "keplr",
-			"challenge_id":     challengeID,
-			"signature":        "signed-proof-value",
-			"signature_kind":   "eip191",
-			"signature_source": "manual",
-			"signed_message":   challengeMessage,
+			"wallet_address":            "cosmos1policymetadatapass",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_kind":            "eip191",
+			"signature_source":          "manual",
+			"signed_message":            challengeMessage,
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "secp256k1",
 		}
 		verifyBodyBytes, err := json.Marshal(verifyRequest)
 		if err != nil {
@@ -5906,13 +5966,21 @@ func TestGPMAuthVerifyRequireWalletExtensionSourcePolicy(t *testing.T) {
 		if strings.TrimSpace(challengeID) == "" {
 			t.Fatalf("challenge_id missing: %v", payload)
 		}
+		challengeMessage, _ := payload["message"].(string)
+		if strings.TrimSpace(challengeMessage) == "" {
+			t.Fatalf("message missing: %v", payload)
+		}
+		signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
 
 		verifyRequest := map[string]any{
-			"wallet_address":   "cosmos1policywalletsrcpass",
-			"wallet_provider":  "keplr",
-			"challenge_id":     challengeID,
-			"signature":        "signed-proof-value",
-			"signature_source": "wallet_extension",
+			"wallet_address":            "cosmos1policywalletsrcpass",
+			"wallet_provider":           "keplr",
+			"challenge_id":              challengeID,
+			"signature":                 signature,
+			"signature_source":          "wallet_extension",
+			"signature_public_key":      publicKey,
+			"signature_public_key_type": "secp256k1",
+			"signed_message":            challengeMessage,
 		}
 		verifyBodyBytes, err := json.Marshal(verifyRequest)
 		if err != nil {
@@ -8264,6 +8332,83 @@ func TestReadBootstrapManifestCacheEnforcesSourceURLPolicyWithoutPinnedOrHTTPSRe
 	errMsg := err.Error()
 	if !strings.Contains(errMsg, "cached manifest source url") || !strings.Contains(errMsg, "unsupported url scheme") {
 		t.Fatalf("error=%q want cached source url scheme validation failure", errMsg)
+	}
+}
+
+func TestReadBootstrapManifestCacheRejectsFutureFetchedAtBeyondSkew(t *testing.T) {
+	now := time.Now().UTC()
+	cachePath := filepath.Join(t.TempDir(), "manifest_cache_future_reject.json")
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(gpmManifestCacheFutureSkew + 3*time.Minute).Format(time.RFC3339),
+		SourceURL:         "https://bootstrap-cache-future.globalprivatemesh.example/v1/bootstrap/manifest",
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache-future-reject.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	svc := &Service{
+		gpmManifestCache:        cachePath,
+		gpmManifestMaxAge:       24 * time.Hour,
+		gpmManifestRequireHTTPS: false,
+	}
+	_, _, err = svc.readBootstrapManifestCache()
+	if err == nil {
+		t.Fatal("expected future fetched_at_utc to fail closed")
+	}
+	if !strings.Contains(err.Error(), "fetched_at_utc is in the future") {
+		t.Fatalf("error=%q want future fetched_at_utc rejection", err.Error())
+	}
+}
+
+func TestReadBootstrapManifestCacheAllowsSmallFutureFetchedAtWithinSkew(t *testing.T) {
+	now := time.Now().UTC()
+	cachePath := filepath.Join(t.TempDir(), "manifest_cache_future_within_skew.json")
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Add(gpmManifestCacheFutureSkew / 2).Format(time.RFC3339),
+		SourceURL:         "https://bootstrap-cache-future.globalprivatemesh.example/v1/bootstrap/manifest",
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache-future-allow.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	svc := &Service{
+		gpmManifestCache:        cachePath,
+		gpmManifestMaxAge:       24 * time.Hour,
+		gpmManifestRequireHTTPS: false,
+	}
+	manifest, signatureVerified, err := svc.readBootstrapManifestCache()
+	if err != nil {
+		t.Fatalf("readBootstrapManifestCache: %v", err)
+	}
+	if !signatureVerified {
+		t.Fatalf("signatureVerified=%t want=true", signatureVerified)
+	}
+	if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != "https://directory.cache-future-allow.globalprivatemesh.example:8081" {
+		t.Fatalf("bootstrap_directories=%v want=[https://directory.cache-future-allow.globalprivatemesh.example:8081]", manifest.BootstrapDirectories)
 	}
 }
 

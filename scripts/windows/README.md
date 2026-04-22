@@ -26,12 +26,13 @@ What the script does:
 - detects and reports current execution policy
 - prints the one-command process-scope bypass if the shell is locked down: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force`
 - refreshes the session `PATH` from machine/user values and common install locations
+- resolves Node tooling to `npm.cmd`/`npx.cmd` (never `npm.ps1`/`npx.ps1`) for policy-safe invocation
 - routes child script launches through `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ...`
-- finishes with a verification block for `go version`, `node -v`, `npm -v`, `rustc -V`, and `cargo -V`
+- finishes with a verification block for `go version`, `node -v`, `npm -v`, `npx -v`, `rustc -V`, and `cargo -V`
 
 Expected healthy output at the end:
 - each tool line says `PASS`
-- the summary line says `summary: pass=5 fail=0`
+- the summary line says `summary: pass=6 fail=0`
 
 ## Troubleshooting (Copy/Paste)
 
@@ -52,6 +53,7 @@ Then run Node commands through the wrapper (avoid direct `npm` in locked shells)
 scripts\windows\desktop_node.cmd npm -v
 scripts\windows\desktop_node.cmd npm install
 scripts\windows\desktop_node.cmd npm run tauri -- dev
+scripts\windows\desktop_node.cmd npx --yes create-vite@latest
 ```
 
 ### 2) `go` / `node` / `npm` / `rustc` / `cargo` not found in PowerShell
