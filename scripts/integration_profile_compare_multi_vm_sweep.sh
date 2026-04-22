@@ -30,6 +30,7 @@ report_md=""
 decision="${FAKE_VM_DECISION:-GO}"
 recommended_profile="${FAKE_VM_RECOMMENDED_PROFILE:-balanced}"
 support_rate_pct="${FAKE_VM_SUPPORT_RATE_PCT:-75.5}"
+trend_source="${FAKE_VM_TREND_SOURCE:-policy_reliability_latency}"
 sleep_sec="${FAKE_VM_SLEEP_SEC:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -74,6 +75,14 @@ while [[ $# -gt 0 ]]; do
       support_rate_pct="${1#*=}"
       shift
       ;;
+    --trend-source)
+      trend_source="${2:-}"
+      shift 2
+      ;;
+    --trend-source=*)
+      trend_source="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -94,14 +103,17 @@ if [[ -n "$summary_json" ]]; then
   jq -n \
     --arg decision "$decision" \
     --arg recommended_profile "$recommended_profile" \
+    --arg trend_source "$trend_source" \
     --argjson support_rate_pct "$support_rate_pct" \
     '{
+      version: 1,
       status: "ok",
       final_rc: 0,
       decision: {
         decision: $decision,
         recommended_profile: $recommended_profile,
-        support_rate_pct: $support_rate_pct
+        support_rate_pct: $support_rate_pct,
+        trend_source: $trend_source
       }
     }' >"$summary_json"
 fi
@@ -164,6 +176,7 @@ if ! jq -e '
   and .reducer_handoff.decision_counts.GO == 1
   and .reducer_handoff.decision_counts["NO-GO"] == 1
   and (.reducer_handoff.input_summary_jsons | length) == 2
+  and ([.vms[] | .artifacts.reducer_schema_ready] | all)
   and (.vms | length) == 2
 ' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary missing expected fields"
@@ -211,10 +224,45 @@ if ! jq -e --arg summary "$QUOTED_SUMMARY_PATH" --arg report "$QUOTED_REPORT_PAT
   and (.vms[0].artifacts.summary_json == $summary)
   and (.vms[0].artifacts.report_md == $report)
   and (.vms[0].artifacts.summary_exists == true)
+  and (.vms[0].artifacts.reducer_schema_ready == true)
   and (.vms[0].artifacts.report_exists == true)
 ' "$QUOTED_SUMMARY" >/dev/null 2>&1; then
   echo "quoted-path sweep summary missing expected artifacts"
   cat "$QUOTED_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-sweep] reducer-schema-invalid summary fails closed"
+SCHEMA_INVALID_SUMMARY="$TMP_DIR/schema_invalid_summary.json"
+SCHEMA_INVALID_LOG="$TMP_DIR/schema_invalid.log"
+SCHEMA_INVALID_CAMPAIGN_SUMMARY_PATH="$TMP_DIR/schema invalid/vm summary.json"
+SCHEMA_INVALID_CAMPAIGN_REPORT_PATH="$TMP_DIR/schema invalid/vm report.md"
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_schema_invalid" \
+  --summary-json "$SCHEMA_INVALID_SUMMARY" \
+  --command-timeout-sec 120 \
+  --vm-command "vm_schema_invalid::FAKE_VM_SHOULD_FAIL=0 \"$FAKE_VM_CAMPAIGN\" --summary-json \"$SCHEMA_INVALID_CAMPAIGN_SUMMARY_PATH\" --report-md \"$SCHEMA_INVALID_CAMPAIGN_REPORT_PATH\" --decision GO --recommended-profile balanced --support-rate-pct 80 --trend-source \"\"" \
+  --print-summary-json 0 >"$SCHEMA_INVALID_LOG" 2>&1
+schema_invalid_rc=$?
+set -e
+
+if [[ "$schema_invalid_rc" -ne 1 ]]; then
+  echo "expected reducer-schema-invalid path rc=1, got rc=$schema_invalid_rc"
+  cat "$SCHEMA_INVALID_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .counts.vm_fail == 1
+  and .reducer_handoff.ready == false
+  and .vms[0].failure_reason == "summary_json_reducer_schema_invalid"
+  and .vms[0].artifacts.reducer_schema_ready == false
+' "$SCHEMA_INVALID_SUMMARY" >/dev/null 2>&1; then
+  echo "schema-invalid summary missing expected fail-closed fields"
+  cat "$SCHEMA_INVALID_SUMMARY"
   exit 1
 fi
 

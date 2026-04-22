@@ -146,6 +146,8 @@ stability_summary_json=""
 fail_on_no_go="1"
 require_status_pass=""
 require_decision_consensus=""
+require_modal_decision=""
+require_modal_decision_support_rate_pct=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -189,6 +191,22 @@ while [[ $# -gt 0 ]]; do
       require_decision_consensus="${1#*=}"
       shift
       ;;
+    --require-modal-decision)
+      require_modal_decision="${2:-}"
+      shift 2
+      ;;
+    --require-modal-decision=*)
+      require_modal_decision="${1#*=}"
+      shift
+      ;;
+    --require-modal-decision-support-rate-pct)
+      require_modal_decision_support_rate_pct="${2:-}"
+      shift 2
+      ;;
+    --require-modal-decision-support-rate-pct=*)
+      require_modal_decision_support_rate_pct="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -196,8 +214,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "$capture_file" ]]; then
-  printf 'check\tscenario=%s\tfail_on_no_go=%s\trequire_status_pass=%s\trequire_decision_consensus=%s\tstability_summary_json=%s\tsummary_json=%s\n' \
-    "$scenario" "$fail_on_no_go" "$require_status_pass" "$require_decision_consensus" "$stability_summary_json" "$summary_json" >>"$capture_file"
+  printf 'check\tscenario=%s\tfail_on_no_go=%s\trequire_status_pass=%s\trequire_decision_consensus=%s\trequire_modal_decision=%s\trequire_modal_decision_support_rate_pct=%s\tstability_summary_json=%s\tsummary_json=%s\n' \
+    "$scenario" "$fail_on_no_go" "$require_status_pass" "$require_decision_consensus" "$require_modal_decision" "$require_modal_decision_support_rate_pct" "$stability_summary_json" "$summary_json" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -312,6 +330,45 @@ fi
 if ! grep -q $'^check\t.*\trequire_status_pass=1\trequire_decision_consensus=1\t' "$CAPTURE_FILE"; then
   echo "expected check-stage forwarding capture not found"
   cat "$CAPTURE_FILE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-cycle] strict default policy profile forwards check defaults"
+STRICT_DEFAULT_SUMMARY="$TMP_DIR/cycle_strict_default_summary.json"
+STRICT_DEFAULT_CAPTURE="$TMP_DIR/cycle_strict_default_capture.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$STRICT_DEFAULT_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_RUN_SCENARIO="pass" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/strict_default_reports" \
+  --summary-json "$STRICT_DEFAULT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_strict_default.log 2>&1
+strict_default_rc=$?
+set -e
+
+if [[ "$strict_default_rc" -ne 0 ]]; then
+  echo "expected strict-default path rc=0, got rc=$strict_default_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_strict_default.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.check.policy_profile == "strict-defaults"
+  and .inputs.check.policy.require_decision_consensus == true
+  and .inputs.check.policy.require_modal_decision == "GO"
+  and .inputs.check.policy.require_modal_decision_support_rate_pct == 67
+' "$STRICT_DEFAULT_SUMMARY" >/dev/null 2>&1; then
+  echo "strict-default cycle summary mismatch"
+  cat "$STRICT_DEFAULT_SUMMARY"
+  exit 1
+fi
+if ! grep -q $'^check\t.*\trequire_decision_consensus=1\trequire_modal_decision=GO\trequire_modal_decision_support_rate_pct=67\t' "$STRICT_DEFAULT_CAPTURE"; then
+  echo "expected strict-default check forwarding capture not found"
+  cat "$STRICT_DEFAULT_CAPTURE"
   exit 1
 fi
 

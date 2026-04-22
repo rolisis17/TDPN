@@ -176,6 +176,10 @@ if ! jq -e '
   .decision.decision == "GO"
   and .status == "ok"
   and .rc == 0
+  and .promotion_gate.decision == "GO"
+  and .promotion_gate.status == "pass"
+  and .promotion_gate.promotion_ready == true
+  and (.promotion_gate.missing_evidence_reasons | length) == 0
   and .decision.recommended_profile == "balanced"
   and (.decision.support_rate_pct >= 99.9)
   and .decision.trend_source == "policy_reliability_latency"
@@ -222,6 +226,36 @@ if ! jq -e '.summary.vm_summaries_total == 3 and .summary.vm_summaries_valid == 
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-reducer] --min-support-rate-pct is configurable and enforced"
+CHECK_E="$TMP_DIR/vm_e_campaign_check_summary.json"
+make_campaign_check_summary "$CHECK_E" "ok" "GO" "private" "83.00" "policy_reliability_latency" 5 5 0 0
+THRESHOLD_FAIL_SUMMARY="$TMP_DIR/reducer_threshold_fail_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --campaign-summary-json "$SIGNOFF_A" \
+  --campaign-summary-json "$CHECK_B" \
+  --campaign-summary-json "$CHECK_E" \
+  --min-support-rate-pct 80 \
+  --summary-json "$THRESHOLD_FAIL_SUMMARY" >/tmp/integration_profile_compare_multi_vm_reducer_threshold_fail.log 2>&1
+threshold_fail_rc=$?
+set -e
+
+if [[ "$threshold_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when support-rate threshold is raised above modal support"
+  cat /tmp/integration_profile_compare_multi_vm_reducer_threshold_fail.log
+  exit 1
+fi
+if ! jq -e '
+  .decision.decision == "NO-GO"
+  and .promotion_gate.decision == "NO-GO"
+  and .inputs.min_support_rate_pct == 80
+  and ((.promotion_gate.missing_evidence_reason_ids // []) | index("recommended_profile_support_rate_below_threshold"))
+' "$THRESHOLD_FAIL_SUMMARY" >/dev/null 2>&1; then
+  echo "expected threshold failure markers missing"
+  cat "$THRESHOLD_FAIL_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-reducer] mixed GO/NO-GO fails closed by default"
 CHECK_D="$TMP_DIR/vm_d_campaign_check_summary.json"
 make_campaign_check_summary "$CHECK_D" "fail" "NO-GO" "private" "40.00" "vote_fallback" 5 2 1 2
@@ -243,6 +277,10 @@ fi
 if ! jq -e '
   .decision.decision == "NO-GO"
   and .status == "fail"
+  and .promotion_gate.decision == "NO-GO"
+  and .promotion_gate.status == "fail"
+  and .promotion_gate.promotion_ready == false
+  and ((.promotion_gate.missing_evidence_reason_ids // []) | index("vm_decisions_not_all_go"))
   and .summary.decision_counts["NO-GO"] == 1
   and .summary.status_counts.fail == 1
   and ((.errors // []) | map(test("not all per-VM decisions are GO")) | any)

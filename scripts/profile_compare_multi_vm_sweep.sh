@@ -166,6 +166,99 @@ summary_value_str() {
   jq -r "$jq_expr" "$summary_path" 2>/dev/null || true
 }
 
+summary_reducer_schema_ready_01() {
+  local summary_path="$1"
+  if [[ -z "$summary_path" || ! -f "$summary_path" ]]; then
+    printf '%s' "0"
+    return
+  fi
+  if ! jq -e '
+    def nonempty_str($value):
+      (($value | type) == "string") and (($value | length) > 0);
+    def numeric_non_negative($value):
+      (($value | type) == "number")
+      or ((($value | type) == "string") and ($value | test("^[0-9]+([.][0-9]+)?$")));
+    def normalized_decision($value):
+      ($value | ascii_upcase | gsub("\\s+"; "")) as $d
+      | if $d == "GO" then "GO"
+        elif $d == "NO-GO" or $d == "NOGO" or $d == "NO_GO" then "NO-GO"
+        else ""
+        end;
+    def decision_ok($value):
+      (normalized_decision($value) == "GO" or normalized_decision($value) == "NO-GO");
+    def normalized_status($value):
+      ($value | ascii_downcase) as $s
+      | if $s == "ok" or $s == "pass" or $s == "warn" or $s == "fail" then $s else "" end;
+    def status_ok($value):
+      (normalized_status($value) != "");
+
+    (
+      .version == 1
+      and status_ok(.status)
+      and ((.decision | type) == "object")
+      and decision_ok(.decision.decision)
+      and nonempty_str(.decision.recommended_profile)
+      and numeric_non_negative(.decision.support_rate_pct)
+      and nonempty_str(.decision.trend_source)
+    )
+    or
+    (
+      .version == 1
+      and status_ok(.status)
+      and decision_ok(.decision)
+      and ((.observed | type) == "object")
+      and nonempty_str(.observed.recommended_profile)
+      and (
+        numeric_non_negative(.observed.recommendation_support_rate_pct)
+        or numeric_non_negative(.observed.support_rate_pct)
+      )
+      and nonempty_str(.observed.trend_source)
+    )
+    or
+    (
+      .version == 1
+      and status_ok(.status)
+      and ((.summary | type) == "object")
+      and ((.decision | type) == "object")
+      and nonempty_str(.decision.recommended_default_profile)
+      and ((.trend | type) == "object")
+      and nonempty_str(.trend.summary_json)
+    )
+  ' "$summary_path" >/dev/null 2>&1; then
+    printf '%s' "0"
+    return
+  fi
+
+  # Campaign-schema summaries must also carry reducer-consumable trend evidence.
+  if jq -e '.version == 1 and (.summary | type == "object") and (.decision | type == "object") and (.trend | type == "object")' "$summary_path" >/dev/null 2>&1; then
+    local local_rc_raw trend_summary_json_raw trend_summary_json_path
+    local_rc_raw="$(jq -r 'if (.rc | type) == "number" then (.rc | tostring) else "" end' "$summary_path" 2>/dev/null || printf '%s' "")"
+    trend_summary_json_raw="$(jq -r 'if (.trend.summary_json | type) == "string" then .trend.summary_json else "" end' "$summary_path" 2>/dev/null || printf '%s' "")"
+    trend_summary_json_path="$(abs_path "$trend_summary_json_raw")"
+    if [[ -z "$local_rc_raw" || ! "$local_rc_raw" =~ ^-?[0-9]+$ ]]; then
+      printf '%s' "0"
+      return
+    fi
+    if [[ -z "$trend_summary_json_path" || ! -f "$trend_summary_json_path" ]]; then
+      printf '%s' "0"
+      return
+    fi
+    if ! jq -e '
+      .version == 1
+      and ((.decision | type) == "object")
+      and (
+        ((.decision.recommendation_support_rate_pct | type) == "number")
+        or ((.decision.recommendation_support_rate_pct | type) == "string" and (.decision.recommendation_support_rate_pct | test("^[0-9]+([.][0-9]+)?$")))
+      )
+      and ((.decision.source | type) == "string" and (.decision.source | length) > 0)
+    ' "$trend_summary_json_path" >/dev/null 2>&1; then
+      printf '%s' "0"
+      return
+    fi
+  fi
+  printf '%s' "1"
+}
+
 file_mtime_epoch() {
   local path="$1"
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -535,6 +628,7 @@ for i in "${!vm_ids[@]}"; do
           summary_json: null,
           summary_exists: false,
           summary_valid: false,
+          reducer_schema_ready: false,
           report_md: null,
           report_exists: false
         },
@@ -595,6 +689,7 @@ for i in "${!vm_ids[@]}"; do
   summary_exists="0"
   summary_valid="0"
   summary_fresh="0"
+  reducer_schema_ready="0"
   report_path=""
   report_exists="0"
   report_fresh="0"
@@ -614,6 +709,7 @@ for i in "${!vm_ids[@]}"; do
       fi
       if jq -e 'type == "object"' "$summary_path" >/dev/null 2>&1; then
         summary_valid="1"
+        reducer_schema_ready="$(summary_reducer_schema_ready_01 "$summary_path")"
       fi
     fi
   fi
@@ -651,6 +747,10 @@ for i in "${!vm_ids[@]}"; do
     status="fail"
     failure_reason="report_md_not_fresh"
   fi
+  if [[ "$status" == "pass" && "$summary_exists" == "1" && "$summary_valid" == "1" && "$reducer_schema_ready" != "1" ]]; then
+    status="fail"
+    failure_reason="summary_json_reducer_schema_invalid"
+  fi
 
   if [[ "$summary_exists" == "1" && "$summary_valid" == "1" ]]; then
     decision_value="$(summary_value_str "$summary_path" '.decision.decision // .decision // ""')"
@@ -669,7 +769,7 @@ for i in "${!vm_ids[@]}"; do
   fi
 
   reducer_input_ready="0"
-  if [[ "$status" == "pass" && "$summary_exists" == "1" && "$summary_valid" == "1" ]]; then
+  if [[ "$status" == "pass" && "$summary_exists" == "1" && "$summary_valid" == "1" && "$reducer_schema_ready" == "1" ]]; then
     reducer_input_ready="1"
   fi
 
@@ -691,6 +791,7 @@ for i in "${!vm_ids[@]}"; do
     --arg summary_exists "$summary_exists" \
     --arg summary_valid "$summary_valid" \
     --arg summary_fresh "$summary_fresh" \
+    --arg reducer_schema_ready "$reducer_schema_ready" \
     --arg report_path "$report_path" \
     --arg report_exists "$report_exists" \
     --arg report_fresh "$report_fresh" \
@@ -715,6 +816,7 @@ for i in "${!vm_ids[@]}"; do
         summary_exists: ($summary_exists == "1"),
         summary_valid: ($summary_valid == "1"),
         summary_fresh: ($summary_fresh == "1"),
+        reducer_schema_ready: ($reducer_schema_ready == "1"),
         report_md: (if $report_path == "" then null else $report_path end),
         report_exists: ($report_exists == "1"),
         report_fresh: ($report_fresh == "1")

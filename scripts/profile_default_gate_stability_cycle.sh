@@ -181,7 +181,7 @@ require_decision_consensus="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_DECIS
 require_min_runs_requested="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
 require_min_runs_completed="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED:-${REQUIRE_MIN_RUNS_COMPLETED:-3}}"
 require_max_runs_fail="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL:-${REQUIRE_MAX_RUNS_FAIL:-0}}"
-require_modal_decision="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-}}"
+require_modal_decision="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION:-${REQUIRE_MODAL_DECISION:-GO}}"
 require_modal_decision_support_rate_pct="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-${REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT:-0}}"
 require_recommended_profile="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE:-${REQUIRE_RECOMMENDED_PROFILE:-}}"
 allow_recommended_profiles="${PROFILE_DEFAULT_GATE_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES:-${ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}}"
@@ -596,12 +596,13 @@ if ! is_non_negative_decimal "$require_modal_decision_support_rate_pct"; then
   echo "--require-modal-decision-support-rate-pct must be a non-negative number"
   exit 2
 fi
-if [[ -n "$require_modal_decision" ]]; then
-  require_modal_decision="$(normalize_decision "$require_modal_decision")"
-  if [[ "$require_modal_decision" != "GO" && "$require_modal_decision" != "NO-GO" ]]; then
-    echo "--require-modal-decision must be GO or NO-GO"
-    exit 2
-  fi
+if [[ -z "$require_modal_decision" ]]; then
+  require_modal_decision="GO"
+fi
+require_modal_decision="$(normalize_decision "$require_modal_decision")"
+if [[ "$require_modal_decision" != "GO" && "$require_modal_decision" != "NO-GO" ]]; then
+  echo "--require-modal-decision must be GO or NO-GO"
+  exit 2
 fi
 
 if (( runs < 1 )); then
@@ -658,6 +659,7 @@ check_cmd=(
   --require-min-runs-requested "$require_min_runs_requested"
   --require-min-runs-completed "$require_min_runs_completed"
   --require-max-runs-fail "$require_max_runs_fail"
+  --require-modal-decision "$require_modal_decision"
   --require-modal-decision-support-rate-pct "$require_modal_decision_support_rate_pct"
   --require-modal-support-rate-pct "$require_modal_support_rate_pct"
   --fail-on-no-go "$fail_on_no_go"
@@ -665,9 +667,6 @@ check_cmd=(
   --show-json 0
   --print-summary-json 0
 )
-if [[ -n "$require_modal_decision" ]]; then
-  check_cmd+=(--require-modal-decision "$require_modal_decision")
-fi
 if [[ -n "$require_recommended_profile" ]]; then
   check_cmd+=(--require-recommended-profile "$require_recommended_profile")
 fi
@@ -679,6 +678,10 @@ check_command_display="$(quote_cmd "${check_cmd[@]}")"
 run_summary_exists="false"
 run_summary_valid="false"
 run_summary_fresh="false"
+run_summary_schema_id=""
+run_summary_schema_valid="false"
+run_summary_status=""
+run_summary_rc_json="null"
 
 echo "[profile-default-gate-stability-cycle] $(timestamp_utc) run-stage start reports_dir=$reports_dir run_summary_json=$run_summary_json"
 pre_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
@@ -703,6 +706,18 @@ if [[ "$(json_file_valid_01 "$run_summary_json")" == "1" ]]; then
   elif [[ -n "$post_run_summary_fingerprint" && "$post_run_summary_fingerprint" != "$pre_run_summary_fingerprint" ]]; then
     run_summary_fresh="true"
   fi
+  run_summary_schema_id="$(jq -r '
+    if (.schema.id | type) == "string" then .schema.id else "" end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "")"
+  if [[ "$run_summary_schema_id" == "profile_default_gate_stability_summary" ]]; then
+    run_summary_schema_valid="true"
+  fi
+  run_summary_status="$(jq -r '
+    if (.status | type) == "string" then .status else "" end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "")"
+  run_summary_rc_json="$(jq -r '
+    if (.rc | type) == "number" then .rc else "null" end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
 fi
 
 check_stage_attempted="false"
@@ -713,11 +728,16 @@ check_stage_rc=0
 check_summary_exists="false"
 check_summary_valid="false"
 check_summary_fresh="false"
+check_summary_schema_id=""
+check_summary_schema_valid="false"
 check_decision=""
+check_has_usable_decision="false"
 check_status=""
 check_rc_json="null"
 check_modal_recommended_profile=""
 check_modal_support_rate_pct_json="null"
+check_enforcement_no_go_enforced=""
+check_outcome_action=""
 check_errors_json="[]"
 
 failure_stage=""
@@ -746,6 +766,24 @@ elif [[ "$run_summary_fresh" != "true" ]]; then
   failure_reason="stability run summary is stale (not refreshed by current run)"
   decision="NO-GO"
   final_rc=1
+elif [[ "$run_summary_schema_valid" != "true" ]]; then
+  run_stage_status="fail"
+  failure_stage="run"
+  failure_reason="stability run summary schema.id mismatch (expected=profile_default_gate_stability_summary actual=${run_summary_schema_id:-unset})"
+  decision="NO-GO"
+  final_rc=1
+elif [[ "$run_summary_rc_json" == "null" ]]; then
+  run_stage_status="fail"
+  failure_stage="run"
+  failure_reason="stability run summary is missing rc"
+  decision="NO-GO"
+  final_rc=1
+elif [[ "$run_summary_rc_json" -ne 0 ]]; then
+  run_stage_status="fail"
+  failure_stage="run"
+  failure_reason="stability run summary reports non-zero rc (rc=$run_summary_rc_json)"
+  decision="NO-GO"
+  final_rc=1
 else
   echo "[profile-default-gate-stability-cycle] $(timestamp_utc) check-stage start check_summary_json=$check_summary_json"
   check_stage_attempted="true"
@@ -770,7 +808,19 @@ else
     elif [[ -n "$post_check_summary_fingerprint" && "$post_check_summary_fingerprint" != "$pre_check_summary_fingerprint" ]]; then
       check_summary_fresh="true"
     fi
+    check_summary_schema_id="$(jq -r '
+      if (.schema.id | type) == "string" then .schema.id else "" end
+    ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+    if [[ "$check_summary_schema_id" == "profile_default_gate_stability_check_summary" ]]; then
+      check_summary_schema_valid="true"
+    fi
     check_decision="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+    if [[ -n "$check_decision" ]]; then
+      check_decision="$(normalize_decision "$check_decision")"
+    fi
+    if [[ "$check_decision" == "GO" || "$check_decision" == "NO-GO" ]]; then
+      check_has_usable_decision="true"
+    fi
     check_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
     check_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else "null" end' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
     check_modal_recommended_profile="$(jq -r '
@@ -788,6 +838,16 @@ else
     check_errors_json="$(jq -c '
       if (.errors | type) == "array" then .errors else [] end
     ' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
+    check_enforcement_no_go_enforced="$(jq -r '
+      if (.enforcement.no_go_enforced | type) == "boolean" then
+        if .enforcement.no_go_enforced then "true" else "false" end
+      else
+        ""
+      end
+    ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+    check_outcome_action="$(jq -r '
+      if (.outcome.action | type) == "string" then .outcome.action else "" end
+    ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
   elif [[ -f "$check_summary_json" ]]; then
     check_summary_exists="true"
     check_summary_valid="false"
@@ -798,10 +858,16 @@ else
       check_stage_status="fail"
     elif [[ "$check_summary_fresh" != "true" ]]; then
       check_stage_status="fail"
+    elif [[ "$check_summary_schema_valid" != "true" ]]; then
+      check_stage_status="fail"
+    elif [[ "$check_has_usable_decision" != "true" ]]; then
+      check_stage_status="fail"
     elif [[ "$check_status" == "fail" || "$check_decision" == "NO-GO" ]]; then
       check_stage_status="fail"
     elif [[ "$check_status" == "ok" || "$check_decision" == "GO" ]]; then
       check_stage_status="pass"
+    else
+      check_stage_status="fail"
     fi
   fi
 
@@ -840,6 +906,18 @@ else
     final_rc=1
     failure_stage="check"
     failure_reason="stability check summary is stale (not refreshed by current run)"
+  elif [[ "$check_summary_schema_valid" != "true" ]]; then
+    decision="NO-GO"
+    status="fail"
+    final_rc=1
+    failure_stage="check"
+    failure_reason="stability check summary schema.id mismatch (expected=profile_default_gate_stability_check_summary actual=${check_summary_schema_id:-unset})"
+  elif [[ "$check_has_usable_decision" != "true" ]]; then
+    decision="NO-GO"
+    status="fail"
+    final_rc=1
+    failure_stage="check"
+    failure_reason="stability check summary is missing a usable decision"
   elif [[ "$check_decision" == "GO" ]]; then
     status="pass"
     final_rc=0
@@ -881,6 +959,9 @@ jq -n \
   --arg run_summary_exists "$run_summary_exists" \
   --arg run_summary_valid "$run_summary_valid" \
   --arg run_summary_fresh "$run_summary_fresh" \
+  --arg run_summary_schema_id "$run_summary_schema_id" \
+  --arg run_summary_schema_valid "$run_summary_schema_valid" \
+  --arg run_summary_status "$run_summary_status" \
   --arg check_stage_attempted "$check_stage_attempted" \
   --arg check_stage_status "$check_stage_status" \
   --arg failure_stage "$failure_stage" \
@@ -888,11 +969,17 @@ jq -n \
   --arg check_summary_exists "$check_summary_exists" \
   --arg check_summary_valid "$check_summary_valid" \
   --arg check_summary_fresh "$check_summary_fresh" \
+  --arg check_summary_schema_id "$check_summary_schema_id" \
+  --arg check_summary_schema_valid "$check_summary_schema_valid" \
   --arg check_decision "$check_decision" \
+  --arg check_has_usable_decision "$check_has_usable_decision" \
   --arg check_status "$check_status" \
   --arg check_modal_recommended_profile "$check_modal_recommended_profile" \
+  --arg check_enforcement_no_go_enforced "$check_enforcement_no_go_enforced" \
+  --arg check_outcome_action "$check_outcome_action" \
   --argjson rc "$final_rc" \
   --argjson run_stage_rc "$run_stage_rc" \
+  --argjson run_summary_rc "$run_summary_rc_json" \
   --argjson check_stage_rc "$check_stage_rc_json" \
   --argjson check_rc "$check_rc_json" \
   --argjson check_modal_support_rate_pct "$check_modal_support_rate_pct_json" \
@@ -978,7 +1065,19 @@ jq -n \
         summary_json: $run_summary_json,
         summary_exists: ($run_summary_exists == "true"),
         summary_valid_json: ($run_summary_valid == "true"),
-        summary_fresh: ($run_summary_fresh == "true")
+        summary_fresh: ($run_summary_fresh == "true"),
+        summary_schema_id: (
+          if $run_summary_schema_id == "" then null
+          else $run_summary_schema_id
+          end
+        ),
+        summary_schema_valid: ($run_summary_schema_valid == "true"),
+        observed_status: (
+          if $run_summary_status == "" then null
+          else $run_summary_status
+          end
+        ),
+        observed_rc: $run_summary_rc
       },
       check: {
         attempted: ($check_stage_attempted == "true"),
@@ -993,7 +1092,14 @@ jq -n \
       summary_exists: ($check_summary_exists == "true"),
       summary_valid_json: ($check_summary_valid == "true"),
       summary_fresh: ($check_summary_fresh == "true"),
+      summary_schema_id: (
+        if $check_summary_schema_id == "" then null
+        else $check_summary_schema_id
+        end
+      ),
+      summary_schema_valid: ($check_summary_schema_valid == "true"),
       decision: (if $check_decision == "" then null else $check_decision end),
+      has_usable_decision: ($check_has_usable_decision == "true"),
       status: (if $check_status == "" then null else $check_status end),
       rc: $check_rc,
       modal_recommended_profile: (
@@ -1002,7 +1108,38 @@ jq -n \
         end
       ),
       modal_support_rate_pct: $check_modal_support_rate_pct,
+      enforcement_no_go_enforced: (
+        if $check_enforcement_no_go_enforced == "true" then true
+        elif $check_enforcement_no_go_enforced == "false" then false
+        else null
+        end
+      ),
+      outcome_action: (
+        if $check_outcome_action == "" then null
+        else $check_outcome_action
+        end
+      ),
       errors: $check_errors
+    },
+    enforcement: {
+      fail_on_no_go: ($fail_on_no_go == 1),
+      no_go_detected: ($decision == "NO-GO"),
+      no_go_enforced: ($decision == "NO-GO" and ($fail_on_no_go == 1)),
+      run_summary_schema_enforced: ($run_summary_schema_valid == "true"),
+      check_summary_schema_enforced: ($check_summary_schema_valid == "true")
+    },
+    outcome: {
+      run_stage_passed: ($run_stage_status == "pass"),
+      check_stage_passed: ($check_stage_status == "pass"),
+      check_has_usable_decision: ($check_has_usable_decision == "true"),
+      should_promote: ($status == "pass" and $decision == "GO"),
+      action: (
+        if $status == "pass" and $decision == "GO" then "promote_allowed"
+        elif $decision == "NO-GO" and $fail_on_no_go == 1 then "hold_promotion_blocked"
+        elif $decision == "NO-GO" then "hold_promotion_warn_only"
+        else "investigate_artifacts"
+        end
+      )
     },
     artifacts: {
       summary_json: $summary_json_path,

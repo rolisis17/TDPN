@@ -186,9 +186,19 @@ mkdir -p "$(dirname "$summary_json")"
 if [[ "$scenario" == "go" ]]; then
   jq -n '{
     version: 1,
+    schema: { id: "profile_default_gate_stability_check_summary" },
     decision: "GO",
     status: "ok",
     rc: 0,
+    enforcement: {
+      fail_on_no_go: true,
+      no_go_detected: false,
+      no_go_enforced: false
+    },
+    outcome: {
+      should_promote: true,
+      action: "promote_allowed"
+    },
     observed: {
       modal_recommended_profile: "balanced",
       modal_support_rate_pct: 100
@@ -208,11 +218,36 @@ if [[ "$scenario" == "invalid" ]]; then
   exit 0
 fi
 
+if [[ "$scenario" == "missing_decision" ]]; then
+  jq -n '{
+    version: 1,
+    schema: { id: "profile_default_gate_stability_check_summary" },
+    status: "fail",
+    rc: 0,
+    observed: {
+      modal_recommended_profile: "balanced",
+      modal_support_rate_pct: 33.33
+    },
+    errors: ["decision missing from check summary"]
+  }' >"$summary_json"
+  exit 0
+fi
+
 jq -n '{
   version: 1,
+  schema: { id: "profile_default_gate_stability_check_summary" },
   decision: "NO-GO",
   status: "fail",
   rc: 1,
+  enforcement: {
+    fail_on_no_go: true,
+    no_go_detected: true,
+    no_go_enforced: true
+  },
+  outcome: {
+    should_promote: false,
+    action: "hold_promotion_blocked"
+  },
   observed: {
     modal_recommended_profile: "balanced",
     modal_support_rate_pct: 33.33
@@ -266,10 +301,15 @@ if ! jq -e '
   and .stages.check.attempted == true
   and .stages.check.status == "pass"
   and .check.decision == "GO"
+  and .check.summary_schema_valid == true
+  and .check.has_usable_decision == true
   and .check.modal_recommended_profile == "balanced"
   and .inputs.check.policy.require_decision_consensus == true
   and .inputs.check.policy.require_modal_decision == "GO"
   and .inputs.check.policy.require_modal_decision_support_rate_pct == 70
+  and .enforcement.no_go_enforced == false
+  and .outcome.should_promote == true
+  and .outcome.action == "promote_allowed"
   and .artifacts.run_summary_json == .stages.run.summary_json
   and .artifacts.check_summary_json == .stages.check.summary_json
 ' "$HAPPY_SUMMARY" >/dev/null 2>&1; then
@@ -290,6 +330,45 @@ fi
 if ! grep -q $'check\t.*\trequire_decision_consensus=1\trequire_modal_decision=GO\trequire_modal_decision_support_rate_pct=70\t' "$FAKE_CAPTURE_FILE"; then
   echo "expected check-stage policy forwarding not captured"
   cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] default require-modal-decision policy aligns with check"
+DEFAULT_POLICY_SUMMARY="$TMP_DIR/cycle_default_policy_summary.json"
+DEFAULT_POLICY_CAPTURE="$TMP_DIR/capture_default_policy.log"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$DEFAULT_POLICY_CAPTURE" \
+FAKE_CYCLE_RUN_SCENARIO="pass" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "inv-default-policy" \
+  --reports-dir "$TMP_DIR/default_policy_reports" \
+  --summary-json "$DEFAULT_POLICY_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_default_policy.log 2>&1
+default_policy_rc=$?
+set -e
+
+if [[ "$default_policy_rc" -ne 0 ]]; then
+  echo "expected default policy path rc=0, got rc=$default_policy_rc"
+  cat /tmp/integration_profile_default_gate_stability_cycle_default_policy.log
+  exit 1
+fi
+if ! grep -q $'check\t.*\trequire_modal_decision=GO\t' "$DEFAULT_POLICY_CAPTURE"; then
+  echo "expected default check modal-decision policy forwarding to GO"
+  cat "$DEFAULT_POLICY_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .inputs.check.policy.require_modal_decision == "GO"
+  and .check.summary_schema_valid == true
+  and .check.has_usable_decision == true
+' "$DEFAULT_POLICY_SUMMARY" >/dev/null 2>&1; then
+  echo "expected default policy summary fields missing"
+  cat "$DEFAULT_POLICY_SUMMARY"
   exit 1
 fi
 
@@ -467,14 +546,56 @@ if ! jq -e '
   and .rc != 0
   and .decision == "NO-GO"
   and .failure_stage == "check"
-  and ((.failure_reason // "") | test("missing a usable decision"))
+  and ((.failure_reason // "") | test("schema.id mismatch"))
   and .stages.check.status == "fail"
   and .stages.check.rc == 0
   and .check.summary_valid_json == true
+  and .check.summary_schema_valid == false
   and .check.decision == null
 ' "$CHECK_INVALID_SUMMARY" >/dev/null 2>&1; then
   echo "malformed check summary fail-closed mismatch"
   cat "$CHECK_INVALID_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] check summary without usable decision fails closed"
+CHECK_MISSING_DECISION_SUMMARY="$TMP_DIR/cycle_check_missing_decision_summary.json"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$TMP_DIR/capture_check_missing_decision.log" \
+FAKE_CYCLE_RUN_SCENARIO="pass" \
+FAKE_CYCLE_CHECK_SCENARIO="missing_decision" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "inv-check-missing-decision" \
+  --reports-dir "$TMP_DIR/check_missing_decision_reports" \
+  --summary-json "$CHECK_MISSING_DECISION_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_check_missing_decision.log 2>&1
+check_missing_decision_rc=$?
+set -e
+
+if [[ "$check_missing_decision_rc" -eq 0 ]]; then
+  echo "expected missing-decision summary to fail closed with rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_cycle_check_missing_decision.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "check"
+  and ((.failure_reason // "") | test("missing a usable decision"))
+  and .stages.check.status == "fail"
+  and .stages.check.rc == 0
+  and .check.summary_valid_json == true
+  and .check.summary_schema_valid == true
+  and .check.has_usable_decision == false
+  and .check.decision == null
+' "$CHECK_MISSING_DECISION_SUMMARY" >/dev/null 2>&1; then
+  echo "missing-decision fail-closed summary mismatch"
+  cat "$CHECK_MISSING_DECISION_SUMMARY"
   exit 1
 fi
 

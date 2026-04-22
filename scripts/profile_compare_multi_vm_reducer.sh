@@ -12,6 +12,7 @@ Usage:
     [--campaign-summary-list FILE] \
     [--reports-dir DIR] \
     [--fail-on-no-go [0|1]] \
+    [--min-support-rate-pct N] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--show-json [0|1]] \
@@ -133,6 +134,7 @@ declare -a campaign_summary_jsons=()
 campaign_summary_list=""
 reports_dir="${PROFILE_COMPARE_MULTI_VM_REDUCER_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 fail_on_no_go="${PROFILE_COMPARE_MULTI_VM_REDUCER_FAIL_ON_NO_GO:-1}"
+min_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_REDUCER_MIN_SUPPORT_RATE_PCT:-60}"
 show_json="${PROFILE_COMPARE_MULTI_VM_REDUCER_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_MULTI_VM_REDUCER_PRINT_SUMMARY_JSON:-0}"
 summary_json="${PROFILE_COMPARE_MULTI_VM_REDUCER_SUMMARY_JSON:-}"
@@ -178,6 +180,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fail-on-no-go=*)
       fail_on_no_go="${1#*=}"
+      shift
+      ;;
+    --min-support-rate-pct)
+      require_value_or_die "$1" "$#"
+      min_support_rate_pct="${2:-}"
+      shift 2
+      ;;
+    --min-support-rate-pct=*)
+      min_support_rate_pct="${1#*=}"
       shift
       ;;
     --show-json)
@@ -249,6 +260,15 @@ fi
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+if ! is_non_negative_decimal "$min_support_rate_pct"; then
+  echo "--min-support-rate-pct must be a non-negative number"
+  exit 2
+fi
+if awk -v raw="$min_support_rate_pct" 'BEGIN { exit !(raw > 100) }'; then
+  echo "--min-support-rate-pct must be <= 100"
+  exit 2
+fi
+min_support_rate_pct="$(awk -v raw="$min_support_rate_pct" 'BEGIN { printf "%.2f", raw + 0 }')"
 
 log_dir="${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
 mkdir -p "$log_dir"
@@ -362,11 +382,13 @@ for summary_path in "${unique_paths[@]}"; do
     elif jq -e '.version == 1 and (.summary | type == "object") and (.decision | type == "object") and (.trend | type == "object")' "$summary_path" >/dev/null 2>&1; then
       schema_kind="campaign"
       local_rc_raw=""
+      explicit_decision_raw=""
       trend_summary_json_raw=""
       campaign_source_raw=""
       IFS=$'\t' read -r status_raw local_rc_raw recommended_profile_raw campaign_source_raw trend_summary_json_raw runs_total_raw runs_pass_raw runs_warn_raw runs_fail_raw < <(
         jq -r '[.status // "", (.rc // ""), .decision.recommended_default_profile // "", .decision.source // "", .trend.summary_json // "", (.summary.runs_total // ""), (.summary.runs_pass // ""), (.summary.runs_warn // ""), (.summary.runs_fail // "")] | @tsv' "$summary_path"
       )
+      explicit_decision_raw="$(jq -r '.decision.decision // .decision.result // .decision.outcome // ""' "$summary_path" 2>/dev/null || printf '%s' "")"
 
       local_rc_raw="$(trim "$local_rc_raw")"
       if [[ -z "$local_rc_raw" ]] || ! [[ "$local_rc_raw" =~ ^-?[0-9]+$ ]]; then
@@ -376,9 +398,14 @@ for summary_path in "${unique_paths[@]}"; do
         row_errors+=("campaign summary status is missing")
       fi
 
-      decision_raw="NO-GO"
-      if [[ "$status_raw" == "pass" && "$local_rc_raw" == "0" ]]; then
-        decision_raw="GO"
+      explicit_decision_raw="$(trim "$explicit_decision_raw")"
+      if [[ -n "$explicit_decision_raw" ]]; then
+        decision_raw="$explicit_decision_raw"
+      else
+        decision_raw="NO-GO"
+        if [[ "$status_raw" == "pass" && "$local_rc_raw" == "0" ]]; then
+          decision_raw="GO"
+        fi
       fi
 
       trend_summary_json_raw="$(trim "$trend_summary_json_raw")"
@@ -582,32 +609,44 @@ modal_trend_source="$(jq -r --arg p "$modal_profile" '
 ' <<<"$rows_json")"
 
 declare -a policy_errors=()
+declare -a promotion_missing_evidence_reason_ids=()
+declare -a promotion_missing_evidence_reason_messages=()
+promotion_min_support_rate_pct="$min_support_rate_pct"
+
+record_policy_failure() {
+  local reason_id="$1"
+  local reason_message="$2"
+  policy_errors+=("$reason_message")
+  promotion_missing_evidence_reason_ids+=("$reason_id")
+  promotion_missing_evidence_reason_messages+=("$reason_message")
+}
+
 if ((vm_total < 1)); then
-  policy_errors+=("no input summaries were provided")
+  record_policy_failure "no_input_summaries" "no input summaries were provided"
 fi
 if ((vm_valid < 1)); then
-  policy_errors+=("no valid per-VM summaries were available for reduction")
+  record_policy_failure "no_valid_vm_summaries" "no valid per-VM summaries were available for reduction"
 fi
 if ((vm_invalid > 0)); then
-  policy_errors+=("one or more per-VM summaries are invalid")
+  record_policy_failure "invalid_vm_summaries_present" "one or more per-VM summaries are invalid"
 fi
 if ((decision_go_count < vm_valid)); then
-  policy_errors+=("not all per-VM decisions are GO")
+  record_policy_failure "vm_decisions_not_all_go" "not all per-VM decisions are GO"
 fi
 if ((status_fail_count > 0)); then
-  policy_errors+=("one or more per-VM statuses are fail")
+  record_policy_failure "vm_status_fail_present" "one or more per-VM statuses are fail"
 fi
 if ((status_warn_count > 0)); then
-  policy_errors+=("one or more per-VM statuses are warn")
+  record_policy_failure "vm_status_warn_present" "one or more per-VM statuses are warn"
 fi
 if [[ -z "$modal_profile" ]]; then
-  policy_errors+=("could not determine modal recommended_profile")
+  record_policy_failure "missing_modal_recommended_profile" "could not determine modal recommended_profile"
 fi
-if awk -v observed="$modal_support_rate_pct" 'BEGIN { exit !(observed < 60) }'; then
-  policy_errors+=("recommended_profile support_rate_pct below threshold (observed=${modal_support_rate_pct}% required=60%)")
+if awk -v observed="$modal_support_rate_pct" -v min_required="$promotion_min_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
+  record_policy_failure "recommended_profile_support_rate_below_threshold" "recommended_profile support_rate_pct below threshold (observed=${modal_support_rate_pct}% required=${promotion_min_support_rate_pct}%)"
 fi
 if [[ -z "$modal_trend_source" ]]; then
-  policy_errors+=("could not determine trend_source")
+  record_policy_failure "missing_trend_source" "could not determine trend_source"
 fi
 
 for err in "${policy_errors[@]}"; do
@@ -618,6 +657,17 @@ errors_json='[]'
 if ((${#errors[@]} > 0)); then
   errors_json="$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s '.')"
 fi
+
+promotion_missing_evidence_reasons_json='[]'
+if ((${#promotion_missing_evidence_reason_ids[@]} > 0)); then
+  for idx in "${!promotion_missing_evidence_reason_ids[@]}"; do
+    promotion_missing_evidence_reasons_json="$(jq -c \
+      --arg id "${promotion_missing_evidence_reason_ids[$idx]}" \
+      --arg message "${promotion_missing_evidence_reason_messages[$idx]}" \
+      '. + [{id: $id, message: $message}]' <<<"$promotion_missing_evidence_reasons_json")"
+  done
+fi
+promotion_missing_evidence_reason_ids_json="$(jq -c '[.[] | .id]' <<<"$promotion_missing_evidence_reasons_json")"
 
 overall_decision="GO"
 overall_status="ok"
@@ -633,9 +683,17 @@ if [[ "$overall_decision" == "NO-GO" && "$fail_on_no_go" == "1" ]]; then
   rc=1
 fi
 
+promotion_gate_status="pass"
+promotion_gate_ready_json="true"
+if [[ "$overall_decision" != "GO" ]]; then
+  promotion_gate_status="fail"
+  promotion_gate_ready_json="false"
+fi
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg decision_value "$overall_decision" \
+  --arg promotion_gate_status "$promotion_gate_status" \
   --arg recommended_profile "$modal_profile" \
   --arg trend_source "$modal_trend_source" \
   --arg notes "$notes" \
@@ -654,6 +712,10 @@ jq -n \
   --argjson status_counts "$status_counts_json" \
   --argjson decision_counts "$decision_counts_json" \
   --argjson recommended_profile_counts "$recommended_profile_counts_json" \
+  --argjson promotion_gate_ready "$promotion_gate_ready_json" \
+  --argjson promotion_min_support_rate_pct "$promotion_min_support_rate_pct" \
+  --argjson promotion_missing_evidence_reasons "$promotion_missing_evidence_reasons_json" \
+  --argjson promotion_missing_evidence_reason_ids "$promotion_missing_evidence_reason_ids_json" \
   --argjson vm_summaries "$rows_json" \
   --argjson errors "$errors_json" \
   '{
@@ -668,9 +730,26 @@ jq -n \
     status: $status,
     rc: $rc,
     notes: $notes,
+    promotion_gate: {
+      decision: $decision_value,
+      status: $promotion_gate_status,
+      promotion_ready: $promotion_gate_ready,
+      missing_evidence_reasons: $promotion_missing_evidence_reasons,
+      missing_evidence_reason_ids: $promotion_missing_evidence_reason_ids,
+      required_evidence: {
+        minimum_valid_vm_summaries: 1,
+        require_all_vm_summaries_valid: true,
+        require_all_vm_decisions_go: true,
+        require_no_vm_warn_or_fail_status: true,
+        require_modal_recommended_profile: true,
+        minimum_recommended_profile_support_rate_pct: $promotion_min_support_rate_pct,
+        require_trend_source: true
+      }
+    },
     inputs: {
       reports_dir: $reports_dir,
       campaign_summary_list: (if $campaign_summary_list == "" then null else $campaign_summary_list end),
+      min_support_rate_pct: $promotion_min_support_rate_pct,
       fail_on_no_go: ($fail_on_no_go == 1)
     },
     summary: {
@@ -700,6 +779,9 @@ jq -n \
   echo "- Trend source: \`$(jq -r '.decision.trend_source // ""' "$summary_json")\`"
   echo "- Status: \`$(jq -r '.status' "$summary_json")\`"
   echo "- RC: \`$(jq -r '.rc' "$summary_json")\`"
+  echo "- Promotion gate decision: \`$(jq -r '.promotion_gate.decision' "$summary_json")\`"
+  echo "- Promotion ready: \`$(jq -r '.promotion_gate.promotion_ready' "$summary_json")\`"
+  echo "- Promotion missing evidence reasons: \`$(jq -r 'if (.promotion_gate.missing_evidence_reason_ids | length) == 0 then "none" else (.promotion_gate.missing_evidence_reason_ids | join(",")) end' "$summary_json")\`"
   echo
   echo "## Counts"
   echo
@@ -707,7 +789,7 @@ jq -n \
   echo "- VM summaries valid: \`$(jq -r '.summary.vm_summaries_valid' "$summary_json")\`"
   echo "- VM summaries invalid: \`$(jq -r '.summary.vm_summaries_invalid' "$summary_json")\`"
   echo "- Status pass/warn/fail/other: \`$(jq -r '.summary.status_counts.pass' "$summary_json")\` / \`$(jq -r '.summary.status_counts.warn' "$summary_json")\` / \`$(jq -r '.summary.status_counts.fail' "$summary_json")\` / \`$(jq -r '.summary.status_counts.other' "$summary_json")\`"
-  echo "- Decision GO/NO-GO: \`$(jq -r '.summary.decision_counts.GO' "$summary_json")\` / \`$(jq -r '.summary.decision_counts[\"NO-GO\"]' "$summary_json")\`"
+  echo "- Decision GO/NO-GO: \`$(jq -r '.summary.decision_counts.GO' "$summary_json")\` / \`$(jq -r '.summary.decision_counts["NO-GO"]' "$summary_json")\`"
   echo
   echo "## Per-VM"
   echo

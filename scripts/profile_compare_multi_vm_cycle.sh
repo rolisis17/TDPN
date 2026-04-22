@@ -21,11 +21,13 @@ Usage:
     [--sweep-fail-fast [0|1]] \
     [--sweep-reducer-min-successful-vms N] \
     [--sweep-reducer-require-all-success [0|1]] \
+    [--sweep-allow-unready-handoff [0|1]] \
     [--vm-command SPEC]... \
     [--vm-command-file PATH]... \
     [--reducer-summary-json PATH] \
     [--reducer-report-md PATH] \
     [--reducer-fail-on-no-go [0|1]] \
+    [--reducer-min-support-rate-pct N] \
     [--reducer-campaign-summary-json PATH]... \
     [--reducer-campaign-summary-list FILE] \
     [--check-campaign-summary-json PATH] \
@@ -238,10 +240,12 @@ sweep_allow_partial="${PROFILE_COMPARE_MULTI_VM_CYCLE_SWEEP_ALLOW_PARTIAL:-0}"
 sweep_fail_fast="${PROFILE_COMPARE_MULTI_VM_CYCLE_SWEEP_FAIL_FAST:-0}"
 sweep_reducer_min_successful_vms="${PROFILE_COMPARE_MULTI_VM_CYCLE_SWEEP_REDUCER_MIN_SUCCESSFUL_VMS:-1}"
 sweep_reducer_require_all_success="${PROFILE_COMPARE_MULTI_VM_CYCLE_SWEEP_REDUCER_REQUIRE_ALL_SUCCESS:-0}"
+sweep_allow_unready_handoff="${PROFILE_COMPARE_MULTI_VM_CYCLE_SWEEP_ALLOW_UNREADY_HANDOFF:-0}"
 
 reducer_summary_json="${PROFILE_COMPARE_MULTI_VM_CYCLE_REDUCER_SUMMARY_JSON:-}"
 reducer_report_md="${PROFILE_COMPARE_MULTI_VM_CYCLE_REDUCER_REPORT_MD:-}"
 reducer_fail_on_no_go="${PROFILE_COMPARE_MULTI_VM_CYCLE_REDUCER_FAIL_ON_NO_GO:-0}"
+reducer_min_support_rate_pct="${PROFILE_COMPARE_MULTI_VM_CYCLE_REDUCER_MIN_SUPPORT_RATE_PCT:-${PROFILE_COMPARE_MULTI_VM_REDUCER_MIN_SUPPORT_RATE_PCT:-60}}"
 reducer_campaign_summary_list="${PROFILE_COMPARE_MULTI_VM_CYCLE_REDUCER_CAMPAIGN_SUMMARY_LIST:-}"
 
 check_campaign_summary_json="${PROFILE_COMPARE_MULTI_VM_CYCLE_CHECK_CAMPAIGN_SUMMARY_JSON:-}"
@@ -366,6 +370,19 @@ while [[ $# -gt 0 ]]; do
       sweep_reducer_require_all_success="${1#*=}"
       shift
       ;;
+    --sweep-allow-unready-handoff)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        sweep_allow_unready_handoff="${2:-}"
+        shift 2
+      else
+        sweep_allow_unready_handoff="1"
+        shift
+      fi
+      ;;
+    --sweep-allow-unready-handoff=*)
+      sweep_allow_unready_handoff="${1#*=}"
+      shift
+      ;;
     --vm-command)
       require_value_or_die "$1" "$#"
       vm_command_specs+=("${2:-}")
@@ -413,6 +430,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --reducer-fail-on-no-go=*)
       reducer_fail_on_no_go="${1#*=}"
+      shift
+      ;;
+    --reducer-min-support-rate-pct)
+      require_value_or_die "$1" "$#"
+      reducer_min_support_rate_pct="${2:-}"
+      shift 2
+      ;;
+    --reducer-min-support-rate-pct=*)
+      reducer_min_support_rate_pct="${1#*=}"
       shift
       ;;
     --reducer-campaign-summary-json)
@@ -666,10 +692,12 @@ sweep_allow_partial="$(trim "$sweep_allow_partial")"
 sweep_fail_fast="$(trim "$sweep_fail_fast")"
 sweep_reducer_min_successful_vms="$(trim "$sweep_reducer_min_successful_vms")"
 sweep_reducer_require_all_success="$(trim "$sweep_reducer_require_all_success")"
+sweep_allow_unready_handoff="$(trim "$sweep_allow_unready_handoff")"
 
 reducer_summary_json="$(abs_path "$reducer_summary_json")"
 reducer_report_md="$(abs_path "$reducer_report_md")"
 reducer_fail_on_no_go="$(trim "$reducer_fail_on_no_go")"
+reducer_min_support_rate_pct="$(trim "$reducer_min_support_rate_pct")"
 reducer_campaign_summary_list="$(abs_path "$reducer_campaign_summary_list")"
 
 check_campaign_summary_json="$(abs_path "$check_campaign_summary_json")"
@@ -715,6 +743,7 @@ fi
 bool_arg_or_die "--sweep-allow-partial" "$sweep_allow_partial"
 bool_arg_or_die "--sweep-fail-fast" "$sweep_fail_fast"
 bool_arg_or_die "--sweep-reducer-require-all-success" "$sweep_reducer_require_all_success"
+bool_arg_or_die "--sweep-allow-unready-handoff" "$sweep_allow_unready_handoff"
 bool_arg_or_die "--reducer-fail-on-no-go" "$reducer_fail_on_no_go"
 bool_arg_or_die "--require-status-pass" "$require_status_pass"
 bool_arg_or_die "--require-trend-status-pass" "$require_trend_status_pass"
@@ -740,6 +769,15 @@ if ! is_non_negative_decimal "$require_recommendation_support_rate_pct"; then
   echo "--require-recommendation-support-rate-pct must be a non-negative number"
   exit 2
 fi
+if ! is_non_negative_decimal "$reducer_min_support_rate_pct"; then
+  echo "--reducer-min-support-rate-pct must be a non-negative number"
+  exit 2
+fi
+if awk -v raw="$reducer_min_support_rate_pct" 'BEGIN { exit !(raw > 100) }'; then
+  echo "--reducer-min-support-rate-pct must be <= 100"
+  exit 2
+fi
+reducer_min_support_rate_pct="$(awk -v raw="$reducer_min_support_rate_pct" 'BEGIN { printf "%.2f", raw + 0 }')"
 
 if [[ ${#vm_command_specs[@]} -eq 0 && ${#vm_command_files[@]} -eq 0 ]]; then
   echo "at least one --vm-command or --vm-command-file is required"
@@ -859,8 +897,10 @@ sweep_summary_exists="false"
 sweep_summary_valid="false"
 sweep_summary_fresh="false"
 sweep_reducer_handoff_ready="false"
+sweep_reducer_handoff_not_ready_reason=""
 sweep_reducer_input_vm_count_json="0"
 sweep_reducer_input_summary_jsons_json="[]"
+sweep_reducer_input_missing_paths=0
 
 reducer_stage_attempted="false"
 reducer_stage_status="skip"
@@ -877,6 +917,11 @@ reducer_recommended_profile=""
 reducer_support_rate_pct_json="null"
 reducer_trend_source=""
 reducer_errors_json="[]"
+reducer_promotion_gate_available="false"
+reducer_promotion_gate_decision=""
+reducer_promotion_gate_status=""
+reducer_promotion_gate_ready_json="false"
+reducer_promotion_missing_evidence_json="[]"
 
 check_stage_attempted="false"
 check_stage_status="skip"
@@ -893,6 +938,7 @@ check_recommended_profile=""
 check_support_rate_pct_json="null"
 check_trend_source_value=""
 check_errors_json="[]"
+check_promotion_missing_evidence_json="[]"
 
 failure_stage=""
 failure_reason=""
@@ -931,6 +977,12 @@ if [[ "$(json_file_valid_01 "$sweep_summary_json")" == "1" ]]; then
     else "false"
     end
   ' "$sweep_summary_json" 2>/dev/null || printf '%s' "false")"
+  sweep_reducer_handoff_not_ready_reason="$(jq -r '
+    if (.reducer_handoff.not_ready_reason | type) == "string"
+    then .reducer_handoff.not_ready_reason
+    else ""
+    end
+  ' "$sweep_summary_json" 2>/dev/null || printf '%s' "")"
   sweep_reducer_input_vm_count_json="$(jq -r '
     if (.reducer_handoff.input_vm_count | type) == "number"
     then (.reducer_handoff.input_vm_count | floor)
@@ -950,6 +1002,9 @@ if [[ "$(json_file_valid_01 "$sweep_summary_json")" == "1" ]]; then
       sweep_input_path="$(abs_path "$sweep_input_path")"
       if [[ -n "$sweep_input_path" ]]; then
         sweep_reducer_input_summary_jsons_norm+=("$sweep_input_path")
+        if [[ ! -f "$sweep_input_path" ]]; then
+          sweep_reducer_input_missing_paths=$((sweep_reducer_input_missing_paths + 1))
+        fi
       fi
     done
     sweep_reducer_input_summary_jsons=("${sweep_reducer_input_summary_jsons_norm[@]}")
@@ -981,6 +1036,31 @@ elif [[ "$sweep_summary_fresh" != "true" ]]; then
   decision="NO-GO"
   status="fail"
   final_rc=1
+elif [[ "$sweep_reducer_handoff_ready" != "true" && "$sweep_allow_unready_handoff" != "1" ]]; then
+  sweep_stage_status="fail"
+  failure_stage="sweep"
+  if [[ -n "$sweep_reducer_handoff_not_ready_reason" ]]; then
+    failure_reason="multi-vm sweep reducer handoff is not ready: $sweep_reducer_handoff_not_ready_reason"
+  else
+    failure_reason="multi-vm sweep reducer handoff is not ready"
+  fi
+  decision="NO-GO"
+  status="fail"
+  final_rc=1
+elif [[ "$sweep_reducer_handoff_ready" == "true" && ${#reducer_campaign_summary_jsons[@]} -eq 0 && -z "$reducer_campaign_summary_list" && "$sweep_reducer_input_vm_count_json" != "${#sweep_reducer_input_summary_jsons[@]}" ]]; then
+  sweep_stage_status="fail"
+  failure_stage="sweep"
+  failure_reason="multi-vm sweep reducer handoff is inconsistent: ready=true but reducer input summary count does not match advertised input_vm_count"
+  decision="NO-GO"
+  status="fail"
+  final_rc=1
+elif [[ "$sweep_reducer_handoff_ready" == "true" && ${#reducer_campaign_summary_jsons[@]} -eq 0 && -z "$reducer_campaign_summary_list" && "$sweep_reducer_input_missing_paths" -gt 0 ]]; then
+  sweep_stage_status="fail"
+  failure_stage="sweep"
+  failure_reason="multi-vm sweep reducer handoff is inconsistent: ready=true but one or more reducer input summary paths are missing"
+  decision="NO-GO"
+  status="fail"
+  final_rc=1
 else
   proceed_reducer="true"
 fi
@@ -991,6 +1071,7 @@ if [[ "$proceed_reducer" == "true" ]]; then
     bash "$REDUCER_SCRIPT"
     --reports-dir "$reports_dir"
     --fail-on-no-go "$reducer_fail_on_no_go"
+    --min-support-rate-pct "$reducer_min_support_rate_pct"
     --summary-json "$reducer_summary_json"
     --report-md "$reducer_report_md"
     --show-json 0
@@ -1065,6 +1146,49 @@ if [[ "$proceed_reducer" == "true" ]]; then
     ' "$reducer_summary_json" 2>/dev/null || printf '%s' "")"
     reducer_errors_json="$(jq -c '
       if (.errors | type) == "array" then .errors else [] end
+    ' "$reducer_summary_json" 2>/dev/null || printf '%s' "[]")"
+    reducer_promotion_gate_available="$(jq -r '
+      if (.promotion_gate | type) == "object" then "true" else "false" end
+    ' "$reducer_summary_json" 2>/dev/null || printf '%s' "false")"
+    reducer_promotion_gate_decision="$(jq -r '
+      if (.promotion_gate.decision | type) == "string" then .promotion_gate.decision else "" end
+    ' "$reducer_summary_json" 2>/dev/null || printf '%s' "")"
+    reducer_promotion_gate_decision="$(normalize_decision "$reducer_promotion_gate_decision")"
+    reducer_promotion_gate_status="$(jq -r '
+      if (.promotion_gate.status | type) == "string" then .promotion_gate.status else "" end
+    ' "$reducer_summary_json" 2>/dev/null || printf '%s' "")"
+    reducer_promotion_gate_ready_json="$(jq -r '
+      if (.promotion_gate.promotion_ready | type) == "boolean" then (.promotion_gate.promotion_ready | tostring) else "false" end
+    ' "$reducer_summary_json" 2>/dev/null || printf '%s' "false")"
+    reducer_promotion_missing_evidence_json="$(jq -c '
+      if (.promotion_gate.missing_evidence_reasons | type) == "array" then
+        [
+          .promotion_gate.missing_evidence_reasons[]?
+          | if type == "object" then
+              {
+                id: (
+                  if (.id | type) == "string" and (.id | length) > 0
+                  then .id
+                  else "reducer_policy_failure"
+                  end
+                ),
+                message: (
+                  if (.message | type) == "string"
+                  then .message
+                  else ""
+                  end
+                ),
+                source: "reducer.promotion_gate"
+              }
+            elif type == "string" then
+              {id: ., message: ., source: "reducer.promotion_gate"}
+            else
+              empty
+            end
+        ]
+      else
+        []
+      end
     ' "$reducer_summary_json" 2>/dev/null || printf '%s' "[]")"
   fi
 
@@ -1354,6 +1478,17 @@ if [[ "$proceed_reducer" == "true" ]]; then
         check_errors_json="$(jq -c '
           if (.errors | type) == "array" then .errors else [] end
         ' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
+        check_promotion_missing_evidence_json="$(jq -c '
+          (.decision_diagnostics.m4_policy.unmet_requirements // []) as $unmet
+          | (
+              [ $unmet[]? | select(type == "string" and length > 0) | {id: ., message: ., source: "check.m4_policy"} ]
+            ) as $unmet_rows
+          | if ($unmet_rows | length) > 0 then
+              $unmet_rows
+            else
+              [ (.errors // [])[]? | select(type == "string" and length > 0) | {id: "check_policy_error", message: ., source: "check.errors"} ]
+            end
+        ' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
       fi
 
       if [[ "$check_stage_rc" -eq 0 ]]; then
@@ -1437,10 +1572,113 @@ if [[ "$proceed_reducer" == "true" ]]; then
   fi
 fi
 
+reducer_promotion_gate_decision_effective="$reducer_promotion_gate_decision"
+if [[ -z "$reducer_promotion_gate_decision_effective" ]]; then
+  reducer_promotion_gate_decision_effective="$reducer_decision"
+fi
+
+reducer_promotion_gate_status_effective="$reducer_promotion_gate_status"
+if [[ -z "$reducer_promotion_gate_status_effective" ]]; then
+  if [[ "$reducer_stage_attempted" != "true" ]]; then
+    reducer_promotion_gate_status_effective="skip"
+  elif [[ "$reducer_promotion_gate_decision_effective" == "GO" && "$reducer_status_value" != "fail" ]]; then
+    reducer_promotion_gate_status_effective="pass"
+  else
+    reducer_promotion_gate_status_effective="fail"
+  fi
+fi
+
+if [[ "$reducer_promotion_gate_available" != "true" ]]; then
+  if [[ "$reducer_promotion_gate_status_effective" == "pass" ]]; then
+    reducer_promotion_gate_ready_json="true"
+  else
+    reducer_promotion_gate_ready_json="false"
+  fi
+fi
+
+if [[ "$(jq -r 'length' <<<"$reducer_promotion_missing_evidence_json" 2>/dev/null || printf '0')" == "0" && "$reducer_stage_attempted" == "true" && "$reducer_promotion_gate_status_effective" == "fail" ]]; then
+  reducer_primary_reason="$(jq -r '
+    if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string"
+    then .[0]
+    else "multi-vm reducer promotion gate not pass"
+    end
+  ' <<<"$reducer_errors_json" 2>/dev/null || printf '%s' "multi-vm reducer promotion gate not pass")"
+  reducer_promotion_missing_evidence_json="$(jq -nc --arg reason "$reducer_primary_reason" '
+    [{id: "reducer_gate_not_pass", message: $reason, source: "reducer"}]
+  ')"
+fi
+
+check_promotion_gate_decision="$check_decision"
+check_promotion_gate_status="skip"
+check_promotion_gate_ready_json="false"
+if [[ "$check_stage_attempted" == "true" ]]; then
+  if [[ "$check_promotion_gate_decision" == "GO" && "$check_status_value" == "ok" ]]; then
+    check_promotion_gate_status="pass"
+    check_promotion_gate_ready_json="true"
+  else
+    check_promotion_gate_status="fail"
+  fi
+fi
+
+if [[ "$(jq -r 'length' <<<"$check_promotion_missing_evidence_json" 2>/dev/null || printf '0')" == "0" && "$check_stage_attempted" == "true" && "$check_promotion_gate_status" == "fail" ]]; then
+  check_primary_reason="$(jq -r '
+    if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string"
+    then .[0]
+    else "campaign check promotion gate not pass"
+    end
+  ' <<<"$check_errors_json" 2>/dev/null || printf '%s' "campaign check promotion gate not pass")"
+  check_promotion_missing_evidence_json="$(jq -nc --arg reason "$check_primary_reason" '
+    [{id: "campaign_check_gate_not_pass", message: $reason, source: "check"}]
+  ')"
+fi
+
+promotion_gate_missing_evidence_json="$(jq -nc \
+  --argjson reducer_reasons "$reducer_promotion_missing_evidence_json" \
+  --argjson check_reasons "$check_promotion_missing_evidence_json" \
+  --arg decision "$decision" \
+  --arg failure_stage "$failure_stage" \
+  --arg failure_reason "$failure_reason" '
+  ($reducer_reasons + $check_reasons) as $base
+  | (
+      $base
+      + (
+          if (($base | length) == 0 and $decision == "NO-GO") then
+            [
+              {
+                id: (if $failure_stage == "" then "cycle_no_go" else ($failure_stage + "_stage_failure") end),
+                message: (if $failure_reason == "" then "promotion gate failed" else $failure_reason end),
+                source: "cycle"
+              }
+            ]
+          else
+            []
+          end
+        )
+    )
+  | map({
+      id: (if (.id // "") == "" then "unspecified" else .id end),
+      message: (.message // ""),
+      source: (if (.source // "") == "" then "cycle" else .source end)
+    })
+  | unique_by(.id + "|" + .source + "|" + .message)
+')"
+promotion_gate_missing_evidence_reason_ids_json="$(jq -c '[.[] | .id]' <<<"$promotion_gate_missing_evidence_json")"
+
+promotion_gate_decision="NO-GO"
+promotion_gate_status="fail"
+promotion_gate_ready_json="false"
+if [[ "$decision" == "GO" ]] && [[ "$(jq -r 'length' <<<"$promotion_gate_missing_evidence_json" 2>/dev/null || printf '0')" == "0" ]]; then
+  promotion_gate_decision="GO"
+  promotion_gate_status="pass"
+  promotion_gate_ready_json="true"
+fi
+
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
   --arg decision "$decision" \
+  --arg promotion_gate_decision "$promotion_gate_decision" \
+  --arg promotion_gate_status "$promotion_gate_status" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
   --arg reports_dir "$reports_dir" \
@@ -1468,6 +1706,7 @@ jq -n \
   --arg sweep_summary_valid "$sweep_summary_valid" \
   --arg sweep_summary_fresh "$sweep_summary_fresh" \
   --arg sweep_reducer_handoff_ready "$sweep_reducer_handoff_ready" \
+  --arg sweep_reducer_handoff_not_ready_reason "$sweep_reducer_handoff_not_ready_reason" \
   --arg reducer_summary_exists "$reducer_summary_exists" \
   --arg reducer_summary_valid "$reducer_summary_valid" \
   --arg reducer_summary_fresh "$reducer_summary_fresh" \
@@ -1475,6 +1714,10 @@ jq -n \
   --arg reducer_status_value "$reducer_status_value" \
   --arg reducer_recommended_profile "$reducer_recommended_profile" \
   --arg reducer_trend_source "$reducer_trend_source" \
+  --arg reducer_promotion_gate_available "$reducer_promotion_gate_available" \
+  --arg reducer_promotion_gate_decision "$reducer_promotion_gate_decision_effective" \
+  --arg reducer_promotion_gate_status "$reducer_promotion_gate_status_effective" \
+  --arg reducer_promotion_gate_ready "$reducer_promotion_gate_ready_json" \
   --arg check_summary_exists "$check_summary_exists" \
   --arg check_summary_valid "$check_summary_valid" \
   --arg check_summary_fresh "$check_summary_fresh" \
@@ -1482,7 +1725,11 @@ jq -n \
   --arg check_status_value "$check_status_value" \
   --arg check_recommended_profile "$check_recommended_profile" \
   --arg check_trend_source_value "$check_trend_source_value" \
+  --arg check_promotion_gate_status "$check_promotion_gate_status" \
+  --arg check_promotion_gate_decision "$check_promotion_gate_decision" \
+  --arg check_promotion_gate_ready "$check_promotion_gate_ready_json" \
   --argjson rc "$final_rc" \
+  --argjson promotion_gate_ready "$promotion_gate_ready_json" \
   --argjson sweep_stage_rc "$sweep_stage_rc" \
   --argjson reducer_stage_rc "$reducer_stage_rc_json" \
   --argjson check_stage_rc "$check_stage_rc_json" \
@@ -1491,9 +1738,13 @@ jq -n \
   --argjson reducer_rc "$reducer_rc_json" \
   --argjson reducer_support_rate_pct "$reducer_support_rate_pct_json" \
   --argjson reducer_errors "$reducer_errors_json" \
+  --argjson reducer_promotion_missing_evidence "$reducer_promotion_missing_evidence_json" \
   --argjson check_rc "$check_rc_json" \
   --argjson check_support_rate_pct "$check_support_rate_pct_json" \
   --argjson check_errors "$check_errors_json" \
+  --argjson check_promotion_missing_evidence "$check_promotion_missing_evidence_json" \
+  --argjson promotion_gate_missing_evidence_reasons "$promotion_gate_missing_evidence_json" \
+  --argjson promotion_gate_missing_evidence_reason_ids "$promotion_gate_missing_evidence_reason_ids_json" \
   --argjson vm_command_count "$vm_command_count_json" \
   --argjson vm_command_file_count "$vm_command_file_count_json" \
   --argjson sweep_command_timeout_sec "$sweep_command_timeout_sec" \
@@ -1501,7 +1752,9 @@ jq -n \
   --argjson sweep_fail_fast "$sweep_fail_fast" \
   --argjson sweep_reducer_min_successful_vms "$sweep_reducer_min_successful_vms" \
   --argjson sweep_reducer_require_all_success "$sweep_reducer_require_all_success" \
+  --argjson sweep_allow_unready_handoff "$sweep_allow_unready_handoff" \
   --argjson reducer_fail_on_no_go "$reducer_fail_on_no_go" \
+  --argjson reducer_min_support_rate_pct "$reducer_min_support_rate_pct" \
   --arg reducer_campaign_summary_list "$reducer_campaign_summary_list" \
   --argjson reducer_campaign_summary_json_count "$reducer_campaign_summary_json_count_json" \
   --argjson require_status_pass "$require_status_pass" \
@@ -1527,6 +1780,27 @@ jq -n \
     status: $status,
     rc: $rc,
     decision: (if $decision == "" then null else $decision end),
+    promotion_gate: {
+      decision: $promotion_gate_decision,
+      status: $promotion_gate_status,
+      promotion_ready: $promotion_gate_ready,
+      missing_evidence_reasons: $promotion_gate_missing_evidence_reasons,
+      missing_evidence_reason_ids: $promotion_gate_missing_evidence_reason_ids,
+      reducer: {
+        available: ($reducer_promotion_gate_available == "true"),
+        decision: (if $reducer_promotion_gate_decision == "" then null else $reducer_promotion_gate_decision end),
+        status: (if $reducer_promotion_gate_status == "" then null else $reducer_promotion_gate_status end),
+        promotion_ready: ($reducer_promotion_gate_ready == "true"),
+        missing_evidence_reasons: $reducer_promotion_missing_evidence
+      },
+      check: {
+        attempted: ($check_stage_attempted == "true"),
+        decision: (if $check_promotion_gate_decision == "" then null else $check_promotion_gate_decision end),
+        status: (if $check_promotion_gate_status == "" then null else $check_promotion_gate_status end),
+        promotion_ready: ($check_promotion_gate_ready == "true"),
+        missing_evidence_reasons: $check_promotion_missing_evidence
+      }
+    },
     failure_stage: (if $failure_stage == "" then null else $failure_stage end),
     failure_reason: (if $failure_reason == "" then null else $failure_reason end),
     inputs: {
@@ -1538,10 +1812,12 @@ jq -n \
         allow_partial: ($sweep_allow_partial == 1),
         fail_fast: ($sweep_fail_fast == 1),
         reducer_min_successful_vms: $sweep_reducer_min_successful_vms,
-        reducer_require_all_success: ($sweep_reducer_require_all_success == 1)
+        reducer_require_all_success: ($sweep_reducer_require_all_success == 1),
+        allow_unready_handoff: ($sweep_allow_unready_handoff == 1)
       },
       reducer: {
         fail_on_no_go: ($reducer_fail_on_no_go == 1),
+        min_support_rate_pct: $reducer_min_support_rate_pct,
         campaign_summary_json_count: $reducer_campaign_summary_json_count,
         campaign_summary_list: (
           if $reducer_campaign_summary_list == ""
@@ -1617,6 +1893,11 @@ jq -n \
       summary_valid_json: ($sweep_summary_valid == "true"),
       summary_fresh: ($sweep_summary_fresh == "true"),
       reducer_handoff_ready: ($sweep_reducer_handoff_ready == "true"),
+      reducer_handoff_not_ready_reason: (
+        if $sweep_reducer_handoff_not_ready_reason == "" then null
+        else $sweep_reducer_handoff_not_ready_reason
+        end
+      ),
       reducer_input_vm_count: $sweep_reducer_input_vm_count,
       reducer_input_summary_jsons: $sweep_reducer_input_summary_jsons
     },

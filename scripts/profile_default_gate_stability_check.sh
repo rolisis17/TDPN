@@ -800,6 +800,9 @@ jq -n \
   --arg summary_json "$summary_json" \
   '{
     version: 1,
+    schema: {
+      id: "profile_default_gate_stability_check_summary"
+    },
     generated_at_utc: $generated_at_utc,
     decision: $decision,
     status: $status,
@@ -876,6 +879,27 @@ jq -n \
         if $observed_decision_consensus == "true" then true
         elif $observed_decision_consensus == "false" then false
         else null
+        end
+      )
+    },
+    enforcement: {
+      fail_on_no_go: ($fail_on_no_go == 1),
+      no_go_detected: ($decision == "NO-GO"),
+      no_go_enforced: ($decision == "NO-GO" and ($fail_on_no_go == 1)),
+      terminal_outcome: (
+        if $decision == "GO" then "pass"
+        elif $fail_on_no_go == 1 then "blocked"
+        else "warn"
+        end
+      )
+    },
+    outcome: {
+      has_usable_decision: ($decision == "GO" or $decision == "NO-GO"),
+      should_promote: ($decision == "GO"),
+      action: (
+        if $decision == "GO" then "promote_allowed"
+        elif $fail_on_no_go == 1 then "hold_promotion_blocked"
+        else "hold_promotion_warn_only"
         end
       )
     },

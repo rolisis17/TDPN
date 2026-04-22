@@ -94,10 +94,14 @@ if ! grep -q '\[profile-default-gate-stability-check\] decision=GO status=ok rc=
   exit 1
 fi
 if ! jq -e '
-  .decision == "GO"
+  .schema.id == "profile_default_gate_stability_check_summary"
+  and .decision == "GO"
   and .status == "ok"
   and .rc == 0
   and (.errors | length) == 0
+  and .enforcement.no_go_enforced == false
+  and .outcome.should_promote == true
+  and .outcome.action == "promote_allowed"
   and .observed.runs_requested == 3
   and .observed.runs_completed == 3
   and .observed.runs_fail == 0
@@ -381,6 +385,15 @@ if [[ "$fail_open_rc" -ne 0 ]]; then
 fi
 if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 0' "$FAIL_OPEN_OUT" >/dev/null 2>&1; then
   echo "expected NO-GO decision with rc=0 for fail-on-no-go=0"
+  cat "$FAIL_OPEN_OUT"
+  exit 1
+fi
+if ! jq -e '
+  .enforcement.no_go_enforced == false
+  and .outcome.should_promote == false
+  and .outcome.action == "hold_promotion_warn_only"
+' "$FAIL_OPEN_OUT" >/dev/null 2>&1; then
+  echo "expected machine-readable enforcement/outcome fields for fail-open NO-GO path"
   cat "$FAIL_OPEN_OUT"
   exit 1
 fi

@@ -1561,6 +1561,27 @@ All deep checks in one command:
 ./scripts/deep_test_suite.sh
 ```
 
+Multi-VM promotion-ready reducer/cycle artifacts:
+
+```bash
+./scripts/profile_compare_multi_vm_reducer.sh \
+  --campaign-summary-list <path/to/input_summaries.list> \
+  --min-support-rate-pct 60 \
+  --summary-json .easy-node-logs/profile_compare_multi_vm_reducer_summary.json
+
+./scripts/profile_compare_multi_vm_cycle.sh \
+  --reports-dir .easy-node-logs/profile_compare_multi_vm_cycle_run \
+  --vm-command-file <path/to/vm_commands.txt> \
+  --reducer-min-support-rate-pct 60 \
+  --summary-json .easy-node-logs/profile_compare_multi_vm_cycle_summary.json
+```
+
+Promotion gate output fields (deterministic promotion decisioning):
+- reducer summary: `.promotion_gate.decision`, `.promotion_gate.status`, `.promotion_gate.promotion_ready`, `.promotion_gate.missing_evidence_reason_ids`, `.promotion_gate.missing_evidence_reasons[]`.
+- cycle summary: `.promotion_gate.decision`, `.promotion_gate.status`, `.promotion_gate.promotion_ready`, `.promotion_gate.reducer.*`, `.promotion_gate.check.*`, `.promotion_gate.missing_evidence_reason_ids`.
+- fail-closed promotion behavior: treat promotion as blocked unless `.promotion_gate.promotion_ready == true`, even when wrapper/runtime RC is soft (`warn`/`rc=0`).
+- cycle sweep handoff behavior: reducer/check are blocked by default when `.sweep.reducer_handoff_ready != true`; use `--sweep-allow-unready-handoff 1` only for explicit override workflows.
+
 ## 6) What each integration script proves
 
 - `integration_challenge.sh`:

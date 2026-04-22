@@ -118,15 +118,17 @@ jq -n \
   --arg report_md "$report_md" \
   --arg input_summary_a "$input_summary_a" \
   --arg input_summary_b "$input_summary_b" \
+  --arg scenario "$scenario" \
   '{
     version: 1,
     schema: { id: "profile_compare_multi_vm_sweep_summary" },
     status: "pass",
     rc: 0,
     reducer_handoff: {
-      ready: true,
+      ready: ($scenario != "not_ready"),
+      not_ready_reason: (if $scenario == "not_ready" then "insufficient reducer-ready VM outputs" else null end),
       input_vm_count: 2,
-      input_summary_jsons: [$input_summary_a, $input_summary_b],
+      input_summary_jsons: (if $scenario == "ready_missing_inputs" then [] else [$input_summary_a, $input_summary_b] end),
       input_report_mds: [],
       input_logs: []
     },
@@ -155,6 +157,7 @@ capture_file="${FAKE_CYCLE_CAPTURE_FILE:-}"
 summary_json=""
 report_md=""
 fail_on_no_go="0"
+min_support_rate_pct=""
 campaign_summary_json_count=0
 campaign_summary_list=""
 while [[ $# -gt 0 ]]; do
@@ -181,6 +184,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fail-on-no-go=*)
       fail_on_no_go="${1#*=}"
+      shift
+      ;;
+    --min-support-rate-pct)
+      min_support_rate_pct="${2:-}"
+      shift 2
+      ;;
+    --min-support-rate-pct=*)
+      min_support_rate_pct="${1#*=}"
       shift
       ;;
     --campaign-summary-json)
@@ -215,8 +226,8 @@ if [[ -z "$report_md" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'reducer\tscenario=%s\tfail_on_no_go=%s\tcampaign_summary_json_count=%s\tcampaign_summary_list=%s\tsummary_json=%s\treport_md=%s\n' \
-    "$scenario" "$fail_on_no_go" "$campaign_summary_json_count" "$campaign_summary_list" "$summary_json" "$report_md" >>"$capture_file"
+  printf 'reducer\tscenario=%s\tfail_on_no_go=%s\tmin_support_rate_pct=%s\tcampaign_summary_json_count=%s\tcampaign_summary_list=%s\tsummary_json=%s\treport_md=%s\n' \
+    "$scenario" "$fail_on_no_go" "$min_support_rate_pct" "$campaign_summary_json_count" "$campaign_summary_list" "$summary_json" "$report_md" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -253,6 +264,15 @@ if [[ "$scenario" == "no_go" ]]; then
         recommended_profile_counts: { balanced: 2 },
         average_input_support_rate_pct: 40
       },
+      promotion_gate: {
+        decision: "NO-GO",
+        status: "fail",
+        promotion_ready: false,
+        missing_evidence_reasons: [
+          { id: "vm_decisions_not_all_go", message: "simulated reducer no-go" }
+        ],
+        missing_evidence_reason_ids: ["vm_decisions_not_all_go"]
+      },
       vm_summaries: [
         { input_summary_json: "vm_a.json", status: "fail", valid: true },
         { input_summary_json: "vm_b.json", status: "warn", valid: true }
@@ -280,6 +300,13 @@ jq -n '{
     decision_counts: { GO: 2, "NO-GO": 0 },
     recommended_profile_counts: { balanced: 2 },
     average_input_support_rate_pct: 88.8
+  },
+  promotion_gate: {
+    decision: "GO",
+    status: "pass",
+    promotion_ready: true,
+    missing_evidence_reasons: [],
+    missing_evidence_reason_ids: []
   },
   vm_summaries: [
     { input_summary_json: "vm_a.json", status: "pass", valid: true },
@@ -426,6 +453,16 @@ jq -n \
       recommendation_support_rate_pct: 40,
       trend_source: "policy_reliability_latency"
     },
+    decision_diagnostics: {
+      m4_policy: {
+        unmet_requirements: ["runtime_actuation_status_not_pass"],
+        gate_evaluation: {
+          runtime_actuation_status_pass: {
+            status: "fail"
+          }
+        }
+      }
+    },
     errors: ["simulated check no-go"]
   }' >"$summary_json"
 exit "$check_rc"
@@ -453,6 +490,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --vm-command-file "$VM_COMMAND_FILE" \
   --reducer-summary-json "$TMP_DIR/happy_reducer_summary.json" \
   --reducer-report-md "$TMP_DIR/happy_reducer_report.md" \
+  --reducer-min-support-rate-pct 66 \
   --check-summary-json "$TMP_DIR/happy_check_summary.json" \
   --require-status-pass 1 \
   --require-recommendation-support-rate-pct 75 \
@@ -472,6 +510,10 @@ if ! jq -e '
   and .status == "pass"
   and .rc == 0
   and .decision == "GO"
+  and .promotion_gate.decision == "GO"
+  and .promotion_gate.status == "pass"
+  and .promotion_gate.promotion_ready == true
+  and (.promotion_gate.missing_evidence_reasons | length) == 0
   and .failure_stage == null
   and .stages.sweep.attempted == true
   and .stages.sweep.status == "pass"
@@ -483,6 +525,8 @@ if ! jq -e '
   and .inputs.check.policy.require_status_pass == true
   and .inputs.check.policy.require_recommendation_support_rate_pct == 75
   and .inputs.check.policy.require_selection_policy_valid == true
+  and .inputs.reducer.min_support_rate_pct == 66
+  and .inputs.sweep.allow_unready_handoff == false
   and .artifacts.sweep_summary_json == .stages.sweep.summary_json
   and .artifacts.reducer_summary_json == .stages.reducer.summary_json
   and .artifacts.check_summary_json == .stages.check.summary_json
@@ -498,6 +542,11 @@ if ! grep -q $'^sweep\t.*\tvm_command_count=1\tvm_command_file_count=1\t' "$FAKE
 fi
 if ! grep -q $'^reducer\t.*\tcampaign_summary_json_count=2\t' "$FAKE_CAPTURE_FILE"; then
   echo "expected reducer input-summary forwarding capture not found"
+  cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+if ! grep -q $'^reducer\t.*\tmin_support_rate_pct=66.00\t' "$FAKE_CAPTURE_FILE"; then
+  echo "expected reducer min-support-rate threshold forwarding capture not found"
   cat "$FAKE_CAPTURE_FILE"
   exit 1
 fi
@@ -570,6 +619,11 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and .decision == "NO-GO"
+  and .promotion_gate.decision == "NO-GO"
+  and .promotion_gate.status == "fail"
+  and .promotion_gate.promotion_ready == false
+  and .promotion_gate.check.status == "fail"
+  and ((.promotion_gate.missing_evidence_reason_ids // []) | index("runtime_actuation_status_not_pass"))
   and .failure_stage == null
   and .stages.check.attempted == true
   and .stages.check.status == "fail"
@@ -583,6 +637,155 @@ fi
 if ! grep -q $'^check\t.*\tfail_on_no_go=0\t' "$TMP_DIR/capture_no_go_soft.log"; then
   echo "expected check fail_on_no_go=0 capture not found"
   cat "$TMP_DIR/capture_no_go_soft.log"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-cycle] sweep reducer-handoff not-ready fails closed by default"
+HANDOFF_NOT_READY_SUMMARY="$TMP_DIR/cycle_handoff_not_ready_summary.json"
+HANDOFF_NOT_READY_CAPTURE="$TMP_DIR/capture_handoff_not_ready.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_SWEEP_SCRIPT="$FAKE_SWEEP_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_REDUCER_SCRIPT="$FAKE_REDUCER_SCRIPT" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$HANDOFF_NOT_READY_CAPTURE" \
+FAKE_CYCLE_SWEEP_SCENARIO="not_ready" \
+FAKE_CYCLE_REDUCER_SCENARIO="go" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/handoff_not_ready_reports" \
+  --vm-command "vm_arg::echo vm" \
+  --vm-command-file "$VM_COMMAND_FILE" \
+  --summary-json "$HANDOFF_NOT_READY_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_cycle_handoff_not_ready.log 2>&1
+handoff_not_ready_rc=$?
+set -e
+
+if [[ "$handoff_not_ready_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when sweep reducer handoff is not ready"
+  cat /tmp/integration_profile_compare_multi_vm_cycle_handoff_not_ready.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "sweep"
+  and ((.failure_reason // "") | test("handoff"))
+  and .sweep.reducer_handoff_ready == false
+  and .stages.reducer.attempted == false
+  and .stages.check.attempted == false
+' "$HANDOFF_NOT_READY_SUMMARY" >/dev/null 2>&1; then
+  echo "handoff-not-ready cycle summary mismatch"
+  cat "$HANDOFF_NOT_READY_SUMMARY"
+  exit 1
+fi
+if grep -q '^reducer' "$HANDOFF_NOT_READY_CAPTURE"; then
+  echo "reducer should not run when sweep handoff is not ready and override is disabled"
+  cat "$HANDOFF_NOT_READY_CAPTURE"
+  exit 1
+fi
+if grep -q '^check' "$HANDOFF_NOT_READY_CAPTURE"; then
+  echo "check should not run when sweep handoff is not ready and override is disabled"
+  cat "$HANDOFF_NOT_READY_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-cycle] sweep handoff ready-but-missing-inputs fails closed"
+HANDOFF_INCONSISTENT_SUMMARY="$TMP_DIR/cycle_handoff_inconsistent_summary.json"
+HANDOFF_INCONSISTENT_CAPTURE="$TMP_DIR/capture_handoff_inconsistent.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_SWEEP_SCRIPT="$FAKE_SWEEP_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_REDUCER_SCRIPT="$FAKE_REDUCER_SCRIPT" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$HANDOFF_INCONSISTENT_CAPTURE" \
+FAKE_CYCLE_SWEEP_SCENARIO="ready_missing_inputs" \
+FAKE_CYCLE_REDUCER_SCENARIO="go" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/handoff_inconsistent_reports" \
+  --vm-command "vm_arg::echo vm" \
+  --vm-command-file "$VM_COMMAND_FILE" \
+  --summary-json "$HANDOFF_INCONSISTENT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_cycle_handoff_inconsistent.log 2>&1
+handoff_inconsistent_rc=$?
+set -e
+
+if [[ "$handoff_inconsistent_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when sweep handoff is ready but input summaries are missing"
+  cat /tmp/integration_profile_compare_multi_vm_cycle_handoff_inconsistent.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "sweep"
+  and ((.failure_reason // "") | test("inconsistent"))
+  and .sweep.reducer_handoff_ready == true
+  and .sweep.reducer_input_vm_count == 2
+  and (.sweep.reducer_input_summary_jsons | length) == 0
+  and .stages.reducer.attempted == false
+  and .stages.check.attempted == false
+' "$HANDOFF_INCONSISTENT_SUMMARY" >/dev/null 2>&1; then
+  echo "handoff-inconsistent cycle summary mismatch"
+  cat "$HANDOFF_INCONSISTENT_SUMMARY"
+  exit 1
+fi
+if grep -q '^reducer' "$HANDOFF_INCONSISTENT_CAPTURE"; then
+  echo "reducer should not run when sweep handoff inputs are inconsistent"
+  cat "$HANDOFF_INCONSISTENT_CAPTURE"
+  exit 1
+fi
+if grep -q '^check' "$HANDOFF_INCONSISTENT_CAPTURE"; then
+  echo "check should not run when sweep handoff inputs are inconsistent"
+  cat "$HANDOFF_INCONSISTENT_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-cycle] sweep reducer-handoff override allows reducer/check"
+HANDOFF_OVERRIDE_SUMMARY="$TMP_DIR/cycle_handoff_override_summary.json"
+HANDOFF_OVERRIDE_CAPTURE="$TMP_DIR/capture_handoff_override.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_SWEEP_SCRIPT="$FAKE_SWEEP_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_REDUCER_SCRIPT="$FAKE_REDUCER_SCRIPT" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$HANDOFF_OVERRIDE_CAPTURE" \
+FAKE_CYCLE_SWEEP_SCENARIO="not_ready" \
+FAKE_CYCLE_REDUCER_SCENARIO="go" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/handoff_override_reports" \
+  --vm-command "vm_arg::echo vm" \
+  --vm-command-file "$VM_COMMAND_FILE" \
+  --sweep-allow-unready-handoff 1 \
+  --summary-json "$HANDOFF_OVERRIDE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_cycle_handoff_override.log 2>&1
+handoff_override_rc=$?
+set -e
+
+if [[ "$handoff_override_rc" -ne 0 ]]; then
+  echo "expected rc=0 when sweep handoff override is enabled"
+  cat /tmp/integration_profile_compare_multi_vm_cycle_handoff_override.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .decision == "GO"
+  and .inputs.sweep.allow_unready_handoff == true
+  and .sweep.reducer_handoff_ready == false
+  and .stages.reducer.attempted == true
+  and .stages.check.attempted == true
+' "$HANDOFF_OVERRIDE_SUMMARY" >/dev/null 2>&1; then
+  echo "handoff-override cycle summary mismatch"
+  cat "$HANDOFF_OVERRIDE_SUMMARY"
+  exit 1
+fi
+if ! grep -q '^reducer' "$HANDOFF_OVERRIDE_CAPTURE"; then
+  echo "reducer should run when sweep handoff override is enabled"
+  cat "$HANDOFF_OVERRIDE_CAPTURE"
+  exit 1
+fi
+if ! grep -q '^check' "$HANDOFF_OVERRIDE_CAPTURE"; then
+  echo "check should run when sweep handoff override is enabled"
+  cat "$HANDOFF_OVERRIDE_CAPTURE"
   exit 1
 fi
 
