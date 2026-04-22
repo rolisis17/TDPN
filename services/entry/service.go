@@ -1034,6 +1034,9 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 		operatorID: strings.TrimSpace(s.operatorID),
 	}
 	if exitID == "" {
+		if s.betaStrict || s.prodStrict {
+			return exitRoute{}, fmt.Errorf("exit id required in strict mode")
+		}
 		return fallback, nil
 	}
 
@@ -1340,6 +1343,9 @@ func (s *Service) fetchDirectoryPubKeys(ctx context.Context, directoryURL string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
+		if s.betaStrict || s.prodStrict {
+			return nil, "", fmt.Errorf("directory legacy /v1/pubkey fallback is not allowed in strict mode")
+		}
 		return s.fetchDirectoryPubKeyLegacy(ctx, directoryURL)
 	}
 	if resp.StatusCode != http.StatusOK {

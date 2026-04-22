@@ -67,6 +67,31 @@ func TestFetchPeerRelaysVerifiesSignature(t *testing.T) {
 	}
 }
 
+func TestFetchPeerPubKeysStrictRejectsLegacyFallback(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkeys": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
+		},
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+	}
+	s := &Service{
+		betaStrict: true,
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if _, _, err := s.fetchPeerPubKeys(context.Background(), peerURL); err == nil {
+		t.Fatalf("expected strict mode to reject legacy /v1/pubkey fallback")
+	}
+}
+
 func TestFetchPeerPubKeyRejectsSignedHintMismatch(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	actualPub, _, err := crypto.GenerateEd25519Keypair()

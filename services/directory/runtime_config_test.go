@@ -70,6 +70,73 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsPeerTrustTOFU(t *testing.T) {
+	s := &Service{
+		betaStrict:               true,
+		peerDiscoveryEnabled:     true,
+		peerMinOperators:         2,
+		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
+		issuerMinOperators:       2,
+		issuerTrustMinVotes:      2,
+		issuerDisputeMinVotes:    2,
+		issuerAppealMinVotes:     2,
+		peerDiscoveryMinVotes:    2,
+		peerDiscoveryRequireHint: true,
+		peerDiscoveryMaxPerSrc:   4,
+		peerDiscoveryMaxPerOp:    4,
+		peerTrustStrict:          true,
+		peerTrustTOFU:            true,
+		finalAdjudicationOps:     2,
+		finalAdjudicationSources: 2,
+		finalDisputeMinVotes:     2,
+		finalAppealMinVotes:      2,
+		keyRotateEvery:           time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection for DIRECTORY_PEER_TRUST_TOFU=1")
+	}
+	if err.Error() != "BETA_STRICT_MODE requires DIRECTORY_PEER_TRUST_TOFU=0" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDangerousProviderTokenBypass(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+	s := &Service{
+		betaStrict:               true,
+		peerDiscoveryEnabled:     true,
+		peerMinOperators:         2,
+		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
+		issuerMinOperators:       2,
+		issuerTrustMinVotes:      2,
+		issuerDisputeMinVotes:    2,
+		issuerAppealMinVotes:     2,
+		peerDiscoveryMinVotes:    2,
+		peerDiscoveryRequireHint: true,
+		peerDiscoveryMaxPerSrc:   4,
+		peerDiscoveryMaxPerOp:    4,
+		peerTrustStrict:          true,
+		finalAdjudicationOps:     2,
+		finalAdjudicationSources: 2,
+		finalDisputeMinVotes:     2,
+		finalAppealMinVotes:      2,
+		keyRotateEvery:           time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection for dangerous provider-token bypass env")
+	}
+	expected := "BETA_STRICT_MODE forbids " + allowDangerousProviderTokenBypass
+	if err.Error() != expected {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigPublicBindRejectsWeakAdminToken(t *testing.T) {
 	s := &Service{
 		addr:       "0.0.0.0:8081",

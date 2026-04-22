@@ -77,6 +77,19 @@ func TestResolveExitRouteFallback(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteFallbackStrictRejectsEmptyExitID(t *testing.T) {
+	s := &Service{
+		betaStrict:     true,
+		exitControlURL: "127.0.0.1:8084",
+		exitDataAddr:   "127.0.0.1:51821",
+		routeTTL:       time.Minute,
+		exitRouteCache: map[string]exitRoute{},
+	}
+	if _, err := s.resolveExitRoute(context.Background(), ""); err == nil {
+		t.Fatalf("expected strict mode to reject empty exit id fallback")
+	}
+}
+
 func TestResolveExitRouteCached(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
@@ -109,6 +122,33 @@ func TestResolveExitRouteCached(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("expected one directory relays fetch due to cache, got %d", calls)
+	}
+}
+
+func TestFetchDirectoryPubKeysStrictRejectsLegacyFallback(t *testing.T) {
+	durl := "http://directory.local"
+	pub, _, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		durl + "/v1/pubkeys": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
+		},
+		durl + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+	}
+
+	s := &Service{
+		betaStrict: true,
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if _, _, err := s.fetchDirectoryPubKeys(context.Background(), durl); err == nil {
+		t.Fatalf("expected strict mode to reject legacy /v1/pubkey fallback")
 	}
 }
 

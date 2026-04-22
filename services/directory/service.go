@@ -776,6 +776,12 @@ func (s *Service) validateRuntimeConfig() error {
 	if !s.peerTrustStrict {
 		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_TRUST_STRICT=1")
 	}
+	if s.peerTrustTOFU {
+		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_TRUST_TOFU=0")
+	}
+	if envEnabled(allowDangerousProviderTokenBypass) {
+		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousProviderTokenBypass)
+	}
 	if s.finalAdjudicationOps < 2 {
 		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_FINAL_ADJUDICATION_MIN_OPERATORS>=2")
 	}
@@ -801,9 +807,6 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.prodStrict {
 		if !securehttp.Enabled() {
 			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
-		}
-		if s.peerTrustTOFU {
-			return fmt.Errorf("PROD_STRICT_MODE requires DIRECTORY_PEER_TRUST_TOFU=0")
 		}
 	}
 	return nil
@@ -2013,6 +2016,9 @@ func (s *Service) fetchPeerPubKeys(ctx context.Context, peerURL string) ([]ed255
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
+		if s.betaStrict || s.prodStrict {
+			return nil, "", fmt.Errorf("peer legacy /v1/pubkey fallback is not allowed in strict mode")
+		}
 		keys, operatorID, legacyErr := s.fetchPeerPubKeyLegacy(ctx, peerURL)
 		if legacyErr != nil {
 			return nil, "", legacyErr
@@ -3456,8 +3462,9 @@ func validateProviderTokenClaims(claims crypto.CapabilityClaims, nowUnix int64) 
 
 func (s *Service) validateProviderTokenCNFBinding(claims crypto.CapabilityClaims, relayPubKey string) error {
 	cnf := strings.TrimSpace(claims.CNFEd25519)
+	allowDangerousBypass := envEnabled(allowDangerousProviderTokenBypass) && !(s.betaStrict || s.prodStrict)
 	if cnf == "" {
-		if envEnabled(allowDangerousProviderTokenBypass) {
+		if allowDangerousBypass {
 			return nil
 		}
 		return fmt.Errorf("provider token cnf_ed25519 missing")
@@ -3486,7 +3493,7 @@ func (s *Service) validateProviderTokenProof(
 	now time.Time,
 ) error {
 	cnf := strings.TrimSpace(claims.CNFEd25519)
-	allowDangerousBypass := envEnabled(allowDangerousProviderTokenBypass)
+	allowDangerousBypass := envEnabled(allowDangerousProviderTokenBypass) && !(s.betaStrict || s.prodStrict)
 	if cnf == "" {
 		if allowDangerousBypass {
 			return nil
