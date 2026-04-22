@@ -167,7 +167,6 @@ extract_m4_policy_signals_from_summary() {
     def quality_candidate:
       first_non_null([
         (canonical_m4_evidence | if type == "object" then .micro_relay_quality else null end),
-        canonical_m4_evidence,
         .summary.micro_relay_quality_evidence,
         .summary.micro_relay_quality,
         .summary.m4.micro_relay_quality,
@@ -212,7 +211,16 @@ extract_m4_policy_signals_from_summary() {
       elif ($candidate | type) == "object" then
         if ($candidate.available? != null) then (($candidate.available // false) | boolish_true)
         elif ($candidate.present? != null) then (($candidate.present // false) | boolish_true)
-        else true
+        elif ($candidate.status? != null) then true
+        elif ($candidate.quality_status? != null) then true
+        elif ($candidate.pass? != null) then true
+        elif ($candidate.quality_ok? != null) then true
+        elif ($candidate.status_pass? != null) then true
+        elif ($candidate.healthy? != null) then true
+        elif (($candidate.quality_band? | type) == "string" and (($candidate.quality_band // "") | length) > 0) then true
+        elif (($candidate.quality_score? | type) == "number") then true
+        elif (($candidate.quality_score_avg? | type) == "number") then true
+        else false
         end
       else
         ($candidate | boolish_true)
@@ -221,9 +229,7 @@ extract_m4_policy_signals_from_summary() {
       if $candidate == null then false
       elif ($candidate | type) == "object" then
         if ($candidate[$field]? != null) then true
-        elif ($candidate.available? != null) then (($candidate.available // false) | boolish_true)
-        elif ($candidate.present? != null) then (($candidate.present // false) | boolish_true)
-        else true
+        else false
         end
       else
         ($candidate | boolish_true)
@@ -233,8 +239,7 @@ extract_m4_policy_signals_from_summary() {
       elif ($candidate | type) == "object" then
         if ($candidate.present? != null) then (($candidate.present // false) | boolish_true)
         elif ($candidate.evidence_hits? != null and (($candidate.evidence_hits | type) == "number")) then (($candidate.evidence_hits // 0) > 0)
-        elif ($candidate.available? != null) then (($candidate.available // false) | boolish_true)
-        else true
+        else false
         end
       else
         ($candidate | boolish_true)
@@ -282,6 +287,246 @@ extract_m4_policy_signals_from_summary() {
   done
 
   echo "$quality_present $quality_status_pass $demotion_present $promotion_present $trust_tier_port_unlock_present"
+}
+
+extract_m4_policy_observed_from_summary() {
+  local summary_path="$1"
+  local observed_json=""
+
+  if [[ -z "$summary_path" || ! -f "$summary_path" ]]; then
+    jq -nc '{
+      quality: {
+        present: false,
+        status_pass: false,
+        available: null,
+        score: null,
+        score_avg: null,
+        band: null,
+        reason: "summary_missing"
+      },
+      adaptive: {
+        present: false,
+        available: null,
+        demotion_policy_present: false,
+        promotion_policy_present: false,
+        demotion_signal_count: null,
+        promotion_signal_count: null,
+        demotion_candidate: null,
+        promotion_candidate: null,
+        wiring_present: null,
+        reason: "summary_missing"
+      },
+      trust_tier: {
+        present: false,
+        policy_present: false,
+        evaluated: null,
+        present_flag: null,
+        evidence_hits: null,
+        reason: "summary_missing"
+      }
+    }'
+    return
+  fi
+
+  observed_json="$(jq -c '
+    def bool_or_null($value):
+      if $value == null then null
+      elif ($value | type) == "boolean" then $value
+      elif ($value | type) == "number" then ($value != 0)
+      elif ($value | type) == "string" then
+        (($value | ascii_downcase) as $text |
+          if ($text == "1" or $text == "true" or $text == "yes" or $text == "pass" or $text == "ok" or $text == "go" or $text == "healthy" or $text == "enabled") then true
+          elif ($text == "0" or $text == "false" or $text == "no" or $text == "fail" or $text == "disabled" or $text == "none" or $text == "missing") then false
+          else null
+          end)
+      else null
+      end;
+    def num_or_null($value):
+      if ($value | type) == "number" then $value else null end;
+    def str_or_null($value):
+      if ($value | type) == "string" and ($value | length) > 0 then $value else null end;
+    def score_band_pass($value):
+      if ($value | type) != "string" then false
+      else
+        (($value | ascii_downcase) as $band |
+          ($band == "excellent" or $band == "good" or $band == "pass" or $band == "ok" or $band == "healthy"))
+      end;
+    def status_pass($value):
+      if ($value | type) != "string" then false
+      else
+        (($value | ascii_downcase) as $status |
+          ($status == "pass" or $status == "ok" or $status == "go" or $status == "healthy"))
+      end;
+    (.summary.m4_micro_relay_evidence // .m4_micro_relay_evidence // .summary.m4.micro_relay_evidence // .m4.micro_relay_evidence // null) as $m4
+    | if ($m4 | type) != "object" then
+        {
+          quality: {
+            present: false,
+            status_pass: false,
+            available: null,
+            score: null,
+            score_avg: null,
+            band: null,
+            reason: "m4_evidence_missing"
+          },
+          adaptive: {
+            present: false,
+            available: null,
+            demotion_policy_present: false,
+            promotion_policy_present: false,
+            demotion_signal_count: null,
+            promotion_signal_count: null,
+            demotion_candidate: null,
+            promotion_candidate: null,
+            wiring_present: null,
+            reason: "m4_evidence_missing"
+          },
+          trust_tier: {
+            present: false,
+            policy_present: false,
+            evaluated: null,
+            present_flag: null,
+            evidence_hits: null,
+            reason: "m4_evidence_missing"
+          }
+        }
+      else
+        ($m4.micro_relay_quality // null) as $quality
+        | ($m4.adaptive_demotion_promotion // null) as $adaptive
+        | ($m4.trust_tier_port_unlock_wiring // null) as $trust
+        | (num_or_null($quality.quality_score) // num_or_null($quality.score)) as $quality_score
+        | (num_or_null($quality.quality_score_avg) // num_or_null($quality.score_avg) // $quality_score) as $quality_score_avg
+        | (str_or_null($quality.quality_band) // str_or_null($quality.band)) as $quality_band
+        | (num_or_null($adaptive.demotion_signal_count_total) // num_or_null($adaptive.demotion_signal_count) // num_or_null($adaptive.demotion_signals)) as $demotion_signal_count
+        | (num_or_null($adaptive.promotion_signal_count_total) // num_or_null($adaptive.promotion_signal_count) // num_or_null($adaptive.promotion_signals)) as $promotion_signal_count
+        | (num_or_null($trust.evidence_hits_total) // num_or_null($trust.evidence_hits)) as $trust_evidence_hits
+        | {
+            quality: {
+              present: (
+                ($quality | type) == "object"
+                and (
+                  bool_or_null($quality.available) == true
+                  or bool_or_null($quality.present) == true
+                  or $quality_score != null
+                  or $quality_score_avg != null
+                  or $quality_band != null
+                  or status_pass($quality.status)
+                  or status_pass($quality.quality_status)
+                  or bool_or_null($quality.pass) != null
+                  or bool_or_null($quality.quality_ok) != null
+                  or bool_or_null($quality.status_pass) != null
+                  or bool_or_null($quality.healthy) != null
+                )
+              ),
+              status_pass: (
+                ($quality | type) == "object"
+                and (
+                  status_pass($quality.status)
+                  or status_pass($quality.quality_status)
+                  or bool_or_null($quality.pass) == true
+                  or bool_or_null($quality.quality_ok) == true
+                  or bool_or_null($quality.status_pass) == true
+                  or bool_or_null($quality.healthy) == true
+                  or score_band_pass($quality_band)
+                  or ($quality_score != null and $quality_score >= 85)
+                )
+              ),
+              available: (bool_or_null($quality.available) // bool_or_null($quality.present)),
+              score: $quality_score,
+              score_avg: $quality_score_avg,
+              band: $quality_band,
+              reason: str_or_null($quality.reason)
+            },
+            adaptive: {
+              present: (
+                ($adaptive | type) == "object"
+                and (
+                  $adaptive.demotion_candidate != null
+                  or $adaptive.promotion_candidate != null
+                  or $demotion_signal_count != null
+                  or $promotion_signal_count != null
+                )
+              ),
+              available: bool_or_null($adaptive.available),
+              demotion_policy_present: (
+                ($adaptive | type) == "object"
+                and ($adaptive.demotion_candidate != null or $demotion_signal_count != null)
+              ),
+              promotion_policy_present: (
+                ($adaptive | type) == "object"
+                and ($adaptive.promotion_candidate != null or $promotion_signal_count != null)
+              ),
+              demotion_signal_count: $demotion_signal_count,
+              promotion_signal_count: $promotion_signal_count,
+              demotion_candidate: bool_or_null($adaptive.demotion_candidate),
+              promotion_candidate: bool_or_null($adaptive.promotion_candidate),
+              wiring_present: bool_or_null($adaptive.wiring_present),
+              reason: str_or_null($adaptive.reason)
+            },
+            trust_tier: {
+              present: (
+                ($trust | type) == "object"
+                and (
+                  bool_or_null($trust.present) == true
+                  or ($trust_evidence_hits != null and $trust_evidence_hits > 0)
+                )
+              ),
+              policy_present: (
+                ($trust | type) == "object"
+                and (
+                  bool_or_null($trust.present) == true
+                  or ($trust_evidence_hits != null and $trust_evidence_hits > 0)
+                )
+              ),
+              evaluated: (
+                if (num_or_null($trust.evaluated_reports) != null) then (num_or_null($trust.evaluated_reports) > 0)
+                else bool_or_null($trust.evaluated)
+                end
+              ),
+              present_flag: bool_or_null($trust.present),
+              evidence_hits: $trust_evidence_hits,
+              reason: str_or_null($trust.reason)
+            }
+          }
+      end
+  ' "$summary_path" 2>/dev/null || true)"
+
+  if [[ -z "$observed_json" ]]; then
+    jq -nc '{
+      quality: {
+        present: false,
+        status_pass: false,
+        available: null,
+        score: null,
+        score_avg: null,
+        band: null,
+        reason: "summary_parse_error"
+      },
+      adaptive: {
+        present: false,
+        available: null,
+        demotion_policy_present: false,
+        promotion_policy_present: false,
+        demotion_signal_count: null,
+        promotion_signal_count: null,
+        demotion_candidate: null,
+        promotion_candidate: null,
+        wiring_present: null,
+        reason: "summary_parse_error"
+      },
+      trust_tier: {
+        present: false,
+        policy_present: false,
+        evaluated: null,
+        present_flag: null,
+        evidence_hits: null,
+        reason: "summary_parse_error"
+      }
+    }'
+    return
+  fi
+
+  printf '%s\n' "$observed_json"
 }
 
 need_cmd jq
@@ -647,6 +892,7 @@ campaign_micro_relay_quality_status_pass=0
 campaign_micro_relay_demotion_policy_present=0
 campaign_micro_relay_promotion_policy_present=0
 campaign_trust_tier_port_unlock_policy_present=0
+campaign_m4_observed_json="$(extract_m4_policy_observed_from_summary "$campaign_summary_json")"
 read -r campaign_micro_relay_quality_evidence_present \
   campaign_micro_relay_quality_status_pass \
   campaign_micro_relay_demotion_policy_present \
@@ -665,6 +911,7 @@ m4_selected_summaries_quality_status_pass_count=0
 m4_selected_summaries_demotion_policy_present_count=0
 m4_selected_summaries_promotion_policy_present_count=0
 m4_selected_summaries_trust_tier_port_unlock_policy_present_count=0
+selected_m4_observed_lines=""
 while IFS= read -r selected_summary_path; do
   selected_summary_path="$(abs_path "$selected_summary_path")"
   if [[ -z "$selected_summary_path" || ! -f "$selected_summary_path" ]]; then
@@ -689,6 +936,8 @@ while IFS= read -r selected_summary_path; do
     m4_selected_demotion_present \
     m4_selected_promotion_present \
     m4_selected_trust_tier_port_unlock_present < <(extract_m4_policy_signals_from_summary "$selected_summary_path")
+  m4_selected_observed_json="$(extract_m4_policy_observed_from_summary "$selected_summary_path")"
+  selected_m4_observed_lines+="$m4_selected_observed_json"$'\n'
   if [[ "$m4_selected_quality_present" == "1" ]]; then
     m4_selected_summaries_quality_evidence_present_count=$((m4_selected_summaries_quality_evidence_present_count + 1))
   fi
@@ -705,6 +954,53 @@ while IFS= read -r selected_summary_path; do
     m4_selected_summaries_trust_tier_port_unlock_policy_present_count=$((m4_selected_summaries_trust_tier_port_unlock_policy_present_count + 1))
   fi
 done < <(jq -r '.selected_summaries[]? | select(type == "string" and length > 0)' "$campaign_summary_json" 2>/dev/null || true)
+
+selected_m4_observed_aggregate_json="$(printf '%s' "$selected_m4_observed_lines" | jq -cs '
+  . as $rows
+  | [$rows[] | .quality.score | select(type == "number")] as $quality_scores
+  | [$rows[] | .quality.score_avg | select(type == "number")] as $quality_score_avgs
+  | [$rows[] | .quality.band | select(type == "string" and length > 0) | ascii_downcase] as $quality_bands
+  | [$rows[] | .adaptive.demotion_signal_count | select(type == "number")] as $demotion_signals
+  | [$rows[] | .adaptive.promotion_signal_count | select(type == "number")] as $promotion_signals
+  | [$rows[] | .adaptive.demotion_candidate | select(type == "boolean")] as $demotion_candidates
+  | [$rows[] | .adaptive.promotion_candidate | select(type == "boolean")] as $promotion_candidates
+  | [$rows[] | .adaptive.wiring_present | select(type == "boolean")] as $adaptive_wiring
+  | [$rows[] | .trust_tier.present_flag | select(type == "boolean")] as $trust_present_flags
+  | [$rows[] | .trust_tier.evaluated | select(type == "boolean")] as $trust_evaluated_flags
+  | [$rows[] | .trust_tier.evidence_hits | select(type == "number")] as $trust_evidence_hits
+  | {
+      summaries_count: ($rows | length),
+      quality: {
+        with_score: ($quality_scores | length),
+        score_min: (if ($quality_scores | length) > 0 then ($quality_scores | min) else null end),
+        score_max: (if ($quality_scores | length) > 0 then ($quality_scores | max) else null end),
+        score_avg: (if ($quality_scores | length) > 0 then (($quality_scores | add) / ($quality_scores | length)) else null end),
+        with_score_avg: ($quality_score_avgs | length),
+        score_avg_min: (if ($quality_score_avgs | length) > 0 then ($quality_score_avgs | min) else null end),
+        score_avg_max: (if ($quality_score_avgs | length) > 0 then ($quality_score_avgs | max) else null end),
+        quality_band_counts: (
+          if ($quality_bands | length) > 0 then
+            ($quality_bands | sort | group_by(.) | map({band: .[0], count: length}))
+          else
+            []
+          end
+        ),
+        status_pass_true_count: ([$rows[] | .quality.status_pass | select(. == true)] | length)
+      },
+      adaptive: {
+        demotion_signal_count_total: ($demotion_signals | add // 0),
+        promotion_signal_count_total: ($promotion_signals | add // 0),
+        demotion_candidate_true_count: ([$demotion_candidates[] | select(. == true)] | length),
+        promotion_candidate_true_count: ([$promotion_candidates[] | select(. == true)] | length),
+        wiring_present_true_count: ([$adaptive_wiring[] | select(. == true)] | length)
+      },
+      trust_tier: {
+        present_true_count: ([$trust_present_flags[] | select(. == true)] | length),
+        evaluated_true_count: ([$trust_evaluated_flags[] | select(. == true)] | length),
+        evidence_hits_total: ($trust_evidence_hits | add // 0)
+      }
+    }
+')"
 
 selection_policy_selected_summaries_missing_or_unreadable_count=$((selection_policy_selected_summaries_total - selection_policy_selected_summaries_found))
 if ((selection_policy_selected_summaries_missing_or_unreadable_count < 0)); then
@@ -727,7 +1023,11 @@ elif ((selection_policy_selected_summaries_total > 0 && selection_policy_selecte
 fi
 
 micro_relay_quality_evidence_present=0
-if ((campaign_micro_relay_quality_evidence_present == 1 || m4_selected_summaries_quality_evidence_present_count > 0)); then
+if ((campaign_micro_relay_quality_evidence_present == 1)); then
+  micro_relay_quality_evidence_present=1
+elif ((selection_policy_selected_summaries_total > 0 \
+    && selection_policy_selected_summaries_found == selection_policy_selected_summaries_total \
+    && m4_selected_summaries_quality_evidence_present_count == selection_policy_selected_summaries_total)); then
   micro_relay_quality_evidence_present=1
 fi
 
@@ -739,17 +1039,29 @@ elif ((selection_policy_selected_summaries_total > 0 && m4_selected_summaries_qu
 fi
 
 micro_relay_demotion_policy_present=0
-if ((campaign_micro_relay_demotion_policy_present == 1 || m4_selected_summaries_demotion_policy_present_count > 0)); then
+if ((campaign_micro_relay_demotion_policy_present == 1)); then
+  micro_relay_demotion_policy_present=1
+elif ((selection_policy_selected_summaries_total > 0 \
+    && selection_policy_selected_summaries_found == selection_policy_selected_summaries_total \
+    && m4_selected_summaries_demotion_policy_present_count == selection_policy_selected_summaries_total)); then
   micro_relay_demotion_policy_present=1
 fi
 
 micro_relay_promotion_policy_present=0
-if ((campaign_micro_relay_promotion_policy_present == 1 || m4_selected_summaries_promotion_policy_present_count > 0)); then
+if ((campaign_micro_relay_promotion_policy_present == 1)); then
+  micro_relay_promotion_policy_present=1
+elif ((selection_policy_selected_summaries_total > 0 \
+    && selection_policy_selected_summaries_found == selection_policy_selected_summaries_total \
+    && m4_selected_summaries_promotion_policy_present_count == selection_policy_selected_summaries_total)); then
   micro_relay_promotion_policy_present=1
 fi
 
 trust_tier_port_unlock_policy_present=0
-if ((campaign_trust_tier_port_unlock_policy_present == 1 || m4_selected_summaries_trust_tier_port_unlock_policy_present_count > 0)); then
+if ((campaign_trust_tier_port_unlock_policy_present == 1)); then
+  trust_tier_port_unlock_policy_present=1
+elif ((selection_policy_selected_summaries_total > 0 \
+    && selection_policy_selected_summaries_found == selection_policy_selected_summaries_total \
+    && m4_selected_summaries_trust_tier_port_unlock_policy_present_count == selection_policy_selected_summaries_total)); then
   trust_tier_port_unlock_policy_present=1
 fi
 
@@ -936,6 +1248,8 @@ jq -n \
   --argjson m4_selected_summaries_demotion_policy_present_count "$m4_selected_summaries_demotion_policy_present_count" \
   --argjson m4_selected_summaries_promotion_policy_present_count "$m4_selected_summaries_promotion_policy_present_count" \
   --argjson m4_selected_summaries_trust_tier_port_unlock_policy_present_count "$m4_selected_summaries_trust_tier_port_unlock_policy_present_count" \
+  --argjson campaign_m4_observed "$campaign_m4_observed_json" \
+  --argjson selected_m4_observed_aggregate "$selected_m4_observed_aggregate_json" \
   --argjson fail_on_no_go "$fail_on_no_go" \
   --argjson rc "$rc" \
   --argjson errors "$errors_json" \
@@ -1017,7 +1331,9 @@ jq -n \
         selected_summaries_with_quality_status_pass: $m4_selected_summaries_quality_status_pass_count,
         selected_summaries_with_demotion_policy_present: $m4_selected_summaries_demotion_policy_present_count,
         selected_summaries_with_promotion_policy_present: $m4_selected_summaries_promotion_policy_present_count,
-        selected_summaries_with_trust_tier_port_unlock_policy_present: $m4_selected_summaries_trust_tier_port_unlock_policy_present_count
+        selected_summaries_with_trust_tier_port_unlock_policy_present: $m4_selected_summaries_trust_tier_port_unlock_policy_present_count,
+        campaign_summary_details: $campaign_m4_observed,
+        selected_summaries_aggregate: $selected_m4_observed_aggregate
       }
     },
     decision_diagnostics: {
@@ -1030,11 +1346,20 @@ jq -n \
             promotion_policy: ($require_micro_relay_promotion_policy == 1),
             trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1)
           },
+          observed_details: {
+            campaign_summary: $campaign_m4_observed,
+            selected_summaries_aggregate: $selected_m4_observed_aggregate
+          },
           unmet_requirements: $m4_policy_issues,
           gate_evaluation: {
             micro_relay_quality_evidence: {
               required: ($require_micro_relay_quality_evidence == 1),
               observed: ($micro_relay_quality_evidence_present == 1),
+              observed_any: ($campaign_micro_relay_quality_evidence_present == 1 or $m4_selected_summaries_quality_evidence_present_count > 0),
+              campaign_summary_observed: ($campaign_micro_relay_quality_evidence_present == 1),
+              selected_summaries_total: $selection_policy_selected_summaries_total,
+              selected_summaries_found: $selection_policy_selected_summaries_found,
+              selected_summaries_with_signal: $m4_selected_summaries_quality_evidence_present_count,
               status: (
                 if ($require_micro_relay_quality_evidence == 1) then
                   (if ($micro_relay_quality_evidence_present == 1) then "pass" else "fail" end)
@@ -1054,6 +1379,11 @@ jq -n \
             micro_relay_quality_status_pass: {
               required: ($require_micro_relay_quality_status_pass == 1),
               observed: ($micro_relay_quality_status_pass == 1),
+              observed_any: ($campaign_micro_relay_quality_status_pass == 1 or $m4_selected_summaries_quality_status_pass_count > 0),
+              campaign_summary_observed: ($campaign_micro_relay_quality_status_pass == 1),
+              selected_summaries_total: $selection_policy_selected_summaries_total,
+              selected_summaries_found: $selection_policy_selected_summaries_found,
+              selected_summaries_with_signal: $m4_selected_summaries_quality_status_pass_count,
               status: (
                 if ($require_micro_relay_quality_status_pass == 1) then
                   (if ($micro_relay_quality_status_pass == 1) then "pass" else "fail" end)
@@ -1073,6 +1403,11 @@ jq -n \
             micro_relay_demotion_policy: {
               required: ($require_micro_relay_demotion_policy == 1),
               observed: ($micro_relay_demotion_policy_present == 1),
+              observed_any: ($campaign_micro_relay_demotion_policy_present == 1 or $m4_selected_summaries_demotion_policy_present_count > 0),
+              campaign_summary_observed: ($campaign_micro_relay_demotion_policy_present == 1),
+              selected_summaries_total: $selection_policy_selected_summaries_total,
+              selected_summaries_found: $selection_policy_selected_summaries_found,
+              selected_summaries_with_signal: $m4_selected_summaries_demotion_policy_present_count,
               status: (
                 if ($require_micro_relay_demotion_policy == 1) then
                   (if ($micro_relay_demotion_policy_present == 1) then "pass" else "fail" end)
@@ -1092,6 +1427,11 @@ jq -n \
             micro_relay_promotion_policy: {
               required: ($require_micro_relay_promotion_policy == 1),
               observed: ($micro_relay_promotion_policy_present == 1),
+              observed_any: ($campaign_micro_relay_promotion_policy_present == 1 or $m4_selected_summaries_promotion_policy_present_count > 0),
+              campaign_summary_observed: ($campaign_micro_relay_promotion_policy_present == 1),
+              selected_summaries_total: $selection_policy_selected_summaries_total,
+              selected_summaries_found: $selection_policy_selected_summaries_found,
+              selected_summaries_with_signal: $m4_selected_summaries_promotion_policy_present_count,
               status: (
                 if ($require_micro_relay_promotion_policy == 1) then
                   (if ($micro_relay_promotion_policy_present == 1) then "pass" else "fail" end)
@@ -1111,6 +1451,11 @@ jq -n \
             trust_tier_port_unlock_policy: {
               required: ($require_trust_tier_port_unlock_policy == 1),
               observed: ($trust_tier_port_unlock_policy_present == 1),
+              observed_any: ($campaign_trust_tier_port_unlock_policy_present == 1 or $m4_selected_summaries_trust_tier_port_unlock_policy_present_count > 0),
+              campaign_summary_observed: ($campaign_trust_tier_port_unlock_policy_present == 1),
+              selected_summaries_total: $selection_policy_selected_summaries_total,
+              selected_summaries_found: $selection_policy_selected_summaries_found,
+              selected_summaries_with_signal: $m4_selected_summaries_trust_tier_port_unlock_policy_present_count,
               status: (
                 if ($require_trust_tier_port_unlock_policy == 1) then
                   (if ($trust_tier_port_unlock_policy_present == 1) then "pass" else "fail" end)
