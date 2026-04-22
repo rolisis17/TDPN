@@ -127,6 +127,30 @@ if [[ -n "$summary_json" ]]; then
   }
 }
 EOF_SUMMARY
+    if [[ "${FAKE_CHECK_WRITE_RUNTIME_GATE:-0}" == "1" ]]; then
+      runtime_gate_status="${FAKE_CHECK_RUNTIME_GATE_STATUS:-fail}"
+      runtime_gate_source="${FAKE_CHECK_RUNTIME_GATE_SOURCE:-explicit_campaign_summary}"
+      runtime_gate_actionable_reason="${FAKE_CHECK_RUNTIME_GATE_ACTIONABLE_REASON:-runtime gate actionable reason}"
+      runtime_gate_required="${FAKE_CHECK_RUNTIME_GATE_REQUIRED:-1}"
+      runtime_gate_blocking="${FAKE_CHECK_RUNTIME_GATE_BLOCKING:-1}"
+      runtime_gate_tmp="${summary_json}.tmp"
+      jq \
+        --arg runtime_gate_status "$runtime_gate_status" \
+        --arg runtime_gate_source "$runtime_gate_source" \
+        --arg runtime_gate_actionable_reason "$runtime_gate_actionable_reason" \
+        --arg runtime_gate_required "$runtime_gate_required" \
+        --arg runtime_gate_blocking "$runtime_gate_blocking" \
+        '
+        .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass = {
+          required: ($runtime_gate_required == "1"),
+          status: $runtime_gate_status,
+          blocking: ($runtime_gate_blocking == "1"),
+          source: (if $runtime_gate_source == "" then null else $runtime_gate_source end),
+          actionable_reason: (if $runtime_gate_actionable_reason == "" then null else $runtime_gate_actionable_reason end)
+        }
+        ' "$summary_json" >"$runtime_gate_tmp"
+      mv -f "$runtime_gate_tmp" "$summary_json"
+    fi
   fi
 fi
 if [[ -n "${FAKE_CHECK_FAILURE_LINE:-}" ]]; then
@@ -185,7 +209,7 @@ if ! rg -q 'campaign refresh completed attempt=initial' /tmp/integration_profile
   cat /tmp/integration_profile_compare_campaign_signoff_success.log
   exit 1
 fi
-if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == 1 and .inputs.policy.require_micro_relay_quality_status_pass == 1 and .inputs.policy.require_micro_relay_demotion_policy == 1 and .inputs.policy.require_micro_relay_promotion_policy == 1 and .inputs.policy.require_trust_tier_port_unlock_policy == 1 and .inputs.policy.require_runtime_actuation_status_pass == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == 1 and .inputs.policy.require_micro_relay_quality_status_pass == 1 and .inputs.policy.require_micro_relay_demotion_policy == 1 and .inputs.policy.require_micro_relay_promotion_policy == 1 and .inputs.policy.require_trust_tier_port_unlock_policy == 1 and .inputs.policy.require_runtime_actuation_status_pass == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.status == "unknown"' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing expected fields"
   cat "$SUCCESS_SUMMARY"
   exit 1
@@ -1630,6 +1654,83 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ENDPOINT'
 }
 EOF_DIAG_CURRENT_ENDPOINT
 assert_diag_case "current_endpoint_unreachable" "current" "endpoint_unreachable" "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" 0 0 0 0 0 4 "directory endpoint did not respond"
+
+echo "[profile-compare-campaign-signoff] runtime gate diagnostics propagation and action precedence"
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_RUNTIME_GATE_BASE'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"}
+}
+EOF_DIAG_RUNTIME_GATE_BASE
+RUNTIME_GATE_PROP_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_runtime_gate_propagation.json"
+RUNTIME_GATE_PROP_CHECK="$DIAG_REPORTS_DIR/profile_compare_campaign_check_summary_runtime_gate_propagation.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+FAKE_CHECK_WRITE_RUNTIME_GATE=1 \
+FAKE_CHECK_RUNTIME_GATE_STATUS=fail \
+FAKE_CHECK_RUNTIME_GATE_SOURCE=explicit_campaign_summary \
+FAKE_CHECK_RUNTIME_GATE_REQUIRED=1 \
+FAKE_CHECK_RUNTIME_GATE_BLOCKING=1 \
+FAKE_CHECK_RUNTIME_GATE_ACTIONABLE_REASON='runtime gate action please rerun after fixing runtime evidence' \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$DIAG_REPORTS_DIR" \
+  --refresh-campaign 0 \
+  --campaign-summary-json "$DIAG_CAMPAIGN_JSON" \
+  --campaign-report-md "$DIAG_REPORT_MD" \
+  --campaign-check-summary-json "$RUNTIME_GATE_PROP_CHECK" \
+  --summary-json "$RUNTIME_GATE_PROP_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_runtime_gate_propagation.log 2>&1
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.next_operator_action == "runtime gate action please rerun after fixing runtime evidence" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.required == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.status == "fail" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.blocking == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.source == "explicit_campaign_summary" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.actionable_reason == "runtime gate action please rerun after fixing runtime evidence"' "$RUNTIME_GATE_PROP_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime gate diagnostics propagation assertion failed"
+  cat "$RUNTIME_GATE_PROP_SUMMARY"
+  exit 1
+fi
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_RUNTIME_GATE_PRECEDENCE'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "aggregated_diagnostics": {
+    "transport_mismatch_failures": 2,
+    "token_proof_invalid_failures": 0,
+    "unknown_exit_failures": 0,
+    "directory_trust_failures": 0
+  }
+}
+EOF_DIAG_RUNTIME_GATE_PRECEDENCE
+RUNTIME_GATE_PRECEDENCE_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_runtime_gate_precedence.json"
+RUNTIME_GATE_PRECEDENCE_CHECK="$DIAG_REPORTS_DIR/profile_compare_campaign_check_summary_runtime_gate_precedence.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+FAKE_CHECK_WRITE_RUNTIME_GATE=1 \
+FAKE_CHECK_RUNTIME_GATE_STATUS=fail \
+FAKE_CHECK_RUNTIME_GATE_SOURCE=explicit_campaign_summary \
+FAKE_CHECK_RUNTIME_GATE_REQUIRED=1 \
+FAKE_CHECK_RUNTIME_GATE_BLOCKING=1 \
+FAKE_CHECK_RUNTIME_GATE_ACTIONABLE_REASON='runtime gate reason should not override mapped diagnostics action' \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$DIAG_REPORTS_DIR" \
+  --refresh-campaign 0 \
+  --campaign-summary-json "$DIAG_CAMPAIGN_JSON" \
+  --campaign-report-md "$DIAG_REPORT_MD" \
+  --campaign-check-summary-json "$RUNTIME_GATE_PRECEDENCE_CHECK" \
+  --summary-json "$RUNTIME_GATE_PRECEDENCE_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_runtime_gate_precedence.log 2>&1
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.next_operator_action == "Rerun with remote docker campaign and opaque/udp transport defaults" and .decision.diagnostics.likely_primary_failure == "transport_mismatch" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.actionable_reason == "runtime gate reason should not override mapped diagnostics action"' "$RUNTIME_GATE_PRECEDENCE_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime gate action precedence assertion failed"
+  cat "$RUNTIME_GATE_PRECEDENCE_SUMMARY"
+  exit 1
+fi
 
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_campaign_signoff_forward.sh"
 cat >"$FAKE_FORWARD" <<'EOF_FORWARD'

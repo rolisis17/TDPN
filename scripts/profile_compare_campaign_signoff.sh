@@ -1508,6 +1508,7 @@ trend_source_value=""
 selection_policy_evidence_present="0"
 selection_policy_evidence_valid="0"
 decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
+campaign_check_gate_diagnostics_json='{"runtime_actuation_status_pass":{"available":false,"required":false,"status":"unknown","blocking":false,"source":null,"actionable_reason":null}}'
 next_operator_action=""
 campaign_check_summary_present=0
 if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
@@ -1519,6 +1520,21 @@ if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e
   trend_source_value="$(jq -r '.observed.trend_source // ""' "$campaign_check_summary_json")"
   selection_policy_evidence_present="$(jq -r 'if (.observed.selection_policy_evidence.present // false) then "1" else "0" end' "$campaign_check_summary_json" 2>/dev/null || printf '0')"
   selection_policy_evidence_valid="$(jq -r 'if (.observed.selection_policy_evidence.valid // false) then "1" else "0" end' "$campaign_check_summary_json" 2>/dev/null || printf '0')"
+  campaign_check_gate_diagnostics_candidate="$(jq -c '
+    {
+      runtime_actuation_status_pass: {
+        available: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass != null),
+        required: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.required // false),
+        status: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status // "unknown"),
+        blocking: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.blocking // false),
+        source: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source // null),
+        actionable_reason: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.actionable_reason // null)
+      }
+    }
+  ' "$campaign_check_summary_json" 2>/dev/null || true)"
+  if [[ -n "$campaign_check_gate_diagnostics_candidate" ]] && jq -e . >/dev/null 2>&1 <<<"$campaign_check_gate_diagnostics_candidate"; then
+    campaign_check_gate_diagnostics_json="$campaign_check_gate_diagnostics_candidate"
+  fi
 fi
 
 if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
@@ -1616,6 +1632,12 @@ case "$diagnostics_primary_failure" in
     fi
     ;;
 esac
+if [[ -z "$next_operator_action" ]]; then
+  runtime_gate_actionable_reason="$(jq -r '.runtime_actuation_status_pass.actionable_reason // ""' <<<"$campaign_check_gate_diagnostics_json" 2>/dev/null || printf '%s' "")"
+  if [[ -n "$runtime_gate_actionable_reason" ]]; then
+    next_operator_action="$runtime_gate_actionable_reason"
+  fi
+fi
 
 if ! is_non_negative_decimal "$support_rate_pct"; then
   support_rate_pct="0"
@@ -1737,6 +1759,7 @@ jq -n \
   --arg decision_context "$decision_context" \
   --arg decision_reason "$decision_reason" \
   --argjson decision_diagnostics "$decision_diagnostics_json" \
+  --argjson campaign_check_gate_diagnostics "$campaign_check_gate_diagnostics_json" \
   --arg next_operator_action "$next_operator_action" \
   --arg recommended_profile "$recommended_profile" \
   --arg support_rate_pct "$support_rate_pct" \
@@ -1965,6 +1988,7 @@ jq -n \
       reason: (if $decision_reason == "" then null else $decision_reason end),
       from_campaign_check_summary: ($campaign_check_summary_present == 1),
       diagnostics: $decision_diagnostics,
+      campaign_check_gate_diagnostics: $campaign_check_gate_diagnostics,
       next_operator_action: $next_operator_action,
       recommended_profile: $recommended_profile,
       support_rate_pct: ($support_rate_pct | tonumber),
