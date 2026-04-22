@@ -946,7 +946,7 @@ if ! jq -e '
   exit 1
 fi
 
-echo "[roadmap-progress-report] blockchain freshness fresh-vs-stale go behavior"
+echo "[roadmap-progress-report] blockchain freshness fresh-vs-stale go behavior (generated_at_utc support)"
 MINIMAL_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_minimal_summary_for_gate_tests.json"
 cat >"$MINIMAL_MANUAL_SUMMARY_JSON" <<'EOF_MINIMAL_SUMMARY_GATE'
 {"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"},"report":{"readiness_status":"NOT_READY"}}
@@ -958,6 +958,7 @@ current_epoch="$(date -u +%s)"
 fresh_epoch=$((current_epoch - 3600))
 stale_epoch=$((current_epoch - 172800))
 fresh_iso="$(date -u -d "@$fresh_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+stale_iso="$(date -u -d "@$stale_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 
 cat >"$FRESH_MAINNET_GATE_SUMMARY_JSON" <<EOF_FRESH_MAINNET
 {
@@ -994,7 +995,7 @@ cat >"$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" <<EOF_FRESH_BOOTSTRAP
     "major": 1,
     "minor": 0
   },
-  "generated_at": "$fresh_iso",
+  "generated_at_utc": "$fresh_iso",
   "status": "GO",
   "decision": {
     "pass": true,
@@ -1010,7 +1011,7 @@ cat >"$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" <<EOF_FRESH_BOOTSTRAP
 }
 EOF_FRESH_BOOTSTRAP
 
-cat >"$STALE_MAINNET_GATE_SUMMARY_JSON" <<'EOF_STALE_MAINNET'
+cat >"$STALE_MAINNET_GATE_SUMMARY_JSON" <<EOF_STALE_MAINNET
 {
   "version": 1,
   "schema": {
@@ -1018,6 +1019,7 @@ cat >"$STALE_MAINNET_GATE_SUMMARY_JSON" <<'EOF_STALE_MAINNET'
     "major": 1,
     "minor": 0
   },
+  "generated_at_utc": "$stale_iso",
   "status": "GO",
   "decision": {
     "pass": true,
@@ -1035,7 +1037,7 @@ cat >"$STALE_MAINNET_GATE_SUMMARY_JSON" <<'EOF_STALE_MAINNET'
   ]
 }
 EOF_STALE_MAINNET
-touch -d "@$stale_epoch" "$STALE_MAINNET_GATE_SUMMARY_JSON"
+touch "$STALE_MAINNET_GATE_SUMMARY_JSON"
 
 FRESH_SUMMARY_JSON="$TMP_DIR/roadmap_progress_mainnet_activation_gate_fresh_summary.json"
 FRESH_REPORT_MD="$TMP_DIR/roadmap_progress_mainnet_activation_gate_fresh_report.md"
@@ -1112,13 +1114,13 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
   exit 1
 fi
-if ! jq -e --arg stale_reason "stale activation evidence" '
+if ! jq -e --arg stale_reason "stale activation evidence" --arg stale_iso "$stale_iso" '
   .blockchain_track.mainnet_activation_gate.available == true
   and .blockchain_track.mainnet_activation_gate.status == "GO"
   and .blockchain_track.mainnet_activation_gate.decision == "GO"
   and .blockchain_track.mainnet_activation_gate.go == true
   and .blockchain_track.mainnet_activation_gate.no_go == false
-  and .blockchain_track.mainnet_activation_gate.summary_generated_at == null
+  and .blockchain_track.mainnet_activation_gate.summary_generated_at == $stale_iso
   and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) >= 172800
   and .blockchain_track.mainnet_activation_gate.summary_stale == true
   and .blockchain_track.mainnet_activation_gate.summary_max_age_sec == 86400
@@ -1165,6 +1167,78 @@ fi
 if ! rg -q 'blockchain_recommended_gate_id=blockchain_mainnet_activation_refresh_evidence' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
   echo "stale blockchain freshness log missing recommended gate line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] blockchain freshness invalid generated_at_utc is fail-closed despite fresh mtime"
+INVALID_MAINNET_GATE_SUMMARY_JSON="$TMP_DIR/blockchain_mainnet_activation_gate_invalid_generated_at_utc_summary.json"
+cat >"$INVALID_MAINNET_GATE_SUMMARY_JSON" <<'EOF_INVALID_MAINNET'
+{
+  "version": 1,
+  "schema": {
+    "id": "mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "not-a-real-utc-timestamp",
+  "status": "GO",
+  "decision": {
+    "pass": true,
+    "go": true,
+    "no_go": false,
+    "reasons": [
+      "invalid generated_at_utc fixture"
+    ]
+  },
+  "reasons": [
+    "invalid generated_at_utc fixture"
+  ],
+  "source_paths": [
+    "./artifacts/blockchain/mainnet-activation-metrics/metrics.json"
+  ]
+}
+EOF_INVALID_MAINNET
+touch "$INVALID_MAINNET_GATE_SUMMARY_JSON"
+
+INVALID_SUMMARY_JSON="$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_generated_at_utc_summary.json"
+INVALID_REPORT_MD="$TMP_DIR/roadmap_progress_mainnet_activation_gate_invalid_generated_at_utc_report.md"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "" \
+  --blockchain-mainnet-activation-gate-summary-json "$INVALID_MAINNET_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$FRESH_BOOTSTRAP_GATE_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$INVALID_SUMMARY_JSON" \
+  --report-md "$INVALID_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log 2>&1; then
+  echo "expected success for invalid generated_at_utc blockchain freshness summary"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log
+  exit 1
+fi
+if ! jq -e '
+  .blockchain_track.mainnet_activation_gate.available == true
+  and .blockchain_track.mainnet_activation_gate.status == "GO"
+  and .blockchain_track.mainnet_activation_gate.decision == "GO"
+  and .blockchain_track.mainnet_activation_gate.go == true
+  and .blockchain_track.mainnet_activation_gate.no_go == false
+  and .blockchain_track.mainnet_activation_stale_evidence.status != "fresh"
+  and (
+    .blockchain_track.mainnet_activation_stale_evidence.status == "stale"
+    or .blockchain_track.mainnet_activation_stale_evidence.status == "unknown"
+  )
+  and .blockchain_track.mainnet_activation_stale_evidence.action_required == true
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.available == true
+  and .blockchain_track.mainnet_activation_refresh_evidence_action.id == "blockchain_mainnet_activation_refresh_evidence"
+  and .blockchain_track.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
+  and ((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence"))
+' "$INVALID_SUMMARY_JSON" >/dev/null; then
+  echo "invalid generated_at_utc blockchain freshness summary missing fail-closed refresh-action fields"
+  cat "$INVALID_SUMMARY_JSON"
   exit 1
 fi
 
@@ -5237,18 +5311,20 @@ fi
 
 : >"$CAPTURE"
 
-echo "[roadmap-progress-report] multi-VM promotion stale summary is fail-closed"
+echo "[roadmap-progress-report] multi-VM promotion stale generated_at_utc takes precedence over fresh mtime"
 PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_promotion_stale_summary.json"
-cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY'
+stale_multi_vm_promotion_generated_at_epoch=$(( $(date -u +%s) - 172800 ))
+stale_multi_vm_promotion_generated_at_iso="$(date -u -d "@$stale_multi_vm_promotion_generated_at_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON" <<EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY
 {
   "version": 1,
   "schema": {
     "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
   },
+  "generated_at_utc": "$stale_multi_vm_promotion_generated_at_iso",
   "status": "pass",
   "rc": 0,
   "decision": "GO",
-  "stale": true,
   "promotion": {
     "summary_exists": true,
     "summary_valid_json": true,
@@ -5259,6 +5335,7 @@ cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON" <<'EOF_P
   }
 }
 EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY
+touch "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMARY_JSON"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -5287,6 +5364,60 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_STALE_SUMMAR
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_stale_summary.json" >/dev/null; then
   echo "multi-VM promotion stale fail-closed summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_stale_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] multi-VM promotion invalid generated_at_utc is fail-closed despite fresh mtime"
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY_JSON="$TMP_DIR/profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY_JSON" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "generated_at_utc": "definitely-not-utc",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "GO",
+    "status": "pass",
+    "rc": 0
+  }
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY
+touch "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc.log 2>&1; then
+  echo "expected success for multi-VM promotion invalid generated_at_utc fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc.log
+  exit 1
+fi
+if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_INVALID_TS_SUMMARY_JSON" '
+  .vpn_track.multi_vm_stability_promotion.input_summary_json == $src
+  and .vpn_track.multi_vm_stability_promotion.available == false
+  and .vpn_track.multi_vm_stability_promotion.source_summary_json == null
+  and .vpn_track.multi_vm_stability_promotion.status == "missing"
+  and .vpn_track.multi_vm_stability_promotion.decision == null
+  and .vpn_track.multi_vm_stability_promotion.go == null
+  and .vpn_track.multi_vm_stability_promotion.no_go == null
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion == "missing"
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
+  and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("promotion-check")) | not)
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc_summary.json" >/dev/null; then
+  echo "multi-VM promotion invalid generated_at_utc fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_promotion_invalid_generated_at_utc_summary.json"
   exit 1
 fi
 
@@ -6643,17 +6774,20 @@ if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_status=fail 
   exit 1
 fi
 
-echo "[roadmap-progress-report] runtime-actuation stale latest alias candidate is fail-closed"
+echo "[roadmap-progress-report] runtime-actuation stale generated_at_utc latest-alias candidate is fail-closed"
 RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR="$TMP_DIR/runtime_actuation_stale_alias_reports"
 RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_LOG_DIR="$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR/isolated_logs"
 mkdir -p "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR" "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_LOG_DIR"
 RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON="$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
-cat >"$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS'
+stale_runtime_actuation_generated_at_epoch=$(( $(date -u +%s) - 172800 ))
+stale_runtime_actuation_generated_at_iso="$(date -u -d "@$stale_runtime_actuation_generated_at_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON" <<EOF_RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS
 {
   "version": 1,
   "schema": {
     "id": "runtime_actuation_promotion_check_summary"
   },
+  "generated_at_utc": "$stale_runtime_actuation_generated_at_iso",
   "status": "pass",
   "rc": 0,
   "decision": "GO",
@@ -6661,8 +6795,7 @@ cat >"$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON" <<'EOF_RUNTIME_ACTUATION_PR
   "no_go": false
 }
 EOF_RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS
-stale_runtime_actuation_epoch=$(( $(date -u +%s) - 172800 ))
-touch -d "@$stale_runtime_actuation_epoch" "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON"
+touch "$RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_JSON"
 RUNTIME_ACTUATION_PROMOTION_STALE_ALIAS_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_stale_alias_summary.json"
 jq --arg rel "runtime_actuation_stale_alias_reports/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json" '
   .summary = (
@@ -6706,6 +6839,72 @@ fi
 if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log; then
   echo "expected runtime-actuation stale latest-alias fail-closed availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation invalid generated_at_utc latest-alias candidate is fail-closed"
+RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_REPORTS_DIR="$TMP_DIR/runtime_actuation_invalid_generated_at_utc_alias_reports"
+RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_LOG_DIR="$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_REPORTS_DIR/isolated_logs"
+mkdir -p "$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_REPORTS_DIR" "$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_LOG_DIR"
+RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_JSON="$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_REPORTS_DIR/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_check_summary"
+  },
+  "generated_at_utc": "bad-timestamp-value",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS
+touch "$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_JSON"
+RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_invalid_generated_at_utc_alias_summary.json"
+jq --arg rel "runtime_actuation_invalid_generated_at_utc_alias_reports/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_cycle: {
+        latest_aliases: {
+          promotion_check_summary_json: $rel
+        }
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_MANUAL_SUMMARY_JSON"
+
+if ! ROADMAP_PROGRESS_LOG_DIR="$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_LOG_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_PROMOTION_INVALID_TS_ALIAS_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_invalid_generated_at_utc_alias_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_invalid_generated_at_utc_alias_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log 2>&1; then
+  echo "expected success for runtime-actuation invalid generated_at_utc latest-alias fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.runtime_actuation_promotion.available == false
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == null
+  and .vpn_track.runtime_actuation_promotion.status == "missing"
+  and .vpn_track.runtime_actuation_promotion.decision == null
+  and .vpn_track.runtime_actuation_promotion.go == null
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "missing"
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-cycle"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_invalid_generated_at_utc_alias_summary.json" >/dev/null; then
+  echo "runtime-actuation invalid generated_at_utc latest-alias fail-closed summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_invalid_generated_at_utc_alias_summary.json"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log; then
+  echo "expected runtime-actuation invalid generated_at_utc latest-alias fail-closed availability log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log
   exit 1
 fi
 

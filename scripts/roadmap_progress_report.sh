@@ -162,10 +162,63 @@ json_file_valid_01() {
   fi
 }
 
+json_first_string_field_from_path() {
+  local path="$1"
+  shift || true
+  local field=""
+  local value=""
+
+  if [[ -z "$path" || ! -f "$path" ]] || ! jq -e . "$path" >/dev/null 2>&1; then
+    printf '%s' ""
+    return
+  fi
+
+  for field in "$@"; do
+    value="$(jq -r --arg field "$field" '
+      .[$field]
+      | if type == "string" then . else "" end
+    ' "$path" 2>/dev/null || true)"
+    value="$(trim "$value")"
+    if [[ "$value" == "null" ]]; then
+      value=""
+    fi
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return
+    fi
+  done
+
+  printf '%s' ""
+}
+
+timestamp_epoch_utc_or_empty() {
+  local timestamp
+  local epoch=""
+  timestamp="$(trim "${1:-}")"
+  if [[ -z "$timestamp" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?([Zz]|[+]00:00|[+]0000|[+]00)$ ]]; then
+    printf '%s' ""
+    return
+  fi
+  if epoch="$(date -u -d "$timestamp" +%s 2>/dev/null)" && [[ "$epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$epoch"
+    return
+  fi
+  printf '%s' ""
+}
+
 summary_age_sec_from_path() {
   local path="$1"
   local now_epoch=""
-  local mtime_epoch=""
+  local reference_epoch=""
+  local known_timestamp_present="0"
+  local known_timestamp_invalid="0"
+  local timestamp_field=""
+  local timestamp_raw=""
+  local timestamp_epoch=""
   local age_sec=""
 
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -174,13 +227,47 @@ summary_age_sec_from_path() {
   fi
 
   now_epoch="$(date -u +%s)"
-  mtime_epoch="$(file_mtime_epoch "$path")"
-  if [[ ! "$now_epoch" =~ ^[0-9]+$ || ! "$mtime_epoch" =~ ^[0-9]+$ ]]; then
+  if [[ ! "$now_epoch" =~ ^[0-9]+$ ]]; then
     printf '%s' ""
     return
   fi
 
-  age_sec="$((now_epoch - mtime_epoch))"
+  for timestamp_field in generated_at_utc generated_at summary_generated_at_utc summary_generated_at; do
+    if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
+      known_timestamp_present="1"
+      timestamp_raw="$(jq -r --arg field "$timestamp_field" '
+        .[$field]
+        | if type == "string" then . else "" end
+      ' "$path" 2>/dev/null || true)"
+      timestamp_raw="$(trim "$timestamp_raw")"
+      timestamp_epoch="$(timestamp_epoch_utc_or_empty "$timestamp_raw")"
+      if [[ -n "$timestamp_epoch" ]]; then
+        if [[ -z "$reference_epoch" ]]; then
+          reference_epoch="$timestamp_epoch"
+        fi
+      else
+        known_timestamp_invalid="1"
+      fi
+    fi
+  done
+
+  if [[ "$known_timestamp_invalid" == "1" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$known_timestamp_present" != "1" ]]; then
+    reference_epoch="$(file_mtime_epoch "$path")"
+  fi
+  if [[ -z "$reference_epoch" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ ! "$reference_epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  age_sec="$((now_epoch - reference_epoch))"
   if (( age_sec < 0 )); then
     age_sec=0
   fi
@@ -1322,7 +1409,13 @@ profile_compare_multi_vm_stability_promotion_summary_stale_01() {
     max_age_sec=86400
   fi
   age_sec="$(summary_age_sec_from_path "$path")"
-  if [[ "$age_sec" =~ ^[0-9]+$ ]] && (( age_sec > max_age_sec )); then
+  if [[ "$age_sec" =~ ^[0-9]+$ ]]; then
+    if (( age_sec > max_age_sec )); then
+      printf '1'
+      return
+    fi
+  else
+    # Fail closed when summary age cannot be computed.
     printf '1'
     return
   fi
@@ -1409,7 +1502,13 @@ runtime_actuation_promotion_summary_stale_01() {
     max_age_sec=86400
   fi
   age_sec="$(summary_age_sec_from_path "$path")"
-  if [[ "$age_sec" =~ ^[0-9]+$ ]] && (( age_sec > max_age_sec )); then
+  if [[ "$age_sec" =~ ^[0-9]+$ ]]; then
+    if (( age_sec > max_age_sec )); then
+      printf '1'
+      return
+    fi
+  else
+    # Fail closed when summary age cannot be computed.
     printf '1'
     return
   fi
@@ -4265,21 +4364,41 @@ blockchain_gate_summary_freshness_fields() {
   local age_sec=""
   local stale="null"
   local now_epoch=""
+  local known_timestamp_present="0"
+  local known_timestamp_invalid="0"
+  local timestamp_field=""
+  local timestamp_raw=""
+  local timestamp_epoch=""
 
   if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
-    generated_at="$(jq -r '.generated_at // ""' "$path" 2>/dev/null || true)"
-    if [[ "$generated_at" == "null" ]]; then
-      generated_at=""
-    fi
-    if [[ -n "$generated_at" ]]; then
-      reference_epoch="$(date -u -d "$generated_at" +%s 2>/dev/null || true)"
-      if ! [[ "$reference_epoch" =~ ^[0-9]+$ ]]; then
-        reference_epoch=""
+    for timestamp_field in generated_at_utc generated_at; do
+      if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
+        known_timestamp_present="1"
+        timestamp_raw="$(jq -r --arg field "$timestamp_field" '
+          .[$field]
+          | if type == "string" then . else "" end
+        ' "$path" 2>/dev/null || true)"
+        timestamp_raw="$(trim "$timestamp_raw")"
+        if [[ -z "$generated_at" && -n "$timestamp_raw" ]]; then
+          generated_at="$timestamp_raw"
+        fi
+        timestamp_epoch="$(timestamp_epoch_utc_or_empty "$timestamp_raw")"
+        if [[ -n "$timestamp_epoch" ]]; then
+          if [[ -z "$reference_epoch" ]]; then
+            reference_epoch="$timestamp_epoch"
+          fi
+        else
+          known_timestamp_invalid="1"
+        fi
       fi
-    fi
+    done
   fi
 
-  if [[ -z "$reference_epoch" ]]; then
+  if [[ "$known_timestamp_invalid" == "1" ]]; then
+    reference_epoch=""
+  fi
+
+  if [[ -z "$reference_epoch" && "$known_timestamp_present" != "1" ]]; then
     reference_epoch="$(file_mtime_epoch "$path")"
     if ! [[ "$reference_epoch" =~ ^[0-9]+$ ]] || [[ "$reference_epoch" == "0" ]]; then
       reference_epoch=""
