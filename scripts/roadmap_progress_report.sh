@@ -217,6 +217,7 @@ summary_age_sec_from_path() {
   local known_timestamp_present="0"
   local known_timestamp_invalid="0"
   local timestamp_field=""
+  local timestamp_type=""
   local timestamp_raw=""
   local timestamp_epoch=""
   local age_sec=""
@@ -235,11 +236,20 @@ summary_age_sec_from_path() {
   for timestamp_field in generated_at_utc generated_at summary_generated_at_utc summary_generated_at; do
     if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
       known_timestamp_present="1"
+      timestamp_type="$(jq -r --arg field "$timestamp_field" '.[$field] | type' "$path" 2>/dev/null || true)"
+      if [[ "$timestamp_type" != "string" ]]; then
+        known_timestamp_invalid="1"
+        continue
+      fi
       timestamp_raw="$(jq -r --arg field "$timestamp_field" '
         .[$field]
         | if type == "string" then . else "" end
       ' "$path" 2>/dev/null || true)"
       timestamp_raw="$(trim "$timestamp_raw")"
+      if [[ -z "$timestamp_raw" ]]; then
+        known_timestamp_invalid="1"
+        continue
+      fi
       timestamp_epoch="$(timestamp_epoch_utc_or_empty "$timestamp_raw")"
       if [[ -n "$timestamp_epoch" ]]; then
         if [[ -z "$reference_epoch" ]]; then
@@ -1351,27 +1361,54 @@ profile_compare_multi_vm_stability_promotion_summary_usable_01() {
     return
   fi
   if jq -e '
+    def norm_decision:
+      ascii_upcase | gsub("[[:space:]_-]"; "");
+    def decision_allowed:
+      ((. | norm_decision) == "GO")
+      or ((. | norm_decision) == "NOGO")
+      or ((. | norm_decision) == "PENDING");
+    def norm_status:
+      ascii_downcase | gsub("[[:space:]_-]"; "");
+    def status_allowed:
+      ((. | norm_status) == "ok")
+      or ((. | norm_status) == "pass")
+      or ((. | norm_status) == "fail")
+      or ((. | norm_status) == "warn")
+      or ((. | norm_status) == "pending")
+      or ((. | norm_status) == "go")
+      or ((. | norm_status) == "nogo")
+      or ((. | norm_status) == "runtimefail");
+    def schema_id:
+      (.schema.id // "");
     (.version == 1)
     and ((.decision | type) == "string")
     and ((.status | type) == "string")
+    and (.decision | decision_allowed)
+    and (.status | status_allowed)
     and (
-      (.schema == null)
-      or (
-        (.schema | type) == "object"
-        and (
-          ((.schema.id // "") == "profile_compare_multi_vm_stability_promotion_check_summary")
-          or ((.schema.id // "") == "profile_compare_multi_vm_stability_promotion_summary")
-          or ((.schema.id // "") == "profile_compare_multi_vm_stability_promotion_cycle_summary")
+      if (.schema == null) then
+        true
+      elif (.schema | type) == "object" then
+        (
+          (schema_id == "profile_compare_multi_vm_stability_promotion_check_summary")
+          or (schema_id == "profile_compare_multi_vm_stability_promotion_summary")
+          or (schema_id == "profile_compare_multi_vm_stability_promotion_cycle_summary")
         )
-      )
+      else
+        false
+      end
     )
     and (
-      if ((.schema.id // "") == "profile_compare_multi_vm_stability_promotion_cycle_summary") then
+      if (schema_id == "profile_compare_multi_vm_stability_promotion_cycle_summary") then
         ((.promotion.summary_exists // false) == true)
         and ((.promotion.summary_valid_json // false) == true)
         and ((.promotion.summary_fresh // false) == true)
         and ((.promotion.decision | type) == "string")
         and ((.promotion.status | type) == "string")
+        and (.promotion.decision | decision_allowed)
+        and (.promotion.status | status_allowed)
+        and ((.promotion.decision | norm_decision) == (.decision | norm_decision))
+        and ((.promotion.status | norm_status) == (.status | norm_status))
       else
         true
       end
@@ -1523,23 +1560,46 @@ runtime_actuation_promotion_summary_usable_01() {
     return
   fi
   if jq -e '
+    def norm_decision:
+      ascii_upcase | gsub("[[:space:]_-]"; "");
+    def decision_allowed:
+      ((. | norm_decision) == "GO")
+      or ((. | norm_decision) == "NOGO")
+      or ((. | norm_decision) == "PENDING");
+    def norm_status:
+      ascii_downcase | gsub("[[:space:]_-]"; "");
+    def status_allowed:
+      ((. | norm_status) == "ok")
+      or ((. | norm_status) == "pass")
+      or ((. | norm_status) == "fail")
+      or ((. | norm_status) == "warn")
+      or ((. | norm_status) == "pending")
+      or ((. | norm_status) == "go")
+      or ((. | norm_status) == "nogo")
+      or ((. | norm_status) == "runtimefail");
+    def schema_id:
+      (.schema.id // "");
     (.version == 1)
     and ((.decision | type) == "string")
     and ((.status | type) == "string")
+    and (.decision | decision_allowed)
+    and (.status | status_allowed)
     and (
-      (.schema == null)
-      or (
-        (.schema | type) == "object"
-        and (
-          ((.schema.id // "") == "runtime_actuation_promotion_check_summary")
-          or ((.schema.id // "") == "runtime_actuation_promotion_summary")
-          or ((.schema.id // "") == "profile_default_gate_runtime_actuation_promotion_check_summary")
-          or ((.schema.id // "") == "runtime_actuation_promotion_cycle_summary")
+      if (.schema == null) then
+        true
+      elif (.schema | type) == "object" then
+        (
+          (schema_id == "runtime_actuation_promotion_check_summary")
+          or (schema_id == "runtime_actuation_promotion_summary")
+          or (schema_id == "profile_default_gate_runtime_actuation_promotion_check_summary")
+          or (schema_id == "runtime_actuation_promotion_cycle_summary")
         )
-      )
+      else
+        false
+      end
     )
     and (
-      if ((.schema.id // "") == "runtime_actuation_promotion_cycle_summary") then
+      if (schema_id == "runtime_actuation_promotion_cycle_summary") then
         ((.stages.promotion_check.summary_exists // false) == true)
         and ((.stages.promotion_check.summary_valid_json // false) == true)
         and ((.stages.promotion_check.summary_fresh // false) == true)
@@ -1547,6 +1607,10 @@ runtime_actuation_promotion_summary_usable_01() {
         and ((.promotion_check.status | type) == "string")
         and ((.promotion_check.decision | type) == "string")
         and ((.promotion_check.rc | type) == "number")
+        and (.promotion_check.decision | decision_allowed)
+        and (.promotion_check.status | status_allowed)
+        and ((.promotion_check.decision | norm_decision) == (.decision | norm_decision))
+        and ((.promotion_check.status | norm_status) == (.status | norm_status))
       else
         true
       end
@@ -4368,6 +4432,7 @@ blockchain_gate_summary_freshness_fields() {
   local known_timestamp_present="0"
   local known_timestamp_invalid="0"
   local timestamp_field=""
+  local timestamp_type=""
   local timestamp_raw=""
   local timestamp_epoch=""
 
@@ -4375,11 +4440,20 @@ blockchain_gate_summary_freshness_fields() {
     for timestamp_field in generated_at_utc generated_at summary_generated_at_utc summary_generated_at; do
       if jq -e --arg field "$timestamp_field" 'has($field)' "$path" >/dev/null 2>&1; then
         known_timestamp_present="1"
+        timestamp_type="$(jq -r --arg field "$timestamp_field" '.[$field] | type' "$path" 2>/dev/null || true)"
+        if [[ "$timestamp_type" != "string" ]]; then
+          known_timestamp_invalid="1"
+          continue
+        fi
         timestamp_raw="$(jq -r --arg field "$timestamp_field" '
           .[$field]
           | if type == "string" then . else "" end
         ' "$path" 2>/dev/null || true)"
         timestamp_raw="$(trim "$timestamp_raw")"
+        if [[ -z "$timestamp_raw" ]]; then
+          known_timestamp_invalid="1"
+          continue
+        fi
         if [[ -z "$generated_at" && -n "$timestamp_raw" ]]; then
           generated_at="$timestamp_raw"
         fi
@@ -4508,10 +4582,12 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
   local candidate=""
   local candidate_age_sec=0
   local candidate_has_age=0
+  local candidate_mtime=0
   local candidate_preferred=1
   local best_path=""
   local best_age_sec=0
   local best_has_age=-1
+  local best_mtime=-1
   local best_preferred=-1
   logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
@@ -4532,6 +4608,10 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
       candidate_has_age=0
       candidate_age_sec=0
     fi
+    candidate_mtime="$(file_mtime_epoch "$candidate")"
+    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
+      candidate_mtime=0
+    fi
     candidate_preferred=1
     if [[ "$(blockchain_gate_candidate_missing_metrics_no_go_01 "$candidate")" == "1" ]]; then
       candidate_preferred=0
@@ -4543,21 +4623,28 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
       best_preferred="$candidate_preferred"
       best_has_age="$candidate_has_age"
       best_age_sec="$candidate_age_sec"
+      best_mtime="$candidate_mtime"
       best_path="$candidate"
     elif (( candidate_preferred == best_preferred )); then
       if (( candidate_has_age > best_has_age )); then
         best_has_age="$candidate_has_age"
         best_age_sec="$candidate_age_sec"
+        best_mtime="$candidate_mtime"
         best_path="$candidate"
       elif (( candidate_has_age == best_has_age )); then
         if (( candidate_has_age == 1 )); then
           if (( candidate_age_sec < best_age_sec )); then
             best_age_sec="$candidate_age_sec"
+            best_mtime="$candidate_mtime"
             best_path="$candidate"
           elif (( candidate_age_sec == best_age_sec )) && [[ "$candidate" > "$best_path" ]]; then
+            best_mtime="$candidate_mtime"
             best_path="$candidate"
           fi
-        elif [[ "$candidate" > "$best_path" ]]; then
+        elif (( candidate_mtime > best_mtime )); then
+          best_mtime="$candidate_mtime"
+          best_path="$candidate"
+        elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
           best_path="$candidate"
         fi
       fi
@@ -4738,10 +4825,12 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
   local candidate=""
   local candidate_age_sec=0
   local candidate_has_age=0
+  local candidate_mtime=0
   local candidate_preferred=1
   local best_path=""
   local best_age_sec=0
   local best_has_age=-1
+  local best_mtime=-1
   local best_preferred=-1
   logs_root="$(roadmap_resilience_logs_root)"
   if [[ ! -d "$logs_root" ]]; then
@@ -4762,6 +4851,10 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
       candidate_has_age=0
       candidate_age_sec=0
     fi
+    candidate_mtime="$(file_mtime_epoch "$candidate")"
+    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
+      candidate_mtime=0
+    fi
     candidate_preferred=1
     if [[ "$(blockchain_gate_candidate_missing_metrics_no_go_01 "$candidate")" == "1" ]]; then
       candidate_preferred=0
@@ -4770,21 +4863,28 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
       best_preferred="$candidate_preferred"
       best_has_age="$candidate_has_age"
       best_age_sec="$candidate_age_sec"
+      best_mtime="$candidate_mtime"
       best_path="$candidate"
     elif (( candidate_preferred == best_preferred )); then
       if (( candidate_has_age > best_has_age )); then
         best_has_age="$candidate_has_age"
         best_age_sec="$candidate_age_sec"
+        best_mtime="$candidate_mtime"
         best_path="$candidate"
       elif (( candidate_has_age == best_has_age )); then
         if (( candidate_has_age == 1 )); then
           if (( candidate_age_sec < best_age_sec )); then
             best_age_sec="$candidate_age_sec"
+            best_mtime="$candidate_mtime"
             best_path="$candidate"
           elif (( candidate_age_sec == best_age_sec )) && [[ "$candidate" > "$best_path" ]]; then
+            best_mtime="$candidate_mtime"
             best_path="$candidate"
           fi
-        elif [[ "$candidate" > "$best_path" ]]; then
+        elif (( candidate_mtime > best_mtime )); then
+          best_mtime="$candidate_mtime"
+          best_path="$candidate"
+        elif (( candidate_mtime == best_mtime )) && [[ "$candidate" > "$best_path" ]]; then
           best_path="$candidate"
         fi
       fi
@@ -8540,7 +8640,7 @@ runtime_actuation_promotion_no_go_json="null"
 runtime_actuation_promotion_reasons_json='[]'
 runtime_actuation_promotion_notes_json=""
 runtime_actuation_promotion_needs_attention_json="true"
-runtime_actuation_promotion_next_command="./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --cycles 3 --fail-on-no-go 0 --summary-json .easy-node-logs/runtime_actuation_promotion_cycle_latest_summary.json --print-summary-json 1"
+runtime_actuation_promotion_next_command="./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --cycles 3 --fail-on-no-go 1 --summary-json .easy-node-logs/runtime_actuation_promotion_cycle_latest_summary.json --print-summary-json 1"
 runtime_actuation_promotion_next_command_reason="runtime-actuation promotion evidence is missing; run promotion cycle to produce fresh fail-closed GO/NO-GO evidence"
 if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
    && [[ "$(runtime_actuation_promotion_summary_usable_01 "$runtime_actuation_promotion_summary_json")" == "1" ]]; then
@@ -9353,9 +9453,16 @@ elif [[ "$manual_refresh_status" == "warn" || "$single_machine_refresh_status" =
 elif [[ "$readiness_status" != "READY" ]]; then
   final_status="warn"
   notes="VPN production signoff is still pending external real-host gates."
+elif [[ "$profile_default_gate_needs_attention_json" == "true" ]] \
+  && [[ "$runtime_actuation_promotion_needs_attention_json" == "true" ]]; then
+  final_status="warn"
+  notes="Core roadmap gates are healthy, but optional profile-default and runtime-actuation promotion gates still need attention."
 elif [[ "$profile_default_gate_needs_attention_json" == "true" ]]; then
   final_status="warn"
   notes="Core roadmap gates are healthy, but optional profile-default gate still needs attention."
+elif [[ "$runtime_actuation_promotion_needs_attention_json" == "true" ]]; then
+  final_status="warn"
+  notes="Core roadmap gates are healthy, but optional runtime-actuation promotion gate still needs attention."
 fi
 
 summary_payload="$(jq -n \

@@ -346,7 +346,7 @@ function Ensure-PolicyBypassProcess {
   if ([string]::IsNullOrWhiteSpace($effectivePolicy)) {
     $effectivePolicy = "Unknown"
   }
-  $isPolicyRisk = $effectivePolicy.Equals("Restricted", [System.StringComparison]::OrdinalIgnoreCase) -or $effectivePolicy.Equals("AllSigned", [System.StringComparison]::OrdinalIgnoreCase)
+  $isPolicyRisk = Test-ExecutionPolicyRisk -EffectivePolicy $effectivePolicy
   $rerunCommand = Get-ProcessBypassRerunCommand
 
   if ($null -ne $script:BootstrapSummary) {
@@ -361,7 +361,7 @@ function Ensure-PolicyBypassProcess {
       Write-Step ("execution policy risk detected: effective_policy={0}" -f $effectivePolicy)
       Write-Step "execution policy may block direct .ps1 invocations in this shell."
     } else {
-      Write-Step ("execution policy unchanged for current process (effective_policy={0}; pass -EnablePolicyBypass to opt in)" -f $effectivePolicy)
+      Write-Step ("execution policy unchanged for current process (effective_policy={0})" -f $effectivePolicy)
     }
     Write-Step ("rerun in this shell with process-scope bypass: {0}" -f $rerunCommand)
     return
@@ -379,6 +379,21 @@ function Ensure-PolicyBypassProcess {
       $script:BootstrapSummary.execution_policy_process_state = "BypassSetFailed"
     }
   }
+}
+
+function Test-ExecutionPolicyRisk {
+  param(
+    [AllowEmptyString()]
+    [string]$EffectivePolicy
+  )
+
+  $policy = [string]$EffectivePolicy
+  if ([string]::IsNullOrWhiteSpace($policy)) {
+    return $false
+  }
+
+  return $policy.Equals("Restricted", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $policy.Equals("AllSigned", [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Resolve-GitBashPath {
@@ -1623,10 +1638,7 @@ function Invoke-LocalApiForeground {
   )
 
   $scriptPath = Join-Path $RepoRootPath "scripts\windows\local_api_session.ps1"
-  $args = @("-NoProfile")
-  if ($EnablePolicyBypass) {
-    $args += @("-ExecutionPolicy", "Bypass")
-  }
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass")
   $args += @("-File", $scriptPath, "-ApiAddr", $Addr)
   if (-not [string]::IsNullOrWhiteSpace($RunnerPath)) {
     $args += @("-CommandRunner", $RunnerPath)
@@ -1653,10 +1665,7 @@ function Start-LocalApiBackgroundWindow {
   )
 
   $scriptPath = Join-Path $RepoRootPath "scripts\windows\local_api_session.ps1"
-  $args = @("-NoProfile")
-  if ($EnablePolicyBypass) {
-    $args += @("-ExecutionPolicy", "Bypass")
-  }
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass")
   $args += @("-File", $scriptPath, "-ApiAddr", $Addr)
   if (-not [string]::IsNullOrWhiteSpace($RunnerPath)) {
     $args += @("-CommandRunner", $RunnerPath)

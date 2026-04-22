@@ -140,11 +140,26 @@ function Get-ExecutionPolicySnapshot {
   }
 }
 
+function Test-ExecutionPolicyRisk {
+  param(
+    [AllowEmptyString()]
+    [string]$EffectivePolicy
+  )
+
+  $policy = [string]$EffectivePolicy
+  if ([string]::IsNullOrWhiteSpace($policy)) {
+    return $false
+  }
+
+  return $policy.Equals("Restricted", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $policy.Equals("AllSigned", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Show-ExecutionPolicyStatus {
   $snapshot = Get-ExecutionPolicySnapshot
   Write-Step ("execution policy: effective={0}; process={1}; current_user={2}; local_machine={3}" -f $snapshot.effective, $snapshot.scopes.Process, $snapshot.scopes.CurrentUser, $snapshot.scopes.LocalMachine)
 
-  if ($snapshot.effective -notin @("Bypass", "Unrestricted")) {
+  if (Test-ExecutionPolicyRisk -EffectivePolicy $snapshot.effective) {
     Write-Step "execution policy risk detected: effective_policy=$($snapshot.effective)"
     Write-Step "rerun in this shell with process-scope bypass:"
     Write-Host "  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force"

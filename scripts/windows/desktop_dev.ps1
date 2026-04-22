@@ -104,10 +104,7 @@ if ($shouldEnablePolicyBypass) {
   $invokeArgs += "-EnablePolicyBypass"
 }
 
-$bootstrapLaunchArgs = @("-NoLogo", "-NoProfile")
-if ($shouldEnablePolicyBypass) {
-  $bootstrapLaunchArgs += @("-ExecutionPolicy", "Bypass")
-}
+$bootstrapLaunchArgs = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass")
 $bootstrapLaunchArgs += @("-File", $bootstrapScript)
 $bootstrapLaunchArgs += $invokeArgs
 

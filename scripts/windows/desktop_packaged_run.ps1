@@ -446,10 +446,7 @@ if ($null -ne $PrintDoctorSummaryJson) {
   $doctorInvokeArgs += @("-PrintSummaryJson", ([string]$PrintDoctorSummaryJson))
 }
 
-$doctorLaunchArgs = @("-NoLogo", "-NoProfile")
-if ($shouldEnablePolicyBypass) {
-  $doctorLaunchArgs += @("-ExecutionPolicy", "Bypass")
-}
+$doctorLaunchArgs = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass")
 $doctorLaunchArgs += @("-File", $doctorScript)
 $doctorLaunchArgs += $doctorInvokeArgs
 
@@ -467,7 +464,7 @@ if ($doctorExitCode -ne 0) {
     -InstallMissingIntent $installMissingIntent `
     -ApiAddress $ApiAddr `
     -Runner $CommandRunner `
-    -PolicyBypassEnabled $shouldEnablePolicyBypass `
+    -PolicyBypassEnabled $true `
     -ResolvedDesktopExecutablePath $resolvedDesktopExecutablePath `
     -ResolvedDesktopExecutableSource $resolvedDesktopExecutableSource `
     -FailureStage $failureStage `
@@ -509,10 +506,7 @@ if (-not [string]::IsNullOrWhiteSpace($CommandRunner)) {
   $bootstrapInvokeArgs += @("-CommandRunner", $CommandRunner)
 }
 
-$bootstrapLaunchArgs = @("-NoLogo", "-NoProfile")
-if ($shouldEnablePolicyBypass) {
-  $bootstrapLaunchArgs += @("-ExecutionPolicy", "Bypass")
-}
+$bootstrapLaunchArgs = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass")
 $bootstrapLaunchArgs += @("-File", $bootstrapScript)
 $bootstrapLaunchArgs += $bootstrapInvokeArgs
 
@@ -532,7 +526,7 @@ Write-PackagedRunSummary `
   -InstallMissingIntent $installMissingIntent `
   -ApiAddress $ApiAddr `
   -Runner $CommandRunner `
-  -PolicyBypassEnabled $shouldEnablePolicyBypass `
+  -PolicyBypassEnabled $true `
   -ResolvedDesktopExecutablePath $resolvedDesktopExecutablePath `
   -ResolvedDesktopExecutableSource $resolvedDesktopExecutableSource `
   -FailureStage $failureStage `

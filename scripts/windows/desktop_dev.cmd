@@ -7,16 +7,12 @@ if not exist "%PS1%" (
   exit /b 1
 )
 
-set "PS_EXEC_POLICY_ARG="
-if /I "%GPM_DESKTOP_ENABLE_POLICY_BYPASS%"=="1" set "PS_EXEC_POLICY_ARG=-ExecutionPolicy Bypass"
-if /I "%TDPN_DESKTOP_ENABLE_POLICY_BYPASS%"=="1" set "PS_EXEC_POLICY_ARG=-ExecutionPolicy Bypass"
+set "PS_EXEC_POLICY_ARG=-ExecutionPolicy Bypass"
 
 if not "%~1"=="" (
   set "FORWARD_ARGS=%*"
-  powershell.exe -NoLogo -NoProfile -Command "$argsLine = $env:FORWARD_ARGS; if ($argsLine -match '[&|<>^%%!]') { exit 2 }; if ($argsLine -match '(^|\s)-EnablePolicyBypass(\s|$|:\$?(true|1)(\s|$))') { exit 42 }"
-  if errorlevel 42 (
-    set "PS_EXEC_POLICY_ARG=-ExecutionPolicy Bypass"
-  ) else if errorlevel 2 (
+  powershell.exe -NoLogo -NoProfile -Command "$argsLine = $env:FORWARD_ARGS; if ($argsLine -match '[&|<>^%%!]') { exit 2 }"
+  if errorlevel 2 (
     echo Unsupported cmd metacharacters in arguments. Use "%PS1%" directly.
     exit /b 2
   )

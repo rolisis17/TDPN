@@ -69,6 +69,15 @@ EMBEDDED_FAIL_CLOSED_CI_VALID_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/ci_phase6_c
 EMBEDDED_FAIL_CLOSED_CONTRACTS_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_fixture"
 EMBEDDED_FAIL_CLOSED_SUITE_DIR="$EMBEDDED_FAIL_CLOSED_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_fixture"
 
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR="$TMP_DIR/fallback_reports_embedded_fail_closed_invalid_vs_absent"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORT_JSON="$TMP_DIR/report_fallback_embedded_fail_closed_invalid_vs_absent.json"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CANONICAL_REPORT_JSON="$TMP_DIR/report_fallback_embedded_fail_closed_invalid_vs_absent_canonical.json"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_LOG="$TMP_DIR/fallback_embedded_fail_closed_invalid_vs_absent.log"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_DIR="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_invalid_embedded_fresh_mtime"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_DIR="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR/ci_phase6_cosmos_l1_build_testnet_absent_embedded_stale_mtime"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS_DIR="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR/ci_phase6_cosmos_l1_contracts_fixture"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE_DIR="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR/phase6_cosmos_l1_build_testnet_suite_fixture"
+
 EMBEDDED_PRECEDENCE_REPORTS_DIR="$TMP_DIR/fallback_reports_embedded_precedence"
 EMBEDDED_PRECEDENCE_REPORT_JSON="$TMP_DIR/report_fallback_embedded_precedence.json"
 EMBEDDED_PRECEDENCE_CANONICAL_REPORT_JSON="$TMP_DIR/report_fallback_embedded_precedence_canonical.json"
@@ -694,6 +703,99 @@ if ! jq -e \
   echo "phase6 summary report fail-closed embedded timestamp discovery mismatch"
   cat "$EMBEDDED_FAIL_CLOSED_REPORT_JSON"
   cat "$EMBEDDED_FAIL_CLOSED_LOG"
+  exit 1
+fi
+
+mkdir -p "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR"
+mkdir -p "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_DIR" "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_DIR" "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS_DIR" "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE_DIR"
+
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_PATH="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_PATH="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_DIR/ci_phase6_cosmos_l1_build_testnet_summary.json"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS_PATH="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS_DIR/ci_phase6_cosmos_l1_contracts_summary.json"
+EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE_PATH="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE_DIR/phase6_cosmos_l1_build_testnet_suite_summary.json"
+
+cat >"$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "not-a-real-utc-timestamp",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID
+
+cat >"$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_build_testnet_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT
+
+cat >"$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS'
+{
+  "version": 1,
+  "schema": {
+    "id": "ci_phase6_cosmos_l1_contracts_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T17:10:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS
+
+cat >"$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE_PATH" <<'EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE'
+{
+  "version": 1,
+  "schema": {
+    "id": "phase6_cosmos_l1_build_testnet_suite_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "2026-04-15T17:20:00Z",
+  "status": "pass",
+  "rc": 0
+}
+EOF_EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE
+
+touch -t 202604151100 "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_PATH"
+touch -t 202604151400 "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_PATH"
+
+echo "[phase6-cosmos-l1-summary-report] fallback discovery fail-closed invalid embedded timestamp versus absent embedded timestamp"
+PHASE6_COSMOS_L1_SUMMARY_REPORT_CANONICAL_SUMMARY_JSON="$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CANONICAL_REPORT_JSON" \
+"$SCRIPT_UNDER_TEST" \
+  --reports-dir "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORTS_DIR" \
+  --summary-json "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORT_JSON" \
+  --print-report 0 \
+  --show-json 0 >"$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_LOG" 2>&1
+
+if ! jq -e \
+  --arg expected_ci_path "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_ABSENT_PATH" \
+  --arg unexpected_invalid_ci_path "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CI_INVALID_PATH" \
+  --arg expected_contracts_path "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_CONTRACTS_PATH" \
+  --arg expected_suite_path "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_SUITE_PATH" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .summaries.build_testnet_ci.path == $expected_ci_path
+  and .summaries.build_testnet_ci.path != $unexpected_invalid_ci_path
+  and .summaries.contracts_ci.path == $expected_contracts_path
+  and .summaries.build_testnet_suite.path == $expected_suite_path
+' "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORT_JSON" >/dev/null; then
+  echo "phase6 summary report fail-closed invalid-versus-absent embedded timestamp discovery mismatch"
+  cat "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_REPORT_JSON"
+  cat "$EMBEDDED_FAIL_CLOSED_INVALID_VS_ABSENT_LOG"
   exit 1
 fi
 
