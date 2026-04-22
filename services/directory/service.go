@@ -1094,8 +1094,10 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 	relayVoters := make(map[string]map[string]map[string]struct{})
 	scoreCandidates := make(map[string]scoreCandidate)
 	scoreVoters := make(map[string]map[string]struct{})
+	scoreSignalSources := 0
 	trustCandidates := make(map[string]trustCandidate)
 	trustVoters := make(map[string]map[string]struct{})
+	trustSignalSources := 0
 	minVotes := s.peerMinVotes
 	if minVotes <= 0 {
 		minVotes = 1
@@ -1145,10 +1147,14 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 		scores, scoreErr := s.fetchPeerSelectionScores(ctx, peerURL, pubs)
 		if scoreErr != nil {
 			lastErr = scoreErr
+		} else if scores != nil {
+			scoreSignalSources++
 		}
 		attestations, trustErr := s.fetchPeerTrustAttestations(ctx, peerURL, pubs)
 		if trustErr != nil {
 			lastErr = trustErr
+		} else if attestations != nil {
+			trustSignalSources++
 		}
 		success++
 		successOperators[sourceOperator] = struct{}{}
@@ -1322,9 +1328,41 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 	}
 	s.peerMu.Lock()
 	s.peerRelays = merged
-	s.peerScores = mergedScores
-	s.peerTrust = mergedTrust
+	scoreSourcesInsufficient := scoreSignalSources < scoreMinVotes
+	scoreMergedEmptyWithCache := len(mergedScores) == 0 && len(s.peerScores) > 0
+	useCachedScores := scoreSourcesInsufficient || scoreMergedEmptyWithCache
+	if useCachedScores {
+		s.peerScores = cloneSelectionScores(s.peerScores)
+	} else {
+		s.peerScores = mergedScores
+	}
+	trustSourcesInsufficient := trustSignalSources < trustMinVotes
+	trustMergedEmptyWithCache := len(mergedTrust) == 0 && len(s.peerTrust) > 0
+	useCachedTrust := trustSourcesInsufficient || trustMergedEmptyWithCache
+	if useCachedTrust {
+		s.peerTrust = cloneTrustAttestations(s.peerTrust)
+	} else {
+		s.peerTrust = mergedTrust
+	}
 	s.peerMu.Unlock()
+	if useCachedScores {
+		log.Printf(
+			"directory peer score sync: preserving cached scores (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d)",
+			scoreSourcesInsufficient,
+			scoreMergedEmptyWithCache,
+			scoreSignalSources,
+			scoreMinVotes,
+		)
+	}
+	if useCachedTrust {
+		log.Printf(
+			"directory peer trust sync: preserving cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d)",
+			trustSourcesInsufficient,
+			trustMergedEmptyWithCache,
+			trustSignalSources,
+			trustMinVotes,
+		)
+	}
 	return nil
 }
 
@@ -1462,6 +1500,7 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 	metaMinVotes := maxInt(1, s.adjudicationMetaMin)
 	candidates := make(map[string]trustCandidate)
 	trustVoters := make(map[string]map[string]struct{})
+	trustSignalSources := 0
 	var lastErr error
 	nowUnix := time.Now().Unix()
 	for _, issuerURL := range s.issuerTrustURLs {
@@ -1480,6 +1519,9 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 		if err != nil {
 			lastErr = err
 			continue
+		}
+		if attestations != nil {
+			trustSignalSources++
 		}
 		success++
 		successOperators[sourceOperator] = struct{}{}
@@ -1567,8 +1609,24 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 		merged[key] = att
 	}
 	s.peerMu.Lock()
-	s.issuerTrust = merged
+	trustSourcesInsufficient := trustSignalSources < minVotes
+	trustMergedEmptyWithCache := len(merged) == 0 && len(s.issuerTrust) > 0
+	useCachedTrust := trustSourcesInsufficient || trustMergedEmptyWithCache
+	if useCachedTrust {
+		s.issuerTrust = cloneTrustAttestations(s.issuerTrust)
+	} else {
+		s.issuerTrust = merged
+	}
 	s.peerMu.Unlock()
+	if useCachedTrust {
+		log.Printf(
+			"directory issuer trust sync: preserving cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d)",
+			trustSourcesInsufficient,
+			trustMergedEmptyWithCache,
+			trustSignalSources,
+			minVotes,
+		)
+	}
 	return nil
 }
 
@@ -4289,9 +4347,11 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 	nowUnix := now.Unix()
 	actuated := make([]proto.RelayDescriptor, 0, len(merged))
 	for _, desc := range merged {
-		if desc.Role == "micro-relay" &&
-			!s.microRelayEligibleForPublication(desc.RelayID, nowUnix, peerScores, peerTrust, issuerTrust) {
-			continue
+		if role, ok := canonicalizeSignalRole(desc.Role); ok && role == "micro-relay" {
+			desc.Role = role
+			if !s.microRelayEligibleForPublication(desc, nowUnix, peerScores, peerTrust, issuerTrust) {
+				continue
+			}
 		}
 		actuated = append(actuated, desc)
 	}
@@ -4299,17 +4359,29 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 }
 
 func (s *Service) microRelayEligibleForPublication(
-	relayID string,
+	desc proto.RelayDescriptor,
 	nowUnix int64,
 	peerScores map[string]proto.RelaySelectionScore,
 	peerTrust map[string]proto.RelayTrustAttestation,
 	issuerTrust map[string]proto.RelayTrustAttestation,
 ) bool {
+	relayID := strings.TrimSpace(desc.RelayID)
 	relayID = strings.TrimSpace(relayID)
 	if relayID == "" {
 		return false
 	}
 	key := relayKey(relayID, "micro-relay")
+	localScore := proto.RelaySelectionScore{
+		RelayID:      relayID,
+		Role:         "micro-relay",
+		Reputation:   desc.Reputation,
+		Uptime:       desc.Uptime,
+		Capacity:     desc.Capacity,
+		AbusePenalty: desc.AbusePenalty,
+	}
+	if !microRelayScoreEligible(localScore) {
+		return false
+	}
 	if score, ok := peerScores[key]; ok && !microRelayScoreEligible(score) {
 		return false
 	}
@@ -4356,13 +4428,11 @@ func (s *Service) buildSelectionScores(relays []proto.RelayDescriptor) []proto.R
 	}
 	agg := make(map[string]scoreAgg)
 	add := func(score proto.RelaySelectionScore) {
-		role := strings.TrimSpace(score.Role)
-		if role == "" {
-			role = "exit"
-		}
-		if role != "exit" || strings.TrimSpace(score.RelayID) == "" {
+		role, ok := canonicalizeSignalRole(score.Role)
+		if !ok || strings.TrimSpace(score.RelayID) == "" {
 			return
 		}
+		score.Role = role
 		key := relayKey(score.RelayID, role)
 		a := agg[key]
 		a.relayID = score.RelayID
@@ -4378,12 +4448,13 @@ func (s *Service) buildSelectionScores(relays []proto.RelayDescriptor) []proto.R
 	}
 
 	for _, relayDesc := range relays {
-		if relayDesc.Role != "exit" {
+		role, ok := canonicalizeSignalRole(relayDesc.Role)
+		if !ok {
 			continue
 		}
 		add(proto.RelaySelectionScore{
 			RelayID:      relayDesc.RelayID,
-			Role:         relayDesc.Role,
+			Role:         role,
 			Reputation:   relayDesc.Reputation,
 			Uptime:       relayDesc.Uptime,
 			Capacity:     relayDesc.Capacity,
@@ -4462,13 +4533,11 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 	adjudicationMinSources := s.effectiveFinalAdjudicationMinSources()
 	adjudicationMinRatio := s.effectiveFinalAdjudicationMinRatio()
 	add := func(att proto.RelayTrustAttestation, sourceClass string) {
-		role := strings.TrimSpace(att.Role)
-		if role == "" {
-			role = "exit"
-		}
-		if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+		role, ok := canonicalizeSignalRole(att.Role)
+		if !ok || strings.TrimSpace(att.RelayID) == "" {
 			return
 		}
+		att.Role = role
 		key := relayKey(att.RelayID, role)
 		a := agg[key]
 		a.relayID = att.RelayID
@@ -4523,12 +4592,13 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 	}
 
 	for _, relayDesc := range relays {
-		if relayDesc.Role != "exit" {
+		role, ok := canonicalizeSignalRole(relayDesc.Role)
+		if !ok {
 			continue
 		}
 		add(proto.RelayTrustAttestation{
 			RelayID:      relayDesc.RelayID,
-			Role:         relayDesc.Role,
+			Role:         role,
 			OperatorID:   relayDesc.OperatorID,
 			Reputation:   relayDesc.Reputation,
 			Uptime:       relayDesc.Uptime,
@@ -5726,7 +5796,7 @@ func pickConsensusTier(votes map[int]int) (int, bool) {
 		if tier < 1 || tier > 3 {
 			continue
 		}
-		if count > bestVotes || (count == bestVotes && tier > bestTier) {
+		if count > bestVotes || (count == bestVotes && (bestTier == 0 || tier < bestTier)) {
 			bestTier = tier
 			bestVotes = count
 		}
@@ -6261,9 +6331,9 @@ func (s *Service) snapshotGovernanceStatus(now time.Time) proto.DirectoryGoverna
 	aggregated := s.buildTrustAttestations(relays)
 	relayOperators := make(map[string]string, len(relays)+len(aggregated))
 	for _, desc := range relays {
-		role := strings.TrimSpace(desc.Role)
-		if role == "" {
-			role = "exit"
+		role, ok := canonicalizeSignalRole(desc.Role)
+		if !ok {
+			continue
 		}
 		if strings.TrimSpace(desc.RelayID) == "" {
 			continue
@@ -6273,9 +6343,9 @@ func (s *Service) snapshotGovernanceStatus(now time.Time) proto.DirectoryGoverna
 		}
 	}
 	for _, att := range aggregated {
-		role := strings.TrimSpace(att.Role)
-		if role == "" {
-			role = "exit"
+		role, ok := canonicalizeSignalRole(att.Role)
+		if !ok {
+			continue
 		}
 		if strings.TrimSpace(att.RelayID) == "" {
 			continue
@@ -6318,11 +6388,8 @@ func (s *Service) snapshotGovernanceStatus(now time.Time) proto.DirectoryGoverna
 		bucket[operator] = struct{}{}
 	}
 	markSignal := func(att proto.RelayTrustAttestation) {
-		role := strings.TrimSpace(att.Role)
-		if role == "" {
-			role = "exit"
-		}
-		if role != "exit" || strings.TrimSpace(att.RelayID) == "" {
+		role, ok := canonicalizeSignalRole(att.Role)
+		if !ok || strings.TrimSpace(att.RelayID) == "" {
 			return
 		}
 		key := relayKey(att.RelayID, role)
@@ -6358,9 +6425,9 @@ func (s *Service) snapshotGovernanceStatus(now time.Time) proto.DirectoryGoverna
 		markSignal(att)
 	}
 	for _, att := range aggregated {
-		role := strings.TrimSpace(att.Role)
-		if role == "" {
-			role = "exit"
+		role, ok := canonicalizeSignalRole(att.Role)
+		if !ok || strings.TrimSpace(att.RelayID) == "" {
+			continue
 		}
 		key := relayKey(att.RelayID, role)
 		if _, _, ok := s.activeDispute(att, nowUnix); ok {
