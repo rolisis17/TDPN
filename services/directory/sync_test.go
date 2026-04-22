@@ -1000,6 +1000,261 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 	}
 }
 
+func TestSyncPeerRelaysPreservesCachedSignalsWhenSourcesInsufficient(t *testing.T) {
+	urlA := "http://peer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-new",
+		Role:       "exit",
+		OperatorID: "op-new",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	selectionFeed := proto.RelaySelectionFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Scores: []proto.RelaySelectionScore{
+			{RelayID: "exit-new", Role: "exit", Reputation: 0.9, Uptime: 0.8, Capacity: 0.7, AbusePenalty: 0.1, BondScore: 0.6, StakeScore: 0.5},
+		},
+	}
+	selectionSig, err := crypto.SignRelaySelectionFeed(selectionFeed, privA)
+	if err != nil {
+		t.Fatalf("sign selection feed: %v", err)
+	}
+	selectionFeed.Signature = selectionSig
+	trustFeed := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-new",
+				Role:         "exit",
+				OperatorID:   "op-new",
+				Reputation:   0.85,
+				Uptime:       0.75,
+				Capacity:     0.65,
+				AbusePenalty: 0.15,
+				BondScore:    0.55,
+				StakeScore:   0.45,
+				Confidence:   0.9,
+			},
+		},
+	}
+	trustSig, err := crypto.SignRelayTrustAttestationFeed(trustFeed, privA)
+	if err != nil {
+		t.Fatalf("sign trust feed: %v", err)
+	}
+	trustFeed.Signature = trustSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/selection-feed":     jsonResp(selectionFeed),
+		urlA + "/v1/trust-attestations": jsonResp(trustFeed),
+	}
+
+	cachedScore := proto.RelaySelectionScore{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		Reputation:   0.61,
+		Uptime:       0.62,
+		Capacity:     0.63,
+		AbusePenalty: 0.11,
+		BondScore:    0.41,
+		StakeScore:   0.31,
+	}
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.71,
+		Uptime:       0.72,
+		Capacity:     0.73,
+		AbusePenalty: 0.12,
+		BondScore:    0.42,
+		StakeScore:   0.32,
+		Confidence:   0.81,
+	}
+
+	s := &Service{
+		peerURLs:          []string{urlA},
+		peerMinVotes:      1,
+		peerScoreMinVotes: 2,
+		peerTrustMinVotes: 2,
+		peerRelays:        make(map[string]proto.RelayDescriptor),
+		peerScores: map[string]proto.RelaySelectionScore{
+			relayKey("exit-cached", "exit"): cachedScore,
+		},
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		peerRelayETags: make(map[string]string),
+		peerRelayCache: make(map[string][]proto.RelayDescriptor),
+		peerScoreETags: make(map[string]string),
+		peerScoreCache: make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags: make(map[string]string),
+		peerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+
+	gotScores := s.snapshotPeerScores()
+	if len(gotScores) != 1 {
+		t.Fatalf("expected cached score set preserved, got %d entries", len(gotScores))
+	}
+	gotScore, ok := gotScores[relayKey("exit-cached", "exit")]
+	if !ok {
+		t.Fatalf("expected cached score entry preserved")
+	}
+	if gotScore != cachedScore {
+		t.Fatalf("expected cached score preserved, got %+v", gotScore)
+	}
+	if _, exists := gotScores[relayKey("exit-new", "exit")]; exists {
+		t.Fatalf("expected new score entry dropped when signal sources are insufficient")
+	}
+
+	gotTrust := s.snapshotPeerTrust()
+	if len(gotTrust) != 1 {
+		t.Fatalf("expected cached trust set preserved, got %d entries", len(gotTrust))
+	}
+	gotAtt, ok := gotTrust[relayKey("exit-cached", "exit")]
+	if !ok {
+		t.Fatalf("expected cached trust entry preserved")
+	}
+	if gotAtt != cachedTrust {
+		t.Fatalf("expected cached trust preserved, got %+v", gotAtt)
+	}
+	if _, exists := gotTrust[relayKey("exit-new", "exit")]; exists {
+		t.Fatalf("expected new trust entry dropped when signal sources are insufficient")
+	}
+}
+
+func TestSyncPeerRelaysPreservesCachedSignalsWhenMergedSignalsEmptyWithCache(t *testing.T) {
+	urlA := "http://peer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-new",
+		Role:       "exit",
+		OperatorID: "op-new",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	selectionFeed := proto.RelaySelectionFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Scores:      []proto.RelaySelectionScore{},
+	}
+	selectionSig, err := crypto.SignRelaySelectionFeed(selectionFeed, privA)
+	if err != nil {
+		t.Fatalf("sign selection feed: %v", err)
+	}
+	selectionFeed.Signature = selectionSig
+	trustFeed := proto.RelayTrustAttestationFeedResponse{
+		Operator:     "op-a",
+		GeneratedAt:  now.Unix(),
+		ExpiresAt:    now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{},
+	}
+	trustSig, err := crypto.SignRelayTrustAttestationFeed(trustFeed, privA)
+	if err != nil {
+		t.Fatalf("sign trust feed: %v", err)
+	}
+	trustFeed.Signature = trustSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/selection-feed":     jsonResp(selectionFeed),
+		urlA + "/v1/trust-attestations": jsonResp(trustFeed),
+	}
+
+	cachedScore := proto.RelaySelectionScore{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		Reputation:   0.61,
+		Uptime:       0.62,
+		Capacity:     0.63,
+		AbusePenalty: 0.11,
+		BondScore:    0.41,
+		StakeScore:   0.31,
+	}
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.71,
+		Uptime:       0.72,
+		Capacity:     0.73,
+		AbusePenalty: 0.12,
+		BondScore:    0.42,
+		StakeScore:   0.32,
+		Confidence:   0.81,
+	}
+
+	s := &Service{
+		peerURLs:          []string{urlA},
+		peerMinVotes:      1,
+		peerScoreMinVotes: 1,
+		peerTrustMinVotes: 1,
+		peerRelays:        make(map[string]proto.RelayDescriptor),
+		peerScores: map[string]proto.RelaySelectionScore{
+			relayKey("exit-cached", "exit"): cachedScore,
+		},
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		peerRelayETags: make(map[string]string),
+		peerRelayCache: make(map[string][]proto.RelayDescriptor),
+		peerScoreETags: make(map[string]string),
+		peerScoreCache: make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags: make(map[string]string),
+		peerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+
+	gotScores := s.snapshotPeerScores()
+	if len(gotScores) != 1 {
+		t.Fatalf("expected cached score set preserved, got %d entries", len(gotScores))
+	}
+	gotScore, ok := gotScores[relayKey("exit-cached", "exit")]
+	if !ok {
+		t.Fatalf("expected cached score entry preserved")
+	}
+	if gotScore != cachedScore {
+		t.Fatalf("expected cached score preserved, got %+v", gotScore)
+	}
+
+	gotTrust := s.snapshotPeerTrust()
+	if len(gotTrust) != 1 {
+		t.Fatalf("expected cached trust set preserved, got %d entries", len(gotTrust))
+	}
+	gotAtt, ok := gotTrust[relayKey("exit-cached", "exit")]
+	if !ok {
+		t.Fatalf("expected cached trust entry preserved")
+	}
+	if gotAtt != cachedTrust {
+		t.Fatalf("expected cached trust preserved, got %+v", gotAtt)
+	}
+}
+
 func TestSyncPeerRelaysOperatorQuorumFailure(t *testing.T) {
 	urlA := "http://peer-a.local"
 	urlB := "http://peer-b.local"
@@ -1239,6 +1494,152 @@ func TestSyncIssuerTrustAggregatesAttestations(t *testing.T) {
 	}
 	if got.BondScore < 0.49 || got.BondScore > 0.51 {
 		t.Fatalf("expected averaged bond score around 0.5, got %f", got.BondScore)
+	}
+}
+
+func TestSyncIssuerTrustPreservesCacheWhenSignalSourcesInsufficient(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	trustFeed := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-new",
+				Role:         "exit",
+				OperatorID:   "op-new",
+				Reputation:   0.84,
+				Uptime:       0.74,
+				Capacity:     0.64,
+				AbusePenalty: 0.16,
+				BondScore:    0.54,
+				StakeScore:   0.44,
+				Confidence:   0.91,
+			},
+		},
+	}
+	trustSig, err := crypto.SignRelayTrustAttestationFeed(trustFeed, privA)
+	if err != nil {
+		t.Fatalf("sign trust feed: %v", err)
+	}
+	trustFeed.Signature = trustSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-a", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustFeed),
+	}
+
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.72,
+		Uptime:       0.73,
+		Capacity:     0.74,
+		AbusePenalty: 0.14,
+		BondScore:    0.43,
+		StakeScore:   0.33,
+		Confidence:   0.82,
+	}
+
+	s := &Service{
+		issuerTrustURLs:     []string{urlA},
+		issuerTrustMinVotes: 2,
+		issuerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		issuerTrustETags: make(map[string]string),
+		issuerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:       &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+
+	got := s.snapshotIssuerTrust()
+	if len(got) != 1 {
+		t.Fatalf("expected cached issuer trust preserved, got %d entries", len(got))
+	}
+	att, ok := got[relayKey("exit-cached", "exit")]
+	if !ok {
+		t.Fatalf("expected cached issuer trust entry preserved")
+	}
+	if att != cachedTrust {
+		t.Fatalf("expected cached issuer trust preserved, got %+v", att)
+	}
+	if _, exists := got[relayKey("exit-new", "exit")]; exists {
+		t.Fatalf("expected new issuer trust entry dropped when signal sources are insufficient")
+	}
+}
+
+func TestSyncIssuerTrustPreservesCacheWhenMergedSignalsEmptyWithCache(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	trustFeed := proto.RelayTrustAttestationFeedResponse{
+		Operator:     "issuer-a",
+		GeneratedAt:  now.Unix(),
+		ExpiresAt:    now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{},
+	}
+	trustSig, err := crypto.SignRelayTrustAttestationFeed(trustFeed, privA)
+	if err != nil {
+		t.Fatalf("sign trust feed: %v", err)
+	}
+	trustFeed.Signature = trustSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-a", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustFeed),
+	}
+
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.72,
+		Uptime:       0.73,
+		Capacity:     0.74,
+		AbusePenalty: 0.14,
+		BondScore:    0.43,
+		StakeScore:   0.33,
+		Confidence:   0.82,
+	}
+
+	s := &Service{
+		issuerTrustURLs:     []string{urlA},
+		issuerTrustMinVotes: 1,
+		issuerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		issuerTrustETags: make(map[string]string),
+		issuerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:       &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+
+	got := s.snapshotIssuerTrust()
+	if len(got) != 1 {
+		t.Fatalf("expected cached issuer trust preserved, got %d entries", len(got))
+	}
+	att, ok := got[relayKey("exit-cached", "exit")]
+	if !ok {
+		t.Fatalf("expected cached issuer trust entry preserved")
+	}
+	if att != cachedTrust {
+		t.Fatalf("expected cached issuer trust preserved, got %+v", att)
 	}
 }
 
