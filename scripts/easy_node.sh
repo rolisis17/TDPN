@@ -287,10 +287,15 @@ Usage:
 ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
+  ./scripts/easy_node.sh profile-default-gate-stability-evidence-pack [--reports-dir DIR] [--stability-summary-json PATH|--run-summary-json PATH] [--stability-check-summary-json PATH|--check-summary-json PATH] [--cycle-summary-json PATH] [--max-age-sec N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-promotion-check [--cycle-summary-json PATH]... [--cycle-summary-list FILE] [--reports-dir DIR] [--require-min-cycles N] [--require-min-pass-cycles N] [--require-max-fail-cycles N] [--require-max-warn-cycles N] [--require-min-pass-rate-pct N] [--require-min-go-decision-rate-pct N] [--require-check-schema-valid [0|1]] [--require-check-usable-decision [0|1]] [--require-check-policy-modal-decision GO|NO-GO] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-promotion-cycle [profile_default_gate_stability_promotion_cycle args...]
   ./scripts/easy_node.sh runtime-actuation-promotion-check [runtime_actuation_promotion_check args...]
   ./scripts/easy_node.sh runtime-actuation-promotion-cycle [runtime_actuation_promotion_cycle args...]
+  ./scripts/easy_node.sh runtime-actuation-multi-vm-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
+  ./scripts/easy_node.sh profile-default-gate-evidence-pack [profile_default_gate_stability_evidence_pack args...]
+  ./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
@@ -421,10 +426,15 @@ Usage:
 ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json PATH [--require-stability-ok [0|1]] [--require-min-runs-completed N] [--require-modal-support-rate-pct N] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
 ./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]
+  ./scripts/easy_node.sh profile-default-gate-stability-evidence-pack [--reports-dir DIR] [--stability-summary-json PATH|--run-summary-json PATH] [--stability-check-summary-json PATH|--check-summary-json PATH] [--cycle-summary-json PATH] [--max-age-sec N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-promotion-check [--cycle-summary-json PATH]... [--cycle-summary-list FILE] [--reports-dir DIR] [--require-min-cycles N] [--require-min-pass-cycles N] [--require-max-fail-cycles N] [--require-max-warn-cycles N] [--require-min-pass-rate-pct N] [--require-min-go-decision-rate-pct N] [--require-check-schema-valid [0|1]] [--require-check-usable-decision [0|1]] [--require-check-policy-modal-decision GO|NO-GO] [--fail-on-no-go [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-stability-promotion-cycle [profile_default_gate_stability_promotion_cycle args...]
   ./scripts/easy_node.sh runtime-actuation-promotion-check [runtime_actuation_promotion_check args...]
   ./scripts/easy_node.sh runtime-actuation-promotion-cycle [runtime_actuation_promotion_cycle args...]
+  ./scripts/easy_node.sh runtime-actuation-multi-vm-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
+  ./scripts/easy_node.sh profile-default-gate-evidence-pack [profile_default_gate_stability_evidence_pack args...]
+  ./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [runtime_actuation_multi_vm_evidence_pack args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
@@ -642,10 +652,14 @@ Notes:
   - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff. In invite-key flows, prefer `--campaign-subject` (alias `--subject`) with a real key value; fallback order is `CAMPAIGN_SUBJECT` then `INVITE_KEY`.
   - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. Auth mode supports invite-key subject flags or anon-credential pass-through flags, and rejects mixed subject+anon modes.
   - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, supports explicit directory endpoint overrides via `--directory-a-url/--directory-b-url`, auto-enables remote HTTP probe opt-in only when resolved directory URLs are non-loopback `http://`, and calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping when explicit URLs are not provided.
+  - profile-default-gate-stability-evidence-pack ingests latest profile-default-gate stability run/check/cycle summaries and emits a compact fail-closed evidence pack JSON+markdown artifact for promotion handoff.
+  - profile-default-gate-evidence-pack is a compatibility alias for profile-default-gate-stability-evidence-pack.
   - profile-default-gate-stability-promotion-check evaluates existing profile-default-gate stability-cycle evidence for promotion readiness (ad hoc/manual input path) and emits one fail-closed GO/NO-GO summary.
   - profile-default-gate-stability-promotion-cycle is the primary refresh/rerun path: it runs repeated profile-default-gate stability cycles and then executes promotion-check on the generated cycle-summary list.
   - runtime-actuation-promotion-check evaluates runtime-actuation promotion readiness and emits one fail-closed GO/NO-GO summary for roadmap/default-gate surfacing.
   - runtime-actuation-promotion-cycle runs repeated profile-compare campaign-signoff evidence cycles and then executes runtime-actuation promotion-check on the produced cycle summary list.
+  - runtime-actuation-multi-vm-evidence-pack consolidates runtime-actuation promotion-cycle + multi-VM stability promotion-cycle evidence into one fail-closed summary/report bundle and normalizes combined decision/next-action output.
+  - runtime-actuation-promotion-evidence-pack and profile-compare-multi-vm-stability-promotion-evidence-pack are compatibility aliases that currently dispatch to runtime-actuation-multi-vm-evidence-pack.
   - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
   - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
@@ -9829,6 +9843,11 @@ profile_default_gate_stability_cycle() {
   "$profile_default_gate_stability_cycle_script" "$@"
 }
 
+profile_default_gate_stability_evidence_pack() {
+  local profile_default_gate_stability_evidence_pack_script="${PROFILE_DEFAULT_GATE_STABILITY_EVIDENCE_PACK_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_stability_evidence_pack.sh}"
+  "$profile_default_gate_stability_evidence_pack_script" "$@"
+}
+
 profile_default_gate_stability_promotion_check() {
   local profile_default_gate_stability_promotion_check_script="${PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CHECK_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_stability_promotion_check.sh}"
   "$profile_default_gate_stability_promotion_check_script" "$@"
@@ -9847,6 +9866,23 @@ runtime_actuation_promotion_check() {
 runtime_actuation_promotion_cycle() {
   local runtime_actuation_promotion_cycle_script="${RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT:-$ROOT_DIR/scripts/runtime_actuation_promotion_cycle.sh}"
   "$runtime_actuation_promotion_cycle_script" "$@"
+}
+
+runtime_actuation_multi_vm_evidence_pack() {
+  local runtime_actuation_multi_vm_evidence_pack_script="${RUNTIME_ACTUATION_MULTI_VM_EVIDENCE_PACK_SCRIPT:-$ROOT_DIR/scripts/runtime_actuation_multi_vm_evidence_pack.sh}"
+  "$runtime_actuation_multi_vm_evidence_pack_script" "$@"
+}
+
+profile_default_gate_evidence_pack() {
+  profile_default_gate_stability_evidence_pack "$@"
+}
+
+runtime_actuation_promotion_evidence_pack() {
+  runtime_actuation_multi_vm_evidence_pack "$@"
+}
+
+profile_compare_multi_vm_stability_promotion_evidence_pack() {
+  runtime_actuation_multi_vm_evidence_pack "$@"
 }
 
 profile_default_gate_token_probe() {
@@ -16848,6 +16884,14 @@ main() {
       shift
       profile_default_gate_stability_cycle "$@"
       ;;
+    profile-default-gate-stability-evidence-pack)
+      shift
+      profile_default_gate_stability_evidence_pack "$@"
+      ;;
+    profile-default-gate-evidence-pack)
+      shift
+      profile_default_gate_evidence_pack "$@"
+      ;;
     profile-default-gate-stability-promotion-check)
       shift
       profile_default_gate_stability_promotion_check "$@"
@@ -16863,6 +16907,18 @@ main() {
     runtime-actuation-promotion-cycle)
       shift
       runtime_actuation_promotion_cycle "$@"
+      ;;
+    runtime-actuation-multi-vm-evidence-pack)
+      shift
+      runtime_actuation_multi_vm_evidence_pack "$@"
+      ;;
+    runtime-actuation-promotion-evidence-pack)
+      shift
+      runtime_actuation_promotion_evidence_pack "$@"
+      ;;
+    profile-compare-multi-vm-stability-promotion-evidence-pack)
+      shift
+      profile_compare_multi_vm_stability_promotion_evidence_pack "$@"
       ;;
     profile-default-gate-live)
       shift

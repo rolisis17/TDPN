@@ -58,6 +58,20 @@ run_roadmap_progress_report() {
     "$@"
 }
 
+roadmap_test_easy_node_supports_subcommand_01() {
+  local subcommand="$1"
+  local easy_node_script="$ROOT_DIR/scripts/easy_node.sh"
+  if [[ -z "$subcommand" ]] || [[ ! -f "$easy_node_script" ]]; then
+    printf '0'
+    return
+  fi
+  if grep -Fq "${subcommand})" "$easy_node_script"; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 FAKE_MANUAL="$TMP_DIR/fake_manual_validation_report.sh"
 cat >"$FAKE_MANUAL" <<'EOF_FAKE_MANUAL'
 #!/usr/bin/env bash
@@ -7959,6 +7973,209 @@ fi
 if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log; then
   echo "expected runtime-actuation stale fail-closed availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log
+  exit 1
+fi
+
+PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-evidence-pack")" == "1" ]]; then
+  PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
+fi
+RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "runtime-actuation-promotion-evidence-pack")" == "1" ]]; then
+  RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
+fi
+MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-compare-multi-vm-stability-promotion-evidence-pack")" == "1" ]]; then
+  MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
+fi
+
+echo "[roadmap-progress-report] evidence-pack summaries missing -> surfaced fail-closed + helper-aware actions"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_evidence_pack_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_evidence_pack_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log 2>&1; then
+  echo "expected success for evidence-pack missing summary path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log
+  exit 1
+fi
+if ! jq -e \
+  --argjson expect_profile_action "$PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_runtime_action "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_multi_vm_action "$MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  '
+  .vpn_track.profile_default_gate_evidence_pack.status == "missing"
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.status == "missing"
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.status == "missing"
+  and .vpn_track.profile_default_gate_evidence_pack.needs_attention == true
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == true
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.needs_attention == true
+  and .vpn_track.optional_gate_status.profile_default_gate_evidence_pack == "missing"
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion_evidence_pack == "missing"
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion_evidence_pack == "missing"
+  and (if $expect_profile_action then
+         ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("profile-default-gate-evidence-pack"))
+         and ((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack"))
+       else
+         (.vpn_track.profile_default_gate_evidence_pack.next_command == null)
+         and (((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack")) | not)
+       end)
+  and (if $expect_runtime_action then
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-evidence-pack"))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+         and ((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack" and ((.command // "") | test("runtime-actuation-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+       else
+         (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
+         and (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
+       end)
+  and (if $expect_multi_vm_action then
+         ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack"))
+         and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+         and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack" and ((.command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+       else
+         (.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command == null)
+         and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
+       end)
+  ' "$TMP_DIR/roadmap_progress_evidence_pack_missing_summary.json" >/dev/null; then
+  echo "evidence-pack missing summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_evidence_pack_missing_summary.json"
+  exit 1
+fi
+if ! rg -q 'Profile-default evidence pack next command/reason:' "$TMP_DIR/roadmap_progress_evidence_pack_missing_report.md"; then
+  echo "expected profile-default evidence-pack markdown line in report"
+  cat "$TMP_DIR/roadmap_progress_evidence_pack_missing_report.md"
+  exit 1
+fi
+if ! rg -q '\[roadmap-progress-report\] profile_default_gate_evidence_pack_status=missing' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log; then
+  echo "expected profile-default evidence-pack missing log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] runtime-actuation evidence-pack stale summary is fail-closed"
+RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_DIR="$TMP_DIR/runtime_actuation_evidence_pack_stale"
+mkdir -p "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_DIR"
+RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_JSON="$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_DIR/runtime_actuation_promotion_evidence_pack_summary.json"
+stale_runtime_actuation_evidence_pack_epoch=$(( $(date -u +%s) - 172800 ))
+stale_runtime_actuation_evidence_pack_iso="$(date -u -d "@$stale_runtime_actuation_evidence_pack_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_JSON" <<EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_STALE
+{
+  "version": 1,
+  "generated_at_utc": "$stale_runtime_actuation_evidence_pack_iso",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_STALE
+RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_evidence_pack_stale_summary.json"
+jq --arg rel "runtime_actuation_evidence_pack_stale/runtime_actuation_promotion_evidence_pack_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_evidence_pack: {
+        summary_json: $rel
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_stale_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_stale_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_stale.log 2>&1; then
+  echo "expected success for runtime-actuation evidence-pack stale fail-closed path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_stale.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_JSON" --argjson expect_runtime_action "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" '
+  .vpn_track.runtime_actuation_promotion_evidence_pack.available == false
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.input_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.source_summary_json == null
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.status == "stale"
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == true
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion_evidence_pack == "stale"
+  and (if $expect_runtime_action then
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-evidence-pack"))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+         and ((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack" and ((.command // "") | test("runtime-actuation-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+       else
+         (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
+       end)
+' "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_stale_summary.json" >/dev/null; then
+  echo "runtime-actuation evidence-pack stale summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_stale_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] multi-VM promotion evidence-pack fail summary stays actionable"
+MULTI_VM_EVIDENCE_PACK_FAIL_DIR="$TMP_DIR/multi_vm_evidence_pack_fail"
+mkdir -p "$MULTI_VM_EVIDENCE_PACK_FAIL_DIR"
+MULTI_VM_EVIDENCE_PACK_FAIL_JSON="$MULTI_VM_EVIDENCE_PACK_FAIL_DIR/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json"
+fresh_multi_vm_evidence_pack_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$MULTI_VM_EVIDENCE_PACK_FAIL_JSON" <<EOF_MULTI_VM_EVIDENCE_PACK_FAIL
+{
+  "version": 1,
+  "generated_at_utc": "$fresh_multi_vm_evidence_pack_iso",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": ["multi-vm evidence-pack publish blocked: missing live-host reducer output"]
+}
+EOF_MULTI_VM_EVIDENCE_PACK_FAIL
+MULTI_VM_EVIDENCE_PACK_FAIL_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_multi_vm_evidence_pack_fail_summary.json"
+jq --arg rel "multi_vm_evidence_pack_fail/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      profile_compare_multi_vm_stability_promotion_evidence_pack: {
+        summary_json: $rel
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$MULTI_VM_EVIDENCE_PACK_FAIL_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MULTI_VM_EVIDENCE_PACK_FAIL_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_fail_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_fail_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_evidence_pack_fail.log 2>&1; then
+  echo "expected success for multi-VM evidence-pack fail summary path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_evidence_pack_fail.log
+  exit 1
+fi
+if ! jq -e --arg src "$MULTI_VM_EVIDENCE_PACK_FAIL_JSON" --argjson expect_multi_vm_action "$MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" '
+  .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.available == true
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.input_summary_json == $src
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.source_summary_json == $src
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.status == "fail"
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.decision == "NO-GO"
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.go == false
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.no_go == true
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.needs_attention == true
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion_evidence_pack == "fail"
+  and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("missing live-host reducer output|evidence-pack"; "i"))
+  and (if $expect_multi_vm_action then
+         ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack"))
+         and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+         and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack" and ((.command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+       else
+         (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
+       end)
+' "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_fail_summary.json" >/dev/null; then
+  echo "multi-VM evidence-pack fail summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_fail_summary.json"
   exit 1
 fi
 
