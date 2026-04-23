@@ -3422,6 +3422,33 @@ func validateProviderRelayUpsertShape(req proto.ProviderRelayUpsertRequest) erro
 	return nil
 }
 
+func validateProviderRelayRuntimeAdmission(desc proto.RelayDescriptor) error {
+	role, err := canonicalizeProviderRelayRole(desc.Role)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(desc.RelayID) == "" {
+		return fmt.Errorf("provider relay_id is required")
+	}
+	if role != "micro-relay" {
+		return nil
+	}
+	if normalizeOperatorID(desc.OperatorID) == "" {
+		return fmt.Errorf("provider micro-relay operator id invalid")
+	}
+	for _, hopRole := range normalizeHopRoles(desc.HopRoles) {
+		if hopRole != "middle" {
+			return fmt.Errorf("provider micro-relay hop_roles must only include middle")
+		}
+	}
+	for _, capability := range normalizeCapabilities(desc.Capabilities, role) {
+		if capability == "two-hop" || capability == "tiered-policy" {
+			return fmt.Errorf("provider micro-relay capability %q is not allowed", capability)
+		}
+	}
+	return nil
+}
+
 func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
 	dec.DisallowUnknownFields()
@@ -4122,10 +4149,21 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 	desc.AbusePenalty = clampScore(req.AbusePenalty)
 	desc.BondScore = clampScore(req.BondScore)
 	desc.StakeScore = clampScore(req.StakeScore)
+	if err := validateProviderRelayRuntimeAdmission(desc); err != nil {
+		return proto.RelayDescriptor{}, err
+	}
 	return desc, nil
 }
 
 func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) error {
+	role, err := canonicalizeProviderRelayRole(desc.Role)
+	if err != nil {
+		return err
+	}
+	desc.Role = role
+	if err := validateProviderRelayRuntimeAdmission(desc); err != nil {
+		return err
+	}
 	key := relayKey(desc.RelayID, desc.Role)
 	desc.Signature = ""
 	s.providerMu.Lock()
@@ -4366,8 +4404,10 @@ func (s *Service) microRelayEligibleForPublication(
 	issuerTrust map[string]proto.RelayTrustAttestation,
 ) bool {
 	relayID := strings.TrimSpace(desc.RelayID)
-	relayID = strings.TrimSpace(relayID)
 	if relayID == "" {
+		return false
+	}
+	if normalizeOperatorID(desc.OperatorID) == "" {
 		return false
 	}
 	key := relayKey(relayID, "micro-relay")

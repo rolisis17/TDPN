@@ -105,6 +105,75 @@ sanitize_id() {
   printf '%s' "$value"
 }
 
+is_sensitive_secret_flag() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+render_log_token() {
+  local token="${1:-}"
+  if [[ "$token" == *[[:space:]]* ]]; then
+    token="${token//\'/\'\"\'\"\'}"
+    printf "'%s'" "$token"
+  else
+    printf '%s' "$token"
+  fi
+}
+
+redact_command_secrets() {
+  local line="${1:-}"
+  local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer'
+  local token=""
+  local key=""
+  local rendered=""
+  local idx=0
+  local token_count=0
+
+  if command_string_to_argv "$line"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      if is_sensitive_secret_flag "$token"; then
+        rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
+        if (( idx + 1 < token_count )); then
+          rendered="${rendered}${rendered:+ }[redacted]"
+          idx=$((idx + 2))
+        else
+          idx=$((idx + 1))
+        fi
+        continue
+      fi
+
+      if [[ "$token" == --*=* ]]; then
+        key="${token%%=*}"
+        if is_sensitive_secret_flag "$key"; then
+          rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          idx=$((idx + 1))
+          continue
+        fi
+      fi
+
+      rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
+      idx=$((idx + 1))
+    done
+    printf '%s' "$rendered"
+    return
+  fi
+
+  line="$(printf '%s' "$line" | sed -E \
+    -e "s/(${flag_regex})([[:space:]]+)\"[^\"]*\"/\\1\\2[redacted]/g" \
+    -e "s/(${flag_regex})([[:space:]]+)'[^']*'/\\1\\2[redacted]/g" \
+    -e "s/(${flag_regex})([[:space:]]+)[^[:space:]]+/\\1\\2[redacted]/g" \
+    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g")"
+  printf '%s' "$line"
+}
+
 command_requires_shell_execution() {
   local command_text="${1:-}"
   if [[ -z "$command_text" ]]; then
@@ -121,27 +190,100 @@ command_requires_shell_execution() {
 
 command_string_to_argv() {
   local command_text="${1:-}"
+  local length=0
+  local idx=0
+  local ch=""
+  local token=""
+  local quote_mode=""
+  local escaped="0"
+  local token_started="0"
   COMMAND_STRING_ARGV=()
-  if ! command -v python3 >/dev/null 2>&1; then
-    return 1
-  fi
-  if ! mapfile -d '' -t COMMAND_STRING_ARGV < <(
-    python3 - "$command_text" <<'PY'
-import shlex
-import sys
+  length="${#command_text}"
 
-try:
-    for token in shlex.split(sys.argv[1], posix=True):
-        sys.stdout.write(token)
-        sys.stdout.write("\0")
-except ValueError:
-    sys.exit(1)
-PY
-  ); then
+  while (( idx < length )); do
+    ch="${command_text:idx:1}"
+
+    if [[ "$quote_mode" == "single" ]]; then
+      if [[ "$ch" == "'" ]]; then
+        quote_mode=""
+      else
+        token+="$ch"
+      fi
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$quote_mode" == "double" ]]; then
+      if [[ "$escaped" == "1" ]]; then
+        token+="$ch"
+        escaped="0"
+        token_started="1"
+        idx=$((idx + 1))
+        continue
+      fi
+      case "$ch" in
+        "\\")
+          escaped="1"
+          ;;
+        "\"")
+          quote_mode=""
+          ;;
+        *)
+          token+="$ch"
+          token_started="1"
+          ;;
+      esac
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$escaped" == "1" ]]; then
+      token+="$ch"
+      escaped="0"
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+
+    case "$ch" in
+      [[:space:]])
+        if [[ "$token_started" == "1" ]]; then
+          COMMAND_STRING_ARGV+=("$token")
+          token=""
+          token_started="0"
+        fi
+        ;;
+      "\\")
+        escaped="1"
+        token_started="1"
+        ;;
+      "'")
+        quote_mode="single"
+        token_started="1"
+        ;;
+      "\"")
+        quote_mode="double"
+        token_started="1"
+        ;;
+      *)
+        token+="$ch"
+        token_started="1"
+        ;;
+    esac
+    idx=$((idx + 1))
+  done
+
+  if [[ "$escaped" == "1" || -n "$quote_mode" ]]; then
     COMMAND_STRING_ARGV=()
     return 1
   fi
-  return 0
+
+  if [[ "$token_started" == "1" ]]; then
+    COMMAND_STRING_ARGV+=("$token")
+  fi
+
+  [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
 }
 
 action_command_argv_allowed() {
@@ -183,6 +325,7 @@ run_action_command_string() {
   local command_text="${1:-}"
   local log_path="${2:-}"
   local timeout_sec="${3:-0}"
+  local redacted_command_text=""
   local -a command_argv=()
   local -a env_prefix=()
   local token
@@ -190,6 +333,7 @@ run_action_command_string() {
   if [[ -z "$command_text" ]]; then
     return 4
   fi
+  redacted_command_text="$(redact_command_secrets "$command_text")"
 
   if ! command_requires_shell_execution "$command_text" && command_string_to_argv "$command_text"; then
     for token in "${COMMAND_STRING_ARGV[@]}"; do
@@ -204,9 +348,16 @@ run_action_command_string() {
       if ! action_command_argv_allowed "${command_argv[@]}"; then
         {
           echo "refusing untrusted action command (outside scripts allowlist)"
-          echo "command: $command_text"
+          echo "command: $redacted_command_text"
         } >"$log_path"
         return 6
+      fi
+      if [[ "${#env_prefix[@]}" -gt 0 && "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
+        {
+          echo "refusing env-prefixed action command (set --allow-unsafe-shell-commands 1 to override)"
+          echo "command: $redacted_command_text"
+        } >"$log_path"
+        return 5
       fi
       if (( timeout_sec > 0 )); then
         if [[ "${#env_prefix[@]}" -gt 0 ]]; then
@@ -229,7 +380,7 @@ run_action_command_string() {
     if [[ "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
       {
         echo "refusing shell-evaluated action command (set --allow-unsafe-shell-commands 1 to override)"
-        echo "command: $command_text"
+        echo "command: $redacted_command_text"
       } >"$log_path"
       return 5
     fi
@@ -238,7 +389,7 @@ run_action_command_string() {
     if [[ "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
       {
         echo "refusing shell-evaluated action command (set --allow-unsafe-shell-commands 1 to override)"
-        echo "command: $command_text"
+        echo "command: $redacted_command_text"
       } >"$log_path"
       return 5
     fi
@@ -408,11 +559,16 @@ roadmap_script="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT:-$ROOT_DIR/sc
 ran_roadmap_report="0"
 
 if [[ "$roadmap_paths_provided" != "1" ]]; then
-  if [[ ! -x "$roadmap_script" ]]; then
-    echo "missing executable roadmap script: $roadmap_script"
+  if [[ ! -f "$roadmap_script" ]]; then
+    echo "missing roadmap script: $roadmap_script"
+    exit 2
+  fi
+  if [[ ! -r "$roadmap_script" ]]; then
+    echo "roadmap script is not readable: $roadmap_script"
     exit 2
   fi
   roadmap_cmd=(
+    bash
     "$roadmap_script"
     --refresh-manual-validation "$refresh_manual_validation"
     --refresh-single-machine-readiness "$refresh_single_machine_readiness"
@@ -448,6 +604,7 @@ selected_actions_json="$(jq -c '[ (.next_actions // [])[] | select((.id // "") |
 recommended_id="$(jq -r '(.blockchain_track.recommended_gate_id // .blockchain_track.mainnet_activation_missing_metrics_action.id // "")' "$roadmap_summary_json")"
 recommended_reason="$(jq -r '(.blockchain_track.recommended_gate_reason // .blockchain_track.mainnet_activation_missing_metrics_action.reason // "")' "$roadmap_summary_json")"
 recommended_command="$(jq -r '(.blockchain_track.recommended_gate_command // .blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // .blockchain_track.mainnet_activation_missing_metrics_action.command // "")' "$roadmap_summary_json")"
+recommended_command_redacted="$(redact_command_secrets "$recommended_command")"
 recommended_id_matches_selected="0"
 recommended_only_selection_state="disabled"
 recommended_only_selection_reason=""
@@ -484,7 +641,11 @@ echo "[roadmap-blockchain-actionable-run] selected_actions=$actions_count parall
 echo "[roadmap-blockchain-actionable-run] allow_unsafe_shell_commands=$allow_unsafe_shell_commands"
 echo "[roadmap-blockchain-actionable-run] action_ids=$selected_action_ids_csv"
 if (( actions_count == 0 )); then
-  echo "[roadmap-blockchain-actionable-run] no actions selected; writing pass summary"
+  if [[ "$recommended_only" == "1" && "$recommended_only_selection_state" != "selected_recommended_action" ]]; then
+    echo "[roadmap-blockchain-actionable-run] no actions selected; fail-closed in recommended-only strict mode state=$recommended_only_selection_state"
+  else
+    echo "[roadmap-blockchain-actionable-run] no actions selected; writing pass summary"
+  fi
 fi
 
 actions_tmp="$(mktemp)"
@@ -498,6 +659,7 @@ declare -a action_ids
 declare -a action_labels
 declare -a action_reasons
 declare -a action_commands
+declare -a action_commands_redacted
 declare -a action_logs
 
 final_status="pass"
@@ -506,6 +668,7 @@ executed_count=0
 pass_count=0
 fail_count=0
 timed_out_count=0
+recommended_only_fail_closed="0"
 
 for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson idx "$idx" '.[$idx]')"
@@ -521,6 +684,8 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_labels[$idx]="$action_label"
   action_reasons[$idx]="$action_reason"
   action_commands[$idx]="$action_command"
+  action_command_redacted="$(redact_command_secrets "$action_command")"
+  action_commands_redacted[$idx]="$action_command_redacted"
   action_logs[$idx]="$action_log"
   action_result_files[$idx]="$action_result_file"
 
@@ -529,7 +694,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --arg id "$action_id" \
       --arg label "$action_label" \
       --arg reason "$action_reason" \
-      --arg command "$action_command" \
+      --arg command "$action_command_redacted" \
       --arg status "fail" \
       --arg notes "missing command" \
       --arg log "$action_log" \
@@ -584,7 +749,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --arg id "$action_id" \
           --arg label "$action_label" \
           --arg reason "$action_reason" \
-          --arg command "$action_command" \
+          --arg command "$action_command_redacted" \
           --arg status "$action_status" \
           --arg notes "$action_notes" \
           --arg log "$action_log" \
@@ -638,7 +803,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --arg id "$action_id" \
         --arg label "$action_label" \
         --arg reason "$action_reason" \
-        --arg command "$action_command" \
+        --arg command "$action_command_redacted" \
         --arg status "$action_status" \
         --arg notes "$action_notes" \
         --arg log "$action_log" \
@@ -678,13 +843,14 @@ if [[ "$parallel" == "1" ]]; then
         action_label="${action_labels[$idx]}"
         action_reason="${action_reasons[$idx]}"
         action_command="${action_commands[$idx]}"
+        action_command_redacted="${action_commands_redacted[$idx]}"
         action_log="${action_logs[$idx]}"
         action_result_file="${action_result_files[$idx]}"
         jq -cn \
           --arg id "$action_id" \
           --arg label "$action_label" \
           --arg reason "$action_reason" \
-          --arg command "$action_command" \
+          --arg command "$action_command_redacted" \
           --arg status "fail" \
           --arg notes "internal runner error (wait rc=$wait_rc)" \
           --arg log "$action_log" \
@@ -718,6 +884,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_label="${action_labels[$idx]}"
   action_reason="${action_reasons[$idx]}"
   action_command="${action_commands[$idx]}"
+  action_command_redacted="${action_commands_redacted[$idx]}"
   action_log="${action_logs[$idx]}"
 
   if [[ ! -s "$action_result_file" ]] || ! jq -e . "$action_result_file" >/dev/null 2>&1; then
@@ -725,7 +892,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --arg id "$action_id" \
       --arg label "$action_label" \
       --arg reason "$action_reason" \
-      --arg command "$action_command" \
+      --arg command "$action_command_redacted" \
       --arg status "fail" \
       --arg notes "internal runner error (missing or invalid action result)" \
       --arg log "$action_log" \
@@ -785,15 +952,28 @@ done
 
 actions_results_json="$(jq -s '.' "$actions_tmp")"
 if (( actions_count == 0 )); then
-  final_status="pass"
-  final_rc=0
+  if [[ "$recommended_only" == "1" && "$recommended_only_selection_state" != "selected_recommended_action" ]]; then
+    recommended_only_fail_closed="1"
+    final_status="fail"
+    if (( final_rc == 0 )); then
+      final_rc=4
+    fi
+  else
+    final_status="pass"
+    final_rc=0
+  fi
 fi
+summary_command_input="./scripts/roadmap_blockchain_actionable_run.sh"
+for arg in "$@"; do
+  summary_command_input="${summary_command_input} $(render_log_token "$arg")"
+done
+summary_command_redacted="$(redact_command_secrets "$summary_command_input")"
 
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$final_status" \
   --argjson rc "$final_rc" \
-  --arg command "./scripts/roadmap_blockchain_actionable_run.sh $*" \
+  --arg command "$summary_command_redacted" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
   --arg roadmap_summary_json "$roadmap_summary_json" \
@@ -801,9 +981,10 @@ jq -n \
   --arg roadmap_log "$roadmap_log" \
   --arg recommended_id "$recommended_id" \
   --arg recommended_reason "$recommended_reason" \
-  --arg recommended_command "$recommended_command" \
+  --arg recommended_command "$recommended_command_redacted" \
   --arg recommended_only_selection_state "$recommended_only_selection_state" \
   --arg recommended_only_selection_reason "$recommended_only_selection_reason" \
+  --argjson recommended_only_fail_closed "$recommended_only_fail_closed" \
   --argjson ran_roadmap_report "$ran_roadmap_report" \
   --argjson refresh_manual_validation "$refresh_manual_validation" \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
@@ -842,6 +1023,7 @@ jq -n \
       recommended_gate_command: (if $recommended_command == "" then null else $recommended_command end),
       recommended_only_selection_state: $recommended_only_selection_state,
       recommended_only_selection_reason: (if $recommended_only_selection_reason == "" then null else $recommended_only_selection_reason end),
+      recommended_only_fail_closed: ($recommended_only_fail_closed == 1),
       actions_selected_count: $actions_count,
       selected_action_ids: $selected_action_ids
     },

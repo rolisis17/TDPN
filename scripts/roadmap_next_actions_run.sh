@@ -20,13 +20,17 @@ Usage:
     [--max-actions N] \
     [--profile-default-gate-subject ID] \
     [--allow-profile-default-gate-unreachable [0|1]] \
+    [--include-id ID] \
+    [--exclude-id ID] \
     [--include-id-prefix PREFIX] \
     [--exclude-id-prefix PREFIX] \
+    [--include-id-suffix SUFFIX] \
+    [--exclude-id-suffix SUFFIX] \
     [--print-summary-json [0|1]]
 
 Purpose:
   Resolve roadmap next_actions from roadmap_progress_report summary JSON,
-  apply optional id-prefix filters, and execute selected commands in one
+  apply optional id-prefix/id/id-suffix filters, and execute selected commands in one
   deterministic wrapper run.
 
 Defaults:
@@ -40,14 +44,24 @@ Defaults:
   --max-actions 0   (0 = no limit)
   --profile-default-gate-subject ""   (disabled)
   --allow-profile-default-gate-unreachable 0
+  --include-id ""   (disabled; repeatable)
+  --exclude-id ""   (disabled; repeatable)
   --include-id-prefix ""   (disabled)
   --exclude-id-prefix ""   (disabled)
+  --include-id-suffix ""   (disabled; repeatable)
+  --exclude-id-suffix ""   (disabled; repeatable)
+  ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS ""   (optional comma-separated ids)
+  ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_IDS ""   (optional comma-separated ids)
+  ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_SUFFIXES ""   (optional comma-separated suffixes)
+  ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_SUFFIXES ""   (optional comma-separated suffixes)
   --print-summary-json 1
 
 Exit behavior:
   - Runs all selected commands (sequential by default, concurrent when --parallel=1).
   - Returns rc=0 only when all selected commands pass (or no actions selected).
   - Returns first failing action command rc otherwise.
+  - Fails closed (rc=3) when selected actions contain duplicate ids with
+    conflicting commands after dedupe/filtering, to avoid stale ambiguous runs.
   - With --profile-default-gate-subject, profile_default_gate actions append
     --campaign-subject when no subject/anon override flag is already present.
   - With global --action-timeout-sec=0, profile_default_gate gets a default
@@ -110,6 +124,52 @@ need_cmd() {
   fi
 }
 
+json_array_from_args() {
+  if [[ $# -eq 0 ]]; then
+    printf '%s' "[]"
+  else
+    jq -cn '$ARGS.positional' --args "$@"
+  fi
+}
+
+append_csv_values_to_id_filters() {
+  local csv="${1:-}"
+  local filter_kind="${2:-}"
+  local raw=""
+  local value=""
+  local IFS=','
+  local -a values=()
+  read -r -a values <<<"$csv"
+  for raw in "${values[@]}"; do
+    value="$(trim "$raw")"
+    [[ -n "$value" ]] || continue
+    if [[ "$filter_kind" == "include" ]]; then
+      include_ids+=("$value")
+    elif [[ "$filter_kind" == "exclude" ]]; then
+      exclude_ids+=("$value")
+    fi
+  done
+}
+
+append_csv_values_to_suffix_filters() {
+  local csv="${1:-}"
+  local filter_kind="${2:-}"
+  local raw=""
+  local value=""
+  local IFS=','
+  local -a values=()
+  read -r -a values <<<"$csv"
+  for raw in "${values[@]}"; do
+    value="$(trim "$raw")"
+    [[ -n "$value" ]] || continue
+    if [[ "$filter_kind" == "include" ]]; then
+      include_id_suffixes+=("$value")
+    elif [[ "$filter_kind" == "exclude" ]]; then
+      exclude_id_suffixes+=("$value")
+    fi
+  done
+}
+
 sanitize_id() {
   local value
   value="$(trim "${1:-}")"
@@ -118,6 +178,27 @@ sanitize_id() {
     value="action"
   fi
   printf '%s' "$value"
+}
+
+is_sensitive_secret_flag() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+render_log_token() {
+  local token="${1:-}"
+  if [[ "$token" == *[[:space:]]* ]]; then
+    token="${token//\'/\'\"\'\"\'}"
+    printf "'%s'" "$token"
+  else
+    printf '%s' "$token"
+  fi
 }
 
 command_has_profile_subject_or_anon_arg() {
@@ -158,9 +239,49 @@ command_replace_profile_subject_placeholder() {
 
 redact_command_secrets() {
   local line="${1:-}"
+  local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer'
+  local token=""
+  local key=""
+  local rendered=""
+  local idx=0
+  local token_count=0
+
+  if command_string_to_argv "$line"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      if is_sensitive_secret_flag "$token"; then
+        rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
+        if (( idx + 1 < token_count )); then
+          rendered="${rendered}${rendered:+ }[redacted]"
+          idx=$((idx + 2))
+        else
+          idx=$((idx + 1))
+        fi
+        continue
+      fi
+
+      if [[ "$token" == --*=* ]]; then
+        key="${token%%=*}"
+        if is_sensitive_secret_flag "$key"; then
+          rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          idx=$((idx + 1))
+          continue
+        fi
+      fi
+
+      rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
+      idx=$((idx + 1))
+    done
+    printf '%s' "$rendered"
+    return
+  fi
+
   line="$(printf '%s' "$line" | sed -E \
-    -e 's/(--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)([[:space:]]+)[^[:space:]]+/\1\2[redacted]/g' \
-    -e 's/(--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)=[^[:space:]]+/\1=[redacted]/g')"
+    -e "s/(${flag_regex})([[:space:]]+)\"[^\"]*\"/\\1\\2[redacted]/g" \
+    -e "s/(${flag_regex})([[:space:]]+)'[^']*'/\\1\\2[redacted]/g" \
+    -e "s/(${flag_regex})([[:space:]]+)[^[:space:]]+/\\1\\2[redacted]/g" \
+    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g")"
   printf '%s' "$line"
 }
 
@@ -357,27 +478,100 @@ command_requires_shell_execution() {
 
 command_string_to_argv() {
   local command_text="${1:-}"
+  local length=0
+  local idx=0
+  local ch=""
+  local token=""
+  local quote_mode=""
+  local escaped="0"
+  local token_started="0"
   COMMAND_STRING_ARGV=()
-  if ! command -v python3 >/dev/null 2>&1; then
-    return 1
-  fi
-  if ! mapfile -d '' -t COMMAND_STRING_ARGV < <(
-    python3 - "$command_text" <<'PY'
-import shlex
-import sys
+  length="${#command_text}"
 
-try:
-    for token in shlex.split(sys.argv[1], posix=True):
-        sys.stdout.write(token)
-        sys.stdout.write("\0")
-except ValueError:
-    sys.exit(1)
-PY
-  ); then
+  while (( idx < length )); do
+    ch="${command_text:idx:1}"
+
+    if [[ "$quote_mode" == "single" ]]; then
+      if [[ "$ch" == "'" ]]; then
+        quote_mode=""
+      else
+        token+="$ch"
+      fi
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$quote_mode" == "double" ]]; then
+      if [[ "$escaped" == "1" ]]; then
+        token+="$ch"
+        escaped="0"
+        token_started="1"
+        idx=$((idx + 1))
+        continue
+      fi
+      case "$ch" in
+        "\\")
+          escaped="1"
+          ;;
+        "\"")
+          quote_mode=""
+          ;;
+        *)
+          token+="$ch"
+          token_started="1"
+          ;;
+      esac
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$escaped" == "1" ]]; then
+      token+="$ch"
+      escaped="0"
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+
+    case "$ch" in
+      [[:space:]])
+        if [[ "$token_started" == "1" ]]; then
+          COMMAND_STRING_ARGV+=("$token")
+          token=""
+          token_started="0"
+        fi
+        ;;
+      "\\")
+        escaped="1"
+        token_started="1"
+        ;;
+      "'")
+        quote_mode="single"
+        token_started="1"
+        ;;
+      "\"")
+        quote_mode="double"
+        token_started="1"
+        ;;
+      *)
+        token+="$ch"
+        token_started="1"
+        ;;
+    esac
+    idx=$((idx + 1))
+  done
+
+  if [[ "$escaped" == "1" || -n "$quote_mode" ]]; then
     COMMAND_STRING_ARGV=()
     return 1
   fi
-  return 0
+
+  if [[ "$token_started" == "1" ]]; then
+    COMMAND_STRING_ARGV+=("$token")
+  fi
+
+  [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
 }
 
 action_command_argv_allowed() {
@@ -406,12 +600,8 @@ action_command_argv_allowed() {
       ./scripts/*)
         script_path="$ROOT_DIR/${script_path#./}"
         ;;
-      /*)
-        # Allow explicit absolute script paths (used by integration harnesses).
-        ;;
       *)
-        # Resolve plain/relative script paths against repo root.
-        script_path="$ROOT_DIR/$script_path"
+        return 1
         ;;
     esac
     if [[ "$script_path" == *".."* ]]; then
@@ -445,6 +635,7 @@ run_action_command_string() {
   local command_text="${1:-}"
   local log_path="${2:-}"
   local timeout_sec="${3:-0}"
+  local redacted_command_text=""
   local -a command_argv=()
   local -a env_prefix=()
   local token
@@ -452,6 +643,7 @@ run_action_command_string() {
   if [[ -z "$command_text" ]]; then
     return 4
   fi
+  redacted_command_text="$(redact_command_secrets "$command_text")"
 
   if ! command_requires_shell_execution "$command_text" && command_string_to_argv "$command_text"; then
     for token in "${COMMAND_STRING_ARGV[@]}"; do
@@ -466,9 +658,16 @@ run_action_command_string() {
       if ! action_command_argv_allowed "${command_argv[@]}"; then
         {
           echo "refusing untrusted action command (outside scripts allowlist)"
-          echo "command: $command_text"
+          echo "command: $redacted_command_text"
         } >"$log_path"
         return 6
+      fi
+      if [[ "${#env_prefix[@]}" -gt 0 && "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
+        {
+          echo "refusing env-prefixed action command (set --allow-unsafe-shell-commands 1 to override)"
+          echo "command: $redacted_command_text"
+        } >"$log_path"
+        return 5
       fi
       if (( timeout_sec > 0 )); then
         if [[ "${#env_prefix[@]}" -gt 0 ]]; then
@@ -491,7 +690,7 @@ run_action_command_string() {
     if [[ "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
       {
         echo "refusing shell-evaluated action command (set --allow-unsafe-shell-commands 1 to override)"
-        echo "command: $command_text"
+        echo "command: $redacted_command_text"
       } >"$log_path"
       return 5
     fi
@@ -500,7 +699,7 @@ run_action_command_string() {
     if [[ "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
       {
         echo "refusing shell-evaluated action command (set --allow-unsafe-shell-commands 1 to override)"
-        echo "command: $command_text"
+        echo "command: $redacted_command_text"
       } >"$log_path"
       return 5
     fi
@@ -525,10 +724,22 @@ profile_default_gate_subject="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SU
 allow_profile_default_gate_unreachable="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE:-0}"
 include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
+include_ids_csv="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS:-}"
+exclude_ids_csv="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_IDS:-}"
+include_id_suffixes_csv="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_SUFFIXES:-}"
+exclude_id_suffixes_csv="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_SUFFIXES:-}"
 print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
 profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-2400}"
+declare -a include_ids=()
+declare -a exclude_ids=()
+declare -a include_id_suffixes=()
+declare -a exclude_id_suffixes=()
+append_csv_values_to_id_filters "$include_ids_csv" "include"
+append_csv_values_to_id_filters "$exclude_ids_csv" "exclude"
+append_csv_values_to_suffix_filters "$include_id_suffixes_csv" "include"
+append_csv_values_to_suffix_filters "$exclude_id_suffixes_csv" "exclude"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -617,9 +828,49 @@ while [[ $# -gt 0 ]]; do
       include_id_prefix="${2:-}"
       shift 2
       ;;
+    --include-id)
+      require_value_or_die "$1" "${2:-}"
+      include_id_value="$(trim "${2:-}")"
+      if [[ -z "$include_id_value" ]]; then
+        echo "--include-id requires a non-empty value"
+        exit 2
+      fi
+      include_ids+=("$include_id_value")
+      shift 2
+      ;;
+    --exclude-id)
+      require_value_or_die "$1" "${2:-}"
+      exclude_id_value="$(trim "${2:-}")"
+      if [[ -z "$exclude_id_value" ]]; then
+        echo "--exclude-id requires a non-empty value"
+        exit 2
+      fi
+      exclude_ids+=("$exclude_id_value")
+      shift 2
+      ;;
     --exclude-id-prefix)
       require_value_or_die "$1" "${2:-}"
       exclude_id_prefix="${2:-}"
+      shift 2
+      ;;
+    --include-id-suffix)
+      require_value_or_die "$1" "${2:-}"
+      include_id_suffix_value="$(trim "${2:-}")"
+      if [[ -z "$include_id_suffix_value" ]]; then
+        echo "--include-id-suffix requires a non-empty value"
+        exit 2
+      fi
+      include_id_suffixes+=("$include_id_suffix_value")
+      shift 2
+      ;;
+    --exclude-id-suffix)
+      require_value_or_die "$1" "${2:-}"
+      exclude_id_suffix_value="$(trim "${2:-}")"
+      if [[ -z "$exclude_id_suffix_value" ]]; then
+        echo "--exclude-id-suffix requires a non-empty value"
+        exit 2
+      fi
+      exclude_id_suffixes+=("$exclude_id_suffix_value")
       shift 2
       ;;
     --print-summary-json)
@@ -694,11 +945,16 @@ roadmap_script="${ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT:-$ROOT_DIR/scripts/roa
 ran_roadmap_report="0"
 
 if [[ "$roadmap_paths_provided" != "1" ]]; then
-  if [[ ! -x "$roadmap_script" ]]; then
-    echo "missing executable roadmap script: $roadmap_script"
+  if [[ ! -f "$roadmap_script" ]]; then
+    echo "missing roadmap script: $roadmap_script"
+    exit 2
+  fi
+  if [[ ! -r "$roadmap_script" ]]; then
+    echo "roadmap script is not readable: $roadmap_script"
     exit 2
   fi
   roadmap_cmd=(
+    bash
     "$roadmap_script"
     --refresh-manual-validation "$refresh_manual_validation"
     --refresh-single-machine-readiness "$refresh_single_machine_readiness"
@@ -730,16 +986,141 @@ if [[ ! -f "$roadmap_report_md" ]]; then
   exit 3
 fi
 
+include_id_suffixes_json="$(json_array_from_args "${include_id_suffixes[@]}")"
+exclude_id_suffixes_json="$(json_array_from_args "${exclude_id_suffixes[@]}")"
+include_ids_json="$(json_array_from_args "${include_ids[@]}")"
+exclude_ids_json="$(json_array_from_args "${exclude_ids[@]}")"
 selected_actions_json="$(jq -c '[ (.next_actions // [])[] | select(((.command // "") | tostring | length) > 0) ]' "$roadmap_summary_json")"
+non_empty_command_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 if [[ -n "$include_id_prefix" ]]; then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg prefix "$include_id_prefix" '[.[] | select(((.id // "") | startswith($prefix)))]')"
 fi
 if [[ -n "$exclude_id_prefix" ]]; then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg prefix "$exclude_id_prefix" '[.[] | select(((.id // "") | startswith($prefix) | not))]')"
 fi
+after_prefix_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+if (( ${#include_ids[@]} > 0 )); then
+  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson ids "$include_ids_json" '[.[] | select((((.id // "") | tostring) as $id | any($ids[]; . == $id)))]')"
+fi
+after_include_id_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+if (( ${#exclude_ids[@]} > 0 )); then
+  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson ids "$exclude_ids_json" '[.[] | select(((((.id // "") | tostring) as $id | any($ids[]; . == $id)) | not))]')"
+fi
+after_exclude_id_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+if (( ${#include_id_suffixes[@]} > 0 )); then
+  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson suffixes "$include_id_suffixes_json" '[.[] | select((((.id // "") | tostring) as $id | any($suffixes[]; . as $suffix | ($id | endswith($suffix))))) ]')"
+fi
+after_include_suffix_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+if (( ${#exclude_id_suffixes[@]} > 0 )); then
+  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson suffixes "$exclude_id_suffixes_json" '[.[] | select(((((.id // "") | tostring) as $id | any($suffixes[]; . as $suffix | ($id | endswith($suffix)))) | not))]')"
+fi
+after_exclude_suffix_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+before_dedupe_count="$after_exclude_suffix_filters_count"
+deduped_actions_count=0
+deduped_exact_duplicate_count=0
+deduped_id_command_duplicate_count=0
+dedupe_result_json="$(
+  printf '%s\n' "$selected_actions_json" | jq -c '
+    reduce .[] as $action (
+      {
+        actions: [],
+        seen_exact: {},
+        seen_id_command: {},
+        deduped_exact_duplicate_count: 0,
+        deduped_id_command_duplicate_count: 0
+      };
+      (
+        ($action | tojson) as $exact_key
+        | (($action.id // "") | tostring) as $id
+        | (($action.command // "") | tostring) as $command
+        | ($id + "\u0000" + $command) as $id_command_key
+        | if (.seen_exact[$exact_key] // false) then
+            .deduped_exact_duplicate_count += 1
+          elif (.seen_id_command[$id_command_key] // false) then
+            .deduped_id_command_duplicate_count += 1
+          else
+            .actions += [$action]
+            | .seen_exact[$exact_key] = true
+            | .seen_id_command[$id_command_key] = true
+          end
+      )
+    )
+    | .deduped_actions_count = (.deduped_exact_duplicate_count + .deduped_id_command_duplicate_count)
+    | {
+        actions,
+        deduped_actions_count,
+        deduped_exact_duplicate_count,
+        deduped_id_command_duplicate_count
+      }
+  '
+)"
+selected_actions_json="$(printf '%s\n' "$dedupe_result_json" | jq -c '.actions')"
+deduped_actions_count="$(printf '%s\n' "$dedupe_result_json" | jq -r '.deduped_actions_count // 0')"
+deduped_exact_duplicate_count="$(printf '%s\n' "$dedupe_result_json" | jq -r '.deduped_exact_duplicate_count // 0')"
+deduped_id_command_duplicate_count="$(printf '%s\n' "$dedupe_result_json" | jq -r '.deduped_id_command_duplicate_count // 0')"
+after_dedupe_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+conflicting_ids_after_dedupe_json="$(
+  printf '%s\n' "$selected_actions_json" | jq -c '
+    group_by((.id // "") | tostring)
+    | map(select(((.[0].id // "") | tostring | length) > 0 and length > 1))
+    | map({
+        id: ((.[0].id // "") | tostring),
+        commands: (map((.command // "") | tostring))
+      })
+  '
+)"
+conflicting_ids_after_dedupe_count="$(printf '%s\n' "$conflicting_ids_after_dedupe_json" | jq -r 'length')"
+if (( conflicting_ids_after_dedupe_count > 0 )); then
+  conflicting_ids_after_dedupe_csv="$(printf '%s\n' "$conflicting_ids_after_dedupe_json" | jq -r 'map(.id) | join(",")')"
+  echo "[roadmap-next-actions-run] fail-closed duplicate action ids with conflicting commands: $conflicting_ids_after_dedupe_csv"
+  echo "roadmap next_actions contains stale/ambiguous duplicate ids; use include/exclude id filters or regenerate roadmap summary."
+  exit 3
+fi
+before_batch_deconflict_count="$after_dedupe_count"
+if printf '%s\n' "$selected_actions_json" | jq -e 'any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")' >/dev/null; then
+  selected_actions_json="$(
+    printf '%s\n' "$selected_actions_json" | jq -c '
+      [.[] | select(
+        ((.id // "") != "roadmap_live_evidence_actionable_run")
+        and ((.id // "") != "profile_default_gate")
+        and ((.id // "") != "runtime_actuation_promotion")
+        and ((.id // "") != "profile_compare_multi_vm_stability_promotion")
+        and ((.id // "") != "profile_default_gate_stability_cycle")
+        and ((.id // "") != "runtime_actuation_promotion_cycle")
+        and ((.id // "") != "profile_compare_multi_vm_stability_promotion_cycle")
+      )]
+    '
+  )"
+fi
+if printf '%s\n' "$selected_actions_json" | jq -e 'any(.[]; (.id // "") == "roadmap_live_and_pack_actionable_run")' >/dev/null; then
+  selected_actions_json="$(
+    printf '%s\n' "$selected_actions_json" | jq -c '
+      [.[] | select(
+        ((.id // "") != "roadmap_live_evidence_actionable_run")
+        and ((.id // "") != "roadmap_live_evidence_cycle_batch_run")
+        and ((.id // "") != "roadmap_evidence_pack_actionable_run")
+        and ((.id // "") != "profile_default_gate")
+        and ((.id // "") != "runtime_actuation_promotion")
+        and ((.id // "") != "profile_compare_multi_vm_stability")
+        and ((.id // "") != "profile_compare_multi_vm_stability_promotion")
+        and ((.id // "") != "profile_default_gate_evidence_pack")
+        and ((.id // "") != "runtime_actuation_promotion_evidence_pack")
+        and ((.id // "") != "profile_compare_multi_vm_stability_promotion_evidence_pack")
+      )]
+    '
+  )"
+fi
+if printf '%s\n' "$selected_actions_json" | jq -e 'any(.[]; (.id // "") == "profile_default_gate_evidence_pack" or (.id // "") == "runtime_actuation_promotion_evidence_pack" or (.id // "") == "profile_compare_multi_vm_stability_promotion_evidence_pack")' >/dev/null; then
+  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c '[.[] | select((.id // "") != "roadmap_evidence_pack_actionable_run")]')"
+fi
+if printf '%s\n' "$selected_actions_json" | jq -e 'any(.[]; (.id // "") == "profile_default_gate" or (.id // "") == "runtime_actuation_promotion" or (.id // "") == "profile_compare_multi_vm_stability" or (.id // "") == "profile_compare_multi_vm_stability_promotion")' >/dev/null; then
+  selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c '[.[] | select((.id // "") != "roadmap_live_evidence_actionable_run")]')"
+fi
+after_batch_deconflict_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 if (( max_actions > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson max_actions "$max_actions" '.[:$max_actions]')"
 fi
+after_max_actions_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 
 selected_has_profile_default_gate="$(printf '%s\n' "$selected_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_default_gate")')"
 if [[ "$selected_has_profile_default_gate" == "true" && "$action_timeout_sec" == "0" ]]; then
@@ -749,12 +1130,18 @@ fi
 actions_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 selected_action_ids_json="$(printf '%s\n' "$selected_actions_json" | jq -c '[.[] | .id // "" | select(length > 0)]')"
 selected_action_ids_csv="$(printf '%s\n' "$selected_action_ids_json" | jq -r 'join(",")')"
+include_ids_csv_display="$(printf '%s\n' "$include_ids_json" | jq -r 'if length == 0 then "none" else join(",") end')"
+exclude_ids_csv_display="$(printf '%s\n' "$exclude_ids_json" | jq -r 'if length == 0 then "none" else join(",") end')"
+include_id_suffixes_csv_display="$(printf '%s\n' "$include_id_suffixes_json" | jq -r 'if length == 0 then "none" else join(",") end')"
+exclude_id_suffixes_csv_display="$(printf '%s\n' "$exclude_id_suffixes_json" | jq -r 'if length == 0 then "none" else join(",") end')"
 if [[ -z "$selected_action_ids_csv" ]]; then
   selected_action_ids_csv="none"
 fi
 echo "[roadmap-next-actions-run] selected_actions=$actions_count parallel=$parallel action_timeout_sec=$action_timeout_sec"
 echo "[roadmap-next-actions-run] allow_unsafe_shell_commands=$allow_unsafe_shell_commands"
 echo "[roadmap-next-actions-run] include_id_prefix=${include_id_prefix:-none} exclude_id_prefix=${exclude_id_prefix:-none}"
+echo "[roadmap-next-actions-run] include_ids=$include_ids_csv_display exclude_ids=$exclude_ids_csv_display"
+echo "[roadmap-next-actions-run] include_id_suffixes=$include_id_suffixes_csv_display exclude_id_suffixes=$exclude_id_suffixes_csv_display"
 echo "[roadmap-next-actions-run] action_ids=$selected_action_ids_csv"
 if (( actions_count == 0 )); then
   echo "[roadmap-next-actions-run] no actions selected; writing pass summary"
@@ -1141,7 +1528,11 @@ if (( actions_count == 0 )); then
   final_status="pass"
   final_rc=0
 fi
-summary_command_redacted="$(redact_command_secrets "./scripts/roadmap_next_actions_run.sh $*")"
+summary_command_input="./scripts/roadmap_next_actions_run.sh"
+for arg in "$@"; do
+  summary_command_input="${summary_command_input} $(render_log_token "$arg")"
+done
+summary_command_redacted="$(redact_command_secrets "$summary_command_input")"
 profile_default_gate_subject_configured=0
 profile_default_gate_subject_redacted=""
 if [[ -n "$profile_default_gate_subject" ]]; then
@@ -1161,6 +1552,23 @@ jq -n \
   --arg roadmap_log "$roadmap_log" \
   --arg include_id_prefix "$include_id_prefix" \
   --arg exclude_id_prefix "$exclude_id_prefix" \
+  --argjson include_ids "$include_ids_json" \
+  --argjson exclude_ids "$exclude_ids_json" \
+  --argjson include_id_suffixes "$include_id_suffixes_json" \
+  --argjson exclude_id_suffixes "$exclude_id_suffixes_json" \
+  --argjson non_empty_command_count "$non_empty_command_count" \
+  --argjson after_prefix_filters_count "$after_prefix_filters_count" \
+  --argjson after_include_id_filters_count "$after_include_id_filters_count" \
+  --argjson after_exclude_id_filters_count "$after_exclude_id_filters_count" \
+  --argjson after_include_suffix_filters_count "$after_include_suffix_filters_count" \
+  --argjson after_exclude_suffix_filters_count "$after_exclude_suffix_filters_count" \
+  --argjson before_dedupe_count "$before_dedupe_count" \
+  --argjson deduped_actions_count "$deduped_actions_count" \
+  --argjson deduped_exact_duplicate_count "$deduped_exact_duplicate_count" \
+  --argjson deduped_id_command_duplicate_count "$deduped_id_command_duplicate_count" \
+  --argjson after_dedupe_count "$after_dedupe_count" \
+  --argjson after_batch_deconflict_count "$after_batch_deconflict_count" \
+  --argjson after_max_actions_count "$after_max_actions_count" \
   --argjson ran_roadmap_report "$ran_roadmap_report" \
   --argjson refresh_manual_validation "$refresh_manual_validation" \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
@@ -1193,18 +1601,37 @@ jq -n \
       parallel: ($parallel == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
-      allow_unsafe_shell_commands: $allow_unsafe_shell_commands,
+      allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1),
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
       profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
-      exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end)
+      exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end),
+      include_ids: (if ($include_ids | length) == 0 then null else $include_ids end),
+      exclude_ids: (if ($exclude_ids | length) == 0 then null else $exclude_ids end),
+      include_id_suffixes: (if ($include_id_suffixes | length) == 0 then null else $include_id_suffixes end),
+      exclude_id_suffixes: (if ($exclude_id_suffixes | length) == 0 then null else $exclude_id_suffixes end)
     },
     roadmap: {
       generated_this_run: ($ran_roadmap_report == 1),
       actions_selected_count: $actions_count,
-      selected_action_ids: $selected_action_ids
+      selected_action_ids: $selected_action_ids,
+      selection_accounting: {
+        non_empty_command_count: $non_empty_command_count,
+        after_prefix_filters_count: $after_prefix_filters_count,
+        after_include_id_filters_count: $after_include_id_filters_count,
+        after_exclude_id_filters_count: $after_exclude_id_filters_count,
+        after_include_suffix_filters_count: $after_include_suffix_filters_count,
+        after_exclude_suffix_filters_count: $after_exclude_suffix_filters_count,
+        before_dedupe_count: $before_dedupe_count,
+        deduped_actions_count: $deduped_actions_count,
+        deduped_exact_duplicate_count: $deduped_exact_duplicate_count,
+        deduped_id_command_duplicate_count: $deduped_id_command_duplicate_count,
+        after_dedupe_count: $after_dedupe_count,
+        after_batch_deconflict_count: $after_batch_deconflict_count,
+        after_max_actions_count: $after_max_actions_count
+      }
     },
     summary: {
       actions_executed: $executed_count,

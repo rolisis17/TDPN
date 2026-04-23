@@ -11,23 +11,31 @@ for cmd in bash jq mktemp chmod mkdir cat grep timeout date; do
   fi
 done
 
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+mkdir -p "$ROOT_DIR/.easy-node-logs"
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.easy-node-logs/integration_roadmap_next_actions_run_XXXXXX")"
+ACTION_TMP_DIR="$(mktemp -d "$ROOT_DIR/scripts/.integration_roadmap_next_actions_run.XXXXXX")"
+trap 'rm -rf "$TMP_DIR" "$ACTION_TMP_DIR"' EXIT
 
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
-PASS1="$TMP_DIR/pass_action_1.sh"
-PASS2="$TMP_DIR/pass_action_2.sh"
-FAIL1="$TMP_DIR/fail_action_1.sh"
-FAIL2="$TMP_DIR/fail_action_2.sh"
-SLOW1="$TMP_DIR/slow_action_1.sh"
-SLOW2="$TMP_DIR/slow_action_2.sh"
-UNREACHABLE_PROFILE="$TMP_DIR/profile_unreachable.sh"
-MISSING_SUBJECT_PROFILE="$TMP_DIR/profile_missing_subject.sh"
-MISSING_SUBJECT_PROFILE_LIVE="$TMP_DIR/profile_missing_subject_live.sh"
-UNREACHABLE_PROFILE_MARKER="$TMP_DIR/profile_unreachable_marker.sh"
-MISSING_SUBJECT_PROFILE_MARKER="$TMP_DIR/profile_missing_subject_marker.sh"
-FAKE_EASY_NODE="$TMP_DIR/fake_easy_node.sh"
-FAKE_EASY_NODE_CAPTURE="$TMP_DIR/fake_easy_node_capture.log"
+PASS1="$ACTION_TMP_DIR/pass_action_1.sh"
+PASS2="$ACTION_TMP_DIR/pass_action_2.sh"
+DEDUPE_MARK="$ACTION_TMP_DIR/dedupe_mark_action.sh"
+DEDUP_MARK_COUNT_FILE="$ACTION_TMP_DIR/dedupe_mark_count.txt"
+CONFLICT_CMD_A="$ACTION_TMP_DIR/conflict_cmd_a.sh"
+CONFLICT_CMD_B="$ACTION_TMP_DIR/conflict_cmd_b.sh"
+CONFLICT_MARK_A="$ACTION_TMP_DIR/conflict_cmd_a.marker"
+CONFLICT_MARK_B="$ACTION_TMP_DIR/conflict_cmd_b.marker"
+FAIL1="$ACTION_TMP_DIR/fail_action_1.sh"
+FAIL2="$ACTION_TMP_DIR/fail_action_2.sh"
+SLOW1="$ACTION_TMP_DIR/slow_action_1.sh"
+SLOW2="$ACTION_TMP_DIR/slow_action_2.sh"
+UNREACHABLE_PROFILE="$ACTION_TMP_DIR/profile_unreachable.sh"
+MISSING_SUBJECT_PROFILE="$ACTION_TMP_DIR/profile_missing_subject.sh"
+MISSING_SUBJECT_PROFILE_LIVE="$ACTION_TMP_DIR/profile_missing_subject_live.sh"
+UNREACHABLE_PROFILE_MARKER="$ACTION_TMP_DIR/profile_unreachable_marker.sh"
+MISSING_SUBJECT_PROFILE_MARKER="$ACTION_TMP_DIR/profile_missing_subject_marker.sh"
+FAKE_EASY_NODE="$ACTION_TMP_DIR/fake_easy_node.sh"
+FAKE_EASY_NODE_CAPTURE="$ACTION_TMP_DIR/fake_easy_node_capture.log"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -42,6 +50,45 @@ set -euo pipefail
 echo "pass action 2"
 EOF_PASS2
 chmod +x "$PASS2"
+
+cat >"$DEDUPE_MARK" <<'EOF_DEDUPE_MARK'
+#!/usr/bin/env bash
+set -euo pipefail
+count_file="${NEXT_ACTION_DEDUPE_COUNT_FILE:-}"
+if [[ -z "$count_file" ]]; then
+  echo "missing NEXT_ACTION_DEDUPE_COUNT_FILE"
+  exit 2
+fi
+printf 'run\n' >>"$count_file"
+echo "dedupe marker ran"
+EOF_DEDUPE_MARK
+chmod +x "$DEDUPE_MARK"
+
+cat >"$CONFLICT_CMD_A" <<'EOF_CONFLICT_CMD_A'
+#!/usr/bin/env bash
+set -euo pipefail
+marker="${NEXT_ACTION_CONFLICT_MARK_A:-}"
+if [[ -z "$marker" ]]; then
+  echo "missing NEXT_ACTION_CONFLICT_MARK_A"
+  exit 2
+fi
+printf 'ran\n' >>"$marker"
+echo "conflict command A ran"
+EOF_CONFLICT_CMD_A
+chmod +x "$CONFLICT_CMD_A"
+
+cat >"$CONFLICT_CMD_B" <<'EOF_CONFLICT_CMD_B'
+#!/usr/bin/env bash
+set -euo pipefail
+marker="${NEXT_ACTION_CONFLICT_MARK_B:-}"
+if [[ -z "$marker" ]]; then
+  echo "missing NEXT_ACTION_CONFLICT_MARK_B"
+  exit 2
+fi
+printf 'ran\n' >>"$marker"
+echo "conflict command B ran"
+EOF_CONFLICT_CMD_B
+chmod +x "$CONFLICT_CMD_B"
 
 cat >"$FAIL1" <<'EOF_FAIL1'
 #!/usr/bin/env bash
@@ -238,6 +285,27 @@ JSON
 }
 JSON
     ;;
+  duplicate_actions)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"dedupe_once","label":"Dedupe once","command":"bash \"$DEDUPE_MARK\"","reason":"base"},
+    {"id":"dedupe_once","label":"Dedupe once","command":"bash \"$DEDUPE_MARK\"","reason":"base"},
+    {"id":"dedupe_once","label":"Dedupe once alternate","command":"bash \"$DEDUPE_MARK\"","reason":"same-id-command"}
+  ]
+}
+JSON
+    ;;
+  duplicate_id_conflicting_commands)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"dup_conflict","label":"Duplicate conflict A","command":"bash \"$CONFLICT_CMD_A\"","reason":"stale-A"},
+    {"id":"dup_conflict","label":"Duplicate conflict B","command":"bash \"$CONFLICT_CMD_B\"","reason":"stale-B"}
+  ]
+}
+JSON
+    ;;
   fail_first_rc)
     cat >"$summary_json" <<JSON
 {
@@ -264,6 +332,67 @@ JSON
 {
   "next_actions": [
     {"id":"profile_compare_multi_vm_stability","label":"Profile compare multi-VM stability cycle","command":"bash \"$PASS1\"","reason":"test-multi-vm-stability"}
+  ]
+}
+JSON
+    ;;
+  evidence_pack_helper_conflict)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate_evidence_pack","label":"Profile default evidence-pack publish","command":"bash \"$PASS1\"","reason":"test-evidence-pack"},
+    {"id":"roadmap_evidence_pack_actionable_run","label":"Roadmap evidence-pack actionable run","command":"bash \"$PASS2\"","reason":"test-batch-helper"}
+  ]
+}
+JSON
+    ;;
+  live_evidence_helper_conflict)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$PASS1\"","reason":"test-live-evidence"},
+    {"id":"roadmap_live_evidence_actionable_run","label":"Roadmap live evidence actionable run","command":"bash \"$PASS2\"","reason":"test-batch-helper"}
+  ]
+}
+JSON
+    ;;
+  live_and_pack_helper_conflict)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$PASS1\"","reason":"test-live"},
+    {"id":"profile_default_gate_evidence_pack","label":"Profile default evidence-pack publish","command":"bash \"$PASS2\"","reason":"test-pack"},
+    {"id":"roadmap_live_evidence_actionable_run","label":"Roadmap live evidence actionable run","command":"bash \"$PASS2\"","reason":"test-live-helper"},
+    {"id":"roadmap_evidence_pack_actionable_run","label":"Roadmap evidence-pack actionable run","command":"bash \"$PASS2\"","reason":"test-pack-helper"},
+    {"id":"roadmap_live_and_pack_actionable_run","label":"Roadmap live-and-pack actionable run","command":"bash \"$PASS1\"","reason":"test-combined-helper"}
+  ]
+}
+JSON
+    ;;
+  live_and_pack_with_cycle_batch_helper_conflict)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$PASS1\"","reason":"test-live"},
+    {"id":"runtime_actuation_promotion","label":"Runtime-actuation promotion cycle","command":"bash \"$PASS2\"","reason":"test-runtime-live"},
+    {"id":"profile_default_gate_evidence_pack","label":"Profile default evidence-pack publish","command":"bash \"$PASS2\"","reason":"test-pack"},
+    {"id":"roadmap_live_evidence_actionable_run","label":"Roadmap live evidence actionable run","command":"bash \"$PASS2\"","reason":"test-live-helper"},
+    {"id":"roadmap_live_evidence_cycle_batch_run","label":"Roadmap live-evidence cycle-batch run","command":"bash \"$PASS2\"","reason":"test-cycle-batch-helper"},
+    {"id":"roadmap_evidence_pack_actionable_run","label":"Roadmap evidence-pack actionable run","command":"bash \"$PASS2\"","reason":"test-pack-helper"},
+    {"id":"roadmap_live_and_pack_actionable_run","label":"Roadmap live-and-pack actionable run","command":"bash \"$PASS1\"","reason":"test-combined-helper"}
+  ]
+}
+JSON
+    ;;
+  live_evidence_cycle_batch_helper_conflict)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$PASS1\"","reason":"test-cycle-live"},
+    {"id":"runtime_actuation_promotion","label":"Runtime-actuation promotion cycle","command":"bash \"$PASS2\"","reason":"test-cycle-runtime"},
+    {"id":"profile_compare_multi_vm_stability_promotion","label":"Profile compare multi-VM stability promotion cycle","command":"bash \"$PASS2\"","reason":"test-cycle-promotion"},
+    {"id":"roadmap_live_evidence_actionable_run","label":"Roadmap live evidence actionable run","command":"bash \"$PASS2\"","reason":"test-live-helper"},
+    {"id":"roadmap_live_evidence_cycle_batch_run","label":"Roadmap live-evidence cycle-batch run","command":"bash \"$PASS1\"","reason":"test-cycle-batch-helper"}
   ]
 }
 JSON
@@ -401,8 +530,24 @@ if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--include-i
   echo "help output missing --include-id-prefix PREFIX"
   exit 1
 fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--include-id ID" >/dev/null; then
+  echo "help output missing --include-id ID"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--exclude-id ID" >/dev/null; then
+  echo "help output missing --exclude-id ID"
+  exit 1
+fi
 if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--exclude-id-prefix PREFIX" >/dev/null; then
   echo "help output missing --exclude-id-prefix PREFIX"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--include-id-suffix SUFFIX" >/dev/null; then
+  echo "help output missing --include-id-suffix SUFFIX"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--exclude-id-suffix SUFFIX" >/dev/null; then
+  echo "help output missing --exclude-id-suffix SUFFIX"
   exit 1
 fi
 if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--parallel [0|1]" >/dev/null; then
@@ -444,6 +589,92 @@ if ! jq -e '
 ' "$SUMMARY_PASS" >/dev/null; then
   echo "success path summary mismatch"
   cat "$SUMMARY_PASS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] dedupes duplicate next_actions entries (exact + id+command) and executes once"
+SUMMARY_DEDUPE="$TMP_DIR/summary_dedupe.json"
+REPORTS_DEDUPE="$TMP_DIR/reports_dedupe"
+rm -f "$DEDUP_MARK_COUNT_FILE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=duplicate_actions \
+PASS1="$PASS1" PASS2="$PASS2" DEDUPE_MARK="$DEDUPE_MARK" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+NEXT_ACTION_DEDUPE_COUNT_FILE="$DEDUP_MARK_COUNT_FILE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_DEDUPE" \
+  --summary-json "$SUMMARY_DEDUPE" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["dedupe_once"]
+  and .roadmap.selection_accounting.non_empty_command_count == 3
+  and .roadmap.selection_accounting.before_dedupe_count == 3
+  and .roadmap.selection_accounting.deduped_actions_count == 2
+  and .roadmap.selection_accounting.deduped_exact_duplicate_count == 1
+  and .roadmap.selection_accounting.deduped_id_command_duplicate_count == 1
+  and .roadmap.selection_accounting.after_dedupe_count == 1
+  and .roadmap.selection_accounting.after_batch_deconflict_count == 1
+  and .roadmap.selection_accounting.after_max_actions_count == 1
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "dedupe_once"
+  and .actions[0].status == "pass"
+' "$SUMMARY_DEDUPE" >/dev/null; then
+  echo "duplicate-actions dedupe summary mismatch"
+  cat "$SUMMARY_DEDUPE"
+  exit 1
+fi
+
+dedupe_run_count=0
+if [[ -f "$DEDUP_MARK_COUNT_FILE" ]]; then
+  dedupe_run_count="$(wc -l <"$DEDUP_MARK_COUNT_FILE" | tr -d '[:space:]')"
+fi
+if [[ "$dedupe_run_count" != "1" ]]; then
+  echo "duplicate-actions dedupe execution mismatch: expected 1 run, got $dedupe_run_count"
+  cat "$SUMMARY_DEDUPE"
+  if [[ -f "$DEDUP_MARK_COUNT_FILE" ]]; then
+    cat "$DEDUP_MARK_COUNT_FILE"
+  fi
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] fail-closed on duplicate id with conflicting commands"
+SUMMARY_DUP_CONFLICT="$TMP_DIR/summary_dup_conflict.json"
+REPORTS_DUP_CONFLICT="$TMP_DIR/reports_dup_conflict"
+DUP_CONFLICT_OUTPUT="$TMP_DIR/dup_conflict_output.log"
+rm -f "$CONFLICT_MARK_A" "$CONFLICT_MARK_B"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=duplicate_id_conflicting_commands \
+PASS1="$PASS1" PASS2="$PASS2" DEDUPE_MARK="$DEDUPE_MARK" CONFLICT_CMD_A="$CONFLICT_CMD_A" CONFLICT_CMD_B="$CONFLICT_CMD_B" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+NEXT_ACTION_CONFLICT_MARK_A="$CONFLICT_MARK_A" NEXT_ACTION_CONFLICT_MARK_B="$CONFLICT_MARK_B" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_DUP_CONFLICT" \
+  --summary-json "$SUMMARY_DUP_CONFLICT" \
+  --print-summary-json 0 >"$DUP_CONFLICT_OUTPUT" 2>&1
+dup_conflict_rc=$?
+set -e
+if [[ "$dup_conflict_rc" != "3" ]]; then
+  echo "expected duplicate conflicting id fail-closed rc=3, got rc=$dup_conflict_rc"
+  cat "$DUP_CONFLICT_OUTPUT"
+  if [[ -f "$SUMMARY_DUP_CONFLICT" ]]; then
+    cat "$SUMMARY_DUP_CONFLICT"
+  fi
+  exit 1
+fi
+if [[ -f "$CONFLICT_MARK_A" || -f "$CONFLICT_MARK_B" ]]; then
+  echo "duplicate conflicting-id commands unexpectedly executed"
+  cat "$DUP_CONFLICT_OUTPUT"
+  exit 1
+fi
+if ! grep -F -- "fail-closed duplicate action ids with conflicting commands: dup_conflict" "$DUP_CONFLICT_OUTPUT" >/dev/null 2>&1; then
+  echo "duplicate conflicting-id fail-closed message missing"
+  cat "$DUP_CONFLICT_OUTPUT"
   exit 1
 fi
 
@@ -503,6 +734,141 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] deconflicts evidence-pack batch helper when individual evidence-pack actions are selected"
+SUMMARY_EVIDENCE_HELPER_CONFLICT="$TMP_DIR/summary_evidence_helper_conflict.json"
+REPORTS_EVIDENCE_HELPER_CONFLICT="$TMP_DIR/reports_evidence_helper_conflict"
+ROADMAP_NEXT_ACTIONS_SCENARIO=evidence_pack_helper_conflict \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_EVIDENCE_HELPER_CONFLICT" \
+  --summary-json "$SUMMARY_EVIDENCE_HELPER_CONFLICT" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["profile_default_gate_evidence_pack"]
+  and .roadmap.selection_accounting.after_batch_deconflict_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate_evidence_pack"
+  and .actions[0].status == "pass"
+' "$SUMMARY_EVIDENCE_HELPER_CONFLICT" >/dev/null; then
+  echo "evidence-pack helper deconflict summary mismatch"
+  cat "$SUMMARY_EVIDENCE_HELPER_CONFLICT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] deconflicts live-evidence batch helper when individual live-evidence actions are selected"
+SUMMARY_LIVE_HELPER_CONFLICT="$TMP_DIR/summary_live_helper_conflict.json"
+REPORTS_LIVE_HELPER_CONFLICT="$TMP_DIR/reports_live_helper_conflict"
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_evidence_helper_conflict \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_HELPER_CONFLICT" \
+  --summary-json "$SUMMARY_LIVE_HELPER_CONFLICT" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["profile_default_gate"]
+  and .roadmap.selection_accounting.after_batch_deconflict_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+' "$SUMMARY_LIVE_HELPER_CONFLICT" >/dev/null; then
+  echo "live-evidence helper deconflict summary mismatch"
+  cat "$SUMMARY_LIVE_HELPER_CONFLICT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] deconflicts combined live-and-pack helper against overlapping live/evidence actions"
+SUMMARY_LIVE_AND_PACK_HELPER_CONFLICT="$TMP_DIR/summary_live_and_pack_helper_conflict.json"
+REPORTS_LIVE_AND_PACK_HELPER_CONFLICT="$TMP_DIR/reports_live_and_pack_helper_conflict"
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_and_pack_helper_conflict \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_AND_PACK_HELPER_CONFLICT" \
+  --summary-json "$SUMMARY_LIVE_AND_PACK_HELPER_CONFLICT" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["roadmap_live_and_pack_actionable_run"]
+  and .roadmap.selection_accounting.after_batch_deconflict_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "roadmap_live_and_pack_actionable_run"
+  and .actions[0].status == "pass"
+' "$SUMMARY_LIVE_AND_PACK_HELPER_CONFLICT" >/dev/null; then
+  echo "live-and-pack helper deconflict summary mismatch"
+  cat "$SUMMARY_LIVE_AND_PACK_HELPER_CONFLICT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] deconflicts combined live-and-pack helper against cycle-batch helper and overlapping live/pack actions"
+SUMMARY_LIVE_AND_PACK_WITH_CYCLE_BATCH_HELPER_CONFLICT="$TMP_DIR/summary_live_and_pack_with_cycle_batch_helper_conflict.json"
+REPORTS_LIVE_AND_PACK_WITH_CYCLE_BATCH_HELPER_CONFLICT="$TMP_DIR/reports_live_and_pack_with_cycle_batch_helper_conflict"
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_and_pack_with_cycle_batch_helper_conflict \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_AND_PACK_WITH_CYCLE_BATCH_HELPER_CONFLICT" \
+  --summary-json "$SUMMARY_LIVE_AND_PACK_WITH_CYCLE_BATCH_HELPER_CONFLICT" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["roadmap_live_and_pack_actionable_run"]
+  and .roadmap.selection_accounting.after_batch_deconflict_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "roadmap_live_and_pack_actionable_run"
+  and .actions[0].status == "pass"
+' "$SUMMARY_LIVE_AND_PACK_WITH_CYCLE_BATCH_HELPER_CONFLICT" >/dev/null; then
+  echo "live-and-pack + cycle-batch helper deconflict summary mismatch"
+  cat "$SUMMARY_LIVE_AND_PACK_WITH_CYCLE_BATCH_HELPER_CONFLICT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] deconflicts live-evidence cycle-batch helper against overlapping cycle actions and live helper"
+SUMMARY_LIVE_CYCLE_BATCH_HELPER_CONFLICT="$TMP_DIR/summary_live_cycle_batch_helper_conflict.json"
+REPORTS_LIVE_CYCLE_BATCH_HELPER_CONFLICT="$TMP_DIR/reports_live_cycle_batch_helper_conflict"
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_evidence_cycle_batch_helper_conflict \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_CYCLE_BATCH_HELPER_CONFLICT" \
+  --summary-json "$SUMMARY_LIVE_CYCLE_BATCH_HELPER_CONFLICT" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["roadmap_live_evidence_cycle_batch_run"]
+  and .roadmap.selection_accounting.after_batch_deconflict_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "roadmap_live_evidence_cycle_batch_run"
+  and .actions[0].status == "pass"
+' "$SUMMARY_LIVE_CYCLE_BATCH_HELPER_CONFLICT" >/dev/null; then
+  echo "live-evidence cycle-batch helper deconflict summary mismatch"
+  cat "$SUMMARY_LIVE_CYCLE_BATCH_HELPER_CONFLICT"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] include/exclude id-prefix filtering path"
 SUMMARY_FILTER="$TMP_DIR/summary_filter.json"
 REPORTS_FILTER="$TMP_DIR/reports_filter"
@@ -530,6 +896,172 @@ if ! jq -e '
 ' "$SUMMARY_FILTER" >/dev/null; then
   echo "include/exclude filtering summary mismatch"
   cat "$SUMMARY_FILTER"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] include/exclude exact id filtering path via repeatable args"
+SUMMARY_FILTER_ID_ARGS="$TMP_DIR/summary_filter_id_args.json"
+REPORTS_FILTER_ID_ARGS="$TMP_DIR/reports_filter_id_args"
+ROADMAP_NEXT_ACTIONS_SCENARIO=filter_mix \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_FILTER_ID_ARGS" \
+  --summary-json "$SUMMARY_FILTER_ID_ARGS" \
+  --include-id keep_a_1 \
+  --include-id keep_a_2 \
+  --exclude-id keep_a_1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.include_ids == ["keep_a_1","keep_a_2"]
+  and .inputs.exclude_ids == ["keep_a_1"]
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["keep_a_2"]
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "keep_a_2"
+  and .actions[0].status == "pass"
+' "$SUMMARY_FILTER_ID_ARGS" >/dev/null; then
+  echo "include/exclude exact id repeatable-args summary mismatch"
+  cat "$SUMMARY_FILTER_ID_ARGS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] include/exclude exact id filtering path via comma-separated env"
+SUMMARY_FILTER_ID_ENV="$TMP_DIR/summary_filter_id_env.json"
+REPORTS_FILTER_ID_ENV="$TMP_DIR/reports_filter_id_env"
+ROADMAP_NEXT_ACTIONS_SCENARIO=filter_mix \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS="keep_a_1,drop_b_1" \
+ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_IDS="drop_b_1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_FILTER_ID_ENV" \
+  --summary-json "$SUMMARY_FILTER_ID_ENV" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.include_ids == ["keep_a_1","drop_b_1"]
+  and .inputs.exclude_ids == ["drop_b_1"]
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["keep_a_1"]
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "keep_a_1"
+  and .actions[0].status == "pass"
+' "$SUMMARY_FILTER_ID_ENV" >/dev/null; then
+  echo "include/exclude exact id env summary mismatch"
+  cat "$SUMMARY_FILTER_ID_ENV"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] exact id + suffix interaction path"
+SUMMARY_FILTER_ID_SUFFIX_INTERACTION="$TMP_DIR/summary_filter_id_suffix_interaction.json"
+REPORTS_FILTER_ID_SUFFIX_INTERACTION="$TMP_DIR/reports_filter_id_suffix_interaction"
+ROADMAP_NEXT_ACTIONS_SCENARIO=filter_mix \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_FILTER_ID_SUFFIX_INTERACTION" \
+  --summary-json "$SUMMARY_FILTER_ID_SUFFIX_INTERACTION" \
+  --include-id-prefix keep_ \
+  --include-id keep_a_1 \
+  --include-id keep_a_2 \
+  --exclude-id keep_a_1 \
+  --include-id-suffix _2 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.include_id_prefix == "keep_"
+  and .inputs.include_ids == ["keep_a_1","keep_a_2"]
+  and .inputs.exclude_ids == ["keep_a_1"]
+  and .inputs.include_id_suffixes == ["_2"]
+  and .roadmap.selection_accounting.non_empty_command_count == 3
+  and .roadmap.selection_accounting.after_prefix_filters_count == 2
+  and .roadmap.selection_accounting.after_include_id_filters_count == 2
+  and .roadmap.selection_accounting.after_exclude_id_filters_count == 1
+  and .roadmap.selection_accounting.after_include_suffix_filters_count == 1
+  and .roadmap.selection_accounting.after_exclude_suffix_filters_count == 1
+  and .roadmap.selection_accounting.after_max_actions_count == 1
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["keep_a_2"]
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "keep_a_2"
+  and .actions[0].status == "pass"
+' "$SUMMARY_FILTER_ID_SUFFIX_INTERACTION" >/dev/null; then
+  echo "exact-id + suffix interaction summary mismatch"
+  cat "$SUMMARY_FILTER_ID_SUFFIX_INTERACTION"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] include/exclude id-suffix filtering path via repeatable args"
+SUMMARY_FILTER_SUFFIX_ARGS="$TMP_DIR/summary_filter_suffix_args.json"
+REPORTS_FILTER_SUFFIX_ARGS="$TMP_DIR/reports_filter_suffix_args"
+ROADMAP_NEXT_ACTIONS_SCENARIO=filter_mix \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_FILTER_SUFFIX_ARGS" \
+  --summary-json "$SUMMARY_FILTER_SUFFIX_ARGS" \
+  --include-id-suffix _1 \
+  --include-id-suffix _2 \
+  --exclude-id-suffix _1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.include_id_suffixes == ["_1","_2"]
+  and .inputs.exclude_id_suffixes == ["_1"]
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["keep_a_2"]
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "keep_a_2"
+  and .actions[0].status == "pass"
+' "$SUMMARY_FILTER_SUFFIX_ARGS" >/dev/null; then
+  echo "include/exclude id-suffix repeatable-args summary mismatch"
+  cat "$SUMMARY_FILTER_SUFFIX_ARGS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] include/exclude id-suffix filtering path via comma-separated env"
+SUMMARY_FILTER_SUFFIX_ENV="$TMP_DIR/summary_filter_suffix_env.json"
+REPORTS_FILTER_SUFFIX_ENV="$TMP_DIR/reports_filter_suffix_env"
+ROADMAP_NEXT_ACTIONS_SCENARIO=filter_mix \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_SUFFIXES="_1,_2" \
+ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_SUFFIXES="_2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_FILTER_SUFFIX_ENV" \
+  --summary-json "$SUMMARY_FILTER_SUFFIX_ENV" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.include_id_suffixes == ["_1","_2"]
+  and .inputs.exclude_id_suffixes == ["_2"]
+  and .roadmap.actions_selected_count == 2
+  and .roadmap.selected_action_ids == ["keep_a_1","drop_b_1"]
+  and .summary.actions_executed == 2
+  and ((.actions // []) | length == 2)
+  and .actions[0].id == "keep_a_1"
+  and .actions[0].status == "pass"
+  and .actions[1].id == "drop_b_1"
+  and .actions[1].status == "pass"
+' "$SUMMARY_FILTER_SUFFIX_ENV" >/dev/null; then
+  echo "include/exclude id-suffix env summary mismatch"
+  cat "$SUMMARY_FILTER_SUFFIX_ENV"
   exit 1
 fi
 
@@ -899,8 +1431,10 @@ if ! jq -e '
   and ((.actions[0].command // "") | contains("profile-default-gate-live"))
   and ((.actions[0].command // "") | contains("--host-a 100.113.245.61"))
   and ((.actions[0].command // "") | contains("--host-b 100.64.244.24"))
-  and ((.actions[0].command // "") | contains("--reports-dir /tmp/fake\\ profile\\ reports"))
-  and ((.actions[0].command // "") | contains("--summary-json /tmp/fake\\ profile\\ summary.json"))
+  and ((.actions[0].command // "") | contains("--reports-dir"))
+  and ((.actions[0].command // "") | contains("/tmp/fake profile reports"))
+  and ((.actions[0].command // "") | contains("--summary-json"))
+  and ((.actions[0].command // "") | contains("/tmp/fake profile summary.json"))
   and ((.actions[0].command // "") | contains("--subject [redacted]"))
   and (((.actions[0].command // "") | contains("127.0.0.1")) | not)
 ' "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_QUOTED" >/dev/null; then
@@ -915,6 +1449,62 @@ if ! grep -E -- 'profile-default-gate-live' "$FAKE_EASY_NODE_CAPTURE" >/dev/null
 fi
 if grep -E -- '127\.0\.0\.1' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   echo "profile localhost-to-live quoted rewrite command capture still contains localhost endpoints"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] no-python safe-mode path preserves quoted localhost-to-live rewrite"
+SUMMARY_PROFILE_LOCALHOST_TO_LIVE_NO_PYTHON="$TMP_DIR/summary_profile_localhost_to_live_no_python.json"
+REPORTS_PROFILE_LOCALHOST_TO_LIVE_NO_PYTHON="$TMP_DIR/reports_profile_localhost_to_live_no_python"
+NO_PYTHON_BIN="$TMP_DIR/no_python_bin"
+mkdir -p "$NO_PYTHON_BIN"
+cat >"$NO_PYTHON_BIN/python3" <<'EOF_NO_PYTHON'
+#!/usr/bin/env bash
+exit 127
+EOF_NO_PYTHON
+chmod +x "$NO_PYTHON_BIN/python3"
+: >"$FAKE_EASY_NODE_CAPTURE"
+PATH="$NO_PYTHON_BIN:$PATH" \
+A_HOST=100.113.245.61 B_HOST=100.64.244.24 \
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_localhost_run_easy_node_quoted \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" \
+FAKE_EASY_NODE_EXPECT_REPORTS_DIR="/tmp/fake profile reports" \
+FAKE_EASY_NODE_EXPECT_SUMMARY_JSON="/tmp/fake profile summary.json" \
+FAKE_EASY_NODE_EXPECT_SUBJECT="inv quoted subject" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_LOCALHOST_TO_LIVE_NO_PYTHON" \
+  --summary-json "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_NO_PYTHON" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("profile-default-gate-live"))
+  and ((.actions[0].command // "") | contains("--host-a 100.113.245.61"))
+  and ((.actions[0].command // "") | contains("--host-b 100.64.244.24"))
+  and ((.actions[0].command // "") | contains("--reports-dir"))
+  and ((.actions[0].command // "") | contains("/tmp/fake profile reports"))
+  and ((.actions[0].command // "") | contains("--summary-json"))
+  and ((.actions[0].command // "") | contains("/tmp/fake profile summary.json"))
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
+  and (((.actions[0].command // "") | contains("inv quoted subject")) | not)
+  and (((.actions[0].command // "") | contains("127.0.0.1")) | not)
+' "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_NO_PYTHON" >/dev/null; then
+  echo "no-python quoted localhost rewrite summary mismatch"
+  cat "$SUMMARY_PROFILE_LOCALHOST_TO_LIVE_NO_PYTHON"
+  exit 1
+fi
+if ! grep -E -- 'profile-default-gate-live' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "no-python quoted localhost rewrite command capture missing live wrapper command"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- '127\.0\.0\.1' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "no-python quoted localhost rewrite command capture still contains localhost endpoints"
   cat "$FAKE_EASY_NODE_CAPTURE"
   exit 1
 fi
@@ -1203,6 +1793,126 @@ if ! jq -e '
 ' "$SUMMARY_PROFILE_MARKER_SOFT_FAIL" >/dev/null; then
   echo "profile unreachable marker soft-fail summary mismatch"
   cat "$SUMMARY_PROFILE_MARKER_SOFT_FAIL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] rejects absolute out-of-repo action path in safe mode"
+ABS_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_abs_reject_input.json"
+ABS_REJECT_SUMMARY="$TMP_DIR/summary_abs_reject.json"
+ABS_REJECT_REPORT="$TMP_DIR/report_abs_reject.md"
+ABS_REJECT_LOG_DIR="$TMP_DIR/reports_abs_reject"
+ABS_OUTSIDE_DIR="$(mktemp -d)"
+ABS_OUTSIDE_SCRIPT="$ABS_OUTSIDE_DIR/poc.sh"
+ABS_OUTSIDE_MARKER="$ABS_OUTSIDE_DIR/poc.marker"
+cat >"$ABS_OUTSIDE_SCRIPT" <<EOF_ABS_OUTSIDE
+#!/usr/bin/env bash
+set -euo pipefail
+echo "executed" >"$ABS_OUTSIDE_MARKER"
+EOF_ABS_OUTSIDE
+chmod +x "$ABS_OUTSIDE_SCRIPT"
+cat >"$ABS_REJECT_SUMMARY_INPUT" <<JSON_ABS_REJECT
+{
+  "next_actions": [
+    {
+      "id": "abs_reject",
+      "label": "Absolute out-of-repo action",
+      "command": "bash $ABS_OUTSIDE_SCRIPT",
+      "reason": "security contract"
+    }
+  ]
+}
+JSON_ABS_REJECT
+echo "# abs reject report" >"$ABS_REJECT_REPORT"
+set +e
+bash ./scripts/roadmap_next_actions_run.sh \
+  --roadmap-summary-json "$ABS_REJECT_SUMMARY_INPUT" \
+  --roadmap-report-md "$ABS_REJECT_REPORT" \
+  --reports-dir "$ABS_REJECT_LOG_DIR" \
+  --summary-json "$ABS_REJECT_SUMMARY" \
+  --print-summary-json 0
+abs_reject_rc=$?
+set -e
+if [[ "$abs_reject_rc" != "6" ]]; then
+  echo "expected absolute out-of-repo rejection rc=6, got rc=$abs_reject_rc"
+  cat "$ABS_REJECT_SUMMARY"
+  exit 1
+fi
+if [[ -f "$ABS_OUTSIDE_MARKER" ]]; then
+  echo "absolute out-of-repo action unexpectedly executed"
+  cat "$ABS_REJECT_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$ABS_REJECT_SUMMARY" >/dev/null; then
+  echo "absolute out-of-repo rejection summary mismatch"
+  cat "$ABS_REJECT_SUMMARY"
+  exit 1
+fi
+rm -rf "$ABS_OUTSIDE_DIR"
+
+echo "[roadmap-next-actions-run] rejects env-prefixed action in safe mode"
+ENV_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_env_reject_input.json"
+ENV_REJECT_SUMMARY="$TMP_DIR/summary_env_reject.json"
+ENV_REJECT_REPORT="$TMP_DIR/report_env_reject.md"
+ENV_REJECT_LOG_DIR="$TMP_DIR/reports_env_reject"
+ENV_REJECT_PAYLOAD="$TMP_DIR/env_reject_payload.sh"
+ENV_REJECT_MARKER="$TMP_DIR/env_reject_marker.txt"
+cat >"$ENV_REJECT_PAYLOAD" <<EOF_ENV_REJECT
+#!/usr/bin/env bash
+set -euo pipefail
+echo "payload-executed" >"$ENV_REJECT_MARKER"
+EOF_ENV_REJECT
+chmod +x "$ENV_REJECT_PAYLOAD"
+cat >"$ENV_REJECT_SUMMARY_INPUT" <<JSON_ENV_REJECT
+{
+  "next_actions": [
+    {
+      "id": "env_reject",
+      "label": "Env-prefixed action",
+      "command": "BASH_ENV=$ENV_REJECT_PAYLOAD bash ./scripts/roadmap_progress_report.sh --help",
+      "reason": "security contract"
+    }
+  ]
+}
+JSON_ENV_REJECT
+echo "# env reject report" >"$ENV_REJECT_REPORT"
+set +e
+bash ./scripts/roadmap_next_actions_run.sh \
+  --roadmap-summary-json "$ENV_REJECT_SUMMARY_INPUT" \
+  --roadmap-report-md "$ENV_REJECT_REPORT" \
+  --reports-dir "$ENV_REJECT_LOG_DIR" \
+  --summary-json "$ENV_REJECT_SUMMARY" \
+  --print-summary-json 0
+env_reject_rc=$?
+set -e
+if [[ "$env_reject_rc" != "5" ]]; then
+  echo "expected env-prefixed safe-mode rejection rc=5, got rc=$env_reject_rc"
+  cat "$ENV_REJECT_SUMMARY"
+  exit 1
+fi
+if [[ -f "$ENV_REJECT_MARKER" ]]; then
+  echo "env-prefixed action payload unexpectedly executed in safe mode"
+  cat "$ENV_REJECT_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 5
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 5
+' "$ENV_REJECT_SUMMARY" >/dev/null; then
+  echo "env-prefixed safe-mode rejection summary mismatch"
+  cat "$ENV_REJECT_SUMMARY"
   exit 1
 fi
 

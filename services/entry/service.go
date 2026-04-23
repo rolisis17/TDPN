@@ -1145,12 +1145,13 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 	if err != nil {
 		return "unknown-middle-relay"
 	}
-	if !relaySupportsMiddleDescriptor(desc) {
+	requireCanonicalMiddleRole := s.betaStrict || s.prodStrict
+	if !relaySupportsMiddleDescriptorForPolicy(desc, requireCanonicalMiddleRole) {
 		return "middle-relay-role-invalid"
 	}
 	middleOp := strings.TrimSpace(desc.OperatorID)
 	if middleOp == "" {
-		if s.betaStrict || s.prodStrict {
+		if s.betaStrict || s.prodStrict || s.requireDistinctExitOp {
 			return "middle-relay-operator-missing"
 		}
 		return ""
@@ -1344,6 +1345,33 @@ func relayDescriptorVotes(candidates map[string]relayDescriptorCandidate, desc p
 func relaySupportsMiddleDescriptor(relay proto.RelayDescriptor) bool {
 	if hopRoleIsMiddleDescriptor(relay.Role) {
 		return true
+	}
+	for _, hopRole := range relay.HopRoles {
+		if hopRoleIsMiddleDescriptor(hopRole) {
+			return true
+		}
+	}
+	for _, capability := range relay.Capabilities {
+		if hopRoleIsMiddleDescriptor(capability) {
+			return true
+		}
+	}
+	return false
+}
+
+func relaySupportsMiddleDescriptorForPolicy(relay proto.RelayDescriptor, requireCanonicalRole bool) bool {
+	if !requireCanonicalRole {
+		return relaySupportsMiddleDescriptor(relay)
+	}
+	if relayDescriptorHasMalformedMiddleRoleMetadata(relay) {
+		return false
+	}
+	return hopRoleIsMiddleDescriptor(relay.Role)
+}
+
+func relayDescriptorHasMalformedMiddleRoleMetadata(relay proto.RelayDescriptor) bool {
+	if hopRoleIsMiddleDescriptor(relay.Role) {
+		return false
 	}
 	for _, hopRole := range relay.HopRoles {
 		if hopRoleIsMiddleDescriptor(hopRole) {

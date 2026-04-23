@@ -243,6 +243,67 @@ func TestHandleProviderRelayUpsertStoresScoresForMicroRelayRole(t *testing.T) {
 	}
 }
 
+func TestBuildRelayDescriptorsSkipsMicroRelayWithoutOperatorID(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().UTC()
+	s := &Service{
+		operatorID: "op-local",
+		pubKey:     pub,
+		privKey:    priv,
+		providerRelays: map[string]proto.RelayDescriptor{
+			relayKey("middle-missing-operator", "micro-relay"): {
+				RelayID:      "middle-missing-operator",
+				Role:         "micro-relay",
+				OperatorID:   "",
+				Endpoint:     "127.0.0.1:52850",
+				ControlURL:   "http://127.0.0.1:9285",
+				Reputation:   0.9,
+				Uptime:       0.9,
+				Capacity:     0.9,
+				AbusePenalty: 0.1,
+				ValidUntil:   now.Add(5 * time.Minute),
+			},
+			relayKey("middle-valid-operator", "micro-relay"): {
+				RelayID:      "middle-valid-operator",
+				Role:         "micro-relay",
+				OperatorID:   "provider-op-1",
+				Endpoint:     "127.0.0.1:52851",
+				ControlURL:   "http://127.0.0.1:9286",
+				Reputation:   0.9,
+				Uptime:       0.9,
+				Capacity:     0.9,
+				AbusePenalty: 0.1,
+				ValidUntil:   now.Add(5 * time.Minute),
+			},
+		},
+		peerRelays:  make(map[string]proto.RelayDescriptor),
+		peerScores:  make(map[string]proto.RelaySelectionScore),
+		peerTrust:   make(map[string]proto.RelayTrustAttestation),
+		issuerTrust: make(map[string]proto.RelayTrustAttestation),
+	}
+
+	relays := s.buildRelayDescriptors(now)
+	var sawMissingOperator bool
+	var sawValidOperator bool
+	for _, desc := range relays {
+		if desc.RelayID == "middle-missing-operator" && desc.Role == "micro-relay" {
+			sawMissingOperator = true
+		}
+		if desc.RelayID == "middle-valid-operator" && desc.Role == "micro-relay" {
+			sawValidOperator = true
+		}
+	}
+	if sawMissingOperator {
+		t.Fatalf("expected micro-relay without operator id to be suppressed from publication")
+	}
+	if !sawValidOperator {
+		t.Fatalf("expected micro-relay with operator id to remain eligible for publication")
+	}
+}
+
 func TestHandleProviderRelayUpsertRejectsUnanchoredProviderIssuerKey(t *testing.T) {
 	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -1842,6 +1903,163 @@ func TestHandleProviderRelayUpsertAllowsSameOwnerUpdate(t *testing.T) {
 	}
 	if stored.ControlURL != "http://127.0.0.1:9384" {
 		t.Fatalf("expected control_url updated by same owner, got %s", stored.ControlURL)
+	}
+}
+
+func TestUpsertProviderRelayRuntimeAdmissionMicroRelayRoleDescriptors(t *testing.T) {
+	baseDesc := proto.RelayDescriptor{
+		RelayID:      "runtime-admission-relay",
+		Role:         "micro-relay",
+		OperatorID:   "provider-op-runtime",
+		Endpoint:     "127.0.0.1:52890",
+		ControlURL:   "http://127.0.0.1:9389",
+		Capabilities: []string{"wg"},
+		HopRoles:     []string{"middle"},
+		ValidUntil:   time.Now().Add(5 * time.Minute),
+	}
+	tests := []struct {
+		name        string
+		desc        proto.RelayDescriptor
+		wantErrPart string
+		wantStored  bool
+	}{
+		{
+			name:       "approved canonical micro-relay descriptor",
+			desc:       baseDesc,
+			wantStored: true,
+		},
+		{
+			name: "approved alias micro-relay descriptor",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-alias"
+				d.Role = "middle"
+				return d
+			}(),
+			wantStored: true,
+		},
+		{
+			name: "unapproved role descriptor",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-bad-role"
+				d.Role = "bogus-role"
+				return d
+			}(),
+			wantErrPart: "provider relay role must be entry, exit, or micro-relay",
+		},
+		{
+			name: "malformed micro descriptor with non-middle hop role",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-bad-hop"
+				d.HopRoles = []string{"entry"}
+				return d
+			}(),
+			wantErrPart: "provider micro-relay hop_roles must only include middle",
+		},
+		{
+			name: "malformed micro descriptor with role-conflicting capability",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-bad-cap"
+				d.Capabilities = []string{"wg", "tiered-policy"}
+				return d
+			}(),
+			wantErrPart: "provider micro-relay capability \"tiered-policy\" is not allowed",
+		},
+		{
+			name: "malformed micro descriptor with missing operator",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-missing-op"
+				d.OperatorID = ""
+				return d
+			}(),
+			wantErrPart: "provider micro-relay operator id invalid",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{
+				providerRelays: make(map[string]proto.RelayDescriptor),
+			}
+			err := s.upsertProviderRelay(tc.desc)
+			if tc.wantErrPart == "" && err != nil {
+				t.Fatalf("expected success, got err=%v", err)
+			}
+			if tc.wantErrPart != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tc.wantErrPart)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrPart) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrPart, err.Error())
+				}
+			}
+
+			if tc.wantStored {
+				stored, ok := s.providerRelays[relayKey(tc.desc.RelayID, "micro-relay")]
+				if !ok {
+					t.Fatalf("expected descriptor stored under canonical micro-relay key")
+				}
+				if stored.Role != "micro-relay" {
+					t.Fatalf("expected stored canonical role micro-relay, got %q", stored.Role)
+				}
+			}
+		})
+	}
+}
+
+func TestUpsertProviderRelayRuntimeAdmissionNonMicroBackwardCompatible(t *testing.T) {
+	tests := []struct {
+		name string
+		desc proto.RelayDescriptor
+	}{
+		{
+			name: "entry descriptor remains accepted",
+			desc: proto.RelayDescriptor{
+				RelayID:      "runtime-admission-entry",
+				Role:         "entry",
+				OperatorID:   "provider-op-entry",
+				Endpoint:     "127.0.0.1:52910",
+				ControlURL:   "http://127.0.0.1:9391",
+				Capabilities: []string{"wg", "two-hop"},
+				ValidUntil:   time.Now().Add(5 * time.Minute),
+			},
+		},
+		{
+			name: "exit descriptor remains accepted",
+			desc: proto.RelayDescriptor{
+				RelayID:      "runtime-admission-exit",
+				Role:         "exit",
+				OperatorID:   "provider-op-exit",
+				Endpoint:     "127.0.0.1:52911",
+				ControlURL:   "http://127.0.0.1:9392",
+				Capabilities: []string{"wg", "tiered-policy"},
+				ValidUntil:   time.Now().Add(5 * time.Minute),
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{
+				providerRelays: make(map[string]proto.RelayDescriptor),
+			}
+			if err := s.upsertProviderRelay(tc.desc); err != nil {
+				t.Fatalf("expected non-micro descriptor accepted, got err=%v", err)
+			}
+			stored, ok := s.providerRelays[relayKey(tc.desc.RelayID, tc.desc.Role)]
+			if !ok {
+				t.Fatalf("expected descriptor stored for role=%s", tc.desc.Role)
+			}
+			if stored.Role != tc.desc.Role {
+				t.Fatalf("expected stored role %q, got %q", tc.desc.Role, stored.Role)
+			}
+		})
 	}
 }
 

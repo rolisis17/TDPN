@@ -33,7 +33,8 @@ Usage:
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
-    [--print-summary-json [0|1]]
+    [--print-summary-json [0|1]] \
+    [--suppress-live-evidence-next-actions-when-batch-helper [0|1]]
 
 Purpose:
   Generate one concise roadmap progress handoff (JSON + markdown) from current
@@ -5382,6 +5383,7 @@ restore_json_snapshot() {
   fi
   mkdir -p "$(dirname "$target_path")"
   restore_tmp="$(mktemp "${target_path}.restore.tmp.XXXXXX")"
+  roadmap_progress_register_temp_file "$restore_tmp"
   cp "$snapshot_path" "$restore_tmp"
   if ! jq -e . "$restore_tmp" >/dev/null 2>&1; then
     rm -f "$restore_tmp"
@@ -5389,6 +5391,30 @@ restore_json_snapshot() {
   fi
   mv -f "$restore_tmp" "$target_path"
 }
+
+declare -a ROADMAP_PROGRESS_TEMP_FILES=()
+
+roadmap_progress_register_temp_file() {
+  local temp_path=""
+  temp_path="$(trim "${1:-}")"
+  if [[ -n "$temp_path" ]]; then
+    ROADMAP_PROGRESS_TEMP_FILES+=("$temp_path")
+  fi
+}
+
+roadmap_progress_cleanup_temp_files() {
+  local exit_code=$?
+  local temp_path=""
+  set +e
+  for temp_path in "${ROADMAP_PROGRESS_TEMP_FILES[@]:-}"; do
+    if [[ -n "$temp_path" ]]; then
+      rm -f "$temp_path" 2>/dev/null || true
+    fi
+  done
+  return "$exit_code"
+}
+
+trap 'roadmap_progress_cleanup_temp_files' EXIT
 
 refresh_manual_validation="1"
 refresh_single_machine_readiness="0"
@@ -5398,6 +5424,7 @@ manual_refresh_timeout_sec="${ROADMAP_PROGRESS_MANUAL_REFRESH_TIMEOUT_SEC:-900}"
 single_machine_refresh_timeout_sec="${ROADMAP_PROGRESS_SINGLE_MACHINE_REFRESH_TIMEOUT_SEC:-7200}"
 print_report="1"
 print_summary_json="1"
+suppress_live_evidence_next_actions_when_batch_helper="${ROADMAP_PROGRESS_SUPPRESS_LIVE_EVIDENCE_NEXT_ACTIONS_WHEN_BATCH_HELPER:-0}"
 
 default_log_dir="${ROADMAP_PROGRESS_LOG_DIR:-${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}}"
 default_log_dir="$(abs_path "$default_log_dir")"
@@ -5600,6 +5627,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --suppress-live-evidence-next-actions-when-batch-helper)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        suppress_live_evidence_next_actions_when_batch_helper="${2:-}"
+        shift 2
+      else
+        suppress_live_evidence_next_actions_when_batch_helper="1"
+        shift
+      fi
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -5620,6 +5656,8 @@ bool_arg_or_die "--refresh-manual-validation" "$refresh_manual_validation"
 bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_readiness"
 bool_arg_or_die "--print-report" "$print_report"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--suppress-live-evidence-next-actions-when-batch-helper" "$suppress_live_evidence_next_actions_when_batch_helper"
+suppress_live_evidence_next_actions_when_batch_helper_json="$( [[ "$suppress_live_evidence_next_actions_when_batch_helper" == "1" ]] && printf 'true' || printf 'false' )"
 if ! [[ "$manual_refresh_timeout_sec" =~ ^[0-9]+$ ]]; then
   echo "--manual-refresh-timeout-sec must be an integer >= 0"
   exit 2
@@ -5678,11 +5716,13 @@ single_machine_summary_valid_after_run="false"
 
 if [[ "$(manual_validation_summary_usable_01 "$manual_validation_summary_json")" == "1" ]]; then
   manual_summary_snapshot="$(mktemp "$log_dir/roadmap_progress_manual_validation_snapshot_${ts}_XXXXXX.json")"
+  roadmap_progress_register_temp_file "$manual_summary_snapshot"
   cp "$manual_validation_summary_json" "$manual_summary_snapshot"
   manual_summary_snapshot_valid="true"
 fi
 if [[ "$(single_machine_summary_usable_01 "$single_machine_summary_json")" == "1" ]]; then
   single_machine_summary_snapshot="$(mktemp "$log_dir/roadmap_progress_single_machine_snapshot_${ts}_XXXXXX.json")"
+  roadmap_progress_register_temp_file "$single_machine_summary_snapshot"
   cp "$single_machine_summary_json" "$single_machine_summary_snapshot"
   single_machine_summary_snapshot_valid="true"
 fi
@@ -7894,7 +7934,7 @@ if [[ "$blockchain_mainnet_activation_gate_status_json" == "missing" ]] \
   blockchain_mainnet_activation_gate_source_summary_json="$phase7_mainnet_cutover_summary_source_summary_json"
   if [[ -n "$blockchain_mainnet_activation_gate_source_summary_json" ]]; then
     blockchain_mainnet_activation_gate_input_summary_json="$blockchain_mainnet_activation_gate_source_summary_json"
-    blockchain_mainnet_activation_gate_source_paths_json="$(jq -nc --arg p "$blockchain_mainnet_activation_gate_source_summary_json" '[$p]')"
+    blockchain_mainnet_activation_gate_source_paths_json="$(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 jq -nc --arg p "$blockchain_mainnet_activation_gate_source_summary_json" '[$p]')"
   else
     blockchain_mainnet_activation_gate_source_paths_json="[]"
   fi
@@ -7955,7 +7995,7 @@ if [[ "$blockchain_bootstrap_governance_graduation_gate_status_json" == "missing
   blockchain_bootstrap_governance_graduation_gate_source_summary_json="$phase7_mainnet_cutover_summary_source_summary_json"
   if [[ -n "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" ]]; then
     blockchain_bootstrap_governance_graduation_gate_input_summary_json="$blockchain_bootstrap_governance_graduation_gate_source_summary_json"
-    blockchain_bootstrap_governance_graduation_gate_source_paths_json="$(jq -nc --arg p "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" '[$p]')"
+    blockchain_bootstrap_governance_graduation_gate_source_paths_json="$(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 jq -nc --arg p "$blockchain_bootstrap_governance_graduation_gate_source_summary_json" '[$p]')"
   else
     blockchain_bootstrap_governance_graduation_gate_source_paths_json="[]"
   fi
@@ -9951,7 +9991,37 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
+next_actions_live_evidence_pending_action_count=0
+if [[ "$profile_default_gate_needs_attention_json" == "true" ]] && [[ -n "$profile_default_gate_next_command" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+if [[ "$multi_vm_stability_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_next_command" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+if [[ "$multi_vm_stability_promotion_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_promotion_next_command" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+if [[ "$runtime_actuation_promotion_needs_attention_json" == "true" ]] && [[ -n "$runtime_actuation_promotion_next_command" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+next_actions_evidence_pack_pending_action_count=0
+if [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] && [[ -n "$profile_default_gate_evidence_pack_next_command" ]]; then
+  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+fi
+if [[ "$runtime_actuation_promotion_evidence_pack_needs_attention_json" == "true" ]] && [[ -n "$runtime_actuation_promotion_evidence_pack_next_command" ]]; then
+  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+fi
+if [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_promotion_evidence_pack_next_command" ]]; then
+  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+fi
+
+live_evidence_cycle_batch_helper_subcommand="roadmap-live-evidence-cycle-batch-run"
+live_evidence_cycle_batch_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$live_evidence_cycle_batch_helper_subcommand")" == "1" ]]; then
+  live_evidence_cycle_batch_helper_available_json="true"
+fi
+
+next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -9994,6 +10064,23 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       command: $runtime_actuation_promotion_next_command,
       reason: (if ($runtime_actuation_promotion_next_command_reason // "") != "" then $runtime_actuation_promotion_next_command_reason else "runtime-actuation promotion evidence requires refresh; rerun promotion cycle" end)
     } else empty end),
+    (if (
+      ($profile_default_gate_needs_attention == true and ($profile_default_gate_next_command // "") != "")
+      or ($runtime_actuation_promotion_needs_attention == true and ($runtime_actuation_promotion_next_command // "") != "")
+      or ($multi_vm_stability_needs_attention == true and ($multi_vm_stability_next_command // "") != "")
+      or ($multi_vm_stability_promotion_needs_attention == true and ($multi_vm_stability_promotion_next_command // "") != "")
+    ) then {
+      id: "roadmap_live_evidence_actionable_run",
+      label: "Roadmap live-evidence actionable run",
+      command: "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "batch-run pending live evidence cycle actions"
+    } else empty end),
+    (if ($next_actions_live_evidence_pending_action_count > 0 and $live_evidence_cycle_batch_helper_available == true) then {
+      id: "roadmap_live_evidence_cycle_batch_run",
+      label: "Roadmap live-evidence cycle-batch run",
+      command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "repeat pending live evidence cycles across tracks in one helper run"
+    } else empty end),
     (if ($profile_default_gate_evidence_pack_needs_attention == true and ($profile_default_gate_evidence_pack_next_command // "") != "") then {
       id: "profile_default_gate_evidence_pack",
       label: "Profile default evidence-pack publish",
@@ -10011,6 +10098,22 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
       label: "Multi-VM promotion evidence-pack publish",
       command: $multi_vm_stability_promotion_evidence_pack_next_command,
       reason: (if ($multi_vm_stability_promotion_evidence_pack_next_command_reason // "") != "" then $multi_vm_stability_promotion_evidence_pack_next_command_reason else "multi-VM promotion evidence-pack requires refresh/publish" end)
+    } else empty end),
+    (if (
+      ($profile_default_gate_evidence_pack_needs_attention == true and ($profile_default_gate_evidence_pack_next_command // "") != "")
+      or ($runtime_actuation_promotion_evidence_pack_needs_attention == true and ($runtime_actuation_promotion_evidence_pack_next_command // "") != "")
+      or ($multi_vm_stability_promotion_evidence_pack_needs_attention == true and ($multi_vm_stability_promotion_evidence_pack_next_command // "") != "")
+    ) then {
+      id: "roadmap_evidence_pack_actionable_run",
+      label: "Roadmap evidence-pack actionable run",
+      command: "./scripts/easy_node.sh roadmap-evidence-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "batch-run pending evidence-pack publish actions"
+    } else empty end),
+    (if ($next_actions_live_evidence_pending_action_count > 0 and $next_actions_evidence_pack_pending_action_count > 0) then {
+      id: "roadmap_live_and_pack_actionable_run",
+      label: "Roadmap live+pack actionable run",
+      command: "./scripts/easy_node.sh roadmap-live-and-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "live-evidence cycles and evidence-pack publishes are both pending; run the combined orchestrator"
     } else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and (($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" or ($blockchain_mainnet_activation_missing_metrics_action_operator_pack_command // "") != "")) then {
       id: "blockchain_mainnet_activation_missing_metrics",
@@ -10045,6 +10148,45 @@ next_actions_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --
   ]
   | unique_commands_preserve_order
 ' "$manual_validation_summary_json")"
+next_actions_json="$(printf '%s\n' "$next_actions_candidate_json" | jq -c --argjson suppress_live_evidence_next_actions_when_batch_helper "$suppress_live_evidence_next_actions_when_batch_helper_json" '
+  def is_live_evidence_individual_action:
+    (.id // "") as $id
+    | (
+      $id == "profile_default_gate"
+      or $id == "profile_compare_multi_vm_stability"
+      or $id == "profile_compare_multi_vm_stability_promotion"
+      or $id == "runtime_actuation_promotion"
+    );
+  if $suppress_live_evidence_next_actions_when_batch_helper
+      and any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")
+  then
+    map(select(is_live_evidence_individual_action | not))
+  else
+    .
+  end
+')"
+next_actions_live_evidence_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")')"
+next_actions_live_evidence_cycle_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")')"
+next_actions_live_evidence_cycle_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_evidence_cycle_batch_run")] | length')"
+next_actions_live_and_pack_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_and_pack_actionable_run")')"
+next_actions_live_and_pack_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_and_pack_actionable_run")] | length')"
+next_actions_live_evidence_individual_suppression_applied_json="$(jq -n \
+  --argjson suppression_mode "$suppress_live_evidence_next_actions_when_batch_helper_json" \
+  --argjson candidate "$next_actions_candidate_json" \
+  --argjson final "$next_actions_json" '
+  def is_live_evidence_individual_action:
+    (.id // "") as $id
+    | (
+      $id == "profile_default_gate"
+      or $id == "profile_compare_multi_vm_stability"
+      or $id == "profile_compare_multi_vm_stability_promotion"
+      or $id == "runtime_actuation_promotion"
+    );
+  ($candidate | any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")) as $candidate_has_helper
+  | ($candidate | any(.[]; is_live_evidence_individual_action)) as $candidate_has_individual
+  | ($final | any(.[]; is_live_evidence_individual_action)) as $final_has_individual
+  | ($suppression_mode and $candidate_has_helper and $candidate_has_individual and ($final_has_individual | not))
+')"
 
 blockchain_track_status="parallel-cosmos-build"
 blockchain_track_policy="canonical execution plan: docs/full-execution-plan-2026-2027.md"
@@ -10087,7 +10229,193 @@ elif [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] 
   notes="Core roadmap gates are healthy, but evidence-pack publication gates still need attention."
 fi
 
-summary_payload="$(jq -n \
+next_actions_json_file="$(mktemp)"
+roadmap_progress_register_temp_file "$next_actions_json_file"
+printf '%s\n' "$next_actions_json" >"$next_actions_json_file"
+pending_real_host_checks_json_file="$(mktemp)"
+roadmap_progress_register_temp_file "$pending_real_host_checks_json_file"
+printf '%s\n' "$pending_real_host_checks_json" >"$pending_real_host_checks_json_file"
+non_blockchain_actionable_no_sudo_or_github_json_file="$(mktemp)"
+roadmap_progress_register_temp_file "$non_blockchain_actionable_no_sudo_or_github_json_file"
+printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" >"$non_blockchain_actionable_no_sudo_or_github_json_file"
+blocking_check_ids_json_file="$(mktemp)"
+roadmap_progress_register_temp_file "$blocking_check_ids_json_file"
+printf '%s\n' "$blocking_check_ids_json" >"$blocking_check_ids_json_file"
+optional_check_ids_json_file="$(mktemp)"
+roadmap_progress_register_temp_file "$optional_check_ids_json_file"
+printf '%s\n' "$optional_check_ids_json" >"$optional_check_ids_json_file"
+next_action_command_raw_file="$(mktemp)"
+roadmap_progress_register_temp_file "$next_action_command_raw_file"
+printf '%s' "$next_action_command" >"$next_action_command_raw_file"
+
+if [[ "${ROADMAP_PROGRESS_DEBUG_SUMMARY_ARG_SIZES:-0}" == "1" ]]; then
+  {
+    echo "[roadmap-progress-report] debug summary arg sizes (top-120)"
+    while IFS= read -r debug_var_name; do
+      case "$debug_var_name" in
+        BASH*|EUID|GROUPS|HOME|HOSTNAME|IFS|OLDPWD|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|PPID|PS*|PWD|SHELL|SHELLOPTS|SHLVL|TERM|UID|_ )
+          continue
+          ;;
+      esac
+      debug_value="${!debug_var_name-}"
+      printf '%s\t%s\n' "${#debug_value}" "$debug_var_name"
+    done < <(compgen -v)
+  } | sort -nr | head -n 120 >&2
+fi
+
+summary_payload_jq_program_file="$(mktemp)"
+roadmap_progress_register_temp_file "$summary_payload_jq_program_file"
+awk '
+  { sub(/\r$/, "", $0) }
+  $0 == "ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN" {capture=1; next}
+  $0 == "ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_END" {capture=0; exit}
+  capture { print }
+' "$0" >"$summary_payload_jq_program_file"
+
+summary_payload_jq_bin="jq"
+if [[ -x /usr/bin/jq ]]; then
+  summary_payload_jq_bin="/usr/bin/jq"
+fi
+
+summary_payload_jq_disable_arg_conv="0"
+if command -v cygpath >/dev/null 2>&1; then
+  summary_payload_jq_disable_arg_conv="1"
+fi
+
+summary_payload_jq_file_arg_path() {
+  local candidate_path=""
+  local converted_path=""
+  candidate_path="$(trim "${1:-}")"
+  if [[ -z "$candidate_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$summary_payload_jq_disable_arg_conv" == "1" ]] && command -v cygpath >/dev/null 2>&1; then
+    converted_path="$(cygpath -w "$candidate_path" 2>/dev/null || true)"
+    if [[ -n "$converted_path" ]]; then
+      printf '%s' "$converted_path"
+      return
+    fi
+  fi
+  printf '%s' "$candidate_path"
+}
+
+summary_payload_jq_run() {
+  if [[ "$summary_payload_jq_disable_arg_conv" == "1" ]]; then
+    # Git Bash jq invocations need:
+    # 1) path conversion only for file args (--slurpfile/--rawfile/-f)
+    # 2) disabled MSYS argv rewriting so --arg payloads stay POSIX in JSON
+    MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 "$summary_payload_jq_bin" "$@"
+  else
+    "$summary_payload_jq_bin" "$@"
+  fi
+}
+
+summary_payload_jq_build_via_context_fallback() {
+  local jq_program_file="$1"
+  shift
+  local -a jq_args=("$@")
+  local ctx_file=""
+  local wrapper_file=""
+  local ctx_tmp=""
+  local ctx_file_jq=""
+  local wrapper_file_jq=""
+  local value_file_jq=""
+  local idx=0
+  local opt=""
+  local key=""
+  local value=""
+  local -a ctx_var_names=()
+  local -A ctx_var_seen=()
+
+  ctx_file="$(mktemp)"
+  roadmap_progress_register_temp_file "$ctx_file"
+  printf '{}\n' >"$ctx_file"
+
+  while (( idx < ${#jq_args[@]} )); do
+    opt="${jq_args[$idx]}"
+    idx=$((idx + 1))
+    case "$opt" in
+      --arg|--argjson|--slurpfile|--rawfile)
+        if (( idx + 1 >= ${#jq_args[@]} )); then
+          echo "roadmap-progress-report: jq fallback argument triplet is incomplete for $opt" >&2
+          return 1
+        fi
+        key="${jq_args[$idx]}"
+        value="${jq_args[$((idx + 1))]}"
+        idx=$((idx + 2))
+        if [[ -z "${ctx_var_seen[$key]+x}" ]]; then
+          ctx_var_seen[$key]=1
+          ctx_var_names+=("$key")
+        fi
+        ctx_tmp="$(mktemp)"
+        roadmap_progress_register_temp_file "$ctx_tmp"
+        ctx_file_jq="$(summary_payload_jq_file_arg_path "$ctx_file")"
+        case "$opt" in
+          --arg)
+            if ! summary_payload_jq_run -c --arg key "$key" --arg value "$value" '. + {($key): $value}' "$ctx_file_jq" >"$ctx_tmp"; then
+              return 1
+            fi
+            ;;
+          --argjson)
+            if ! summary_payload_jq_run -c --arg key "$key" --argjson value "$value" '. + {($key): $value}' "$ctx_file_jq" >"$ctx_tmp"; then
+              return 1
+            fi
+            ;;
+          --slurpfile)
+            value_file_jq="$(summary_payload_jq_file_arg_path "$value")"
+            if ! summary_payload_jq_run -c --arg key "$key" --slurpfile value "$value_file_jq" '. + {($key): $value}' "$ctx_file_jq" >"$ctx_tmp"; then
+              return 1
+            fi
+            ;;
+          --rawfile)
+            value_file_jq="$(summary_payload_jq_file_arg_path "$value")"
+            if ! summary_payload_jq_run -c --arg key "$key" --rawfile value "$value_file_jq" '. + {($key): $value}' "$ctx_file_jq" >"$ctx_tmp"; then
+              return 1
+            fi
+            ;;
+        esac
+        mv -f "$ctx_tmp" "$ctx_file"
+        ;;
+      -f)
+        # The caller provides the extracted jq program file separately.
+        idx=$((idx + 1))
+        ;;
+      *)
+        echo "roadmap-progress-report: unsupported jq argument in fallback path: $opt" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  wrapper_file="$(mktemp)"
+  roadmap_progress_register_temp_file "$wrapper_file"
+  {
+    printf '($summary_ctx_file[0] // {}) as $summary_ctx\n'
+    for key in "${ctx_var_names[@]}"; do
+      printf '| ($summary_ctx["%s"]) as $%s\n' "$key" "$key"
+    done
+    printf '| (\n'
+    cat "$jq_program_file"
+    printf '\n)\n'
+  } >"$wrapper_file"
+
+  ctx_file_jq="$(summary_payload_jq_file_arg_path "$ctx_file")"
+  wrapper_file_jq="$(summary_payload_jq_file_arg_path "$wrapper_file")"
+  summary_payload_jq_run -n \
+    --slurpfile summary_ctx_file "$ctx_file_jq" \
+    -f "$wrapper_file_jq"
+}
+
+non_blockchain_actionable_no_sudo_or_github_json_file_jq="$(summary_payload_jq_file_arg_path "$non_blockchain_actionable_no_sudo_or_github_json_file")"
+blocking_check_ids_json_file_jq="$(summary_payload_jq_file_arg_path "$blocking_check_ids_json_file")"
+optional_check_ids_json_file_jq="$(summary_payload_jq_file_arg_path "$optional_check_ids_json_file")"
+next_actions_json_file_jq="$(summary_payload_jq_file_arg_path "$next_actions_json_file")"
+pending_real_host_checks_json_file_jq="$(summary_payload_jq_file_arg_path "$pending_real_host_checks_json_file")"
+next_action_command_raw_file_jq="$(summary_payload_jq_file_arg_path "$next_action_command_raw_file")"
+summary_payload_jq_program_file_jq="$(summary_payload_jq_file_arg_path "$summary_payload_jq_program_file")"
+
+summary_payload_jq_args=(
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$final_status" \
   --arg notes "$notes" \
@@ -10095,7 +10423,6 @@ summary_payload="$(jq -n \
   --arg roadmap_stage "$roadmap_stage" \
   --arg next_action_check_id "$next_action_check_id" \
   --arg next_action_label "$next_action_label" \
-  --arg next_action_command "$next_action_command" \
   --argjson single_machine_ready "$single_machine_ready_json" \
   --argjson real_host_gate_ready "$real_host_gate_ready_json" \
   --argjson machine_c_smoke_ready "$machine_c_smoke_ready_json" \
@@ -10129,7 +10456,7 @@ summary_payload="$(jq -n \
   --arg phase1_resilience_handoff_profile_matrix_stable_failure_kind "$phase1_resilience_handoff_profile_matrix_stable_failure_kind_json" \
   --arg phase1_resilience_handoff_peer_loss_recovery_ok_failure_kind "$phase1_resilience_handoff_peer_loss_recovery_ok_failure_kind_json" \
   --arg phase1_resilience_handoff_session_churn_guard_ok_failure_kind "$phase1_resilience_handoff_session_churn_guard_ok_failure_kind_json" \
-  --argjson non_blockchain_actionable_no_sudo_or_github "$non_blockchain_actionable_no_sudo_or_github_json" \
+  --slurpfile non_blockchain_actionable_no_sudo_or_github_file "$non_blockchain_actionable_no_sudo_or_github_json_file_jq" \
   --arg non_blockchain_recommended_gate_id "$non_blockchain_recommended_gate_id" \
   --argjson resilience_handoff_available "$resilience_handoff_available_json" \
   --arg resilience_handoff_source_summary_json "$resilience_handoff_source_summary_json" \
@@ -10426,10 +10753,20 @@ summary_payload="$(jq -n \
   --argjson warn_checks "$counts_warn" \
   --argjson fail_checks "$counts_fail" \
   --argjson pending_checks "$counts_pending" \
-  --argjson blocking_check_ids "$blocking_check_ids_json" \
-  --argjson optional_check_ids "$optional_check_ids_json" \
-  --argjson pending_real_host_checks "$pending_real_host_checks_json" \
-  --argjson next_actions "$next_actions_json" \
+  --slurpfile blocking_check_ids_file "$blocking_check_ids_json_file_jq" \
+  --slurpfile optional_check_ids_file "$optional_check_ids_json_file_jq" \
+  --slurpfile next_actions_file "$next_actions_json_file_jq" \
+  --slurpfile pending_real_host_checks_file "$pending_real_host_checks_json_file_jq" \
+  --rawfile next_action_command_raw "$next_action_command_raw_file_jq" \
+  --argjson next_actions_live_evidence_batch_helper_emitted "$next_actions_live_evidence_batch_helper_emitted_json" \
+  --argjson next_actions_live_evidence_cycle_batch_helper_emitted "$next_actions_live_evidence_cycle_batch_helper_emitted_json" \
+  --argjson next_actions_live_evidence_cycle_batch_helper_count "$next_actions_live_evidence_cycle_batch_helper_count_json" \
+  --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" \
+  --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" \
+  --argjson next_actions_live_and_pack_batch_helper_emitted "$next_actions_live_and_pack_batch_helper_emitted_json" \
+  --argjson next_actions_live_and_pack_batch_helper_count "$next_actions_live_and_pack_batch_helper_count_json" \
+  --argjson next_actions_live_evidence_individual_suppression_mode "$suppress_live_evidence_next_actions_when_batch_helper_json" \
+  --argjson next_actions_live_evidence_individual_suppression_applied "$next_actions_live_evidence_individual_suppression_applied_json" \
   --arg blockchain_track_status "$blockchain_track_status" \
   --arg blockchain_track_policy "$blockchain_track_policy" \
   --arg blockchain_track_recommendation "$blockchain_track_recommendation" \
@@ -10460,7 +10797,28 @@ summary_payload="$(jq -n \
   --arg single_machine_summary_json "$single_machine_summary_json" \
   --arg summary_json_path "$summary_json" \
   --arg report_md_path "$report_md" \
-  '{
+  -f "$summary_payload_jq_program_file_jq"
+)
+
+summary_payload_jq_stderr_file="$(mktemp)"
+roadmap_progress_register_temp_file "$summary_payload_jq_stderr_file"
+summary_payload_jq_rc=0
+if ! summary_payload="$(summary_payload_jq_run -n "${summary_payload_jq_args[@]}" 2>"$summary_payload_jq_stderr_file")"; then
+  summary_payload_jq_rc=$?
+  if ! summary_payload="$(summary_payload_jq_build_via_context_fallback "$summary_payload_jq_program_file" "${summary_payload_jq_args[@]}" 2>>"$summary_payload_jq_stderr_file")"; then
+    cat "$summary_payload_jq_stderr_file" >&2
+    exit "${summary_payload_jq_rc:-1}"
+  fi
+fi
+
+: <<'ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BLOCK'
+ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
+  ($next_actions_file[0] // []) as $next_actions
+  | ($pending_real_host_checks_file[0] // []) as $pending_real_host_checks
+  | ($non_blockchain_actionable_no_sudo_or_github_file[0] // []) as $non_blockchain_actionable_no_sudo_or_github
+  | ($blocking_check_ids_file[0] // []) as $blocking_check_ids
+  | ($optional_check_ids_file[0] // []) as $optional_check_ids
+  | {
     version: 1,
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -10610,7 +10968,7 @@ summary_payload="$(jq -n \
       next_action: {
         check_id: $next_action_check_id,
         label: $next_action_label,
-        command: $next_action_command
+        command: $next_action_command_raw
       },
       profile_default_gate: {
         status: $profile_default_gate_status,
@@ -10952,10 +11310,24 @@ summary_payload="$(jq -n \
       }
     },
     next_actions: $next_actions,
+    next_actions_summary: {
+      live_evidence_batch_helper_emitted: $next_actions_live_evidence_batch_helper_emitted,
+      live_evidence_cycle_batch_helper_emitted: $next_actions_live_evidence_cycle_batch_helper_emitted,
+      live_evidence_cycle_batch_helper_count: $next_actions_live_evidence_cycle_batch_helper_count,
+      live_evidence_pending_action_count: $next_actions_live_evidence_pending_action_count,
+      evidence_pack_pending_action_count: $next_actions_evidence_pack_pending_action_count,
+      live_and_pack_batch_helper_emitted: $next_actions_live_and_pack_batch_helper_emitted,
+      live_and_pack_batch_helper_count: $next_actions_live_and_pack_batch_helper_count,
+      live_evidence_individual_suppression_mode: $next_actions_live_evidence_individual_suppression_mode,
+      live_evidence_individual_suppression_applied: $next_actions_live_evidence_individual_suppression_applied
+    },
     artifacts: {
       manual_validation_summary_json: $manual_validation_summary_json,
       manual_validation_report_md: $manual_validation_report_md,
       profile_compare_signoff_summary_json: (if $profile_compare_signoff_summary_json == "" then null else $profile_compare_signoff_summary_json end),
+      profile_default_gate_stability_summary_json: (if $profile_default_gate_stability_summary_json == "" then null else $profile_default_gate_stability_summary_json end),
+      profile_default_gate_stability_check_summary_json: (if $profile_default_gate_stability_check_summary_json == "" then null else $profile_default_gate_stability_check_summary_json end),
+      profile_default_gate_stability_cycle_summary_json: (if $profile_default_gate_stability_cycle_summary_json == "" then null else $profile_default_gate_stability_cycle_summary_json end),
       profile_default_gate_stability_evidence_pack_summary_json: (if $profile_default_gate_evidence_pack_source_summary_json == "" then null else $profile_default_gate_evidence_pack_source_summary_json end),
       profile_default_gate_evidence_pack_summary_json: (if $profile_default_gate_evidence_pack_source_summary_json == "" then null else $profile_default_gate_evidence_pack_source_summary_json end),
       profile_compare_multi_vm_stability_summary_json: (if $profile_compare_multi_vm_stability_source_summary_json == "" then null else $profile_compare_multi_vm_stability_source_summary_json end),
@@ -10977,9 +11349,19 @@ summary_payload="$(jq -n \
       summary_json: $summary_json_path,
       report_md: $report_md_path
     }
-  }')"
+  }
+ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_END
+ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BLOCK
+rm -f "$next_actions_json_file"
+rm -f "$pending_real_host_checks_json_file"
+rm -f "$non_blockchain_actionable_no_sudo_or_github_json_file"
+rm -f "$blocking_check_ids_json_file"
+rm -f "$optional_check_ids_json_file"
+rm -f "$next_action_command_raw_file"
+rm -f "$summary_payload_jq_program_file"
 
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
+roadmap_progress_register_temp_file "$summary_tmp"
 printf '%s\n' "$summary_payload" >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
 
@@ -10996,6 +11378,7 @@ pending_real_host_checks_md="$(printf '%s\n' "$pending_real_host_checks_json" | 
 ')"
 
 report_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
+roadmap_progress_register_temp_file "$report_tmp"
 cat >"$report_tmp" <<EOF_MD
 # Roadmap Progress Report
 
@@ -11290,6 +11673,8 @@ $pending_real_host_checks_md
 
 ## Next Actions
 
+- Live-evidence individual suppression applied: $(jq -r '.next_actions_summary.live_evidence_individual_suppression_applied | tostring' "$summary_json") (mode=$(jq -r '.next_actions_summary.live_evidence_individual_suppression_mode | tostring' "$summary_json"), batch_helper=$(jq -r '.next_actions_summary.live_evidence_batch_helper_emitted | tostring' "$summary_json"))
+
 $next_actions_md
 
 ## Non-Blockchain Actionable Gates (No sudo/GitHub)
@@ -11417,13 +11802,6 @@ fi
 if [[ "$print_summary_json" == "1" ]]; then
   echo "[roadmap-progress-report] summary_json_payload:"
   cat "$summary_json"
-fi
-
-if [[ -n "$manual_summary_snapshot" ]]; then
-  rm -f "$manual_summary_snapshot" 2>/dev/null || true
-fi
-if [[ -n "$single_machine_summary_snapshot" ]]; then
-  rm -f "$single_machine_summary_snapshot" 2>/dev/null || true
 fi
 
 exit "$final_rc"

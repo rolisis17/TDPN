@@ -298,6 +298,8 @@ Usage:
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [profile_compare_multi_vm_stability_promotion_evidence_pack args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
+  ./scripts/easy_node.sh gpm-gap-scan [gpm_gap_scan args...]
+  ./scripts/easy_node.sh gpm-logic-check [gpm_logic_check args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
@@ -321,7 +323,12 @@ Usage:
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
-  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
+  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id ID] [--exclude-id ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [--include-id-suffix SUFFIX] [--exclude-id-suffix SUFFIX] [roadmap_next_actions_run args...]
+  ./scripts/easy_node.sh roadmap-evidence-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--scope all|profile-default|runtime-actuation|multi-vm] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-evidence-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID] [--exclude-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -437,6 +444,8 @@ Usage:
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack [profile_compare_multi_vm_stability_promotion_evidence_pack args...]
   ./scripts/easy_node.sh profile-default-gate-token-probe --directory-url URL --issuer-url URL --exit-url URL --campaign-subject INVITE_KEY [--reports-dir DIR] [--connect-timeout-sec N] [--max-time-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
+  ./scripts/easy_node.sh gpm-gap-scan [gpm_gap_scan args...]
+  ./scripts/easy_node.sh gpm-logic-check [gpm_logic_check args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
   ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
@@ -525,7 +534,12 @@ Usage:
   ./scripts/easy_node.sh blockchain-bootstrap-governance-graduation-gate [blockchain_bootstrap_governance_graduation_gate args...]
   ./scripts/easy_node.sh roadmap-non-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--allow-policy-no-go [0|1]] [--parallel [0|1]] [roadmap_non_blockchain_actionable_run args...]
   ./scripts/easy_node.sh roadmap-blockchain-actionable-run [--recommended-only [0|1]] [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [roadmap_blockchain_actionable_run args...]
-  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]
+  ./scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id ID] [--exclude-id ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [--include-id-suffix SUFFIX] [--exclude-id-suffix SUFFIX] [roadmap_next_actions_run args...]
+  ./scripts/easy_node.sh roadmap-evidence-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--scope all|profile-default|runtime-actuation|multi-vm] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-evidence-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID] [--exclude-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -662,6 +676,8 @@ Notes:
   - runtime-actuation-promotion-evidence-pack and profile-compare-multi-vm-stability-promotion-evidence-pack are compatibility aliases that dispatch to their dedicated evidence-pack scripts while preserving the existing command names.
   - profile-default-gate-token-probe runs a fast live token-proof binding probe against directory/issuer/exit endpoints so operator key-binding mismatches are visible before a long campaign refresh run.
   - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
+  - gpm-gap-scan wraps the GPM gap-scan helper path and preserves pass-through args.
+  - gpm-logic-check wraps the GPM logic-check helper path and preserves pass-through args.
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
@@ -708,7 +724,12 @@ Notes:
   - blockchain-bootstrap-governance-graduation-gate wraps the blockchain bootstrap governance graduation gate helper path and preserves pass-through args.
   - roadmap-non-blockchain-actionable-run resolves and runs the current roadmap no-sudo/no-GitHub actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, policy override via `--allow-policy-no-go [0|1]`, and `--parallel [0|1]`).
   - roadmap-blockchain-actionable-run resolves and runs the current roadmap blockchain actionable gate list in one command (supports `--recommended-only 1`, `--max-actions N`, per-action timeout via `--action-timeout-sec N`, and `--parallel [0|1]`).
-  - roadmap-next-actions-run wraps roadmap `next_actions` in one command with optional ID-prefix filtering, per-action timeout, parallel execution controls, optional soft-fail for unreachable profile-default endpoints, and explicit profile-default subject override via `--profile-default-gate-subject ID`.
+  - roadmap-next-actions-run wraps roadmap `next_actions` in one command with optional exact-id, id-prefix, and id-suffix filtering, per-action timeout, parallel execution controls, optional soft-fail for unreachable profile-default endpoints, and explicit profile-default subject override via `--profile-default-gate-subject ID`.
+  - roadmap-evidence-pack-actionable-run wraps the roadmap evidence-pack actionable helper path, supports `--scope all|profile-default|runtime-actuation|multi-vm`, and emits `roadmap_evidence_pack_actionable_run_summary` output.
+  - roadmap-live-evidence-actionable-run wraps the roadmap live-evidence actionable helper path, targets live-cycle ids, and emits `roadmap_live_evidence_actionable_run_summary` output.
+  - roadmap-live-and-pack-actionable-run wraps the roadmap live+pack actionable helper path, chains live-cycle and pack actions, and emits `roadmap_live_and_pack_actionable_run_summary` output.
+  - roadmap-live-evidence-cycle-batch-run wraps the roadmap live-evidence cycle-batch helper path (override with `ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT`) and preserves pass-through args.
+  - roadmap-validation-debt-actionable-run wraps the roadmap validation-debt actionable helper path (override with `ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT`) and preserves pass-through args.
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
   - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
   - phase1-resilience-handoff-check wraps the Phase-1 resilience handoff check helper script with pass-through args.
@@ -9408,6 +9429,39 @@ roadmap_next_actions_run() {
   "$script" "$@"
 }
 
+roadmap_evidence_pack_actionable_run() {
+  local script="${ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_evidence_pack_actionable_run.sh}"
+  "$script" "$@"
+}
+
+roadmap_live_evidence_actionable_run() {
+  local script="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_evidence_actionable_run.sh}"
+  "$script" "$@"
+}
+
+roadmap_live_and_pack_actionable_run() {
+  local script="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_and_pack_actionable_run.sh}"
+  "$script" "$@"
+}
+
+roadmap_live_evidence_cycle_batch_run() {
+  local script="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_evidence_cycle_batch_run.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+roadmap_validation_debt_actionable_run() {
+  local script="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_validation_debt_actionable_run.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
 ci_phase0() {
   local gate_script="${CI_PHASE0_SCRIPT:-$ROOT_DIR/scripts/ci_phase0.sh}"
   "$gate_script" "$@"
@@ -9895,6 +9949,16 @@ profile_default_gate_token_probe() {
 gpm_endpoint_posture_remediate() {
   local gpm_endpoint_posture_remediate_script="${GPM_ENDPOINT_POSTURE_REMEDIATE_SCRIPT:-$ROOT_DIR/scripts/gpm_endpoint_posture_remediate.sh}"
   "$gpm_endpoint_posture_remediate_script" "$@"
+}
+
+gpm_gap_scan() {
+  local gpm_gap_scan_script="${GPM_GAP_SCAN_SCRIPT:-$ROOT_DIR/scripts/gpm_gap_scan.sh}"
+  "$gpm_gap_scan_script" "$@"
+}
+
+gpm_logic_check() {
+  local gpm_logic_check_script="${GPM_LOGIC_CHECK_SCRIPT:-$ROOT_DIR/scripts/gpm_logic_check.sh}"
+  "$gpm_logic_check_script" "$@"
 }
 
 profile_default_gate_live() {
@@ -16934,6 +16998,14 @@ main() {
       shift
       gpm_endpoint_posture_remediate "$@"
       ;;
+    gpm-gap-scan)
+      shift
+      gpm_gap_scan "$@"
+      ;;
+    gpm-logic-check)
+      shift
+      gpm_logic_check "$@"
+      ;;
     client-vpn-preflight)
       shift
       client_vpn_preflight "$@"
@@ -17121,6 +17193,26 @@ main() {
     roadmap-next-actions-run)
       shift
       roadmap_next_actions_run "$@"
+      ;;
+    roadmap-evidence-pack-actionable-run)
+      shift
+      roadmap_evidence_pack_actionable_run "$@"
+      ;;
+    roadmap-live-evidence-actionable-run)
+      shift
+      roadmap_live_evidence_actionable_run "$@"
+      ;;
+    roadmap-live-and-pack-actionable-run)
+      shift
+      roadmap_live_and_pack_actionable_run "$@"
+      ;;
+    roadmap-live-evidence-cycle-batch-run)
+      shift
+      roadmap_live_evidence_cycle_batch_run "$@"
+      ;;
+    roadmap-validation-debt-actionable-run)
+      shift
+      roadmap_validation_debt_actionable_run "$@"
       ;;
     ci-phase0)
       shift

@@ -11,15 +11,20 @@ for cmd in bash jq mktemp chmod mkdir cat grep timeout; do
   fi
 done
 
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+mkdir -p "$ROOT_DIR/.easy-node-logs"
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.easy-node-logs/integration_roadmap_non_blockchain_actionable_run_XXXXXX")"
+ACTION_TMP_DIR="$(mktemp -d "$ROOT_DIR/scripts/.integration_roadmap_non_blockchain_actionable_run.XXXXXX")"
+trap 'rm -rf "$TMP_DIR" "$ACTION_TMP_DIR"' EXIT
 
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
-PASS1="$TMP_DIR/pass_action_1.sh"
-PASS2="$TMP_DIR/pass_action_2.sh"
-FAIL2="$TMP_DIR/fail_action_2.sh"
-SLOW1="$TMP_DIR/slow_action_1.sh"
-SLOW2="$TMP_DIR/slow_action_2.sh"
+PASS1="$ACTION_TMP_DIR/pass_action_1.sh"
+PASS2="$ACTION_TMP_DIR/pass_action_2.sh"
+FAIL2="$ACTION_TMP_DIR/fail_action_2.sh"
+SLOW1="$ACTION_TMP_DIR/slow_action_1.sh"
+SLOW2="$ACTION_TMP_DIR/slow_action_2.sh"
+ASSERT_ARGS="$ACTION_TMP_DIR/assert_args_action.sh"
+ENV_REJECT_PAYLOAD="$ACTION_TMP_DIR/env_reject_payload.sh"
+ENV_REJECT_MARKER="$TMP_DIR/env_reject_marker.txt"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -58,6 +63,24 @@ sleep 4
 echo "slow action 2 done"
 EOF_SLOW2
 chmod +x "$SLOW2"
+
+cat >"$ASSERT_ARGS" <<'EOF_ASSERT_ARGS'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" -ne 3 || "${1:-}" != "alpha value" || "${2:-}" != "--subject" || "${3:-}" != "inv quoted subject" ]]; then
+  echo "unexpected argv: count=$# args=[$*]"
+  exit 23
+fi
+echo "quoted argv ok"
+EOF_ASSERT_ARGS
+chmod +x "$ASSERT_ARGS"
+
+cat >"$ENV_REJECT_PAYLOAD" <<EOF_ENV_REJECT_PAYLOAD
+#!/usr/bin/env bash
+set -euo pipefail
+echo "payload-executed" >"$ENV_REJECT_MARKER"
+EOF_ENV_REJECT_PAYLOAD
+chmod +x "$ENV_REJECT_PAYLOAD"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -124,6 +147,18 @@ JSON
 }
 JSON
     ;;
+  recommended_missing_id)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_pass_1","label":"Action pass 1","command":"bash \"$PASS1\"","reason":"test"},
+      {"id":"action_pass_2","label":"Action pass 2","command":"bash \"$PASS2\"","reason":"test"}
+    ]
+  }
+}
+JSON
+    ;;
   fail_second)
     cat >"$summary_json" <<JSON
 {
@@ -158,6 +193,42 @@ JSON
     "non_blockchain_actionable_no_sudo_or_github": [
       {"id":"action_slow_1","label":"Action slow 1","command":"bash \"$SLOW1\"","reason":"test-parallel"},
       {"id":"action_slow_2","label":"Action slow 2","command":"bash \"$SLOW2\"","reason":"test-parallel"}
+    ]
+  }
+}
+JSON
+    ;;
+  redaction)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_redaction_1",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_redaction_1","label":"Action redaction 1","command":"bash \"$PASS1\" --token super-secret-token --campaign-subject inv-secret-subject","reason":"test-redaction"}
+    ]
+  }
+}
+JSON
+    ;;
+  no_python_quoted)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_no_python_quoted",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_no_python_quoted","label":"Action no-python quoted","command":"bash \"$ASSERT_ARGS\" \"alpha value\" --subject \"inv quoted subject\"","reason":"test-no-python-quoted"}
+    ]
+  }
+}
+JSON
+    ;;
+  env_prefixed_reject)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_env_prefixed_reject",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_env_prefixed_reject","label":"Action env-prefixed reject","command":"BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"","reason":"test-env-prefixed-reject"}
     ]
   }
 }
@@ -260,6 +331,108 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-non-blockchain-actionable-run] command redaction in action summaries"
+SUMMARY_REDACTION="$TMP_DIR/summary_redaction.json"
+REPORTS_REDACTION="$TMP_DIR/reports_redaction"
+ROADMAP_ACTIONABLE_SCENARIO=redaction \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REDACTION" \
+  --summary-json "$SUMMARY_REDACTION" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "action_redaction_1"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--token [redacted]"))
+  and ((.actions[0].command // "") | contains("--campaign-subject [redacted]"))
+  and (((.actions[0].command // "") | contains("super-secret-token")) | not)
+  and (((.actions[0].command // "") | contains("inv-secret-subject")) | not)
+' "$SUMMARY_REDACTION" >/dev/null; then
+  echo "redaction summary mismatch"
+  cat "$SUMMARY_REDACTION"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] no-python safe-mode path preserves quoted argv parsing"
+SUMMARY_NO_PYTHON_QUOTED="$TMP_DIR/summary_no_python_quoted.json"
+REPORTS_NO_PYTHON_QUOTED="$TMP_DIR/reports_no_python_quoted"
+NO_PYTHON_BIN="$TMP_DIR/no_python_bin"
+mkdir -p "$NO_PYTHON_BIN"
+cat >"$NO_PYTHON_BIN/python3" <<'EOF_NO_PYTHON'
+#!/usr/bin/env bash
+exit 127
+EOF_NO_PYTHON
+chmod +x "$NO_PYTHON_BIN/python3"
+PATH="$NO_PYTHON_BIN:$PATH" \
+ROADMAP_ACTIONABLE_SCENARIO=no_python_quoted \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" ASSERT_ARGS="$ASSERT_ARGS" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_NO_PYTHON_QUOTED" \
+  --summary-json "$SUMMARY_NO_PYTHON_QUOTED" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .summary.actions_executed == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "action_no_python_quoted"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
+  and (((.actions[0].command // "") | contains("inv quoted subject")) | not)
+' "$SUMMARY_NO_PYTHON_QUOTED" >/dev/null; then
+  echo "no-python quoted safe-mode summary mismatch"
+  cat "$SUMMARY_NO_PYTHON_QUOTED"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] env-prefixed action remains fail-closed in safe mode"
+SUMMARY_ENV_REJECT="$TMP_DIR/summary_env_reject.json"
+REPORTS_ENV_REJECT="$TMP_DIR/reports_env_reject"
+rm -f "$ENV_REJECT_MARKER"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=env_prefixed_reject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" ENV_REJECT_PAYLOAD="$ENV_REJECT_PAYLOAD" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_ENV_REJECT" \
+  --summary-json "$SUMMARY_ENV_REJECT" \
+  --print-summary-json 0
+env_reject_rc=$?
+set -e
+if [[ "$env_reject_rc" != "5" ]]; then
+  echo "expected env-prefixed safe-mode rejection rc=5, got rc=$env_reject_rc"
+  cat "$SUMMARY_ENV_REJECT"
+  exit 1
+fi
+if [[ -f "$ENV_REJECT_MARKER" ]]; then
+  echo "env-prefixed payload unexpectedly executed in safe mode"
+  cat "$SUMMARY_ENV_REJECT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 5
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "action_env_prefixed_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 5
+' "$SUMMARY_ENV_REJECT" >/dev/null; then
+  echo "env-prefixed safe-mode rejection summary mismatch"
+  cat "$SUMMARY_ENV_REJECT"
+  exit 1
+fi
+
 echo "[roadmap-non-blockchain-actionable-run] recommended-only path"
 SUMMARY_RECOMMENDED="$TMP_DIR/summary_recommended.json"
 REPORTS_RECOMMENDED="$TMP_DIR/reports_recommended"
@@ -277,6 +450,9 @@ if ! jq -e '
   and .rc == 0
   and .roadmap.actions_selected_count == 1
   and .roadmap.recommended_gate_id_not_found == false
+  and .roadmap.recommended_only_selection_state == "selected_recommended_action"
+  and .roadmap.recommended_only_selection_reason == null
+  and .roadmap.recommended_only_fail_closed == false
   and .summary.actions_executed == 1
   and ((.actions // []) | length == 1)
   and .actions[0].id == "action_pass_1"
@@ -309,8 +485,12 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 5
+  and .rc != 0
   and .roadmap.recommended_gate_id == "action_missing_1"
   and .roadmap.recommended_gate_id_not_found == true
+  and .roadmap.recommended_only_selection_state == "recommended_id_not_found"
+  and ((.roadmap.recommended_only_selection_reason // "") | contains("action_missing_1"))
+  and .roadmap.recommended_only_fail_closed == true
   and .roadmap.actions_selected_count == 0
   and .summary.actions_executed == 0
   and .summary.pass == 0
@@ -319,6 +499,45 @@ if ! jq -e '
 ' "$SUMMARY_RECOMMENDED_MISSING" >/dev/null; then
   echo "recommended-only stale-id summary mismatch"
   cat "$SUMMARY_RECOMMENDED_MISSING"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] recommended-only missing recommended id fails closed"
+SUMMARY_RECOMMENDED_MISSING_ID="$TMP_DIR/summary_recommended_missing_id.json"
+REPORTS_RECOMMENDED_MISSING_ID="$TMP_DIR/reports_recommended_missing_id"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=recommended_missing_id \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_RECOMMENDED_MISSING_ID" \
+  --summary-json "$SUMMARY_RECOMMENDED_MISSING_ID" \
+  --recommended-only 1 \
+  --print-summary-json 0
+recommended_missing_id_rc=$?
+set -e
+if [[ "$recommended_missing_id_rc" != "5" ]]; then
+  echo "expected missing recommended-id rc=5, got rc=$recommended_missing_id_rc"
+  cat "$SUMMARY_RECOMMENDED_MISSING_ID"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 5
+  and .rc != 0
+  and .roadmap.recommended_gate_id == null
+  and .roadmap.recommended_gate_id_not_found == false
+  and .roadmap.recommended_only_selection_state == "missing_recommended_id"
+  and .roadmap.recommended_only_selection_reason == "no recommended gate id was provided"
+  and .roadmap.recommended_only_fail_closed == true
+  and .roadmap.actions_selected_count == 0
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_RECOMMENDED_MISSING_ID" >/dev/null; then
+  echo "recommended-only missing-id summary mismatch"
+  cat "$SUMMARY_RECOMMENDED_MISSING_ID"
   exit 1
 fi
 

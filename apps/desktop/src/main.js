@@ -3961,16 +3961,51 @@ function computeClientLockHintText() {
   return "Client controls are available for client-capable roles.";
 }
 
+function ensureSentence(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return "";
+  }
+  if (/[.!?]$/.test(normalized)) {
+    return normalized;
+  }
+  return `${normalized}.`;
+}
+
+function inferTabActivationPathHint(tabName, reason) {
+  const normalizedReason = typeof reason === "string" ? reason : "";
+  const directPathMatch = normalizedReason.match(/Direct path:\s*([^.;]+)\s*[.;]?/i);
+  if (directPathMatch && directPathMatch[1]) {
+    return directPathMatch[1].trim();
+  }
+  if (tabName === "client") {
+    if (!state.sessionToken) {
+      return "Request Challenge, complete Wallet Sign-In or Sign In, then Register Client";
+    }
+    return "Register Client to unlock client-capable session controls";
+  }
+  if (!state.sessionToken) {
+    return "Request Challenge, complete Wallet Sign-In or Sign In, then Apply Operator Role";
+  }
+  return "Apply Operator Role, wait for approval, then refresh Session or Operator Status";
+}
+
+function formatLockedTabMessage(tabName, reason) {
+  const normalizedReason = ensureSentence(reason) || `${tabName} tab is currently locked by role policy.`;
+  const activationPath = ensureSentence(`Activation path: ${inferTabActivationPathHint(tabName.toLowerCase(), normalizedReason)}`);
+  return `${tabName} tab locked: ${normalizedReason} ${activationPath}`;
+}
+
 function syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason) {
   if (!tabLockHintEl) {
     return;
   }
   const lockMessages = [];
   if (!clientTabVisible && clientReason) {
-    lockMessages.push(`Client tab locked: ${clientReason}`);
+    lockMessages.push(formatLockedTabMessage("Client", clientReason));
   }
   if (!serverTabVisible && serverReason) {
-    lockMessages.push(`Server tab locked: ${serverReason}`);
+    lockMessages.push(formatLockedTabMessage("Server", serverReason));
   }
   if (lockMessages.length === 0) {
     tabLockHintEl.textContent = "";
@@ -3986,26 +4021,38 @@ function syncServerRoleLockState() {
   const serverTabVisible = isServerTabVisibleRole();
   const clientReason = computeClientLockHintText();
   const serverReason = computeServerLockHintText();
+  const clientLockedMessage = formatLockedTabMessage("Client", clientReason);
+  const serverLockedMessage = formatLockedTabMessage("Server", serverReason);
 
   tabClientEl.disabled = !clientTabVisible;
   tabClientEl.classList.toggle("locked", !clientTabVisible);
   panelClientEl.classList.toggle("locked", !clientTabVisible);
   tabClientEl.setAttribute("aria-disabled", clientTabVisible ? "false" : "true");
-  tabClientEl.title = clientTabVisible ? "Open Client workspace." : clientReason;
+  tabClientEl.title = clientTabVisible ? "Open Client workspace." : clientLockedMessage;
   tabClientEl.setAttribute(
     "aria-label",
-    clientTabVisible ? "Client workspace tab." : `Client workspace tab locked. ${clientReason}`
+    clientTabVisible ? "Client workspace tab." : `Client workspace tab locked. ${clientLockedMessage}`
   );
+  if (!clientTabVisible && tabLockHintEl) {
+    tabClientEl.setAttribute("aria-describedby", "tab_lock_hint");
+  } else {
+    tabClientEl.removeAttribute("aria-describedby");
+  }
 
   tabServerEl.disabled = !serverTabVisible;
   tabServerEl.classList.toggle("locked", !serverTabVisible);
   panelServerEl.classList.toggle("locked", !serverTabVisible);
   tabServerEl.setAttribute("aria-disabled", serverTabVisible ? "false" : "true");
-  tabServerEl.title = serverTabVisible ? "Open Server workspace." : serverReason;
+  tabServerEl.title = serverTabVisible ? "Open Server workspace." : serverLockedMessage;
   tabServerEl.setAttribute(
     "aria-label",
-    serverTabVisible ? "Server workspace tab." : `Server workspace tab locked. ${serverReason}`
+    serverTabVisible ? "Server workspace tab." : `Server workspace tab locked. ${serverLockedMessage}`
   );
+  if (!serverTabVisible && tabLockHintEl) {
+    tabServerEl.setAttribute("aria-describedby", "tab_lock_hint");
+  } else {
+    tabServerEl.removeAttribute("aria-describedby");
+  }
 
   const clientTabActive = tabClientEl.classList.contains("active");
   const serverTabActive = tabServerEl.classList.contains("active");
