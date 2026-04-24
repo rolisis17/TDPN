@@ -184,6 +184,7 @@ func TestMsgServerFinalizeUsageIdempotentReplay(t *testing.T) {
 		Reservation: types.CreditReservation{
 			ReservationID: "res-6",
 			SessionID:     "sess-6",
+			AssetDenom:    "uusdc",
 			Amount:        100,
 		},
 	}); err != nil {
@@ -196,6 +197,7 @@ func TestMsgServerFinalizeUsageIdempotentReplay(t *testing.T) {
 			ReservationID: "res-6",
 			SessionID:     "sess-6",
 			BilledAmount:  80,
+			AssetDenom:    "uusdc",
 		},
 	}
 	if _, err := server.FinalizeUsage(req); err != nil {
@@ -246,6 +248,7 @@ func TestMsgServerFinalizeUsageConflictPropagation(t *testing.T) {
 		Reservation: types.CreditReservation{
 			ReservationID: "res-8",
 			SessionID:     "sess-8",
+			AssetDenom:    "uusdc",
 			Amount:        100,
 		},
 	}); err != nil {
@@ -258,6 +261,7 @@ func TestMsgServerFinalizeUsageConflictPropagation(t *testing.T) {
 			ReservationID: "res-8",
 			SessionID:     "sess-8",
 			BilledAmount:  75,
+			AssetDenom:    "uusdc",
 		},
 	}
 	if _, err := server.FinalizeUsage(req); err != nil {
@@ -293,6 +297,7 @@ func TestMsgServerFinalizeUsageMissingReservationPropagation(t *testing.T) {
 			ReservationID: "does-not-exist",
 			SessionID:     "sess-9",
 			BilledAmount:  10,
+			AssetDenom:    "uusdc",
 		},
 	})
 	if err == nil {
@@ -331,6 +336,75 @@ func TestMsgServerFinalizeUsageSessionMismatchPropagation(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid settlement error for session mismatch")
+	}
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement, got %v", err)
+	}
+}
+
+func TestMsgServerFinalizeUsageNegativeUsageBytesPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{
+		Reservation: types.CreditReservation{
+			ReservationID: "res-negative-usage-msg",
+			SessionID:     "sess-negative-usage-msg",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	_, err := server.FinalizeUsage(FinalizeUsageRequest{
+		Settlement: types.SettlementRecord{
+			SettlementID:  "set-negative-usage-msg",
+			ReservationID: "res-negative-usage-msg",
+			SessionID:     "sess-negative-usage-msg",
+			BilledAmount:  10,
+			UsageBytes:    -1,
+			AssetDenom:    "uusdc",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid settlement error for negative usage bytes")
+	}
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected ErrInvalidSettlement, got %v", err)
+	}
+}
+
+func TestMsgServerFinalizeUsageEmptyAssetDenomPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{
+		Reservation: types.CreditReservation{
+			ReservationID: "res-empty-denom-msg",
+			SessionID:     "sess-empty-denom-msg",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		},
+	}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	_, err := server.FinalizeUsage(FinalizeUsageRequest{
+		Settlement: types.SettlementRecord{
+			SettlementID:  "set-empty-denom-msg",
+			ReservationID: "res-empty-denom-msg",
+			SessionID:     "sess-empty-denom-msg",
+			BilledAmount:  10,
+			AssetDenom:    " \n\t ",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid settlement error for empty asset denom")
 	}
 	if !errors.Is(err, ErrInvalidSettlement) {
 		t.Fatalf("expected ErrInvalidSettlement, got %v", err)

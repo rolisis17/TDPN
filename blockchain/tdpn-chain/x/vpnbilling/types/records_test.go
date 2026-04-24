@@ -69,6 +69,7 @@ func TestSettlementRecordValidateBasic(t *testing.T) {
 	base := SettlementRecord{
 		SettlementID: "set-1",
 		SessionID:    "sess-1",
+		AssetDenom:   "uusdc",
 		BilledAmount: 55,
 	}
 
@@ -90,18 +91,33 @@ func TestSettlementRecordValidateBasic(t *testing.T) {
 		},
 		{
 			name:    "missing session id",
-			record:  SettlementRecord{SettlementID: base.SettlementID, BilledAmount: base.BilledAmount},
+			record:  SettlementRecord{SettlementID: base.SettlementID, AssetDenom: base.AssetDenom, BilledAmount: base.BilledAmount},
 			wantErr: "session id is required",
 		},
 		{
+			name:    "missing asset denom",
+			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, BilledAmount: base.BilledAmount},
+			wantErr: "asset denom is required",
+		},
+		{
+			name:    "whitespace asset denom",
+			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, AssetDenom: " \t ", BilledAmount: base.BilledAmount},
+			wantErr: "asset denom is required",
+		},
+		{
 			name:    "zero billed amount",
-			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, BilledAmount: 0},
+			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, AssetDenom: base.AssetDenom, BilledAmount: 0},
 			wantErr: "billed amount must be positive",
 		},
 		{
 			name:    "negative billed amount",
-			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, BilledAmount: -1},
+			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, AssetDenom: base.AssetDenom, BilledAmount: -1},
 			wantErr: "billed amount must be positive",
+		},
+		{
+			name:    "negative usage bytes",
+			record:  SettlementRecord{SettlementID: base.SettlementID, SessionID: base.SessionID, AssetDenom: base.AssetDenom, BilledAmount: base.BilledAmount, UsageBytes: -1},
+			wantErr: "usage bytes cannot be negative",
 		},
 	}
 

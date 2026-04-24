@@ -110,12 +110,16 @@ if [[ -n "$summary_json" ]]; then
     support="${FAKE_CHECK_SUPPORT_PCT:-80}"
     selection_policy_present="${FAKE_CHECK_SELECTION_POLICY_PRESENT:-1}"
     selection_policy_valid="${FAKE_CHECK_SELECTION_POLICY_VALID:-1}"
+    errors_json="${FAKE_CHECK_ERRORS_JSON:-[]}"
+    if ! jq -e . >/dev/null 2>&1 <<<"$errors_json"; then
+      errors_json='[]'
+    fi
     cat >"$summary_json" <<EOF_SUMMARY
 {
   "decision": "$decision",
   "status": "ok",
   "rc": 0,
-  "errors": [],
+  "errors": $errors_json,
   "observed": {
     "recommended_profile": "balanced",
     "support_rate_pct": $support,
@@ -1237,6 +1241,32 @@ fi
 if ! jq -e '.status == "fail" and .final_rc == 19 and .failure_stage == "campaign_check" and .decision.decision == "NO-GO" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "fail"' "$CHECK_FAIL_SUMMARY" >/dev/null 2>&1; then
   echo "check-fail summary JSON missing expected fields"
   cat "$CHECK_FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] NO-GO reason propagates from campaign-check summary"
+: >"$SIGNOFF_CAPTURE"
+CHECK_REASON_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_check_reason.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=NO-GO \
+FAKE_CHECK_ERRORS_JSON='["insufficient evidence for default recommendation (fail-closed): runs_total=4 < required_min_runs_total=5; recommendation_support_rate_pct=70% < required_recommendation_support_rate_pct=75%"]' \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_check_reason" \
+  --refresh-campaign 1 \
+  --fail-on-no-go 0 \
+  --summary-json "$CHECK_REASON_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_check_reason.log 2>&1
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=NO-GO' /tmp/integration_profile_compare_campaign_signoff_check_reason.log; then
+  echo "expected NO-GO status line with propagated check reason not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_check_reason.log
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .failure_stage == "" and .decision.decision == "NO-GO" and .decision.context == "campaign_check_summary" and .decision.from_campaign_check_summary == true and .decision.reason == "insufficient evidence for default recommendation (fail-closed): runs_total=4 < required_min_runs_total=5; recommendation_support_rate_pct=70% < required_recommendation_support_rate_pct=75%" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass"' "$CHECK_REASON_SUMMARY" >/dev/null 2>&1; then
+  echo "check-summary NO-GO reason propagation summary JSON missing expected fields"
+  cat "$CHECK_REASON_SUMMARY"
   exit 1
 fi
 

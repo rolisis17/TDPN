@@ -1172,7 +1172,7 @@ fi
 live_wrapper_line_sp="${live_wrapper_line//$'\t'/ }"
 assert_contains "$live_wrapper_line_sp" "--directory-a http://wrapper-live-a.test:8081" "missing live forwarded --directory-a"
 assert_contains "$live_wrapper_line_sp" "--directory-b http://wrapper-live-b.test:8081" "missing live forwarded --directory-b"
-assert_contains "$live_wrapper_line_sp" "--allow-remote-http-probe 1" "missing live forwarded --allow-remote-http-probe opt-in"
+assert_contains "$live_wrapper_line_sp" "--allow-remote-http-probe 0" "missing live forwarded --allow-remote-http-probe fail-closed default"
 assert_contains "$live_wrapper_line_sp" "--campaign-bootstrap-directory http://wrapper-live-a.test:8081" "missing live forwarded --campaign-bootstrap-directory"
 assert_contains "$live_wrapper_line_sp" "--campaign-issuer-url http://wrapper-live-a.test:8082" "missing live forwarded --campaign-issuer-url"
 assert_contains "$live_wrapper_line_sp" "--campaign-entry-url http://wrapper-live-a.test:8083" "missing live forwarded --campaign-entry-url"
@@ -1294,7 +1294,7 @@ fi
 live_equals_wrapper_line_sp="${live_equals_wrapper_line//$'\t'/ }"
 assert_contains "$live_equals_wrapper_line_sp" "--directory-a http://wrapper-live-eq-a.test:8081" "missing equals live forwarded --directory-a"
 assert_contains "$live_equals_wrapper_line_sp" "--directory-b http://wrapper-live-eq-b.test:8081" "missing equals live forwarded --directory-b"
-assert_contains "$live_equals_wrapper_line_sp" "--allow-remote-http-probe 1" "missing equals live forwarded --allow-remote-http-probe opt-in"
+assert_contains "$live_equals_wrapper_line_sp" "--allow-remote-http-probe 0" "missing equals live forwarded --allow-remote-http-probe fail-closed default"
 assert_contains "$live_equals_wrapper_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-equals-wrapper" "missing equals live forwarded env CAMPAIGN_SUBJECT"
 assert_not_contains "$live_equals_wrapper_line_sp" "--campaign-subject" "unexpected equals live forwarded --campaign-subject credential arg"
 assert_not_contains "$live_equals_wrapper_line_sp" "--subject" "unexpected equals live forwarded --subject credential arg"
@@ -1305,6 +1305,31 @@ assert_contains "$live_equals_wrapper_line_sp" "--campaign-timeout-sec 778" "mis
 assert_contains "$live_equals_wrapper_line_sp" "--heartbeat-interval-sec 9" "missing equals live forwarded --heartbeat-interval-sec"
 assert_contains "$live_equals_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_equals_summary.json" "missing equals live forwarded --summary-json"
 assert_contains "$live_equals_wrapper_line_sp" "--print-summary-json 0" "missing equals live forwarded --print-summary-json"
+
+echo "[profile-default-gate-live] explicit remote-http probe opt-in is forwarded as-is"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_EXPLICIT_REMOTE_HTTP_OPT_IN_LOG="$TMP_DIR/easy_node_profile_default_gate_live_explicit_remote_http_opt_in.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "wrapper-live-optin-a.test" \
+  --host-b "wrapper-live-optin-b.test" \
+  --campaign-subject "inv-live-explicit-remote-http-opt-in" \
+  --allow-remote-http-probe 1 \
+  --reports-dir "$TMP_DIR/live_reports_explicit_remote_http_opt_in" \
+  --campaign-timeout-sec 781 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_explicit_remote_http_opt_in_summary.json" >"$EASY_NODE_LIVE_EXPLICIT_REMOTE_HTTP_OPT_IN_LOG" 2>&1
+
+live_explicit_remote_http_opt_in_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_explicit_remote_http_opt_in_line" ]]; then
+  echo "missing easy_node live explicit remote-http opt-in wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_EXPLICIT_REMOTE_HTTP_OPT_IN_LOG"
+  exit 1
+fi
+live_explicit_remote_http_opt_in_line_sp="${live_explicit_remote_http_opt_in_line//$'\t'/ }"
+assert_contains "$live_explicit_remote_http_opt_in_line_sp" "--allow-remote-http-probe 1" "missing explicit live forwarded --allow-remote-http-probe opt-in"
+assert_contains "$live_explicit_remote_http_opt_in_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-explicit-remote-http-opt-in" "missing explicit remote-http opt-in env CAMPAIGN_SUBJECT forwarding"
+assert_not_contains "$live_explicit_remote_http_opt_in_line_sp" "--campaign-subject" "unexpected explicit remote-http opt-in forwarded --campaign-subject credential arg"
 
 echo "[profile-default-gate-live] explicit directory URL overrides are forwarded as-is with env subject forwarding"
 : >"$WRAPPER_CAPTURE"
@@ -1363,7 +1388,7 @@ fi
 live_host_norm_line_sp="${live_host_norm_line//$'\t'/ }"
 assert_contains "$live_host_norm_line_sp" "--directory-a http://wrapper-live-norm-a.test:8081" "missing host-normalized live forwarded --directory-a"
 assert_contains "$live_host_norm_line_sp" "--directory-b http://wrapper-live-norm-b.test:8081" "missing host-normalized live forwarded --directory-b"
-assert_contains "$live_host_norm_line_sp" "--allow-remote-http-probe 1" "missing host-normalized live forwarded --allow-remote-http-probe opt-in"
+assert_contains "$live_host_norm_line_sp" "--allow-remote-http-probe 0" "missing host-normalized live forwarded --allow-remote-http-probe fail-closed default"
 assert_contains "$live_host_norm_line_sp" "--campaign-bootstrap-directory http://wrapper-live-norm-a.test:8081" "missing host-normalized live forwarded --campaign-bootstrap-directory"
 assert_contains "$live_host_norm_line_sp" "--campaign-issuer-url http://wrapper-live-norm-a.test:8082" "missing host-normalized live forwarded --campaign-issuer-url"
 assert_contains "$live_host_norm_line_sp" "--campaign-entry-url http://wrapper-live-norm-a.test:8083" "missing host-normalized live forwarded --campaign-entry-url"

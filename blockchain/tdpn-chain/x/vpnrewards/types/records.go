@@ -69,6 +69,9 @@ func (r DistributionRecord) ValidateBasic() error {
 	if r.AccrualID == "" {
 		return errors.New("accrual id is required")
 	}
+	if strings.TrimSpace(r.PayoutRef) == "" {
+		return errors.New("payout ref is required")
+	}
 	return nil
 }
 

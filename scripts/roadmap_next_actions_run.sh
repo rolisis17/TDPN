@@ -12,6 +12,10 @@ Usage:
     [--summary-json PATH] \
     [--roadmap-summary-json PATH] \
     [--roadmap-report-md PATH] \
+    [--host-a HOST] \
+    [--host-b HOST] \
+    [--campaign-subject ID] \
+    [--vm-command-source PATH] \
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
     [--refresh-manual-validation [0|1]] \
@@ -36,6 +40,10 @@ Purpose:
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
   --allow-unsafe-shell-commands 0
+  --host-a ""   (precedence: CLI --host-a > ROADMAP_NEXT_ACTIONS_RUN_HOST_A > A_HOST > HOST_A > summary command values)
+  --host-b ""   (precedence: CLI --host-b > ROADMAP_NEXT_ACTIONS_RUN_HOST_B > B_HOST > HOST_B > summary command values)
+  --campaign-subject ""   (precedence: CLI --campaign-subject > --profile-default-gate-subject > ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT > ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > summary command values)
+  --vm-command-source ""   (precedence: CLI --vm-command-source > ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE > VM_COMMAND_SOURCE > summary command values)
   profile_default_gate default timeout sec: 2400
     (env ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC)
   --refresh-manual-validation 0
@@ -60,6 +68,7 @@ Exit behavior:
   - Runs all selected commands (sequential by default, concurrent when --parallel=1).
   - Returns rc=0 only when all selected commands pass (or no actions selected).
   - Returns first failing action command rc otherwise.
+  - Runtime inputs use deterministic precedence: CLI flags > env values > summary command values.
   - Fails closed (rc=3) when selected actions contain duplicate ids with
     conflicting commands after dedupe/filtering, to avoid stale ambiguous runs.
   - With --profile-default-gate-subject, profile_default_gate actions append
@@ -252,6 +261,15 @@ build_profile_default_gate_subject_operator_command() {
   if [[ "${allow_profile_default_gate_unreachable:-0}" == "1" ]]; then
     cmd+=(--allow-profile-default-gate-unreachable 1)
   fi
+  if [[ -n "${runtime_host_a:-}" ]]; then
+    cmd+=(--host-a "$runtime_host_a")
+  fi
+  if [[ -n "${runtime_host_b:-}" ]]; then
+    cmd+=(--host-b "$runtime_host_b")
+  fi
+  if [[ -n "${runtime_vm_command_source:-}" ]]; then
+    cmd+=(--vm-command-source "$runtime_vm_command_source")
+  fi
   if [[ -n "${include_id_prefix:-}" ]]; then
     cmd+=(--include-id-prefix "$include_id_prefix")
   fi
@@ -279,6 +297,7 @@ build_profile_default_gate_subject_operator_command() {
     fi
   done
   cmd+=(--print-summary-json "${print_summary_json:-1}")
+  cmd+=(--campaign-subject "REPLACE_WITH_INVITE_SUBJECT")
   cmd+=(--profile-default-gate-subject "REPLACE_WITH_INVITE_SUBJECT")
 
   render_command_line_from_argv "${cmd[@]}"
@@ -299,6 +318,12 @@ action_id_is_profile_default_family() {
   local action_id
   action_id="$(trim "${1:-}")"
   [[ "$action_id" == profile_default_gate* ]]
+}
+
+action_id_is_multi_vm_stability_action_01() {
+  local action_id
+  action_id="$(trim "${1:-}")"
+  [[ "$action_id" == "profile_compare_multi_vm_stability" || "$action_id" == "profile_compare_multi_vm_stability_promotion" ]]
 }
 
 strip_optional_wrapping_quotes() {
@@ -329,6 +354,121 @@ profile_subject_looks_placeholder() {
       return 0
       ;;
   esac
+  return 1
+}
+
+value_matches_placeholder_token_01() {
+  local value token normalized
+  value="$(trim "${1:-}")"
+  token="$(trim "${2:-}")"
+  if [[ -z "$value" || -z "$token" ]]; then
+    return 1
+  fi
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    "$token"|\$\{"$token"\}|\$"$token"|"<$token>"|"{{$token}}"|YOUR_"$token"|REPLACE_WITH_"$token"|%$token%|\$\{"$token":-*}|\$\{"$token"-*})
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+host_a_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in A_HOST HOST_A; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+host_b_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in B_HOST HOST_B; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+vm_command_source_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in VM_COMMAND_SOURCE VM_COMMAND_FILE VM_COMMAND; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$value" in
+    "<VM-COMMAND>"|"<SET-VM-COMMAND-SOURCE>"|REPLACE_WITH_VM_COMMAND_SOURCE|REPLACE_WITH_VM_COMMAND_FILE)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+command_has_vm_command_source_placeholder_01() {
+  local command_text normalized token key value idx token_count
+  command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    idx=0
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      case "$token" in
+        --vm-command-file|--vm-command-source)
+          if (( idx + 1 >= token_count )); then
+            return 0
+          fi
+          value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if vm_command_source_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 2))
+          continue
+          ;;
+        --vm-command-file=*|--vm-command-source=*)
+          key="${token%%=*}"
+          value="${token#*=}"
+          if [[ -z "$value" ]] || vm_command_source_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 1))
+          continue
+          ;;
+      esac
+      if vm_command_source_value_looks_placeholder_01 "$token"; then
+        return 0
+      fi
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$normalized" =~ \$\{?(VM_COMMAND_SOURCE|VM_COMMAND_FILE|VM_COMMAND)\}? ]]; then
+    return 0
+  fi
+  if [[ "$normalized" =~ (^|[^A-Z0-9_])(REPLACE_WITH_VM_COMMAND_SOURCE|REPLACE_WITH_VM_COMMAND_FILE|VM_COMMAND_SOURCE|VM_COMMAND_FILE|VM_COMMAND)([^A-Z0-9_]|$) ]]; then
+    return 0
+  fi
+  if [[ "$normalized" == *"<VM-COMMAND>"* ]] \
+     || [[ "$normalized" == *"<SET-VM-COMMAND-SOURCE>"* ]] \
+     || [[ "$normalized" == *"REPLACE_WITH_VM_COMMAND_SOURCE"* ]] \
+     || [[ "$normalized" == *"REPLACE_WITH_VM_COMMAND_FILE"* ]]; then
+    return 0
+  fi
   return 1
 }
 
@@ -456,18 +596,32 @@ resolve_profile_default_gate_subject_value() {
   PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE=""
   PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL=""
 
-  candidate="$(trim "${profile_default_gate_subject:-}")"
+  candidate="$(trim "${runtime_campaign_subject:-}")"
   if [[ -n "$candidate" ]]; then
     if profile_subject_looks_placeholder "$candidate"; then
-      detail="profile_default_gate_subject=placeholder"
+      detail="runtime_campaign_subject=placeholder"
     else
       PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE="$candidate"
-      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE="profile_default_gate_subject"
-      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="profile_default_gate_subject=resolved"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE="${runtime_campaign_subject_source:-runtime_campaign_subject}"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="runtime_campaign_subject=resolved(${runtime_campaign_subject_source:-runtime_campaign_subject})"
       return 0
     fi
   else
-    detail="profile_default_gate_subject=missing"
+    detail="runtime_campaign_subject=missing"
+  fi
+
+  candidate="$(trim "${profile_default_gate_subject:-}")"
+  if [[ -n "$candidate" ]]; then
+    if profile_subject_looks_placeholder "$candidate"; then
+      detail="${detail},profile_default_gate_subject=placeholder"
+    else
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE="$candidate"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE="profile_default_gate_subject"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="${detail},profile_default_gate_subject=resolved"
+      return 0
+    fi
+  else
+    detail="${detail},profile_default_gate_subject=missing"
   fi
 
   candidate="$(trim "${CAMPAIGN_SUBJECT:-}")"
@@ -530,6 +684,76 @@ write_profile_default_gate_subject_precondition_log() {
     fi
     echo "operator_next_action: $next_operator_action"
     echo "operator_next_action: CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT ./scripts/roadmap_next_actions_run.sh --reports-dir $reports_dir --summary-json $summary_json --print-summary-json ${print_summary_json:-1}"
+    echo "operator_next_action: ./scripts/roadmap_next_actions_run.sh --reports-dir $reports_dir --summary-json $summary_json --profile-default-gate-subject REPLACE_WITH_INVITE_SUBJECT --campaign-subject REPLACE_WITH_INVITE_SUBJECT --print-summary-json ${print_summary_json:-1}"
+  } >"$log_path"
+}
+
+build_multi_vm_stability_vm_command_source_operator_command_01() {
+  local -a cmd=("./scripts/roadmap_next_actions_run.sh")
+
+  if [[ -n "${reports_dir:-}" ]]; then
+    cmd+=(--reports-dir "$reports_dir")
+  fi
+  if [[ -n "${summary_json:-}" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  if [[ -n "${roadmap_summary_json:-}" ]]; then
+    cmd+=(--roadmap-summary-json "$roadmap_summary_json")
+  fi
+  if [[ -n "${roadmap_report_md:-}" ]]; then
+    cmd+=(--roadmap-report-md "$roadmap_report_md")
+  fi
+  if [[ -n "${runtime_host_a:-}" ]]; then
+    cmd+=(--host-a "$runtime_host_a")
+  fi
+  if [[ -n "${runtime_host_b:-}" ]]; then
+    cmd+=(--host-b "$runtime_host_b")
+  fi
+  if [[ -n "${runtime_campaign_subject:-}" ]]; then
+    cmd+=(--campaign-subject "$runtime_campaign_subject")
+  fi
+  if [[ "${parallel:-0}" == "1" ]]; then
+    cmd+=(--parallel 1)
+  fi
+  if [[ "${max_actions:-0}" != "0" ]]; then
+    cmd+=(--max-actions "$max_actions")
+  fi
+  if [[ "${action_timeout_sec:-0}" != "0" ]]; then
+    cmd+=(--action-timeout-sec "$action_timeout_sec")
+  fi
+  if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
+    cmd+=(--allow-unsafe-shell-commands 1)
+  fi
+  cmd+=(--include-id "profile_compare_multi_vm_stability")
+  cmd+=(--include-id "profile_compare_multi_vm_stability_promotion")
+  cmd+=(--vm-command-source "REPLACE_WITH_VM_COMMAND_SOURCE")
+  cmd+=(--print-summary-json "${print_summary_json:-1}")
+  render_command_line_from_argv "${cmd[@]}"
+}
+
+write_multi_vm_stability_vm_command_source_precondition_log_01() {
+  local log_path="${1:-}"
+  local command_redacted="${2:-}"
+  local notes="${3:-}"
+  local next_operator_action="${4:-}"
+
+  if [[ -z "$log_path" ]]; then
+    return
+  fi
+  if [[ -z "$next_operator_action" ]]; then
+    next_operator_action="$(build_multi_vm_stability_vm_command_source_operator_command_01)"
+  fi
+  {
+    echo "failure_kind=missing_vm_command_source_precondition"
+    echo "multi-vm stability vm command source precondition failed before execution"
+    if [[ -n "$notes" ]]; then
+      echo "$notes"
+    fi
+    if [[ -n "$command_redacted" ]]; then
+      echo "command=$command_redacted"
+    fi
+    echo "operator_next_action: $next_operator_action"
+    echo "operator_next_action: VM_COMMAND_SOURCE=/absolute/path/to/vm_command.txt ./scripts/roadmap_next_actions_run.sh --reports-dir $reports_dir --summary-json $summary_json --include-id profile_compare_multi_vm_stability --vm-command-source /absolute/path/to/vm_command.txt --print-summary-json ${print_summary_json:-1}"
   } >"$log_path"
 }
 
@@ -611,6 +835,127 @@ profile_default_gate_extract_arg_value_from_cmd() {
     fi
     idx=$((idx + 1))
   done
+  printf '%s' ""
+}
+
+command_extract_first_flag_value_01() {
+  local cmd="${1:-}"
+  local token=""
+  local key=""
+  local idx=0
+  local token_count=0
+  local flag=""
+  shift || true
+  if [[ -z "$cmd" || $# -eq 0 ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' ""
+    return
+  fi
+  token_count="${#COMMAND_STRING_ARGV[@]}"
+  while (( idx < token_count )); do
+    token="${COMMAND_STRING_ARGV[$idx]}"
+    for flag in "$@"; do
+      if [[ "$token" == "$flag" ]]; then
+        if (( idx + 1 < token_count )); then
+          printf '%s' "${COMMAND_STRING_ARGV[$((idx + 1))]}"
+        else
+          printf '%s' ""
+        fi
+        return
+      fi
+      if [[ "$token" == "$flag="* ]]; then
+        printf '%s' "${token#"$flag="}"
+        return
+      fi
+    done
+    if [[ "$token" == --*=* ]]; then
+      key="${token%%=*}"
+      for flag in "$@"; do
+        if [[ "$key" == "$flag" ]]; then
+          printf '%s' "${token#*=}"
+          return
+        fi
+      done
+    fi
+    idx=$((idx + 1))
+  done
+  printf '%s' ""
+}
+
+extract_host_a_value_from_command_01() {
+  local cmd value
+  cmd="${1:-}"
+  value="$(command_extract_first_flag_value_01 "$cmd" \
+    --host-a --directory-a --host --host-a-url --directory-a-url \
+    --bootstrap-directory --issuer-url --entry-url --exit-url)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! host_a_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_host_b_value_from_command_01() {
+  local cmd value
+  cmd="${1:-}"
+  value="$(command_extract_first_flag_value_01 "$cmd" --host-b --directory-b --host-b-url --directory-b-url)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! host_b_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_campaign_subject_value_from_command_01() {
+  local cmd value
+  cmd="${1:-}"
+  value="$(command_extract_first_flag_value_01 "$cmd" --campaign-subject --subject --key --invite-key)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! profile_subject_looks_placeholder "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_vm_command_source_value_from_command_01() {
+  local cmd value
+  cmd="${1:-}"
+  value="$(command_extract_first_flag_value_01 "$cmd" --vm-command-source --vm-command-file)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! vm_command_source_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_first_runtime_value_from_selected_actions_01() {
+  local selected_actions_json="${1:-[]}"
+  local extractor_fn="${2:-}"
+  local action_json=""
+  local action_command=""
+  local value=""
+  if [[ -z "$extractor_fn" ]]; then
+    printf '%s' ""
+    return
+  fi
+  while IFS= read -r action_json; do
+    [[ -n "$action_json" ]] || continue
+    action_command="$(printf '%s\n' "$action_json" | jq -r '.command // "" | tostring')"
+    [[ -n "$action_command" ]] || continue
+    value="$("$extractor_fn" "$action_command")"
+    value="$(trim "$value")"
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return
+    fi
+  done < <(printf '%s\n' "$selected_actions_json" | jq -c '.[]')
   printf '%s' ""
 }
 
@@ -853,6 +1198,175 @@ profile_default_gate_command_apply_env_host_placeholders() {
     idx=$((idx + 1))
   done
 
+  profile_default_gate_command_from_argv "${out_argv[@]}"
+}
+
+profile_default_gate_command_apply_subject_override_01() {
+  local cmd subject_value
+  local token=""
+  local key=""
+  local value=""
+  local idx=0
+  local token_count=0
+  local has_subject_arg="0"
+  local has_anon_arg="0"
+  local -a in_argv=()
+  local -a out_argv=()
+
+  cmd="$(trim "${1:-}")"
+  subject_value="$(trim "${2:-}")"
+  if [[ -z "$cmd" || -z "$subject_value" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' "$cmd"
+    return
+  fi
+
+  in_argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#in_argv[@]}"
+  while (( idx < token_count )); do
+    token="${in_argv[$idx]}"
+    if is_profile_subject_flag "$token"; then
+      has_subject_arg="1"
+      out_argv+=("$token")
+      if (( idx + 1 < token_count )); then
+        out_argv+=("$subject_value")
+        idx=$((idx + 2))
+      else
+        idx=$((idx + 1))
+      fi
+      continue
+    fi
+    case "$token" in
+      --campaign-anon-cred|--anon-cred)
+        has_anon_arg="1"
+        out_argv+=("$token")
+        if (( idx + 1 < token_count )); then
+          out_argv+=("${in_argv[$((idx + 1))]}")
+          idx=$((idx + 2))
+        else
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --*=*)
+        key="${token%%=*}"
+        value="${token#*=}"
+        if is_profile_subject_flag "$key"; then
+          has_subject_arg="1"
+          out_argv+=("${key}=${subject_value}")
+          idx=$((idx + 1))
+          continue
+        fi
+        if [[ "$key" == "--campaign-anon-cred" || "$key" == "--anon-cred" ]]; then
+          has_anon_arg="1"
+          out_argv+=("$token")
+          idx=$((idx + 1))
+          continue
+        fi
+        ;;
+    esac
+    out_argv+=("$token")
+    idx=$((idx + 1))
+  done
+  if [[ "$has_subject_arg" != "1" && "$has_anon_arg" != "1" ]]; then
+    out_argv+=("--campaign-subject" "$subject_value")
+  fi
+  profile_default_gate_command_from_argv "${out_argv[@]}"
+}
+
+multi_vm_stability_command_apply_vm_command_source_override_01() {
+  local cmd vm_command_source
+  local token=""
+  local key=""
+  local idx=0
+  local token_count=0
+  local has_vm_command_file="0"
+  local has_vm_command="0"
+  local -a in_argv=()
+  local -a out_argv=()
+
+  cmd="$(trim "${1:-}")"
+  vm_command_source="$(trim "${2:-}")"
+  if [[ -z "$cmd" || -z "$vm_command_source" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    cmd="${cmd//VM_COMMAND_SOURCE/$vm_command_source}"
+    cmd="${cmd//VM_COMMAND_FILE/$vm_command_source}"
+    printf '%s' "$cmd"
+    return
+  fi
+
+  in_argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#in_argv[@]}"
+  while (( idx < token_count )); do
+    token="${in_argv[$idx]}"
+    case "$token" in
+      --vm-command-file)
+        has_vm_command_file="1"
+        out_argv+=("--vm-command-file")
+        if (( idx + 1 < token_count )); then
+          out_argv+=("$vm_command_source")
+          idx=$((idx + 2))
+        else
+          out_argv+=("$vm_command_source")
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --vm-command-file=*)
+        has_vm_command_file="1"
+        out_argv+=("--vm-command-file=$vm_command_source")
+        idx=$((idx + 1))
+        continue
+        ;;
+      --vm-command)
+        has_vm_command="1"
+        out_argv+=("$token")
+        if (( idx + 1 < token_count )); then
+          out_argv+=("${in_argv[$((idx + 1))]}")
+          idx=$((idx + 2))
+        else
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --vm-command=*)
+        has_vm_command="1"
+        out_argv+=("$token")
+        idx=$((idx + 1))
+        continue
+        ;;
+      --*=*)
+        key="${token%%=*}"
+        if [[ "$key" == "--vm-command-file" ]]; then
+          has_vm_command_file="1"
+          out_argv+=("--vm-command-file=$vm_command_source")
+          idx=$((idx + 1))
+          continue
+        fi
+        if [[ "$key" == "--vm-command" ]]; then
+          has_vm_command="1"
+          out_argv+=("$token")
+          idx=$((idx + 1))
+          continue
+        fi
+        ;;
+    esac
+
+    token="${token//VM_COMMAND_SOURCE/$vm_command_source}"
+    token="${token//VM_COMMAND_FILE/$vm_command_source}"
+    out_argv+=("$token")
+    idx=$((idx + 1))
+  done
+
+  if [[ "$has_vm_command_file" != "1" && "$has_vm_command" != "1" ]]; then
+    out_argv+=("--vm-command-file" "$vm_command_source")
+  fi
   profile_default_gate_command_from_argv "${out_argv[@]}"
 }
 
@@ -1182,11 +1696,17 @@ reports_dir="${ROADMAP_NEXT_ACTIONS_RUN_REPORTS_DIR:-}"
 summary_json="${ROADMAP_NEXT_ACTIONS_RUN_SUMMARY_JSON:-}"
 roadmap_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SUMMARY_JSON:-}"
 roadmap_report_md="${ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_REPORT_MD:-}"
+host_a_override_env="${ROADMAP_NEXT_ACTIONS_RUN_HOST_A:-}"
+host_b_override_env="${ROADMAP_NEXT_ACTIONS_RUN_HOST_B:-}"
+campaign_subject_override_env="${ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT:-}"
+vm_command_source_override_env="${ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE:-${VM_COMMAND_SOURCE:-}}"
 refresh_manual_validation="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_NEXT_ACTIONS_RUN_PARALLEL:-0}"
 max_actions="${ROADMAP_NEXT_ACTIONS_RUN_MAX_ACTIONS:-0}"
-profile_default_gate_subject="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT:-}"
+profile_default_gate_subject_env="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT:-}"
+profile_default_gate_subject="$profile_default_gate_subject_env"
+profile_default_gate_subject_arg_provided="0"
 allow_profile_default_gate_unreachable="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE:-0}"
 include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
@@ -1198,6 +1718,14 @@ print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
 profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-2400}"
+host_a_override_arg=""
+host_b_override_arg=""
+campaign_subject_override_arg=""
+vm_command_source_override_arg=""
+host_a_override_arg_provided="0"
+host_b_override_arg_provided="0"
+campaign_subject_override_arg_provided="0"
+vm_command_source_override_arg_provided="0"
 declare -a include_ids=()
 declare -a exclude_ids=()
 declare -a include_id_suffixes=()
@@ -1227,6 +1755,30 @@ while [[ $# -gt 0 ]]; do
     --roadmap-report-md)
       require_value_or_die "$1" "${2:-}"
       roadmap_report_md="${2:-}"
+      shift 2
+      ;;
+    --host-a)
+      require_value_or_die "$1" "${2:-}"
+      host_a_override_arg="${2:-}"
+      host_a_override_arg_provided="1"
+      shift 2
+      ;;
+    --host-b)
+      require_value_or_die "$1" "${2:-}"
+      host_b_override_arg="${2:-}"
+      host_b_override_arg_provided="1"
+      shift 2
+      ;;
+    --campaign-subject)
+      require_value_or_die "$1" "${2:-}"
+      campaign_subject_override_arg="${2:-}"
+      campaign_subject_override_arg_provided="1"
+      shift 2
+      ;;
+    --vm-command-source)
+      require_value_or_die "$1" "${2:-}"
+      vm_command_source_override_arg="${2:-}"
+      vm_command_source_override_arg_provided="1"
       shift 2
       ;;
     --action-timeout-sec)
@@ -1278,6 +1830,7 @@ while [[ $# -gt 0 ]]; do
     --profile-default-gate-subject)
       require_value_or_die "$1" "${2:-}"
       profile_default_gate_subject="${2:-}"
+      profile_default_gate_subject_arg_provided="1"
       shift 2
       ;;
     --allow-profile-default-gate-unreachable)
@@ -1372,6 +1925,116 @@ int_arg_or_die "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SE
 if (( profile_default_gate_default_timeout_sec < 1 )); then
   echo "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC must be >= 1"
   exit 2
+fi
+
+runtime_host_a=""
+runtime_host_a_source="summary_command"
+runtime_host_a_configured="0"
+runtime_host_b=""
+runtime_host_b_source="summary_command"
+runtime_host_b_configured="0"
+runtime_campaign_subject=""
+runtime_campaign_subject_source="summary_command"
+runtime_campaign_subject_configured="0"
+runtime_vm_command_source=""
+runtime_vm_command_source_source="summary_command"
+runtime_vm_command_source_configured="0"
+
+runtime_value_candidate="$(trim "$host_a_override_arg")"
+if [[ "$host_a_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! host_a_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_host_a="$runtime_value_candidate"
+    runtime_host_a_source="cli:--host-a"
+    runtime_host_a_configured="1"
+  else
+    runtime_host_a_source="cli:--host-a=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$host_a_override_env")" ]] && ! host_a_value_looks_placeholder_01 "$host_a_override_env"; then
+  runtime_host_a="$(trim "$host_a_override_env")"
+  runtime_host_a_source="env:ROADMAP_NEXT_ACTIONS_RUN_HOST_A"
+  runtime_host_a_configured="1"
+elif [[ -n "$(trim "${A_HOST:-}")" ]] && ! host_a_value_looks_placeholder_01 "${A_HOST:-}"; then
+  runtime_host_a="$(trim "${A_HOST:-}")"
+  runtime_host_a_source="env:A_HOST"
+  runtime_host_a_configured="1"
+elif [[ -n "$(trim "${HOST_A:-}")" ]] && ! host_a_value_looks_placeholder_01 "${HOST_A:-}"; then
+  runtime_host_a="$(trim "${HOST_A:-}")"
+  runtime_host_a_source="env:HOST_A"
+  runtime_host_a_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$host_b_override_arg")"
+if [[ "$host_b_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! host_b_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_host_b="$runtime_value_candidate"
+    runtime_host_b_source="cli:--host-b"
+    runtime_host_b_configured="1"
+  else
+    runtime_host_b_source="cli:--host-b=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$host_b_override_env")" ]] && ! host_b_value_looks_placeholder_01 "$host_b_override_env"; then
+  runtime_host_b="$(trim "$host_b_override_env")"
+  runtime_host_b_source="env:ROADMAP_NEXT_ACTIONS_RUN_HOST_B"
+  runtime_host_b_configured="1"
+elif [[ -n "$(trim "${B_HOST:-}")" ]] && ! host_b_value_looks_placeholder_01 "${B_HOST:-}"; then
+  runtime_host_b="$(trim "${B_HOST:-}")"
+  runtime_host_b_source="env:B_HOST"
+  runtime_host_b_configured="1"
+elif [[ -n "$(trim "${HOST_B:-}")" ]] && ! host_b_value_looks_placeholder_01 "${HOST_B:-}"; then
+  runtime_host_b="$(trim "${HOST_B:-}")"
+  runtime_host_b_source="env:HOST_B"
+  runtime_host_b_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$campaign_subject_override_arg")"
+if [[ "$campaign_subject_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! profile_subject_looks_placeholder "$runtime_value_candidate"; then
+    runtime_campaign_subject="$runtime_value_candidate"
+    runtime_campaign_subject_source="cli:--campaign-subject"
+    runtime_campaign_subject_configured="1"
+  else
+    runtime_campaign_subject_source="cli:--campaign-subject=placeholder_or_empty"
+  fi
+elif [[ "$profile_default_gate_subject_arg_provided" == "1" ]]; then
+  runtime_value_candidate="$(trim "$profile_default_gate_subject")"
+  if [[ -n "$runtime_value_candidate" ]] && ! profile_subject_looks_placeholder "$runtime_value_candidate"; then
+    runtime_campaign_subject="$runtime_value_candidate"
+    runtime_campaign_subject_source="cli:--profile-default-gate-subject"
+    runtime_campaign_subject_configured="1"
+  else
+    runtime_campaign_subject_source="cli:--profile-default-gate-subject=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$profile_default_gate_subject_env")" ]] && ! profile_subject_looks_placeholder "$profile_default_gate_subject_env"; then
+  runtime_campaign_subject="$(trim "$profile_default_gate_subject_env")"
+  runtime_campaign_subject_source="env:ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT"
+  runtime_campaign_subject_configured="1"
+elif [[ -n "$(trim "$campaign_subject_override_env")" ]] && ! profile_subject_looks_placeholder "$campaign_subject_override_env"; then
+  runtime_campaign_subject="$(trim "$campaign_subject_override_env")"
+  runtime_campaign_subject_source="env:ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT"
+  runtime_campaign_subject_configured="1"
+elif [[ -n "$(trim "${CAMPAIGN_SUBJECT:-}")" ]] && ! profile_subject_looks_placeholder "${CAMPAIGN_SUBJECT:-}"; then
+  runtime_campaign_subject="$(trim "${CAMPAIGN_SUBJECT:-}")"
+  runtime_campaign_subject_source="env:CAMPAIGN_SUBJECT"
+  runtime_campaign_subject_configured="1"
+elif [[ -n "$(trim "${INVITE_KEY:-}")" ]] && ! profile_subject_looks_placeholder "${INVITE_KEY:-}"; then
+  runtime_campaign_subject="$(trim "${INVITE_KEY:-}")"
+  runtime_campaign_subject_source="env:INVITE_KEY"
+  runtime_campaign_subject_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$vm_command_source_override_arg")"
+if [[ "$vm_command_source_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! vm_command_source_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_vm_command_source="$runtime_value_candidate"
+    runtime_vm_command_source_source="cli:--vm-command-source"
+    runtime_vm_command_source_configured="1"
+  else
+    runtime_vm_command_source_source="cli:--vm-command-source=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$vm_command_source_override_env")" ]] && ! vm_command_source_value_looks_placeholder_01 "$vm_command_source_override_env"; then
+  runtime_vm_command_source="$(trim "$vm_command_source_override_env")"
+  runtime_vm_command_source_source="env:ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE"
+  runtime_vm_command_source_configured="1"
 fi
 
 if (( action_timeout_sec > 0 )); then
@@ -1588,6 +2251,39 @@ if (( max_actions > 0 )); then
 fi
 after_max_actions_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 
+if [[ "$runtime_host_a_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$selected_actions_json" extract_host_a_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_host_a="$runtime_value_candidate"
+    runtime_host_a_source="summary_command:extracted_host_a"
+    runtime_host_a_configured="1"
+  fi
+fi
+if [[ "$runtime_host_b_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$selected_actions_json" extract_host_b_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_host_b="$runtime_value_candidate"
+    runtime_host_b_source="summary_command:extracted_host_b"
+    runtime_host_b_configured="1"
+  fi
+fi
+if [[ "$runtime_campaign_subject_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$selected_actions_json" extract_campaign_subject_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_campaign_subject="$runtime_value_candidate"
+    runtime_campaign_subject_source="summary_command:extracted_campaign_subject"
+    runtime_campaign_subject_configured="1"
+  fi
+fi
+if [[ "$runtime_vm_command_source_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$selected_actions_json" extract_vm_command_source_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_vm_command_source="$runtime_value_candidate"
+    runtime_vm_command_source_source="summary_command:extracted_vm_command_source"
+    runtime_vm_command_source_configured="1"
+  fi
+fi
+
 selected_has_profile_default_gate="$(printf '%s\n' "$selected_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_default_gate")')"
 if [[ "$selected_has_profile_default_gate" == "true" && "$action_timeout_sec" == "0" ]]; then
   need_cmd timeout
@@ -1656,17 +2352,41 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     action_command="$(
       profile_default_gate_command_apply_env_host_placeholders \
         "$action_command" \
-        "${A_HOST:-}" \
-        "${B_HOST:-}"
+        "$runtime_host_a" \
+        "$runtime_host_b"
     )"
   fi
   if [[ "$action_id" == "profile_default_gate" ]]; then
     action_command="$(
       profile_default_gate_command_localhost_run_to_live_wrapper \
         "$action_command" \
-        "${A_HOST:-}" \
-        "${B_HOST:-}"
+        "$runtime_host_a" \
+        "$runtime_host_b"
     )"
+  fi
+  if action_id_is_profile_default_family "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && [[ "$runtime_campaign_subject_configured" == "1" ]]; then
+    action_command="$(
+      profile_default_gate_command_apply_subject_override_01 \
+        "$action_command" \
+        "$runtime_campaign_subject"
+    )"
+  fi
+  if action_id_is_multi_vm_stability_action_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && [[ "$runtime_vm_command_source_configured" == "1" ]]; then
+    action_command="$(
+      multi_vm_stability_command_apply_vm_command_source_override_01 \
+        "$action_command" \
+        "$runtime_vm_command_source"
+    )"
+  fi
+  if action_id_is_multi_vm_stability_action_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && command_has_vm_command_source_placeholder_01 "$action_command"; then
+    action_preflight_failure_kind="missing_vm_command_source_precondition"
+    action_preflight_notes="multi-vm stability vm command source placeholder token unresolved"
   fi
   if action_id_is_profile_default_family "$action_id" && [[ -n "$action_command" ]]; then
     if command_has_profile_subject_placeholder_invite_key "$action_command"; then
@@ -1686,20 +2406,6 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         action_profile_subject_resolve_detail="${PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL:-}"
       fi
     fi
-
-    if [[ -z "$action_preflight_failure_kind" \
-       && -n "$profile_default_gate_subject" \
-       && "$action_has_subject_placeholder" != "1" ]] \
-       && ! command_has_profile_subject_or_anon_arg "$action_command"; then
-      if resolve_profile_default_gate_subject_value; then
-        action_resolved_subject_value="$PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE"
-        action_command="$action_command --campaign-subject $(printf '%q' "$action_resolved_subject_value")"
-      else
-        action_preflight_failure_kind="missing_invite_subject_precondition"
-        action_preflight_notes="profile_default_gate subject override unresolved"
-        action_profile_subject_resolve_detail="${PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL:-}"
-      fi
-    fi
   fi
   action_id_safe="$(sanitize_id "$action_id")"
   action_log="$reports_dir/action_$((idx + 1))_${action_id_safe}.log"
@@ -1716,13 +2422,22 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_result_files[$idx]="$action_result_file"
 
   if [[ -n "$action_preflight_failure_kind" ]]; then
-    action_preflight_next_operator_action="$(build_profile_default_gate_subject_operator_command)"
-    write_profile_default_gate_subject_precondition_log \
-      "$action_log" \
-      "$action_command_redacted" \
-      "$action_preflight_notes" \
-      "$action_profile_subject_resolve_detail" \
-      "$action_preflight_next_operator_action"
+    if [[ "$action_preflight_failure_kind" == "missing_vm_command_source_precondition" ]]; then
+      action_preflight_next_operator_action="$(build_multi_vm_stability_vm_command_source_operator_command_01)"
+      write_multi_vm_stability_vm_command_source_precondition_log_01 \
+        "$action_log" \
+        "$action_command_redacted" \
+        "$action_preflight_notes" \
+        "$action_preflight_next_operator_action"
+    else
+      action_preflight_next_operator_action="$(build_profile_default_gate_subject_operator_command)"
+      write_profile_default_gate_subject_precondition_log \
+        "$action_log" \
+        "$action_command_redacted" \
+        "$action_preflight_notes" \
+        "$action_profile_subject_resolve_detail" \
+        "$action_preflight_next_operator_action"
+    fi
     jq -cn \
       --arg id "$action_id" \
       --arg label "$action_label" \
@@ -2074,11 +2789,12 @@ for arg in "$@"; do
   summary_command_input="${summary_command_input} $(render_log_token "$arg")"
 done
 summary_command_redacted="$(redact_command_secrets "$summary_command_input")"
-profile_default_gate_subject_configured=0
+profile_default_gate_subject_configured="$runtime_campaign_subject_configured"
 profile_default_gate_subject_redacted=""
-if [[ -n "$profile_default_gate_subject" ]]; then
-  profile_default_gate_subject_configured=1
+runtime_campaign_subject_redacted=""
+if [[ "$profile_default_gate_subject_configured" == "1" ]]; then
   profile_default_gate_subject_redacted="[redacted]"
+  runtime_campaign_subject_redacted="[redacted]"
 fi
 
 jq -n \
@@ -2115,6 +2831,18 @@ jq -n \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
   --argjson parallel "$parallel" \
   --argjson max_actions "$max_actions" \
+  --arg runtime_host_a "$runtime_host_a" \
+  --arg runtime_host_a_source "$runtime_host_a_source" \
+  --argjson runtime_host_a_configured "$runtime_host_a_configured" \
+  --arg runtime_host_b "$runtime_host_b" \
+  --arg runtime_host_b_source "$runtime_host_b_source" \
+  --argjson runtime_host_b_configured "$runtime_host_b_configured" \
+  --arg runtime_campaign_subject_redacted "$runtime_campaign_subject_redacted" \
+  --arg runtime_campaign_subject_source "$runtime_campaign_subject_source" \
+  --argjson runtime_campaign_subject_configured "$runtime_campaign_subject_configured" \
+  --arg runtime_vm_command_source "$runtime_vm_command_source" \
+  --arg runtime_vm_command_source_source "$runtime_vm_command_source_source" \
+  --argjson runtime_vm_command_source_configured "$runtime_vm_command_source_configured" \
   --arg profile_default_gate_subject_redacted "$profile_default_gate_subject_redacted" \
   --argjson profile_default_gate_subject_configured "$profile_default_gate_subject_configured" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
@@ -2143,6 +2871,17 @@ jq -n \
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1),
+      runtime_input_precedence: "cli > env > summary_command",
+      host_a: (if $runtime_host_a_configured == 1 then $runtime_host_a else null end),
+      host_a_source: (if $runtime_host_a_source == "" then null else $runtime_host_a_source end),
+      host_b: (if $runtime_host_b_configured == 1 then $runtime_host_b else null end),
+      host_b_source: (if $runtime_host_b_source == "" then null else $runtime_host_b_source end),
+      campaign_subject: (if $runtime_campaign_subject_configured == 1 then $runtime_campaign_subject_redacted else null end),
+      campaign_subject_configured: ($runtime_campaign_subject_configured == 1),
+      campaign_subject_source: (if $runtime_campaign_subject_source == "" then null else $runtime_campaign_subject_source end),
+      vm_command_source: (if $runtime_vm_command_source_configured == 1 then $runtime_vm_command_source else null end),
+      vm_command_source_configured: ($runtime_vm_command_source_configured == 1),
+      vm_command_source_source: (if $runtime_vm_command_source_source == "" then null else $runtime_vm_command_source_source end),
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
       profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),

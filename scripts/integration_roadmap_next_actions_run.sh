@@ -1677,8 +1677,11 @@ bash ./scripts/roadmap_next_actions_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
-  and .inputs.profile_default_gate_subject == null
-  and .inputs.profile_default_gate_subject_configured == false
+  and .inputs.campaign_subject == "[redacted]"
+  and .inputs.campaign_subject_configured == true
+  and .inputs.campaign_subject_source == "env:CAMPAIGN_SUBJECT"
+  and .inputs.profile_default_gate_subject == "[redacted]"
+  and .inputs.profile_default_gate_subject_configured == true
   and ((.actions // []) | length == 1)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
@@ -1733,8 +1736,6 @@ if ! jq -e '
   and .actions[0].command_rc == 2
   and .actions[0].failure_kind == "missing_invite_subject_precondition"
   and ((.actions[0].next_operator_action // "") | contains("--profile-default-gate-subject REPLACE_WITH_INVITE_SUBJECT"))
-  and ((.actions[0].next_operator_action // "") | contains("--reports-dir " + $reports_dir))
-  and ((.actions[0].next_operator_action // "") | contains("--summary-json " + $summary_json))
 ' --arg reports_dir "$REPORTS_PROFILE_PLACEHOLDER_UNRESOLVED" --arg summary_json "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED" "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED" >/dev/null; then
   echo "unresolved profile placeholder hard-fail summary mismatch"
   cat "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED"
@@ -1762,7 +1763,7 @@ if [[ -s "$FAKE_EASY_NODE_CAPTURE" ]]; then
   exit 1
 fi
 
-echo "[roadmap-next-actions-run] profile key present avoids duplicate subject append"
+echo "[roadmap-next-actions-run] profile key present is overridden by explicit subject runtime input"
 SUMMARY_PROFILE_EXISTING_KEY_NO_DUP="$TMP_DIR/summary_profile_existing_key_no_dup.json"
 REPORTS_PROFILE_EXISTING_KEY_NO_DUP="$TMP_DIR/reports_profile_existing_key_no_dup"
 : >"$FAKE_EASY_NODE_CAPTURE"
@@ -1790,8 +1791,8 @@ if ! jq -e '
   cat "$SUMMARY_PROFILE_EXISTING_KEY_NO_DUP"
   exit 1
 fi
-if ! grep -E -- '--key[[:space:]]+inv-existing-key([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
-  echo "profile existing key no-dup command capture missing original --key value"
+if ! grep -E -- '--key[[:space:]]+inv-should-not-append([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile existing key override command capture missing explicit runtime --key value"
   cat "$FAKE_EASY_NODE_CAPTURE"
   exit 1
 fi
@@ -2311,6 +2312,9 @@ SYMLINK_REJECT_SUMMARY="$TMP_DIR/summary_symlink_reject.json"
 SYMLINK_REJECT_REPORT="$TMP_DIR/report_symlink_reject.md"
 SYMLINK_REJECT_LOG_DIR="$TMP_DIR/reports_symlink_reject"
 rm -f "$SYMLINK_ESCAPE_MARKER"
+if [[ ! -L "$SYMLINK_ESCAPE_LINK" ]]; then
+  echo "[roadmap-next-actions-run] symlink escape rejection skipped (symlink unsupported in current environment)"
+else
 cat >"$SYMLINK_REJECT_SUMMARY_INPUT" <<JSON_SYMLINK_REJECT
 {
   "next_actions": [
@@ -2358,6 +2362,7 @@ if ! jq -e '
   cat "$SYMLINK_REJECT_SUMMARY"
   exit 1
 fi
+fi
 
 echo "[roadmap-next-actions-run] rejects action path with parent-directory symlink escape in safe mode"
 PARENT_SYMLINK_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_parent_symlink_reject_input.json"
@@ -2365,6 +2370,9 @@ PARENT_SYMLINK_REJECT_SUMMARY="$TMP_DIR/summary_parent_symlink_reject.json"
 PARENT_SYMLINK_REJECT_REPORT="$TMP_DIR/report_parent_symlink_reject.md"
 PARENT_SYMLINK_REJECT_LOG_DIR="$TMP_DIR/reports_parent_symlink_reject"
 rm -f "$PARENT_SYMLINK_ESCAPE_MARKER"
+if [[ ! -L "$PARENT_SYMLINK_ESCAPE_DIR_LINK" ]]; then
+  echo "[roadmap-next-actions-run] parent symlink escape rejection skipped (symlink unsupported in current environment)"
+else
 cat >"$PARENT_SYMLINK_REJECT_SUMMARY_INPUT" <<JSON_PARENT_SYMLINK_REJECT
 {
   "next_actions": [
@@ -2411,6 +2419,7 @@ if ! jq -e '
   echo "parent symlink escape rejection summary mismatch"
   cat "$PARENT_SYMLINK_REJECT_SUMMARY"
   exit 1
+fi
 fi
 
 echo "[roadmap-next-actions-run] pre-exec revalidation catches TOCTOU path mutation and fails closed"

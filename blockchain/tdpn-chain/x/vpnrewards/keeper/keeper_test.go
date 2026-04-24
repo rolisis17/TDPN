@@ -533,6 +533,50 @@ func TestKeeperRecordDistributionValidation(t *testing.T) {
 	}
 }
 
+func TestKeeperRecordDistributionRejectsMissingPayoutRefWithoutAdvancingAccrual(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	accrual, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "acc-missing-payout-ref",
+		SessionID:      "sess-missing-payout-ref",
+		ProviderID:     "provider-missing-payout-ref",
+		Amount:         20,
+		OperationState: chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	_, err = k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-missing-payout-ref",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      " \t ",
+	})
+	if err == nil {
+		t.Fatal("expected missing payout ref validation error")
+	}
+	if !strings.Contains(err.Error(), "payout ref is required") {
+		t.Fatalf("expected payout ref validation error, got %v", err)
+	}
+
+	if _, ok := k.GetDistribution("dist-missing-payout-ref"); ok {
+		t.Fatal("expected rejected distribution to not be persisted")
+	}
+
+	accrualAfter, ok := k.GetAccrual(accrual.AccrualID)
+	if !ok {
+		t.Fatalf("expected accrual %q to remain available", accrual.AccrualID)
+	}
+	if accrualAfter.OperationState != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected accrual state %q to remain unchanged after payout-ref rejection, got %q",
+			chaintypes.ReconciliationPending,
+			accrualAfter.OperationState,
+		)
+	}
+}
+
 func TestKeeperRecordDistributionMissingAccrual(t *testing.T) {
 	t.Parallel()
 

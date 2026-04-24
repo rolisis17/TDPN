@@ -12,6 +12,10 @@ Usage:
     [--summary-json PATH] \
     [--roadmap-summary-json PATH] \
     [--roadmap-report-md PATH] \
+    [--host-a HOST] \
+    [--host-b HOST] \
+    [--campaign-subject ID] \
+    [--vm-command-source PATH] \
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
     [--refresh-manual-validation [0|1]] \
@@ -35,6 +39,10 @@ Purpose:
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
   --allow-unsafe-shell-commands 0
+  --host-a ""   (precedence: CLI --host-a > ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_HOST_A > A_HOST > HOST_A > summary command values)
+  --host-b ""   (precedence: CLI --host-b > ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_HOST_B > B_HOST > HOST_B > summary command values)
+  --campaign-subject ""   (precedence: CLI --campaign-subject > ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > summary command values)
+  --vm-command-source ""   (precedence: CLI --vm-command-source > ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_VM_COMMAND_SOURCE > VM_COMMAND_SOURCE > summary command values)
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
   --scope auto
@@ -137,6 +145,23 @@ subject_value_looks_placeholder_01() {
   return 1
 }
 
+vm_command_source_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in VM_COMMAND_SOURCE VM_COMMAND_FILE VM_COMMAND; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$value" in
+    "<VM-COMMAND>"|"<SET-VM-COMMAND-SOURCE>"|REPLACE_WITH_VM_COMMAND_SOURCE|REPLACE_WITH_VM_COMMAND_FILE)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 command_contains_placeholder_token_01() {
   local command_text token normalized
   command_text="${1:-}"
@@ -156,6 +181,218 @@ command_contains_placeholder_token_01() {
     return 0
   fi
   return 1
+}
+
+COMMAND_STRING_ARGV=()
+command_string_to_argv_01() {
+  local command_text="${1:-}"
+  local length=0
+  local idx=0
+  local ch=""
+  local token=""
+  local quote_mode=""
+  local escaped="0"
+  local token_started="0"
+  COMMAND_STRING_ARGV=()
+  length="${#command_text}"
+
+  while (( idx < length )); do
+    ch="${command_text:idx:1}"
+    if [[ "$quote_mode" == "single" ]]; then
+      if [[ "$ch" == "'" ]]; then
+        quote_mode=""
+      else
+        token+="$ch"
+      fi
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+    if [[ "$quote_mode" == "double" ]]; then
+      if [[ "$escaped" == "1" ]]; then
+        token+="$ch"
+        escaped="0"
+        token_started="1"
+        idx=$((idx + 1))
+        continue
+      fi
+      case "$ch" in
+        "\\")
+          escaped="1"
+          ;;
+        "\"")
+          quote_mode=""
+          ;;
+        *)
+          token+="$ch"
+          token_started="1"
+          ;;
+      esac
+      idx=$((idx + 1))
+      continue
+    fi
+    if [[ "$escaped" == "1" ]]; then
+      token+="$ch"
+      escaped="0"
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+    case "$ch" in
+      [[:space:]])
+        if [[ "$token_started" == "1" ]]; then
+          COMMAND_STRING_ARGV+=("$token")
+          token=""
+          token_started="0"
+        fi
+        ;;
+      "\\")
+        escaped="1"
+        token_started="1"
+        ;;
+      "'")
+        quote_mode="single"
+        token_started="1"
+        ;;
+      "\"")
+        quote_mode="double"
+        token_started="1"
+        ;;
+      *)
+        token+="$ch"
+        token_started="1"
+        ;;
+    esac
+    idx=$((idx + 1))
+  done
+
+  if [[ "$escaped" == "1" || -n "$quote_mode" ]]; then
+    COMMAND_STRING_ARGV=()
+    return 1
+  fi
+  if [[ "$token_started" == "1" ]]; then
+    COMMAND_STRING_ARGV+=("$token")
+  fi
+  [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
+}
+
+command_extract_first_flag_value_01() {
+  local command_text="${1:-}"
+  local token=""
+  local key=""
+  local idx=0
+  local token_count=0
+  local flag=""
+  local -a argv=()
+  shift || true
+  if [[ -z "$command_text" || $# -eq 0 ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! command_string_to_argv_01 "$command_text"; then
+    printf '%s' ""
+    return
+  fi
+  argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#argv[@]}"
+  while (( idx < token_count )); do
+    token="${argv[$idx]}"
+    for flag in "$@"; do
+      if [[ "$token" == "$flag" ]]; then
+        if (( idx + 1 < token_count )); then
+          printf '%s' "${argv[$((idx + 1))]}"
+        else
+          printf '%s' ""
+        fi
+        return
+      fi
+      if [[ "$token" == "$flag="* ]]; then
+        printf '%s' "${token#"$flag="}"
+        return
+      fi
+    done
+    if [[ "$token" == --*=* ]]; then
+      key="${token%%=*}"
+      for flag in "$@"; do
+        if [[ "$key" == "$flag" ]]; then
+          printf '%s' "${token#*=}"
+          return
+        fi
+      done
+    fi
+    idx=$((idx + 1))
+  done
+  printf '%s' ""
+}
+
+extract_host_a_value_from_command_01() {
+  local value
+  value="$(command_extract_first_flag_value_01 "${1:-}" \
+    --host-a --directory-a --host --host-a-url --directory-a-url \
+    --bootstrap-directory --issuer-url --entry-url --exit-url)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! host_a_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_host_b_value_from_command_01() {
+  local value
+  value="$(command_extract_first_flag_value_01 "${1:-}" --host-b --directory-b --host-b-url --directory-b-url)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! host_b_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_campaign_subject_value_from_command_01() {
+  local value
+  value="$(command_extract_first_flag_value_01 "${1:-}" --campaign-subject --subject --key --invite-key)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! subject_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_vm_command_source_value_from_command_01() {
+  local value
+  value="$(command_extract_first_flag_value_01 "${1:-}" --vm-command-source --vm-command-file)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]] && ! vm_command_source_value_looks_placeholder_01 "$value"; then
+    printf '%s' "$value"
+  else
+    printf '%s' ""
+  fi
+}
+
+extract_first_runtime_value_from_selected_actions_01() {
+  local selected_actions_json="${1:-[]}"
+  local extractor_fn="${2:-}"
+  local action_json=""
+  local command_text=""
+  local value=""
+  if [[ -z "$extractor_fn" ]]; then
+    printf '%s' ""
+    return
+  fi
+  while IFS= read -r action_json; do
+    [[ -n "$action_json" ]] || continue
+    command_text="$(printf '%s\n' "$action_json" | jq -r '.command // "" | tostring')"
+    [[ -n "$command_text" ]] || continue
+    value="$("$extractor_fn" "$command_text")"
+    value="$(trim "$value")"
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return
+    fi
+  done < <(printf '%s\n' "$selected_actions_json" | jq -c '.[]')
+  printf '%s' ""
 }
 
 append_unique_array_value_01() {
@@ -280,6 +517,10 @@ reports_dir="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_REPORTS_DIR:-}"
 summary_json="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_SUMMARY_JSON:-}"
 roadmap_summary_json="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SUMMARY_JSON:-}"
 roadmap_report_md="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_REPORT_MD:-}"
+host_a_override_env="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_HOST_A:-${A_HOST:-${HOST_A:-}}}"
+host_b_override_env="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_HOST_B:-${B_HOST:-${HOST_B:-}}}"
+campaign_subject_override_env="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_CAMPAIGN_SUBJECT:-${CAMPAIGN_SUBJECT:-${INVITE_KEY:-}}}"
+vm_command_source_override_env="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_VM_COMMAND_SOURCE:-${VM_COMMAND_SOURCE:-}}"
 refresh_manual_validation="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_PARALLEL:-0}"
@@ -289,6 +530,14 @@ print_summary_json="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1
 action_timeout_sec="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
 scope="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_SCOPE:-${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCOPE:-auto}}"
+host_a_override_arg=""
+host_b_override_arg=""
+campaign_subject_override_arg=""
+vm_command_source_override_arg=""
+host_a_override_arg_provided="0"
+host_b_override_arg_provided="0"
+campaign_subject_override_arg_provided="0"
+vm_command_source_override_arg_provided="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -310,6 +559,30 @@ while [[ $# -gt 0 ]]; do
     --roadmap-report-md)
       require_value_or_die "$1" "${2:-}"
       roadmap_report_md="${2:-}"
+      shift 2
+      ;;
+    --host-a)
+      require_value_or_die "$1" "${2:-}"
+      host_a_override_arg="${2:-}"
+      host_a_override_arg_provided="1"
+      shift 2
+      ;;
+    --host-b)
+      require_value_or_die "$1" "${2:-}"
+      host_b_override_arg="${2:-}"
+      host_b_override_arg_provided="1"
+      shift 2
+      ;;
+    --campaign-subject)
+      require_value_or_die "$1" "${2:-}"
+      campaign_subject_override_arg="${2:-}"
+      campaign_subject_override_arg_provided="1"
+      shift 2
+      ;;
+    --vm-command-source)
+      require_value_or_die "$1" "${2:-}"
+      vm_command_source_override_arg="${2:-}"
+      vm_command_source_override_arg_provided="1"
       shift 2
       ;;
     --action-timeout-sec)
@@ -402,6 +675,79 @@ bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
 scope_arg_or_die "$scope"
+
+runtime_host_a=""
+runtime_host_a_source="summary_command"
+runtime_host_a_configured="0"
+runtime_host_b=""
+runtime_host_b_source="summary_command"
+runtime_host_b_configured="0"
+runtime_campaign_subject=""
+runtime_campaign_subject_source="summary_command"
+runtime_campaign_subject_configured="0"
+runtime_vm_command_source=""
+runtime_vm_command_source_source="summary_command"
+runtime_vm_command_source_configured="0"
+
+runtime_value_candidate="$(trim "$host_a_override_arg")"
+if [[ "$host_a_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! host_a_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_host_a="$runtime_value_candidate"
+    runtime_host_a_source="cli:--host-a"
+    runtime_host_a_configured="1"
+  else
+    runtime_host_a_source="cli:--host-a=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$host_a_override_env")" ]] && ! host_a_value_looks_placeholder_01 "$host_a_override_env"; then
+  runtime_host_a="$(trim "$host_a_override_env")"
+  runtime_host_a_source="env:host_a"
+  runtime_host_a_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$host_b_override_arg")"
+if [[ "$host_b_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! host_b_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_host_b="$runtime_value_candidate"
+    runtime_host_b_source="cli:--host-b"
+    runtime_host_b_configured="1"
+  else
+    runtime_host_b_source="cli:--host-b=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$host_b_override_env")" ]] && ! host_b_value_looks_placeholder_01 "$host_b_override_env"; then
+  runtime_host_b="$(trim "$host_b_override_env")"
+  runtime_host_b_source="env:host_b"
+  runtime_host_b_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$campaign_subject_override_arg")"
+if [[ "$campaign_subject_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! subject_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_campaign_subject="$runtime_value_candidate"
+    runtime_campaign_subject_source="cli:--campaign-subject"
+    runtime_campaign_subject_configured="1"
+  else
+    runtime_campaign_subject_source="cli:--campaign-subject=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$campaign_subject_override_env")" ]] && ! subject_value_looks_placeholder_01 "$campaign_subject_override_env"; then
+  runtime_campaign_subject="$(trim "$campaign_subject_override_env")"
+  runtime_campaign_subject_source="env:campaign_subject"
+  runtime_campaign_subject_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$vm_command_source_override_arg")"
+if [[ "$vm_command_source_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! vm_command_source_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_vm_command_source="$runtime_value_candidate"
+    runtime_vm_command_source_source="cli:--vm-command-source"
+    runtime_vm_command_source_configured="1"
+  else
+    runtime_vm_command_source_source="cli:--vm-command-source=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$vm_command_source_override_env")" ]] && ! vm_command_source_value_looks_placeholder_01 "$vm_command_source_override_env"; then
+  runtime_vm_command_source="$(trim "$vm_command_source_override_env")"
+  runtime_vm_command_source_source="env:vm_command_source"
+  runtime_vm_command_source_configured="1"
+fi
 
 roadmap_paths_provided="1"
 if [[ -z "$roadmap_summary_json" || -z "$roadmap_report_md" ]]; then
@@ -652,72 +998,63 @@ if (( scope_match_command_conflict_count > 0 )); then
   deterministic_command_selection_reason="$(printf '%s\n' "$scope_match_command_conflicts_json" | jq -r 'map(.id + ": " + (.commands | join(" || "))) | join("; ")')"
 fi
 
+if [[ "$runtime_host_a_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$scope_match_unique_actions_json" extract_host_a_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_host_a="$runtime_value_candidate"
+    runtime_host_a_source="summary_command:extracted_host_a"
+    runtime_host_a_configured="1"
+  fi
+fi
+if [[ "$runtime_host_b_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$scope_match_unique_actions_json" extract_host_b_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_host_b="$runtime_value_candidate"
+    runtime_host_b_source="summary_command:extracted_host_b"
+    runtime_host_b_configured="1"
+  fi
+fi
+if [[ "$runtime_campaign_subject_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$scope_match_unique_actions_json" extract_campaign_subject_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_campaign_subject="$runtime_value_candidate"
+    runtime_campaign_subject_source="summary_command:extracted_campaign_subject"
+    runtime_campaign_subject_configured="1"
+  fi
+fi
+if [[ "$runtime_vm_command_source_configured" != "1" ]]; then
+  runtime_value_candidate="$(extract_first_runtime_value_from_selected_actions_01 "$scope_match_unique_actions_json" extract_vm_command_source_value_from_command_01)"
+  if [[ -n "$runtime_value_candidate" ]]; then
+    runtime_vm_command_source="$runtime_value_candidate"
+    runtime_vm_command_source_source="summary_command:extracted_vm_command_source"
+    runtime_vm_command_source_configured="1"
+  fi
+fi
+
 placeholder_host_a_resolved="0"
 placeholder_host_b_resolved="0"
 placeholder_subject_resolved="0"
+placeholder_vm_command_source_resolved="0"
 placeholder_host_a_source="missing"
 placeholder_host_b_source="missing"
 placeholder_subject_source="missing"
-placeholder_host_a_value="$(trim "${A_HOST:-}")"
-if [[ -n "$placeholder_host_a_value" ]]; then
-  if host_a_value_looks_placeholder_01 "$placeholder_host_a_value"; then
-    placeholder_host_a_source="A_HOST=placeholder"
-  else
-    placeholder_host_a_resolved="1"
-    placeholder_host_a_source="A_HOST"
-  fi
+placeholder_vm_command_source_source="missing"
+if [[ "$runtime_host_a_configured" == "1" ]]; then
+  placeholder_host_a_resolved="1"
 fi
-if [[ "$placeholder_host_a_resolved" != "1" ]]; then
-  placeholder_host_a_value="$(trim "${HOST_A:-}")"
-  if [[ -n "$placeholder_host_a_value" ]]; then
-    if host_a_value_looks_placeholder_01 "$placeholder_host_a_value"; then
-      placeholder_host_a_source="${placeholder_host_a_source},HOST_A=placeholder"
-    else
-      placeholder_host_a_resolved="1"
-      placeholder_host_a_source="HOST_A"
-    fi
-  fi
+placeholder_host_a_source="$runtime_host_a_source"
+if [[ "$runtime_host_b_configured" == "1" ]]; then
+  placeholder_host_b_resolved="1"
 fi
-placeholder_host_b_value="$(trim "${B_HOST:-}")"
-if [[ -n "$placeholder_host_b_value" ]]; then
-  if host_b_value_looks_placeholder_01 "$placeholder_host_b_value"; then
-    placeholder_host_b_source="B_HOST=placeholder"
-  else
-    placeholder_host_b_resolved="1"
-    placeholder_host_b_source="B_HOST"
-  fi
+placeholder_host_b_source="$runtime_host_b_source"
+if [[ "$runtime_campaign_subject_configured" == "1" ]]; then
+  placeholder_subject_resolved="1"
 fi
-if [[ "$placeholder_host_b_resolved" != "1" ]]; then
-  placeholder_host_b_value="$(trim "${HOST_B:-}")"
-  if [[ -n "$placeholder_host_b_value" ]]; then
-    if host_b_value_looks_placeholder_01 "$placeholder_host_b_value"; then
-      placeholder_host_b_source="${placeholder_host_b_source},HOST_B=placeholder"
-    else
-      placeholder_host_b_resolved="1"
-      placeholder_host_b_source="HOST_B"
-    fi
-  fi
+placeholder_subject_source="$runtime_campaign_subject_source"
+if [[ "$runtime_vm_command_source_configured" == "1" ]]; then
+  placeholder_vm_command_source_resolved="1"
 fi
-placeholder_subject_value="$(trim "${CAMPAIGN_SUBJECT:-}")"
-if [[ -n "$placeholder_subject_value" ]]; then
-  if subject_value_looks_placeholder_01 "$placeholder_subject_value"; then
-    placeholder_subject_source="CAMPAIGN_SUBJECT=placeholder"
-  else
-    placeholder_subject_resolved="1"
-    placeholder_subject_source="CAMPAIGN_SUBJECT"
-  fi
-fi
-if [[ "$placeholder_subject_resolved" != "1" ]]; then
-  placeholder_subject_value="$(trim "${INVITE_KEY:-}")"
-  if [[ -n "$placeholder_subject_value" ]]; then
-    if subject_value_looks_placeholder_01 "$placeholder_subject_value"; then
-      placeholder_subject_source="${placeholder_subject_source},INVITE_KEY=placeholder"
-    else
-      placeholder_subject_resolved="1"
-      placeholder_subject_source="INVITE_KEY"
-    fi
-  fi
-fi
+placeholder_vm_command_source_source="$runtime_vm_command_source_source"
 
 unresolved_placeholder_actions_lines=""
 while IFS= read -r selected_action_json; do
@@ -738,6 +1075,13 @@ while IFS= read -r selected_action_json; do
   if command_contains_placeholder_token_01 "$command_text" "INVITE_KEY" || command_contains_placeholder_token_01 "$command_text" "CAMPAIGN_SUBJECT" || command_contains_placeholder_token_01 "$command_text" "INVITE_SUBJECT"; then
     if [[ "$placeholder_subject_resolved" != "1" ]]; then
       append_unique_array_value_01 "INVITE_KEY/CAMPAIGN_SUBJECT" unresolved_placeholders
+    fi
+  fi
+  if command_contains_placeholder_token_01 "$command_text" "VM_COMMAND_SOURCE" \
+     || command_contains_placeholder_token_01 "$command_text" "VM_COMMAND_FILE" \
+     || command_contains_placeholder_token_01 "$command_text" "VM_COMMAND"; then
+    if [[ "$placeholder_vm_command_source_resolved" != "1" ]]; then
+      append_unique_array_value_01 "VM_COMMAND_SOURCE/VM_COMMAND_FILE" unresolved_placeholders
     fi
   fi
   if (( ${#unresolved_placeholders[@]} > 0 )); then
@@ -843,6 +1187,18 @@ next_actions_cmd=(
   --max-actions "$max_actions"
   --print-summary-json 0
 )
+if [[ "$runtime_host_a_configured" == "1" ]]; then
+  next_actions_cmd+=(--host-a "$runtime_host_a")
+fi
+if [[ "$runtime_host_b_configured" == "1" ]]; then
+  next_actions_cmd+=(--host-b "$runtime_host_b")
+fi
+if [[ "$runtime_campaign_subject_configured" == "1" ]]; then
+  next_actions_cmd+=(--campaign-subject "$runtime_campaign_subject")
+fi
+if [[ "$runtime_vm_command_source_configured" == "1" ]]; then
+  next_actions_cmd+=(--vm-command-source "$runtime_vm_command_source")
+fi
 
 print_only_mode="0"
 deterministic_conflict_mode="0"
@@ -986,6 +1342,10 @@ if [[ -z "$selected_action_ids_csv" ]]; then
   selected_action_ids_csv="none"
 fi
 command_display="$(render_invocation_command "./scripts/roadmap_live_evidence_actionable_run.sh" "$@")"
+runtime_campaign_subject_redacted=""
+if [[ "$runtime_campaign_subject_configured" == "1" ]]; then
+  runtime_campaign_subject_redacted="[redacted]"
+fi
 
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -1028,6 +1388,18 @@ jq -n \
   --argjson delegated_runner_invoked "$delegated_runner_invoked" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
+  --arg runtime_host_a "$runtime_host_a" \
+  --arg runtime_host_a_source "$runtime_host_a_source" \
+  --argjson runtime_host_a_configured "$runtime_host_a_configured" \
+  --arg runtime_host_b "$runtime_host_b" \
+  --arg runtime_host_b_source "$runtime_host_b_source" \
+  --argjson runtime_host_b_configured "$runtime_host_b_configured" \
+  --arg runtime_campaign_subject_redacted "$runtime_campaign_subject_redacted" \
+  --arg runtime_campaign_subject_source "$runtime_campaign_subject_source" \
+  --argjson runtime_campaign_subject_configured "$runtime_campaign_subject_configured" \
+  --arg runtime_vm_command_source "$runtime_vm_command_source" \
+  --arg runtime_vm_command_source_source "$runtime_vm_command_source_source" \
+  --argjson runtime_vm_command_source_configured "$runtime_vm_command_source_configured" \
   --argjson source_actions_with_command_count "$source_actions_with_command_count" \
   --argjson target_match_count "$target_match_count" \
   --argjson target_match_action_ids "$target_match_action_ids_json" \
@@ -1044,9 +1416,11 @@ jq -n \
   --argjson placeholder_host_a_resolved "$placeholder_host_a_resolved" \
   --argjson placeholder_host_b_resolved "$placeholder_host_b_resolved" \
   --argjson placeholder_subject_resolved "$placeholder_subject_resolved" \
+  --argjson placeholder_vm_command_source_resolved "$placeholder_vm_command_source_resolved" \
   --arg placeholder_host_a_source "$placeholder_host_a_source" \
   --arg placeholder_host_b_source "$placeholder_host_b_source" \
   --arg placeholder_subject_source "$placeholder_subject_source" \
+  --arg placeholder_vm_command_source_source "$placeholder_vm_command_source_source" \
   --argjson scope_target_action_ids "$scope_target_action_ids_json" \
   --argjson scope_match_count "$scope_match_count" \
   --argjson scope_match_action_ids "$scope_match_action_ids_json" \
@@ -1088,6 +1462,17 @@ jq -n \
       delegated_runner_invoked: ($delegated_runner_invoked == 1),
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1),
+      runtime_input_precedence: "cli > env > summary_command",
+      host_a: (if $runtime_host_a_configured == 1 then $runtime_host_a else null end),
+      host_a_source: (if $runtime_host_a_source == "" then null else $runtime_host_a_source end),
+      host_b: (if $runtime_host_b_configured == 1 then $runtime_host_b else null end),
+      host_b_source: (if $runtime_host_b_source == "" then null else $runtime_host_b_source end),
+      campaign_subject: (if $runtime_campaign_subject_configured == 1 then $runtime_campaign_subject_redacted else null end),
+      campaign_subject_configured: ($runtime_campaign_subject_configured == 1),
+      campaign_subject_source: (if $runtime_campaign_subject_source == "" then null else $runtime_campaign_subject_source end),
+      vm_command_source: (if $runtime_vm_command_source_configured == 1 then $runtime_vm_command_source else null end),
+      vm_command_source_configured: ($runtime_vm_command_source_configured == 1),
+      vm_command_source_source: (if $runtime_vm_command_source_source == "" then null else $runtime_vm_command_source_source end),
       scope: $scope,
       resolved_scope: $resolved_scope,
       scope_inference_reason: $scope_inference_reason,
@@ -1127,7 +1512,9 @@ jq -n \
         host_b_resolved: ($placeholder_host_b_resolved == 1),
         host_b_source: (if $placeholder_host_b_source == "" then null else $placeholder_host_b_source end),
         subject_resolved: ($placeholder_subject_resolved == 1),
-        subject_source: (if $placeholder_subject_source == "" then null else $placeholder_subject_source end)
+        subject_source: (if $placeholder_subject_source == "" then null else $placeholder_subject_source end),
+        vm_command_source_resolved: ($placeholder_vm_command_source_resolved == 1),
+        vm_command_source_source: (if $placeholder_vm_command_source_source == "" then null else $placeholder_vm_command_source_source end)
       },
       scope_target_action_ids: $scope_target_action_ids,
       scope_match_count: $scope_match_count,

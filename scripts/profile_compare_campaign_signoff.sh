@@ -1520,6 +1520,25 @@ if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e
   trend_source_value="$(jq -r '.observed.trend_source // ""' "$campaign_check_summary_json")"
   selection_policy_evidence_present="$(jq -r 'if (.observed.selection_policy_evidence.present // false) then "1" else "0" end' "$campaign_check_summary_json" 2>/dev/null || printf '0')"
   selection_policy_evidence_valid="$(jq -r 'if (.observed.selection_policy_evidence.valid // false) then "1" else "0" end' "$campaign_check_summary_json" 2>/dev/null || printf '0')"
+  if [[ "$decision" == "NO-GO" ]]; then
+    decision_reason="$(jq -r '
+      (
+        ((.errors // [])
+          | if type == "array" then . else [] end
+          | map(select(type == "string" and startswith("insufficient evidence for default recommendation")))
+          | .[0])
+        //
+        ((.errors // [])
+          | if type == "array" then . else [] end
+          | map(select(type == "string"))
+          | .[0])
+        //
+        (if (.notes | type) == "string" then .notes else null end)
+        //
+        ""
+      )
+    ' "$campaign_check_summary_json" 2>/dev/null || printf '%s' "")"
+  fi
   campaign_check_gate_diagnostics_candidate="$(jq -c '
     {
       runtime_actuation_status_pass: {

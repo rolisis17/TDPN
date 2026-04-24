@@ -53,6 +53,7 @@ func TestProtoMsgServerAdapterFinalizeUsage(t *testing.T) {
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-2",
 			SessionId:     "sess-2",
+			AssetDenom:    "uusdc",
 			Amount:        100,
 		},
 	}); err != nil {
@@ -64,6 +65,7 @@ func TestProtoMsgServerAdapterFinalizeUsage(t *testing.T) {
 			SettlementId:  "set-adapter-2",
 			ReservationId: "res-adapter-2",
 			SessionId:     "sess-2",
+			AssetDenom:    "uusdc",
 			BilledAmount:  60,
 		},
 	})
@@ -116,6 +118,7 @@ func TestProtoMsgServerAdapterFinalizeUsageIgnoresClientSuppliedStatus(t *testin
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-status-2",
 			SessionId:     "sess-status-2",
+			AssetDenom:    "uusdc",
 			Amount:        100,
 		},
 	}); err != nil {
@@ -127,6 +130,7 @@ func TestProtoMsgServerAdapterFinalizeUsageIgnoresClientSuppliedStatus(t *testin
 			SettlementId:   "set-adapter-status-2",
 			ReservationId:  "res-adapter-status-2",
 			SessionId:      "sess-status-2",
+			AssetDenom:     "uusdc",
 			BilledAmount:   60,
 			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
@@ -149,6 +153,7 @@ func TestProtoMsgServerAdapterFinalizeUsageRejectsZeroBilledAmount(t *testing.T)
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-zero-amount",
 			SessionId:     "sess-zero-amount",
+			AssetDenom:    "uusdc",
 			Amount:        100,
 		},
 	}); err != nil {
@@ -160,6 +165,7 @@ func TestProtoMsgServerAdapterFinalizeUsageRejectsZeroBilledAmount(t *testing.T)
 			SettlementId:  "set-adapter-zero-amount",
 			ReservationId: "res-adapter-zero-amount",
 			SessionId:     "sess-zero-amount",
+			AssetDenom:    "uusdc",
 			BilledAmount:  0,
 		},
 	})

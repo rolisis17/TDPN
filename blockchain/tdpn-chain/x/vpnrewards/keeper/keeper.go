@@ -16,6 +16,10 @@ type Keeper struct {
 	store KeeperStore
 }
 
+type distributionAccrualAtomicWriter interface {
+	UpsertDistributionWithAccrualWithError(distribution types.DistributionRecord, accrual types.RewardAccrual) error
+}
+
 func NewKeeper() Keeper {
 	return NewKeeperWithStore(nil)
 }
@@ -212,6 +216,19 @@ func (k *Keeper) persistDistributionWithAccrualAdvanceLocked(
 	accrualBefore types.RewardAccrual,
 ) error {
 	accrualAfter := advanceAccrualStateForDistribution(accrualBefore)
+
+	if atomicWriter, ok := k.store.(distributionAccrualAtomicWriter); ok {
+		if err := atomicWriter.UpsertDistributionWithAccrualWithError(distribution, accrualAfter); err != nil {
+			return fmt.Errorf(
+				"persist distribution %q with accrual %q advance: %w",
+				distribution.DistributionID,
+				accrualAfter.AccrualID,
+				err,
+			)
+		}
+		return nil
+	}
+
 	accrualChanged := !accrualRecordsEqual(accrualBefore, accrualAfter)
 
 	if accrualChanged {

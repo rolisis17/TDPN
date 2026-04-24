@@ -15,6 +15,12 @@ type Keeper struct {
 	store KeeperStore
 }
 
+// keeperStoreWithAtomicPenaltyEvidenceWrite allows stores to persist a penalty decision and
+// corresponding evidence status advancement in one durability boundary.
+type keeperStoreWithAtomicPenaltyEvidenceWrite interface {
+	UpsertPenaltyAndEvidenceWithError(penalty types.PenaltyDecision, evidence types.SlashEvidence) error
+}
+
 func NewKeeper() Keeper {
 	return NewKeeperWithStore(nil)
 }
@@ -30,14 +36,14 @@ func NewKeeperWithStore(store KeeperStore) Keeper {
 }
 
 func (k *Keeper) UpsertEvidence(record types.SlashEvidence) {
-	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
+	record = normalizeEvidenceForUpsert(record)
 	_ = k.UpsertEvidenceWithError(record)
 }
 
 func (k *Keeper) UpsertEvidenceWithError(record types.SlashEvidence) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
+	record = normalizeEvidenceForUpsert(record)
 	return k.upsertEvidenceLocked(record)
 }
 
@@ -77,9 +83,11 @@ func (k *Keeper) SubmitEvidence(record types.SlashEvidence) (types.SlashEvidence
 }
 
 func (k *Keeper) GetEvidence(evidenceID string) (types.SlashEvidence, bool) {
+	normalizedEvidenceID := types.NormalizeEvidenceID(evidenceID)
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetEvidence(evidenceID)
+	return k.store.GetEvidence(normalizedEvidenceID)
 }
 
 func (k *Keeper) ListEvidence() []types.SlashEvidence {
@@ -105,12 +113,14 @@ func (k *Keeper) ListEvidenceWithError() ([]types.SlashEvidence, error) {
 }
 
 func (k *Keeper) UpsertPenalty(record types.PenaltyDecision) {
+	record = normalizePenaltyForUpsert(record)
 	_ = k.UpsertPenaltyWithError(record)
 }
 
 func (k *Keeper) UpsertPenaltyWithError(record types.PenaltyDecision) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	record = normalizePenaltyForUpsert(record)
 	return k.upsertPenaltyLocked(record)
 }
 
@@ -156,9 +166,11 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 }
 
 func (k *Keeper) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {
+	normalizedPenaltyID := types.NormalizePenaltyID(penaltyID)
+
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.store.GetPenalty(penaltyID)
+	return k.store.GetPenalty(normalizedPenaltyID)
 }
 
 func (k *Keeper) ListPenalties() []types.PenaltyDecision {
@@ -191,6 +203,20 @@ func (k *Keeper) persistPenaltyWithEvidenceAdvanceLocked(
 	evidenceChanged := !slashEvidenceRecordsEqual(evidenceBefore, evidenceAfter)
 
 	if evidenceChanged {
+		if atomicStore, ok := k.store.(keeperStoreWithAtomicPenaltyEvidenceWrite); ok {
+			if err := atomicStore.UpsertPenaltyAndEvidenceWithError(penalty, evidenceAfter); err != nil {
+				return fmt.Errorf(
+					"persist penalty %q with evidence %q atomically: %w",
+					penalty.PenaltyID,
+					evidenceAfter.EvidenceID,
+					err,
+				)
+			}
+			return nil
+		}
+	}
+
+	if evidenceChanged {
 		if err := k.upsertEvidenceLocked(evidenceAfter); err != nil {
 			return err
 		}
@@ -216,6 +242,8 @@ func advanceEvidenceStatusForPenalty(record types.SlashEvidence) types.SlashEvid
 }
 
 func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyDecision, bool, error) {
+	evidenceID = types.NormalizeEvidenceID(evidenceID)
+
 	penalties, err := k.listPenaltiesLocked()
 	if err != nil {
 		return types.PenaltyDecision{}, false, err
@@ -269,6 +297,7 @@ func (k *Keeper) listPenaltiesLocked() ([]types.PenaltyDecision, error) {
 }
 
 func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
+	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
 	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationSubmitted
@@ -277,9 +306,23 @@ func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
 }
 
 func normalizePenalty(record types.PenaltyDecision) types.PenaltyDecision {
+	record.PenaltyID = types.NormalizePenaltyID(record.PenaltyID)
+	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationSubmitted
 	}
+	return record
+}
+
+func normalizeEvidenceForUpsert(record types.SlashEvidence) types.SlashEvidence {
+	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
+	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
+	return record
+}
+
+func normalizePenaltyForUpsert(record types.PenaltyDecision) types.PenaltyDecision {
+	record.PenaltyID = types.NormalizePenaltyID(record.PenaltyID)
+	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
 	return record
 }
 

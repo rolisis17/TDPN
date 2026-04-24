@@ -645,17 +645,17 @@ reports_dir="${PROFILE_COMPARE_CAMPAIGN_CHECK_REPORTS_DIR:-$ROOT_DIR/.easy-node-
 
 require_status_pass="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_STATUS_PASS:-1}"
 require_trend_status_pass="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TREND_STATUS_PASS:-1}"
-require_min_runs_total="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MIN_RUNS_TOTAL:-3}"
+require_min_runs_total="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MIN_RUNS_TOTAL:-5}"
 require_max_runs_fail="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MAX_RUNS_FAIL:-0}"
 require_max_runs_warn="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MAX_RUNS_WARN:-0}"
-require_min_runs_with_summary="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MIN_RUNS_WITH_SUMMARY:-3}"
-require_recommendation_support_rate_pct="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_RECOMMENDATION_SUPPORT_RATE_PCT:-60}"
+require_min_runs_with_summary="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MIN_RUNS_WITH_SUMMARY:-5}"
+require_recommendation_support_rate_pct="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_RECOMMENDATION_SUPPORT_RATE_PCT:-75}"
 require_recommended_profile="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_RECOMMENDED_PROFILE:-}"
 allow_recommended_profiles="${PROFILE_COMPARE_CAMPAIGN_CHECK_ALLOW_RECOMMENDED_PROFILES:-balanced,speed,private}"
 disallow_experimental_default="${PROFILE_COMPARE_CAMPAIGN_CHECK_DISALLOW_EXPERIMENTAL_DEFAULT:-1}"
-require_trend_source="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TREND_SOURCE:-policy_reliability_latency,vote_fallback,safe_default_fallback}"
-require_selection_policy_present="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_PRESENT:-0}"
-require_selection_policy_valid="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_VALID:-0}"
+require_trend_source="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TREND_SOURCE:-policy_reliability_latency}"
+require_selection_policy_present="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
+require_selection_policy_valid="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_VALID:-1}"
 require_micro_relay_quality_evidence="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_QUALITY_EVIDENCE:-1}"
 require_micro_relay_quality_status_pass="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_QUALITY_STATUS_PASS:-1}"
 require_micro_relay_demotion_policy="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-1}"
@@ -1255,6 +1255,7 @@ if ((${#numeric_validation_issues[@]} > 0)); then
   errors+=("campaign/trend numeric fields invalid or non-numeric: $(IFS=,; echo "${numeric_validation_issues[*]}")")
 fi
 declare -a m4_policy_issues=()
+declare -a insufficient_evidence_reasons=()
 
 if [[ "$require_status_pass" == "1" ]] && [[ "$campaign_status" != "pass" ]]; then
   errors+=("campaign status must be pass (actual=${campaign_status:-unset})")
@@ -1270,15 +1271,19 @@ if [[ "$trend_rc" != "0" ]]; then
 fi
 if ((runs_total < require_min_runs_total)); then
   errors+=("runs_total below required minimum (actual=$runs_total required=$require_min_runs_total)")
+  insufficient_evidence_reasons+=("runs_total=$runs_total < required_min_runs_total=$require_min_runs_total")
 fi
 if ((runs_fail > require_max_runs_fail)); then
   errors+=("runs_fail exceeds allowed maximum (actual=$runs_fail max=$require_max_runs_fail)")
+  insufficient_evidence_reasons+=("runs_fail=$runs_fail > allowed_max_runs_fail=$require_max_runs_fail")
 fi
 if ((runs_warn > require_max_runs_warn)); then
   errors+=("runs_warn exceeds allowed maximum (actual=$runs_warn max=$require_max_runs_warn)")
+  insufficient_evidence_reasons+=("runs_warn=$runs_warn > allowed_max_runs_warn=$require_max_runs_warn")
 fi
 if ((runs_with_summary < require_min_runs_with_summary)); then
   errors+=("runs_with_summary below required minimum (actual=$runs_with_summary required=$require_min_runs_with_summary)")
+  insufficient_evidence_reasons+=("runs_with_summary=$runs_with_summary < required_min_runs_with_summary=$require_min_runs_with_summary")
 fi
 if [[ -z "$recommended_profile" ]]; then
   errors+=("recommended profile is empty")
@@ -1296,22 +1301,28 @@ if [[ "$disallow_experimental_default" == "1" && "$recommended_profile" == "spee
 fi
 if awk -v observed="$support_rate_pct" -v min_required="$require_recommendation_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
   errors+=("recommendation support rate below threshold (actual=${support_rate_pct}% required=${require_recommendation_support_rate_pct}%)")
+  insufficient_evidence_reasons+=("recommendation_support_rate_pct=${support_rate_pct}% < required_recommendation_support_rate_pct=${require_recommendation_support_rate_pct}%")
 fi
 if [[ "$trend_summary_present" != "1" ]]; then
   errors+=("trend summary JSON is missing or invalid (${trend_summary_json:-unset})")
+  insufficient_evidence_reasons+=("trend_summary_json_missing_or_invalid")
 fi
 if [[ -n "$require_trend_source" ]]; then
   if [[ -z "$trend_source_value" ]]; then
     errors+=("trend source is missing")
+    insufficient_evidence_reasons+=("trend_source_missing")
   elif ! csv_contains "$require_trend_source" "$trend_source_value"; then
     errors+=("trend source is not allowed (actual=$trend_source_value allowed=$require_trend_source)")
+    insufficient_evidence_reasons+=("trend_source=$trend_source_value not_in_allowed_trend_sources=$require_trend_source")
   fi
 fi
 if [[ "$require_selection_policy_present" == "1" && "$selection_policy_evidence_present" != "1" ]]; then
   errors+=("selection policy evidence is required but not present")
+  insufficient_evidence_reasons+=("selection_policy_evidence_missing")
 fi
 if [[ "$require_selection_policy_valid" == "1" && "$selection_policy_evidence_valid" != "1" ]]; then
   errors+=("selection policy evidence is required to be valid (valid_summaries=$selection_policy_selected_summaries_valid_count total_summaries=$selection_policy_selected_summaries_total)")
+  insufficient_evidence_reasons+=("selection_policy_evidence_invalid_or_incomplete")
 fi
 if [[ "$require_micro_relay_quality_evidence" == "1" && "$micro_relay_quality_evidence_present" != "1" ]]; then
   errors+=("micro-relay quality evidence is required but not present")
@@ -1338,13 +1349,23 @@ if [[ "$require_runtime_actuation_status_pass" == "1" && "$runtime_actuation_sta
   m4_policy_issues+=("runtime_actuation_status_not_pass")
 fi
 
+insufficient_evidence_summary=""
+if ((${#insufficient_evidence_reasons[@]} > 0)); then
+  insufficient_evidence_summary="insufficient evidence for default recommendation (fail-closed): $(IFS='; '; echo "${insufficient_evidence_reasons[*]}")"
+  errors=("$insufficient_evidence_summary" "${errors[@]}")
+fi
+
 decision="GO"
 status="ok"
 notes="campaign recommendation passes configured policy"
 if ((${#errors[@]} > 0)); then
   decision="NO-GO"
   status="fail"
-  notes="campaign recommendation violates one or more policy checks"
+  if [[ -n "$insufficient_evidence_summary" ]]; then
+    notes="$insufficient_evidence_summary"
+  else
+    notes="campaign recommendation violates one or more policy checks"
+  fi
 fi
 
 rc=0
@@ -1365,6 +1386,10 @@ mkdir -p "$(dirname "$summary_json")"
 errors_json='[]'
 if ((${#errors[@]} > 0)); then
   errors_json="$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s '.')"
+fi
+insufficient_evidence_reasons_json='[]'
+if ((${#insufficient_evidence_reasons[@]} > 0)); then
+  insufficient_evidence_reasons_json="$(printf '%s\n' "${insufficient_evidence_reasons[@]}" | jq -R . | jq -s '.')"
 fi
 m4_policy_issues_json='[]'
 if ((${#m4_policy_issues[@]} > 0)); then
@@ -1451,6 +1476,8 @@ jq -n \
   --argjson fail_on_no_go "$fail_on_no_go" \
   --argjson rc "$rc" \
   --argjson errors "$errors_json" \
+  --arg insufficient_evidence_summary "$insufficient_evidence_summary" \
+  --argjson insufficient_evidence_reasons "$insufficient_evidence_reasons_json" \
   --argjson m4_policy_issues "$m4_policy_issues_json" \
   --arg summary_json "$summary_json" \
   '{
@@ -1544,6 +1571,11 @@ jq -n \
       }
     },
     decision_diagnostics: {
+      insufficient_evidence: {
+        triggered: (($insufficient_evidence_reasons | length) > 0),
+        summary: (if $insufficient_evidence_summary == "" then null else $insufficient_evidence_summary end),
+        reasons: $insufficient_evidence_reasons
+      },
       m4_policy: (
         {
           required: {

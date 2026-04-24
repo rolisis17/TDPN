@@ -12,6 +12,10 @@ Usage:
     [--summary-json PATH] \
     [--roadmap-summary-json PATH] \
     [--roadmap-report-md PATH] \
+    [--host-a HOST] \
+    [--host-b HOST] \
+    [--campaign-subject ID] \
+    [--vm-command-source PATH] \
     [--run-live-archive [0|1]] \
     [--archive-root DIR] \
     [--action-timeout-sec N] \
@@ -33,6 +37,10 @@ Purpose:
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
   --allow-unsafe-shell-commands 0
+  --host-a ""   (precedence: CLI --host-a > ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_HOST_A > A_HOST > HOST_A > delegated summary command values)
+  --host-b ""   (precedence: CLI --host-b > ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_HOST_B > B_HOST > HOST_B > delegated summary command values)
+  --campaign-subject ""   (precedence: CLI --campaign-subject > ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > delegated summary command values)
+  --vm-command-source ""   (precedence: CLI --vm-command-source > ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_VM_COMMAND_SOURCE > VM_COMMAND_SOURCE > delegated summary command values)
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
   --run-live-archive 0
@@ -149,6 +157,92 @@ require_value_or_die() {
   fi
 }
 
+strip_optional_wrapping_quotes_01() {
+  local value="${1:-}"
+  local first_char=""
+  local last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+value_matches_placeholder_token_01() {
+  local value token normalized
+  value="$(trim "${1:-}")"
+  token="$(trim "${2:-}")"
+  if [[ -z "$value" || -z "$token" ]]; then
+    return 1
+  fi
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    "$token"|\$\{"$token"\}|\$"$token"|"<$token>"|"{{$token}}"|YOUR_"$token"|REPLACE_WITH_"$token"|%$token%|\$\{"$token":-*}|\$\{"$token"-*})
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+host_a_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in A_HOST HOST_A; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+host_b_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in B_HOST HOST_B; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+subject_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in INVITE_KEY CAMPAIGN_SUBJECT INVITE_SUBJECT; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+vm_command_source_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in VM_COMMAND_SOURCE VM_COMMAND_FILE VM_COMMAND; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$value" in
+    "<VM-COMMAND>"|"<SET-VM-COMMAND-SOURCE>"|REPLACE_WITH_VM_COMMAND_SOURCE|REPLACE_WITH_VM_COMMAND_FILE)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 need_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -261,6 +355,10 @@ reports_dir="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_REPORTS_DIR:-}"
 summary_json="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_SUMMARY_JSON:-}"
 roadmap_summary_json="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ROADMAP_SUMMARY_JSON:-}"
 roadmap_report_md="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ROADMAP_REPORT_MD:-}"
+host_a_override_env="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_HOST_A:-${A_HOST:-${HOST_A:-}}}"
+host_b_override_env="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_HOST_B:-${B_HOST:-${HOST_B:-}}}"
+campaign_subject_override_env="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_CAMPAIGN_SUBJECT:-${CAMPAIGN_SUBJECT:-${INVITE_KEY:-}}}"
+vm_command_source_override_env="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_VM_COMMAND_SOURCE:-${VM_COMMAND_SOURCE:-}}"
 refresh_manual_validation="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PARALLEL:-0}"
@@ -273,6 +371,14 @@ run_live_archive="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_RUN_LIVE_ARCHIVE:-0}"
 archive_root="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_ROOT:-}"
 scope="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_SCOPE:-${ROADMAP_LIVE_AND_PACK_ACTIONABLE_SCOPE:-auto}}"
 original_args=("$@")
+host_a_override_arg=""
+host_b_override_arg=""
+campaign_subject_override_arg=""
+vm_command_source_override_arg=""
+host_a_override_arg_provided="0"
+host_b_override_arg_provided="0"
+campaign_subject_override_arg_provided="0"
+vm_command_source_override_arg_provided="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -294,6 +400,30 @@ while [[ $# -gt 0 ]]; do
     --roadmap-report-md)
       require_value_or_die "$1" "${2:-}"
       roadmap_report_md="${2:-}"
+      shift 2
+      ;;
+    --host-a)
+      require_value_or_die "$1" "${2:-}"
+      host_a_override_arg="${2:-}"
+      host_a_override_arg_provided="1"
+      shift 2
+      ;;
+    --host-b)
+      require_value_or_die "$1" "${2:-}"
+      host_b_override_arg="${2:-}"
+      host_b_override_arg_provided="1"
+      shift 2
+      ;;
+    --campaign-subject)
+      require_value_or_die "$1" "${2:-}"
+      campaign_subject_override_arg="${2:-}"
+      campaign_subject_override_arg_provided="1"
+      shift 2
+      ;;
+    --vm-command-source)
+      require_value_or_die "$1" "${2:-}"
+      vm_command_source_override_arg="${2:-}"
+      vm_command_source_override_arg_provided="1"
       shift 2
       ;;
     --run-live-archive)
@@ -401,6 +531,79 @@ bool_arg_or_die "--run-live-archive" "$run_live_archive"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
 scope_arg_or_die "$scope"
+
+runtime_host_a=""
+runtime_host_a_source="summary_command"
+runtime_host_a_configured="0"
+runtime_host_b=""
+runtime_host_b_source="summary_command"
+runtime_host_b_configured="0"
+runtime_campaign_subject=""
+runtime_campaign_subject_source="summary_command"
+runtime_campaign_subject_configured="0"
+runtime_vm_command_source=""
+runtime_vm_command_source_source="summary_command"
+runtime_vm_command_source_configured="0"
+
+runtime_value_candidate="$(trim "$host_a_override_arg")"
+if [[ "$host_a_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! host_a_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_host_a="$runtime_value_candidate"
+    runtime_host_a_source="cli:--host-a"
+    runtime_host_a_configured="1"
+  else
+    runtime_host_a_source="cli:--host-a=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$host_a_override_env")" ]] && ! host_a_value_looks_placeholder_01 "$host_a_override_env"; then
+  runtime_host_a="$(trim "$host_a_override_env")"
+  runtime_host_a_source="env:host_a"
+  runtime_host_a_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$host_b_override_arg")"
+if [[ "$host_b_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! host_b_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_host_b="$runtime_value_candidate"
+    runtime_host_b_source="cli:--host-b"
+    runtime_host_b_configured="1"
+  else
+    runtime_host_b_source="cli:--host-b=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$host_b_override_env")" ]] && ! host_b_value_looks_placeholder_01 "$host_b_override_env"; then
+  runtime_host_b="$(trim "$host_b_override_env")"
+  runtime_host_b_source="env:host_b"
+  runtime_host_b_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$campaign_subject_override_arg")"
+if [[ "$campaign_subject_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! subject_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_campaign_subject="$runtime_value_candidate"
+    runtime_campaign_subject_source="cli:--campaign-subject"
+    runtime_campaign_subject_configured="1"
+  else
+    runtime_campaign_subject_source="cli:--campaign-subject=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$campaign_subject_override_env")" ]] && ! subject_value_looks_placeholder_01 "$campaign_subject_override_env"; then
+  runtime_campaign_subject="$(trim "$campaign_subject_override_env")"
+  runtime_campaign_subject_source="env:campaign_subject"
+  runtime_campaign_subject_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$vm_command_source_override_arg")"
+if [[ "$vm_command_source_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! vm_command_source_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_vm_command_source="$runtime_value_candidate"
+    runtime_vm_command_source_source="cli:--vm-command-source"
+    runtime_vm_command_source_configured="1"
+  else
+    runtime_vm_command_source_source="cli:--vm-command-source=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$vm_command_source_override_env")" ]] && ! vm_command_source_value_looks_placeholder_01 "$vm_command_source_override_env"; then
+  runtime_vm_command_source="$(trim "$vm_command_source_override_env")"
+  runtime_vm_command_source_source="env:vm_command_source"
+  runtime_vm_command_source_configured="1"
+fi
 
 if [[ -n "$roadmap_summary_json" && -z "$roadmap_report_md" ]] || [[ -z "$roadmap_summary_json" && -n "$roadmap_report_md" ]]; then
   echo "--roadmap-summary-json and --roadmap-report-md must be provided together"
@@ -568,6 +771,18 @@ live_cmd=(
   --max-actions "$max_actions"
   --print-summary-json 0
 )
+if [[ "$runtime_host_a_configured" == "1" ]]; then
+  live_cmd+=(--host-a "$runtime_host_a")
+fi
+if [[ "$runtime_host_b_configured" == "1" ]]; then
+  live_cmd+=(--host-b "$runtime_host_b")
+fi
+if [[ "$runtime_campaign_subject_configured" == "1" ]]; then
+  live_cmd+=(--campaign-subject "$runtime_campaign_subject")
+fi
+if [[ "$runtime_vm_command_source_configured" == "1" ]]; then
+  live_cmd+=(--vm-command-source "$runtime_vm_command_source")
+fi
 if [[ "$roadmap_paths_provided" == "1" ]]; then
   live_cmd+=(--roadmap-summary-json "$roadmap_summary_json" --roadmap-report-md "$roadmap_report_md")
 fi

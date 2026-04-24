@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"sync"
+	"syscall"
 
 	"github.com/tdpn/tdpn-chain/internal/fsguard"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
@@ -29,6 +29,7 @@ type FileStore struct {
 	path          string
 	accruals      map[string]types.RewardAccrual
 	distributions map[string]types.DistributionRecord
+	persistHook   func() error
 }
 
 func NewFileStore(path string) (*FileStore, error) {
@@ -113,6 +114,38 @@ func (s *FileStore) UpsertDistributionWithError(record types.DistributionRecord)
 	return nil
 }
 
+// UpsertDistributionWithAccrualWithError atomically persists a distribution record
+// together with the associated accrual state advance in one durable snapshot write.
+func (s *FileStore) UpsertDistributionWithAccrualWithError(
+	distribution types.DistributionRecord,
+	accrual types.RewardAccrual,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previousDistribution, hadDistribution := s.distributions[distribution.DistributionID]
+	previousAccrual, hadAccrual := s.accruals[accrual.AccrualID]
+
+	s.distributions[distribution.DistributionID] = distribution
+	s.accruals[accrual.AccrualID] = accrual
+
+	if err := s.persistLocked(); err != nil {
+		if hadDistribution {
+			s.distributions[distribution.DistributionID] = previousDistribution
+		} else {
+			delete(s.distributions, distribution.DistributionID)
+		}
+
+		if hadAccrual {
+			s.accruals[accrual.AccrualID] = previousAccrual
+		} else {
+			delete(s.accruals, accrual.AccrualID)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *FileStore) GetDistribution(distributionID string) (types.DistributionRecord, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -173,6 +206,12 @@ func (s *FileStore) persist() error {
 }
 
 func (s *FileStore) persistLocked() error {
+	if s.persistHook != nil {
+		if err := s.persistHook(); err != nil {
+			return err
+		}
+	}
+
 	state := fileStoreState{
 		Accruals:      s.accruals,
 		Distributions: s.distributions,

@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,6 +185,132 @@ func TestKeeperSubmitAndApplyUseCustomStoreWithEvidenceProgression(t *testing.T)
 	}
 	if updated.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf("expected evidence status %q after penalty, got %q", chaintypes.ReconciliationConfirmed, updated.Status)
+	}
+}
+
+func TestApplyPenaltyFileStorePersistsEvidenceAdvanceAndPenaltyAtomically(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	k := NewKeeperWithStore(store)
+
+	evidence, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-file-atomic-1",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-file-atomic-1"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+
+	persistCalls := 0
+	store.persistFailureInjector = func() error {
+		persistCalls++
+		return nil
+	}
+	defer func() {
+		store.persistFailureInjector = nil
+	}()
+
+	_, err = k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       "penalty-file-atomic-1",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 15,
+	})
+	if err != nil {
+		t.Fatalf("apply penalty: %v", err)
+	}
+	if persistCalls != 1 {
+		t.Fatalf("expected exactly 1 persistence call for atomic apply, got %d", persistCalls)
+	}
+}
+
+func TestApplyPenaltyFileStoreAtomicPersistFailureLeavesDurableStateUnchanged(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	k := NewKeeperWithStore(store)
+
+	evidenceID := "evidence-file-atomic-failure"
+	_, err = k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    evidenceID,
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-file-atomic-failure"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+
+	failOnce := true
+	store.persistFailureInjector = func() error {
+		if failOnce {
+			failOnce = false
+			return errors.New("forced atomic persist failure")
+		}
+		return nil
+	}
+
+	penaltyID := "penalty-file-atomic-failure"
+	_, err = k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       penaltyID,
+		EvidenceID:      evidenceID,
+		SlashBasisPoint: 25,
+	})
+	if err == nil {
+		t.Fatal("expected apply penalty to fail when atomic persist fails")
+	}
+	if !strings.Contains(err.Error(), "atomically") {
+		t.Fatalf("expected atomic persistence failure, got %v", err)
+	}
+	store.persistFailureInjector = nil
+
+	if _, ok := k.GetPenalty(penaltyID); ok {
+		t.Fatal("expected no in-memory penalty after failed atomic persist")
+	}
+
+	evidenceAfter, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to remain available", evidenceID)
+	}
+	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected in-memory evidence status %q after failed apply, got %q",
+			chaintypes.ReconciliationPending,
+			evidenceAfter.Status,
+		)
+	}
+
+	reopened, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("reopen file store: %v", err)
+	}
+
+	if _, ok := reopened.GetPenalty(penaltyID); ok {
+		t.Fatal("expected no durable penalty after failed atomic persist")
+	}
+
+	durableEvidence, ok := reopened.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected durable evidence %q to remain available", evidenceID)
+	}
+	if durableEvidence.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected durable evidence status %q after failed apply, got %q",
+			chaintypes.ReconciliationPending,
+			durableEvidence.Status,
+		)
 	}
 }
 

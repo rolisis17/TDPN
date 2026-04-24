@@ -181,6 +181,44 @@ func TestKeeperPenaltyUpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestKeeperUpsertAndGetCanonicalizeEvidenceAndPenaltyIDs(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    " \nEVIDENCE-UPSERT-CANON-1\t ",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-upsert-canon-1"),
+		ViolationType: "double-sign",
+	})
+
+	evidence, ok := k.GetEvidence(" \tEVIDENCE-UPSERT-CANON-1\n ")
+	if !ok {
+		t.Fatal("expected canonicalized evidence lookup to succeed")
+	}
+	if evidence.EvidenceID != "evidence-upsert-canon-1" {
+		t.Fatalf("expected canonical evidence id %q, got %q", "evidence-upsert-canon-1", evidence.EvidenceID)
+	}
+
+	k.UpsertPenalty(types.PenaltyDecision{
+		PenaltyID:       " \nPENALTY-UPSERT-CANON-1\t ",
+		EvidenceID:      " \tEVIDENCE-UPSERT-CANON-1\n ",
+		SlashBasisPoint: 10,
+	})
+
+	penalty, ok := k.GetPenalty(" \tPENALTY-UPSERT-CANON-1\n ")
+	if !ok {
+		t.Fatal("expected canonicalized penalty lookup to succeed")
+	}
+	if penalty.PenaltyID != "penalty-upsert-canon-1" {
+		t.Fatalf("expected canonical penalty id %q, got %q", "penalty-upsert-canon-1", penalty.PenaltyID)
+	}
+	if penalty.EvidenceID != "evidence-upsert-canon-1" {
+		t.Fatalf("expected canonical evidence id %q on penalty, got %q", "evidence-upsert-canon-1", penalty.EvidenceID)
+	}
+}
+
 func TestKeeperListEvidenceDeterministicOrderByID(t *testing.T) {
 	t.Parallel()
 
@@ -292,6 +330,81 @@ func TestSubmitEvidenceIdempotentReplay(t *testing.T) {
 	}
 	if first != second {
 		t.Fatalf("expected replay to return identical record, first=%+v second=%+v", first, second)
+	}
+}
+
+func TestSubmitEvidenceAndApplyPenaltyCanonicalizeIDsForIdempotencyAndLookup(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	firstEvidence, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    " \nEVIDENCE-SUBMIT-CANON-1\t ",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-submit-canon-1"),
+		ViolationType: "double-sign",
+	})
+	if err != nil {
+		t.Fatalf("first submit failed: %v", err)
+	}
+	if firstEvidence.EvidenceID != "evidence-submit-canon-1" {
+		t.Fatalf("expected canonical evidence id %q, got %q", "evidence-submit-canon-1", firstEvidence.EvidenceID)
+	}
+
+	replayedEvidence, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    " \tEVIDENCE-SUBMIT-CANON-1\n ",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-submit-canon-1"),
+		ViolationType: "double-sign",
+	})
+	if err != nil {
+		t.Fatalf("replayed submit failed: %v", err)
+	}
+	if replayedEvidence != firstEvidence {
+		t.Fatalf("expected canonicalized replay to be idempotent, first=%+v replay=%+v", firstEvidence, replayedEvidence)
+	}
+
+	lookupEvidence, ok := k.GetEvidence(" \tEVIDENCE-SUBMIT-CANON-1\n ")
+	if !ok {
+		t.Fatal("expected canonicalized evidence lookup to succeed")
+	}
+	if lookupEvidence != firstEvidence {
+		t.Fatalf("expected canonicalized evidence lookup %+v to match first %+v", lookupEvidence, firstEvidence)
+	}
+
+	firstPenalty, err := k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       " \nPENALTY-APPLY-CANON-1\t ",
+		EvidenceID:      " \tEVIDENCE-SUBMIT-CANON-1\n ",
+		SlashBasisPoint: 25,
+	})
+	if err != nil {
+		t.Fatalf("first apply failed: %v", err)
+	}
+	if firstPenalty.PenaltyID != "penalty-apply-canon-1" {
+		t.Fatalf("expected canonical penalty id %q, got %q", "penalty-apply-canon-1", firstPenalty.PenaltyID)
+	}
+	if firstPenalty.EvidenceID != "evidence-submit-canon-1" {
+		t.Fatalf("expected canonical evidence id %q on penalty, got %q", "evidence-submit-canon-1", firstPenalty.EvidenceID)
+	}
+
+	replayedPenalty, err := k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       " \tPENALTY-APPLY-CANON-1\n ",
+		EvidenceID:      "evidence-submit-canon-1",
+		SlashBasisPoint: 25,
+	})
+	if err != nil {
+		t.Fatalf("replayed apply failed: %v", err)
+	}
+	if replayedPenalty != firstPenalty {
+		t.Fatalf("expected canonicalized penalty replay to be idempotent, first=%+v replay=%+v", firstPenalty, replayedPenalty)
+	}
+
+	lookupPenalty, ok := k.GetPenalty(" \tPENALTY-APPLY-CANON-1\n ")
+	if !ok {
+		t.Fatal("expected canonicalized penalty lookup to succeed")
+	}
+	if lookupPenalty != firstPenalty {
+		t.Fatalf("expected canonicalized penalty lookup %+v to match first %+v", lookupPenalty, firstPenalty)
 	}
 }
 
@@ -836,6 +949,49 @@ func TestApplyPenaltyInvalid(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid penalty to fail")
+	}
+}
+
+func TestApplyPenaltyRejectsNoOpPenaltyWithoutAdvancingEvidence(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	evidence, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-penalty-noop",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-noop"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+
+	_, err = k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:  "penalty-noop",
+		EvidenceID: evidence.EvidenceID,
+	})
+	if err == nil {
+		t.Fatal("expected no-op penalty to fail")
+	}
+	if !strings.Contains(err.Error(), "must slash or jail") {
+		t.Fatalf("expected no-op validation error, got %v", err)
+	}
+
+	if _, ok := k.GetPenalty("penalty-noop"); ok {
+		t.Fatal("expected no penalty to be persisted for no-op rejection")
+	}
+
+	evidenceAfter, ok := k.GetEvidence(evidence.EvidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to remain available", evidence.EvidenceID)
+	}
+	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected evidence status %q to remain unchanged after no-op rejection, got %q",
+			chaintypes.ReconciliationPending,
+			evidenceAfter.Status,
+		)
 	}
 }
 

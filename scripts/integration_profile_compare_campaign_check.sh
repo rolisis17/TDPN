@@ -103,6 +103,81 @@ cat >"$CAMPAIGN_JSON" <<EOF_CAMPAIGN
 }
 EOF_CAMPAIGN
 
+TREND_WEAK_JSON="$TMP_DIR/profile_compare_trend_summary_weak.json"
+cat >"$TREND_WEAK_JSON" <<'EOF_TREND_WEAK'
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "trend pass but weak support",
+  "summary": {
+    "reports_total": 4,
+    "pass_reports": 4,
+    "warn_reports": 0,
+    "fail_reports": 0
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "vote_fallback",
+    "rationale": "weak trend fallback",
+    "recommendation_support_rate_pct": 70.0
+  },
+  "profiles": []
+}
+EOF_TREND_WEAK
+
+CAMPAIGN_WEAK_EVIDENCE_JSON="$TMP_DIR/profile_compare_campaign_summary_weak_evidence.json"
+cat >"$CAMPAIGN_WEAK_EVIDENCE_JSON" <<EOF_CAMPAIGN_WEAK_EVIDENCE
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass but weak recommendation evidence",
+  "summary": {
+    "runs_total": 4,
+    "runs_pass": 4,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 4,
+    "m4_micro_relay_evidence": {
+      "available": true,
+      "micro_relay_quality": {
+        "available": true,
+        "quality_band": "good",
+        "quality_score": 92,
+        "quality_score_avg": 92
+      },
+      "adaptive_demotion_promotion": {
+        "available": true,
+        "demotion_signal_count": 0,
+        "promotion_signal_count": 4,
+        "demotion_candidate": false,
+        "promotion_candidate": true
+      },
+      "trust_tier_port_unlock_wiring": {
+        "present": true,
+        "evidence_hits": 2
+      }
+    }
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "vote_fallback",
+    "rationale": "fallback recommendation with weak support"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass but weak support",
+    "summary_json": "$TREND_WEAK_JSON"
+  },
+  "selected_summaries": [
+    "$COMPARE_SUMMARY_POLICY_JSON"
+  ],
+  "runs": []
+}
+EOF_CAMPAIGN_WEAK_EVIDENCE
+
 echo "[profile-compare-campaign-check] baseline default m4 policy is fail-closed"
 BASELINE_SUMMARY="$TMP_DIR/campaign_check_baseline_default_m4_fail_closed.json"
 set +e
@@ -122,7 +197,45 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=1' 
   cat /tmp/integration_profile_compare_campaign_check_baseline.log
   exit 1
 fi
-if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 1 and .observed.recommended_profile == "balanced" and .observed.selection_policy_evidence.present == true and .observed.selection_policy_evidence.valid == true and .observed.selection_policy_evidence.selected_summaries_total == 1 and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and .inputs.policy.require_runtime_actuation_status_pass == true and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_quality_evidence")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("micro_relay_quality_status_not_pass")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_demotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_promotion_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("missing_trust_tier_port_unlock_policy")) != null and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .decision_diagnostics.m4_policy.gate_summary.required_total == 6 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 6 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 6 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_status_pass.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_promotion_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail"' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc == 1
+  and .observed.recommended_profile == "balanced"
+  and .observed.selection_policy_evidence.present == true
+  and .observed.selection_policy_evidence.valid == true
+  and .observed.selection_policy_evidence.selected_summaries_total == 1
+  and .observed.selection_policy_evidence.selected_summaries_with_policy_valid == 1
+  and .inputs.policy.require_min_runs_total == 5
+  and .inputs.policy.require_max_runs_fail == 0
+  and .inputs.policy.require_max_runs_warn == 0
+  and .inputs.policy.require_min_runs_with_summary == 5
+  and .inputs.policy.require_recommendation_support_rate_pct == 75
+  and .inputs.policy.require_trend_source == "policy_reliability_latency"
+  and .inputs.policy.require_selection_policy_present == true
+  and .inputs.policy.require_selection_policy_valid == true
+  and .inputs.policy.require_micro_relay_quality_evidence == true
+  and .inputs.policy.require_micro_relay_quality_status_pass == true
+  and .inputs.policy.require_micro_relay_demotion_policy == true
+  and .inputs.policy.require_micro_relay_promotion_policy == true
+  and .inputs.policy.require_trust_tier_port_unlock_policy == true
+  and .inputs.policy.require_runtime_actuation_status_pass == true
+  and ((.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_quality_evidence")) != null)
+  and ((.decision_diagnostics.m4_policy.unmet_requirements | index("micro_relay_quality_status_not_pass")) != null)
+  and ((.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_demotion_policy")) != null)
+  and ((.decision_diagnostics.m4_policy.unmet_requirements | index("missing_micro_relay_promotion_policy")) != null)
+  and ((.decision_diagnostics.m4_policy.unmet_requirements | index("missing_trust_tier_port_unlock_policy")) != null)
+  and ((.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null)
+  and .decision_diagnostics.m4_policy.gate_summary.required_total == 6
+  and .decision_diagnostics.m4_policy.gate_summary.required_failed == 6
+  and ((.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 6)
+  and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "fail"
+  and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_status_pass.status == "fail"
+  and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "fail"
+  and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_promotion_policy.status == "fail"
+  and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "fail"
+  and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail"
+' "$BASELINE_SUMMARY" >/dev/null 2>&1; then
   echo "baseline default m4 fail-closed summary missing expected fields"
   cat "$BASELINE_SUMMARY"
   exit 1
@@ -156,6 +269,68 @@ if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | le
   exit 1
 fi
 
+echo "[profile-compare-campaign-check] hardened defaults fail-close weak evidence"
+WEAK_DEFAULT_SUMMARY="$TMP_DIR/campaign_check_weak_default_fail.json"
+set +e
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_WEAK_EVIDENCE_JSON" \
+  --summary-json "$WEAK_DEFAULT_SUMMARY" >/tmp/integration_profile_compare_campaign_check_weak_default_fail.log 2>&1
+weak_default_rc=$?
+set -e
+if [[ "$weak_default_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for weak-evidence default policy failure"
+  cat /tmp/integration_profile_compare_campaign_check_weak_default_fail.log
+  exit 1
+fi
+for expected in \
+  'insufficient evidence for default recommendation (fail-closed)' \
+  'runs_total below required minimum' \
+  'runs_with_summary below required minimum' \
+  'recommendation support rate below threshold' \
+  'trend source is not allowed'; do
+  if ! rg -F -q "$expected" /tmp/integration_profile_compare_campaign_check_weak_default_fail.log; then
+    echo "expected weak-evidence failure reason missing: $expected"
+    cat /tmp/integration_profile_compare_campaign_check_weak_default_fail.log
+    exit 1
+  fi
+done
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc == 1
+  and (.notes | contains("insufficient evidence for default recommendation"))
+  and .decision_diagnostics.insufficient_evidence.triggered == true
+  and (.decision_diagnostics.insufficient_evidence.reasons | length) >= 4
+  and .inputs.policy.require_min_runs_total == 5
+  and .inputs.policy.require_min_runs_with_summary == 5
+  and .inputs.policy.require_recommendation_support_rate_pct == 75
+  and .inputs.policy.require_trend_source == "policy_reliability_latency"
+' "$WEAK_DEFAULT_SUMMARY" >/dev/null 2>&1; then
+  echo "weak-evidence default summary missing hardened default diagnostics"
+  cat "$WEAK_DEFAULT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] explicit overrides preserve weak-evidence compatibility"
+WEAK_OVERRIDE_SUMMARY="$TMP_DIR/campaign_check_weak_override_pass.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_WEAK_EVIDENCE_JSON" \
+  --require-min-runs-total 4 \
+  --require-min-runs-with-summary 4 \
+  --require-recommendation-support-rate-pct 70 \
+  --require-trend-source policy_reliability_latency,vote_fallback,safe_default_fallback \
+  --summary-json "$WEAK_OVERRIDE_SUMMARY" >/tmp/integration_profile_compare_campaign_check_weak_override_pass.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_weak_override_pass.log; then
+  echo "expected GO output for explicit weak-evidence overrides not found"
+  cat /tmp/integration_profile_compare_campaign_check_weak_override_pass.log
+  exit 1
+fi
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .decision_diagnostics.insufficient_evidence.triggered == false and (.decision_diagnostics.insufficient_evidence.reasons | length) == 0 and .inputs.policy.require_min_runs_total == 4 and .inputs.policy.require_min_runs_with_summary == 4 and .inputs.policy.require_recommendation_support_rate_pct == 70 and .inputs.policy.require_trend_source == "policy_reliability_latency,vote_fallback,safe_default_fallback"' "$WEAK_OVERRIDE_SUMMARY" >/dev/null 2>&1; then
+  echo "weak-evidence override summary missing expected override diagnostics"
+  cat "$WEAK_OVERRIDE_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-check] support rate fail-close"
 set +e
 ./scripts/profile_compare_campaign_check.sh \
@@ -175,7 +350,7 @@ if ! rg -q 'recommendation support rate below threshold' /tmp/integration_profil
   exit 1
 fi
 
-echo "[profile-compare-campaign-check] selection policy evidence fail-close: present"
+echo "[profile-compare-campaign-check] selection policy evidence fail-close by default"
 CAMPAIGN_NO_POLICY_JSON="$TMP_DIR/profile_compare_campaign_summary_no_policy.json"
 cat >"$CAMPAIGN_NO_POLICY_JSON" <<EOF_CAMPAIGN_NO_POLICY
 {
@@ -209,18 +384,41 @@ EOF_CAMPAIGN_NO_POLICY
 set +e
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_NO_POLICY_JSON" \
-  --require-selection-policy-present 1 \
   --summary-json "$TMP_DIR/campaign_check_selection_policy_present_fail.json" >/tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log 2>&1
 selection_policy_present_fail_rc=$?
 set -e
 if [[ "$selection_policy_present_fail_rc" -eq 0 ]]; then
-  echo "expected non-zero rc when selection policy evidence presence is required"
+  echo "expected non-zero rc when default selection policy evidence is missing"
   cat /tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log
   exit 1
 fi
 if ! rg -q 'selection policy evidence is required but not present' /tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log; then
   echo "expected selection-policy present failure reason missing"
   cat /tmp/integration_profile_compare_campaign_check_selection_policy_present_fail.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] selection policy default can be overridden explicitly"
+SELECTION_POLICY_OVERRIDE_SUMMARY="$TMP_DIR/campaign_check_selection_policy_override_pass.json"
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_NO_POLICY_JSON" \
+  --require-selection-policy-present 0 \
+  --require-selection-policy-valid 0 \
+  --require-micro-relay-quality-evidence 0 \
+  --require-micro-relay-quality-status-pass 0 \
+  --require-micro-relay-demotion-policy 0 \
+  --require-micro-relay-promotion-policy 0 \
+  --require-trust-tier-port-unlock-policy 0 \
+  --require-runtime-actuation-status-pass 0 \
+  --summary-json "$SELECTION_POLICY_OVERRIDE_SUMMARY" >/tmp/integration_profile_compare_campaign_check_selection_policy_override_pass.log 2>&1
+if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/integration_profile_compare_campaign_check_selection_policy_override_pass.log; then
+  echo "expected GO output for explicit selection-policy override not found"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_override_pass.log
+  exit 1
+fi
+if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .inputs.policy.require_selection_policy_present == false and .inputs.policy.require_selection_policy_valid == false' "$SELECTION_POLICY_OVERRIDE_SUMMARY" >/dev/null 2>&1; then
+  echo "selection-policy override summary missing expected fields"
+  cat "$SELECTION_POLICY_OVERRIDE_SUMMARY"
   exit 1
 fi
 
@@ -357,6 +555,8 @@ echo "[profile-compare-campaign-check] m4 policy pass"
 M4_PASS_SUMMARY="$TMP_DIR/campaign_check_m4_pass.json"
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_M4_PASS_JSON" \
+  --require-selection-policy-present 0 \
+  --require-selection-policy-valid 0 \
   --require-micro-relay-quality-evidence 1 \
   --require-micro-relay-quality-status-pass 1 \
   --require-micro-relay-demotion-policy 1 \
@@ -774,6 +974,8 @@ EOF_CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS
 M4_RUNTIME_EXPLICIT_PASS_SUMMARY="$TMP_DIR/campaign_check_m4_runtime_explicit_pass.json"
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_M4_RUNTIME_EXPLICIT_PASS_JSON" \
+  --require-selection-policy-present 0 \
+  --require-selection-policy-valid 0 \
   --require-micro-relay-quality-evidence 0 \
   --require-micro-relay-quality-status-pass 0 \
   --require-micro-relay-demotion-policy 0 \
@@ -908,6 +1110,10 @@ EOF_CAMPAIGN_RUNTIME_ROOT_SIGNAL
 RUNTIME_ROOT_SIGNAL_SUMMARY="$TMP_DIR/campaign_check_runtime_root_signal.json"
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_RUNTIME_ROOT_SIGNAL_JSON" \
+  --require-min-runs-total 3 \
+  --require-min-runs-with-summary 3 \
+  --require-selection-policy-present 0 \
+  --require-selection-policy-valid 0 \
   --require-micro-relay-quality-evidence 0 \
   --require-micro-relay-quality-status-pass 0 \
   --require-micro-relay-demotion-policy 0 \
@@ -1160,6 +1366,10 @@ EOF_CAMPAIGN_RUNTIME_SELECTED_PASS
 RUNTIME_SELECTED_PASS_SUMMARY="$TMP_DIR/campaign_check_runtime_selected_pass.json"
 ./scripts/profile_compare_campaign_check.sh \
   --campaign-summary-json "$CAMPAIGN_RUNTIME_SELECTED_PASS_JSON" \
+  --require-min-runs-total 3 \
+  --require-min-runs-with-summary 3 \
+  --require-selection-policy-present 0 \
+  --require-selection-policy-valid 0 \
   --require-micro-relay-quality-evidence 0 \
   --require-micro-relay-quality-status-pass 0 \
   --require-micro-relay-demotion-policy 0 \

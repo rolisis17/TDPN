@@ -28,6 +28,10 @@ type FileStore struct {
 	path      string
 	evidence  map[string]types.SlashEvidence
 	penalties map[string]types.PenaltyDecision
+
+	// persistFailureInjector is nil in production paths and can be set by tests
+	// to deterministically fail persistence before any filesystem mutation.
+	persistFailureInjector func() error
 }
 
 func NewFileStore(path string) (*FileStore, error) {
@@ -112,6 +116,33 @@ func (s *FileStore) UpsertPenaltyWithError(record types.PenaltyDecision) error {
 	return nil
 }
 
+// UpsertPenaltyAndEvidenceWithError persists penalty and evidence updates atomically by writing
+// a single snapshot that contains both changes.
+func (s *FileStore) UpsertPenaltyAndEvidenceWithError(penalty types.PenaltyDecision, evidence types.SlashEvidence) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previousEvidence, hadPreviousEvidence := s.evidence[evidence.EvidenceID]
+	previousPenalty, hadPreviousPenalty := s.penalties[penalty.PenaltyID]
+
+	s.evidence[evidence.EvidenceID] = evidence
+	s.penalties[penalty.PenaltyID] = penalty
+	if err := s.persistLocked(); err != nil {
+		if hadPreviousEvidence {
+			s.evidence[evidence.EvidenceID] = previousEvidence
+		} else {
+			delete(s.evidence, evidence.EvidenceID)
+		}
+		if hadPreviousPenalty {
+			s.penalties[penalty.PenaltyID] = previousPenalty
+		} else {
+			delete(s.penalties, penalty.PenaltyID)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *FileStore) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -175,6 +206,12 @@ func (s *FileStore) persist() error {
 }
 
 func (s *FileStore) persistLocked() error {
+	if s.persistFailureInjector != nil {
+		if err := s.persistFailureInjector(); err != nil {
+			return err
+		}
+	}
+
 	state := fileStoreState{
 		Evidence:  s.evidence,
 		Penalties: s.penalties,

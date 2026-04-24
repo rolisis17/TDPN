@@ -235,6 +235,44 @@ func TestMsgServerDistributeRewardInvalidPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerDistributeRewardMissingPayoutRefPropagation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.AccrueReward(AccrueRewardRequest{
+		Accrual: types.RewardAccrual{
+			AccrualID:  "acc-missing-payout-msg",
+			SessionID:  "sess-missing-payout-msg",
+			ProviderID: "provider-missing-payout-msg",
+			Amount:     25,
+		},
+	}); err != nil {
+		t.Fatalf("accrue failed: %v", err)
+	}
+
+	resp, err := server.DistributeReward(DistributeRewardRequest{
+		Distribution: types.DistributionRecord{
+			DistributionID: "dist-missing-payout-msg",
+			AccrualID:      "acc-missing-payout-msg",
+			PayoutRef:      " \t ",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid distribution error")
+	}
+	if !errors.Is(err, ErrInvalidDistribution) {
+		t.Fatalf("expected ErrInvalidDistribution, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false for missing payout ref rejection")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false for missing payout ref rejection")
+	}
+}
+
 func TestMsgServerDistributeRewardConflictPropagation(t *testing.T) {
 	t.Parallel()
 

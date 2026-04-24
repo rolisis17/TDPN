@@ -31,6 +31,16 @@ func NormalizeViolationType(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+// NormalizeEvidenceID canonicalizes evidence identifiers for storage and lookup.
+func NormalizeEvidenceID(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// NormalizePenaltyID canonicalizes penalty identifiers for storage and lookup.
+func NormalizePenaltyID(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 // CanonicalObjectiveEvidenceIdentity returns a canonical identity key for
 // machine-verifiable incidents so equivalent case/whitespace variants
 // cannot be replayed under a different EvidenceID.
@@ -72,7 +82,7 @@ type PenaltyDecision struct {
 }
 
 func (e SlashEvidence) ValidateBasic() error {
-	evidenceID := strings.TrimSpace(e.EvidenceID)
+	evidenceID := NormalizeEvidenceID(e.EvidenceID)
 	if evidenceID == "" {
 		return errors.New("evidence id is required")
 	}
@@ -112,14 +122,14 @@ func (e SlashEvidence) ValidateBasic() error {
 }
 
 func (d PenaltyDecision) ValidateBasic() error {
-	penaltyID := strings.TrimSpace(d.PenaltyID)
+	penaltyID := NormalizePenaltyID(d.PenaltyID)
 	if penaltyID == "" {
 		return errors.New("penalty id is required")
 	}
 	if len(penaltyID) > maxPenaltyIDLength {
 		return errors.New("penalty id exceeds 128 characters")
 	}
-	evidenceID := strings.TrimSpace(d.EvidenceID)
+	evidenceID := NormalizeEvidenceID(d.EvidenceID)
 	if evidenceID == "" {
 		return errors.New("evidence id is required")
 	}
@@ -128,6 +138,9 @@ func (d PenaltyDecision) ValidateBasic() error {
 	}
 	if d.SlashBasisPoint > 10000 {
 		return errors.New("slash basis points cannot exceed 10000")
+	}
+	if d.SlashBasisPoint == 0 && !d.Jailed {
+		return errors.New("penalty decision must slash or jail")
 	}
 	return nil
 }

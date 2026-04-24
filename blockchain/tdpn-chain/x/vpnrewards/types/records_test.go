@@ -75,6 +75,7 @@ func TestDistributionRecordValidateBasic(t *testing.T) {
 	base := DistributionRecord{
 		DistributionID: "dist-1",
 		AccrualID:      "acc-1",
+		PayoutRef:      "payout-1",
 	}
 
 	tests := []struct {
@@ -100,8 +101,18 @@ func TestDistributionRecordValidateBasic(t *testing.T) {
 		},
 		{
 			name:    "whitespace-only accrual id",
-			record:  DistributionRecord{DistributionID: base.DistributionID, AccrualID: "\t"},
+			record:  DistributionRecord{DistributionID: base.DistributionID, AccrualID: "\t", PayoutRef: base.PayoutRef},
 			wantErr: "accrual id is required",
+		},
+		{
+			name:    "missing payout ref",
+			record:  DistributionRecord{DistributionID: base.DistributionID, AccrualID: base.AccrualID},
+			wantErr: "payout ref is required",
+		},
+		{
+			name:    "whitespace-only payout ref",
+			record:  DistributionRecord{DistributionID: base.DistributionID, AccrualID: base.AccrualID, PayoutRef: " \n\t "},
+			wantErr: "payout ref is required",
 		},
 	}
 

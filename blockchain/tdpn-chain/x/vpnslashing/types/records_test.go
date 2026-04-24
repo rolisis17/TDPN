@@ -29,6 +29,10 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 	}{
 		{name: "valid sha256 lowercase", record: base},
 		{
+			name:   "valid canonicalizable evidence id",
+			record: SlashEvidence{EvidenceID: " \nEVIDENCE-1\t ", Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
+		},
+		{
 			name:   "valid sha256 uppercase",
 			record: SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: validSHA256Upper, ViolationType: base.ViolationType},
 		},
@@ -196,6 +200,14 @@ func TestPenaltyDecisionValidateBasic(t *testing.T) {
 	}{
 		{name: "valid", record: base},
 		{
+			name:   "valid canonicalizable ids",
+			record: PenaltyDecision{PenaltyID: " \tPENALTY-1 ", EvidenceID: " \nEVIDENCE-1 ", SlashBasisPoint: base.SlashBasisPoint},
+		},
+		{
+			name:   "valid jail-only penalty",
+			record: PenaltyDecision{PenaltyID: "penalty-jail-only", EvidenceID: base.EvidenceID, SlashBasisPoint: 0, Jailed: true},
+		},
+		{
 			name:    "missing penalty id",
 			record:  PenaltyDecision{EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint},
 			wantErr: "penalty id is required",
@@ -214,6 +226,11 @@ func TestPenaltyDecisionValidateBasic(t *testing.T) {
 			name:    "penalty id too long",
 			record:  PenaltyDecision{PenaltyID: strings.Repeat("p", 129), EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint},
 			wantErr: "penalty id exceeds 128 characters",
+		},
+		{
+			name:    "no-op penalty decision",
+			record:  PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: 0, Jailed: false},
+			wantErr: "penalty decision must slash or jail",
 		},
 	}
 
@@ -234,6 +251,17 @@ func TestPenaltyDecisionValidateBasic(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNormalizeIDHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := NormalizeEvidenceID(" \nEVIDENCE-ABC\t "); got != "evidence-abc" {
+		t.Fatalf("expected normalized evidence id %q, got %q", "evidence-abc", got)
+	}
+	if got := NormalizePenaltyID(" \nPENALTY-ABC\t "); got != "penalty-abc" {
+		t.Fatalf("expected normalized penalty id %q, got %q", "penalty-abc", got)
 	}
 }
 

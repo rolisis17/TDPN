@@ -342,6 +342,48 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutOperatorQuor
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsMultiDirectoryWithoutRelayVoteQuorum(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      1,
+		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     1,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict validation error")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_DIRECTORY_MIN_RELAY_VOTES>=2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictAllowsMultiDirectoryWithRelayVoteQuorum(t *testing.T) {
+	s := &Service{
+		betaStrict:            true,
+		liveWGMode:            true,
+		directoryTrustStrict:  true,
+		requireDistinctExitOp: true,
+		operatorID:            "op-entry",
+		puzzleSecret:          "entry-secret-012345",
+		puzzleDifficulty:      1,
+		directoryURLs:         []string{"http://127.0.0.1:8081", "http://127.0.0.1:8085"},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     2,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected strict config valid, got %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigRejectsDistinctOperatorWithoutEntryOperatorID(t *testing.T) {
 	s := &Service{
 		betaStrict:            false,

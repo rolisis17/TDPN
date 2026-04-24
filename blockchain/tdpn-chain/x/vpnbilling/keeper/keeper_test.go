@@ -446,10 +446,104 @@ func TestKeeperFinalizeSettlementValidation(t *testing.T) {
 
 	_, err := k.FinalizeSettlement(types.SettlementRecord{
 		SettlementID: "set-1",
+		AssetDenom:   "uusdc",
 		BilledAmount: 50,
 	})
 	if err == nil {
 		t.Fatal("expected validation error for missing session id")
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsNegativeUsageBytesWithoutAdvancingReservation(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-negative-usage",
+		SessionID:     "sess-negative-usage",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-negative-usage",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  10,
+		UsageBytes:    -1,
+		AssetDenom:    reservation.AssetDenom,
+	})
+	if err == nil {
+		t.Fatal("expected negative usage bytes validation error")
+	}
+	if !strings.Contains(err.Error(), "usage bytes cannot be negative") {
+		t.Fatalf("expected usage bytes validation error, got %v", err)
+	}
+
+	if _, ok := k.GetSettlement("set-negative-usage"); ok {
+		t.Fatal("expected settlement to remain absent on negative usage bytes rejection")
+	}
+
+	reservationAfter, ok := k.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatalf("expected reservation %q to remain available", reservation.ReservationID)
+	}
+	if reservationAfter.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected reservation status %q to remain unchanged, got %q",
+			chaintypes.ReconciliationPending,
+			reservationAfter.Status,
+		)
+	}
+}
+
+func TestKeeperFinalizeSettlementRejectsEmptyAssetDenomWithoutAdvancingReservation(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-empty-denom",
+		SessionID:     "sess-empty-denom",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-empty-denom",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  10,
+		AssetDenom:    " \t ",
+	})
+	if err == nil {
+		t.Fatal("expected empty asset denom validation error")
+	}
+	if !strings.Contains(err.Error(), "asset denom is required") {
+		t.Fatalf("expected asset denom validation error, got %v", err)
+	}
+
+	if _, ok := k.GetSettlement("set-empty-denom"); ok {
+		t.Fatal("expected settlement to remain absent on empty asset denom rejection")
+	}
+
+	reservationAfter, ok := k.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatalf("expected reservation %q to remain available", reservation.ReservationID)
+	}
+	if reservationAfter.Status != chaintypes.ReconciliationPending {
+		t.Fatalf(
+			"expected reservation status %q to remain unchanged, got %q",
+			chaintypes.ReconciliationPending,
+			reservationAfter.Status,
+		)
 	}
 }
 
@@ -482,6 +576,7 @@ func TestKeeperFinalizeSettlementAdvancesReservationStatus(t *testing.T) {
 			reservation, err := k.CreateReservation(types.CreditReservation{
 				ReservationID: "res-1",
 				SessionID:     "sess-1",
+				AssetDenom:    "uusdc",
 				Amount:        100,
 				Status:        tc.initial,
 			})
@@ -497,6 +592,7 @@ func TestKeeperFinalizeSettlementAdvancesReservationStatus(t *testing.T) {
 				ReservationID: reservation.ReservationID,
 				SessionID:     reservation.SessionID,
 				BilledAmount:  10,
+				AssetDenom:    reservation.AssetDenom,
 			})
 			if err != nil {
 				t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)

@@ -675,7 +675,7 @@ Notes:
   - profile-compare-campaign-check applies fail-closed policy gates to campaign artifacts and emits one GO/NO-GO decision for default-profile readiness.
   - profile-compare-campaign-signoff runs campaign-check fail-closed in one command; `--refresh-campaign 1` attempts a fresh campaign run, while `--refresh-campaign 0` reuses existing campaign artifacts, and emits one signoff summary JSON for handoff. In invite-key flows, prefer `--campaign-subject` (alias `--subject`) with a real key value; fallback order is `CAMPAIGN_SUBJECT` then `INVITE_KEY`.
   - profile-default-gate-run wraps profile-compare-campaign-signoff for final optional VPN default-profile gating with A/B endpoint wait-retry preflight and roadmap docker defaults. Auth mode supports invite-key subject flags or anon-credential pass-through flags, and rejects mixed subject+anon modes.
-  - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, supports explicit directory endpoint overrides via `--directory-a-url/--directory-b-url`, auto-enables remote HTTP probe opt-in only when resolved directory URLs are non-loopback `http://`, and calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping when explicit URLs are not provided.
+  - profile-default-gate-live is a convenience wrapper for real-host runs that derives A/B hosts from `A_HOST`/`B_HOST` and subject from `INVITE_KEY` when flags are omitted, supports explicit directory endpoint overrides via `--directory-a-url/--directory-b-url`, keeps remote HTTP probing fail-closed by default unless `--allow-remote-http-probe 1` is explicitly provided, and calls `profile-default-gate-run` with standard `:8081-:8084` endpoint mapping when explicit URLs are not provided.
   - profile-default-gate-stability-evidence-pack ingests latest profile-default-gate stability run/check/cycle summaries and emits a compact fail-closed evidence pack JSON+markdown artifact for promotion handoff.
   - profile-default-gate-evidence-pack is a compatibility alias for profile-default-gate-stability-evidence-pack.
   - profile-default-gate-stability-promotion-check evaluates existing profile-default-gate stability-cycle evidence for promotion readiness (ad hoc/manual input path) and emits one fail-closed GO/NO-GO summary.
@@ -10302,22 +10302,6 @@ profile_default_gate_live() {
   local directory_a_source="host-default"
   local directory_b_source="host-default"
 
-  requires_remote_http_probe_opt_in_01() {
-    local endpoint_url endpoint_host
-    endpoint_url="$(trim_url "${1:-}")"
-    if [[ "$endpoint_url" != http://* ]]; then
-      return 1
-    fi
-    endpoint_host="$(host_from_url "$endpoint_url")"
-    endpoint_host="$(printf '%s' "$endpoint_host" | tr '[:upper:]' '[:lower:]')"
-    endpoint_host="${endpoint_host#[}"
-    endpoint_host="${endpoint_host%]}"
-    if host_is_loopback "$endpoint_host"; then
-      return 1
-    fi
-    return 0
-  }
-
   if [[ -n "$directory_a_url_override" ]]; then
     directory_a="$directory_a_url_override"
     directory_a_source="explicit-url"
@@ -10335,8 +10319,6 @@ profile_default_gate_live() {
   exit_a="$(url_from_host_port "$host_a" 8084)"
   if [[ -n "$allow_remote_http_probe_override" ]]; then
     allow_remote_http_probe_effective="$allow_remote_http_probe_override"
-  elif requires_remote_http_probe_opt_in_01 "$directory_a" || requires_remote_http_probe_opt_in_01 "$directory_b"; then
-    allow_remote_http_probe_effective="1"
   fi
 
   redact_url_for_log_01() {

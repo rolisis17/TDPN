@@ -412,6 +412,9 @@ func (s *Service) validateRuntimeConfig() error {
 			if s.directoryMinOperators < 2 {
 				return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_MIN_OPERATORS>=2 when multiple DIRECTORY_URLS are configured")
 			}
+			if s.directoryMinVotes < 2 {
+				return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_MIN_RELAY_VOTES>=2 when multiple DIRECTORY_URLS are configured")
+			}
 		}
 	}
 	if s.prodStrict {
@@ -595,7 +598,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if reason := s.validateMiddleRelayRequest(r.Context(), req, route); reason != "" {
+	if reason := s.validateMiddleRelayRequest(r.Context(), &req, route); reason != "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: reason})
 		return
@@ -1271,15 +1274,26 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	return best, nil
 }
 
-func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.PathOpenRequest, route exitRoute) string {
+func (s *Service) validateMiddleRelayRequest(ctx context.Context, req *proto.PathOpenRequest, route exitRoute) string {
 	middleRelayID := strings.TrimSpace(req.MiddleRelayID)
+	exitID := strings.TrimSpace(req.ExitID)
 	if middleRelayID == "" {
-		if s.requireMiddleRelay {
+		if !s.requireMiddleRelay {
+			return ""
+		}
+		selected, err := s.selectMiddleRelayDescriptor(ctx, route, exitID)
+		if err != nil {
+			log.Printf("entry middle relay auto-selection failed exit=%s err=%v", strings.TrimSpace(req.ExitID), err)
 			return "middle-relay-required"
 		}
+		selectedRelayID := strings.TrimSpace(selected.RelayID)
+		if selectedRelayID == "" {
+			log.Printf("entry middle relay auto-selection returned empty relay id exit=%s", strings.TrimSpace(req.ExitID))
+			return "middle-relay-required"
+		}
+		req.MiddleRelayID = selectedRelayID
 		return ""
 	}
-	exitID := strings.TrimSpace(req.ExitID)
 	if exitID != "" && middleRelayID == exitID {
 		return "middle-relay-equals-exit"
 	}
@@ -1288,6 +1302,10 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 	if err != nil {
 		return "unknown-middle-relay"
 	}
+	return s.validateMiddleRelayDescriptor(desc, route)
+}
+
+func (s *Service) validateMiddleRelayDescriptor(desc proto.RelayDescriptor, route exitRoute) string {
 	requireCanonicalMiddleRole := s.betaStrict || s.prodStrict || s.requireMiddleRelay
 	if !relaySupportsMiddleDescriptorForPolicy(desc, requireCanonicalMiddleRole) {
 		return "middle-relay-role-invalid"
@@ -1308,6 +1326,92 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 		return "middle-exit-operator-collision"
 	}
 	return ""
+}
+
+func (s *Service) selectMiddleRelayDescriptor(ctx context.Context, route exitRoute, exitID string) (proto.RelayDescriptor, error) {
+	now := time.Now()
+	exitID = strings.TrimSpace(exitID)
+	requiredSources := maxInt(1, s.directoryMinSources)
+	requiredOperators := maxInt(1, s.directoryMinOperators)
+	requiredVotes := maxInt(1, s.directoryMinVotes)
+
+	candidates := make(map[string]relayDescriptorCandidate)
+	descriptorVoters := make(map[string]map[string]struct{})
+	successSources := 0
+	successOperators := make(map[string]struct{})
+	var lastErr error
+
+	for _, durl := range s.directoryURLs {
+		dirPubs, sourceOperator, err := s.fetchDirectoryPubKeys(ctx, durl)
+		if err != nil {
+			lastErr = err
+			log.Printf("entry directory pubkey fetch failed url=%s err=%v", durl, err)
+			continue
+		}
+		relays, err := s.fetchRelaysVerified(ctx, durl, dirPubs)
+		if err != nil {
+			lastErr = err
+			log.Printf("entry directory relays fetch failed url=%s err=%v", durl, err)
+			continue
+		}
+		successSources++
+		successOperators[sourceOperator] = struct{}{}
+		seenFromSource := make(map[string]struct{})
+		for _, desc := range relays {
+			relayID := strings.TrimSpace(desc.RelayID)
+			if relayID == "" {
+				continue
+			}
+			if exitID != "" && relayID == exitID {
+				continue
+			}
+			if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+				continue
+			}
+			if reason := s.validateMiddleRelayDescriptor(desc, route); reason != "" {
+				continue
+			}
+			key := relayDescriptorVoteKey(desc)
+			if _, alreadySeen := seenFromSource[key]; alreadySeen {
+				continue
+			}
+			seenFromSource[key] = struct{}{}
+			if !markRouteVoter(descriptorVoters, key, sourceOperator) {
+				continue
+			}
+			candidate := candidates[key]
+			if candidate.votes == 0 {
+				candidate.desc = desc
+			}
+			candidate.votes++
+			candidates[key] = candidate
+		}
+	}
+
+	if successSources < requiredSources {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("insufficient directory sources")
+		}
+		return proto.RelayDescriptor{}, fmt.Errorf("middle relay quorum not met: success=%d required=%d: %w",
+			successSources, requiredSources, lastErr)
+	}
+	if len(successOperators) < requiredOperators {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("insufficient directory operators")
+		}
+		return proto.RelayDescriptor{}, fmt.Errorf("middle relay operator quorum not met: operators=%d required=%d: %w",
+			len(successOperators), requiredOperators, lastErr)
+	}
+
+	best, ok := pickBestRelayDescriptor(candidates, requiredVotes)
+	if !ok {
+		if lastErr != nil {
+			return proto.RelayDescriptor{}, fmt.Errorf("no middle relay met vote threshold: required_votes=%d: %w",
+				requiredVotes, lastErr)
+		}
+		return proto.RelayDescriptor{}, fmt.Errorf("no middle relay met vote threshold: required_votes=%d", requiredVotes)
+	}
+	return best, nil
 }
 
 func (s *Service) resolveRelayDescriptor(ctx context.Context, relayID string) (proto.RelayDescriptor, error) {

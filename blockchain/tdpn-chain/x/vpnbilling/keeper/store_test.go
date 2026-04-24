@@ -143,6 +143,7 @@ func TestKeeperCreateAndFinalizeUseCustomStoreWithStatusProgression(t *testing.T
 	reservation, err := k.CreateReservation(types.CreditReservation{
 		ReservationID: "res-1",
 		SessionID:     "sess-1",
+		AssetDenom:    "uusdc",
 		Amount:        100,
 	})
 	if err != nil {
@@ -160,6 +161,7 @@ func TestKeeperCreateAndFinalizeUseCustomStoreWithStatusProgression(t *testing.T
 		ReservationID: reservation.ReservationID,
 		SessionID:     reservation.SessionID,
 		BilledAmount:  10,
+		AssetDenom:    reservation.AssetDenom,
 	})
 	if err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
