@@ -1352,12 +1352,14 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("no peer directory responses")
 		}
+		s.dropStalePeerSignalCacheOnSyncFailure(time.Now().UTC(), scoreSignalSources, scoreMinVotes, trustSignalSources, trustMinVotes)
 		return lastErr
 	}
 	if len(successOperators) < requiredOperators {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("insufficient peer operators")
 		}
+		s.dropStalePeerSignalCacheOnSyncFailure(time.Now().UTC(), scoreSignalSources, scoreMinVotes, trustSignalSources, trustMinVotes)
 		return fmt.Errorf("peer operator quorum not met: operators=%d required=%d: %w", len(successOperators), requiredOperators, lastErr)
 	}
 
@@ -1754,12 +1756,14 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("no issuer trust responses")
 		}
+		s.dropStaleIssuerTrustCacheOnSyncFailure(time.Now().UTC(), trustSignalSources, minVotes)
 		return lastErr
 	}
 	if len(successOperators) < requiredOperators {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("insufficient issuer operators")
 		}
+		s.dropStaleIssuerTrustCacheOnSyncFailure(time.Now().UTC(), trustSignalSources, minVotes)
 		return fmt.Errorf("issuer operator quorum not met: operators=%d required=%d: %w", len(successOperators), requiredOperators, lastErr)
 	}
 	merged := make(map[string]proto.RelayTrustAttestation)
@@ -5119,6 +5123,120 @@ func evaluateSignalCacheFreshness(lastFreshAt *time.Time, now time.Time, maxAge 
 		return true, age, false
 	}
 	return false, age, false
+}
+
+func (s *Service) dropStalePeerSignalCacheOnSyncFailure(now time.Time, scoreSignalSources int, scoreMinVotes int, trustSignalSources int, trustMinVotes int) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	peerSignalMaxAge := s.effectivePeerSignalFreshnessMaxAge()
+	peerSignalMaxAgeSec := int64(peerSignalMaxAge / time.Second)
+	var scoreCacheAgeSec int64
+	var trustCacheAgeSec int64
+	scoreCacheTimestampInitialized := false
+	trustCacheTimestampInitialized := false
+	staleCachedScoresDropped := false
+	staleCachedTrustDropped := false
+
+	s.peerMu.Lock()
+	if len(s.peerScores) > 0 {
+		stale, age, initialized := evaluateSignalCacheFreshness(&s.peerScoreLastFreshAt, now, peerSignalMaxAge)
+		scoreCacheTimestampInitialized = initialized
+		scoreCacheAgeSec = int64(age / time.Second)
+		if stale {
+			s.peerScores = make(map[string]proto.RelaySelectionScore)
+			s.peerScoreLastFreshAt = time.Time{}
+			staleCachedScoresDropped = true
+		}
+	} else {
+		s.peerScoreLastFreshAt = time.Time{}
+	}
+	if len(s.peerTrust) > 0 {
+		stale, age, initialized := evaluateSignalCacheFreshness(&s.peerTrustLastFreshAt, now, peerSignalMaxAge)
+		trustCacheTimestampInitialized = initialized
+		trustCacheAgeSec = int64(age / time.Second)
+		if stale {
+			s.peerTrust = make(map[string]proto.RelayTrustAttestation)
+			s.peerTrustLastFreshAt = time.Time{}
+			staleCachedTrustDropped = true
+		}
+	} else {
+		s.peerTrustLastFreshAt = time.Time{}
+	}
+	s.peerMu.Unlock()
+
+	if scoreCacheTimestampInitialized {
+		log.Printf(
+			"directory peer score sync: initialized cached score freshness timestamp on quorum failure (max_age_sec=%d)",
+			peerSignalMaxAgeSec,
+		)
+	}
+	if staleCachedScoresDropped {
+		log.Printf(
+			"directory peer score sync: dropping stale cached scores on quorum failure (sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+			scoreSignalSources,
+			scoreMinVotes,
+			scoreCacheAgeSec,
+			peerSignalMaxAgeSec,
+		)
+	}
+	if trustCacheTimestampInitialized {
+		log.Printf(
+			"directory peer trust sync: initialized cached trust freshness timestamp on quorum failure (max_age_sec=%d)",
+			peerSignalMaxAgeSec,
+		)
+	}
+	if staleCachedTrustDropped {
+		log.Printf(
+			"directory peer trust sync: dropping stale cached trust attestations on quorum failure (sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+			trustSignalSources,
+			trustMinVotes,
+			trustCacheAgeSec,
+			peerSignalMaxAgeSec,
+		)
+	}
+}
+
+func (s *Service) dropStaleIssuerTrustCacheOnSyncFailure(now time.Time, trustSignalSources int, trustMinVotes int) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	issuerSignalMaxAge := s.effectiveIssuerSignalFreshnessMaxAge()
+	issuerSignalMaxAgeSec := int64(issuerSignalMaxAge / time.Second)
+	var issuerCacheAgeSec int64
+	issuerCacheTimestampInitialized := false
+	staleIssuerCacheDropped := false
+
+	s.peerMu.Lock()
+	if len(s.issuerTrust) > 0 {
+		stale, age, initialized := evaluateSignalCacheFreshness(&s.issuerTrustLastFreshAt, now, issuerSignalMaxAge)
+		issuerCacheTimestampInitialized = initialized
+		issuerCacheAgeSec = int64(age / time.Second)
+		if stale {
+			s.issuerTrust = make(map[string]proto.RelayTrustAttestation)
+			s.issuerTrustLastFreshAt = time.Time{}
+			staleIssuerCacheDropped = true
+		}
+	} else {
+		s.issuerTrustLastFreshAt = time.Time{}
+	}
+	s.peerMu.Unlock()
+
+	if issuerCacheTimestampInitialized {
+		log.Printf(
+			"directory issuer trust sync: initialized cached trust freshness timestamp on quorum failure (max_age_sec=%d)",
+			issuerSignalMaxAgeSec,
+		)
+	}
+	if staleIssuerCacheDropped {
+		log.Printf(
+			"directory issuer trust sync: dropping stale cached trust attestations on quorum failure (sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+			trustSignalSources,
+			trustMinVotes,
+			issuerCacheAgeSec,
+			issuerSignalMaxAgeSec,
+		)
+	}
 }
 
 func splitCSV(raw string) []string {

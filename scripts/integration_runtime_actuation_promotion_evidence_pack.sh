@@ -63,6 +63,12 @@ assert_cycle_rerun_next_command_hardened() {
   assert_jq "$file" '.next_command_reason != null and (.next_command_reason | contains("--subject")) and (.next_command_reason | contains("CAMPAIGN_SUBJECT/INVITE_KEY"))'
 }
 
+assert_invite_subject_reason_sanitized() {
+  local file="$1"
+  assert_jq "$file" '.next_command_reason != null and ((.next_command_reason | contains("real invite key")) or (.next_command_reason | contains("real invite-subject value")))'
+  assert_jq "$file" '.next_command_reason != null and ((.next_command_reason | test("REPLACE_WITH_INVITE_SUBJECT|<SET-REAL-INVITE-KEY>|\\[redacted\\]|\\[REDACTED\\]")) | not)'
+}
+
 write_cycle_summary() {
   local path="$1"
   local generated_at="$2"
@@ -409,6 +415,56 @@ assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.diagnostics.no_go.reason_category ==
 assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '((.diagnostics.no_go.reason_codes | index("signoff_context_missing")) != null)'
 assert_cycle_rerun_next_command_hardened "$SIGNOFF_CONTEXT_NOGO_SUMMARY"
 assert_no_blank_reason_entries "$SIGNOFF_CONTEXT_NOGO_SUMMARY"
+
+INVITE_SUBJECT_NOGO_REPORTS="$TMP_DIR/invite_subject_nogo_reports"
+INVITE_SUBJECT_NOGO_SOURCE="$INVITE_SUBJECT_NOGO_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
+INVITE_SUBJECT_NOGO_SUMMARY="$TMP_DIR/invite_subject_nogo_summary.json"
+INVITE_SUBJECT_NOGO_REPORT="$TMP_DIR/invite_subject_nogo_report.md"
+mkdir -p "$INVITE_SUBJECT_NOGO_REPORTS"
+jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
+  '{
+    version: 1,
+    schema: { id: "runtime_actuation_promotion_cycle_summary" },
+    generated_at_utc: $generated_at_utc,
+    status: "fail",
+    rc: 1,
+    decision: "NO-GO",
+    promotion_check: {
+      decision: "NO-GO",
+      status: "fail",
+      rc: 1,
+      violation_codes: [
+        "policy_guardrail_not_met"
+      ],
+      next_operator_action: "rerun cycle with --subject INVITE_KEY or --campaign-subject REPLACE_WITH_INVITE_SUBJECT; previous value [redacted] looked stale"
+    }
+  }' >"$INVITE_SUBJECT_NOGO_SOURCE"
+
+echo "[runtime-actuation-promotion-evidence-pack] NO-GO invite-subject placeholder guidance is normalized"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$INVITE_SUBJECT_NOGO_REPORTS" \
+  --summary-json "$INVITE_SUBJECT_NOGO_SUMMARY" \
+  --report-md "$INVITE_SUBJECT_NOGO_REPORT" \
+  --fail-on-no-go 1 \
+  --max-age-sec 86400 \
+  --print-summary-json 0 \
+  --print-report 0 >/tmp/integration_runtime_actuation_promotion_evidence_pack_invite_subject_nogo.log 2>&1
+INVITE_SUBJECT_NOGO_RC=$?
+set -e
+
+if [[ "$INVITE_SUBJECT_NOGO_RC" -eq 0 ]]; then
+  echo "expected invite-subject NO-GO path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_evidence_pack_invite_subject_nogo.log
+  exit 1
+fi
+assert_jq "$INVITE_SUBJECT_NOGO_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc != 0'
+assert_jq "$INVITE_SUBJECT_NOGO_SUMMARY" '.diagnostics.no_go.reason_category == "invite_subject_input"'
+assert_jq "$INVITE_SUBJECT_NOGO_SUMMARY" '((.diagnostics.no_go.reason_codes | index("invite_subject_input")) != null)'
+assert_cycle_rerun_next_command_hardened "$INVITE_SUBJECT_NOGO_SUMMARY"
+assert_invite_subject_reason_sanitized "$INVITE_SUBJECT_NOGO_SUMMARY"
+assert_no_blank_reason_entries "$INVITE_SUBJECT_NOGO_SUMMARY"
 
 GO_WARN_REPORTS="$TMP_DIR/go_warn_reports"
 GO_WARN_SOURCE="$GO_WARN_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"

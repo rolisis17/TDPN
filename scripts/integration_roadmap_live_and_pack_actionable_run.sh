@@ -123,6 +123,7 @@ if [[ "${FAKE_LIVE_WRITE_SUMMARY:-1}" == "1" ]]; then
   fi
   timed_out_count="${FAKE_LIVE_TIMED_OUT:-0}"
   soft_failed_count="${FAKE_LIVE_SOFT_FAILED:-0}"
+  actions_json="${FAKE_LIVE_ACTIONS_JSON:-[]}"
 
   jq -n \
     --arg status "$summary_status" \
@@ -134,6 +135,7 @@ if [[ "${FAKE_LIVE_WRITE_SUMMARY:-1}" == "1" ]]; then
     --argjson fail "$fail_count" \
     --argjson timed_out "$timed_out_count" \
     --argjson soft_failed "$soft_failed_count" \
+    --argjson actions "$actions_json" \
     --arg roadmap_summary_json "$roadmap_summary_json" \
     --arg roadmap_report_md "$roadmap_report_md" \
     '{
@@ -150,7 +152,7 @@ if [[ "${FAKE_LIVE_WRITE_SUMMARY:-1}" == "1" ]]; then
         timed_out: $timed_out,
         soft_failed: $soft_failed
       },
-      actions: [],
+      actions: $actions,
       artifacts: {
         roadmap_summary_json: (if $roadmap_summary_json == "" then null else $roadmap_summary_json end),
         roadmap_report_md: (if $roadmap_report_md == "" then null else $roadmap_report_md end)
@@ -390,6 +392,7 @@ if [[ "${FAKE_PACK_WRITE_SUMMARY:-1}" == "1" ]]; then
   fi
   timed_out_count="${FAKE_PACK_TIMED_OUT:-0}"
   soft_failed_count="${FAKE_PACK_SOFT_FAILED:-0}"
+  actions_json="${FAKE_PACK_ACTIONS_JSON:-[]}"
 
   jq -n \
     --arg status "$summary_status" \
@@ -401,6 +404,7 @@ if [[ "${FAKE_PACK_WRITE_SUMMARY:-1}" == "1" ]]; then
     --argjson fail "$fail_count" \
     --argjson timed_out "$timed_out_count" \
     --argjson soft_failed "$soft_failed_count" \
+    --argjson actions "$actions_json" \
     --arg roadmap_summary_json "$roadmap_summary_json" \
     --arg roadmap_report_md "$roadmap_report_md" \
     --arg live_evidence_summary_json "$live_evidence_summary_json" \
@@ -419,7 +423,7 @@ if [[ "${FAKE_PACK_WRITE_SUMMARY:-1}" == "1" ]]; then
         timed_out: $timed_out,
         soft_failed: $soft_failed
       },
-      actions: [],
+      actions: $actions,
       enforcement: {
         live_evidence_summary_json: (if $live_evidence_summary_json == "" then null else $live_evidence_summary_json end),
         required_live_check_reason: (if $required_live_check_reason == "" then null else $required_live_check_reason end)
@@ -1154,6 +1158,162 @@ if ! jq -e '
 fi
 if [[ ! -s "$PACK_CAPTURE" ]]; then
   echo "expected evidence-pack runner invocation in evidence-pack warn/rc0 fail-closed path"
+  exit 1
+fi
+
+echo "[roadmap-live-and-pack-actionable-run] fail-closed when selected live command contains unresolved placeholder token"
+SUMMARY_LIVE_PLACEHOLDER_FAIL="$TMP_DIR/summary_live_placeholder_fail.json"
+REPORTS_LIVE_PLACEHOLDER_FAIL="$TMP_DIR/reports_live_placeholder_fail"
+: >"$LIVE_CAPTURE"
+: >"$ARCHIVE_CAPTURE"
+: >"$PACK_CAPTURE"
+set +e
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_LIVE_SCRIPT="$FAKE_LIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_SCRIPT="$FAKE_ARCHIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_LIVE_CAPTURE_FILE="$LIVE_CAPTURE" \
+FAKE_ARCHIVE_CAPTURE_FILE="$ARCHIVE_CAPTURE" \
+FAKE_PACK_CAPTURE_FILE="$PACK_CAPTURE" \
+FAKE_SHARED_ROADMAP_SUMMARY_JSON="$SHARED_ROADMAP_SUMMARY" \
+FAKE_SHARED_ROADMAP_REPORT_MD="$SHARED_ROADMAP_REPORT" \
+FAKE_LIVE_RC=0 FAKE_LIVE_SUMMARY_RC=0 FAKE_LIVE_STATUS=pass FAKE_LIVE_SELECTED_IDS_JSON='["profile_default_gate"]' FAKE_LIVE_SELECTED_COUNT=1 FAKE_LIVE_ACTIONS_EXECUTED=1 FAKE_LIVE_PASS=1 FAKE_LIVE_FAIL=0 \
+FAKE_LIVE_ACTIONS_JSON='[{"id":"profile_default_gate","command":"./scripts/easy_node.sh profile-default-gate-live --campaign-subject INVITE_KEY"}]' \
+FAKE_PACK_RC=0 FAKE_PACK_SUMMARY_RC=0 FAKE_PACK_SELECTED_IDS_JSON='["profile_default_gate_evidence_pack"]' FAKE_PACK_SELECTED_COUNT=1 FAKE_PACK_ACTIONS_EXECUTED=1 FAKE_PACK_PASS=1 FAKE_PACK_FAIL=0 \
+bash ./scripts/roadmap_live_and_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_LIVE_PLACEHOLDER_FAIL" \
+  --summary-json "$SUMMARY_LIVE_PLACEHOLDER_FAIL" \
+  --print-summary-json 0
+live_placeholder_rc=$?
+set -e
+if [[ "$live_placeholder_rc" != "1" ]]; then
+  echo "expected unresolved-placeholder fail-closed rc=1, got rc=$live_placeholder_rc"
+  cat "$SUMMARY_LIVE_PLACEHOLDER_FAIL"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "live_evidence_summary_contract"
+  and .steps.live_evidence.status == "fail"
+  and .steps.live_evidence.contract_valid == false
+  and (.steps.live_evidence.contract_failure_reason | contains("unresolved placeholder tokens"))
+  and .steps.live_evidence.command_hygiene.checked == true
+  and .steps.live_evidence.command_hygiene.selected_commands_count == 1
+  and .steps.live_evidence.command_hygiene.unresolved_placeholder_count == 1
+  and .steps.live_evidence.command_hygiene.unsafe_token_count == 0
+  and .steps.live_evidence.command_hygiene.contract_valid == false
+  and (.steps.live_evidence.command_hygiene.contract_failure_reason | contains("unresolved placeholder tokens"))
+  and .steps.evidence_pack.status == "skipped"
+  and .steps.evidence_pack.skip_reason == "live_step_failed_fail_closed"
+' "$SUMMARY_LIVE_PLACEHOLDER_FAIL" >/dev/null; then
+  echo "unresolved-placeholder fail-closed summary mismatch"
+  cat "$SUMMARY_LIVE_PLACEHOLDER_FAIL"
+  exit 1
+fi
+if [[ -s "$PACK_CAPTURE" ]]; then
+  echo "evidence-pack runner should not execute when live command has unresolved placeholder tokens"
+  cat "$PACK_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-live-and-pack-actionable-run] fail-closed when selected evidence-pack command needs unsafe shell parsing and unsafe mode is off"
+SUMMARY_PACK_UNSAFE_BLOCKED="$TMP_DIR/summary_pack_unsafe_blocked.json"
+REPORTS_PACK_UNSAFE_BLOCKED="$TMP_DIR/reports_pack_unsafe_blocked"
+: >"$LIVE_CAPTURE"
+: >"$ARCHIVE_CAPTURE"
+: >"$PACK_CAPTURE"
+set +e
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_LIVE_SCRIPT="$FAKE_LIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_SCRIPT="$FAKE_ARCHIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_LIVE_CAPTURE_FILE="$LIVE_CAPTURE" \
+FAKE_ARCHIVE_CAPTURE_FILE="$ARCHIVE_CAPTURE" \
+FAKE_PACK_CAPTURE_FILE="$PACK_CAPTURE" \
+FAKE_SHARED_ROADMAP_SUMMARY_JSON="$SHARED_ROADMAP_SUMMARY" \
+FAKE_SHARED_ROADMAP_REPORT_MD="$SHARED_ROADMAP_REPORT" \
+FAKE_LIVE_RC=0 FAKE_LIVE_SUMMARY_RC=0 FAKE_LIVE_STATUS=pass FAKE_LIVE_SELECTED_IDS_JSON='["profile_default_gate"]' FAKE_LIVE_SELECTED_COUNT=1 FAKE_LIVE_ACTIONS_EXECUTED=1 FAKE_LIVE_PASS=1 FAKE_LIVE_FAIL=0 \
+FAKE_LIVE_ACTIONS_JSON='[{"id":"profile_default_gate","command":"bash ./scripts/integration_ci_phase1_resilience.sh"}]' \
+FAKE_PACK_RC=0 FAKE_PACK_SUMMARY_RC=0 FAKE_PACK_STATUS=pass FAKE_PACK_SELECTED_IDS_JSON='["profile_default_gate_evidence_pack"]' FAKE_PACK_SELECTED_COUNT=1 FAKE_PACK_ACTIONS_EXECUTED=1 FAKE_PACK_PASS=1 FAKE_PACK_FAIL=0 \
+FAKE_PACK_ACTIONS_JSON='[{"id":"profile_default_gate_evidence_pack","command":"bash -lc '\''echo one; echo two'\''"}]' \
+bash ./scripts/roadmap_live_and_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_PACK_UNSAFE_BLOCKED" \
+  --summary-json "$SUMMARY_PACK_UNSAFE_BLOCKED" \
+  --print-summary-json 0
+pack_unsafe_blocked_rc=$?
+set -e
+if [[ "$pack_unsafe_blocked_rc" != "1" ]]; then
+  echo "expected unsafe-token fail-closed rc=1, got rc=$pack_unsafe_blocked_rc"
+  cat "$SUMMARY_PACK_UNSAFE_BLOCKED"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "evidence_pack_summary_contract"
+  and .steps.live_evidence.status == "pass"
+  and .steps.live_evidence.contract_valid == true
+  and .steps.evidence_pack.status == "fail"
+  and .steps.evidence_pack.summary_valid == true
+  and .steps.evidence_pack.contract_valid == false
+  and (.steps.evidence_pack.contract_failure_reason | contains("unsafe shell parsing"))
+  and .steps.evidence_pack.command_hygiene.checked == true
+  and .steps.evidence_pack.command_hygiene.selected_commands_count == 1
+  and .steps.evidence_pack.command_hygiene.unresolved_placeholder_count == 0
+  and .steps.evidence_pack.command_hygiene.unsafe_token_count == 1
+  and .steps.evidence_pack.command_hygiene.unsafe_tokens_blocked == true
+  and .steps.evidence_pack.command_hygiene.contract_valid == false
+  and (.steps.evidence_pack.command_hygiene.contract_failure_reason | contains("unsafe shell parsing"))
+' "$SUMMARY_PACK_UNSAFE_BLOCKED" >/dev/null; then
+  echo "unsafe-token fail-closed summary mismatch"
+  cat "$SUMMARY_PACK_UNSAFE_BLOCKED"
+  exit 1
+fi
+if [[ ! -s "$PACK_CAPTURE" ]]; then
+  echo "expected evidence-pack runner invocation in unsafe-token fail-closed path"
+  exit 1
+fi
+
+echo "[roadmap-live-and-pack-actionable-run] unsafe selected commands remain allowed with explicit --allow-unsafe-shell-commands=1"
+SUMMARY_PACK_UNSAFE_ALLOWED="$TMP_DIR/summary_pack_unsafe_allowed.json"
+REPORTS_PACK_UNSAFE_ALLOWED="$TMP_DIR/reports_pack_unsafe_allowed"
+: >"$LIVE_CAPTURE"
+: >"$ARCHIVE_CAPTURE"
+: >"$PACK_CAPTURE"
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_LIVE_SCRIPT="$FAKE_LIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_SCRIPT="$FAKE_ARCHIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_LIVE_CAPTURE_FILE="$LIVE_CAPTURE" \
+FAKE_ARCHIVE_CAPTURE_FILE="$ARCHIVE_CAPTURE" \
+FAKE_PACK_CAPTURE_FILE="$PACK_CAPTURE" \
+FAKE_SHARED_ROADMAP_SUMMARY_JSON="$SHARED_ROADMAP_SUMMARY" \
+FAKE_SHARED_ROADMAP_REPORT_MD="$SHARED_ROADMAP_REPORT" \
+FAKE_LIVE_RC=0 FAKE_LIVE_SUMMARY_RC=0 FAKE_LIVE_STATUS=pass FAKE_LIVE_SELECTED_IDS_JSON='["profile_default_gate"]' FAKE_LIVE_SELECTED_COUNT=1 FAKE_LIVE_ACTIONS_EXECUTED=1 FAKE_LIVE_PASS=1 FAKE_LIVE_FAIL=0 \
+FAKE_LIVE_ACTIONS_JSON='[{"id":"profile_default_gate","command":"bash ./scripts/integration_ci_phase1_resilience.sh"}]' \
+FAKE_PACK_RC=0 FAKE_PACK_SUMMARY_RC=0 FAKE_PACK_STATUS=pass FAKE_PACK_SELECTED_IDS_JSON='["profile_default_gate_evidence_pack"]' FAKE_PACK_SELECTED_COUNT=1 FAKE_PACK_ACTIONS_EXECUTED=1 FAKE_PACK_PASS=1 FAKE_PACK_FAIL=0 \
+FAKE_PACK_ACTIONS_JSON='[{"id":"profile_default_gate_evidence_pack","command":"bash -lc '\''echo one; echo two'\''"}]' \
+bash ./scripts/roadmap_live_and_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_PACK_UNSAFE_ALLOWED" \
+  --summary-json "$SUMMARY_PACK_UNSAFE_ALLOWED" \
+  --allow-unsafe-shell-commands 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .failure_substep == null
+  and .inputs.allow_unsafe_shell_commands == true
+  and .steps.live_evidence.status == "pass"
+  and .steps.evidence_pack.status == "pass"
+  and .steps.evidence_pack.contract_valid == true
+  and .steps.evidence_pack.command_hygiene.checked == true
+  and .steps.evidence_pack.command_hygiene.selected_commands_count == 1
+  and .steps.evidence_pack.command_hygiene.unsafe_token_count == 1
+  and .steps.evidence_pack.command_hygiene.unsafe_tokens_blocked == false
+  and .steps.evidence_pack.command_hygiene.contract_valid == true
+  and .steps.evidence_pack.command_hygiene.contract_failure_reason == null
+' "$SUMMARY_PACK_UNSAFE_ALLOWED" >/dev/null; then
+  echo "unsafe-token allow-mode summary mismatch"
+  cat "$SUMMARY_PACK_UNSAFE_ALLOWED"
   exit 1
 fi
 

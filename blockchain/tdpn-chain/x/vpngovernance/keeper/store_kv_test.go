@@ -194,3 +194,36 @@ func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
 		t.Fatal("expected audit action key/payload mismatch to return decode error")
 	}
 }
+
+func TestKVStoreFailsClosedOnDecisionMissingPolicyReference(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+
+	payload, err := json.Marshal(types.GovernanceDecision{
+		DecisionID:    "decision-orphan",
+		PolicyID:      "policy-missing",
+		ProposalID:    "proposal-1",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council-1",
+		DecidedAtUnix: 1,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("marshal decision payload: %v", err)
+	}
+	backend.Set(decisionKey("decision-orphan"), payload)
+
+	if _, ok := store.GetDecision("decision-orphan"); ok {
+		t.Fatal("expected orphaned decision to be rejected by GetDecision")
+	}
+
+	if _, err := store.ListDecisionsWithError(); err == nil {
+		t.Fatal("expected ListDecisionsWithError to fail on missing policy reference")
+	}
+
+	if got := store.ListDecisions(); len(got) != 0 {
+		t.Fatalf("expected fail-closed decision listing, got %d records", len(got))
+	}
+}

@@ -937,6 +937,14 @@ if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_A
   and (.vpn_track.profile_default_gate | has("runtime_actuation_ready"))
   and (.vpn_track.profile_default_gate | has("runtime_actuation_status"))
   and (.vpn_track.profile_default_gate | has("runtime_actuation_reason"))
+  and (.vpn_track.profile_default_gate | has("next_command_reason"))
+  and (.vpn_track.profile_default_gate | has("next_command_has_unresolved_placeholders"))
+  and (.vpn_track.profile_default_gate | has("next_command_sudo_has_unresolved_placeholders"))
+  and (.vpn_track.profile_default_gate | has("next_command_unresolved_placeholder_keys"))
+  and (.vpn_track.profile_default_gate | has("next_command_sudo_unresolved_placeholder_keys"))
+  and (.vpn_track.profile_default_gate | has("unresolved_placeholders"))
+  and (.vpn_track.profile_default_gate | has("unresolved_placeholder_keys"))
+  and (.vpn_track.profile_default_gate | has("unresolved_placeholder_reason"))
   and (
     (.vpn_track.profile_default_gate.selection_policy_evidence_present == null)
     or ((.vpn_track.profile_default_gate.selection_policy_evidence_present | type) == "boolean")
@@ -960,6 +968,20 @@ if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_A
   and ((.vpn_track.profile_default_gate.runtime_actuation_ready | type) == "boolean")
   and ((.vpn_track.profile_default_gate.runtime_actuation_status == "pass") or (.vpn_track.profile_default_gate.runtime_actuation_status == "pending"))
   and ((.vpn_track.profile_default_gate.runtime_actuation_reason | type) == "string")
+  and (
+    (.vpn_track.profile_default_gate.next_command_reason == null)
+    or ((.vpn_track.profile_default_gate.next_command_reason | type) == "string")
+  )
+  and ((.vpn_track.profile_default_gate.next_command_has_unresolved_placeholders | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.next_command_sudo_has_unresolved_placeholders | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.next_command_unresolved_placeholder_keys | type) == "array")
+  and ((.vpn_track.profile_default_gate.next_command_sudo_unresolved_placeholder_keys | type) == "array")
+  and ((.vpn_track.profile_default_gate.unresolved_placeholders | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.unresolved_placeholder_keys | type) == "array")
+  and (
+    (.vpn_track.profile_default_gate.unresolved_placeholder_reason == null)
+    or ((.vpn_track.profile_default_gate.unresolved_placeholder_reason | type) == "string")
+  )
   and (
     (.vpn_track.profile_default_gate.runtime_actuation_ready == true and .vpn_track.profile_default_gate.runtime_actuation_status == "pass" and .vpn_track.profile_default_gate.runtime_actuation_reason == "")
     or (.vpn_track.profile_default_gate.runtime_actuation_ready == false and .vpn_track.profile_default_gate.runtime_actuation_status == "pending" and ((.vpn_track.profile_default_gate.runtime_actuation_reason | length) > 0))
@@ -3711,6 +3733,99 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_profile_default_live_placeholder_summary.json" >/dev/null; then
   echo "profile default live wrapper summary JSON missing expected INVITE_KEY placeholder command normalization"
   cat "$TMP_DIR/roadmap_progress_profile_default_live_placeholder_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] profile default gate unresolved placeholders expose deterministic flags and actionable reason"
+PROFILE_DEFAULT_GATE_UNRESOLVED_PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_unresolved_placeholder_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_UNRESOLVED_PLACEHOLDER_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_UNRESOLVED_PLACEHOLDER_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "placeholder command should be explicitly surfaced as unresolved",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a HOST_A --host-b B_HOST --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --subject INVITE_KEY",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a HOST_A --host-b B_HOST --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --subject INVITE_KEY",
+      "next_command_source": "default_non_sudo",
+      "docker_rehearsal_hint_available": false
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_UNRESOLVED_PLACEHOLDER_SUMMARY
+
+if ! A_HOST="" B_HOST="" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_UNRESOLVED_PLACEHOLDER_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_unresolved_placeholder.log 2>&1; then
+  echo "expected success when profile default gate command includes unresolved placeholders"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_unresolved_placeholder.log
+  exit 1
+fi
+if ! jq -e '
+  def has_key($arr; $needle):
+    (($arr // []) | if type == "array" then any(.[]; . == $needle) else false end);
+  (.vpn_track.profile_default_gate.unresolved_placeholders == true)
+  and has_key(.vpn_track.profile_default_gate.unresolved_placeholder_keys; "host_a")
+  and has_key(.vpn_track.profile_default_gate.unresolved_placeholder_keys; "host_b")
+  and has_key(.vpn_track.profile_default_gate.unresolved_placeholder_keys; "invite_key")
+  and (.vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true)
+  and (.vpn_track.profile_default_gate.next_command_sudo_has_unresolved_placeholders == true)
+  and ((.vpn_track.profile_default_gate.next_command_reason // "") | test("unresolved placeholders"; "i"))
+  and ((.vpn_track.profile_default_gate.unresolved_placeholder_reason // "") | test("A_HOST/B_HOST"; "i"))
+  and ((.next_actions // []) | any(
+    (.id // "") == "profile_default_gate"
+    and (.placeholder_unresolved == true)
+    and has_key(.placeholder_keys; "host_a")
+    and has_key(.placeholder_keys; "host_b")
+    and has_key(.placeholder_keys; "invite_key")
+    and ((.reason // "") | test("unresolved placeholders"; "i"))
+  ))
+' "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_summary.json" >/dev/null; then
+  echo "profile default unresolved placeholder summary JSON missing expected flags/guidance"
+  cat "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_summary.json"
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_next_command_reason=.*unresolved placeholders' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_unresolved_placeholder.log; then
+  echo "expected unresolved placeholder guidance log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_unresolved_placeholder.log
   exit 1
 fi
 

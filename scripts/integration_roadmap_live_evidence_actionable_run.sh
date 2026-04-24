@@ -201,6 +201,18 @@ JSON
 }
 JSON
     ;;
+  unresolved_placeholders)
+    cat >"$summary_json" <<JSON
+{
+  "status": "warn",
+  "rc": 0,
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile gate command with unresolved placeholders","command":"./scripts/easy_node.sh profile-default-gate-live --host-a HOST_A --host-b B_HOST --campaign-subject INVITE_KEY --print-summary-json 1","reason":"live-cycle"},
+    {"id":"runtime_actuation_promotion","label":"Runtime pass command must not run when precondition fails","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"live-cycle"}
+  ]
+}
+JSON
+    ;;
   missing_summary_output)
     # Intentionally emit no summary payload to verify stale-summary reuse protection.
     ;;
@@ -713,6 +725,143 @@ if ! jq -e '
 fi
 if [[ -s "$EXEC_LOG" ]]; then
   echo "deterministic command conflict path should not execute any live action"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-actionable-run] scoped runs ignore deterministic conflicts outside the selected family"
+SUMMARY_CONFLICT_SCOPED="$TMP_DIR/summary_conflict_scoped.json"
+REPORTS_CONFLICT_SCOPED="$TMP_DIR/reports_conflict_scoped"
+: >"$EXEC_LOG"
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCENARIO=deterministic_command_conflict \
+PASS_PROFILE_DEFAULT_GATE="$PASS_PROFILE_DEFAULT_GATE" \
+PASS_RUNTIME_ACTUATION_PROMOTION="$PASS_RUNTIME_ACTUATION_PROMOTION" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION" \
+FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY="$FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+NON_TARGET_FAIL="$NON_TARGET_FAIL" \
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_live_evidence_actionable_run.sh \
+  --reports-dir "$REPORTS_CONFLICT_SCOPED" \
+  --summary-json "$SUMMARY_CONFLICT_SCOPED" \
+  --scope profile-default \
+  --parallel 0 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.scope == "profile-default"
+  and .inputs.deterministic_conflict_mode == false
+  and .roadmap.target_match_count == 3
+  and .roadmap.target_match_action_ids == ["runtime_actuation_promotion","runtime_actuation_promotion","profile_default_gate"]
+  and .roadmap.target_match_command_conflict_count == 1
+  and (.roadmap.target_match_command_conflicts | length) == 1
+  and .roadmap.scope_match_count == 1
+  and .roadmap.scope_match_action_ids == ["profile_default_gate"]
+  and .roadmap.scope_match_unique_count == 1
+  and .roadmap.scope_match_unique_action_ids == ["profile_default_gate"]
+  and .roadmap.scope_match_command_conflict_count == 0
+  and .roadmap.scope_match_command_conflicts == []
+  and .roadmap.deterministic_command_selection_valid == true
+  and .roadmap.deterministic_command_selection_reason == null
+  and .roadmap.selected_unique_count == 1
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["profile_default_gate"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and .delegated_runner.summary_valid == true
+  and .delegated_runner.invoked == true
+  and .delegated_runner.contract_valid == true
+  and .delegated_runner.status == "pass"
+  and .delegated_runner.rc == 0
+  and .delegated_runner.process_rc == 0
+' "$SUMMARY_CONFLICT_SCOPED" >/dev/null; then
+  echo "scoped deterministic conflict summary mismatch"
+  cat "$SUMMARY_CONFLICT_SCOPED"
+  exit 1
+fi
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected exactly one action execution in scoped deterministic conflict path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -Fx "profile_default_gate" "$EXEC_LOG" >/dev/null; then
+  echo "expected profile_default_gate execution in scoped deterministic conflict path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "runtime_actuation_promotion" "$EXEC_LOG" >/dev/null || grep -F "non_target_should_not_run" "$EXEC_LOG" >/dev/null; then
+  echo "unexpected action executed in scoped deterministic conflict path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-actionable-run] unresolved placeholder commands fail closed before delegation"
+SUMMARY_UNRESOLVED_PLACEHOLDER="$TMP_DIR/summary_unresolved_placeholder.json"
+REPORTS_UNRESOLVED_PLACEHOLDER="$TMP_DIR/reports_unresolved_placeholder"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCENARIO=unresolved_placeholders \
+PASS_PROFILE_DEFAULT_GATE="$PASS_PROFILE_DEFAULT_GATE" \
+PASS_RUNTIME_ACTUATION_PROMOTION="$PASS_RUNTIME_ACTUATION_PROMOTION" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION" \
+FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY="$FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+NON_TARGET_FAIL="$NON_TARGET_FAIL" \
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_live_evidence_actionable_run.sh \
+  --reports-dir "$REPORTS_UNRESOLVED_PLACEHOLDER" \
+  --summary-json "$SUMMARY_UNRESOLVED_PLACEHOLDER" \
+  --scope all \
+  --parallel 0 \
+  --print-summary-json 0
+unresolved_placeholder_rc=$?
+set -e
+if [[ "$unresolved_placeholder_rc" != "4" ]]; then
+  echo "expected unresolved-placeholder precondition rc=4, got rc=$unresolved_placeholder_rc"
+  cat "$SUMMARY_UNRESOLVED_PLACEHOLDER"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.placeholder_precondition_mode == true
+  and .roadmap.target_match_count == 2
+  and .roadmap.target_match_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
+  and .roadmap.target_match_unique_count == 2
+  and .roadmap.target_match_unique_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
+  and .roadmap.unresolved_placeholder_count == 1
+  and (.roadmap.unresolved_placeholder_actions | length) == 1
+  and .roadmap.unresolved_placeholder_actions[0].id == "profile_default_gate"
+  and (.roadmap.unresolved_placeholder_actions[0].unresolved_placeholders | index("HOST_A/A_HOST") != null)
+  and (.roadmap.unresolved_placeholder_actions[0].unresolved_placeholders | index("HOST_B/B_HOST") != null)
+  and (.roadmap.unresolved_placeholder_actions[0].unresolved_placeholders | index("INVITE_KEY/CAMPAIGN_SUBJECT") != null)
+  and .roadmap.unresolved_placeholder_selection_valid == false
+  and ((.roadmap.unresolved_placeholder_selection_reason | type) == "string")
+  and (.roadmap.unresolved_placeholder_selection_reason | contains("profile_default_gate"))
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+  and .delegated_runner.summary_valid == false
+  and .delegated_runner.invoked == false
+  and .delegated_runner.contract_valid == false
+  and .delegated_runner.failure_substep == "unresolved_placeholder_command_precondition"
+  and .delegated_runner.status == "skipped_unresolved_placeholder_precondition"
+  and .delegated_runner.rc == 4
+  and .delegated_runner.process_rc == null
+' "$SUMMARY_UNRESOLVED_PLACEHOLDER" >/dev/null; then
+  echo "unresolved placeholder precondition summary mismatch"
+  cat "$SUMMARY_UNRESOLVED_PLACEHOLDER"
+  exit 1
+fi
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "unresolved placeholder precondition path should not execute any live action"
   cat "$EXEC_LOG"
   exit 1
 fi

@@ -38,6 +38,83 @@ trim() {
   printf '%s' "$value"
 }
 
+strip_optional_wrapping_quotes_01() {
+  local value
+  local first_char=""
+  local last_char=""
+  value="$(trim "${1:-}")"
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+invite_subject_placeholder_token_01() {
+  local value=""
+  local normalized=""
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|YOUR_INVITE_SUBJECT|REPLACE_WITH_INVITE_KEY|REPLACE_WITH_INVITE_SUBJECT|"<SET-REAL-INVITE-KEY>"|SET-REAL-INVITE-KEY|%INVITE_KEY%|\$\{INVITE_KEY:-*}|\$\{INVITE_KEY-*}|CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|%CAMPAIGN_SUBJECT%|\$\{CAMPAIGN_SUBJECT:-*}|\$\{CAMPAIGN_SUBJECT-*}|"\[REDACTED\]"|"REDACTED")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+text_has_invite_subject_issue_01() {
+  local text=""
+  local normalized=""
+  local token=""
+  local parsed=""
+  text="$(trim "${1:-}")"
+  text="$(strip_optional_wrapping_quotes_01 "$text")"
+  text="$(trim "$text")"
+  if [[ -z "$text" ]]; then
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$text" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    *"MISSING INVITE"*|*"INVITE SUBJECT"*|*"SUBJECT IS REQUIRED"*|*"CANNOT BE RESOLVED"*|*"REAL NON-PLACEHOLDER"*)
+      return 0
+      ;;
+    *)
+      ;;
+  esac
+
+  parsed="$(
+    printf '%s\n' "$text" \
+      | sed -E 's/["'"'"'`(),;=]/ /g'
+  )"
+  for token in $parsed; do
+    if invite_subject_placeholder_token_01 "$token"; then
+      return 0
+    fi
+    case "$token" in
+      --subject|--campaign-subject|--invite-key|--key)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -172,11 +249,17 @@ build_runtime_actuation_cycle_rerun_command_01() {
 
 append_runtime_actuation_subject_guidance_reason_01() {
   local base_reason
+  local normalized_reason=""
   local invite_subject_guidance=""
   base_reason="$(trim "${1:-}")"
+  if text_has_invite_subject_issue_01 "$base_reason"; then
+    normalized_reason="invite-subject input is missing, placeholder-like, or stale-like; rerun using a real invite key"
+  else
+    normalized_reason="$base_reason"
+  fi
   invite_subject_guidance="if invite-subject auth is required, pass --subject <invite-key> (or --campaign-subject <invite-key>) or set CAMPAIGN_SUBJECT/INVITE_KEY to a real non-placeholder value"
-  if [[ -n "$base_reason" ]]; then
-    printf '%s; %s' "$base_reason" "$invite_subject_guidance"
+  if [[ -n "$normalized_reason" ]]; then
+    printf '%s; %s' "$normalized_reason" "$invite_subject_guidance"
   else
     printf '%s' "$invite_subject_guidance"
   fi
@@ -672,6 +755,10 @@ source_failure_reason="$(jq -r '.failure_reason // ""' <<<"$source_eval_json")"
 source_reasons_json="$(jq -c '.reasons // []' <<<"$source_eval_json")"
 source_promotion_violation_codes_json="$(jq -c '.promotion_violation_codes // []' <<<"$source_eval_json")"
 source_cycle_error_codes_json="$(jq -c '.cycle_error_codes // []' <<<"$source_eval_json")"
+source_invite_subject_signal="false"
+if text_has_invite_subject_issue_01 "$source_next_operator_action" || text_has_invite_subject_issue_01 "$source_failure_reason"; then
+  source_invite_subject_signal="true"
+fi
 source_policy_require_min_samples="$(jq -r '
   if (.promotion_policy_require_min_samples | type) == "number" then (.promotion_policy_require_min_samples | floor | tostring)
   else "0"
@@ -831,6 +918,9 @@ if [[ "$needs_attention" == "true" ]]; then
           or . == "signoff_summary_invalid_json"
         ))
       ] | unique' 2>/dev/null || printf '%s' '[]')"
+  elif [[ "$source_invite_subject_signal" == "true" ]]; then
+    no_go_reason_category="invite_subject_input"
+    no_go_reason_codes_json='["invite_subject_input"]'
   elif [[ "$source_usable" == "false" && "$decision" == "NO-GO" ]]; then
     no_go_reason_category="missing_or_invalid_evidence"
     no_go_reason_codes_json="$source_reasons_json"
@@ -867,6 +957,10 @@ if [[ "$needs_attention" == "true" ]]; then
     missing_signoff_context)
       next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
       next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "regenerate signoff evidence with campaign-check context")"
+      ;;
+    invite_subject_input)
+      next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
+      next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "provide a real invite-subject value and rerun runtime-actuation promotion evidence")"
       ;;
     missing_or_invalid_evidence)
       next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"

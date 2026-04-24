@@ -24,3 +24,21 @@ func TestNewFileStoreRejectsConflictingCanonicalPolicySnapshot(t *testing.T) {
 		t.Fatalf("expected conflicting policy validation error, got: %v", err)
 	}
 }
+
+func TestNewFileStoreRejectsDecisionReferencingMissingPolicy(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "vpngovernance.json")
+	payload := `{"decisions":{"legacy-a":{"DecisionID":"decision-1","PolicyID":"policy-missing","ProposalID":"proposal-1","Outcome":"approve","Decider":"council","DecidedAtUnix":1}}}`
+	if err := os.WriteFile(storePath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write seeded snapshot: %v", err)
+	}
+
+	_, err := NewFileStore(storePath)
+	if err == nil {
+		t.Fatal("expected orphaned decision snapshot to fail")
+	}
+	if !strings.Contains(err.Error(), "references missing policy") {
+		t.Fatalf("expected missing policy validation error, got: %v", err)
+	}
+}

@@ -53,6 +53,47 @@ trim() {
   printf '%s' "$value"
 }
 
+strip_optional_wrapping_quotes_01() {
+  local value="${1:-}"
+  local first_char=""
+  local last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+is_runtime_placeholder_token_01() {
+  local value=""
+  local normalized=""
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|CAMPAIGN_SUBJECT|A_HOST|B_HOST|HOST_A|HOST_B|REPLACE_WITH_INVITE_KEY|REPLACE_WITH_INVITE_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|REPLACE_WITH_HOST_A|REPLACE_WITH_HOST_B|REPLACE_WITH_VM_COMMAND_FILE|"<SET-REAL-INVITE-KEY>"|SET-REAL-INVITE-KEY|"<INVITE_KEY>"|"<CAMPAIGN_SUBJECT>"|"<HOST_A>"|"<HOST_B>"|\$\{INVITE_KEY\}|\$INVITE_KEY|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|\$\{A_HOST\}|\$A_HOST|\$\{B_HOST\}|\$B_HOST|%INVITE_KEY%|%CAMPAIGN_SUBJECT%)
+      return 0
+      ;;
+    *)
+      ;;
+  esac
+  if [[ "$normalized" == *"PLACEHOLDER"* || "$normalized" == *"REPLACE_WITH_"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -163,8 +204,19 @@ augment_result_file_with_failure_diagnostics() {
   fi
   local log_path
   log_path="$(jq -r '.log // .artifacts.log // ""' "$result_path")"
+  local track_id
+  local rc
+  track_id="$(jq -r '.track_id // ""' "$result_path")"
+  rc="$(jq -r '.rc // 1' "$result_path")"
+  if ! [[ "$rc" =~ ^-?[0-9]+$ ]]; then
+    rc=1
+  fi
+  local log_tail_json
+  local failure_classification_json
   local failure_diagnostics_json
-  failure_diagnostics_json="$(log_tail_window_json "$log_path" "$failure_log_tail_lines")"
+  log_tail_json="$(log_tail_window_json "$log_path" "$failure_log_tail_lines")"
+  failure_classification_json="$(classify_track_failure_json "$track_id" "$rc" "$log_path")"
+  failure_diagnostics_json="$(jq -cn --argjson c "$failure_classification_json" --argjson l "$log_tail_json" '$c + $l')"
   local updated_json
   updated_json="$(jq -c --argjson failure_diagnostics "$failure_diagnostics_json" '. + {failure_diagnostics: $failure_diagnostics}' "$result_path")"
   printf '%s\n' "$updated_json" >"$result_path"
@@ -346,6 +398,277 @@ json_array_from_ref() {
   printf '%s' "$out"
 }
 
+resolve_runtime_input_state_json() {
+  local input_id="$1"
+  local required_flag="$2"
+  local description="$3"
+  local operator_hint="$4"
+  shift 4
+  local -a env_candidates=("$@")
+  local -a placeholder_envs=()
+  local env_name=""
+  local env_value=""
+  local resolved_env=""
+  local state="missing"
+
+  for env_name in "${env_candidates[@]}"; do
+    env_value="$(trim "${!env_name:-}")"
+    if [[ -z "$env_value" ]]; then
+      continue
+    fi
+    if is_runtime_placeholder_token_01 "$env_value"; then
+      placeholder_envs+=("$env_name")
+      continue
+    fi
+    resolved_env="$env_name"
+    break
+  done
+
+  if [[ -n "$resolved_env" ]]; then
+    state="resolved"
+  elif (( ${#placeholder_envs[@]} > 0 )); then
+    state="placeholder_unresolved"
+  fi
+
+  local env_candidates_json
+  local placeholder_envs_json
+  local value_present_json="false"
+  local resolution_source=""
+  env_candidates_json="$(json_array_from_ref env_candidates)"
+  placeholder_envs_json="$(json_array_from_ref placeholder_envs)"
+  if [[ "$state" != "missing" ]]; then
+    value_present_json="true"
+  fi
+  if [[ -n "$resolved_env" ]]; then
+    resolution_source="env:${resolved_env}"
+  fi
+
+  jq -cn \
+    --arg id "$input_id" \
+    --argjson required "$required_flag" \
+    --arg description "$description" \
+    --arg operator_hint "$operator_hint" \
+    --arg state "$state" \
+    --arg resolution_source "$resolution_source" \
+    --argjson env_candidates "$env_candidates_json" \
+    --argjson placeholder_envs "$placeholder_envs_json" \
+    --argjson value_present "$value_present_json" \
+    '{
+      id: $id,
+      required: $required,
+      description: $description,
+      state: $state,
+      resolution_source: (if $resolution_source == "" then null else $resolution_source end),
+      value_present: $value_present,
+      env_candidates: $env_candidates,
+      placeholder_envs: $placeholder_envs,
+      operator_hint: $operator_hint
+    }'
+}
+
+build_track_runtime_requirements_json() {
+  local track_id="$1"
+  local track_group="$track_id"
+  local track_note=""
+  local requirements_json='[]'
+  local unresolved_required_inputs_json='[]'
+  local unresolved_required_count=0
+  local status="ready_or_dynamic"
+  local row_json=""
+
+  case "$track_id" in
+    profile_default_gate_stability_cycle)
+      track_group="m2_profile_default_gate_stability"
+      row_json="$(resolve_runtime_input_state_json \
+        "host_a" "true" \
+        "Real host/IP for lane A." \
+        "Set PROFILE_DEFAULT_GATE_STABILITY_HOST_A or A_HOST to a concrete host." \
+        "PROFILE_DEFAULT_GATE_STABILITY_HOST_A" "A_HOST")"
+      requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
+      row_json="$(resolve_runtime_input_state_json \
+        "host_b" "true" \
+        "Real host/IP for lane B." \
+        "Set PROFILE_DEFAULT_GATE_STABILITY_HOST_B or B_HOST to a concrete host." \
+        "PROFILE_DEFAULT_GATE_STABILITY_HOST_B" "B_HOST")"
+      requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
+      row_json="$(resolve_runtime_input_state_json \
+        "campaign_subject" "true" \
+        "Concrete invite/campaign subject for profile-default gate checks." \
+        "Set PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT or INVITE_KEY to a real invite subject." \
+        "PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT" "INVITE_KEY")"
+      requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
+      ;;
+    runtime_actuation_promotion_cycle)
+      track_group="m4_runtime_actuation_promotion"
+      row_json="$(resolve_runtime_input_state_json \
+        "campaign_subject" "true" \
+        "Concrete invite/campaign subject (required when signoff args do not provide a usable subject)." \
+        "Set CAMPAIGN_SUBJECT or INVITE_KEY to a real invite subject." \
+        "CAMPAIGN_SUBJECT" "INVITE_KEY")"
+      requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
+      ;;
+    profile_compare_multi_vm_stability_promotion_cycle)
+      track_group="m5_multi_vm_stability_promotion"
+      track_note="VM command source may be discovered dynamically via cycle script fallback; env checks are advisory."
+      row_json="$(resolve_runtime_input_state_json \
+        "vm_command_file_fallback" "false" \
+        "Fallback VM command file envs used when cycle args do not provide commands." \
+        "Set PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE (or related VM command file envs) when dynamic fallback is unavailable." \
+        "PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE" \
+        "PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE" \
+        "PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE")"
+      requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
+      ;;
+    *)
+      ;;
+  esac
+
+  unresolved_required_inputs_json="$(jq -c '[.[] | select(.required == true and .state != "resolved") | .id]' <<<"$requirements_json")"
+  unresolved_required_count="$(jq -r 'length' <<<"$unresolved_required_inputs_json")"
+  if (( unresolved_required_count > 0 )); then
+    status="unresolved_required_inputs"
+  fi
+
+  jq -cn \
+    --arg track_id "$track_id" \
+    --arg track_group "$track_group" \
+    --arg status "$status" \
+    --arg track_note "$track_note" \
+    --argjson required_runtime_inputs "$requirements_json" \
+    --argjson unresolved_required_inputs "$unresolved_required_inputs_json" \
+    --argjson unresolved_required_count "$unresolved_required_count" \
+    '{
+      track_id: $track_id,
+      track_group: $track_group,
+      status: $status,
+      note: (if $track_note == "" then null else $track_note end),
+      required_runtime_inputs: $required_runtime_inputs,
+      unresolved_required_inputs: $unresolved_required_inputs,
+      unresolved_required_count: $unresolved_required_count
+    }'
+}
+
+first_log_match_line_or_empty() {
+  local log_path="$1"
+  local pattern="$2"
+  if [[ -f "$log_path" && -r "$log_path" ]]; then
+    grep -m1 -E -- "$pattern" "$log_path" 2>/dev/null || true
+  else
+    printf '%s' ""
+  fi
+}
+
+classify_track_failure_json() {
+  local track_id="$1"
+  local rc="${2:-1}"
+  local log_path="$3"
+  local track_group="$track_id"
+  local failure_kind="track_execution_failed"
+  local failure_code="track_command_failed"
+  local operator_next_action="Inspect track logs and rerun this track."
+  local operator_next_command=""
+  local hint_line=""
+  local -a unresolved_inputs=()
+  local runtime_requirements_json=""
+  local unresolved_required_inputs_json="[]"
+  local unresolved_required_count=0
+
+  runtime_requirements_json="$(build_track_runtime_requirements_json "$track_id")"
+  unresolved_required_inputs_json="$(jq -c '.unresolved_required_inputs // []' <<<"$runtime_requirements_json")"
+  unresolved_required_count="$(jq -r '.unresolved_required_count // 0' <<<"$runtime_requirements_json")"
+
+  case "$track_id" in
+    profile_default_gate_stability_cycle)
+      track_group="m2_profile_default_gate_stability"
+      failure_code="m2_track_failed"
+      operator_next_action="Set real host/subject inputs for M2 and rerun the profile-default-gate stability cycle."
+      operator_next_command="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key> --reports-dir .easy-node-logs --print-summary-json 1"
+      hint_line="$(first_log_match_line_or_empty "$log_path" '--host-a is required|--host-b is required|--campaign-subject or --subject is required|uses placeholder token|conflicting subject values')"
+      if [[ -n "$hint_line" ]]; then
+        failure_kind="required_runtime_input_unresolved"
+        failure_code="m2_required_runtime_input_unresolved"
+      fi
+      if grep -F -- "--host-a is required" "$log_path" >/dev/null 2>&1 || grep -F -- "set A_HOST/PROFILE_DEFAULT_GATE_STABILITY_HOST_A" "$log_path" >/dev/null 2>&1; then
+        append_unique_id "host_a" unresolved_inputs
+      fi
+      if grep -F -- "--host-b is required" "$log_path" >/dev/null 2>&1 || grep -F -- "set B_HOST/PROFILE_DEFAULT_GATE_STABILITY_HOST_B" "$log_path" >/dev/null 2>&1; then
+        append_unique_id "host_b" unresolved_inputs
+      fi
+      if grep -F -- "--campaign-subject or --subject is required" "$log_path" >/dev/null 2>&1 || grep -F -- "set PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT" "$log_path" >/dev/null 2>&1; then
+        append_unique_id "campaign_subject" unresolved_inputs
+      fi
+      ;;
+    runtime_actuation_promotion_cycle)
+      track_group="m4_runtime_actuation_promotion"
+      failure_code="m4_track_failed"
+      operator_next_action="Provide a real invite subject credential for M4 (direct arg or CAMPAIGN_SUBJECT/INVITE_KEY) and rerun the runtime-actuation cycle."
+      operator_next_command="CAMPAIGN_SUBJECT='<set-real-invite-key>' ./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+      hint_line="$(first_log_match_line_or_empty "$log_path" 'placeholder invite subject|set CAMPAIGN_SUBJECT/INVITE_KEY|requires a non-empty value in signoff passthrough args|requires a value in signoff passthrough args')"
+      if [[ -n "$hint_line" ]]; then
+        failure_kind="required_runtime_input_unresolved"
+        failure_code="m4_required_runtime_input_unresolved"
+        append_unique_id "campaign_subject" unresolved_inputs
+      fi
+      ;;
+    profile_compare_multi_vm_stability_promotion_cycle)
+      track_group="m5_multi_vm_stability_promotion"
+      failure_code="m5_track_failed"
+      operator_next_action="Ensure M5 has usable VM commands/files and rerun the multi-VM stability promotion cycle."
+      operator_next_command="./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir .easy-node-logs --cycle-arg \"--vm-command-file REPLACE_WITH_VM_COMMAND_FILE\" --print-summary-json 1"
+      hint_line="$(first_log_match_line_or_empty "$log_path" 'at least one --vm-command or --vm-command-file is required|vm command file preflight failed|no usable VM command fallback was discovered|vm-command-file preflight checks')"
+      if [[ -n "$hint_line" ]]; then
+        failure_kind="required_runtime_input_unresolved"
+        failure_code="m5_required_runtime_input_unresolved"
+        append_unique_id "vm_command_or_file" unresolved_inputs
+      fi
+      ;;
+    *)
+      ;;
+  esac
+
+  if [[ "$failure_kind" == "track_execution_failed" ]] && [[ "$rc" == "2" ]] && (( unresolved_required_count > 0 )); then
+    failure_kind="required_runtime_input_unresolved"
+    failure_code="${track_group}_required_runtime_input_preflight"
+    if [[ -z "$hint_line" ]]; then
+      hint_line="required runtime inputs unresolved by preflight"
+    fi
+  fi
+
+  local unresolved_inputs_json
+  local unresolved_inputs_count=0
+  unresolved_inputs_json="$(json_array_from_ref unresolved_inputs)"
+  unresolved_inputs_count="$(jq -r 'length' <<<"$unresolved_inputs_json")"
+  if (( unresolved_inputs_count == 0 )) && [[ "$failure_kind" == "required_runtime_input_unresolved" ]]; then
+    unresolved_inputs_json="$unresolved_required_inputs_json"
+    unresolved_inputs_count="$(jq -r 'length' <<<"$unresolved_inputs_json")"
+  fi
+
+  jq -cn \
+    --arg track_group "$track_group" \
+    --arg failure_kind "$failure_kind" \
+    --arg failure_code "$failure_code" \
+    --arg operator_next_action "$operator_next_action" \
+    --arg operator_next_command "$operator_next_command" \
+    --arg hint_line "$hint_line" \
+    --argjson failure_rc "$rc" \
+    --argjson unresolved_inputs "$unresolved_inputs_json" \
+    --argjson unresolved_inputs_count "$unresolved_inputs_count" \
+    --argjson runtime_requirements "$runtime_requirements_json" \
+    '{
+      track_group: $track_group,
+      failure_kind: $failure_kind,
+      failure_code: $failure_code,
+      failure_rc: $failure_rc,
+      deterministic_failure_key: ($track_group + ":" + $failure_code + ":rc=" + ($failure_rc|tostring)),
+      operator_next_action: $operator_next_action,
+      operator_next_command: (if $operator_next_command == "" then null else $operator_next_command end),
+      log_hint_line: (if $hint_line == "" then null else $hint_line end),
+      unresolved_required_inputs: $unresolved_inputs,
+      unresolved_required_inputs_count: $unresolved_inputs_count,
+      runtime_requirements_snapshot: $runtime_requirements
+    }'
+}
+
 for id in "${include_track_ids[@]}"; do
   if ! track_id_exists "$id"; then
     echo "unknown --include-track-id: $id"
@@ -448,6 +771,20 @@ fi
 if [[ -z "$selection_error" ]]; then
   selected_track_ids_csv="$(IFS=','; printf '%s' "${selected_track_ids[*]}")"
   echo "[roadmap-live-evidence-cycle-batch-run] stage=selection status=pass selected_track_count=${#selected_track_ids[@]} ids=$selected_track_ids_csv"
+fi
+
+selected_track_runtime_requirements_json='[]'
+if [[ -z "$selection_error" ]]; then
+  for id in "${selected_track_ids[@]}"; do
+    track_runtime_json="$(build_track_runtime_requirements_json "$id")"
+    selected_track_runtime_requirements_json="$(jq -c --argjson row "$track_runtime_json" '. + [$row]' <<<"$selected_track_runtime_requirements_json")"
+  done
+fi
+unresolved_required_track_ids_json="$(jq -c '[.[] | select(.unresolved_required_count > 0) | .track_id]' <<<"$selected_track_runtime_requirements_json")"
+unresolved_required_track_count="$(jq -r 'length' <<<"$unresolved_required_track_ids_json")"
+if [[ -z "$selection_error" ]] && (( unresolved_required_track_count > 0 )); then
+  unresolved_required_track_ids_csv="$(jq -r 'join(",")' <<<"$unresolved_required_track_ids_json")"
+  echo "[roadmap-live-evidence-cycle-batch-run] stage=runtime-input-preflight status=warn unresolved_required_track_count=$unresolved_required_track_count ids=${unresolved_required_track_ids_csv:-none}"
 fi
 
 declare -A pass_count_by_track=()
@@ -811,6 +1148,7 @@ jq -n \
   --argjson include_track_ids "$include_track_ids_json" \
   --argjson exclude_track_ids "$exclude_track_ids_json" \
   --argjson selected_track_ids "$selected_track_ids_json" \
+  --argjson selected_track_runtime_requirements "$selected_track_runtime_requirements_json" \
   --argjson default_track_count "${#default_track_ids[@]}" \
   --argjson include_track_ids_requested_count "$include_track_ids_requested_count" \
   --argjson include_track_ids_unique_count "$include_track_ids_unique_count" \
@@ -818,6 +1156,8 @@ jq -n \
   --argjson exclude_track_ids_unique_count "$exclude_track_ids_unique_count" \
   --argjson base_track_count "$base_track_count" \
   --argjson selected_track_ids_count "$selected_track_ids_count" \
+  --argjson unresolved_required_track_ids "$unresolved_required_track_ids_json" \
+  --argjson unresolved_required_track_count "$unresolved_required_track_count" \
   --argjson conflicting_duplicate_track_ids "$conflicting_duplicate_track_ids_json" \
   --argjson per_track "$per_track_json" \
   --argjson iterations_results "$iteration_results_json" \
@@ -844,7 +1184,8 @@ jq -n \
       default_track_ids: $default_track_ids,
       include_track_ids: $include_track_ids,
       exclude_track_ids: $exclude_track_ids,
-      selected_track_ids: $selected_track_ids
+      selected_track_ids: $selected_track_ids,
+      track_runtime_requirements: $selected_track_runtime_requirements
     },
     selection_accounting: {
       default_track_count: $default_track_count,
@@ -854,6 +1195,8 @@ jq -n \
       exclude_track_ids_unique_count: $exclude_track_ids_unique_count,
       base_track_count: $base_track_count,
       selected_track_ids_count: $selected_track_ids_count,
+      unresolved_required_track_ids: $unresolved_required_track_ids,
+      unresolved_required_track_count: $unresolved_required_track_count,
       conflicting_duplicate_track_ids: $conflicting_duplicate_track_ids
     },
     stages: {

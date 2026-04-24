@@ -132,6 +132,9 @@ func (s *KVStore) GetDecision(decisionID string) (types.GovernanceDecision, bool
 	if record.DecisionID != canonicalDecisionID {
 		return types.GovernanceDecision{}, false
 	}
+	if err := s.validateDecisionPolicyReference(record); err != nil {
+		return types.GovernanceDecision{}, false
+	}
 
 	return record, true
 }
@@ -161,6 +164,10 @@ func (s *KVStore) ListDecisionsWithError() ([]types.GovernanceDecision, error) {
 		}
 		if record.DecisionID != keyID {
 			decodeErr = fmt.Errorf("decision key/value id mismatch: key=%q payload=%q", keyID, record.DecisionID)
+			return false
+		}
+		if err := s.validateDecisionPolicyReference(record); err != nil {
+			decodeErr = fmt.Errorf("decode decision %q: %w", keyID, err)
 			return false
 		}
 
@@ -293,6 +300,21 @@ func decodeDecision(payload []byte) (types.GovernanceDecision, error) {
 		return types.GovernanceDecision{}, err
 	}
 	return normalized, nil
+}
+
+func (s *KVStore) validateDecisionPolicyReference(record types.GovernanceDecision) error {
+	policyPayload, ok := s.store.Get(policyKey(record.PolicyID))
+	if !ok {
+		return fmt.Errorf("decision references missing policy %q", record.PolicyID)
+	}
+	policy, err := decodePolicy(policyPayload)
+	if err != nil {
+		return fmt.Errorf("decision references invalid policy %q: %w", record.PolicyID, err)
+	}
+	if policy.PolicyID != record.PolicyID {
+		return fmt.Errorf("decision policy id mismatch: decision=%q policy=%q", record.PolicyID, policy.PolicyID)
+	}
+	return nil
 }
 
 func decodeAuditAction(payload []byte) (types.GovernanceAuditAction, error) {

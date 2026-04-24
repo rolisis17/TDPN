@@ -68,6 +68,112 @@ render_invocation_command() {
   printf '%s' "$rendered"
 }
 
+strip_optional_wrapping_quotes_01() {
+  local value="${1:-}"
+  local first_char=""
+  local last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+value_matches_placeholder_token_01() {
+  local value token normalized
+  value="$(trim "${1:-}")"
+  token="$(trim "${2:-}")"
+  if [[ -z "$value" || -z "$token" ]]; then
+    return 1
+  fi
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    "$token"|\$\{"$token"\}|\$"$token"|"<$token>"|"{{$token}}"|YOUR_"$token"|REPLACE_WITH_"$token"|%$token%|\$\{"$token":-*}|\$\{"$token"-*})
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+host_a_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in A_HOST HOST_A; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+host_b_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in B_HOST HOST_B; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+subject_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in INVITE_KEY CAMPAIGN_SUBJECT INVITE_SUBJECT; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+command_contains_placeholder_token_01() {
+  local command_text token normalized
+  command_text="${1:-}"
+  token="$(trim "${2:-}")"
+  if [[ -z "$command_text" || -z "$token" ]]; then
+    return 1
+  fi
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$normalized" =~ (^|[^A-Z0-9_])${token}([^A-Z0-9_]|$) ]]; then
+    return 0
+  fi
+  if [[ "$normalized" =~ REPLACE_WITH_${token} ]]; then
+    return 0
+  fi
+  if [[ "$normalized" =~ YOUR_${token} ]]; then
+    return 0
+  fi
+  return 1
+}
+
+append_unique_array_value_01() {
+  local value="$1"
+  local array_name="$2"
+  local -n ref="$array_name"
+  local existing=""
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  for existing in "${ref[@]}"; do
+    if [[ "$existing" == "$value" ]]; then
+      return
+    fi
+  done
+  ref+=("$value")
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -460,12 +566,6 @@ target_match_command_conflicts_json="$(printf '%s\n' "$target_match_actions_json
   | map(select((.id | length) > 0 and ((.commands | length) > 1)))
 ')"
 target_match_command_conflict_count="$(printf '%s\n' "$target_match_command_conflicts_json" | jq -r 'length')"
-target_match_command_selection_valid="1"
-target_match_command_selection_reason=""
-if (( target_match_command_conflict_count > 0 )); then
-  target_match_command_selection_valid="0"
-  target_match_command_selection_reason="$(printf '%s\n' "$target_match_command_conflicts_json" | jq -r 'map(.id + ": " + (.commands | join(" || "))) | join("; ")')"
-fi
 
 scope_target_action_ids_json='[]'
 resolved_scope="$scope"
@@ -532,6 +632,132 @@ scope_match_action_ids_json="$(printf '%s\n' "$scope_match_actions_json" | jq -c
 scope_match_unique_actions_json="$(printf '%s\n' "$scope_match_actions_json" | jq -c 'reduce .[] as $action ({ ids: [], actions: [] }; (($action.id // "") | tostring) as $id | if ($id | length) == 0 or ((.ids | index($id)) != null) then . else .ids += [$id] | .actions += [$action] end) | .actions')"
 scope_match_unique_count="$(printf '%s\n' "$scope_match_unique_actions_json" | jq -r 'length')"
 scope_match_unique_action_ids_json="$(printf '%s\n' "$scope_match_unique_actions_json" | jq -c '[.[] | .id // "" | select(length > 0)]')"
+scope_match_command_conflicts_json="$(printf '%s\n' "$scope_match_actions_json" | jq -c '
+  sort_by(.id // "")
+  | group_by(.id // "")
+  | map(
+      ((.[0].id // "") | tostring) as $id
+      | {
+          id: $id,
+          commands: ([.[].command | tostring] | unique)
+        }
+    )
+  | map(select((.id | length) > 0 and ((.commands | length) > 1)))
+')"
+scope_match_command_conflict_count="$(printf '%s\n' "$scope_match_command_conflicts_json" | jq -r 'length')"
+deterministic_command_selection_valid="1"
+deterministic_command_selection_reason=""
+if (( scope_match_command_conflict_count > 0 )); then
+  deterministic_command_selection_valid="0"
+  deterministic_command_selection_reason="$(printf '%s\n' "$scope_match_command_conflicts_json" | jq -r 'map(.id + ": " + (.commands | join(" || "))) | join("; ")')"
+fi
+
+placeholder_host_a_resolved="0"
+placeholder_host_b_resolved="0"
+placeholder_subject_resolved="0"
+placeholder_host_a_source="missing"
+placeholder_host_b_source="missing"
+placeholder_subject_source="missing"
+placeholder_host_a_value="$(trim "${A_HOST:-}")"
+if [[ -n "$placeholder_host_a_value" ]]; then
+  if host_a_value_looks_placeholder_01 "$placeholder_host_a_value"; then
+    placeholder_host_a_source="A_HOST=placeholder"
+  else
+    placeholder_host_a_resolved="1"
+    placeholder_host_a_source="A_HOST"
+  fi
+fi
+if [[ "$placeholder_host_a_resolved" != "1" ]]; then
+  placeholder_host_a_value="$(trim "${HOST_A:-}")"
+  if [[ -n "$placeholder_host_a_value" ]]; then
+    if host_a_value_looks_placeholder_01 "$placeholder_host_a_value"; then
+      placeholder_host_a_source="${placeholder_host_a_source},HOST_A=placeholder"
+    else
+      placeholder_host_a_resolved="1"
+      placeholder_host_a_source="HOST_A"
+    fi
+  fi
+fi
+placeholder_host_b_value="$(trim "${B_HOST:-}")"
+if [[ -n "$placeholder_host_b_value" ]]; then
+  if host_b_value_looks_placeholder_01 "$placeholder_host_b_value"; then
+    placeholder_host_b_source="B_HOST=placeholder"
+  else
+    placeholder_host_b_resolved="1"
+    placeholder_host_b_source="B_HOST"
+  fi
+fi
+if [[ "$placeholder_host_b_resolved" != "1" ]]; then
+  placeholder_host_b_value="$(trim "${HOST_B:-}")"
+  if [[ -n "$placeholder_host_b_value" ]]; then
+    if host_b_value_looks_placeholder_01 "$placeholder_host_b_value"; then
+      placeholder_host_b_source="${placeholder_host_b_source},HOST_B=placeholder"
+    else
+      placeholder_host_b_resolved="1"
+      placeholder_host_b_source="HOST_B"
+    fi
+  fi
+fi
+placeholder_subject_value="$(trim "${CAMPAIGN_SUBJECT:-}")"
+if [[ -n "$placeholder_subject_value" ]]; then
+  if subject_value_looks_placeholder_01 "$placeholder_subject_value"; then
+    placeholder_subject_source="CAMPAIGN_SUBJECT=placeholder"
+  else
+    placeholder_subject_resolved="1"
+    placeholder_subject_source="CAMPAIGN_SUBJECT"
+  fi
+fi
+if [[ "$placeholder_subject_resolved" != "1" ]]; then
+  placeholder_subject_value="$(trim "${INVITE_KEY:-}")"
+  if [[ -n "$placeholder_subject_value" ]]; then
+    if subject_value_looks_placeholder_01 "$placeholder_subject_value"; then
+      placeholder_subject_source="${placeholder_subject_source},INVITE_KEY=placeholder"
+    else
+      placeholder_subject_resolved="1"
+      placeholder_subject_source="INVITE_KEY"
+    fi
+  fi
+fi
+
+unresolved_placeholder_actions_lines=""
+while IFS= read -r selected_action_json; do
+  [[ -n "$selected_action_json" ]] || continue
+  action_id="$(printf '%s\n' "$selected_action_json" | jq -r '.id // ""')"
+  command_text="$(printf '%s\n' "$selected_action_json" | jq -r '.command // "" | tostring')"
+  unresolved_placeholders=()
+  if command_contains_placeholder_token_01 "$command_text" "A_HOST" || command_contains_placeholder_token_01 "$command_text" "HOST_A"; then
+    if [[ "$placeholder_host_a_resolved" != "1" ]]; then
+      append_unique_array_value_01 "HOST_A/A_HOST" unresolved_placeholders
+    fi
+  fi
+  if command_contains_placeholder_token_01 "$command_text" "B_HOST" || command_contains_placeholder_token_01 "$command_text" "HOST_B"; then
+    if [[ "$placeholder_host_b_resolved" != "1" ]]; then
+      append_unique_array_value_01 "HOST_B/B_HOST" unresolved_placeholders
+    fi
+  fi
+  if command_contains_placeholder_token_01 "$command_text" "INVITE_KEY" || command_contains_placeholder_token_01 "$command_text" "CAMPAIGN_SUBJECT" || command_contains_placeholder_token_01 "$command_text" "INVITE_SUBJECT"; then
+    if [[ "$placeholder_subject_resolved" != "1" ]]; then
+      append_unique_array_value_01 "INVITE_KEY/CAMPAIGN_SUBJECT" unresolved_placeholders
+    fi
+  fi
+  if (( ${#unresolved_placeholders[@]} > 0 )); then
+    unresolved_placeholders_json="$(printf '%s\n' "${unresolved_placeholders[@]}" | jq -R . | jq -sc 'sort | unique')"
+    unresolved_action_json="$(jq -nc --arg id "$action_id" --arg command "$command_text" --argjson unresolved_placeholders "$unresolved_placeholders_json" '{ id: $id, command: $command, unresolved_placeholders: $unresolved_placeholders }')"
+    unresolved_placeholder_actions_lines+="${unresolved_action_json}"$'\n'
+  fi
+done < <(printf '%s\n' "$scope_match_unique_actions_json" | jq -c '.[]')
+if [[ -n "$unresolved_placeholder_actions_lines" ]]; then
+  unresolved_placeholder_actions_json="$(printf '%s' "$unresolved_placeholder_actions_lines" | jq -sc '.')"
+else
+  unresolved_placeholder_actions_json='[]'
+fi
+unresolved_placeholder_count="$(printf '%s\n' "$unresolved_placeholder_actions_json" | jq -r 'length')"
+unresolved_placeholder_selection_valid="1"
+unresolved_placeholder_selection_reason=""
+if (( unresolved_placeholder_count > 0 )); then
+  unresolved_placeholder_selection_valid="0"
+  unresolved_placeholder_selection_reason="$(printf '%s\n' "$unresolved_placeholder_actions_json" | jq -r 'map((.id // "unknown") + ": " + ((.unresolved_placeholders // []) | join(","))) | join("; ")')"
+fi
 
 derived_evidence_pack_map_json="$(jq -nc --argjson selected_ids "$scope_match_unique_action_ids_json" '
   def derive_evidence_pack_id($id):
@@ -581,10 +807,16 @@ echo "[roadmap-live-evidence-actionable-run] scope_match_action_ids=$scope_match
 echo "[roadmap-live-evidence-actionable-run] scope_match_unique_action_ids=$scope_match_unique_action_ids_csv"
 echo "[roadmap-live-evidence-actionable-run] derived_evidence_pack_count=$derived_evidence_pack_count derived_evidence_pack_ids=$derived_evidence_pack_ids_csv"
 echo "[roadmap-live-evidence-actionable-run] derived_evidence_pack_missing_count=$derived_evidence_pack_missing_count derived_evidence_pack_missing_ids=$derived_evidence_pack_missing_ids_csv"
-if [[ "$target_match_command_selection_valid" != "1" ]]; then
-  echo "[roadmap-live-evidence-actionable-run] deterministic_command_selection=fail conflict_count=$target_match_command_conflict_count reason=$target_match_command_selection_reason"
+echo "[roadmap-live-evidence-actionable-run] target_match_command_conflict_count=$target_match_command_conflict_count scope_match_command_conflict_count=$scope_match_command_conflict_count"
+if [[ "$deterministic_command_selection_valid" != "1" ]]; then
+  echo "[roadmap-live-evidence-actionable-run] deterministic_command_selection=fail conflict_count=$scope_match_command_conflict_count reason=$deterministic_command_selection_reason"
 else
   echo "[roadmap-live-evidence-actionable-run] deterministic_command_selection=pass conflict_count=0"
+fi
+if [[ "$unresolved_placeholder_selection_valid" != "1" ]]; then
+  echo "[roadmap-live-evidence-actionable-run] unresolved_placeholder_precondition=fail count=$unresolved_placeholder_count reason=$unresolved_placeholder_selection_reason"
+else
+  echo "[roadmap-live-evidence-actionable-run] unresolved_placeholder_precondition=pass count=0"
 fi
 
 filtered_roadmap_summary_json="$reports_dir/roadmap_progress_summary_live_evidence_filtered.json"
@@ -614,6 +846,7 @@ next_actions_cmd=(
 
 print_only_mode="0"
 deterministic_conflict_mode="0"
+placeholder_precondition_mode="0"
 no_selected_actions_mode="0"
 delegated_runner_invoked="1"
 next_actions_rc=0
@@ -626,11 +859,16 @@ if [[ "$print_derived_evidence_pack_ids" == "1" ]]; then
     printf '%s\n' "$derived_evidence_pack_ids_json" | jq -r '.[]'
   fi
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=print-derived-evidence-pack-ids"
-elif [[ "$target_match_command_selection_valid" != "1" ]]; then
+elif [[ "$deterministic_command_selection_valid" != "1" ]]; then
   deterministic_conflict_mode="1"
   delegated_runner_invoked="0"
   next_actions_rc=4
-  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=deterministic-command-conflict conflict_count=$target_match_command_conflict_count"
+  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=deterministic-command-conflict conflict_count=$scope_match_command_conflict_count"
+elif [[ "$unresolved_placeholder_selection_valid" != "1" ]]; then
+  placeholder_precondition_mode="1"
+  delegated_runner_invoked="0"
+  next_actions_rc=4
+  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=unresolved-placeholder-precondition count=$unresolved_placeholder_count"
 elif (( scope_match_unique_count == 0 )); then
   no_selected_actions_mode="1"
   delegated_runner_invoked="0"
@@ -666,8 +904,14 @@ if [[ "$print_only_mode" == "1" ]]; then
 elif [[ "$deterministic_conflict_mode" == "1" ]]; then
   nested_runner_status="skipped_deterministic_command_conflict"
   nested_runner_rc=4
-  delegated_runner_contract_failure_reason="deterministic command selection conflict across duplicate target action ids: $target_match_command_selection_reason"
+  delegated_runner_contract_failure_reason="deterministic command selection conflict across duplicate selected action ids: $deterministic_command_selection_reason"
   delegated_runner_failure_substep="deterministic_command_conflict"
+  final_rc=4
+elif [[ "$placeholder_precondition_mode" == "1" ]]; then
+  nested_runner_status="skipped_unresolved_placeholder_precondition"
+  nested_runner_rc=4
+  delegated_runner_contract_failure_reason="selected live-evidence commands include unresolved placeholders: $unresolved_placeholder_selection_reason"
+  delegated_runner_failure_substep="unresolved_placeholder_command_precondition"
   final_rc=4
 elif [[ "$no_selected_actions_mode" == "1" ]]; then
   nested_runner_status="skipped_no_selected_actions"
@@ -676,7 +920,7 @@ elif [[ "$no_selected_actions_mode" == "1" ]]; then
   final_rc=0
 fi
 
-if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$no_selected_actions_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then
+if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$placeholder_precondition_mode" != "1" && "$no_selected_actions_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then
   next_actions_summary_valid="1"
   nested_runner_status="$(jq -r '.status // ""' "$next_actions_summary_json")"
   nested_runner_rc_raw="$(jq -r '.rc // 125' "$next_actions_summary_json")"
@@ -715,7 +959,7 @@ if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$no
   if (( next_actions_rc != 0 && final_rc == 0 )); then
     final_rc="$next_actions_rc"
   fi
-elif [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$no_selected_actions_mode" != "1" ]]; then
+elif [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$placeholder_precondition_mode" != "1" && "$no_selected_actions_mode" != "1" ]]; then
   delegated_runner_contract_failure_reason="delegated summary missing or invalid; refusing stale/invalid summary reuse"
   delegated_runner_failure_substep="delegated_summary_missing_or_invalid"
   if (( next_actions_rc != 0 )); then
@@ -779,6 +1023,7 @@ jq -n \
   --argjson print_derived_evidence_pack_ids "$print_derived_evidence_pack_ids" \
   --argjson print_only_mode "$print_only_mode" \
   --argjson deterministic_conflict_mode "$deterministic_conflict_mode" \
+  --argjson placeholder_precondition_mode "$placeholder_precondition_mode" \
   --argjson no_selected_actions_mode "$no_selected_actions_mode" \
   --argjson delegated_runner_invoked "$delegated_runner_invoked" \
   --argjson action_timeout_sec "$action_timeout_sec" \
@@ -790,13 +1035,25 @@ jq -n \
   --argjson target_match_unique_action_ids "$target_match_unique_action_ids_json" \
   --argjson target_match_command_conflict_count "$target_match_command_conflict_count" \
   --argjson target_match_command_conflicts "$target_match_command_conflicts_json" \
-  --argjson target_match_command_selection_valid "$target_match_command_selection_valid" \
-  --arg target_match_command_selection_reason "$target_match_command_selection_reason" \
+  --argjson deterministic_command_selection_valid "$deterministic_command_selection_valid" \
+  --arg deterministic_command_selection_reason "$deterministic_command_selection_reason" \
+  --argjson unresolved_placeholder_count "$unresolved_placeholder_count" \
+  --argjson unresolved_placeholder_actions "$unresolved_placeholder_actions_json" \
+  --argjson unresolved_placeholder_selection_valid "$unresolved_placeholder_selection_valid" \
+  --arg unresolved_placeholder_selection_reason "$unresolved_placeholder_selection_reason" \
+  --argjson placeholder_host_a_resolved "$placeholder_host_a_resolved" \
+  --argjson placeholder_host_b_resolved "$placeholder_host_b_resolved" \
+  --argjson placeholder_subject_resolved "$placeholder_subject_resolved" \
+  --arg placeholder_host_a_source "$placeholder_host_a_source" \
+  --arg placeholder_host_b_source "$placeholder_host_b_source" \
+  --arg placeholder_subject_source "$placeholder_subject_source" \
   --argjson scope_target_action_ids "$scope_target_action_ids_json" \
   --argjson scope_match_count "$scope_match_count" \
   --argjson scope_match_action_ids "$scope_match_action_ids_json" \
   --argjson scope_match_unique_count "$scope_match_unique_count" \
   --argjson scope_match_unique_action_ids "$scope_match_unique_action_ids_json" \
+  --argjson scope_match_command_conflict_count "$scope_match_command_conflict_count" \
+  --argjson scope_match_command_conflicts "$scope_match_command_conflicts_json" \
   --argjson derived_evidence_pack_map "$derived_evidence_pack_map_json" \
   --argjson derived_evidence_pack_ids "$derived_evidence_pack_ids_json" \
   --argjson derived_evidence_pack_count "$derived_evidence_pack_count" \
@@ -826,6 +1083,7 @@ jq -n \
       print_derived_evidence_pack_ids: ($print_derived_evidence_pack_ids == 1),
       print_only_mode: ($print_only_mode == 1),
       deterministic_conflict_mode: ($deterministic_conflict_mode == 1),
+      placeholder_precondition_mode: ($placeholder_precondition_mode == 1),
       no_selected_actions_fast_path: ($no_selected_actions_mode == 1),
       delegated_runner_invoked: ($delegated_runner_invoked == 1),
       action_timeout_sec: $action_timeout_sec,
@@ -849,17 +1107,35 @@ jq -n \
       target_match_unique_action_ids: $target_match_unique_action_ids,
       target_match_command_conflict_count: $target_match_command_conflict_count,
       target_match_command_conflicts: $target_match_command_conflicts,
-      deterministic_command_selection_valid: ($target_match_command_selection_valid == 1),
+      deterministic_command_selection_valid: ($deterministic_command_selection_valid == 1),
       deterministic_command_selection_reason: (
-        if $target_match_command_selection_reason == "" then null
-        else $target_match_command_selection_reason
+        if $deterministic_command_selection_reason == "" then null
+        else $deterministic_command_selection_reason
         end
       ),
+      unresolved_placeholder_count: $unresolved_placeholder_count,
+      unresolved_placeholder_actions: $unresolved_placeholder_actions,
+      unresolved_placeholder_selection_valid: ($unresolved_placeholder_selection_valid == 1),
+      unresolved_placeholder_selection_reason: (
+        if $unresolved_placeholder_selection_reason == "" then null
+        else $unresolved_placeholder_selection_reason
+        end
+      ),
+      placeholder_resolution_context: {
+        host_a_resolved: ($placeholder_host_a_resolved == 1),
+        host_a_source: (if $placeholder_host_a_source == "" then null else $placeholder_host_a_source end),
+        host_b_resolved: ($placeholder_host_b_resolved == 1),
+        host_b_source: (if $placeholder_host_b_source == "" then null else $placeholder_host_b_source end),
+        subject_resolved: ($placeholder_subject_resolved == 1),
+        subject_source: (if $placeholder_subject_source == "" then null else $placeholder_subject_source end)
+      },
       scope_target_action_ids: $scope_target_action_ids,
       scope_match_count: $scope_match_count,
       scope_match_action_ids: $scope_match_action_ids,
       scope_match_unique_count: $scope_match_unique_count,
       scope_match_unique_action_ids: $scope_match_unique_action_ids,
+      scope_match_command_conflict_count: $scope_match_command_conflict_count,
+      scope_match_command_conflicts: $scope_match_command_conflicts,
       derived_evidence_pack_map: $derived_evidence_pack_map,
       derived_evidence_pack_ids: $derived_evidence_pack_ids,
       derived_evidence_pack_count: $derived_evidence_pack_count,

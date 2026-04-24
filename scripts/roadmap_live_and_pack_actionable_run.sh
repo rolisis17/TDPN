@@ -178,6 +178,80 @@ redact_command_secrets() {
   printf '%s' "$line"
 }
 
+command_hygiene_default_json() {
+  jq -nc '
+    {
+      checked: false,
+      selected_commands: [],
+      selected_commands_count: 0,
+      unresolved_placeholders: [],
+      unresolved_placeholder_count: 0,
+      unsafe_tokens: [],
+      unsafe_token_count: 0,
+      unsafe_tokens_blocked: false,
+      contract_valid: true,
+      contract_failure_reason: null
+    }'
+}
+
+evaluate_selected_action_command_hygiene_json() {
+  local summary_path="${1:-}"
+  local allow_unsafe="${2:-0}"
+  if [[ ! -f "$summary_path" ]] || ! jq -e . "$summary_path" >/dev/null 2>&1; then
+    command_hygiene_default_json
+    return 0
+  fi
+
+  jq -c --argjson allow_unsafe "$allow_unsafe" '
+    def trim: gsub("^\\s+|\\s+$"; "");
+    def has_unresolved_placeholder:
+      (ascii_upcase) as $u
+      | ($u | test("(^|[^A-Z0-9_])(INVITE_KEY|CAMPAIGN_SUBJECT|REPLACE_WITH_INVITE_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT)($|[^A-Z0-9_])"))
+        or ($u | test("\\$\\{?(INVITE_KEY|CAMPAIGN_SUBJECT)\\}?"))
+        or ($u | contains("<SET-REAL-INVITE-KEY>"))
+        or ($u | contains("<SET-INVITE-SUBJECT>"));
+    def has_unsafe_shell_token:
+      test("[\\n\\r]")
+      or test("[;|&<>`$(){}]")
+      or test("^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+");
+
+    (.roadmap.selected_action_ids // [] | map(tostring | trim) | map(select(length > 0)) | unique) as $selected_ids
+    | ([
+        (.actions // [])[]
+        | {
+            id: ((.id // "") | tostring | trim),
+            command: ((.command // "") | tostring | trim)
+          }
+        | select((.id | length) > 0 and (.command | length) > 0)
+        | .id as $action_id
+        | select(($selected_ids | index($action_id)) != null)
+      ] | sort_by([.id, .command])) as $selected_commands
+    | ($selected_commands | map(select(.command | has_unresolved_placeholder))) as $unresolved_placeholders
+    | ($selected_commands | map(select(.command | has_unsafe_shell_token))) as $unsafe_tokens
+    | {
+        checked: true,
+        selected_commands: $selected_commands,
+        selected_commands_count: ($selected_commands | length),
+        unresolved_placeholders: $unresolved_placeholders,
+        unresolved_placeholder_count: ($unresolved_placeholders | length),
+        unsafe_tokens: $unsafe_tokens,
+        unsafe_token_count: ($unsafe_tokens | length),
+        unsafe_tokens_blocked: (($unsafe_tokens | length) > 0 and ($allow_unsafe != 1)),
+        contract_valid: ((($unresolved_placeholders | length) == 0) and ((($unsafe_tokens | length) == 0) or ($allow_unsafe == 1))),
+        contract_failure_reason: (
+          [
+            (if ($unresolved_placeholders | length) > 0 then
+              "selected actionable commands include unresolved placeholder tokens"
+             else empty end),
+            (if (($unsafe_tokens | length) > 0 and ($allow_unsafe != 1)) then
+              "selected actionable commands require unsafe shell parsing while --allow-unsafe-shell-commands=0"
+             else empty end)
+          ]
+          | if length == 0 then null else join("; ") end
+        )
+      }' "$summary_path"
+}
+
 need_cmd jq
 need_cmd bash
 need_cmd date
@@ -425,6 +499,7 @@ live_timed_out_json="null"
 live_soft_failed_json="null"
 live_selected_action_ids_json="[]"
 live_stage_pass=0
+live_command_hygiene_json="$(command_hygiene_default_json)"
 
 pack_status="skipped"
 pack_skip_reason=""
@@ -449,6 +524,7 @@ pack_timed_out_json="null"
 pack_soft_failed_json="null"
 pack_selected_action_ids_json="[]"
 pack_stage_pass=0
+pack_command_hygiene_json="$(command_hygiene_default_json)"
 
 archive_attempted=0
 archive_status="skipped"
@@ -604,6 +680,25 @@ if [[ -f "$live_summary_json" ]] && jq -e . "$live_summary_json" >/dev/null 2>&1
       shared_roadmap_report_md="$candidate_roadmap_report_md"
     fi
   fi
+
+  live_command_hygiene_json="$(evaluate_selected_action_command_hygiene_json "$live_summary_json" "$allow_unsafe_shell_commands")"
+  live_command_hygiene_contract_valid="$(printf '%s\n' "$live_command_hygiene_json" | jq -r '.contract_valid // false')"
+  if [[ "$live_command_hygiene_contract_valid" != "true" ]]; then
+    live_command_hygiene_contract_failure_reason="$(printf '%s\n' "$live_command_hygiene_json" | jq -r '.contract_failure_reason // ""')"
+    if [[ -n "$live_command_hygiene_contract_failure_reason" ]]; then
+      if [[ -n "$live_contract_failure_reason" ]]; then
+        live_contract_failure_reason="${live_contract_failure_reason}; ${live_command_hygiene_contract_failure_reason}"
+      else
+        live_contract_failure_reason="$live_command_hygiene_contract_failure_reason"
+      fi
+    fi
+    live_contract_valid=0
+    live_status="fail"
+    live_stage_pass=0
+    if (( live_rc == 0 )); then
+      live_rc=1
+    fi
+  fi
 else
   live_summary_valid=0
   live_contract_valid=0
@@ -618,6 +713,7 @@ else
 fi
 
 echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence status=$live_status rc=$live_rc contract_valid=$live_contract_valid"
+echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence command_hygiene=$(printf '%s\n' "$live_command_hygiene_json" | jq -c '{checked, selected_commands_count, unresolved_placeholder_count, unsafe_token_count, unsafe_tokens_blocked, contract_valid, contract_failure_reason}')"
 if [[ "$live_status" != "pass" && -n "$live_contract_failure_reason" ]]; then
   echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence fail_reason=$live_contract_failure_reason"
 fi
@@ -887,6 +983,25 @@ if (( run_pack_stage == 1 )); then
       pack_soft_failed_num="$value"
       pack_soft_failed_json="$value"
     fi
+
+    pack_command_hygiene_json="$(evaluate_selected_action_command_hygiene_json "$pack_summary_json" "$allow_unsafe_shell_commands")"
+    pack_command_hygiene_contract_valid="$(printf '%s\n' "$pack_command_hygiene_json" | jq -r '.contract_valid // false')"
+    if [[ "$pack_command_hygiene_contract_valid" != "true" ]]; then
+      pack_command_hygiene_contract_failure_reason="$(printf '%s\n' "$pack_command_hygiene_json" | jq -r '.contract_failure_reason // ""')"
+      if [[ -n "$pack_command_hygiene_contract_failure_reason" ]]; then
+        if [[ -n "$pack_contract_failure_reason" ]]; then
+          pack_contract_failure_reason="${pack_contract_failure_reason}; ${pack_command_hygiene_contract_failure_reason}"
+        else
+          pack_contract_failure_reason="$pack_command_hygiene_contract_failure_reason"
+        fi
+      fi
+      pack_contract_valid=0
+      pack_status="fail"
+      pack_stage_pass=0
+      if (( pack_rc_num == 0 )); then
+        pack_rc_num=1
+      fi
+    fi
   else
     pack_summary_valid=0
     pack_contract_valid=0
@@ -903,6 +1018,7 @@ if (( run_pack_stage == 1 )); then
   pack_rc_json="$pack_rc_num"
   pack_process_rc_json="$pack_process_rc_num"
   echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack status=$pack_status rc=$pack_rc_num contract_valid=$pack_contract_valid"
+  echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack command_hygiene=$(printf '%s\n' "$pack_command_hygiene_json" | jq -c '{checked, selected_commands_count, unresolved_placeholder_count, unsafe_token_count, unsafe_tokens_blocked, contract_valid, contract_failure_reason}')"
   if [[ "$pack_status" != "pass" && -n "$pack_contract_failure_reason" ]]; then
     echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack fail_reason=$pack_contract_failure_reason"
   fi
@@ -1041,6 +1157,7 @@ jq -n \
   --argjson live_summary_valid "$live_summary_valid" \
   --argjson live_contract_valid "$live_contract_valid" \
   --arg live_contract_failure_reason "$live_contract_failure_reason" \
+  --argjson live_command_hygiene "$live_command_hygiene_json" \
   --argjson live_selected_actions_count "$live_selected_actions_count_json" \
   --argjson live_selected_action_ids "$live_selected_action_ids_json" \
   --argjson live_actions_executed "$live_actions_executed_json" \
@@ -1068,6 +1185,7 @@ jq -n \
   --argjson pack_summary_valid "$pack_summary_valid" \
   --argjson pack_contract_valid "$pack_contract_valid" \
   --arg pack_contract_failure_reason "$pack_contract_failure_reason" \
+  --argjson pack_command_hygiene "$pack_command_hygiene_json" \
   --argjson pack_selected_actions_count "$pack_selected_actions_count_json" \
   --argjson pack_selected_action_ids "$pack_selected_action_ids_json" \
   --argjson pack_actions_executed "$pack_actions_executed_json" \
@@ -1121,6 +1239,7 @@ jq -n \
         summary_valid: ($live_summary_valid == 1),
         contract_valid: ($live_contract_valid == 1),
         contract_failure_reason: (if $live_contract_failure_reason == "" then null else $live_contract_failure_reason end),
+        command_hygiene: $live_command_hygiene,
         selected_actions_count: $live_selected_actions_count,
         selected_action_ids: $live_selected_action_ids,
         actions_executed: $live_actions_executed,
@@ -1165,6 +1284,7 @@ jq -n \
         summary_valid: ($pack_summary_valid == 1),
         contract_valid: ($pack_contract_valid == 1),
         contract_failure_reason: (if $pack_contract_failure_reason == "" then null else $pack_contract_failure_reason end),
+        command_hygiene: $pack_command_hygiene,
         skip_reason: (if $pack_status == "skipped" then $pack_skip_reason else null end),
         selected_actions_count: $pack_selected_actions_count,
         selected_action_ids: $pack_selected_action_ids,

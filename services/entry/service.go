@@ -1319,7 +1319,9 @@ func (s *Service) resolveRelayDescriptorWithCachePolicy(ctx context.Context, rel
 		cached, ok := s.relayDescCache[relayID]
 		s.mu.RUnlock()
 		if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
-			return cached.desc, nil
+			if !cached.desc.ValidUntil.IsZero() && !now.After(cached.desc.ValidUntil) {
+				return cached.desc, nil
+			}
 		}
 	}
 

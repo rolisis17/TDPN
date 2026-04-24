@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"syscall"
 	"sync"
+	"syscall"
 
 	"github.com/tdpn/tdpn-chain/internal/fsguard"
 	"github.com/tdpn/tdpn-chain/x/vpngovernance/types"
@@ -222,6 +222,9 @@ func (s *FileStore) load() error {
 		if err != nil {
 			return fmt.Errorf("validate decision snapshot: %w", err)
 		}
+		if err := validateDecisionPolicyReferences(decisions, s.policies); err != nil {
+			return fmt.Errorf("validate decision policy references: %w", err)
+		}
 		s.decisions = decisions
 	}
 	if snapshot.AuditActions != nil {
@@ -291,6 +294,14 @@ func (s *FileStore) UpsertDecision(record types.GovernanceDecision) {
 func (s *FileStore) UpsertDecisionWithError(record types.GovernanceDecision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	policy, ok := s.policies[record.PolicyID]
+	if !ok {
+		return fmt.Errorf("decision %q references missing policy %q", record.DecisionID, record.PolicyID)
+	}
+	if err := policy.ValidateBasic(); err != nil {
+		return fmt.Errorf("decision %q references invalid policy %q: %w", record.DecisionID, record.PolicyID, err)
+	}
 
 	previous, hadPrevious := s.decisions[record.DecisionID]
 	s.decisions[record.DecisionID] = record
@@ -486,6 +497,19 @@ func buildDecisionSnapshotMap(input map[string]types.GovernanceDecision) (map[st
 		loaded[normalized.DecisionID] = normalized
 	}
 	return loaded, nil
+}
+
+func validateDecisionPolicyReferences(decisions map[string]types.GovernanceDecision, policies map[string]types.GovernancePolicy) error {
+	for _, decision := range decisions {
+		policy, ok := policies[decision.PolicyID]
+		if !ok {
+			return fmt.Errorf("decision %q references missing policy %q", decision.DecisionID, decision.PolicyID)
+		}
+		if err := policy.ValidateBasic(); err != nil {
+			return fmt.Errorf("decision %q references invalid policy %q: %w", decision.DecisionID, decision.PolicyID, err)
+		}
+	}
+	return nil
 }
 
 func buildAuditActionSnapshotMap(input map[string]types.GovernanceAuditAction) (map[string]types.GovernanceAuditAction, error) {

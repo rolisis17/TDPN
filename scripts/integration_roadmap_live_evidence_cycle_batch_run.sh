@@ -44,6 +44,11 @@ if [[ "$behavior" == "fail" ]]; then
   echo "runtime_actuation_promotion_cycle failed rc=${TRACK_B_RC:-23}"
   exit "${TRACK_B_RC:-23}"
 fi
+if [[ "$behavior" == "placeholder_fail" ]]; then
+  echo "runtime-actuation-promotion-cycle: placeholder invite subject in signoff passthrough (--subject) cannot be resolved"
+  echo "provide a real value via --subject or set CAMPAIGN_SUBJECT/INVITE_KEY"
+  exit "${TRACK_B_RC:-2}"
+fi
 exit 0
 EOF_TRACK_B
 chmod +x "$TRACK_B"
@@ -125,6 +130,7 @@ if ! jq -e '
     "runtime_actuation_promotion_cycle",
     "profile_compare_multi_vm_stability_promotion_cycle"
   ]
+  and (.inputs.track_runtime_requirements | length == 3)
   and .summary.iterations_requested == 2
   and .summary.iterations_completed == 2
   and .summary.selected_track_count == 3
@@ -135,6 +141,7 @@ if ! jq -e '
   and .selection_accounting.exclude_track_ids_requested_count == 0
   and .selection_accounting.base_track_count == 3
   and .selection_accounting.selected_track_ids_count == 3
+  and (.selection_accounting.unresolved_required_track_count | type) == "number"
   and (.per_track | length == 3)
   and ([.per_track[].total_runs] == [2,2,2])
   and ([.per_track[].pass] == [2,2,2])
@@ -192,7 +199,9 @@ if ! jq -e '
   and .summary.executed_tracks == 0
   and .summary.skipped_tracks == 0
   and .inputs.selected_track_ids == []
+  and .inputs.track_runtime_requirements == []
   and .selection_accounting.selected_track_ids_count == 0
+  and .selection_accounting.unresolved_required_track_count == 0
   and (.per_track | length == 0)
   and (.iterations | length == 0)
 ' "$NO_TRACKS_SUMMARY" >/dev/null; then
@@ -264,6 +273,9 @@ if ! jq -e '
   and (.iterations[0].tracks | length == 3)
   and ([.iterations[0].tracks[].status] == ["pass","fail","skipped"])
   and .iterations[0].tracks[1].failure_diagnostics.log_tail_lines == ["runtime_actuation_promotion_cycle failed rc=23"]
+  and .iterations[0].tracks[1].failure_diagnostics.track_group == "m4_runtime_actuation_promotion"
+  and .iterations[0].tracks[1].failure_diagnostics.failure_kind == "track_execution_failed"
+  and .iterations[0].tracks[1].failure_diagnostics.failure_code == "m4_track_failed"
   and .iterations[0].tracks[1].failure_diagnostics.log_tail_line_count == 1
   and .iterations[0].tracks[1].failure_diagnostics.log_total_line_count == 1
   and .iterations[0].tracks[1].failure_diagnostics.log_tail_truncated == false
@@ -283,6 +295,76 @@ if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "2" ]]; then
 fi
 if grep -F "C:" "$EXEC_LOG" >/dev/null; then
   echo "track C should not run in fail-closed path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] placeholder unresolved-input diagnostics path"
+PLACEHOLDER_SUMMARY="$TMP_DIR/placeholder_summary.json"
+: >"$EXEC_LOG"
+set +e
+A_HOST=A_HOST B_HOST=B_HOST CAMPAIGN_SUBJECT=CAMPAIGN_SUBJECT INVITE_KEY=INVITE_KEY \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=placeholder_fail TRACK_B_RC=2 TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/placeholder_reports" \
+  --summary-json "$PLACEHOLDER_SUMMARY" \
+  --iterations 1 \
+  --continue-on-fail 0 \
+  --parallel 0 \
+  --print-summary-json 0
+placeholder_rc=$?
+set -e
+
+if [[ "$placeholder_rc" != "2" ]]; then
+  echo "expected placeholder diagnostics path rc=2, got rc=$placeholder_rc"
+  cat "$PLACEHOLDER_SUMMARY"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .failure_substep == "execution:iteration_1:track_runtime_actuation_promotion_cycle"
+  and .summary.iterations_completed == 1
+  and .summary.executed_tracks == 2
+  and .summary.skipped_tracks == 1
+  and (.inputs.track_runtime_requirements | length == 3)
+  and .selection_accounting.unresolved_required_track_ids == [
+    "profile_default_gate_stability_cycle",
+    "runtime_actuation_promotion_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_count == 2
+  and .iterations[0].tracks[1].failure_diagnostics.track_group == "m4_runtime_actuation_promotion"
+  and .iterations[0].tracks[1].failure_diagnostics.failure_kind == "required_runtime_input_unresolved"
+  and .iterations[0].tracks[1].failure_diagnostics.failure_code == "m4_required_runtime_input_unresolved"
+  and .iterations[0].tracks[1].failure_diagnostics.unresolved_required_inputs == ["campaign_subject"]
+  and .iterations[0].tracks[1].failure_diagnostics.unresolved_required_inputs_count == 1
+  and .iterations[0].tracks[1].failure_diagnostics.log_hint_line
+      == "runtime-actuation-promotion-cycle: placeholder invite subject in signoff passthrough (--subject) cannot be resolved"
+  and .iterations[0].tracks[1].failure_diagnostics.operator_next_command
+      == "CAMPAIGN_SUBJECT='\''<set-real-invite-key>'\'' ./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_line_count == 2
+  and .iterations[0].tracks[1].failure_diagnostics.log_total_line_count == 2
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_truncated == false
+  and .iterations[0].tracks[2].status == "skipped"
+  and .iterations[0].tracks[2].failure_kind == "skipped_due_to_fail_closed"
+' "$PLACEHOLDER_SUMMARY" >/dev/null; then
+  echo "placeholder unresolved-input diagnostics summary mismatch"
+  cat "$PLACEHOLDER_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "2" ]]; then
+  echo "expected 2 executions in placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "C:" "$EXEC_LOG" >/dev/null; then
+  echo "track C should not run in placeholder diagnostics path"
   cat "$EXEC_LOG"
   exit 1
 fi
@@ -340,6 +422,8 @@ if ! jq -e '
   and (.iterations | length == 2)
   and ([.iterations[].status] == ["fail","fail"])
   and ([.iterations[].failure_substep] == ["track_failed:runtime_actuation_promotion_cycle","track_failed:runtime_actuation_promotion_cycle"])
+  and .iterations[0].tracks[1].failure_diagnostics.failure_kind == "track_execution_failed"
+  and .iterations[1].tracks[1].failure_diagnostics.failure_kind == "track_execution_failed"
   and .iterations[0].tracks[1].failure_diagnostics.log_tail_lines == ["runtime_actuation_promotion_cycle failed rc=23"]
   and .iterations[1].tracks[1].failure_diagnostics.log_tail_lines == ["runtime_actuation_promotion_cycle failed rc=23"]
 ' "$CONTINUE_SUMMARY" >/dev/null; then

@@ -1360,6 +1360,56 @@ func TestSyncPeerRelaysRejectsStaleCachedSignalsWhenSourcesInsufficient(t *testi
 	}
 }
 
+func TestSyncPeerRelaysDropsStaleCachedSignalsWhenAllSourcesFail(t *testing.T) {
+	now := time.Now()
+	cachedScore := proto.RelaySelectionScore{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		Reputation:   0.61,
+		Uptime:       0.62,
+		Capacity:     0.63,
+		AbusePenalty: 0.11,
+		BondScore:    0.41,
+		StakeScore:   0.31,
+	}
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.71,
+		Uptime:       0.72,
+		Capacity:     0.73,
+		AbusePenalty: 0.12,
+		BondScore:    0.42,
+		StakeScore:   0.32,
+		Confidence:   0.81,
+	}
+
+	s := &Service{
+		peerURLs:                  []string{"http://peer-a.local"},
+		peerSignalFreshnessMaxAge: 2 * time.Minute,
+		peerScores: map[string]proto.RelaySelectionScore{
+			relayKey("exit-cached", "exit"): cachedScore,
+		},
+		peerScoreLastFreshAt: now.Add(-10 * time.Minute),
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		peerTrustLastFreshAt: now.Add(-10 * time.Minute),
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: map[string]func(*http.Request) (*http.Response, error){}}},
+	}
+
+	if err := s.syncPeerRelays(context.Background()); err == nil {
+		t.Fatalf("expected syncPeerRelays to fail when all peer sources fail")
+	}
+	if got := s.snapshotPeerScores(); len(got) != 0 {
+		t.Fatalf("expected stale cached peer scores to be dropped on hard sync failure, got %d entries", len(got))
+	}
+	if got := s.snapshotPeerTrust(); len(got) != 0 {
+		t.Fatalf("expected stale cached peer trust to be dropped on hard sync failure, got %d entries", len(got))
+	}
+}
+
 func TestSyncPeerRelaysPreservesCachedSignalsWhenMergedSignalsEmptyWithCache(t *testing.T) {
 	urlA := "http://peer-a.local"
 	pubA, privA, err := crypto.GenerateEd25519Keypair()
@@ -1954,6 +2004,39 @@ func TestSyncIssuerTrustRejectsStaleCacheWhenSignalSourcesInsufficient(t *testin
 
 	if got := s.snapshotIssuerTrust(); len(got) != 0 {
 		t.Fatalf("expected stale cached issuer trust to be dropped, got %d entries", len(got))
+	}
+}
+
+func TestSyncIssuerTrustDropsStaleCacheWhenAllSourcesFail(t *testing.T) {
+	now := time.Now()
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.72,
+		Uptime:       0.73,
+		Capacity:     0.74,
+		AbusePenalty: 0.14,
+		BondScore:    0.43,
+		StakeScore:   0.33,
+		Confidence:   0.82,
+	}
+
+	s := &Service{
+		issuerTrustURLs:             []string{"http://issuer-a.local"},
+		issuerSignalFreshnessMaxAge: 2 * time.Minute,
+		issuerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		issuerTrustLastFreshAt: now.Add(-10 * time.Minute),
+		httpClient:             &http.Client{Transport: mockRoundTripper{handlers: map[string]func(*http.Request) (*http.Response, error){}}},
+	}
+
+	if err := s.syncIssuerTrust(context.Background()); err == nil {
+		t.Fatalf("expected syncIssuerTrust to fail when all issuer sources fail")
+	}
+	if got := s.snapshotIssuerTrust(); len(got) != 0 {
+		t.Fatalf("expected stale cached issuer trust to be dropped on hard sync failure, got %d entries", len(got))
 	}
 }
 

@@ -1211,6 +1211,82 @@ func TestHandlePathOpenNonStrictModeUsesStaleMiddleRelayCache(t *testing.T) {
 	}
 }
 
+func TestHandlePathOpenNonStrictModeBypassesExpiredMiddleRelayCache(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "middle-expired", Role: "exit", OperatorID: "op-middle", Endpoint: "127.0.0.1:51822", ValidUntil: time.Now().Add(time.Minute)},
+	})
+	relayCalls := 0
+	baseRelaysHandler := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		relayCalls++
+		return baseRelaysHandler(req)
+	}
+
+	exitCalls := 0
+	handlers["http://exit.local/v1/path/open"] = func(_ *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{Accepted: true, SessionExp: time.Now().Add(5 * time.Minute).Unix()})(nil)
+	}
+
+	s := &Service{
+		dataAddr:       "127.0.0.1:51820",
+		operatorID:     "op-entry",
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		relayDescCache: map[string]cachedRelayDescriptor{
+			"middle-expired": {
+				desc: proto.RelayDescriptor{
+					RelayID:    "middle-expired",
+					Role:       "micro-relay",
+					OperatorID: "op-middle",
+					Endpoint:   "127.0.0.1:51822",
+					ValidUntil: time.Now().Add(-time.Minute),
+				},
+				fetchedAt: time.Now(),
+			},
+		},
+		directoryURLs: []string{durl},
+		routeTTL:      time.Minute,
+		buckets:       map[string]rateBucket{},
+		abuse:         map[string]abuseState{},
+		openRPS:       100,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:        "exit-b",
+		MiddleRelayID: "middle-expired",
+		Transport:     "wireguard-udp",
+		TokenProof:    "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41045"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected non-strict mode to reject expired cached middle relay descriptor")
+	}
+	if out.Reason != "middle-relay-role-invalid" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if relayCalls == 0 {
+		t.Fatalf("expected non-strict mode to bypass expired cache and fetch directory relay descriptor")
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit, got %d", exitCalls)
+	}
+}
+
 func TestHandlePathOpenRejectsMiddleRelayEqualsExit(t *testing.T) {
 	exitCalls := 0
 	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
