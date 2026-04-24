@@ -4,6 +4,25 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Keep fallback discovery checks hermetic from ambient environment.
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_RUNS || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SLEEP_BETWEEN_SEC || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_ALLOW_PARTIAL || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_MIN_COMPLETED_RUNS || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_MIN_PASS_RUNS || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_REPORTS_DIR || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CANONICAL_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_REPORT_MD || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_TIMEOUT_SEC || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SWEEP_COMMAND_TIMEOUT_SEC || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SHOW_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_PRINT_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE || true
+unset PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE || true
+
 for cmd in bash jq mktemp cat grep timeout wc sed; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
@@ -124,6 +143,7 @@ decision="GO"
 profile="balanced"
 support="82"
 rc=0
+schema_id="profile_compare_multi_vm_cycle_summary"
 
 case "$scenario" in
   stable)
@@ -184,6 +204,21 @@ case "$scenario" in
       rc=0
     fi
     ;;
+  warn_rc_nonzero)
+    status="warn"
+    decision="GO"
+    profile="balanced"
+    support="74"
+    rc=23
+    ;;
+  schema_mismatch)
+    status="pass"
+    decision="GO"
+    profile="balanced"
+    support="82"
+    rc=0
+    schema_id="runtime_actuation_multi_vm_cycle_summary"
+    ;;
   *)
     echo "unsupported fake scenario: $scenario" >&2
     exit 2
@@ -199,12 +234,13 @@ jq -n \
   --arg decision "$decision" \
   --arg profile "$profile" \
   --argjson support "$support" \
+  --arg schema_id "$schema_id" \
   --arg summary_json "$summary_json" \
   --arg report_md "$report_md" \
   --argjson rc "$rc" \
   '{
     version: 1,
-    schema: { id: "profile_compare_multi_vm_cycle_summary" },
+    schema: { id: $schema_id },
     status: $status,
     rc: $rc,
     decision: $decision,
@@ -302,6 +338,451 @@ fi
 if ! grep -q 'vm_cmd=1 vm_cmd_file=1 sweep_timeout=55' "$HAPPY_CAPTURE"; then
   echo "expected vm-command/vm-command-file + sweep timeout pass-through missing"
   cat "$HAPPY_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] fallback command-file discovery from reports-dir artifact"
+FALLBACK_REPORTS_DIR="$TMP_DIR/reports_fallback"
+FALLBACK_SUMMARY="$TMP_DIR/fallback_summary.json"
+FALLBACK_COUNTER="$TMP_DIR/fallback_counter.txt"
+FALLBACK_CAPTURE="$TMP_DIR/fallback_capture.log"
+mkdir -p "$FALLBACK_REPORTS_DIR"
+printf 'vm_fb::echo vm-fallback\n' >"$FALLBACK_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$FALLBACK_COUNTER" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$FALLBACK_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$FALLBACK_REPORTS_DIR" \
+  --summary-json "$FALLBACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_fallback.log 2>&1
+fallback_rc=$?
+set -e
+
+if [[ "$fallback_rc" -ne 0 ]]; then
+  echo "expected fallback-discovery path rc=0, got rc=$fallback_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_fallback.log
+  exit 1
+fi
+if ! grep -q 'vm_cmd=0 vm_cmd_file=1' "$FALLBACK_CAPTURE"; then
+  echo "expected fallback command-file forwarding to cycle"
+  cat "$FALLBACK_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.vm_command_count == 0
+  and .inputs.vm_command_file_count == 1
+  and .inputs.vm_command_fallback_used == true
+  and .inputs.vm_command_fallback_source == "reports-dir-canonical"
+  and ((.inputs.vm_command_fallback_file // "") | test("profile_compare_multi_vm_stability_vm_commands\\.txt$"))
+  and (.inputs.vm_command_fallback_diagnostics | type) == "array"
+  and (.inputs.vm_command_fallback_diagnostics | map(test("source=reports-dir-canonical")) | any)
+  and (.inputs.vm_command_preflight_diagnostics | type) == "array"
+  and (.inputs.vm_command_preflight_diagnostics | map(test("result=ready")) | any)
+' "$FALLBACK_SUMMARY" >/dev/null 2>&1; then
+  echo "fallback summary missing expected metadata"
+  cat "$FALLBACK_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] invalid env fallback does not block reports-dir fallback"
+ENV_INVALID_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_env_invalid_fallback"
+ENV_INVALID_FALLBACK_SUMMARY="$TMP_DIR/env_invalid_fallback_summary.json"
+ENV_INVALID_FALLBACK_COUNTER="$TMP_DIR/env_invalid_fallback_counter.txt"
+ENV_INVALID_FALLBACK_CAPTURE="$TMP_DIR/env_invalid_fallback_capture.log"
+mkdir -p "$ENV_INVALID_FALLBACK_REPORTS_DIR"
+printf 'vm_env_fb::echo vm-env-fallback\n' >"$ENV_INVALID_FALLBACK_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$TMP_DIR/does_not_exist_vm_commands.txt" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$ENV_INVALID_FALLBACK_COUNTER" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$ENV_INVALID_FALLBACK_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$ENV_INVALID_FALLBACK_REPORTS_DIR" \
+  --summary-json "$ENV_INVALID_FALLBACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_env_invalid_fallback.log 2>&1
+env_invalid_fallback_rc=$?
+set -e
+
+if [[ "$env_invalid_fallback_rc" -ne 0 ]]; then
+  echo "expected env-invalid fallback path rc=0, got rc=$env_invalid_fallback_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_env_invalid_fallback.log
+  exit 1
+fi
+if ! grep -q 'vm_cmd=0 vm_cmd_file=1' "$ENV_INVALID_FALLBACK_CAPTURE"; then
+  echo "expected env-invalid fallback to still forward reports-dir vm-command-file"
+  cat "$ENV_INVALID_FALLBACK_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.vm_command_fallback_used == true
+  and .inputs.vm_command_fallback_source == "reports-dir-canonical"
+  and ((.inputs.vm_command_fallback_file // "") | test("profile_compare_multi_vm_stability_vm_commands\\.txt$"))
+' "$ENV_INVALID_FALLBACK_SUMMARY" >/dev/null 2>&1; then
+  echo "env-invalid fallback summary missing expected diagnostics/source"
+  cat "$ENV_INVALID_FALLBACK_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] reports-dir canonical fallback takes precedence over env fallback"
+REPORTS_CANONICAL_PRECEDENCE_REPORTS_DIR="$TMP_DIR/reports_canonical_precedence"
+REPORTS_CANONICAL_PRECEDENCE_SUMMARY="$TMP_DIR/reports_canonical_precedence_summary.json"
+REPORTS_CANONICAL_PRECEDENCE_COUNTER="$TMP_DIR/reports_canonical_precedence_counter.txt"
+REPORTS_CANONICAL_PRECEDENCE_CAPTURE="$TMP_DIR/reports_canonical_precedence_capture.log"
+REPORTS_CANONICAL_PRECEDENCE_ENV_FILE="$TMP_DIR/vm_commands_env_precedence.txt"
+mkdir -p "$REPORTS_CANONICAL_PRECEDENCE_REPORTS_DIR"
+printf 'vm_reports_canonical::echo vm-reports-canonical\n' >"$REPORTS_CANONICAL_PRECEDENCE_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+printf 'vm_env_precedence::echo vm-env-precedence\n' >"$REPORTS_CANONICAL_PRECEDENCE_ENV_FILE"
+
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$REPORTS_CANONICAL_PRECEDENCE_ENV_FILE" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$REPORTS_CANONICAL_PRECEDENCE_COUNTER" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$REPORTS_CANONICAL_PRECEDENCE_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$REPORTS_CANONICAL_PRECEDENCE_REPORTS_DIR" \
+  --summary-json "$REPORTS_CANONICAL_PRECEDENCE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_reports_canonical_precedence.log 2>&1
+reports_canonical_precedence_rc=$?
+set -e
+
+if [[ "$reports_canonical_precedence_rc" -ne 0 ]]; then
+  echo "expected reports-canonical precedence path rc=0, got rc=$reports_canonical_precedence_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_reports_canonical_precedence.log
+  exit 1
+fi
+if ! grep -q 'vm_cmd=0 vm_cmd_file=1' "$REPORTS_CANONICAL_PRECEDENCE_CAPTURE"; then
+  echo "expected reports-canonical precedence to forward one vm-command-file"
+  cat "$REPORTS_CANONICAL_PRECEDENCE_CAPTURE"
+  exit 1
+fi
+if ! jq -e --arg canonical "$REPORTS_CANONICAL_PRECEDENCE_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.vm_command_fallback_used == true
+  and .inputs.vm_command_fallback_source == "reports-dir-canonical"
+  and .inputs.vm_command_fallback_file == $canonical
+' "$REPORTS_CANONICAL_PRECEDENCE_SUMMARY" >/dev/null 2>&1; then
+  echo "reports-canonical precedence summary missing expected fallback metadata"
+  cat "$REPORTS_CANONICAL_PRECEDENCE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] canonical env fallback precedence over alias envs"
+ENV_PRIORITY_REPORTS_DIR="$TMP_DIR/reports_env_priority"
+ENV_PRIORITY_SUMMARY="$TMP_DIR/env_priority_summary.json"
+ENV_PRIORITY_COUNTER="$TMP_DIR/env_priority_counter.txt"
+ENV_PRIORITY_CAPTURE="$TMP_DIR/env_priority_capture.log"
+ENV_PRIORITY_CANONICAL_FILE="$TMP_DIR/vm_commands_env_canonical.txt"
+ENV_PRIORITY_ALIAS_FILE="$TMP_DIR/vm_commands_env_alias.txt"
+printf 'vm_env_canonical::echo vm-env-canonical\n' >"$ENV_PRIORITY_CANONICAL_FILE"
+printf 'vm_env_alias::echo vm-env-alias\n' >"$ENV_PRIORITY_ALIAS_FILE"
+
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$ENV_PRIORITY_CANONICAL_FILE" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE="$ENV_PRIORITY_ALIAS_FILE" \
+PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE="$TMP_DIR/vm_commands_env_legacy_unused.txt" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$ENV_PRIORITY_COUNTER" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$ENV_PRIORITY_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$ENV_PRIORITY_REPORTS_DIR" \
+  --summary-json "$ENV_PRIORITY_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_env_priority.log 2>&1
+env_priority_rc=$?
+set -e
+
+if [[ "$env_priority_rc" -ne 0 ]]; then
+  echo "expected env-priority fallback path rc=0, got rc=$env_priority_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_env_priority.log
+  exit 1
+fi
+if ! grep -q 'vm_cmd=0 vm_cmd_file=1' "$ENV_PRIORITY_CAPTURE"; then
+  echo "expected canonical env fallback to forward one vm-command-file"
+  cat "$ENV_PRIORITY_CAPTURE"
+  exit 1
+fi
+if ! jq -e --arg canonical "$ENV_PRIORITY_CANONICAL_FILE" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.vm_command_fallback_used == true
+  and .inputs.vm_command_fallback_source == "env:PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE"
+  and .inputs.vm_command_fallback_file == $canonical
+' "$ENV_PRIORITY_SUMMARY" >/dev/null 2>&1; then
+  echo "env-priority fallback summary missing canonical ordering metadata"
+  cat "$ENV_PRIORITY_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] fallback missing remains fail-closed with operator diagnostics"
+MISSING_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_missing_fallback"
+MISSING_FALLBACK_SUMMARY="$TMP_DIR/missing_fallback_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/missing_fallback_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$MISSING_FALLBACK_REPORTS_DIR" \
+  --summary-json "$MISSING_FALLBACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log 2>&1
+missing_fallback_rc=$?
+set -e
+
+if [[ "$missing_fallback_rc" -eq 0 ]]; then
+  echo "expected missing-fallback path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q 'at least one --vm-command or --vm-command-file is required' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected missing-fallback hard error message"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action:' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected operator_next_action diagnostics on missing fallback"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: ./scripts/profile_compare_multi_vm_stability_run.sh' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected exact rerun command in missing-fallback diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q -- '--vm-command VM_ID::COMMAND' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected --vm-command rerun guidance in missing-fallback diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q -- '--vm-command-file REPLACE_WITH_VM_COMMAND_FILE' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected --vm-command-file rerun guidance in missing-fallback diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q 'preflight_diag:' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected structured preflight_diag entries on missing fallback"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+if ! grep -q 'profile_compare_multi_vm_stability_vm_commands.txt' /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log; then
+  echo "expected recognized reports-dir artifact path diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_missing_fallback.log
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] malformed fallback vm-command-file fails closed during preflight"
+INVALID_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_invalid_fallback"
+INVALID_FALLBACK_SUMMARY="$TMP_DIR/invalid_fallback_summary.json"
+INVALID_FALLBACK_CAPTURE="$TMP_DIR/invalid_fallback_capture.log"
+mkdir -p "$INVALID_FALLBACK_REPORTS_DIR"
+printf 'vm_invalid_without_delimiter\n' >"$INVALID_FALLBACK_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/invalid_fallback_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$INVALID_FALLBACK_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$INVALID_FALLBACK_REPORTS_DIR" \
+  --summary-json "$INVALID_FALLBACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log 2>&1
+invalid_fallback_rc=$?
+set -e
+
+if [[ "$invalid_fallback_rc" -eq 0 ]]; then
+  echo "expected invalid-fallback preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log
+  exit 1
+fi
+if ! grep -q 'no usable VM command fallback was discovered (fail-closed).' /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log; then
+  echo "expected invalid fallback hard fail-closed message"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log
+  exit 1
+fi
+if ! grep -q 'preflight_diag: source=reports-dir-canonical path=' /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log; then
+  echo "expected fallback diagnostics for invalid canonical vm-command file"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log
+  exit 1
+fi
+if ! grep -q 'reason=invalid_vm_command_spec_line_1_missing_delimiter' /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log; then
+  echo "expected invalid vm-command-file reason in diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_invalid_fallback.log
+  exit 1
+fi
+if [[ -f "$INVALID_FALLBACK_CAPTURE" ]] && [[ -s "$INVALID_FALLBACK_CAPTURE" ]]; then
+  echo "invalid fallback should fail before fake cycle invocation"
+  cat "$INVALID_FALLBACK_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] explicit malformed --vm-command-file fails closed during preflight"
+EXPLICIT_INVALID_REPORTS_DIR="$TMP_DIR/reports_explicit_invalid_vm_file"
+EXPLICIT_INVALID_SUMMARY="$TMP_DIR/explicit_invalid_vm_file_summary.json"
+EXPLICIT_INVALID_VM_FILE="$TMP_DIR/vm_commands_explicit_invalid.txt"
+EXPLICIT_INVALID_CAPTURE="$TMP_DIR/explicit_invalid_vm_file_capture.log"
+printf 'vm_explicit_invalid_without_delimiter\n' >"$EXPLICIT_INVALID_VM_FILE"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/explicit_invalid_vm_file_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$EXPLICIT_INVALID_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$EXPLICIT_INVALID_REPORTS_DIR" \
+  --summary-json "$EXPLICIT_INVALID_SUMMARY" \
+  --vm-command-file "$EXPLICIT_INVALID_VM_FILE" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log 2>&1
+explicit_invalid_vm_file_rc=$?
+set -e
+
+if [[ "$explicit_invalid_vm_file_rc" -eq 0 ]]; then
+  echo "expected explicit invalid vm-command-file preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log
+  exit 1
+fi
+if ! grep -q 'vm command file preflight failed: invalid_vm_command_spec_line_1_missing_delimiter' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log; then
+  echo "expected explicit invalid vm-command-file preflight failure reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: ./scripts/profile_compare_multi_vm_stability_run.sh' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log; then
+  echo "expected exact rerun command in explicit invalid vm-command-file diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log
+  exit 1
+fi
+if ! grep -q -- "--vm-command-file $EXPLICIT_INVALID_VM_FILE" /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log; then
+  echo "expected explicit vm-command-file path in rerun guidance"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log
+  exit 1
+fi
+if ! grep -q 'preflight_diag: source=vm-command-file path=' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log; then
+  echo "expected explicit vm-command-file preflight diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log
+  exit 1
+fi
+if ! grep -q 'reason=invalid_vm_command_spec_line_1_missing_delimiter' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log; then
+  echo "expected explicit vm-command-file invalid reason in diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_invalid_vm_file.log
+  exit 1
+fi
+if [[ -f "$EXPLICIT_INVALID_CAPTURE" ]] && [[ -s "$EXPLICIT_INVALID_CAPTURE" ]]; then
+  echo "explicit invalid vm-command-file should fail before fake cycle invocation"
+  cat "$EXPLICIT_INVALID_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] conflicting duplicate VM_ID in fallback vm-command-file fails closed during preflight"
+DUPLICATE_CONFLICT_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_duplicate_conflict_fallback"
+DUPLICATE_CONFLICT_FALLBACK_SUMMARY="$TMP_DIR/duplicate_conflict_fallback_summary.json"
+DUPLICATE_CONFLICT_FALLBACK_CAPTURE="$TMP_DIR/duplicate_conflict_fallback_capture.log"
+mkdir -p "$DUPLICATE_CONFLICT_FALLBACK_REPORTS_DIR"
+cat >"$DUPLICATE_CONFLICT_FALLBACK_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt" <<'EOF_DUPLICATE_CONFLICT_FALLBACK'
+vm_dup::echo vm-first
+vm_dup::echo vm-second
+EOF_DUPLICATE_CONFLICT_FALLBACK
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/duplicate_conflict_fallback_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$DUPLICATE_CONFLICT_FALLBACK_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$DUPLICATE_CONFLICT_FALLBACK_REPORTS_DIR" \
+  --summary-json "$DUPLICATE_CONFLICT_FALLBACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_duplicate_conflict_fallback.log 2>&1
+duplicate_conflict_fallback_rc=$?
+set -e
+
+if [[ "$duplicate_conflict_fallback_rc" -eq 0 ]]; then
+  echo "expected duplicate-conflict fallback preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_duplicate_conflict_fallback.log
+  exit 1
+fi
+if ! grep -q 'reason=invalid_vm_command_spec_line_2_duplicate_vm_id_conflict' /tmp/integration_profile_compare_multi_vm_stability_run_duplicate_conflict_fallback.log; then
+  echo "expected duplicate VM_ID conflict reason in fallback diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_duplicate_conflict_fallback.log
+  exit 1
+fi
+if [[ -f "$DUPLICATE_CONFLICT_FALLBACK_CAPTURE" ]] && [[ -s "$DUPLICATE_CONFLICT_FALLBACK_CAPTURE" ]]; then
+  echo "duplicate-conflict fallback should fail before fake cycle invocation"
+  cat "$DUPLICATE_CONFLICT_FALLBACK_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] explicit conflicting duplicate VM_ID vm-command-file fails closed during preflight"
+EXPLICIT_DUPLICATE_CONFLICT_REPORTS_DIR="$TMP_DIR/reports_explicit_duplicate_conflict_vm_file"
+EXPLICIT_DUPLICATE_CONFLICT_SUMMARY="$TMP_DIR/explicit_duplicate_conflict_vm_file_summary.json"
+EXPLICIT_DUPLICATE_CONFLICT_VM_FILE="$TMP_DIR/vm_commands_explicit_duplicate_conflict.txt"
+EXPLICIT_DUPLICATE_CONFLICT_CAPTURE="$TMP_DIR/explicit_duplicate_conflict_vm_file_capture.log"
+cat >"$EXPLICIT_DUPLICATE_CONFLICT_VM_FILE" <<'EOF_EXPLICIT_DUPLICATE_CONFLICT'
+vm_explicit_dup::echo vm-explicit-first
+vm_explicit_dup::echo vm-explicit-second
+EOF_EXPLICIT_DUPLICATE_CONFLICT
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/explicit_duplicate_conflict_vm_file_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$EXPLICIT_DUPLICATE_CONFLICT_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$EXPLICIT_DUPLICATE_CONFLICT_REPORTS_DIR" \
+  --summary-json "$EXPLICIT_DUPLICATE_CONFLICT_SUMMARY" \
+  --vm-command-file "$EXPLICIT_DUPLICATE_CONFLICT_VM_FILE" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log 2>&1
+explicit_duplicate_conflict_vm_file_rc=$?
+set -e
+
+if [[ "$explicit_duplicate_conflict_vm_file_rc" -eq 0 ]]; then
+  echo "expected explicit duplicate-conflict vm-command-file preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log
+  exit 1
+fi
+if ! grep -q 'vm command file preflight failed: invalid_vm_command_spec_line_2_duplicate_vm_id_conflict' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log; then
+  echo "expected explicit duplicate-conflict vm-command-file preflight failure reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: ./scripts/profile_compare_multi_vm_stability_run.sh' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log; then
+  echo "expected exact rerun command in explicit duplicate-conflict vm-command-file diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log
+  exit 1
+fi
+if ! grep -q -- "--vm-command-file $EXPLICIT_DUPLICATE_CONFLICT_VM_FILE" /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log; then
+  echo "expected explicit duplicate-conflict vm-command-file path in rerun guidance"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log
+  exit 1
+fi
+if ! grep -q 'reason=invalid_vm_command_spec_line_2_duplicate_vm_id_conflict' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log; then
+  echo "expected explicit duplicate-conflict vm-command-file diagnostics reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_duplicate_conflict_vm_file.log
+  exit 1
+fi
+if [[ -f "$EXPLICIT_DUPLICATE_CONFLICT_CAPTURE" ]] && [[ -s "$EXPLICIT_DUPLICATE_CONFLICT_CAPTURE" ]]; then
+  echo "explicit duplicate-conflict vm-command-file should fail before fake cycle invocation"
+  cat "$EXPLICIT_DUPLICATE_CONFLICT_CAPTURE"
   exit 1
 fi
 
@@ -412,6 +893,79 @@ if ! jq -e '
 ' "$FAIL_SUMMARY" >/dev/null 2>&1; then
   echo "fail-closed summary missing expected fields"
   cat "$FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] nonzero cycle rc remains fail-closed even with warn summary status"
+WARN_RC_NONZERO_SUMMARY="$TMP_DIR/warn_rc_nonzero_summary.json"
+WARN_RC_NONZERO_COUNTER="$TMP_DIR/warn_rc_nonzero_counter.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$WARN_RC_NONZERO_COUNTER" \
+FAKE_CYCLE_SCENARIO="warn_rc_nonzero" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --allow-partial 1 \
+  --min-completed-runs 1 \
+  --min-pass-runs 1 \
+  --reports-dir "$TMP_DIR/reports_warn_rc_nonzero" \
+  --summary-json "$WARN_RC_NONZERO_SUMMARY" \
+  --vm-command "vm_a::echo vm-a" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_warn_rc_nonzero.log 2>&1
+warn_rc_nonzero_rc=$?
+set -e
+
+if [[ "$warn_rc_nonzero_rc" -eq 0 ]]; then
+  echo "expected warn-rc-nonzero path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_warn_rc_nonzero.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .counts.fail == 1
+  and .runs[0].status == "fail"
+  and .runs[0].failure_reason == "cycle_rc_nonzero"
+' "$WARN_RC_NONZERO_SUMMARY" >/dev/null 2>&1; then
+  echo "warn-rc-nonzero summary missing fail-closed contract fields"
+  cat "$WARN_RC_NONZERO_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] schema mismatch remains fail-closed"
+SCHEMA_MISMATCH_SUMMARY="$TMP_DIR/schema_mismatch_summary.json"
+SCHEMA_MISMATCH_COUNTER="$TMP_DIR/schema_mismatch_counter.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$SCHEMA_MISMATCH_COUNTER" \
+FAKE_CYCLE_SCENARIO="schema_mismatch" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/reports_schema_mismatch" \
+  --summary-json "$SCHEMA_MISMATCH_SUMMARY" \
+  --vm-command "vm_a::echo vm-a" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_schema_mismatch.log 2>&1
+schema_mismatch_rc=$?
+set -e
+
+if [[ "$schema_mismatch_rc" -eq 0 ]]; then
+  echo "expected schema-mismatch path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_schema_mismatch.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .counts.fail == 1
+  and .runs[0].status == "fail"
+  and .runs[0].failure_reason == "cycle_summary_schema_mismatch"
+  and .runs[0].artifacts.cycle_summary_schema_valid == false
+  and .runs[0].artifacts.cycle_summary_schema_id == "runtime_actuation_multi_vm_cycle_summary"
+' "$SCHEMA_MISMATCH_SUMMARY" >/dev/null 2>&1; then
+  echo "schema-mismatch summary missing fail-closed schema diagnostics"
+  cat "$SCHEMA_MISMATCH_SUMMARY"
   exit 1
 fi
 

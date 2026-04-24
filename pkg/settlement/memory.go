@@ -2,6 +2,7 @@ package settlement
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -21,13 +22,16 @@ type currencyRate struct {
 	Denominator int64
 }
 
-var supportedObjectiveViolationTypes = map[string]struct{}{
-	"double-sign":              {},
-	"downtime-proof":           {},
-	"invalid-settlement-proof": {},
-	"session-replay-proof":     {},
-	"sponsor-overdraft-proof":  {},
-}
+var (
+	supportedObjectiveViolationTypes = map[string]struct{}{
+		"double-sign":              {},
+		"downtime-proof":           {},
+		"invalid-settlement-proof": {},
+		"session-replay-proof":     {},
+		"sponsor-overdraft-proof":  {},
+	}
+	errChainAdapterNotConfigured = errors.New("chain adapter not configured")
+)
 
 type deferredOperationType string
 
@@ -74,6 +78,7 @@ type MemoryService struct {
 	currencyRates     map[string]currencyRate
 	adapter           ChainAdapter
 	shadowAdapter     ChainAdapter
+	blockchainMode    bool
 
 	pendingAdapterOps int
 }
@@ -91,6 +96,14 @@ func WithChainAdapter(adapter ChainAdapter) MemoryOption {
 func WithShadowChainAdapter(adapter ChainAdapter) MemoryOption {
 	return func(s *MemoryService) {
 		s.shadowAdapter = adapter
+	}
+}
+
+// WithBlockchainMode enables chain-backed settlement semantics. In this mode,
+// missing primary adapter writes fail closed as deferred/pending operations.
+func WithBlockchainMode(enabled bool) MemoryOption {
+	return func(s *MemoryService) {
+		s.blockchainMode = enabled
 	}
 }
 
@@ -173,6 +186,9 @@ func (s *MemoryService) RecordUsage(_ context.Context, usage UsageRecord) error 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.ensureSessionSubjectConsistencyLocked(usage.SessionID, usage.SubjectID); err != nil {
+		return err
+	}
 	s.usageBySession[usage.SessionID] = append(s.usageBySession[usage.SessionID], usage)
 	return nil
 }
@@ -215,6 +231,9 @@ func (s *MemoryService) ReserveFunds(_ context.Context, reservation FundReservat
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.ensureSessionSubjectConsistencyLocked(reservation.SessionID, reservation.SubjectID); err != nil {
+		return FundReservation{}, err
+	}
 	if existing, ok := s.reservationsBySession[reservation.SessionID]; ok {
 		return existing, nil
 	}
@@ -252,6 +271,12 @@ func (s *MemoryService) ReserveSponsorCredits(ctx context.Context, reservation S
 		existing.IdempotentReplay = true
 		s.mu.Unlock()
 		return existing, nil
+	}
+	if reservation.SessionID != "" {
+		if err := s.ensureSessionSubjectConsistencyLocked(reservation.SessionID, reservation.SubjectID); err != nil {
+			s.mu.Unlock()
+			return SponsorCreditReservation{}, err
+		}
 	}
 	currency := s.currency
 	currencyRates := s.currencyRates
@@ -357,6 +382,14 @@ func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) 
 	} else if proof.SessionID != "" {
 		return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
 	}
+	if s.blockchainMode {
+		if reservation.Status == OperationStatusPending {
+			return PaymentAuthorization{}, fmt.Errorf("reservation pending chain submission: %s", proof.ReservationID)
+		}
+		if reservation.Status != OperationStatusConfirmed {
+			return PaymentAuthorization{}, fmt.Errorf("reservation not chain-finalized: %s", proof.ReservationID)
+		}
+	}
 
 	auth := PaymentAuthorization{
 		ReservationID:    reservation.ReservationID,
@@ -405,7 +438,13 @@ func (s *MemoryService) SettleSession(ctx context.Context, sessionID string) (Se
 		return SessionSettlement{}, fmt.Errorf("settle session requires reservation for session %s", sessionID)
 	}
 
-	subjectID := reservation.SubjectID
+	subjectID := strings.TrimSpace(reservation.SubjectID)
+	if subjectID == "" {
+		return SessionSettlement{}, fmt.Errorf("settle session requires reservation subject for session %s", sessionID)
+	}
+	if err := ensureUsageRecordsSubject(sessionID, subjectID, records); err != nil {
+		return SessionSettlement{}, err
+	}
 	totalBytes := int64(0)
 	for _, rec := range records {
 		recordBytes, err := checkedAddInt64(rec.BytesIngress, rec.BytesEgress)
@@ -616,21 +655,35 @@ func (s *MemoryService) Reconcile(ctx context.Context) (ReconcileReport, error) 
 }
 
 func (s *MemoryService) submitSettlementAdapter(ctx context.Context, settlement *SessionSettlement) {
-	adapter := s.currentAdapter()
-	if adapter == nil {
-		return
-	}
+	submission := *settlement
+	submission.Status = OperationStatusSubmitted
 	idempotencyKey := cosmosID("settlement", settlement.SettlementID, settlement.SessionID)
 	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
-		return adapter.SubmitSessionSettlement(ctx, *settlement)
+		return adapter.SubmitSessionSettlement(ctx, submission)
 	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationSettlement,
 		RecordKey:      settlement.SessionID,
 		IdempotencyKey: idempotencyKey,
 	}
+	adapter := s.currentAdapter()
+	if adapter == nil {
+		if !s.blockchainModeEnabled() {
+			return
+		}
+		shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
+		settlement.AdapterDeferred = true
+		settlement.AdapterSubmitted = false
+		settlement.AdapterReferenceID = idempotencyKey
+		settlement.Status = OperationStatusPending
+		applyShadowResultToSettlement(settlement, shadowResult)
+		s.mu.Lock()
+		s.upsertDeferredOperationLocked(op, errChainAdapterNotConfigured)
+		s.mu.Unlock()
+		return
+	}
 
-	ref, err := adapter.SubmitSessionSettlement(ctx, *settlement)
+	ref, err := adapter.SubmitSessionSettlement(ctx, submission)
 	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		settlement.AdapterDeferred = true
@@ -658,20 +711,34 @@ func (s *MemoryService) submitSettlementAdapter(ctx context.Context, settlement 
 }
 
 func (s *MemoryService) submitRewardAdapter(ctx context.Context, reward *RewardIssue) {
-	adapter := s.currentAdapter()
-	if adapter == nil {
-		return
-	}
+	submission := *reward
+	submission.Status = OperationStatusSubmitted
 	idempotencyKey := cosmosID("reward", reward.RewardID, reward.SessionID)
 	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
-		return adapter.SubmitRewardIssue(ctx, *reward)
+		return adapter.SubmitRewardIssue(ctx, submission)
 	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationReward,
 		RecordKey:      reward.RewardID,
 		IdempotencyKey: idempotencyKey,
 	}
-	ref, err := adapter.SubmitRewardIssue(ctx, *reward)
+	adapter := s.currentAdapter()
+	if adapter == nil {
+		if !s.blockchainModeEnabled() {
+			return
+		}
+		shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
+		reward.AdapterDeferred = true
+		reward.AdapterSubmitted = false
+		reward.AdapterReferenceID = idempotencyKey
+		reward.Status = OperationStatusPending
+		applyShadowResultToReward(reward, shadowResult)
+		s.mu.Lock()
+		s.upsertDeferredOperationLocked(op, errChainAdapterNotConfigured)
+		s.mu.Unlock()
+		return
+	}
+	ref, err := adapter.SubmitRewardIssue(ctx, submission)
 	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		reward.AdapterDeferred = true
@@ -699,20 +766,34 @@ func (s *MemoryService) submitRewardAdapter(ctx context.Context, reward *RewardI
 }
 
 func (s *MemoryService) submitSponsorReservationAdapter(ctx context.Context, reservation *SponsorCreditReservation) {
-	adapter := s.currentAdapter()
-	if adapter == nil {
-		return
-	}
+	submission := *reservation
+	submission.Status = OperationStatusPending
 	idempotencyKey := cosmosID("sponsor-reservation", reservation.ReservationID, reservation.SessionID)
 	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
-		return adapter.SubmitSponsorReservation(ctx, *reservation)
+		return adapter.SubmitSponsorReservation(ctx, submission)
 	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationSponsorReservation,
 		RecordKey:      reservation.ReservationID,
 		IdempotencyKey: idempotencyKey,
 	}
-	ref, err := adapter.SubmitSponsorReservation(ctx, *reservation)
+	adapter := s.currentAdapter()
+	if adapter == nil {
+		if !s.blockchainModeEnabled() {
+			return
+		}
+		shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
+		reservation.AdapterDeferred = true
+		reservation.AdapterSubmitted = false
+		reservation.AdapterReferenceID = idempotencyKey
+		reservation.Status = OperationStatusPending
+		applyShadowResultToSponsorReservation(reservation, shadowResult)
+		s.mu.Lock()
+		s.upsertDeferredOperationLocked(op, errChainAdapterNotConfigured)
+		s.mu.Unlock()
+		return
+	}
+	ref, err := adapter.SubmitSponsorReservation(ctx, submission)
 	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		reservation.AdapterDeferred = true
@@ -740,20 +821,34 @@ func (s *MemoryService) submitSponsorReservationAdapter(ctx context.Context, res
 }
 
 func (s *MemoryService) submitSlashEvidenceAdapter(ctx context.Context, evidence *SlashEvidence) {
-	adapter := s.currentAdapter()
-	if adapter == nil {
-		return
-	}
+	submission := *evidence
+	submission.Status = OperationStatusSubmitted
 	idempotencyKey := cosmosID("slash", evidence.EvidenceID, evidence.SubjectID)
 	shadowSubmit := func(ctx context.Context, adapter ChainAdapter) (string, error) {
-		return adapter.SubmitSlashEvidence(ctx, *evidence)
+		return adapter.SubmitSlashEvidence(ctx, submission)
 	}
 	op := deferredAdapterOperation{
 		Type:           deferredOperationSlashEvidence,
 		RecordKey:      evidence.EvidenceID,
 		IdempotencyKey: idempotencyKey,
 	}
-	ref, err := adapter.SubmitSlashEvidence(ctx, *evidence)
+	adapter := s.currentAdapter()
+	if adapter == nil {
+		if !s.blockchainModeEnabled() {
+			return
+		}
+		shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
+		evidence.AdapterDeferred = true
+		evidence.AdapterSubmitted = false
+		evidence.AdapterReferenceID = idempotencyKey
+		evidence.Status = OperationStatusPending
+		applyShadowResultToSlashEvidence(evidence, shadowResult)
+		s.mu.Lock()
+		s.upsertDeferredOperationLocked(op, errChainAdapterNotConfigured)
+		s.mu.Unlock()
+		return
+	}
+	ref, err := adapter.SubmitSlashEvidence(ctx, submission)
 	shadowResult := s.submitShadowSubmission(ctx, idempotencyKey, shadowSubmit)
 	if err != nil {
 		evidence.AdapterDeferred = true
@@ -790,6 +885,12 @@ func (s *MemoryService) currentShadowAdapter() ChainAdapter {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.shadowAdapter
+}
+
+func (s *MemoryService) blockchainModeEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.blockchainMode
 }
 
 func (s *MemoryService) submitShadowSubmission(
@@ -985,10 +1086,12 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		submission := settlement
+		submission.Status = OperationStatusSubmitted
 		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
-			return adapter.SubmitSessionSettlement(ctx, settlement)
+			return adapter.SubmitSessionSettlement(ctx, submission)
 		}
-		ref, err = adapter.SubmitSessionSettlement(ctx, settlement)
+		ref, err = adapter.SubmitSessionSettlement(ctx, submission)
 	case deferredOperationReward:
 		s.mu.Lock()
 		reward, ok := s.rewardsByID[op.RecordKey]
@@ -996,10 +1099,12 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		submission := reward
+		submission.Status = OperationStatusSubmitted
 		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
-			return adapter.SubmitRewardIssue(ctx, reward)
+			return adapter.SubmitRewardIssue(ctx, submission)
 		}
-		ref, err = adapter.SubmitRewardIssue(ctx, reward)
+		ref, err = adapter.SubmitRewardIssue(ctx, submission)
 	case deferredOperationSponsorReservation:
 		s.mu.Lock()
 		reservation, ok := s.sponsorReservationsByID[op.RecordKey]
@@ -1007,10 +1112,12 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		submission := reservation
+		submission.Status = OperationStatusPending
 		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
-			return adapter.SubmitSponsorReservation(ctx, reservation)
+			return adapter.SubmitSponsorReservation(ctx, submission)
 		}
-		ref, err = adapter.SubmitSponsorReservation(ctx, reservation)
+		ref, err = adapter.SubmitSponsorReservation(ctx, submission)
 	case deferredOperationSlashEvidence:
 		s.mu.Lock()
 		evidence, ok := s.slashEvidenceByID[op.RecordKey]
@@ -1018,10 +1125,12 @@ func (s *MemoryService) replayDeferredAdapterOperation(ctx context.Context, adap
 		if !ok {
 			return
 		}
+		submission := evidence
+		submission.Status = OperationStatusSubmitted
 		shadowFn = func(ctx context.Context, adapter ChainAdapter) (string, error) {
-			return adapter.SubmitSlashEvidence(ctx, evidence)
+			return adapter.SubmitSlashEvidence(ctx, submission)
 		}
-		ref, err = adapter.SubmitSlashEvidence(ctx, evidence)
+		ref, err = adapter.SubmitSlashEvidence(ctx, submission)
 	default:
 		return
 	}
@@ -1266,6 +1375,33 @@ func checkedMulInt64(a int64, b int64) (int64, error) {
 		return 0, fmt.Errorf("int64 overflow")
 	}
 	return product, nil
+}
+
+func (s *MemoryService) ensureSessionSubjectConsistencyLocked(sessionID string, subjectID string) error {
+	if reservation, ok := s.reservationsBySession[sessionID]; ok {
+		if strings.TrimSpace(reservation.SubjectID) != subjectID {
+			return sessionSubjectMismatchError(sessionID)
+		}
+	}
+	if settlement, ok := s.settledBySession[sessionID]; ok {
+		if strings.TrimSpace(settlement.SubjectID) != subjectID {
+			return sessionSubjectMismatchError(sessionID)
+		}
+	}
+	return ensureUsageRecordsSubject(sessionID, subjectID, s.usageBySession[sessionID])
+}
+
+func ensureUsageRecordsSubject(sessionID string, subjectID string, records []UsageRecord) error {
+	for _, record := range records {
+		if strings.TrimSpace(record.SubjectID) != subjectID {
+			return sessionSubjectMismatchError(sessionID)
+		}
+	}
+	return nil
+}
+
+func sessionSubjectMismatchError(sessionID string) error {
+	return fmt.Errorf("session subject mismatch for session %s", sessionID)
 }
 
 func normalizeCurrencyCode(raw string) string {

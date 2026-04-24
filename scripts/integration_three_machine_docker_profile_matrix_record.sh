@@ -63,6 +63,23 @@ if [[ "${FAKE_MATRIX_FAIL:-0}" == "1" ]]; then
   notes="${FAKE_MATRIX_NOTES:-Docker profile matrix rehearsal failed}"
 fi
 
+reduction_available="false"
+failed_profiles_json='[]'
+failed_profiles_count=0
+failed_profiles_csv=""
+failed_profiles_csv_json="null"
+rerun_failed_profiles_command_json="null"
+if [[ "$status" == "fail" ]]; then
+  reduction_available="true"
+  failed_profiles_json="${FAKE_MATRIX_FAILED_PROFILES_JSON:-[\"balanced\"]}"
+  failed_profiles_count="$(printf '%s\n' "$failed_profiles_json" | jq -r 'if type == "array" then length else 0 end' 2>/dev/null || printf '0')"
+  failed_profiles_csv="$(printf '%s\n' "$failed_profiles_json" | jq -r 'if type == "array" then join(",") else "" end' 2>/dev/null || printf '')"
+  if [[ -n "$failed_profiles_csv" ]]; then
+    failed_profiles_csv_json="$(printf '%s' "$failed_profiles_csv" | jq -R '.')"
+  fi
+  rerun_failed_profiles_command_json="$(printf '%s' "${FAKE_MATRIX_RERUN_FAILED_PROFILES_COMMAND:-./scripts/three_machine_docker_profile_matrix.sh --profiles ${failed_profiles_csv:-balanced} --print-summary-json 1}" | jq -R '.')"
+fi
+
 if [[ "$dry_run" == "1" ]]; then
   echo "three-machine-docker-profile-matrix: dry-run"
 fi
@@ -86,6 +103,13 @@ if [[ -n "$summary_json" && "$emit_summary" == "1" ]]; then
     "profiles_total": 3,
     "profiles_pass": $(if [[ "$status" == "pass" ]]; then echo 3; else echo 2; fi),
     "profiles_fail": $(if [[ "$status" == "pass" ]]; then echo 0; else echo 1; fi)
+  },
+  "reduction": {
+    "available": $reduction_available,
+    "failed_profiles": $failed_profiles_json,
+    "failed_profiles_count": $failed_profiles_count,
+    "failed_profiles_csv": $failed_profiles_csv_json,
+    "rerun_failed_profiles_command": $rerun_failed_profiles_command_json
   },
   "artifacts": {
     "matrix_log": "$matrix_log"
@@ -203,6 +227,10 @@ if ! jq -e '
   and .stages.matrix.rc == 0
   and .stages.matrix.summary.status == "pass"
   and .stages.matrix.summary.summary.profiles_total == 3
+  and .stages.matrix.reduction.available == false
+  and .stages.matrix.reduction.failed_profiles == []
+  and .stages.matrix.reduction.failed_profiles_count == 0
+  and .stages.matrix.reduction.rerun_failed_profiles_command == null
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
   and .stages.manual_validation_record.check_id == "three_machine_docker_readiness"
@@ -229,6 +257,13 @@ cat >"$TMP_DIR/reuse/matrix_summary_reuse.json" <<EOF_REUSE_SUMMARY
     "profiles_total": 3,
     "profiles_pass": 3,
     "profiles_fail": 0
+  },
+  "reduction": {
+    "available": false,
+    "failed_profiles": [],
+    "failed_profiles_count": 0,
+    "failed_profiles_csv": null,
+    "rerun_failed_profiles_command": null
   },
   "artifacts": {
     "matrix_log": "$TMP_DIR/reuse/matrix_reuse.log"
@@ -287,6 +322,10 @@ if ! jq -e '
   and .stages.matrix.summary_valid == true
   and .stages.matrix.summary_status == "pass"
   and .stages.matrix.summary.summary.profiles_total == 3
+  and .stages.matrix.reduction.available == false
+  and .stages.matrix.reduction.failed_profiles == []
+  and .stages.matrix.reduction.failed_profiles_count == 0
+  and .stages.matrix.reduction.rerun_failed_profiles_command == null
   and .notes == "Reused matrix summary artifact"
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
@@ -351,6 +390,10 @@ if ! jq -e '
   and .stages.matrix.summary_valid == false
   and .stages.matrix.dry_run == true
   and .stages.matrix.summary_status == "dry-run-no-summary"
+  and .stages.matrix.reduction.available == false
+  and .stages.matrix.reduction.failed_profiles == []
+  and .stages.matrix.reduction.failed_profiles_count == 0
+  and .stages.matrix.reduction.rerun_failed_profiles_command == null
   and (.notes | test("dry-run"))
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
@@ -416,6 +459,10 @@ if ! jq -e '
   and .stages.matrix.summary_valid == false
   and .stages.matrix.dry_run == false
   and .stages.matrix.summary_status == "missing"
+  and .stages.matrix.reduction.available == false
+  and .stages.matrix.reduction.failed_profiles == []
+  and .stages.matrix.reduction.failed_profiles_count == 0
+  and .stages.matrix.reduction.rerun_failed_profiles_command == null
   and (.notes | test("did not emit a usable JSON summary"))
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
@@ -486,6 +533,10 @@ if ! jq -e '
   and .stages.matrix.status == "fail"
   and .stages.matrix.rc == 1
   and .stages.matrix.command_rc == 1
+  and .stages.matrix.reduction.available == true
+  and .stages.matrix.reduction.failed_profiles == ["balanced"]
+  and .stages.matrix.reduction.failed_profiles_count == 1
+  and (.stages.matrix.reduction.rerun_failed_profiles_command | contains("--profiles balanced"))
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
   and .stages.manual_validation_record.check_id == "three_machine_docker_readiness"

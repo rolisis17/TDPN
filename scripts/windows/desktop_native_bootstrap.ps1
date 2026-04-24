@@ -1251,6 +1251,9 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm install"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npx --yes create-vite@latest"
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run generate:windows-icon"
+  Add-UniqueValue -List $commands -Value "git checkout -- apps/desktop/src-tauri/icons/icon.svg"
+  Add-UniqueValue -List $commands -Value (Get-TauriBundleIconRepairCommand)
   Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode {0}{1} -InstallMissing -EnablePolicyBypass" -f $normalizedMode, $keepApiRunningArg)
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1"
 
@@ -1879,13 +1882,15 @@ function Invoke-DesktopDev {
     throw "desktop package.json not found: $desktopDir"
   }
 
-  $iconPath = Join-Path $desktopDir "src-tauri\icons\icon.ico"
-  Ensure-DesktopIconAsset -IconPath $iconPath
-
   $npmCmd = Resolve-NpmCommandPath
   if ([string]::IsNullOrWhiteSpace($npmCmd)) {
-    throw "npm not found. Install Node.js LTS first."
+    throw "npm not found. Install Node.js LTS first. command: winget install --id OpenJS.NodeJS.LTS --exact"
   }
+
+  $iconPath = Join-Path $desktopDir "src-tauri\icons\icon.ico"
+  $sourceIconPath = Join-Path $desktopDir "src-tauri\icons\icon.svg"
+  $tauriConfigPath = Join-Path $desktopDir "src-tauri\tauri.conf.json"
+  Ensure-DesktopIconAsset -IconPath $iconPath -SourceIconPath $sourceIconPath -TauriConfigPath $tauriConfigPath -DesktopDir $desktopDir -NpmCommandPath $npmCmd
 
   Push-Location $desktopDir
   try {
@@ -2000,14 +2005,261 @@ function Invoke-DesktopPackaged {
   return $launchMetadata
 }
 
+function Test-IcoBytesAreValid {
+  param(
+    [byte[]]$Bytes
+  )
+
+  if ($null -eq $Bytes -or $Bytes.Length -lt 22) {
+    return $false
+  }
+
+  $reserved = [BitConverter]::ToUInt16($Bytes, 0)
+  $imageType = [BitConverter]::ToUInt16($Bytes, 2)
+  $imageCount = [BitConverter]::ToUInt16($Bytes, 4)
+  if ($reserved -ne 0 -or $imageType -ne 1 -or $imageCount -le 0) {
+    return $false
+  }
+
+  $imageSize = [BitConverter]::ToUInt32($Bytes, 14)
+  $imageOffset = [BitConverter]::ToUInt32($Bytes, 18)
+  if ($imageSize -le 0 -or $imageOffset -lt 22) {
+    return $false
+  }
+
+  $imageEnd = [int64]$imageOffset + [int64]$imageSize
+  return $imageEnd -le [int64]$Bytes.Length
+}
+
+function Test-IcoFileValid {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return [pscustomobject]@{
+      valid = $false
+      reason = "missing"
+    }
+  }
+
+  try {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+  } catch {
+    return [pscustomobject]@{
+      valid = $false
+      reason = ("unreadable: {0}" -f $_.Exception.Message)
+    }
+  }
+
+  if (Test-IcoBytesAreValid -Bytes $bytes) {
+    return [pscustomobject]@{
+      valid = $true
+      reason = "valid"
+    }
+  }
+
+  return [pscustomobject]@{
+    valid = $false
+    reason = "invalid_ico"
+  }
+}
+
+function Get-TauriBundleIconRepairCommand {
+  return 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg=''apps/desktop/src-tauri/tauri.conf.json''; $json=Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json; if($null -eq $json.bundle){$json | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{})}; $icons=@(); if($null -ne $json.bundle.icon){$icons=@($json.bundle.icon)}; if($icons -notcontains ''icons/icon.ico''){$json.bundle.icon=@($icons + ''icons/icon.ico'')}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $cfg -Encoding UTF8"'
+}
+
+function Ensure-TauriBundleIconResource {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedIconRelativePath
+  )
+
+  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
+    throw "tauri config missing: $TauriConfigPath"
+  }
+
+  $config = Get-Content -Raw -LiteralPath $TauriConfigPath | ConvertFrom-Json -ErrorAction Stop
+  $changed = $false
+
+  if ($null -eq $config.bundle) {
+    $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{}) -Force
+    $changed = $true
+  }
+
+  $icons = @()
+  if ($null -ne $config.bundle.icon) {
+    foreach ($iconValue in @($config.bundle.icon)) {
+      if ($null -eq $iconValue) {
+        continue
+      }
+      $iconText = [string]$iconValue
+      if ([string]::IsNullOrWhiteSpace($iconText)) {
+        continue
+      }
+      $icons += $iconText.Trim()
+    }
+  }
+
+  $expectedNormalized = $ExpectedIconRelativePath.Replace("\", "/").Trim().ToLowerInvariant()
+  $hasExpected = $false
+  foreach ($icon in $icons) {
+    $normalized = [string]$icon
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+      continue
+    }
+    $normalized = $normalized.Trim().Replace("\", "/").ToLowerInvariant()
+    if ($normalized -eq $expectedNormalized) {
+      $hasExpected = $true
+      break
+    }
+  }
+
+  if (-not $hasExpected) {
+    $icons += $ExpectedIconRelativePath
+    $config.bundle | Add-Member -NotePropertyName icon -NotePropertyValue @($icons) -Force
+    $changed = $true
+  }
+
+  if ($changed) {
+    $jsonOut = $config | ConvertTo-Json -Depth 20
+    Set-Content -LiteralPath $TauriConfigPath -Value $jsonOut -Encoding UTF8
+  }
+
+  return $changed
+}
+
+function Test-TauriBundleIconConfigured {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedIconRelativePath
+  )
+
+  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
+    return [pscustomobject]@{
+      configured = $false
+      reason = "missing_tauri_conf"
+      icon_entries = @()
+    }
+  }
+
+  $config = $null
+  try {
+    $config = Get-Content -Raw -LiteralPath $TauriConfigPath | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return [pscustomobject]@{
+      configured = $false
+      reason = "invalid_tauri_conf_json"
+      icon_entries = @()
+    }
+  }
+
+  $icons = @()
+  if ($null -ne $config -and $null -ne $config.bundle -and $null -ne $config.bundle.icon) {
+    foreach ($iconValue in @($config.bundle.icon)) {
+      if ($null -eq $iconValue) {
+        continue
+      }
+      $iconText = [string]$iconValue
+      if ([string]::IsNullOrWhiteSpace($iconText)) {
+        continue
+      }
+      $icons += $iconText.Trim()
+    }
+  }
+
+  $expectedNormalized = $ExpectedIconRelativePath.Replace("\", "/").Trim().ToLowerInvariant()
+  foreach ($icon in $icons) {
+    $normalized = [string]$icon
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+      continue
+    }
+    $normalized = $normalized.Trim().Replace("\", "/").ToLowerInvariant()
+    if ($normalized -eq $expectedNormalized) {
+      return [pscustomobject]@{
+        configured = $true
+        reason = "configured"
+        icon_entries = @($icons)
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    configured = $false
+    reason = "missing_bundle_icon_entry"
+    icon_entries = @($icons)
+  }
+}
+
 function Ensure-DesktopIconAsset {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$IconPath
+    [string]$IconPath,
+    [Parameter(Mandatory = $true)]
+    [string]$SourceIconPath,
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopDir,
+    [AllowEmptyString()]
+    [string]$NpmCommandPath
   )
 
-  if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
+  if (-not (Test-Path -LiteralPath $SourceIconPath -PathType Leaf)) {
+    throw ("desktop icon source is missing: {0}`nmanual remediation:`n- git checkout -- apps/desktop/src-tauri/icons/icon.svg`n- scripts\windows\desktop_node.cmd npm run generate:windows-icon" -f $SourceIconPath)
+  }
+
+  $tauriBundleState = Test-TauriBundleIconConfigured -TauriConfigPath $TauriConfigPath -ExpectedIconRelativePath "icons/icon.ico"
+  if (-not [bool]$tauriBundleState.configured) {
+    if ($tauriBundleState.reason -eq "missing_bundle_icon_entry") {
+      if ($DryRun) {
+        Write-Step "dry-run desktop resource remediation: would add icons/icon.ico to apps/desktop/src-tauri/tauri.conf.json bundle.icon"
+      } else {
+        $updated = [bool](Ensure-TauriBundleIconResource -TauriConfigPath $TauriConfigPath -ExpectedIconRelativePath "icons/icon.ico")
+        if ($updated) {
+          Write-Step "desktop resource remediation: added icons/icon.ico to apps/desktop/src-tauri/tauri.conf.json bundle.icon"
+        }
+      }
+    } else {
+      throw ("desktop tauri resource preflight failed ({0}): {1}`nmanual remediation:`n- {2}" -f $tauriBundleState.reason, $TauriConfigPath, (Get-TauriBundleIconRepairCommand))
+    }
+  }
+
+  $iconValidation = Test-IcoFileValid -Path $IconPath
+  if ([bool]$iconValidation.valid) {
     return
+  }
+
+  if ([string]::IsNullOrWhiteSpace($NpmCommandPath)) {
+    Write-Step "desktop icon remediation skipped icon generation: npm was not detected"
+  } elseif (-not (Test-Path -LiteralPath (Join-Path $DesktopDir "package.json") -PathType Leaf)) {
+    Write-Step ("desktop icon remediation skipped icon generation: missing package.json in {0}" -f $DesktopDir)
+  } else {
+    if ($DryRun) {
+      Write-Step "dry-run desktop icon remediation: npm.cmd run generate:windows-icon"
+      return
+    }
+    Push-Location $DesktopDir
+    try {
+      Write-Step "desktop icon remediation: running npm.cmd run generate:windows-icon"
+      & $NpmCommandPath run generate:windows-icon
+      if ($LASTEXITCODE -eq 0) {
+        $postGenerateValidation = Test-IcoFileValid -Path $IconPath
+        if ([bool]$postGenerateValidation.valid) {
+          return
+        }
+        Write-Step ("desktop icon remained invalid after generator run ({0}); applying placeholder fallback" -f $postGenerateValidation.reason)
+      } else {
+        Write-Step ("desktop icon generator failed with exit code {0}; applying placeholder fallback" -f $LASTEXITCODE)
+      }
+    } finally {
+      Pop-Location
+    }
   }
 
   $iconDir = Split-Path -Parent $IconPath
@@ -2035,6 +2287,11 @@ function Ensure-DesktopIconAsset {
     0x00,0x00,0x00,0x00
   )
   [System.IO.File]::WriteAllBytes($IconPath, $icoBytes)
+
+  $postValidation = Test-IcoFileValid -Path $IconPath
+  if (-not [bool]$postValidation.valid) {
+    throw ("desktop icon remediation failed: {0}`nmanual remediation:`n- scripts\windows\desktop_node.cmd npm run generate:windows-icon`n- scripts\windows\desktop_node.cmd npm run tauri -- dev" -f $postValidation.reason)
+  }
 }
 
 function Invoke-BootstrapMain {

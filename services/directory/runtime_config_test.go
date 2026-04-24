@@ -22,6 +22,52 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	}
 }
 
+func TestValidateRuntimeConfigRejectsMalformedStrictModeEnv(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "definitely")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected malformed strict-mode env to fail closed")
+	}
+	if !strings.Contains(err.Error(), "BETA_STRICT_MODE/DIRECTORY_BETA_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsEmptyStrictModeEnv(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", " ")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected empty strict-mode env to fail closed")
+	}
+	if !strings.Contains(err.Error(), "BETA_STRICT_MODE/DIRECTORY_BETA_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewBetaStrictConflictPreservesStrictMode(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("DIRECTORY_BETA_STRICT", "1")
+
+	s := New()
+	if !s.betaStrict {
+		t.Fatalf("expected beta strict mode enabled when strict env vars conflict")
+	}
+}
+
+func TestNewProdStrictConflictPreservesStrictMode(t *testing.T) {
+	t.Setenv("PROD_STRICT_MODE", "0")
+	t.Setenv("DIRECTORY_PROD_STRICT", "1")
+
+	s := New()
+	if !s.prodStrict {
+		t.Fatalf("expected prod strict mode enabled when strict env vars conflict")
+	}
+}
+
 func TestNewDoesNotFallbackToDevAdminTokenByDefault(t *testing.T) {
 	t.Setenv("DIRECTORY_ADMIN_TOKEN", "")
 	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK", "0")
@@ -132,6 +178,74 @@ func TestValidateRuntimeConfigBetaStrictRejectsDangerousProviderTokenBypass(t *t
 		t.Fatalf("expected strict config rejection for dangerous provider-token bypass env")
 	}
 	expected := "BETA_STRICT_MODE forbids " + allowDangerousProviderTokenBypass
+	if err.Error() != expected {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDangerousIssuerTrustWithoutAnchors(t *testing.T) {
+	t.Setenv(allowDangerousIssuerTrustWithoutAnchors, "1")
+	s := &Service{
+		betaStrict:               true,
+		peerDiscoveryEnabled:     true,
+		peerMinOperators:         2,
+		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
+		issuerMinOperators:       2,
+		issuerTrustMinVotes:      2,
+		issuerDisputeMinVotes:    2,
+		issuerAppealMinVotes:     2,
+		peerDiscoveryMinVotes:    2,
+		peerDiscoveryRequireHint: true,
+		peerDiscoveryMaxPerSrc:   4,
+		peerDiscoveryMaxPerOp:    4,
+		peerTrustStrict:          true,
+		finalAdjudicationOps:     2,
+		finalAdjudicationSources: 2,
+		finalDisputeMinVotes:     2,
+		finalAppealMinVotes:      2,
+		keyRotateEvery:           time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection for dangerous issuer-trust-anchor override env")
+	}
+	expected := "BETA_STRICT_MODE forbids " + allowDangerousIssuerTrustWithoutAnchors
+	if err.Error() != expected {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDangerousOutboundPrivateDNS(t *testing.T) {
+	t.Setenv(allowDangerousOutboundPrivateDNS, "1")
+	s := &Service{
+		betaStrict:               true,
+		peerDiscoveryEnabled:     true,
+		peerMinOperators:         2,
+		peerMinVotes:             2,
+		adminToken:               "directory-admin-012345",
+		issuerTrustURLs:          []string{"http://127.0.0.1:8082", "http://127.0.0.1:8083"},
+		issuerMinOperators:       2,
+		issuerTrustMinVotes:      2,
+		issuerDisputeMinVotes:    2,
+		issuerAppealMinVotes:     2,
+		peerDiscoveryMinVotes:    2,
+		peerDiscoveryRequireHint: true,
+		peerDiscoveryMaxPerSrc:   4,
+		peerDiscoveryMaxPerOp:    4,
+		peerTrustStrict:          true,
+		finalAdjudicationOps:     2,
+		finalAdjudicationSources: 2,
+		finalDisputeMinVotes:     2,
+		finalAppealMinVotes:      2,
+		keyRotateEvery:           time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection for dangerous outbound private DNS override env")
+	}
+	expected := "BETA_STRICT_MODE forbids " + allowDangerousOutboundPrivateDNS
 	if err.Error() != expected {
 		t.Fatalf("unexpected error: %v", err)
 	}

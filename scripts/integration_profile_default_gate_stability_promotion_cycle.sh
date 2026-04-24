@@ -151,6 +151,29 @@ if [[ "$scenario" == "invalid_json" ]]; then
   exit 0
 fi
 
+if [[ "$scenario" == "missing_supporting_summaries" ]]; then
+  jq -n '{
+    version: 1,
+    schema: { id: "profile_default_gate_stability_cycle_summary" },
+    status: "pass",
+    rc: 0,
+    decision: "GO",
+    inputs: {
+      check: {
+        policy: {
+          require_modal_decision: "GO"
+        }
+      }
+    },
+    check: {
+      summary_schema_valid: true,
+      has_usable_decision: true,
+      decision: "GO"
+    }
+  }' >"$summary_json"
+  exit 0
+fi
+
 if [[ "$scenario" == "missing_rc" ]]; then
   jq -n '{
     version: 1,
@@ -453,6 +476,47 @@ exit 0
 EOF_FAKE_PROMOTION
 chmod +x "$FAKE_PROMOTION_SCRIPT"
 
+echo "[profile-default-gate-stability-promotion-cycle] placeholder subject precondition fails closed"
+PLACEHOLDER_SUBJECT_SUMMARY="$TMP_DIR/promotion_cycle_placeholder_subject_summary.json"
+PLACEHOLDER_SUBJECT_CAPTURE="$TMP_DIR/promotion_cycle_placeholder_subject_capture.log"
+PLACEHOLDER_SUBJECT_COUNTER="$TMP_DIR/promotion_cycle_placeholder_subject_counter.txt"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_STABILITY_CYCLE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROMOTION_CYCLE_CAPTURE_FILE="$PLACEHOLDER_SUBJECT_CAPTURE" \
+FAKE_PROMOTION_CYCLE_COUNTER_FILE="$PLACEHOLDER_SUBJECT_COUNTER" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "INVITE_KEY" \
+  --cycles 1 \
+  --sleep-between-cycles-sec 0 \
+  --summary-json "$PLACEHOLDER_SUBJECT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_promotion_cycle_placeholder_subject.log 2>&1
+placeholder_subject_rc=$?
+set -e
+
+if [[ "$placeholder_subject_rc" -eq 0 ]]; then
+  echo "expected placeholder subject precondition failure rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_promotion_cycle_placeholder_subject.log
+  exit 1
+fi
+if ! grep -Eiq 'placeholder text|provide a real invite key' /tmp/integration_profile_default_gate_stability_promotion_cycle_placeholder_subject.log; then
+  echo "expected placeholder subject failure guidance in stderr/stdout output"
+  cat /tmp/integration_profile_default_gate_stability_promotion_cycle_placeholder_subject.log
+  exit 1
+fi
+if [[ -s "$PLACEHOLDER_SUBJECT_CAPTURE" ]]; then
+  echo "expected no stage script invocation when placeholder subject precondition fails"
+  cat "$PLACEHOLDER_SUBJECT_CAPTURE"
+  exit 1
+fi
+if [[ -f "$PLACEHOLDER_SUBJECT_SUMMARY" ]]; then
+  echo "expected no summary artifact when placeholder subject precondition fails"
+  cat "$PLACEHOLDER_SUBJECT_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-default-gate-stability-promotion-cycle] strict happy path"
 HAPPY_SUMMARY="$TMP_DIR/promotion_cycle_happy_summary.json"
 set +e
@@ -534,6 +598,11 @@ if [[ "$(grep -c '^cycle' "$CAPTURE_FILE")" -lt 3 ]]; then
 fi
 if ! grep -q '^promotion' "$CAPTURE_FILE"; then
   echo "expected promotion invocation in capture"
+  cat "$CAPTURE_FILE"
+  exit 1
+fi
+if ! grep -q 'campaign_subject=inv-happy' "$CAPTURE_FILE"; then
+  echo "expected cycle command capture to include parsed campaign_subject from --subject alias"
   cat "$CAPTURE_FILE"
   exit 1
 fi
@@ -788,6 +857,50 @@ if ! jq -e '
 ' "$CYCLE_MISSING_RC_SUMMARY" >/dev/null 2>&1; then
   echo "cycle missing-rc summary mismatch"
   cat "$CYCLE_MISSING_RC_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-promotion-cycle] missing run/check evidence artifacts fail closed"
+MISSING_SUPPORTING_SUMMARY="$TMP_DIR/promotion_cycle_missing_supporting_summary.json"
+MISSING_SUPPORTING_CAPTURE="$TMP_DIR/promotion_cycle_missing_supporting_capture.log"
+MISSING_SUPPORTING_COUNTER="$TMP_DIR/promotion_cycle_missing_supporting_counter.txt"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_STABILITY_CYCLE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROMOTION_CYCLE_CAPTURE_FILE="$MISSING_SUPPORTING_CAPTURE" \
+FAKE_PROMOTION_CYCLE_COUNTER_FILE="$MISSING_SUPPORTING_COUNTER" \
+FAKE_PROMOTION_CYCLE_SCENARIOS="missing_supporting_summaries" \
+FAKE_PROMOTION_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "inv-missing-supporting-evidence" \
+  --cycles 1 \
+  --sleep-between-cycles-sec 0 \
+  --fail-on-no-go 0 \
+  --summary-json "$MISSING_SUPPORTING_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_promotion_cycle_missing_supporting.log 2>&1
+missing_supporting_rc=$?
+set -e
+
+if [[ "$missing_supporting_rc" -eq 0 ]]; then
+  echo "expected missing supporting evidence path rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_promotion_cycle_missing_supporting.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "cycle_collection"
+  and .failure_reason == "cycle_collection_artifact_contract_failed"
+  and .stages.cycle_collection.hard_failures >= 1
+  and .stages.cycle_collection.cycles[0].run_summary_exists == false
+  and .stages.cycle_collection.cycles[0].check_summary_exists == false
+  and ((.stages.cycle_collection.cycles[0].failure_reason // "") == "cycle_run_summary_missing")
+' "$MISSING_SUPPORTING_SUMMARY" >/dev/null 2>&1; then
+  echo "missing supporting evidence summary mismatch"
+  cat "$MISSING_SUPPORTING_SUMMARY"
   exit 1
 fi
 

@@ -63,6 +63,43 @@ trim() {
   printf '%s' "$value"
 }
 
+strip_optional_wrapping_quotes() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ "${#value}" -lt 2 ]]; then
+    printf '%s' "$value"
+    return
+  fi
+
+  local first_char last_char
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  printf '%s' "$value"
+}
+
+invite_subject_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY)
+      return 0
+      ;;
+    CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -139,6 +176,14 @@ json_file_valid_01() {
     printf '1'
   else
     printf '0'
+  fi
+}
+
+record_cycle_hard_failure() {
+  local reason="$1"
+  cycle_collection_hard_failures=$((cycle_collection_hard_failures + 1))
+  if [[ -z "${cycle_failure_reason:-}" ]]; then
+    cycle_failure_reason="$reason"
   fi
 }
 
@@ -502,6 +547,11 @@ if [[ -n "$campaign_subject_from_campaign" && -n "$campaign_subject_from_alias" 
   echo "conflicting subject values: --campaign-subject and --subject must match when both are provided"
   exit 2
 fi
+if invite_subject_looks_placeholder_01 "$campaign_subject"; then
+  echo "profile-default-gate-stability-promotion-cycle failed: invite key subject appears to be placeholder text ($campaign_subject)"
+  echo "provide a real invite key via --campaign-subject/--subject or set PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_CAMPAIGN_SUBJECT"
+  exit 2
+fi
 if [[ ! -f "$STABILITY_CYCLE_SCRIPT" ]]; then
   echo "stability cycle script not found: $STABILITY_CYCLE_SCRIPT"
   exit 2
@@ -635,6 +685,14 @@ while (( cycle_index < cycles )); do
   cycle_summary_valid="false"
   cycle_summary_schema_id=""
   cycle_summary_schema_valid="false"
+  cycle_run_summary_exists="false"
+  cycle_run_summary_valid="false"
+  cycle_run_summary_schema_id=""
+  cycle_run_summary_schema_valid="false"
+  cycle_check_summary_exists="false"
+  cycle_check_summary_valid="false"
+  cycle_check_summary_schema_id=""
+  cycle_check_summary_schema_valid="false"
   cycle_status=""
   cycle_decision=""
   cycle_rc_json="null"
@@ -644,8 +702,7 @@ while (( cycle_index < cycles )); do
   if [[ -f "$cycle_summary_json" ]]; then
     cycle_summary_exists="true"
   else
-    cycle_failure_reason="cycle_summary_missing"
-    cycle_collection_hard_failures=$((cycle_collection_hard_failures + 1))
+    record_cycle_hard_failure "cycle_summary_missing"
   fi
 
   if [[ "$cycle_summary_exists" == "true" && "$(json_file_valid_01 "$cycle_summary_json")" == "1" ]]; then
@@ -654,8 +711,7 @@ while (( cycle_index < cycles )); do
     if [[ "$cycle_summary_schema_id" == "profile_default_gate_stability_cycle_summary" ]]; then
       cycle_summary_schema_valid="true"
     else
-      cycle_collection_hard_failures=$((cycle_collection_hard_failures + 1))
-      cycle_failure_reason="cycle_summary_schema_invalid"
+      record_cycle_hard_failure "cycle_summary_schema_invalid"
     fi
     cycle_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$cycle_summary_json" 2>/dev/null || printf '%s' "")"
     cycle_decision="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$cycle_summary_json" 2>/dev/null || printf '%s' "")"
@@ -664,8 +720,43 @@ while (( cycle_index < cycles )); do
     fi
     cycle_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else "null" end' "$cycle_summary_json" 2>/dev/null || printf '%s' "null")"
   elif [[ "$cycle_summary_exists" == "true" ]]; then
-    cycle_collection_hard_failures=$((cycle_collection_hard_failures + 1))
-    cycle_failure_reason="cycle_summary_invalid_json"
+    record_cycle_hard_failure "cycle_summary_invalid_json"
+  fi
+
+  if [[ -f "$cycle_run_summary_json" ]]; then
+    cycle_run_summary_exists="true"
+  else
+    record_cycle_hard_failure "cycle_run_summary_missing"
+  fi
+
+  if [[ "$cycle_run_summary_exists" == "true" && "$(json_file_valid_01 "$cycle_run_summary_json")" == "1" ]]; then
+    cycle_run_summary_valid="true"
+    cycle_run_summary_schema_id="$(jq -r 'if (.schema.id | type) == "string" then .schema.id else "" end' "$cycle_run_summary_json" 2>/dev/null || printf '%s' "")"
+    if [[ "$cycle_run_summary_schema_id" == "profile_default_gate_stability_summary" ]]; then
+      cycle_run_summary_schema_valid="true"
+    else
+      record_cycle_hard_failure "cycle_run_summary_schema_invalid"
+    fi
+  elif [[ "$cycle_run_summary_exists" == "true" ]]; then
+    record_cycle_hard_failure "cycle_run_summary_invalid_json"
+  fi
+
+  if [[ -f "$cycle_check_summary_json" ]]; then
+    cycle_check_summary_exists="true"
+  else
+    record_cycle_hard_failure "cycle_check_summary_missing"
+  fi
+
+  if [[ "$cycle_check_summary_exists" == "true" && "$(json_file_valid_01 "$cycle_check_summary_json")" == "1" ]]; then
+    cycle_check_summary_valid="true"
+    cycle_check_summary_schema_id="$(jq -r 'if (.schema.id | type) == "string" then .schema.id else "" end' "$cycle_check_summary_json" 2>/dev/null || printf '%s' "")"
+    if [[ "$cycle_check_summary_schema_id" == "profile_default_gate_stability_check_summary" ]]; then
+      cycle_check_summary_schema_valid="true"
+    else
+      record_cycle_hard_failure "cycle_check_summary_schema_invalid"
+    fi
+  elif [[ "$cycle_check_summary_exists" == "true" ]]; then
+    record_cycle_hard_failure "cycle_check_summary_invalid_json"
   fi
 
   if [[ "$cycle_summary_valid" == "true" ]]; then
@@ -687,10 +778,7 @@ while (( cycle_index < cycles )); do
   fi
 
   if [[ "$cycle_command_contract_ok" != "true" ]]; then
-    cycle_collection_hard_failures=$((cycle_collection_hard_failures + 1))
-    if [[ -z "$cycle_failure_reason" ]]; then
-      cycle_failure_reason="cycle_command_rc_contract_mismatch"
-    fi
+    record_cycle_hard_failure "cycle_command_rc_contract_mismatch"
   fi
 
   cycle_entry="$(jq -n \
@@ -704,6 +792,14 @@ while (( cycle_index < cycles )); do
     --arg cycle_summary_valid "$cycle_summary_valid" \
     --arg cycle_summary_schema_id "$cycle_summary_schema_id" \
     --arg cycle_summary_schema_valid "$cycle_summary_schema_valid" \
+    --arg cycle_run_summary_exists "$cycle_run_summary_exists" \
+    --arg cycle_run_summary_valid "$cycle_run_summary_valid" \
+    --arg cycle_run_summary_schema_id "$cycle_run_summary_schema_id" \
+    --arg cycle_run_summary_schema_valid "$cycle_run_summary_schema_valid" \
+    --arg cycle_check_summary_exists "$cycle_check_summary_exists" \
+    --arg cycle_check_summary_valid "$cycle_check_summary_valid" \
+    --arg cycle_check_summary_schema_id "$cycle_check_summary_schema_id" \
+    --arg cycle_check_summary_schema_valid "$cycle_check_summary_schema_valid" \
     --arg cycle_status "$cycle_status" \
     --arg cycle_decision "$cycle_decision" \
     --arg cycle_failure_reason "$cycle_failure_reason" \
@@ -728,7 +824,15 @@ while (( cycle_index < cycles )); do
       summary_exists: ($cycle_summary_exists == "true"),
       summary_valid_json: ($cycle_summary_valid == "true"),
       summary_schema_id: (if $cycle_summary_schema_id == "" then null else $cycle_summary_schema_id end),
-      summary_schema_valid: ($cycle_summary_schema_valid == "true")
+      summary_schema_valid: ($cycle_summary_schema_valid == "true"),
+      run_summary_exists: ($cycle_run_summary_exists == "true"),
+      run_summary_valid_json: ($cycle_run_summary_valid == "true"),
+      run_summary_schema_id: (if $cycle_run_summary_schema_id == "" then null else $cycle_run_summary_schema_id end),
+      run_summary_schema_valid: ($cycle_run_summary_schema_valid == "true"),
+      check_summary_exists: ($cycle_check_summary_exists == "true"),
+      check_summary_valid_json: ($cycle_check_summary_valid == "true"),
+      check_summary_schema_id: (if $cycle_check_summary_schema_id == "" then null else $cycle_check_summary_schema_id end),
+      check_summary_schema_valid: ($cycle_check_summary_schema_valid == "true")
     }')"
   cycles_json="$(jq -c --argjson entry "$cycle_entry" '. + [$entry]' <<<"$cycles_json")"
 

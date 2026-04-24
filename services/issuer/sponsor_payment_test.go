@@ -643,6 +643,75 @@ func TestIssueEndpointsRejectRequestAndPaymentProofSubjectMismatch(t *testing.T)
 	}
 }
 
+func TestIssueEndpointsRejectAnonCredentialPaymentProofSubjectMismatchWithDerivedSubject(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.requirePaymentProof = true
+
+	const (
+		credentialID  = "cred-anon-proof-subject-mismatch"
+		reservationID = "sres-anon-proof-subject-mismatch"
+		sessionID     = "sess-anon-proof-subject-mismatch"
+		proofSubject  = "client-proof-subject"
+	)
+	derivedSubject := anonymousSubjectAlias(credentialID)
+	if derivedSubject == proofSubject {
+		t.Fatalf("test setup invalid: expected derived anonymous subject to differ from proof subject")
+	}
+
+	anonCred, err := signAnonymousCredential(anonymousCredentialClaims{
+		Issuer:       s.issuerID,
+		CredentialID: credentialID,
+		Tier:         2,
+		ExpiryUnix:   time.Now().Add(20 * time.Minute).Unix(),
+	}, s.privKey)
+	if err != nil {
+		t.Fatalf("signAnonymousCredential: %v", err)
+	}
+
+	_, err = s.settlementService().ReserveSponsorCredits(context.Background(), settlement.SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-1",
+		SubjectID:     proofSubject,
+		SessionID:     sessionID,
+		AmountMicros:  1000,
+		ExpiresAt:     time.Now().UTC().Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		AnonCred:  anonCred,
+		PaymentProof: &proto.SponsorPaymentProof{
+			ReservationID: reservationID,
+			SponsorID:     "sponsor-1",
+			Subject:       proofSubject,
+			SessionID:     sessionID,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+	s.handleIssueToken(rr, req)
+
+	if rr.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusPaymentRequired, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "payment proof invalid: request subject mismatch") {
+		t.Fatalf("expected request/proof subject mismatch error, body=%s", rr.Body.String())
+	}
+
+	reservation, err := s.settlementService().GetSponsorReservation(context.Background(), reservationID)
+	if err != nil {
+		t.Fatalf("GetSponsorReservation: %v", err)
+	}
+	if !reservation.ConsumedAt.IsZero() {
+		t.Fatalf("expected reservation to remain unconsumed on rejected anonymous proof subject mismatch")
+	}
+}
+
 func TestIssueEndpointsPropagateCanceledRequestContextToAuthorizePayment(t *testing.T) {
 	tests := []struct {
 		name string

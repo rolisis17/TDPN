@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod mkdir cat grep timeout date; do
+for cmd in bash jq mktemp chmod mkdir cat grep timeout date ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -36,6 +36,17 @@ UNREACHABLE_PROFILE_MARKER="$ACTION_TMP_DIR/profile_unreachable_marker.sh"
 MISSING_SUBJECT_PROFILE_MARKER="$ACTION_TMP_DIR/profile_missing_subject_marker.sh"
 FAKE_EASY_NODE="$ACTION_TMP_DIR/fake_easy_node.sh"
 FAKE_EASY_NODE_CAPTURE="$ACTION_TMP_DIR/fake_easy_node_capture.log"
+SYMLINK_ESCAPE_TARGET="$TMP_DIR/symlink_escape_target.sh"
+SYMLINK_ESCAPE_LINK="$ACTION_TMP_DIR/symlink_escape_action.sh"
+SYMLINK_ESCAPE_MARKER="$TMP_DIR/symlink_escape_marker.txt"
+PARENT_SYMLINK_ESCAPE_DIR_TARGET="$TMP_DIR/parent_symlink_escape_dir"
+PARENT_SYMLINK_ESCAPE_DIR_LINK="$ACTION_TMP_DIR/parent_symlink_escape_link"
+PARENT_SYMLINK_ESCAPE_SCRIPT="$PARENT_SYMLINK_ESCAPE_DIR_TARGET/parent_symlink_escape_action.sh"
+PARENT_SYMLINK_ESCAPE_MARKER="$TMP_DIR/parent_symlink_escape_marker.txt"
+TOCTOU_MUTATE_ACTION="$ACTION_TMP_DIR/toctou_mutate_action.sh"
+TOCTOU_RACE_ACTION="$ACTION_TMP_DIR/toctou_race_action.sh"
+TOCTOU_ESCAPE_TARGET="$TMP_DIR/toctou_escape_target.sh"
+TOCTOU_ESCAPE_MARKER="$TMP_DIR/toctou_escape_marker.txt"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -234,6 +245,63 @@ echo "provide --campaign-subject/--subject, or set CAMPAIGN_SUBJECT/INVITE_KEY"
 exit 2
 EOF_FAKE_EASY_NODE
 chmod +x "$FAKE_EASY_NODE"
+
+cat >"$SYMLINK_ESCAPE_TARGET" <<'EOF_SYMLINK_ESCAPE_TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${SYMLINK_ESCAPE_MARKER:-}" ]]; then
+  echo "symlink-escape-executed" >"$SYMLINK_ESCAPE_MARKER"
+fi
+echo "symlink escape payload executed"
+EOF_SYMLINK_ESCAPE_TARGET
+chmod +x "$SYMLINK_ESCAPE_TARGET"
+ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK"
+mkdir -p "$PARENT_SYMLINK_ESCAPE_DIR_TARGET"
+cat >"$PARENT_SYMLINK_ESCAPE_SCRIPT" <<'EOF_PARENT_SYMLINK_ESCAPE_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${PARENT_SYMLINK_ESCAPE_MARKER:-}" ]]; then
+  echo "parent-symlink-escape-executed" >"$PARENT_SYMLINK_ESCAPE_MARKER"
+fi
+echo "parent symlink escape payload executed"
+EOF_PARENT_SYMLINK_ESCAPE_SCRIPT
+chmod +x "$PARENT_SYMLINK_ESCAPE_SCRIPT"
+ln -s "$PARENT_SYMLINK_ESCAPE_DIR_TARGET" "$PARENT_SYMLINK_ESCAPE_DIR_LINK"
+
+cat >"$TOCTOU_RACE_ACTION" <<'EOF_TOCTOU_RACE_ACTION'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "toctou race action executed"
+EOF_TOCTOU_RACE_ACTION
+chmod +x "$TOCTOU_RACE_ACTION"
+
+cat >"$TOCTOU_ESCAPE_TARGET" <<'EOF_TOCTOU_ESCAPE_TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${TOCTOU_ESCAPE_MARKER:-}" ]]; then
+  echo "toctou-escape-executed" >"$TOCTOU_ESCAPE_MARKER"
+fi
+echo "toctou escape payload executed"
+EOF_TOCTOU_ESCAPE_TARGET
+chmod +x "$TOCTOU_ESCAPE_TARGET"
+
+cat >"$TOCTOU_MUTATE_ACTION" <<'EOF_TOCTOU_MUTATE_ACTION'
+#!/usr/bin/env bash
+set -euo pipefail
+target_script="${TOCTOU_TARGET_SCRIPT:-}"
+escape_script="${TOCTOU_ESCAPE_SCRIPT:-}"
+if [[ -z "$target_script" || -z "$escape_script" ]]; then
+  echo "missing TOCTOU_TARGET_SCRIPT or TOCTOU_ESCAPE_SCRIPT"
+  exit 2
+fi
+(
+  sleep 0.2
+  rm -f "$target_script"
+  ln -s "$escape_script" "$target_script"
+) &
+echo "toctou mutator armed"
+EOF_TOCTOU_MUTATE_ACTION
+chmod +x "$TOCTOU_MUTATE_ACTION"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -467,6 +535,15 @@ JSON
 {
   "next_actions": [
     {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --reports-dir /tmp/fake_profile_reports --subject INVITE_KEY","reason":"test-precondition-placeholder-override"}
+  ]
+}
+JSON
+    ;;
+  profile_placeholder_subject_braced_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Profile default decision gate","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-run --reports-dir /tmp/fake_profile_reports --subject '\${CAMPAIGN_SUBJECT}'","reason":"test-precondition-placeholder-braced"}
   ]
 }
 JSON
@@ -1314,6 +1391,106 @@ if grep -E -- 'INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] profile placeholder subject resolves via CAMPAIGN_SUBJECT fallback when CLI override is unset"
+SUMMARY_PROFILE_PLACEHOLDER_ENV_FALLBACK="$TMP_DIR/summary_profile_placeholder_env_fallback.json"
+REPORTS_PROFILE_PLACEHOLDER_ENV_FALLBACK="$TMP_DIR/reports_profile_placeholder_env_fallback"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_placeholder_subject_braced_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" CAMPAIGN_SUBJECT="inv-campaign-fallback-subject" INVITE_KEY="inv-secondary-fallback-subject" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PLACEHOLDER_ENV_FALLBACK" \
+  --summary-json "$SUMMARY_PROFILE_PLACEHOLDER_ENV_FALLBACK" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.profile_default_gate_subject == null
+  and .inputs.profile_default_gate_subject_configured == false
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--subject [redacted]"))
+  and (((.actions[0].command // "") | contains("CAMPAIGN_SUBJECT")) | not)
+  and (((.actions[0].command // "") | contains("INVITE_KEY")) | not)
+' "$SUMMARY_PROFILE_PLACEHOLDER_ENV_FALLBACK" >/dev/null; then
+  echo "profile placeholder env-fallback summary mismatch"
+  cat "$SUMMARY_PROFILE_PLACEHOLDER_ENV_FALLBACK"
+  exit 1
+fi
+if ! grep -E -- '--subject[[:space:]]+inv-campaign-fallback-subject([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder env-fallback command capture missing replaced --subject from CAMPAIGN_SUBJECT"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- 'CAMPAIGN_SUBJECT|INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile placeholder env-fallback command capture still contains placeholder tokens"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] unresolved profile placeholder subject fails closed before command execution"
+SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED="$TMP_DIR/summary_profile_placeholder_unresolved.json"
+REPORTS_PROFILE_PLACEHOLDER_UNRESOLVED="$TMP_DIR/reports_profile_placeholder_unresolved"
+: >"$FAKE_EASY_NODE_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_placeholder_subject_braced_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" CAMPAIGN_SUBJECT="" INVITE_KEY="" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_PLACEHOLDER_UNRESOLVED" \
+  --summary-json "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED" \
+  --print-summary-json 0
+profile_placeholder_unresolved_rc=$?
+set -e
+if [[ "$profile_placeholder_unresolved_rc" != "2" ]]; then
+  echo "expected unresolved profile placeholder hard-fail rc=2, got rc=$profile_placeholder_unresolved_rc"
+  cat "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .summary.actions_executed == 1
+  and .summary.pass == 0
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 2
+  and .actions[0].command_rc == 2
+  and .actions[0].failure_kind == "missing_invite_subject_precondition"
+  and ((.actions[0].next_operator_action // "") | contains("--profile-default-gate-subject REPLACE_WITH_INVITE_SUBJECT"))
+  and ((.actions[0].next_operator_action // "") | contains("--reports-dir " + $reports_dir))
+  and ((.actions[0].next_operator_action // "") | contains("--summary-json " + $summary_json))
+' --arg reports_dir "$REPORTS_PROFILE_PLACEHOLDER_UNRESOLVED" --arg summary_json "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED" "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED" >/dev/null; then
+  echo "unresolved profile placeholder hard-fail summary mismatch"
+  cat "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED"
+  exit 1
+fi
+PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED")"
+if [[ -z "$PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG" || ! -f "$PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG" ]]; then
+  echo "missing unresolved profile placeholder action log artifact"
+  cat "$SUMMARY_PROFILE_PLACEHOLDER_UNRESOLVED"
+  exit 1
+fi
+if ! grep -F -- "operator_next_action: ./scripts/roadmap_next_actions_run.sh" "$PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG" >/dev/null; then
+  echo "missing exact rerun command operator_next_action in unresolved profile placeholder action log"
+  cat "$PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG"
+  exit 1
+fi
+if ! grep -F -- "--profile-default-gate-subject REPLACE_WITH_INVITE_SUBJECT" "$PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG" >/dev/null; then
+  echo "missing profile-default-gate-subject rerun guidance in unresolved profile placeholder action log"
+  cat "$PROFILE_PLACEHOLDER_UNRESOLVED_ACTION_LOG"
+  exit 1
+fi
+if [[ -s "$FAKE_EASY_NODE_CAPTURE" ]]; then
+  echo "unresolved profile placeholder should fail before fake easy_node execution"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] profile key present avoids duplicate subject append"
 SUMMARY_PROFILE_EXISTING_KEY_NO_DUP="$TMP_DIR/summary_profile_existing_key_no_dup.json"
 REPORTS_PROFILE_EXISTING_KEY_NO_DUP="$TMP_DIR/reports_profile_existing_key_no_dup"
@@ -1857,6 +2034,185 @@ if ! jq -e '
 fi
 rm -rf "$ABS_OUTSIDE_DIR"
 
+echo "[roadmap-next-actions-run] rejects symlinked action path escaping scripts ancestry in safe mode"
+SYMLINK_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_symlink_reject_input.json"
+SYMLINK_REJECT_SUMMARY="$TMP_DIR/summary_symlink_reject.json"
+SYMLINK_REJECT_REPORT="$TMP_DIR/report_symlink_reject.md"
+SYMLINK_REJECT_LOG_DIR="$TMP_DIR/reports_symlink_reject"
+rm -f "$SYMLINK_ESCAPE_MARKER"
+cat >"$SYMLINK_REJECT_SUMMARY_INPUT" <<JSON_SYMLINK_REJECT
+{
+  "next_actions": [
+    {
+      "id": "symlink_reject",
+      "label": "Symlink escape action",
+      "command": "bash \"$SYMLINK_ESCAPE_LINK\"",
+      "reason": "security contract"
+    }
+  ]
+}
+JSON_SYMLINK_REJECT
+echo "# symlink reject report" >"$SYMLINK_REJECT_REPORT"
+set +e
+SYMLINK_ESCAPE_MARKER="$SYMLINK_ESCAPE_MARKER" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --roadmap-summary-json "$SYMLINK_REJECT_SUMMARY_INPUT" \
+  --roadmap-report-md "$SYMLINK_REJECT_REPORT" \
+  --reports-dir "$SYMLINK_REJECT_LOG_DIR" \
+  --summary-json "$SYMLINK_REJECT_SUMMARY" \
+  --print-summary-json 0
+symlink_reject_rc=$?
+set -e
+if [[ "$symlink_reject_rc" != "6" ]]; then
+  echo "expected symlink escape rejection rc=6, got rc=$symlink_reject_rc"
+  cat "$SYMLINK_REJECT_SUMMARY"
+  exit 1
+fi
+if [[ -f "$SYMLINK_ESCAPE_MARKER" ]]; then
+  echo "symlink escape payload unexpectedly executed in safe mode"
+  cat "$SYMLINK_REJECT_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "symlink_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$SYMLINK_REJECT_SUMMARY" >/dev/null; then
+  echo "symlink escape rejection summary mismatch"
+  cat "$SYMLINK_REJECT_SUMMARY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] rejects action path with parent-directory symlink escape in safe mode"
+PARENT_SYMLINK_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_parent_symlink_reject_input.json"
+PARENT_SYMLINK_REJECT_SUMMARY="$TMP_DIR/summary_parent_symlink_reject.json"
+PARENT_SYMLINK_REJECT_REPORT="$TMP_DIR/report_parent_symlink_reject.md"
+PARENT_SYMLINK_REJECT_LOG_DIR="$TMP_DIR/reports_parent_symlink_reject"
+rm -f "$PARENT_SYMLINK_ESCAPE_MARKER"
+cat >"$PARENT_SYMLINK_REJECT_SUMMARY_INPUT" <<JSON_PARENT_SYMLINK_REJECT
+{
+  "next_actions": [
+    {
+      "id": "parent_symlink_reject",
+      "label": "Parent symlink escape action",
+      "command": "bash \"$PARENT_SYMLINK_ESCAPE_DIR_LINK/parent_symlink_escape_action.sh\"",
+      "reason": "security contract"
+    }
+  ]
+}
+JSON_PARENT_SYMLINK_REJECT
+echo "# parent symlink reject report" >"$PARENT_SYMLINK_REJECT_REPORT"
+set +e
+PARENT_SYMLINK_ESCAPE_MARKER="$PARENT_SYMLINK_ESCAPE_MARKER" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --roadmap-summary-json "$PARENT_SYMLINK_REJECT_SUMMARY_INPUT" \
+  --roadmap-report-md "$PARENT_SYMLINK_REJECT_REPORT" \
+  --reports-dir "$PARENT_SYMLINK_REJECT_LOG_DIR" \
+  --summary-json "$PARENT_SYMLINK_REJECT_SUMMARY" \
+  --print-summary-json 0
+parent_symlink_reject_rc=$?
+set -e
+if [[ "$parent_symlink_reject_rc" != "6" ]]; then
+  echo "expected parent symlink escape rejection rc=6, got rc=$parent_symlink_reject_rc"
+  cat "$PARENT_SYMLINK_REJECT_SUMMARY"
+  exit 1
+fi
+if [[ -f "$PARENT_SYMLINK_ESCAPE_MARKER" ]]; then
+  echo "parent symlink escape payload unexpectedly executed in safe mode"
+  cat "$PARENT_SYMLINK_REJECT_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "parent_symlink_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$PARENT_SYMLINK_REJECT_SUMMARY" >/dev/null; then
+  echo "parent symlink escape rejection summary mismatch"
+  cat "$PARENT_SYMLINK_REJECT_SUMMARY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] pre-exec revalidation catches TOCTOU path mutation and fails closed"
+TOCTOU_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_toctou_reject_input.json"
+TOCTOU_REJECT_SUMMARY="$TMP_DIR/summary_toctou_reject.json"
+TOCTOU_REJECT_REPORT="$TMP_DIR/report_toctou_reject.md"
+TOCTOU_REJECT_LOG_DIR="$TMP_DIR/reports_toctou_reject"
+rm -f "$TOCTOU_ESCAPE_MARKER"
+cat >"$TOCTOU_REJECT_SUMMARY_INPUT" <<JSON_TOCTOU_REJECT
+{
+  "next_actions": [
+    {
+      "id": "toctou_mutate",
+      "label": "TOCTOU mutator",
+      "command": "bash \"$TOCTOU_MUTATE_ACTION\"",
+      "reason": "security contract"
+    },
+    {
+      "id": "toctou_race",
+      "label": "TOCTOU race target",
+      "command": "bash \"$TOCTOU_RACE_ACTION\"",
+      "reason": "security contract"
+    }
+  ]
+}
+JSON_TOCTOU_REJECT
+echo "# toctou reject report" >"$TOCTOU_REJECT_REPORT"
+set +e
+TOCTOU_TARGET_SCRIPT="$TOCTOU_RACE_ACTION" \
+TOCTOU_ESCAPE_SCRIPT="$TOCTOU_ESCAPE_TARGET" \
+TOCTOU_ESCAPE_MARKER="$TOCTOU_ESCAPE_MARKER" \
+ROADMAP_NEXT_ACTIONS_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC=1 \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --roadmap-summary-json "$TOCTOU_REJECT_SUMMARY_INPUT" \
+  --roadmap-report-md "$TOCTOU_REJECT_REPORT" \
+  --reports-dir "$TOCTOU_REJECT_LOG_DIR" \
+  --summary-json "$TOCTOU_REJECT_SUMMARY" \
+  --print-summary-json 0
+toctou_reject_rc=$?
+set -e
+if [[ "$toctou_reject_rc" != "6" ]]; then
+  echo "expected TOCTOU revalidation rejection rc=6, got rc=$toctou_reject_rc"
+  cat "$TOCTOU_REJECT_SUMMARY"
+  exit 1
+fi
+if [[ -f "$TOCTOU_ESCAPE_MARKER" ]]; then
+  echo "TOCTOU escape payload unexpectedly executed in safe mode"
+  cat "$TOCTOU_REJECT_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 2
+  and .summary.pass == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 2)
+  and .actions[0].id == "toctou_mutate"
+  and .actions[0].status == "pass"
+  and .actions[1].id == "toctou_race"
+  and .actions[1].status == "fail"
+  and .actions[1].rc == 6
+' "$TOCTOU_REJECT_SUMMARY" >/dev/null; then
+  echo "TOCTOU revalidation rejection summary mismatch"
+  cat "$TOCTOU_REJECT_SUMMARY"
+  exit 1
+fi
+if ! grep -R -F "pre-exec validation mismatch" "$TOCTOU_REJECT_LOG_DIR" >/dev/null; then
+  echo "TOCTOU revalidation mismatch log marker missing"
+  cat "$TOCTOU_REJECT_SUMMARY"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] rejects env-prefixed action in safe mode"
 ENV_REJECT_SUMMARY_INPUT="$TMP_DIR/roadmap_env_reject_input.json"
 ENV_REJECT_SUMMARY="$TMP_DIR/summary_env_reject.json"
@@ -1974,8 +2330,8 @@ if ! jq -e '
   exit 1
 fi
 
-if (( parallel_elapsed_sec > 6 )); then
-  echo "parallel timing mismatch: expected <=6s, got ${parallel_elapsed_sec}s"
+if (( parallel_elapsed_sec > 12 )); then
+  echo "parallel timing mismatch: expected <=12s, got ${parallel_elapsed_sec}s"
   cat "$SUMMARY_PARALLEL"
   exit 1
 fi

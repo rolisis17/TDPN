@@ -33,7 +33,9 @@ need_cmd() {
 }
 
 trim() {
-  local value="$1"
+  local value="${1:-}"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
@@ -149,7 +151,7 @@ latest_matching_summary_json() {
     printf '%s' ""
     return
   fi
-  printf '%s' "$best_path"
+  printf '%s' "$(trim "$best_path")"
 }
 
 normalize_decision() {
@@ -167,16 +169,34 @@ normalize_status() {
 }
 
 json_array_from_lines() {
+  local raw_line=""
+  local normalized_line=""
+  local -a normalized_lines=()
+
   if [[ $# -eq 0 ]]; then
     printf '[]'
     return
   fi
-  printf '%s\n' "$@" | jq -R . | jq -s .
+
+  for raw_line in "$@"; do
+    normalized_line="$(trim "$raw_line")"
+    if [[ -n "$normalized_line" ]]; then
+      normalized_lines+=("$normalized_line")
+    fi
+  done
+
+  if [[ "${#normalized_lines[@]}" -eq 0 ]]; then
+    printf '[]'
+    return
+  fi
+
+  printf '%s\n' "${normalized_lines[@]}" | jq -R . | jq -s .
 }
 
 collect_artifact_evidence() {
   local name="$1"
-  local path="$2"
+  local path
+  path="$(abs_path "$2")"
   local expected_schema_id="$3"
   local require_decision="$4"
   local max_age_sec="$5"
@@ -188,8 +208,10 @@ collect_artifact_evidence() {
   local status_value=""
   local status_normalized=""
   local status_valid="false"
+  local status_pass_like="false"
   local rc_raw=""
   local rc_valid="false"
+  local rc_zero="false"
   local decision_value=""
   local decision_normalized=""
   local decision_valid="false"
@@ -227,8 +249,13 @@ collect_artifact_evidence() {
     status_value="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$path" 2>/dev/null || printf '%s' "")"
     status_normalized="$(normalize_status "$status_value")"
     case "$status_normalized" in
-      pass|fail|warn|ok)
+      pass|ok)
         status_valid="true"
+        status_pass_like="true"
+        ;;
+      fail|warn)
+        status_valid="true"
+        errors+=("status is ${status_normalized} (expected pass/ok)")
         ;;
       *)
         errors+=("status missing or invalid (actual=${status_value:-unset})")
@@ -243,6 +270,11 @@ collect_artifact_evidence() {
     ' "$path" 2>/dev/null || printf '%s' "")"
     if [[ "$rc_raw" =~ ^-?[0-9]+$ ]]; then
       rc_valid="true"
+      if [[ "$rc_raw" == "0" ]]; then
+        rc_zero="true"
+      else
+        errors+=("rc is ${rc_raw} (expected 0)")
+      fi
     else
       errors+=("rc missing or invalid (expected numeric rc/final_rc)")
     fi
@@ -295,7 +327,9 @@ collect_artifact_evidence() {
     && "$valid_json" == "1" \
     && "$schema_valid" == "true" \
     && "$status_valid" == "true" \
+    && "$status_pass_like" == "true" \
     && "$rc_valid" == "true" \
+    && "$rc_zero" == "true" \
     && "$freshness_known" == "true" \
     && "$freshness_fresh" == "true" ]]; then
     if [[ "$require_decision" == "1" ]]; then
@@ -316,8 +350,10 @@ collect_artifact_evidence() {
     --arg status_value "$status_value" \
     --arg status_normalized "$status_normalized" \
     --arg status_valid "$status_valid" \
+    --arg status_pass_like "$status_pass_like" \
     --arg rc_raw "$rc_raw" \
     --arg rc_valid "$rc_valid" \
+    --arg rc_zero "$rc_zero" \
     --arg decision_value "$decision_value" \
     --arg decision_normalized "$decision_normalized" \
     --arg decision_valid "$decision_valid" \
@@ -344,11 +380,17 @@ collect_artifact_evidence() {
       status: {
         value: (if $status_value == "" then null else $status_value end),
         normalized: (if $status_normalized == "" then null else $status_normalized end),
-        valid: ($status_valid == "true")
+        valid: ($status_valid == "true"),
+        pass_like: (
+          if $status_valid == "true" then ($status_pass_like == "true")
+          else null
+          end
+        )
       },
       rc: {
         value: (if $rc_valid == "true" then ($rc_raw | tonumber) else null end),
-        valid: ($rc_valid == "true")
+        valid: ($rc_valid == "true"),
+        zero: (if $rc_valid == "true" then ($rc_zero == "true") else null end)
       },
       decision: {
         required: ($require_decision == "1"),
@@ -563,6 +605,7 @@ for label in run check cycle; do
   evidence_usable="$(jq -r '.usable' <<<"$evidence_payload")"
   if [[ "$evidence_usable" != "true" ]]; then
     while IFS= read -r err_line; do
+      err_line="$(trim "$err_line")"
       [[ -n "$err_line" ]] || continue
       reasons+=("${label}: ${err_line}")
     done < <(jq -r '.errors[]?' <<<"$evidence_payload")

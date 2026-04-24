@@ -37,7 +37,7 @@ Defaults:
   --allow-unsafe-shell-commands 0
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
-  --scope profile-default
+  --scope auto
   --parallel 0
   --max-actions 0   (0 = no limit)
   --print-derived-evidence-pack-ids 0
@@ -142,7 +142,7 @@ print_derived_evidence_pack_ids="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_PRINT_DE
 print_summary_json="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
-scope="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_SCOPE:-${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCOPE:-profile-default}}"
+scope="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_SCOPE:-${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCOPE:-auto}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -285,6 +285,8 @@ summary_json="$(abs_path "$summary_json")"
 roadmap_log="$reports_dir/roadmap_progress_report.log"
 
 mkdir -p "$(dirname "$roadmap_summary_json")" "$(dirname "$roadmap_report_md")" "$(dirname "$summary_json")"
+# Fail closed against stale summary reuse when exiting early.
+rm -f "$summary_json"
 
 roadmap_script="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT:-$ROOT_DIR/scripts/roadmap_progress_report.sh}"
 next_actions_script="${ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_NEXT_ACTIONS_SCRIPT:-$ROOT_DIR/scripts/roadmap_next_actions_run.sh}"
@@ -316,6 +318,7 @@ if [[ "$roadmap_paths_provided" != "1" ]]; then
     --print-summary-json 0
   )
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_progress_report status=running"
+  rm -f "$roadmap_summary_json" "$roadmap_report_md" "$roadmap_log"
   set +e
   "${roadmap_cmd[@]}" >"$roadmap_log" 2>&1
   roadmap_rc=$?
@@ -337,6 +340,41 @@ if [[ ! -f "$roadmap_report_md" ]]; then
   echo "roadmap report missing: $roadmap_report_md"
   exit 3
 fi
+roadmap_summary_contract_state="not_present"
+roadmap_summary_contract_reason=""
+roadmap_summary_status_present="$(jq -r 'if has("status") then 1 else 0 end' "$roadmap_summary_json")"
+roadmap_summary_rc_present="$(jq -r 'if has("rc") then 1 else 0 end' "$roadmap_summary_json")"
+if [[ "$roadmap_summary_status_present" == "1" || "$roadmap_summary_rc_present" == "1" ]]; then
+  if [[ "$roadmap_summary_status_present" != "1" || "$roadmap_summary_rc_present" != "1" ]]; then
+    roadmap_summary_contract_state="invalid"
+    roadmap_summary_contract_reason="roadmap summary contract requires both status and rc fields when either is present"
+  else
+    roadmap_summary_status_value="$(jq -r '.status // "" | tostring' "$roadmap_summary_json")"
+    roadmap_summary_rc_value="$(jq -r '.rc' "$roadmap_summary_json")"
+    if ! [[ "$roadmap_summary_rc_value" =~ ^-?[0-9]+$ ]]; then
+      roadmap_summary_contract_state="invalid"
+      roadmap_summary_contract_reason="roadmap summary rc must be an integer"
+    elif [[ "$roadmap_summary_rc_value" != "0" ]]; then
+      roadmap_summary_contract_state="invalid"
+      roadmap_summary_contract_reason="roadmap summary contract requires rc=0"
+    elif [[ "$roadmap_summary_status_value" != "pass" && "$roadmap_summary_status_value" != "ok" && "$roadmap_summary_status_value" != "warn" ]]; then
+      roadmap_summary_contract_state="invalid"
+      roadmap_summary_contract_reason="roadmap summary contract requires status in {pass,ok,warn} when rc=0"
+    else
+      roadmap_summary_contract_state="valid"
+      roadmap_summary_contract_reason="status/rc contract satisfied"
+    fi
+  fi
+fi
+if [[ "$roadmap_summary_contract_state" == "invalid" ]]; then
+  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_progress_summary_contract status=fail reason=$roadmap_summary_contract_reason"
+  exit 4
+fi
+if [[ "$roadmap_summary_contract_state" == "not_present" ]]; then
+  roadmap_summary_contract_reason="roadmap summary contract requires status and rc fields"
+  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_progress_summary_contract status=fail reason=$roadmap_summary_contract_reason"
+  exit 4
+fi
 if [[ ! -f "$next_actions_script" ]]; then
   echo "missing next-actions script: $next_actions_script"
   exit 2
@@ -346,13 +384,48 @@ if [[ ! -r "$next_actions_script" ]]; then
   exit 2
 fi
 
-source_actions_with_command_count="$(jq -r '[ (.next_actions // [])[] | select(((.command // "") | tostring | length) > 0) ] | length' "$roadmap_summary_json")"
-target_match_actions_json="$(jq -c --argjson target_ids "$target_ids_json" '[ (.next_actions // [])[] | select((.id // "") as $id | ($target_ids | index($id)) != null) | select(((.command // "") | tostring | length) > 0) ]' "$roadmap_summary_json")"
+source_actions_with_command_count="$(jq -r '
+  [
+    (.next_actions // [])[]
+    | select((.command | type) == "string")
+    | .command |= gsub("^\\s+|\\s+$"; "")
+    | select((.command | length) > 0)
+  ]
+  | length
+' "$roadmap_summary_json")"
+target_match_actions_json="$(jq -c --argjson target_ids "$target_ids_json" '
+  [
+    (.next_actions // [])[]
+    | select((.id // "") as $id | ($target_ids | index($id)) != null)
+    | select((.command | type) == "string")
+    | .command |= gsub("^\\s+|\\s+$"; "")
+    | select((.command | length) > 0)
+  ]
+' "$roadmap_summary_json")"
 target_match_count="$(printf '%s\n' "$target_match_actions_json" | jq -r 'length')"
 target_match_action_ids_json="$(printf '%s\n' "$target_match_actions_json" | jq -c '[.[] | .id // "" | select(length > 0)]')"
 target_match_unique_actions_json="$(printf '%s\n' "$target_match_actions_json" | jq -c 'reduce .[] as $action ({ ids: [], actions: [] }; (($action.id // "") | tostring) as $id | if ($id | length) == 0 or ((.ids | index($id)) != null) then . else .ids += [$id] | .actions += [$action] end) | .actions')"
 target_match_unique_count="$(printf '%s\n' "$target_match_unique_actions_json" | jq -r 'length')"
 target_match_unique_action_ids_json="$(printf '%s\n' "$target_match_unique_actions_json" | jq -c '[.[] | .id // "" | select(length > 0)]')"
+target_match_command_conflicts_json="$(printf '%s\n' "$target_match_actions_json" | jq -c '
+  sort_by(.id // "")
+  | group_by(.id // "")
+  | map(
+      ((.[0].id // "") | tostring) as $id
+      | {
+          id: $id,
+          commands: ([.[].command | tostring] | unique)
+        }
+    )
+  | map(select((.id | length) > 0 and ((.commands | length) > 1)))
+')"
+target_match_command_conflict_count="$(printf '%s\n' "$target_match_command_conflicts_json" | jq -r 'length')"
+target_match_command_selection_valid="1"
+target_match_command_selection_reason=""
+if (( target_match_command_conflict_count > 0 )); then
+  target_match_command_selection_valid="0"
+  target_match_command_selection_reason="$(printf '%s\n' "$target_match_command_conflicts_json" | jq -r 'map(.id + ": " + (.commands | join(" || "))) | join("; ")')"
+fi
 
 scope_target_action_ids_json='[]'
 resolved_scope="$scope"
@@ -468,6 +541,11 @@ echo "[roadmap-live-evidence-actionable-run] scope_match_action_ids=$scope_match
 echo "[roadmap-live-evidence-actionable-run] scope_match_unique_action_ids=$scope_match_unique_action_ids_csv"
 echo "[roadmap-live-evidence-actionable-run] derived_evidence_pack_count=$derived_evidence_pack_count derived_evidence_pack_ids=$derived_evidence_pack_ids_csv"
 echo "[roadmap-live-evidence-actionable-run] derived_evidence_pack_missing_count=$derived_evidence_pack_missing_count derived_evidence_pack_missing_ids=$derived_evidence_pack_missing_ids_csv"
+if [[ "$target_match_command_selection_valid" != "1" ]]; then
+  echo "[roadmap-live-evidence-actionable-run] deterministic_command_selection=fail conflict_count=$target_match_command_conflict_count reason=$target_match_command_selection_reason"
+else
+  echo "[roadmap-live-evidence-actionable-run] deterministic_command_selection=pass conflict_count=0"
+fi
 
 filtered_roadmap_summary_json="$reports_dir/roadmap_progress_summary_live_evidence_filtered.json"
 jq --argjson actions "$scope_match_unique_actions_json" '.next_actions = $actions' "$roadmap_summary_json" >"$filtered_roadmap_summary_json"
@@ -476,6 +554,7 @@ next_actions_reports_dir="$reports_dir/next_actions_run"
 next_actions_summary_json="$reports_dir/roadmap_next_actions_run_summary.json"
 next_actions_log="$reports_dir/roadmap_next_actions_run.log"
 mkdir -p "$next_actions_reports_dir"
+rm -f "$next_actions_summary_json" "$next_actions_log"
 
 next_actions_cmd=(
   bash
@@ -494,6 +573,7 @@ next_actions_cmd=(
 )
 
 print_only_mode="0"
+deterministic_conflict_mode="0"
 next_actions_rc=0
 if [[ "$print_derived_evidence_pack_ids" == "1" ]]; then
   print_only_mode="1"
@@ -503,6 +583,10 @@ if [[ "$print_derived_evidence_pack_ids" == "1" ]]; then
     printf '%s\n' "$derived_evidence_pack_ids_json" | jq -r '.[]'
   fi
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=print-derived-evidence-pack-ids"
+elif [[ "$target_match_command_selection_valid" != "1" ]]; then
+  deterministic_conflict_mode="1"
+  next_actions_rc=4
+  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=deterministic-command-conflict conflict_count=$target_match_command_conflict_count"
 else
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=running"
   set +e
@@ -514,6 +598,9 @@ fi
 next_actions_summary_valid="0"
 nested_runner_status=""
 nested_runner_rc="$next_actions_rc"
+delegated_runner_contract_valid="0"
+delegated_runner_contract_failure_reason=""
+delegated_runner_failure_substep=""
 selected_action_ids_json="$scope_match_unique_action_ids_json"
 selected_actions_count="$scope_match_unique_count"
 executed_count=0
@@ -526,18 +613,27 @@ final_rc="$next_actions_rc"
 if [[ "$print_only_mode" == "1" ]]; then
   nested_runner_status="skipped_print_derived_evidence_pack_ids"
   nested_runner_rc=0
+  delegated_runner_contract_valid="1"
   final_rc=0
-fi
-if (( final_rc == 0 )); then
-  final_status="pass"
-else
-  final_status="fail"
+elif [[ "$deterministic_conflict_mode" == "1" ]]; then
+  nested_runner_status="skipped_deterministic_command_conflict"
+  nested_runner_rc=4
+  delegated_runner_contract_failure_reason="deterministic command selection conflict across duplicate target action ids: $target_match_command_selection_reason"
+  delegated_runner_failure_substep="deterministic_command_conflict"
+  final_rc=4
 fi
 
-if [[ "$print_only_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then
+if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then
   next_actions_summary_valid="1"
   nested_runner_status="$(jq -r '.status // ""' "$next_actions_summary_json")"
-  nested_runner_rc="$(jq -r '.rc // 125' "$next_actions_summary_json")"
+  nested_runner_rc_raw="$(jq -r '.rc // 125' "$next_actions_summary_json")"
+  if [[ "$nested_runner_rc_raw" =~ ^-?[0-9]+$ ]]; then
+    nested_runner_rc="$nested_runner_rc_raw"
+  else
+    nested_runner_rc=125
+    delegated_runner_contract_failure_reason="delegated summary rc must be an integer"
+    delegated_runner_failure_substep="delegated_summary_contract_invalid_rc"
+  fi
   selected_action_ids_json="$(jq -c '.roadmap.selected_action_ids // []' "$next_actions_summary_json")"
   selected_actions_count="$(jq -r '(.roadmap.actions_selected_count // ((.roadmap.selected_action_ids // []) | length) // 0)' "$next_actions_summary_json")"
   executed_count="$(jq -r '.summary.actions_executed // 0' "$next_actions_summary_json")"
@@ -546,16 +642,46 @@ if [[ "$print_only_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && j
   timed_out_count="$(jq -r '.summary.timed_out // 0' "$next_actions_summary_json")"
   soft_fail_count="$(jq -r '.summary.soft_failed // 0' "$next_actions_summary_json")"
   actions_results_json="$(jq -c '.actions // []' "$next_actions_summary_json")"
+
+  if [[ -z "$delegated_runner_contract_failure_reason" ]]; then
+    if [[ "$nested_runner_status" != "pass" && "$nested_runner_status" != "fail" ]]; then
+      delegated_runner_contract_failure_reason="delegated summary status must be pass or fail"
+      delegated_runner_failure_substep="delegated_summary_contract_invalid_status"
+    elif (( nested_runner_rc == 0 )) && [[ "$nested_runner_status" != "pass" ]]; then
+      delegated_runner_contract_failure_reason="delegated summary contract mismatch: rc=0 requires status=pass"
+      delegated_runner_failure_substep="delegated_summary_contract_rc_status_mismatch"
+    elif (( nested_runner_rc != 0 )) && [[ "$nested_runner_status" != "fail" ]]; then
+      delegated_runner_contract_failure_reason="delegated summary contract mismatch: non-zero rc requires status=fail"
+      delegated_runner_failure_substep="delegated_summary_contract_rc_status_mismatch"
+    else
+      delegated_runner_contract_valid="1"
+    fi
+  fi
+
   final_rc="$nested_runner_rc"
   if (( next_actions_rc != 0 && final_rc == 0 )); then
     final_rc="$next_actions_rc"
   fi
+elif [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" ]]; then
+  delegated_runner_contract_failure_reason="delegated summary missing or invalid; refusing stale/invalid summary reuse"
+  delegated_runner_failure_substep="delegated_summary_missing_or_invalid"
+  if (( next_actions_rc != 0 )); then
+    final_rc="$next_actions_rc"
+  else
+    final_rc=4
+  fi
 fi
 
-if (( final_rc == 0 )); then
+if [[ "$delegated_runner_contract_valid" != "1" ]]; then
+  if (( final_rc == 0 )); then
+    final_rc=4
+  fi
+  final_status="fail"
+elif (( final_rc == 0 )); then
   final_status="pass"
 else
   final_status="fail"
+  delegated_runner_failure_substep="delegated_runner_action_failure"
 fi
 
 selected_action_ids_csv="$(printf '%s\n' "$selected_action_ids_json" | jq -r 'join(",")')"
@@ -581,11 +707,16 @@ jq -n \
   --arg scope "$scope" \
   --arg resolved_scope "$resolved_scope" \
   --arg scope_inference_reason "$scope_inference_reason" \
+  --arg roadmap_summary_contract_state "$roadmap_summary_contract_state" \
+  --arg roadmap_summary_contract_reason "$roadmap_summary_contract_reason" \
   --argjson target_action_ids "$target_ids_json" \
   --arg nested_runner_status "$nested_runner_status" \
   --argjson nested_runner_rc "$nested_runner_rc" \
   --argjson next_actions_rc "$next_actions_rc" \
   --argjson next_actions_summary_valid "$next_actions_summary_valid" \
+  --argjson delegated_runner_contract_valid "$delegated_runner_contract_valid" \
+  --arg delegated_runner_contract_failure_reason "$delegated_runner_contract_failure_reason" \
+  --arg delegated_runner_failure_substep "$delegated_runner_failure_substep" \
   --argjson roadmap_paths_provided "$roadmap_paths_provided" \
   --argjson ran_roadmap_report "$ran_roadmap_report" \
   --argjson refresh_manual_validation "$refresh_manual_validation" \
@@ -594,6 +725,7 @@ jq -n \
   --argjson max_actions "$max_actions" \
   --argjson print_derived_evidence_pack_ids "$print_derived_evidence_pack_ids" \
   --argjson print_only_mode "$print_only_mode" \
+  --argjson deterministic_conflict_mode "$deterministic_conflict_mode" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
   --argjson source_actions_with_command_count "$source_actions_with_command_count" \
@@ -601,6 +733,10 @@ jq -n \
   --argjson target_match_action_ids "$target_match_action_ids_json" \
   --argjson target_match_unique_count "$target_match_unique_count" \
   --argjson target_match_unique_action_ids "$target_match_unique_action_ids_json" \
+  --argjson target_match_command_conflict_count "$target_match_command_conflict_count" \
+  --argjson target_match_command_conflicts "$target_match_command_conflicts_json" \
+  --argjson target_match_command_selection_valid "$target_match_command_selection_valid" \
+  --arg target_match_command_selection_reason "$target_match_command_selection_reason" \
   --argjson scope_target_action_ids "$scope_target_action_ids_json" \
   --argjson scope_match_count "$scope_match_count" \
   --argjson scope_match_action_ids "$scope_match_action_ids_json" \
@@ -634,6 +770,7 @@ jq -n \
       max_actions: $max_actions,
       print_derived_evidence_pack_ids: ($print_derived_evidence_pack_ids == 1),
       print_only_mode: ($print_only_mode == 1),
+      deterministic_conflict_mode: ($deterministic_conflict_mode == 1),
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1),
       scope: $scope,
@@ -644,6 +781,8 @@ jq -n \
     roadmap: {
       source_paths_provided: ($roadmap_paths_provided == 1),
       generated_this_run: ($ran_roadmap_report == 1),
+      summary_contract_state: $roadmap_summary_contract_state,
+      summary_contract_reason: (if $roadmap_summary_contract_reason == "" then null else $roadmap_summary_contract_reason end),
       resolved_scope: $resolved_scope,
       scope_inference_reason: $scope_inference_reason,
       source_actions_with_command_count: $source_actions_with_command_count,
@@ -651,6 +790,14 @@ jq -n \
       target_match_action_ids: $target_match_action_ids,
       target_match_unique_count: $target_match_unique_count,
       target_match_unique_action_ids: $target_match_unique_action_ids,
+      target_match_command_conflict_count: $target_match_command_conflict_count,
+      target_match_command_conflicts: $target_match_command_conflicts,
+      deterministic_command_selection_valid: ($target_match_command_selection_valid == 1),
+      deterministic_command_selection_reason: (
+        if $target_match_command_selection_reason == "" then null
+        else $target_match_command_selection_reason
+        end
+      ),
       scope_target_action_ids: $scope_target_action_ids,
       scope_match_count: $scope_match_count,
       scope_match_action_ids: $scope_match_action_ids,
@@ -678,6 +825,9 @@ jq -n \
     actions: $actions,
     delegated_runner: {
       summary_valid: ($next_actions_summary_valid == 1),
+      contract_valid: ($delegated_runner_contract_valid == 1),
+      contract_failure_reason: (if $delegated_runner_contract_failure_reason == "" then null else $delegated_runner_contract_failure_reason end),
+      failure_substep: (if $delegated_runner_failure_substep == "" then null else $delegated_runner_failure_substep end),
       status: (if $nested_runner_status == "" then null else $nested_runner_status end),
       rc: $nested_runner_rc,
       process_rc: $next_actions_rc
@@ -695,7 +845,10 @@ jq -n \
     }
   }' >"$summary_json"
 
-echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=$final_status rc=$final_rc selected_action_ids=$selected_action_ids_csv"
+echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=$final_status rc=$final_rc selected_action_ids=$selected_action_ids_csv delegated_contract_valid=$delegated_runner_contract_valid"
+if [[ "$final_status" == "fail" && -n "$delegated_runner_failure_substep" ]]; then
+  echo "[roadmap-live-evidence-actionable-run] fail_substep=$delegated_runner_failure_substep reason=${delegated_runner_contract_failure_reason:-runner returned non-zero rc}"
+fi
 echo "[roadmap-live-evidence-actionable-run] summary_json=$summary_json"
 
 if [[ "$print_summary_json" == "1" ]]; then

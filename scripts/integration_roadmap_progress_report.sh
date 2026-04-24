@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in jq mktemp rg chmod mkdir touch find; do
+for cmd in jq mktemp grep chmod mkdir touch find; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -14,8 +14,8 @@ done
 # Keep jq --arg path assertions stable under Git Bash when jq resolves to a
 # native Windows binary.
 if command -v cygpath >/dev/null 2>&1; then
-  export MSYS2_ARG_CONV_EXCL='*'
-  export MSYS_NO_PATHCONV=1
+  export MSYS2_ARG_CONV_EXCL='--arg;--argjson'
+  unset MSYS_NO_PATHCONV || true
 fi
 
 TMP_DIR="$(mktemp -d)"
@@ -25,6 +25,10 @@ ROADMAP_PROGRESS_REPORT_LOG_PREFIX="$INTEGRATION_STDOUT_LOG_DIR/integration_road
 ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary.json"
 
 cleanup_integration_artifacts() {
+  if [[ "${INTEGRATION_KEEP_TMP:-0}" == "1" ]]; then
+    echo "integration_roadmap_progress_report: keeping tmp dir: $TMP_DIR"
+    return
+  fi
   rm -rf "$TMP_DIR"
 }
 trap 'cleanup_integration_artifacts' EXIT
@@ -53,7 +57,11 @@ ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON="$TMP_D
 ROADMAP_PROGRESS_MISSING_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON="$TMP_DIR/missing_blockchain_bootstrap_governance_graduation_gate_summary.json"
 
 run_roadmap_progress_report() {
-  ./scripts/roadmap_progress_report.sh \
+  env -u MSYS2_ARG_CONV_EXCL -u MSYS_NO_PATHCONV \
+    FAKE_ROADMAP_CAPTURE_FILE="${FAKE_ROADMAP_CAPTURE_FILE:-}" \
+    ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="${ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT:-}" \
+    ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="${ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT:-}" \
+    ./scripts/roadmap_progress_report.sh \
     --phase0-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE0_SUMMARY_JSON" \
     --phase1-resilience-handoff-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE1_SUMMARY_JSON" \
     --phase2-linux-prod-candidate-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE2_SUMMARY_JSON" \
@@ -334,6 +342,58 @@ fi
 exit 0
 EOF_FAKE_SINGLE
 chmod +x "$FAKE_SINGLE"
+
+FAKE_MANUAL_REFRESH_RESILIENCE="$TMP_DIR/fake_manual_validation_report_refresh_resilience.sh"
+cat >"$FAKE_MANUAL_REFRESH_RESILIENCE" <<'EOF_FAKE_MANUAL_REFRESH_RESILIENCE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'manual-validation-report-refresh-resilience %s\n' "$*" >>"${FAKE_ROADMAP_CAPTURE_FILE:?}"
+summary_json=""
+report_md=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --report-md)
+      report_md="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$summary_json" || -z "$report_md" ]]; then
+  echo "missing summary/report args" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+cat >"$summary_json" <<'EOF_REFRESH_SUMMARY'
+{"version":1,"summary":{"next_action_check_id":"machine_c_vpn_smoke"},"report":{"readiness_status":"NOT_READY"}}
+EOF_REFRESH_SUMMARY
+printf '# fake manual validation report (refresh resilience)\n' >"$report_md"
+
+logs_root="${ROADMAP_PROGRESS_LOGS_ROOT:-${ROADMAP_PROGRESS_LOG_DIR:-${EASY_NODE_LOG_DIR:-}}}"
+if [[ -n "$logs_root" ]]; then
+  generated_dir="$logs_root/refresh_generated_new_path"
+  mkdir -p "$generated_dir"
+  generated_json="$generated_dir/vpn_rc_resilience_path_summary.json"
+  cat >"$generated_json" <<'EOF_REFRESH_RESILIENCE'
+{
+  "version": 1,
+  "profile_matrix_stable": true,
+  "peer_loss_recovery_ok": true,
+  "session_churn_guard_ok": true
+}
+EOF_REFRESH_RESILIENCE
+  touch -t 202601050505 "$generated_json"
+fi
+EOF_FAKE_MANUAL_REFRESH_RESILIENCE
+chmod +x "$FAKE_MANUAL_REFRESH_RESILIENCE"
 
 echo "[roadmap-progress-report] success path"
 SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary.json"
@@ -789,12 +849,12 @@ run_roadmap_progress_report \
   exit 1
 fi
 
-if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected warn status in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_runtime_actuation_ready=false runtime_actuation_status=pending runtime_actuation_reason=runtime-actuation readiness pending:' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_runtime_actuation_ready=false runtime_actuation_status=pending runtime_actuation_reason=runtime-actuation readiness pending:' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected runtime-actuation stdout line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
@@ -804,7 +864,15 @@ if [[ ! -f "$SUMMARY_JSON" || ! -f "$REPORT_MD" ]]; then
   ls -la "$TMP_DIR"
   exit 1
 fi
-if ! jq -e '
+LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "roadmap-live-evidence-archive-run")" == "1" ]]; then
+  LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON="true"
+fi
+THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "three-machine-real-host-validation-pack")" == "1" ]]; then
+  THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON="true"
+fi
+if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
   .status == "warn"
   and .rc == 0
   and .vpn_track.readiness_status == "NOT_READY"
@@ -920,6 +988,37 @@ if ! jq -e '
   and .vpn_track.phase5_settlement_layer_handoff.settlement_shadow_status_surface_ok == true
   and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_status == "pass"
   and .vpn_track.phase5_settlement_layer_handoff.exit_settlement_status_live_smoke_ok == true
+  and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
+  and .next_actions_summary.three_machine_real_host_validation_pack_helper_available == $expect_three_machine_pack_helper
+  and .next_actions_summary.three_machine_real_host_validation_pack_signoff_pending == true
+  and (if $expect_live_archive_helper then
+         .next_actions_summary.live_evidence_archive_helper_emitted == true
+         and .next_actions_summary.live_evidence_archive_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "roadmap_live_evidence_archive_run"
+           and (.label // "") == "Roadmap live-evidence archive run"
+           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1"
+           and (.reason // "") == "archive current live evidence artifacts before rerunning cycles"
+         ))
+       else
+         .next_actions_summary.live_evidence_archive_helper_emitted == false
+         and .next_actions_summary.live_evidence_archive_helper_count == 0
+         and (((.next_actions // []) | any(.id == "roadmap_live_evidence_archive_run")) | not)
+       end)
+  and (if $expect_three_machine_pack_helper then
+         .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == true
+         and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "three_machine_real_host_validation_pack"
+           and (.label // "") == "Three-machine real-host validation pack"
+           and (.command // "") == "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1"
+           and (.reason // "") == "package current three-machine validation evidence while real-host signoff is still pending"
+         ))
+       else
+         .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
+         and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 0
+         and (((.next_actions // []) | any(.id == "three_machine_real_host_validation_pack")) | not)
+       end)
   and .artifacts.phase0_summary_json == "'"$PHASE0_SUMMARY_JSON"'"
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
@@ -1125,12 +1224,12 @@ if ! jq -e --arg fresh_iso "$fresh_iso" '
   and .blockchain_track.mainnet_activation_gate.no_go == false
   and .blockchain_track.mainnet_activation_gate.summary_generated_at == $fresh_iso
   and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) >= 3500
-  and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) <= 3705
+  and (.blockchain_track.mainnet_activation_gate.summary_age_sec | tonumber) < (.blockchain_track.mainnet_activation_gate.summary_max_age_sec | tonumber)
   and .blockchain_track.mainnet_activation_gate.summary_stale == false
   and .blockchain_track.mainnet_activation_gate.summary_max_age_sec == 86400
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at == $fresh_iso
   and (.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec | tonumber) >= 3500
-  and (.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec | tonumber) <= 3705
+  and (.blockchain_track.bootstrap_governance_graduation_gate.summary_age_sec | tonumber) < (.blockchain_track.bootstrap_governance_graduation_gate.summary_max_age_sec | tonumber)
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_stale == false
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_max_age_sec == 86400
   and .blockchain_track.mainnet_activation_stale_evidence.status == "fresh"
@@ -1202,27 +1301,27 @@ if ! jq -e --arg stale_reason "stale activation evidence" --arg stale_iso "$stal
   cat "$STALE_SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q 'Blockchain recommended actionable gate id: blockchain_mainnet_activation_refresh_evidence' "$STALE_REPORT_MD"; then
+if ! grep -Eq 'Blockchain recommended actionable gate id: blockchain_mainnet_activation_refresh_evidence' "$STALE_REPORT_MD"; then
   echo "stale blockchain report missing recommended actionable gate id line"
   cat "$STALE_REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Mainnet activation stale evidence action required: true' "$STALE_REPORT_MD"; then
+if ! grep -Eq 'Mainnet activation stale evidence action required: true' "$STALE_REPORT_MD"; then
   echo "stale blockchain report missing stale evidence action-required line"
   cat "$STALE_REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Mainnet activation stale evidence refresh command: ./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run ' "$STALE_REPORT_MD"; then
+if ! grep -Eq 'Mainnet activation stale evidence refresh command: ./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run ' "$STALE_REPORT_MD"; then
   echo "stale blockchain report missing stale evidence refresh command line"
   cat "$STALE_REPORT_MD"
   exit 1
 fi
-if ! rg -q 'mainnet_activation_stale_evidence_status=stale action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
+if ! grep -Eq 'mainnet_activation_stale_evidence_status=stale action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
   echo "stale blockchain freshness log missing stale evidence operator-action line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
   exit 1
 fi
-if ! rg -q 'blockchain_recommended_gate_id=blockchain_mainnet_activation_refresh_evidence' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
+if ! grep -Eq 'blockchain_recommended_gate_id=blockchain_mainnet_activation_refresh_evidence' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log; then
   echo "stale blockchain freshness log missing recommended gate line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale.log
   exit 1
@@ -1296,12 +1395,12 @@ if ! jq -e --arg future_iso "$future_iso" '
   cat "$FUTURE_SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q 'mainnet_activation_stale_evidence_status=stale action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log; then
+if ! grep -Eq 'mainnet_activation_stale_evidence_status=stale action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log; then
   echo "future blockchain freshness log missing fail-closed stale operator-action line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log
   exit 1
 fi
-if ! rg -q 'mainnet_activation_gate_available=true .*summary_stale=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log; then
+if ! grep -Eq 'mainnet_activation_gate_available=true .*summary_stale=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log; then
   echo "future blockchain freshness log missing deterministic summary_stale=true line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_future.log
   exit 1
@@ -1406,12 +1505,12 @@ if ! jq -e '
   cat "$INVALID_SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q 'mainnet_activation_stale_evidence_status=unknown action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log; then
+if ! grep -Eq 'mainnet_activation_stale_evidence_status=unknown action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log; then
   echo "invalid generated_at_utc blockchain freshness log missing deterministic unknown stale evidence line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log
   exit 1
 fi
-if ! rg -q 'mainnet_activation_gate_available=true .*summary_stale=null' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log; then
+if ! grep -Eq 'mainnet_activation_gate_available=true .*summary_stale=null' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log; then
   echo "invalid generated_at_utc blockchain freshness log missing deterministic summary_stale=null line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_generated_at_utc.log
   exit 1
@@ -1513,252 +1612,252 @@ if ! jq -e '
   cat "$NULL_EMPTY_SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q 'mainnet_activation_stale_evidence_status=unknown action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_null_empty_generated_at_utc.log; then
+if ! grep -Eq 'mainnet_activation_stale_evidence_status=unknown action_required=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_null_empty_generated_at_utc.log; then
   echo "null/empty generated_at_utc blockchain freshness log missing deterministic unknown stale evidence line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_null_empty_generated_at_utc.log
   exit 1
 fi
-if ! rg -q 'mainnet_activation_gate_available=true .*summary_stale=null' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_null_empty_generated_at_utc.log; then
+if ! grep -Eq 'mainnet_activation_gate_available=true .*summary_stale=null' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_null_empty_generated_at_utc.log; then
   echo "null/empty generated_at_utc blockchain freshness log missing deterministic summary_stale=null line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_null_empty_generated_at_utc.log
   exit 1
 fi
 
-if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] refresh_step=manual_validation_report status=running' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected manual refresh running heartbeat line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] refresh_step=manual_validation_report status=pass rc=0 timed_out=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] refresh_step=manual_validation_report status=pass rc=0 timed_out=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected manual refresh completion heartbeat line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q 'phase7_mainnet_cutover_summary_status=.*mainnet_activation_gate_go_ok=false.*mainnet_activation_gate_go_ok_source=dedicated-mainnet-activation-gate-summary.*bootstrap_governance_graduation_gate_go_ok=true.*bootstrap_governance_graduation_gate_go_ok_source=dedicated-bootstrap-governance-graduation-gate-summary' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq 'phase7_mainnet_cutover_summary_status=.*mainnet_activation_gate_go_ok=false.*mainnet_activation_gate_go_ok_source=dedicated-mainnet-activation-gate-summary.*bootstrap_governance_graduation_gate_go_ok=true.*bootstrap_governance_graduation_gate_go_ok_source=dedicated-bootstrap-governance-graduation-gate-summary' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase7 heartbeat log line to include dedicated gate-aligned signals"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq 'blockchain_mainnet_activation_missing_metrics_action_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected neutral blockchain missing-metrics actionable log line in default success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q 'manual-validation-report --profile-compare-signoff-summary-json' "$CAPTURE"; then
+if ! grep -Eq 'manual-validation-report --profile-compare-signoff-summary-json' "$CAPTURE"; then
   echo "expected manual-validation-report refresh call missing"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q '^## Pending Real-Host Checks$' "$REPORT_MD"; then
+if ! grep -Eq '^## Pending Real-Host Checks$' "$REPORT_MD"; then
   echo "report markdown missing pending real-host checks section"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q '^- Phase-0 product surface available: true$' "$REPORT_MD"; then
+if ! grep -Eq '^- Phase-0 product surface available: true$' "$REPORT_MD"; then
   echo "report markdown missing phase-0 product surface line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'VPN RC done for phase: `false`' "$REPORT_MD"; then
+if ! grep -Eq 'VPN RC done for phase: `false`' "$REPORT_MD"; then
   echo "report markdown missing VPN RC done signal"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Pending real-host checks: machine_c_vpn_smoke,three_machine_prod_signoff' "$REPORT_MD"; then
+if ! grep -Eq 'Pending real-host checks: machine_c_vpn_smoke,three_machine_prod_signoff' "$REPORT_MD"; then
   echo "report markdown missing pending real-host check list"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Profile gate selection-policy evidence present: null' "$REPORT_MD"; then
+if ! grep -Eq 'Profile gate selection-policy evidence present: null' "$REPORT_MD"; then
   echo "report markdown missing profile gate selection-policy evidence present line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Profile gate selection-policy evidence note: selection-policy evidence unavailable' "$REPORT_MD"; then
+if ! grep -Eq 'Profile gate selection-policy evidence note: selection-policy evidence unavailable' "$REPORT_MD"; then
   echo "report markdown missing profile gate selection-policy evidence guidance note"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Profile gate runtime-actuation ready: false' "$REPORT_MD"; then
+if ! grep -Eq 'Profile gate runtime-actuation ready: false' "$REPORT_MD"; then
   echo "report markdown missing profile gate runtime-actuation ready line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Profile gate runtime-actuation status: pending' "$REPORT_MD"; then
+if ! grep -Eq 'Profile gate runtime-actuation status: pending' "$REPORT_MD"; then
   echo "report markdown missing profile gate runtime-actuation status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Profile gate runtime-actuation reason: runtime-actuation readiness pending:' "$REPORT_MD"; then
+if ! grep -Eq 'Profile gate runtime-actuation reason: runtime-actuation readiness pending:' "$REPORT_MD"; then
   echo "report markdown missing profile gate runtime-actuation reason line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 issuer_sponsor_api_live_smoke_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 issuer_sponsor_api_live_smoke_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_sponsor_api_live_smoke_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 issuer_sponsor_api_live_smoke_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 issuer_sponsor_api_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_sponsor_api_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 issuer_settlement_status_live_smoke_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 issuer_settlement_status_live_smoke_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_settlement_status_live_smoke_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 issuer_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 issuer_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_settlement_status_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 issuer_admin_blockchain_handlers_coverage_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 issuer_admin_blockchain_handlers_coverage_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_admin_blockchain_handlers_coverage_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 issuer_admin_blockchain_handlers_coverage_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 issuer_admin_blockchain_handlers_coverage_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 issuer_admin_blockchain_handlers_coverage_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_dual_asset_parity_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_dual_asset_parity_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_dual_asset_parity_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_dual_asset_parity_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_dual_asset_parity_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_dual_asset_parity_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_adapter_signed_tx_roundtrip_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_adapter_signed_tx_roundtrip_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_adapter_signed_tx_roundtrip_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_adapter_signed_tx_roundtrip_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_adapter_signed_tx_roundtrip_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_adapter_signed_tx_roundtrip_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_shadow_env_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_shadow_env_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_shadow_env_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_shadow_env_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_shadow_env_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_shadow_env_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_shadow_status_surface_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_shadow_status_surface_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_shadow_status_surface_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 settlement_shadow_status_surface_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 settlement_shadow_status_surface_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 settlement_shadow_status_surface_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 exit_settlement_status_live_smoke_status: pass' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 exit_settlement_status_live_smoke_status: pass' "$REPORT_MD"; then
   echo "report markdown missing phase5 exit_settlement_status_live_smoke_status line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-5 exit_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-5 exit_settlement_status_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase5 exit_settlement_status_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
 if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
-  if ! rg -q 'Phase-6|phase6_cosmos_l1' "$REPORT_MD"; then
+  if ! grep -Eq 'Phase-6|phase6_cosmos_l1' "$REPORT_MD"; then
     echo "report markdown missing phase6 line"
     cat "$REPORT_MD"
     exit 1
   fi
 fi
 if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
-  if ! rg -q 'Phase-7|phase7_mainnet_cutover' "$REPORT_MD"; then
+  if ! grep -Eq 'Phase-7|phase7_mainnet_cutover' "$REPORT_MD"; then
     echo "report markdown missing phase7 line"
     cat "$REPORT_MD"
     exit 1
   fi
 fi
-if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok: false' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok: false' "$REPORT_MD"; then
   echo "report markdown missing phase7 mainnet_activation_gate_go_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok source: dedicated-mainnet-activation-gate-summary' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover mainnet_activation_gate_go_ok source: dedicated-mainnet-activation-gate-summary' "$REPORT_MD"; then
   echo "report markdown missing phase7 mainnet_activation_gate_go_ok source line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 bootstrap_governance_graduation_gate_go_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok source: dedicated-bootstrap-governance-graduation-gate-summary' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover bootstrap_governance_graduation_gate_go_ok source: dedicated-bootstrap-governance-graduation-gate-summary' "$REPORT_MD"; then
   echo "report markdown missing phase7 bootstrap_governance_graduation_gate_go_ok source line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover tdpnd_grpc_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 tdpnd_grpc_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover module_tx_surface_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover module_tx_surface_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 module_tx_surface_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover tdpnd_grpc_auth_live_smoke_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover tdpnd_grpc_auth_live_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 tdpnd_grpc_auth_live_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover tdpnd_comet_runtime_smoke_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover tdpnd_comet_runtime_smoke_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 tdpnd_comet_runtime_smoke_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover cosmos_module_coverage_floor_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover cosmos_module_coverage_floor_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 cosmos_module_coverage_floor_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover cosmos_keeper_coverage_floor_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover cosmos_keeper_coverage_floor_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 cosmos_keeper_coverage_floor_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover cosmos_app_coverage_floor_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover cosmos_app_coverage_floor_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 cosmos_app_coverage_floor_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Phase-7 mainnet cutover dual_write_parity_ok: true' "$REPORT_MD"; then
+if ! grep -Eq 'Phase-7 mainnet cutover dual_write_parity_ok: true' "$REPORT_MD"; then
   echo "report markdown missing phase7 dual_write_parity_ok line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
+if ! grep -Eq 'Mainnet activation gate|mainnet_activation_gate' "$REPORT_MD"; then
   echo "report markdown missing mainnet activation gate line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Mainnet activation missing-metrics action available: false' "$REPORT_MD"; then
+if ! grep -Eq 'Mainnet activation missing-metrics action available: false' "$REPORT_MD"; then
   echo "report markdown missing neutral mainnet activation missing-metrics actionable line"
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q 'Bootstrap governance graduation gate|bootstrap_governance_graduation_gate' "$REPORT_MD"; then
+if ! grep -Eq 'Bootstrap governance graduation gate|bootstrap_governance_graduation_gate' "$REPORT_MD"; then
   echo "report markdown missing bootstrap governance graduation gate line"
   cat "$REPORT_MD"
   exit 1
@@ -2186,122 +2285,122 @@ fi
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json"
   exit 1
 fi
-if ! rg -q 'Mainnet activation missing-metrics action available: true' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'Mainnet activation missing-metrics action available: true' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing blockchain missing-metrics actionable availability line"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'Mainnet activation missing-metrics prefill command:' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'Mainnet activation missing-metrics prefill command:' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing blockchain missing-metrics prefill command line"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-metrics-input --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-metrics-input --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing metrics-input normalization command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-gate-bundle --blockchain-mainnet-activation-metrics-input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing gate-bundle rerun command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-metrics-missing-checklist --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing missing-checklist command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-metrics-missing-input-template --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-metrics-missing-input-template --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing missing-input-template command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-metrics-input-template --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-metrics-input-template --output-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.template.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing metrics-input template command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-operator-pack --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-operator-pack --metrics-summary-json .easy-node-logs/blockchain_gate_bundle_summary.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing operator-pack one-step command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-operator-pack .* --missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-operator-pack .* --missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing operator-pack missing-input-template output-json"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-operator-pack .* --missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-operator-pack .* --missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing operator-pack missing-input-template canonical-output-json"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-gate-cycle --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-gate-cycle --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing one-command gate cycle command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-gate-cycle-seeded --reports-dir .easy-node-logs/blockchain_mainnet_activation_gate_cycle_seeded' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing seeded one-command gate cycle command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
+if ! grep -Eq 'blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"; then
   echo "auto-discovered report missing preferred real-evidence one-command run command"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_report.md"
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'blockchain_mainnet_activation_missing_metrics_action_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing blockchain missing-metrics actionable line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_template_command=.*blockchain-mainnet-activation-metrics-input-template ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'blockchain_mainnet_activation_missing_metrics_action_template_command=.*blockchain-mainnet-activation-metrics-input-template ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing template actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'prefill_command=.*blockchain-mainnet-activation-metrics-prefill ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'prefill_command=.*blockchain-mainnet-activation-metrics-prefill ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing prefill actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command=.*blockchain-mainnet-activation-metrics-missing-input-template ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command=.*blockchain-mainnet-activation-metrics-missing-input-template ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing missing-input-template actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'operator_pack_command=.*blockchain-mainnet-activation-operator-pack ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'operator_pack_command=.*blockchain-mainnet-activation-operator-pack ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing operator-pack actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'cycle_command=.*blockchain-mainnet-activation-gate-cycle ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'cycle_command=.*blockchain-mainnet-activation-gate-cycle ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing cycle actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'operator_pack_command=.*--missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'operator_pack_command=.*--missing-input-template-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.json' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing operator-pack missing-input-template output-json"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'operator_pack_command=.*--missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'operator_pack_command=.*--missing-input-template-canonical-output-json .easy-node-logs/blockchain_mainnet_activation_metrics_missing_input_template.canonical.json' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing operator-pack missing-input-template canonical-output-json"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_checklist_command=.*blockchain-mainnet-activation-metrics-missing-checklist ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'blockchain_mainnet_activation_missing_metrics_action_checklist_command=.*blockchain-mainnet-activation-metrics-missing-checklist ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing checklist actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=.*blockchain-mainnet-activation-gate-cycle-seeded ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=.*blockchain-mainnet-activation-gate-cycle-seeded ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing seeded cycle actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
 fi
-if ! rg -q 'real_evidence_run_command=.*blockchain-mainnet-activation-real-evidence-run ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
+if ! grep -Eq 'real_evidence_run_command=.*blockchain-mainnet-activation-real-evidence-run ' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log; then
   echo "auto-discovered log missing preferred real-evidence actionable command"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_mainnet_activation_gate_auto.log
   exit 1
@@ -2566,20 +2665,24 @@ if ! ROADMAP_PROGRESS_LOGS_ROOT="$BLOCKCHAIN_SELECTOR_EMBEDDED_TS_LOG_DIR" ROADM
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_blockchain_selector_embedded_timestamp_precedence.log
   exit 1
 fi
+mainnet_preferred_selector_basename="$(basename "$MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON")"
+mainnet_rejected_selector_basename="$(basename "$MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON")"
+bootstrap_preferred_selector_basename="$(basename "$BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON")"
+bootstrap_rejected_selector_basename="$(basename "$BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON")"
 if ! jq -e \
-  --arg mainnet_preferred_src "$MAINNET_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" \
-  --arg mainnet_rejected_src "$MAINNET_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" \
-  --arg bootstrap_preferred_src "$BOOTSTRAP_SELECTOR_NEW_EMBEDDED_OLD_MTIME_JSON" \
-  --arg bootstrap_rejected_src "$BOOTSTRAP_SELECTOR_OLD_EMBEDDED_NEW_MTIME_JSON" \
+  --arg mainnet_preferred_basename "$mainnet_preferred_selector_basename" \
+  --arg mainnet_rejected_basename "$mainnet_rejected_selector_basename" \
+  --arg bootstrap_preferred_basename "$bootstrap_preferred_selector_basename" \
+  --arg bootstrap_rejected_basename "$bootstrap_rejected_selector_basename" \
   --arg preferred_iso "$selector_embedded_new_iso" '
-  .blockchain_track.mainnet_activation_gate.source_summary_json == $mainnet_preferred_src
-  and .blockchain_track.mainnet_activation_gate.source_summary_json != $mainnet_rejected_src
+  (.blockchain_track.mainnet_activation_gate.source_summary_json // "" | endswith($mainnet_preferred_basename))
+  and (.blockchain_track.mainnet_activation_gate.source_summary_json // "" | endswith($mainnet_rejected_basename) | not)
   and .blockchain_track.mainnet_activation_gate.summary_generated_at == $preferred_iso
   and .blockchain_track.mainnet_activation_gate.status == "GO"
   and .blockchain_track.mainnet_activation_gate.decision == "GO"
   and .blockchain_track.mainnet_activation_gate.go == true
-  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $bootstrap_preferred_src
-  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json != $bootstrap_rejected_src
+  and (.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "" | endswith($bootstrap_preferred_basename))
+  and (.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "" | endswith($bootstrap_rejected_basename) | not)
   and .blockchain_track.bootstrap_governance_graduation_gate.summary_generated_at == $preferred_iso
   and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
@@ -2685,19 +2788,23 @@ if ! ROADMAP_PROGRESS_LOGS_ROOT="$BLOCKCHAIN_SELECTOR_INVALID_TS_LOG_DIR" ROADMA
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_blockchain_selector_invalid_embedded_timestamp.log
   exit 1
 fi
+mainnet_invalid_preferred_selector_basename="$(basename "$MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON")"
+mainnet_invalid_rejected_selector_basename="$(basename "$MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON")"
+bootstrap_invalid_preferred_selector_basename="$(basename "$BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON")"
+bootstrap_invalid_rejected_selector_basename="$(basename "$BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON")"
 if ! jq -e \
-  --arg mainnet_preferred_src "$MAINNET_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" \
-  --arg mainnet_rejected_src "$MAINNET_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" \
-  --arg bootstrap_preferred_src "$BOOTSTRAP_SELECTOR_INVALID_EMBEDDED_NEW_MTIME_JSON" \
-  --arg bootstrap_rejected_src "$BOOTSTRAP_SELECTOR_VALID_EMBEDDED_OLD_MTIME_JSON" '
-  .blockchain_track.mainnet_activation_gate.source_summary_json == $mainnet_preferred_src
-  and .blockchain_track.mainnet_activation_gate.source_summary_json != $mainnet_rejected_src
+  --arg mainnet_preferred_basename "$mainnet_invalid_preferred_selector_basename" \
+  --arg mainnet_rejected_basename "$mainnet_invalid_rejected_selector_basename" \
+  --arg bootstrap_preferred_basename "$bootstrap_invalid_preferred_selector_basename" \
+  --arg bootstrap_rejected_basename "$bootstrap_invalid_rejected_selector_basename" '
+  (.blockchain_track.mainnet_activation_gate.source_summary_json // "" | endswith($mainnet_preferred_basename))
+  and (.blockchain_track.mainnet_activation_gate.source_summary_json // "" | endswith($mainnet_rejected_basename) | not)
   and .blockchain_track.mainnet_activation_gate.status == "GO"
   and .blockchain_track.mainnet_activation_gate.decision == "GO"
   and .blockchain_track.mainnet_activation_gate.go == true
   and .blockchain_track.mainnet_activation_gate.summary_stale == null
-  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json == $bootstrap_preferred_src
-  and .blockchain_track.bootstrap_governance_graduation_gate.source_summary_json != $bootstrap_rejected_src
+  and (.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "" | endswith($bootstrap_preferred_basename))
+  and (.blockchain_track.bootstrap_governance_graduation_gate.source_summary_json // "" | endswith($bootstrap_rejected_basename) | not)
   and .blockchain_track.bootstrap_governance_graduation_gate.status == "GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.decision == "GO"
   and .blockchain_track.bootstrap_governance_graduation_gate.go == true
@@ -2818,55 +2925,55 @@ if ! jq -e '
   exit 1
 fi
 
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_sponsor_api_live_smoke_status=pass issuer_sponsor_api_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 issuer sponsor debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status=pass issuer_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_status=pass issuer_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 issuer settlement status debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status=pass issuer_admin_blockchain_handlers_coverage_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_status=pass issuer_admin_blockchain_handlers_coverage_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 issuer admin blockchain handlers coverage debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_dual_asset_parity_status=pass settlement_dual_asset_parity_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_dual_asset_parity_status=pass settlement_dual_asset_parity_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 settlement dual asset parity debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status=pass settlement_adapter_signed_tx_roundtrip_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_status=pass settlement_adapter_signed_tx_roundtrip_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 settlement adapter signed tx roundtrip debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_shadow_env_status=pass settlement_shadow_env_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_shadow_env_status=pass settlement_shadow_env_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 settlement shadow env debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_shadow_status_surface_status=pass settlement_shadow_status_surface_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_settlement_shadow_status_surface_status=pass settlement_shadow_status_surface_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 settlement shadow status surface debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status=pass exit_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_status=pass exit_settlement_status_live_smoke_ok=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected phase5 exit settlement status debug line in success path"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
 if [[ "$PHASE6_OUTPUT_PRESENT" == "1" ]]; then
-  if ! rg -q '\[roadmap-progress-report\].*phase6' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  if ! grep -Eq '\[roadmap-progress-report\].*phase6' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
     echo "expected phase6 debug line in success path"
     cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
     exit 1
   fi
 fi
 if [[ "$PHASE7_OUTPUT_PRESENT" == "1" ]]; then
-  if ! rg -q '\[roadmap-progress-report\].*phase7' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  if ! grep -Eq '\[roadmap-progress-report\].*phase7' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
     echo "expected phase7 debug line in success path"
     cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
     exit 1
@@ -2934,7 +3041,7 @@ if run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log
   exit 1
 fi
-if ! rg -q 'manual-validation summary JSON is missing required fields or uses an incompatible schema' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log; then
+if ! grep -Eq 'manual-validation summary JSON is missing required fields or uses an incompatible schema' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log; then
   echo "incompatible schema path missing expected fail-close message"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_incompatible_schema.log
   exit 1
@@ -4737,6 +4844,87 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] profile default gate resolves HOST_A/HOST_B placeholders from A_HOST/B_HOST when provided"
+PROFILE_DEFAULT_GATE_ENV_HOST_PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_env_host_placeholder_summary.json"
+cat >"$PROFILE_DEFAULT_GATE_ENV_HOST_PLACEHOLDER_SUMMARY_JSON" <<'EOF_PROFILE_DEFAULT_GATE_ENV_HOST_PLACEHOLDER_SUMMARY'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "runtime_hygiene",
+      "label": "Runtime hygiene doctor",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh runtime-doctor --show-json 1"
+    },
+    {
+      "check_id": "wg_only_stack_selftest",
+      "label": "WG-only stack selftest",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh wg-only-stack-selftest-record --strict-beta 1 --print-summary-json 1"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_MACHINE_C_SMOKE",
+    "single_machine_ready": true,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "profile_default_gate": {
+      "status": "pending",
+      "notes": "resolve host placeholders when concrete env hosts are provided",
+      "decision": "NO-GO",
+      "recommended_profile": "balanced",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a HOST_A --host-b HOST_B --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1",
+      "next_command_source": "default_non_sudo",
+      "docker_rehearsal_hint_available": false
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass",
+      "command": "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    },
+    "real_wg_privileged_gate": {
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_PROFILE_DEFAULT_GATE_ENV_HOST_PLACEHOLDER_SUMMARY
+
+if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_ENV_HOST_PLACEHOLDER_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_profile_default_env_host_placeholder_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_profile_default_env_host_placeholder_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_env_host_placeholder.log 2>&1; then
+  echo "expected success when profile default gate command hosts use env placeholders"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_env_host_placeholder.log
+  exit 1
+fi
+if ! jq -e '
+  def has_resolved_hosts($cmd):
+    (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+    and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+  def has_host_placeholders($cmd):
+    (($cmd // "") | test("HOST_A|HOST_B|A_HOST|B_HOST"));
+  ((.next_actions // []) | any(.id == "profile_default_gate" and has_resolved_hosts(.command)))
+  and has_resolved_hosts(.vpn_track.profile_default_gate.next_command)
+  and has_resolved_hosts(.vpn_track.profile_default_gate.next_command_sudo)
+  and ((has_host_placeholders(.vpn_track.profile_default_gate.next_command)) | not)
+  and ((has_host_placeholders(.vpn_track.profile_default_gate.next_command_sudo)) | not)
+' "$TMP_DIR/roadmap_progress_profile_default_env_host_placeholder_summary.json" >/dev/null; then
+  echo "profile default env-host placeholder summary JSON missing resolved host placeholders"
+  cat "$TMP_DIR/roadmap_progress_profile_default_env_host_placeholder_summary.json"
+  exit 1
+fi
+
 : >"$CAPTURE"
 
 echo "[roadmap-progress-report] profile default gate fails closed to pending from NO-GO signoff without campaign-check evidence"
@@ -4767,9 +4955,14 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_no_go.log
   exit 1
 fi
-if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON" '
+profile_default_signoff_no_go_src_basename="$(basename "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_JSON")"
+if ! jq -e --arg src_basename "$profile_default_signoff_no_go_src_basename" '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
-  and .artifacts.profile_compare_signoff_summary_json == $src
+  and ((.artifacts.profile_compare_signoff_summary_json // "") | endswith($src_basename))
+  and .vpn_track.profile_default_gate.summary_json == null
+  and .vpn_track.profile_default_gate.decision == null
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains($src_basename))
+  and ((.vpn_track.profile_default_gate.next_command_sudo // "") | contains($src_basename))
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
@@ -4837,9 +5030,10 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_m4_present.log
   exit 1
 fi
-if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON" '
+profile_default_signoff_m4_present_src_basename="$(basename "$PROFILE_DEFAULT_GATE_SIGNOFF_M4_PRESENT_JSON")"
+if ! jq -e --arg src_basename "$profile_default_signoff_m4_present_src_basename" '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
-  and .artifacts.profile_compare_signoff_summary_json == $src
+  and ((.artifacts.profile_compare_signoff_summary_json // "") | endswith($src_basename))
   and .vpn_track.profile_default_gate.micro_relay_evidence_available == true
   and .vpn_track.profile_default_gate.micro_relay_quality_status_pass == true
   and .vpn_track.profile_default_gate.micro_relay_demotion_policy_present == true
@@ -4923,9 +5117,10 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_no_go_insufficient.log
   exit 1
 fi
-if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON" '
+profile_default_signoff_no_go_insufficient_src_basename="$(basename "$PROFILE_DEFAULT_GATE_SIGNOFF_NO_GO_INSUFFICIENT_JSON")"
+if ! jq -e --arg src_basename "$profile_default_signoff_no_go_insufficient_src_basename" '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
-  and .artifacts.profile_compare_signoff_summary_json == $src
+  and ((.artifacts.profile_compare_signoff_summary_json // "") | endswith($src_basename))
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
@@ -4969,9 +5164,10 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_pending.log
   exit 1
 fi
-if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
+profile_default_signoff_pending_src_basename="$(basename "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON")"
+if ! jq -e --arg src_basename "$profile_default_signoff_pending_src_basename" '
   .vpn_track.optional_gate_status.profile_default_gate == "pending"
-  and .artifacts.profile_compare_signoff_summary_json == $src
+  and ((.artifacts.profile_compare_signoff_summary_json // "") | endswith($src_basename))
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
@@ -5031,7 +5227,7 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_missing_command.log
   exit 1
 fi
-if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
+if ! jq -e --arg src_basename "$profile_default_signoff_pending_src_basename" '
   def is_non_sudo_profile_gate_cmd($cmd):
     (($cmd // "") | test("^\\./scripts/easy_node\\.sh profile-compare-campaign-signoff( |$)"));
   def is_sudo_profile_gate_cmd($cmd):
@@ -5041,7 +5237,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_SIGNOFF_PENDING_JSON" '
   and is_sudo_profile_gate_cmd(.vpn_track.profile_default_gate.next_command_sudo)
   and (.vpn_track.profile_default_gate.next_command_source == "default_non_sudo")
   and ((.vpn_track.profile_default_gate.next_command // "") | contains("--campaign-timeout-sec 2400"))
-  and ((.vpn_track.profile_default_gate.next_command // "") | contains("--summary-json " + $src))
+  and ((.vpn_track.profile_default_gate.next_command // "") | contains($src_basename))
   and ((.vpn_track.profile_default_gate.next_command // "") | contains("--subject INVITE_KEY"))
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
@@ -5135,7 +5331,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_DEFAULT_SUMMARY_JSON" '
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_default_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_summary_json=.*stability_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_default.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_summary_json=.*stability_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_default.log; then
   echo "expected profile default gate stability availability log line in default-artifact scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_default.log
   exit 1
@@ -5216,7 +5412,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_EXPLICIT_INVALID_JSON" '
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_explicit_invalid_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_summary_json=.*stability_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_explicit_invalid.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_summary_json=.*stability_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_explicit_invalid.log; then
   echo "expected profile default gate stability availability log line in explicit-invalid scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_explicit_invalid.log
   exit 1
@@ -5292,7 +5488,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_DEFAULT_SUMMARY_JSON
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_default_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_check_summary_json=.*stability_check_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_check_summary_json=.*stability_check_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log; then
   echo "expected profile default gate stability-check availability log line in default-artifact scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_default.log
   exit 1
@@ -5371,7 +5567,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CHECK_EXPLICIT_INVALID_JSO
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_check_explicit_invalid_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_check_summary_json=.*stability_check_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_check_summary_json=.*stability_check_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log; then
   echo "expected profile default gate stability-check availability log line in explicit-invalid scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_check_explicit_invalid.log
   exit 1
@@ -5448,7 +5644,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CYCLE_DEFAULT_SUMMARY_JSON
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_cycle_default_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_cycle_summary_json=.*cycle_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_default.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_cycle_summary_json=.*cycle_summary_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_default.log; then
   echo "expected profile default gate stability-cycle availability log line in default-artifact scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_default.log
   exit 1
@@ -5527,7 +5723,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CYCLE_EXPLICIT_INVALID_JSO
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_cycle_explicit_invalid_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_cycle_summary_json=.*cycle_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_explicit_invalid.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_cycle_summary_json=.*cycle_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_explicit_invalid.log; then
   echo "expected profile default gate stability-cycle availability log line in explicit-invalid scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_explicit_invalid.log
   exit 1
@@ -5564,7 +5760,7 @@ if ! jq -e --arg src "$PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MISSING_DEFAULT_JSON
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_stability_cycle_missing_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_stability_cycle_summary_json=.*cycle_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_missing.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_stability_cycle_summary_json=.*cycle_summary_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_missing.log; then
   echo "expected profile default gate stability-cycle availability log line in missing-default scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_gate_stability_cycle_missing.log
   exit 1
@@ -5645,7 +5841,7 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_DEFAULT_SUMMARY_JSON" 
   cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_default_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log; then
   echo "expected multi-VM stability availability log line in default-artifact scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_default.log
   exit 1
@@ -5729,7 +5925,7 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
   cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log; then
   echo "expected multi-VM stability availability log line in missing-default scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log
   exit 1
@@ -6137,7 +6333,7 @@ if ! jq -e --arg valid "$MULTI_VM_PROMOTION_SELECTOR_VALID_JSON" --arg malformed
   cat "$TMP_DIR/roadmap_progress_multi_vm_promotion_selector_fallback_summary.json"
   exit 1
 fi
-if ! rg -q "\[roadmap-progress-report\] profile_compare_multi_vm_stability_promotion_available=true .*source_summary_json=$MULTI_VM_PROMOTION_SELECTOR_VALID_JSON" ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_promotion_selector_fallback.log; then
+if ! grep -Eq "\[roadmap-progress-report\] profile_compare_multi_vm_stability_promotion_available=true .*source_summary_json=$MULTI_VM_PROMOTION_SELECTOR_VALID_JSON" ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_promotion_selector_fallback.log; then
   echo "expected multi-VM promotion selector fallback availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_promotion_selector_fallback.log
   exit 1
@@ -6219,7 +6415,7 @@ if FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log; then
+if ! grep -Eq '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log; then
   echo "manual restore path missing fail status line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_restore.log
   exit 1
@@ -6265,7 +6461,7 @@ if FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log; then
+if ! grep -Eq '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log; then
   echo "manual partial restore path missing fail status line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_manual_partial_restore.log
   exit 1
@@ -6364,7 +6560,7 @@ if [[ "$trap_cleanup_rc" -eq 0 ]]; then
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_trap_cleanup.log
   exit 1
 fi
-if ! rg -q 'forced mktemp failure on summary tmp path:' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_trap_cleanup.log; then
+if ! grep -Eq 'forced mktemp failure on summary tmp path:' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_trap_cleanup.log; then
   echo "trap cleanup test missing forced mktemp failure marker"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_trap_cleanup.log
   exit 1
@@ -6402,7 +6598,7 @@ if FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log; then
+if ! grep -Eq '\[roadmap-progress-report\] status=fail rc=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log; then
   echo "expected fail status when single-machine refresh fails"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_fail.log
   exit 1
@@ -6447,12 +6643,12 @@ if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log; then
+if ! grep -Eq '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log; then
   echo "transient warning path missing warn status line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=warn rc=1 timed_out=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log; then
+if ! grep -Eq '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=warn rc=1 timed_out=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log; then
   echo "transient warning path missing single-machine warn heartbeat line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_transient_warn.log
   exit 1
@@ -6493,12 +6689,12 @@ if command -v timeout >/dev/null 2>&1; then
     cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log
     exit 1
   fi
-  if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=running timeout_sec=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log; then
+  if ! grep -Eq '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=running timeout_sec=1' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log; then
     echo "timeout path missing running heartbeat line"
     cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log
     exit 1
   fi
-  if ! rg -q '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=fail rc=124 timed_out=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log; then
+  if ! grep -Eq '\[roadmap-progress-report\] refresh_step=single_machine_prod_readiness status=fail rc=124 timed_out=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log; then
     echo "timeout path missing timeout completion heartbeat line"
     cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_timeout.log
     exit 1
@@ -6643,12 +6839,12 @@ assert_phase1_actionable_contract_case() {
     exit 1
   fi
 
-  if ! rg -q '^## Non-Blockchain Actionable Gates \(No sudo/GitHub\)$' "$phase1_report_md"; then
+  if ! grep -Eq '^## Non-Blockchain Actionable Gates \(No sudo/GitHub\)$' "$phase1_report_md"; then
     echo "phase1 actionable report missing non-blockchain gate section ($case_id)"
     cat "$phase1_report_md"
     exit 1
   fi
-  if ! rg -q 'phase1_resilience_handoff_run.sh --dry-run 1 --print-summary-json 1' "$phase1_report_md"; then
+  if ! grep -Eq 'phase1_resilience_handoff_run.sh --dry-run 1 --print-summary-json 1' "$phase1_report_md"; then
     echo "phase1 actionable report missing recommended dry-run command ($case_id)"
     cat "$phase1_report_md"
     exit 1
@@ -6694,7 +6890,7 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_phase0_actionable_summary.json"
   exit 1
 fi
-if ! rg -q 'ci_phase0.sh --print-summary-json 1' "$TMP_DIR/roadmap_progress_phase0_actionable_report.md"; then
+if ! grep -Eq 'ci_phase0.sh --print-summary-json 1' "$TMP_DIR/roadmap_progress_phase0_actionable_report.md"; then
   echo "phase0 actionable report missing ci_phase0 gate command"
   cat "$TMP_DIR/roadmap_progress_phase0_actionable_report.md"
   exit 1
@@ -6788,7 +6984,7 @@ if ! jq -e --arg p2src "$PHASE2_HANDOFF_FAIL_SUMMARY_JSON" '
   cat "$TMP_DIR/roadmap_progress_phase2_actionable_summary.json"
   exit 1
 fi
-if ! rg -q 'phase2_linux_prod_candidate_handoff_run.sh --dry-run 1 --print-summary-json 1' "$TMP_DIR/roadmap_progress_phase2_actionable_report.md"; then
+if ! grep -Eq 'phase2_linux_prod_candidate_handoff_run.sh --dry-run 1 --print-summary-json 1' "$TMP_DIR/roadmap_progress_phase2_actionable_report.md"; then
   echo "phase2 actionable report missing recommended dry-run command"
   cat "$TMP_DIR/roadmap_progress_phase2_actionable_report.md"
   exit 1
@@ -6855,6 +7051,66 @@ if ! jq -e --arg src "$AUTO_RESILIENCE_NEW_JSON" '
 ' "$TMP_DIR/roadmap_progress_auto_resilience_summary.json" >/dev/null; then
   echo "auto resilience source selection summary mismatch"
   cat "$TMP_DIR/roadmap_progress_auto_resilience_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] resilience refresh-generated summary is visible within same run"
+AUTO_RESILIENCE_REFRESH_LOGS_ROOT="$TMP_DIR/auto_resilience_refresh_logs_root"
+AUTO_RESILIENCE_REFRESH_OLD_DIR="$AUTO_RESILIENCE_REFRESH_LOGS_ROOT/existing_old_path"
+mkdir -p "$AUTO_RESILIENCE_REFRESH_OLD_DIR"
+AUTO_RESILIENCE_REFRESH_OLD_JSON="$AUTO_RESILIENCE_REFRESH_OLD_DIR/vpn_rc_resilience_path_summary.json"
+cat >"$AUTO_RESILIENCE_REFRESH_OLD_JSON" <<'EOF_AUTO_RESILIENCE_REFRESH_OLD'
+{
+  "version": 1,
+  "profile_matrix_stable": false,
+  "peer_loss_recovery_ok": false,
+  "session_churn_guard_ok": false
+}
+EOF_AUTO_RESILIENCE_REFRESH_OLD
+touch -t 202601010101 "$AUTO_RESILIENCE_REFRESH_OLD_JSON"
+
+AUTO_RESILIENCE_REFRESH_NEW_JSON="$AUTO_RESILIENCE_REFRESH_LOGS_ROOT/refresh_generated_new_path/vpn_rc_resilience_path_summary.json"
+AUTO_RESILIENCE_REFRESH_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_refresh_generated_resilience_summary.json"
+AUTO_RESILIENCE_REFRESH_SUMMARY_JSON="$TMP_DIR/roadmap_progress_auto_resilience_refresh_generated_summary.json"
+AUTO_RESILIENCE_REFRESH_REPORT_MD="$TMP_DIR/roadmap_progress_auto_resilience_refresh_generated_report.md"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+  ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REFRESH_RESILIENCE" \
+  ROADMAP_PROGRESS_LOGS_ROOT="$AUTO_RESILIENCE_REFRESH_LOGS_ROOT" \
+  run_roadmap_progress_report \
+    --refresh-manual-validation 1 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$AUTO_RESILIENCE_REFRESH_MANUAL_SUMMARY_JSON" \
+    --phase1-resilience-handoff-summary-json "$TMP_DIR/missing_phase1_for_auto_resilience_refresh_generated.json" \
+    --summary-json "$AUTO_RESILIENCE_REFRESH_SUMMARY_JSON" \
+    --report-md "$AUTO_RESILIENCE_REFRESH_REPORT_MD" \
+    --print-report 0 \
+    --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_auto_resilience_refresh_generated.log 2>&1; then
+  echo "expected success for refresh-generated resilience source visibility path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_auto_resilience_refresh_generated.log
+  exit 1
+fi
+if ! grep -q '^manual-validation-report-refresh-resilience ' "$CAPTURE"; then
+  echo "expected manual refresh helper invocation in refresh-generated resilience path"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! jq -e --arg new_src "$AUTO_RESILIENCE_REFRESH_NEW_JSON" --arg old_src "$AUTO_RESILIENCE_REFRESH_OLD_JSON" '
+  .status == "warn"
+  and .rc == 0
+  and .refresh.manual_validation_report.status == "pass"
+  and .refresh.manual_validation_report.summary_valid_after_run == true
+  and .vpn_track.resilience_handoff.available == true
+  and .vpn_track.resilience_handoff.source_summary_json == $new_src
+  and .vpn_track.resilience_handoff.source_summary_json != $old_src
+  and .vpn_track.resilience_handoff.profile_matrix_stable == true
+  and .vpn_track.resilience_handoff.peer_loss_recovery_ok == true
+  and .vpn_track.resilience_handoff.session_churn_guard_ok == true
+  and .artifacts.vpn_rc_resilience_summary_json == $new_src
+' "$AUTO_RESILIENCE_REFRESH_SUMMARY_JSON" >/dev/null; then
+  echo "refresh-generated resilience source visibility summary mismatch"
+  cat "$AUTO_RESILIENCE_REFRESH_SUMMARY_JSON"
   exit 1
 fi
 
@@ -7656,7 +7912,7 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CONTRADICTORY_JSON" '
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_contradictory_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_status=fail .*go=true .*needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log; then
+if ! grep -Eq '\[roadmap-progress-report\] runtime_actuation_promotion_status=fail .*go=true .*needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log; then
   echo "expected runtime-actuation contradictory fail-closed status log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_contradictory.log
   exit 1
@@ -7723,9 +7979,188 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_ATTENTION_JSON" '
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_attention_warn_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_attention_warn.log; then
+if ! grep -Eq '\[roadmap-progress-report\] status=warn rc=0' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_attention_warn.log; then
   echo "expected runtime-actuation attention warn status log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_attention_warn.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] multi-VM stability next command uses discovered VM command file when available"
+MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR="$TMP_DIR/multi_vm_stability_command_discovery"
+mkdir -p "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR"
+MULTI_VM_STABILITY_COMMAND_DISCOVERY_VM_FILE="$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+cat >"$MULTI_VM_STABILITY_COMMAND_DISCOVERY_VM_FILE" <<'EOF_MULTI_VM_STABILITY_COMMAND_DISCOVERY_VM_FILE'
+# vm command specs
+vm-a::echo vm-a-ok
+EOF_MULTI_VM_STABILITY_COMMAND_DISCOVERY_VM_FILE
+MULTI_VM_STABILITY_COMMAND_DISCOVERY_RUN_SUMMARY_JSON="$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR/profile_compare_multi_vm_stability_summary.json"
+cat >"$MULTI_VM_STABILITY_COMMAND_DISCOVERY_RUN_SUMMARY_JSON" <<EOF_MULTI_VM_STABILITY_COMMAND_DISCOVERY_RUN_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_run_summary"
+  },
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "inputs": {
+    "reports_dir": "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR",
+    "vm_command_fallback_file": "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_VM_FILE",
+    "vm_command_file_count": 1
+  }
+}
+EOF_MULTI_VM_STABILITY_COMMAND_DISCOVERY_RUN_SUMMARY
+MULTI_VM_STABILITY_COMMAND_DISCOVERY_CHECK_SUMMARY_JSON="$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR/profile_compare_multi_vm_stability_check_summary.json"
+cat >"$MULTI_VM_STABILITY_COMMAND_DISCOVERY_CHECK_SUMMARY_JSON" <<EOF_MULTI_VM_STABILITY_COMMAND_DISCOVERY_CHECK_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_check_summary"
+  },
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "inputs": {
+    "stability_summary_json": "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_RUN_SUMMARY_JSON"
+  },
+  "errors": [
+    "multi-vm stability evidence needs refresh"
+  ]
+}
+EOF_MULTI_VM_STABILITY_COMMAND_DISCOVERY_CHECK_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-check-summary-json "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_CHECK_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_multi_vm_stability_command_discovery_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_multi_vm_stability_command_discovery_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_stability_command_discovery.log 2>&1; then
+  echo "expected success for multi-VM stability discovered command-file path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_stability_command_discovery.log
+  exit 1
+fi
+if ! jq -e --arg reports_dir "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR" --arg vm_file "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_VM_FILE" --arg cycle_summary_json "$MULTI_VM_STABILITY_COMMAND_DISCOVERY_DIR/profile_compare_multi_vm_stability_cycle_summary.json" '
+  .vpn_track.multi_vm_stability.available == true
+  and .vpn_track.multi_vm_stability.status == "fail"
+  and .vpn_track.multi_vm_stability.needs_attention == true
+  and ((.vpn_track.multi_vm_stability.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
+  and ((.vpn_track.multi_vm_stability.next_command // "") | contains("--reports-dir " + $reports_dir))
+  and ((.vpn_track.multi_vm_stability.next_command // "") | contains("--vm-command-file " + $vm_file))
+  and ((.vpn_track.multi_vm_stability.next_command // "") | contains("--summary-json " + $cycle_summary_json))
+  and ((.vpn_track.multi_vm_stability.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+  and ((.next_actions // []) | any(
+    .id == "profile_compare_multi_vm_stability"
+    and ((.command // "") | contains("--reports-dir " + $reports_dir))
+    and ((.command // "") | contains("--vm-command-file " + $vm_file))
+    and ((.command // "") | contains("--summary-json " + $cycle_summary_json))
+  ))
+' "$TMP_DIR/roadmap_progress_multi_vm_stability_command_discovery_summary.json" >/dev/null; then
+  echo "multi-VM stability discovered command-file summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_multi_vm_stability_command_discovery_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] multi-VM and runtime promotion next commands reuse source reports-dir and cycle hints"
+PROMOTION_COMMAND_HINTS_DIR="$TMP_DIR/promotion_command_hints"
+mkdir -p "$PROMOTION_COMMAND_HINTS_DIR"
+PROMOTION_COMMAND_HINTS_NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+PROMOTION_COMMAND_HINTS_MULTI_VM_SUMMARY_JSON="$PROMOTION_COMMAND_HINTS_DIR/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+cat >"$PROMOTION_COMMAND_HINTS_MULTI_VM_SUMMARY_JSON" <<EOF_PROMOTION_COMMAND_HINTS_MULTI_VM_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "generated_at_utc": "$PROMOTION_COMMAND_HINTS_NOW_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "inputs": {
+    "reports_dir": "$PROMOTION_COMMAND_HINTS_DIR",
+    "cycle_orchestration": {
+      "cycles": 7
+    }
+  },
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "NO-GO",
+    "status": "fail",
+    "rc": 1
+  }
+}
+EOF_PROMOTION_COMMAND_HINTS_MULTI_VM_SUMMARY
+PROMOTION_COMMAND_HINTS_RUNTIME_SUMMARY_JSON="$PROMOTION_COMMAND_HINTS_DIR/runtime_actuation_promotion_cycle_latest_summary.json"
+cat >"$PROMOTION_COMMAND_HINTS_RUNTIME_SUMMARY_JSON" <<EOF_PROMOTION_COMMAND_HINTS_RUNTIME_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "generated_at_utc": "$PROMOTION_COMMAND_HINTS_NOW_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "inputs": {
+    "reports_dir": "$PROMOTION_COMMAND_HINTS_DIR",
+    "cycles": 5
+  },
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "status": "fail",
+    "decision": "NO-GO",
+    "rc": 1
+  }
+}
+EOF_PROMOTION_COMMAND_HINTS_RUNTIME_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROMOTION_COMMAND_HINTS_MULTI_VM_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$PROMOTION_COMMAND_HINTS_RUNTIME_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_promotion_command_hints_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_promotion_command_hints_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_promotion_command_hints.log 2>&1; then
+  echo "expected success for promotion next-command source reports-dir hint path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_promotion_command_hints.log
+  exit 1
+fi
+if ! jq -e --arg reports_dir "$PROMOTION_COMMAND_HINTS_DIR" --arg multi_vm_summary_json "$PROMOTION_COMMAND_HINTS_DIR/profile_compare_multi_vm_stability_promotion_cycle_summary.json" --arg runtime_summary_json "$PROMOTION_COMMAND_HINTS_DIR/runtime_actuation_promotion_cycle_latest_summary.json" '
+  .vpn_track.multi_vm_stability_promotion.available == true
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | contains("--reports-dir " + $reports_dir))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | contains("--summary-json " + $multi_vm_summary_json))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("(^| )--cycles 7( |$)"))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+  and .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | contains("--reports-dir " + $reports_dir))
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | contains("--summary-json " + $runtime_summary_json))
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("(^| )--cycles 5( |$)"))
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
+  and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion" and ((.command // "") | contains("--reports-dir " + $reports_dir)) and ((.command // "") | test("(^| )--cycles 7( |$)"))))
+  and ((.next_actions // []) | any(.id == "runtime_actuation_promotion" and ((.command // "") | contains("--reports-dir " + $reports_dir)) and ((.command // "") | test("(^| )--cycles 5( |$)"))))
+' "$TMP_DIR/roadmap_progress_promotion_command_hints_summary.json" >/dev/null; then
+  echo "promotion command hints summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_promotion_command_hints_summary.json"
   exit 1
 fi
 
@@ -7834,7 +8269,7 @@ if ! jq -e --arg valid "$RUNTIME_ACTUATION_PROMOTION_SELECTOR_VALID_CYCLE_JSON" 
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_selector_fallback_summary.json"
   exit 1
 fi
-if ! rg -q "\[roadmap-progress-report\] runtime_actuation_promotion_available=true .*source_summary_json=$RUNTIME_ACTUATION_PROMOTION_SELECTOR_VALID_CYCLE_JSON" ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_selector_fallback.log; then
+if ! grep -Eq "\[roadmap-progress-report\] runtime_actuation_promotion_available=true .*source_summary_json=$RUNTIME_ACTUATION_PROMOTION_SELECTOR_VALID_CYCLE_JSON" ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_selector_fallback.log; then
   echo "expected runtime-actuation selector fallback availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_selector_fallback.log
   exit 1
@@ -7871,11 +8306,6 @@ cat >"$INVALID_PROMOTION_REASON_RUNTIME_JSON" <<'EOF_INVALID_PROMOTION_REASON_RU
 EOF_INVALID_PROMOTION_REASON_RUNTIME
 touch -t 202601030303 "$INVALID_PROMOTION_REASON_MULTI_VM_JSON" "$INVALID_PROMOTION_REASON_RUNTIME_JSON"
 INVALID_PROMOTION_REASON_EXPECT_COMBINED_ACTIONABLE_JSON="false"
-if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-stability-evidence-pack")" == "1" ]] \
-  || [[ "$(roadmap_test_easy_node_supports_subcommand_01 "runtime-actuation-promotion-evidence-pack")" == "1" ]] \
-  || [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-compare-multi-vm-stability-promotion-evidence-pack")" == "1" ]]; then
-  INVALID_PROMOTION_REASON_EXPECT_COMBINED_ACTIONABLE_JSON="true"
-fi
 INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON="false"
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "roadmap-live-evidence-cycle-batch-run")" == "1" ]]; then
   INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON="true"
@@ -7894,7 +8324,7 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_promotion_reason_precedence.log
   exit 1
 fi
-if ! jq -e --argjson expect_combined "$INVALID_PROMOTION_REASON_EXPECT_COMBINED_ACTIONABLE_JSON" --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" '
+if ! jq -e --argjson expect_combined "$INVALID_PROMOTION_REASON_EXPECT_COMBINED_ACTIONABLE_JSON" --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
   .vpn_track.multi_vm_stability_promotion.available == false
   and .vpn_track.multi_vm_stability_promotion.status == "missing"
   and .vpn_track.multi_vm_stability_promotion.needs_attention == true
@@ -7919,6 +8349,37 @@ if ! jq -e --argjson expect_combined "$INVALID_PROMOTION_REASON_EXPECT_COMBINED_
   and .next_actions_summary.live_evidence_individual_suppression_mode == false
   and .next_actions_summary.live_evidence_individual_suppression_applied == false
   and .next_actions_summary.live_evidence_pending_action_count > 0
+  and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
+  and (if $expect_live_archive_helper then
+         .next_actions_summary.live_evidence_archive_helper_emitted == true
+         and .next_actions_summary.live_evidence_archive_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "roadmap_live_evidence_archive_run"
+           and (.label // "") == "Roadmap live-evidence archive run"
+           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1"
+           and (.reason // "") == "archive current live evidence artifacts before rerunning cycles"
+         ))
+       else
+         .next_actions_summary.live_evidence_archive_helper_emitted == false
+         and .next_actions_summary.live_evidence_archive_helper_count == 0
+         and (((.next_actions // []) | any(.id == "roadmap_live_evidence_archive_run")) | not)
+       end)
+  and .next_actions_summary.three_machine_real_host_validation_pack_helper_available == $expect_three_machine_pack_helper
+  and ((.next_actions_summary.three_machine_real_host_validation_pack_signoff_pending | type) == "boolean")
+  and (if ($expect_three_machine_pack_helper and .next_actions_summary.three_machine_real_host_validation_pack_signoff_pending) then
+         .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == true
+         and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "three_machine_real_host_validation_pack"
+           and (.label // "") == "Three-machine real-host validation pack"
+           and (.command // "") == "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1"
+           and (.reason // "") == "package current three-machine validation evidence while real-host signoff is still pending"
+         ))
+       else
+         .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
+         and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 0
+         and (((.next_actions // []) | any(.id == "three_machine_real_host_validation_pack")) | not)
+       end)
   and (if $expect_cycle_batch_helper then
          .next_actions_summary.live_evidence_cycle_batch_helper_emitted == true
          and .next_actions_summary.live_evidence_cycle_batch_helper_count == 1
@@ -7975,7 +8436,7 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_promotion_reason_precedence_suppressed.log
   exit 1
 fi
-if ! jq -e --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" '
+if ! jq -e --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
   (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
@@ -7987,6 +8448,33 @@ if ! jq -e --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT
     and (.reason // "") == "batch-run pending live evidence cycle actions"
   ))
   and .next_actions_summary.live_evidence_batch_helper_emitted == true
+  and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
+  and (if $expect_live_archive_helper then
+         .next_actions_summary.live_evidence_archive_helper_emitted == true
+         and .next_actions_summary.live_evidence_archive_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "roadmap_live_evidence_archive_run"
+           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1"
+         ))
+       else
+         .next_actions_summary.live_evidence_archive_helper_emitted == false
+         and .next_actions_summary.live_evidence_archive_helper_count == 0
+         and (((.next_actions // []) | any(.id == "roadmap_live_evidence_archive_run")) | not)
+       end)
+  and .next_actions_summary.three_machine_real_host_validation_pack_helper_available == $expect_three_machine_pack_helper
+  and ((.next_actions_summary.three_machine_real_host_validation_pack_signoff_pending | type) == "boolean")
+  and (if ($expect_three_machine_pack_helper and .next_actions_summary.three_machine_real_host_validation_pack_signoff_pending) then
+         .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == true
+         and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "three_machine_real_host_validation_pack"
+           and (.command // "") == "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1"
+         ))
+       else
+         .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
+         and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 0
+         and (((.next_actions // []) | any(.id == "three_machine_real_host_validation_pack")) | not)
+       end)
   and (if $expect_cycle_batch_helper then
          .next_actions_summary.live_evidence_cycle_batch_helper_emitted == true
          and .next_actions_summary.live_evidence_cycle_batch_helper_count == 1
@@ -8087,7 +8575,7 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_live_evidence_actionable_suppress.log
   exit 1
 fi
-if ! jq -e '
+if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
   (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
@@ -8103,6 +8591,15 @@ if ! jq -e '
   and .next_actions_summary.live_and_pack_batch_helper_count == 0
   and .next_actions_summary.live_evidence_individual_suppression_mode == false
   and .next_actions_summary.live_evidence_individual_suppression_applied == false
+  and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
+  and .next_actions_summary.live_evidence_archive_helper_emitted == false
+  and .next_actions_summary.live_evidence_archive_helper_count == 0
+  and (((.next_actions // []) | any(.id == "roadmap_live_evidence_archive_run")) | not)
+  and .next_actions_summary.three_machine_real_host_validation_pack_helper_available == $expect_three_machine_pack_helper
+  and .next_actions_summary.three_machine_real_host_validation_pack_signoff_pending == false
+  and .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
+  and .next_actions_summary.three_machine_real_host_validation_pack_helper_count == 0
+  and (((.next_actions // []) | any(.id == "three_machine_real_host_validation_pack")) | not)
 ' "$TMP_DIR/roadmap_progress_live_evidence_actionable_suppress_summary.json" >/dev/null; then
   echo "live-evidence actionable suppression summary mismatch"
   cat "$TMP_DIR/roadmap_progress_live_evidence_actionable_suppress_summary.json"
@@ -8172,7 +8669,7 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_stale_alias_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log; then
+if ! grep -Eq '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log; then
   echo "expected runtime-actuation stale latest-alias fail-closed availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_stale_alias.log
   exit 1
@@ -8239,7 +8736,7 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_invalid_generated_at_utc_alias_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log; then
+if ! grep -Eq '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log; then
   echo "expected runtime-actuation invalid generated_at_utc latest-alias fail-closed availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_invalid_generated_at_utc_alias.log
   exit 1
@@ -8299,7 +8796,7 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_stale_summary.json"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log; then
+if ! grep -Eq '\[roadmap-progress-report\] runtime_actuation_promotion_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log; then
   echo "expected runtime-actuation stale fail-closed availability log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_stale.log
   exit 1
@@ -8309,22 +8806,40 @@ PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-stability-evidence-pack")" == "1" ]]; then
   PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
 fi
+PROFILE_DEFAULT_STABILITY_RUN_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-stability-run")" == "1" ]]; then
+  PROFILE_DEFAULT_STABILITY_RUN_HELPER_AVAILABLE_JSON="true"
+fi
+PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-stability-cycle")" == "1" ]]; then
+  PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON="true"
+fi
 RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "runtime-actuation-promotion-evidence-pack")" == "1" ]]; then
   RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
+fi
+RUNTIME_ACTUATION_PROMOTION_CYCLE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "runtime-actuation-promotion-cycle")" == "1" ]]; then
+  RUNTIME_ACTUATION_PROMOTION_CYCLE_HELPER_AVAILABLE_JSON="true"
 fi
 MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="false"
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-compare-multi-vm-stability-promotion-evidence-pack")" == "1" ]]; then
   MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON="true"
 fi
-EVIDENCE_PACK_ACTIONABLE_EXPECTED_JSON="false"
-if [[ "$PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" == "true" ]] \
-  || [[ "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" == "true" ]] \
-  || [[ "$MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" == "true" ]]; then
-  EVIDENCE_PACK_ACTIONABLE_EXPECTED_JSON="true"
+MULTI_VM_STABILITY_CYCLE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-compare-multi-vm-stability-cycle")" == "1" ]]; then
+  MULTI_VM_STABILITY_CYCLE_HELPER_AVAILABLE_JSON="true"
 fi
+EVIDENCE_PACK_ACTIONABLE_EXPECTED_JSON="false"
+PROFILE_DEFAULT_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="false"
+if [[ "$PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON" == "true" ]] \
+  || [[ "$PROFILE_DEFAULT_STABILITY_RUN_HELPER_AVAILABLE_JSON" == "true" ]]; then
+  PROFILE_DEFAULT_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="true"
+fi
+RUNTIME_ACTUATION_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="$RUNTIME_ACTUATION_PROMOTION_CYCLE_HELPER_AVAILABLE_JSON"
+MULTI_VM_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="$MULTI_VM_STABILITY_CYCLE_HELPER_AVAILABLE_JSON"
 
-echo "[roadmap-progress-report] evidence-pack summaries missing -> surfaced fail-closed + helper-aware actions"
+echo "[roadmap-progress-report] evidence-pack summaries missing -> surfaced prerequisite-aware next commands"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -8338,9 +8853,9 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e \
-  --argjson expect_profile_action "$PROFILE_DEFAULT_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
-  --argjson expect_runtime_action "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
-  --argjson expect_multi_vm_action "$MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_action "$PROFILE_DEFAULT_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON" \
+  --argjson expect_runtime_action "$RUNTIME_ACTUATION_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON" \
+  --argjson expect_multi_vm_action "$MULTI_VM_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON" \
   --argjson expect_actionable_run "$EVIDENCE_PACK_ACTIONABLE_EXPECTED_JSON" \
   '
   .vpn_track.profile_default_gate_evidence_pack.status == "missing"
@@ -8355,24 +8870,27 @@ if ! jq -e \
   and .artifacts.profile_default_gate_stability_evidence_pack_summary_json == .artifacts.profile_default_gate_evidence_pack_summary_json
   and .artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json == .artifacts.runtime_actuation_promotion_evidence_pack_summary_json
   and (if $expect_profile_action then
-         ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("profile-default-gate-stability-evidence-pack"))
-         and ((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack"))
+         ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("profile-default-gate-stability-(cycle|run)"))
+         and ((.vpn_track.profile_default_gate_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
+         and ((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack" and ((.command // "") | test("profile-default-gate-stability-(cycle|run)"))))
        else
          (.vpn_track.profile_default_gate_evidence_pack.next_command == null)
          and (((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack")) | not)
        end)
   and (if $expect_runtime_action then
-         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-evidence-pack"))
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-cycle"))
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
-         and ((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack" and ((.command // "") | test("runtime-actuation-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
+         and ((.next_actions // []) | any(((.command // "") | test("runtime-actuation-promotion-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
        else
          (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
          and (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
        end)
   and (if $expect_multi_vm_action then
-         ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack"))
+         ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
          and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
-         and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack" and ((.command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+         and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
+         and ((.next_actions // []) | any(((.command // "") | test("profile-compare-multi-vm-stability-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
        else
          (.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command == null)
          and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
@@ -8392,12 +8910,12 @@ if ! jq -e \
   cat "$TMP_DIR/roadmap_progress_evidence_pack_missing_summary.json"
   exit 1
 fi
-if ! rg -q 'Profile-default evidence pack next command/reason:' "$TMP_DIR/roadmap_progress_evidence_pack_missing_report.md"; then
+if ! grep -Eq 'Profile-default evidence pack next command/reason:' "$TMP_DIR/roadmap_progress_evidence_pack_missing_report.md"; then
   echo "expected profile-default evidence-pack markdown line in report"
   cat "$TMP_DIR/roadmap_progress_evidence_pack_missing_report.md"
   exit 1
 fi
-if ! rg -q '\[roadmap-progress-report\] profile_default_gate_evidence_pack_status=missing' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log; then
+if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_evidence_pack_status=missing' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log; then
   echo "expected profile-default evidence-pack missing log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_evidence_pack_missing.log
   exit 1
@@ -8489,6 +9007,146 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] runtime-actuation evidence-pack prefers canonical lane when alias and canonical summaries coexist"
+EVIDENCE_PACK_LANE_PRIORITY_NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_DIR="$TMP_DIR/runtime_actuation_evidence_pack_lane_priority"
+mkdir -p "$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_DIR"
+RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_ALIAS_JSON="$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_DIR/runtime_actuation_multi_vm_evidence_pack_summary.json"
+cat >"$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_ALIAS_JSON" <<EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_ALIAS
+{
+  "version": 1,
+  "generated_at_utc": "$EVIDENCE_PACK_LANE_PRIORITY_NOW_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": ["wrong-lane runtime_actuation_multi_vm alias should not win when canonical runtime-actuation summary exists"]
+}
+EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_ALIAS
+RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL_JSON="$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_DIR/runtime_actuation_promotion_evidence_pack_summary.json"
+cat >"$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL_JSON" <<EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL
+{
+  "version": 1,
+  "generated_at_utc": "$EVIDENCE_PACK_LANE_PRIORITY_NOW_UTC",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL
+RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_evidence_pack_lane_priority_summary.json"
+jq --arg rel "runtime_actuation_evidence_pack_lane_priority/runtime_actuation_multi_vm_evidence_pack_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_multi_vm_evidence_pack: {
+        summary_json: $rel
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_lane_priority_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_lane_priority_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_lane_priority.log 2>&1; then
+  echo "expected success for runtime-actuation evidence-pack lane priority path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_lane_priority.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL_JSON" --arg alias "$RUNTIME_ACTUATION_EVIDENCE_PACK_LANE_PRIORITY_ALIAS_JSON" '
+  .vpn_track.runtime_actuation_promotion_evidence_pack.available == true
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.input_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.status == "pass"
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.decision == "GO"
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.go == true
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.no_go == false
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == false
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion_evidence_pack == "pass"
+  and .artifacts.runtime_actuation_promotion_evidence_pack_summary_json == $src
+  and .artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.source_summary_json != $alias
+' "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_lane_priority_summary.json" >/dev/null; then
+  echo "runtime-actuation evidence-pack lane-priority summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_lane_priority_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] multi-VM promotion evidence-pack prefers canonical lane when alias and canonical summaries coexist"
+MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_DIR="$TMP_DIR/multi_vm_evidence_pack_lane_priority"
+mkdir -p "$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_DIR"
+MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_ALIAS_JSON="$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_DIR/runtime_actuation_multi_vm_evidence_pack_summary.json"
+cat >"$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_ALIAS_JSON" <<EOF_MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_ALIAS
+{
+  "version": 1,
+  "generated_at_utc": "$EVIDENCE_PACK_LANE_PRIORITY_NOW_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "reasons": ["wrong-lane runtime_actuation_multi_vm alias should not win when canonical multi-vm promotion summary exists"]
+}
+EOF_MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_ALIAS
+MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL_JSON="$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_DIR/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json"
+cat >"$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL_JSON" <<EOF_MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL
+{
+  "version": 1,
+  "generated_at_utc": "$EVIDENCE_PACK_LANE_PRIORITY_NOW_UTC",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL
+MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_multi_vm_evidence_pack_lane_priority_summary.json"
+jq --arg rel "multi_vm_evidence_pack_lane_priority/runtime_actuation_multi_vm_evidence_pack_summary.json" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_multi_vm_evidence_pack: {
+        summary_json: $rel
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_lane_priority_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_lane_priority_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_evidence_pack_lane_priority.log 2>&1; then
+  echo "expected success for multi-VM evidence-pack lane priority path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_evidence_pack_lane_priority.log
+  exit 1
+fi
+if ! jq -e --arg src "$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_CANONICAL_JSON" --arg alias "$MULTI_VM_EVIDENCE_PACK_LANE_PRIORITY_ALIAS_JSON" '
+  .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.available == true
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.input_summary_json == $src
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.source_summary_json == $src
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.status == "pass"
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.decision == "GO"
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.go == true
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.no_go == false
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.needs_attention == false
+  and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion_evidence_pack == "pass"
+  and .artifacts.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json == $src
+  and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.source_summary_json != $alias
+' "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_lane_priority_summary.json" >/dev/null; then
+  echo "multi-VM evidence-pack lane-priority summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_multi_vm_evidence_pack_lane_priority_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] runtime-actuation evidence-pack stale summary is fail-closed"
 RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_DIR="$TMP_DIR/runtime_actuation_evidence_pack_stale"
 mkdir -p "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_DIR"
@@ -8529,7 +9187,7 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_stale.log
   exit 1
 fi
-if ! jq -e --arg src "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_JSON" --argjson expect_runtime_action "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" '
+if ! jq -e --arg src "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_JSON" --argjson expect_runtime_action "$RUNTIME_ACTUATION_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON" '
   .vpn_track.runtime_actuation_promotion_evidence_pack.available == false
   and .vpn_track.runtime_actuation_promotion_evidence_pack.input_summary_json == $src
   and .vpn_track.runtime_actuation_promotion_evidence_pack.source_summary_json == null
@@ -8537,9 +9195,10 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_EVIDENCE_PACK_STALE_JSON" --argjson exp
   and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == true
   and .vpn_track.optional_gate_status.runtime_actuation_promotion_evidence_pack == "stale"
   and (if $expect_runtime_action then
-         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-evidence-pack"))
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-cycle"))
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
-         and ((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack" and ((.command // "") | test("runtime-actuation-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
+         and ((.next_actions // []) | any(((.command // "") | test("runtime-actuation-promotion-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
        else
          (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
        end)
@@ -8589,7 +9248,7 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_multi_vm_evidence_pack_fail.log
   exit 1
 fi
-if ! jq -e --arg src "$MULTI_VM_EVIDENCE_PACK_FAIL_JSON" --argjson expect_multi_vm_action "$MULTI_VM_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" '
+if ! jq -e --arg src "$MULTI_VM_EVIDENCE_PACK_FAIL_JSON" --argjson expect_multi_vm_action "$MULTI_VM_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON" '
   .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.available == true
   and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.input_summary_json == $src
   and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.source_summary_json == $src
@@ -8599,11 +9258,11 @@ if ! jq -e --arg src "$MULTI_VM_EVIDENCE_PACK_FAIL_JSON" --argjson expect_multi_
   and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.no_go == true
   and .vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.needs_attention == true
   and .vpn_track.optional_gate_status.profile_compare_multi_vm_stability_promotion_evidence_pack == "fail"
-  and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("missing live-host reducer output|evidence-pack"; "i"))
+  and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
   and (if $expect_multi_vm_action then
-         ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack"))
+         ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
          and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
-         and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack" and ((.command // "") | test("profile-compare-multi-vm-stability-promotion-evidence-pack")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+         and ((.next_actions // []) | any(((.command // "") | test("profile-compare-multi-vm-stability-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
        else
          (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
        end)
@@ -8687,7 +9346,7 @@ ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_FORWARD" \
   --summary-json "$ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON" \
   --print-summary-json 1 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_forward.log 2>&1
 
-forward_line="$(rg '^roadmap-progress-report ' "$CAPTURE" | tail -n 1 || true)"
+forward_line="$(grep '^roadmap-progress-report ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$forward_line" ]]; then
   echo "missing roadmap-progress-report forward capture"
   cat "$CAPTURE"

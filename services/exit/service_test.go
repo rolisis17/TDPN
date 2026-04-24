@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +137,70 @@ func (a *failingSettlementChainAdapter) SubmitSlashEvidence(_ context.Context, _
 
 func (a *failingSettlementChainAdapter) Health(_ context.Context) error {
 	return errors.New("chain unavailable")
+}
+
+type sequentialWGManager struct {
+	removeSessionErrs  []error
+	removeSessionCalls int
+	removedSessionCfgs []wg.SessionConfig
+}
+
+func (m *sequentialWGManager) ConfigureSession(_ context.Context, _ wg.SessionConfig) error {
+	return nil
+}
+
+func (m *sequentialWGManager) RemoveSession(_ context.Context, cfg wg.SessionConfig) error {
+	m.removeSessionCalls++
+	m.removedSessionCfgs = append(m.removedSessionCfgs, cfg)
+	if len(m.removeSessionErrs) == 0 {
+		return nil
+	}
+	err := m.removeSessionErrs[0]
+	m.removeSessionErrs = m.removeSessionErrs[1:]
+	return err
+}
+
+type blockingWGManager struct {
+	started           chan struct{}
+	release           chan struct{}
+	removeSessionErrs []error
+
+	mu sync.Mutex
+
+	removeSessionCalls int
+	removedSessionCfgs []wg.SessionConfig
+}
+
+func (m *blockingWGManager) ConfigureSession(_ context.Context, _ wg.SessionConfig) error {
+	return nil
+}
+
+func (m *blockingWGManager) RemoveSession(_ context.Context, cfg wg.SessionConfig) error {
+	var err error
+	m.mu.Lock()
+	m.removeSessionCalls++
+	m.removedSessionCfgs = append(m.removedSessionCfgs, cfg)
+	started := m.started
+	release := m.release
+	if len(m.removeSessionErrs) > 0 {
+		err = m.removeSessionErrs[0]
+		m.removeSessionErrs = m.removeSessionErrs[1:]
+	}
+	m.mu.Unlock()
+
+	if started != nil {
+		started <- struct{}{}
+	}
+	if release != nil {
+		<-release
+	}
+	return err
+}
+
+func (m *blockingWGManager) RemoveSessionCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.removeSessionCalls
 }
 
 func TestHandlePathCloseFinalizeWarningDoesNotFailSessionClose(t *testing.T) {
@@ -274,6 +339,259 @@ func TestHandlePathCloseRejectsSessionKeyMismatch(t *testing.T) {
 	}
 }
 
+func TestHandlePathCloseWGTeardownFailureKeepsSessionForRetry(t *testing.T) {
+	now := time.Now()
+	wgManager := &sequentialWGManager{
+		removeSessionErrs: []error{errors.New("wg remove temporarily failed"), nil},
+	}
+	settlementStub := &settlementServiceStub{}
+	s := &Service{
+		wgInterface: "wg-exit0",
+		wgManager:   wgManager,
+		settlement:  settlementStub,
+		sessions: map[string]sessionInfo{
+			"sid-close-wg-retry": {
+				claims:        crypto.CapabilityClaims{Subject: "client-5", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:    map[uint64]struct{}{},
+				transport:     "wireguard-udp",
+				sessionKeyID:  "sk-close-wg-retry",
+				clientPubKey:  "client-wg-pubkey",
+				clientInnerIP: "10.90.0.2/32",
+			},
+		},
+	}
+
+	reqBody := `{"session_id":"sid-close-wg-retry","session_key_id":"sk-close-wg-retry"}`
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	firstRR := httptest.NewRecorder()
+	s.handlePathClose(firstRR, firstReq)
+
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("expected first close HTTP 200, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	var firstResp proto.PathCloseResponse
+	if err := json.Unmarshal(firstRR.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("decode first close response: %v", err)
+	}
+	if firstResp.Closed {
+		t.Fatalf("expected first close to fail when wg teardown fails: %+v", firstResp)
+	}
+	if firstResp.Reason != "wg remove failed" {
+		t.Fatalf("first close reason=%q want=wg remove failed", firstResp.Reason)
+	}
+	if _, exists := s.sessions["sid-close-wg-retry"]; !exists {
+		t.Fatalf("expected session retained after wg teardown failure")
+	}
+	if settlementStub.recordUsageCalls != 0 || settlementStub.settleSessionCalls != 0 {
+		t.Fatalf("expected no settlement finalization after failed close, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+	if wgManager.removeSessionCalls != 1 {
+		t.Fatalf("expected one wg remove attempt, got %d", wgManager.removeSessionCalls)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	secondRR := httptest.NewRecorder()
+	s.handlePathClose(secondRR, secondReq)
+
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("expected retry close HTTP 200, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	var secondResp proto.PathCloseResponse
+	if err := json.Unmarshal(secondRR.Body.Bytes(), &secondResp); err != nil {
+		t.Fatalf("decode retry close response: %v", err)
+	}
+	if !secondResp.Closed {
+		t.Fatalf("expected retry close success after wg teardown recovery: %+v", secondResp)
+	}
+	if _, exists := s.sessions["sid-close-wg-retry"]; exists {
+		t.Fatalf("expected session removed after successful retry close")
+	}
+	if wgManager.removeSessionCalls != 2 {
+		t.Fatalf("expected two wg remove attempts across retries, got %d", wgManager.removeSessionCalls)
+	}
+	if settlementStub.recordUsageCalls != 1 || settlementStub.settleSessionCalls != 1 {
+		t.Fatalf("expected settlement finalized exactly once after successful close, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+
+	thirdReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	thirdRR := httptest.NewRecorder()
+	s.handlePathClose(thirdRR, thirdReq)
+
+	if thirdRR.Code != http.StatusOK {
+		t.Fatalf("expected repeated close HTTP 200, got %d body=%s", thirdRR.Code, thirdRR.Body.String())
+	}
+	var thirdResp proto.PathCloseResponse
+	if err := json.Unmarshal(thirdRR.Body.Bytes(), &thirdResp); err != nil {
+		t.Fatalf("decode repeated close response: %v", err)
+	}
+	if !thirdResp.Closed {
+		t.Fatalf("expected repeated close after success to be idempotent success: %+v", thirdResp)
+	}
+	if wgManager.removeSessionCalls != 2 {
+		t.Fatalf("expected no additional wg remove on repeated close, got %d calls", wgManager.removeSessionCalls)
+	}
+	if settlementStub.recordUsageCalls != 1 || settlementStub.settleSessionCalls != 1 {
+		t.Fatalf("expected settlement totals unchanged on repeated close, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+}
+
+func TestHandlePathCloseConcurrentCloseRequestsAreIdempotent(t *testing.T) {
+	now := time.Now()
+	wgManager := &blockingWGManager{
+		started: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	settlementStub := &settlementServiceStub{}
+	s := &Service{
+		wgInterface: "wg-exit0",
+		wgManager:   wgManager,
+		settlement:  settlementStub,
+		sessions: map[string]sessionInfo{
+			"sid-close-race": {
+				claims:        crypto.CapabilityClaims{Subject: "client-race", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:    map[uint64]struct{}{},
+				transport:     "wireguard-udp",
+				sessionKeyID:  "sk-close-race",
+				clientPubKey:  "client-wg-pubkey",
+				clientInnerIP: "10.90.0.2/32",
+				ingressBytes:  4096,
+				egressBytes:   2048,
+			},
+		},
+	}
+
+	reqBody := `{"session_id":"sid-close-race","session_key_id":"sk-close-race"}`
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	firstRR := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	secondRR := httptest.NewRecorder()
+
+	var callWG sync.WaitGroup
+	callWG.Add(2)
+	go func() {
+		defer callWG.Done()
+		s.handlePathClose(firstRR, firstReq)
+	}()
+	go func() {
+		defer callWG.Done()
+		s.handlePathClose(secondRR, secondReq)
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-wgManager.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for concurrent wg remove calls")
+		}
+	}
+	close(wgManager.release)
+	callWG.Wait()
+
+	for idx, rr := range []*httptest.ResponseRecorder{firstRR, secondRR} {
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected close HTTP 200 for call %d, got %d body=%s", idx+1, rr.Code, rr.Body.String())
+		}
+		var resp proto.PathCloseResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode close response %d: %v", idx+1, err)
+		}
+		if !resp.Closed {
+			t.Fatalf("expected close call %d to succeed idempotently, got %+v", idx+1, resp)
+		}
+	}
+	if _, exists := s.sessions["sid-close-race"]; exists {
+		t.Fatalf("expected session removed after concurrent close calls")
+	}
+	if wgManager.RemoveSessionCalls() != 2 {
+		t.Fatalf("expected two overlapping wg remove attempts, got %d", wgManager.RemoveSessionCalls())
+	}
+	if settlementStub.recordUsageCalls != 1 || settlementStub.settleSessionCalls != 1 {
+		t.Fatalf("expected settlement finalized exactly once across concurrent closes, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+}
+
+func TestHandlePathCloseConcurrentCloseStaysIdempotentWhenSecondWGRemoveErrors(t *testing.T) {
+	now := time.Now()
+	wgManager := &blockingWGManager{
+		started:           make(chan struct{}, 2),
+		release:           make(chan struct{}),
+		removeSessionErrs: []error{nil, errors.New("already removed")},
+	}
+	settlementStub := &settlementServiceStub{}
+	s := &Service{
+		wgInterface: "wg-exit0",
+		wgManager:   wgManager,
+		settlement:  settlementStub,
+		sessions: map[string]sessionInfo{
+			"sid-close-race-err": {
+				claims:        crypto.CapabilityClaims{Subject: "client-race-err", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:    map[uint64]struct{}{},
+				transport:     "wireguard-udp",
+				sessionKeyID:  "sk-close-race-err",
+				clientPubKey:  "client-wg-pubkey-race-err",
+				clientInnerIP: "10.90.0.3/32",
+				ingressBytes:  1024,
+				egressBytes:   512,
+			},
+		},
+	}
+
+	reqBody := `{"session_id":"sid-close-race-err","session_key_id":"sk-close-race-err"}`
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	firstRR := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(reqBody))
+	secondRR := httptest.NewRecorder()
+
+	var callWG sync.WaitGroup
+	callWG.Add(2)
+	go func() {
+		defer callWG.Done()
+		s.handlePathClose(firstRR, firstReq)
+	}()
+	go func() {
+		defer callWG.Done()
+		s.handlePathClose(secondRR, secondReq)
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-wgManager.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for concurrent wg remove calls")
+		}
+	}
+	close(wgManager.release)
+	callWG.Wait()
+
+	for idx, rr := range []*httptest.ResponseRecorder{firstRR, secondRR} {
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected close HTTP 200 for call %d, got %d body=%s", idx+1, rr.Code, rr.Body.String())
+		}
+		var resp proto.PathCloseResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode close response %d: %v", idx+1, err)
+		}
+		if !resp.Closed {
+			t.Fatalf("expected close call %d to remain idempotent success, got %+v", idx+1, resp)
+		}
+	}
+	if _, exists := s.sessions["sid-close-race-err"]; exists {
+		t.Fatalf("expected session removed after concurrent close calls")
+	}
+	if wgManager.RemoveSessionCalls() != 2 {
+		t.Fatalf("expected two overlapping wg remove attempts, got %d", wgManager.RemoveSessionCalls())
+	}
+	if settlementStub.recordUsageCalls != 1 || settlementStub.settleSessionCalls != 1 {
+		t.Fatalf("expected settlement finalized exactly once across concurrent closes, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+}
+
 func TestHandlePathCloseDeferredChainAdapterDoesNotBlockSessionClose(t *testing.T) {
 	adapter := &failingSettlementChainAdapter{}
 	memSettlement := settlement.NewMemoryService(
@@ -366,6 +684,310 @@ func TestHandlePathOpenRejectsMalformedJSONBodies(t *testing.T) {
 				t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
 			}
 		})
+	}
+}
+
+func signedPathOpenRequestBody(t *testing.T, req proto.PathOpenRequest, claims crypto.CapabilityClaims, issuerPriv ed25519.PrivateKey, popPriv ed25519.PrivateKey) []byte {
+	t.Helper()
+
+	token, err := crypto.SignClaims(claims, issuerPriv)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	req.Token = token
+
+	tokenProof, err := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+		Token:           req.Token,
+		ExitID:          req.ExitID,
+		MiddleRelayID:   req.MiddleRelayID,
+		TokenProofNonce: req.TokenProofNonce,
+		ClientInnerPub:  req.ClientInnerPub,
+		Transport:       req.Transport,
+		RequestedMTU:    req.RequestedMTU,
+		RequestedRegion: req.RequestedRegion,
+	})
+	if err != nil {
+		t.Fatalf("sign path-open proof: %v", err)
+	}
+	req.TokenProof = tokenProof
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal path-open request: %v", err)
+	}
+	return body
+}
+
+func TestHandlePathOpenRejectsExitIdentityMismatchInEnforceMode(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-remote-2",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-exit-id-mismatch",
+		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-exit-id-mismatch",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-exit-id-mismatch",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "json",
+		betaStrict:    true,
+		exitRelayID:   "exit-local-1",
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected rejection for mismatched exit identity, got %+v", resp)
+	}
+	if resp.Reason != "exit identity mismatch" {
+		t.Fatalf("reason=%q want=exit identity mismatch", resp.Reason)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected rejected path-open to avoid creating session")
+	}
+}
+
+func TestHandlePathOpenRejectsWhenStrictBindingExitRelayIDUnset(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-exit-id-unset",
+		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-exit-id-unset",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-exit-id-unset",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "json",
+		betaStrict:    true,
+		exitRelayID:   " ",
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected rejection when strict identity binding has no EXIT_RELAY_ID, got %+v", resp)
+	}
+	if resp.Reason != "exit identity mismatch" {
+		t.Fatalf("reason=%q want=exit identity mismatch", resp.Reason)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected rejected path-open to avoid creating session")
+	}
+}
+
+func TestHandlePathOpenAcceptsMatchingExitIdentityInEnforceMode(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-exit-id-match",
+		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-exit-id-match",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-exit-id-match",
+		ExitScope:  []string{"exit-alt-1", req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "json",
+		betaStrict:    true,
+		exitRelayID:   req.ExitID,
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Accepted {
+		t.Fatalf("expected successful path-open when exit identity matches, got %+v", resp)
+	}
+	if resp.SessionKeyID == "" {
+		t.Fatalf("expected session key id on success")
+	}
+	if resp.Transport != "policy-json" {
+		t.Fatalf("transport=%q want=policy-json", resp.Transport)
+	}
+	if _, exists := s.sessions[req.SessionID]; !exists {
+		t.Fatalf("expected accepted path-open to create session")
+	}
+}
+
+func TestHandlePathOpenRejectsDuplicateSessionID(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-duplicate-session",
+		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-duplicate-session",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-duplicate-session",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	existing := sessionInfo{
+		claims:       crypto.CapabilityClaims{Subject: "existing", ExpiryUnix: time.Now().Add(time.Minute).Unix()},
+		seenNonces:   map[uint64]struct{}{},
+		transport:    "policy-json",
+		sessionKeyID: "existing-session-key",
+	}
+	s := &Service{
+		dataMode:      "json",
+		exitRelayID:   req.ExitID,
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{req.SessionID: existing},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected duplicate session id rejection, got %+v", resp)
+	}
+	if resp.Reason != "session already exists" {
+		t.Fatalf("reason=%q want=session already exists", resp.Reason)
+	}
+	got, exists := s.sessions[req.SessionID]
+	if !exists {
+		t.Fatalf("expected pre-existing session retained")
+	}
+	if got.sessionKeyID != existing.sessionKeyID {
+		t.Fatalf("expected existing session unchanged, got key=%q", got.sessionKeyID)
 	}
 }
 
@@ -2374,9 +2996,63 @@ func TestValidateRuntimeConfigWGOnlyAcceptsValidConfig(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigRejectsMalformedStrictModeEnv(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "definitely")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected malformed strict-mode env to fail closed")
+	}
+	if !strings.Contains(err.Error(), "BETA_STRICT_MODE/EXIT_BETA_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsEmptyStrictModeEnv(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", " ")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected empty strict-mode env to fail closed")
+	}
+	if !strings.Contains(err.Error(), "BETA_STRICT_MODE/EXIT_BETA_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsMalformedProdStrictModeEnv(t *testing.T) {
+	t.Setenv("PROD_STRICT_MODE", "invalid")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected malformed prod strict-mode env to fail closed")
+	}
+	if !strings.Contains(err.Error(), "PROD_STRICT_MODE/EXIT_PROD_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsStrictModeWithEmptyExitRelayID(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "1")
+	t.Setenv("EXIT_RELAY_ID", " ")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode with empty EXIT_RELAY_ID to fail closed")
+	}
+	if !strings.Contains(err.Error(), "EXIT_RELAY_ID") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2399,6 +3075,7 @@ func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing
 func TestValidateRuntimeConfigBetaStrictRejectsNoReplayGuard(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2422,9 +3099,100 @@ func TestValidateRuntimeConfigBetaStrictRejectsNoReplayGuard(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsDangerousOutboundPrivateDNS(t *testing.T) {
+	t.Setenv(allowDangerousOutboundPrivateDNS, "1")
+
+	s := &Service{
+		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	expected := "BETA_STRICT_MODE forbids " + allowDangerousOutboundPrivateDNS
+	if err.Error() != expected {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDangerousIssuerKeysetReplacement(t *testing.T) {
+	t.Setenv(allowDangerousIssuerKeysetReplacement, "1")
+
+	s := &Service{
+		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	expected := "BETA_STRICT_MODE forbids " + allowDangerousIssuerKeysetReplacement
+	if err.Error() != expected {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsDangerousCosmosFallback(t *testing.T) {
+	t.Setenv(allowDangerousCosmosAdapterFallback, "1")
+
+	s := &Service{
+		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
+		dataMode:              "opaque",
+		dataAddr:              "127.0.0.1:51821",
+		wgBackend:             "command",
+		wgPrivateKey:          "/tmp/wg-exit.key",
+		wgKernelProxy:         true,
+		wgListenPort:          51831,
+		liveWGMode:            true,
+		opaqueEcho:            false,
+		opaqueSinkAddr:        "127.0.0.1:53011",
+		opaqueSourceAddr:      "127.0.0.1:53012",
+		tokenProofReplayGuard: true,
+		peerRebindAfter:       0,
+		startupSyncTimeout:    8 * time.Second,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode validation failure")
+	}
+	expected := "BETA_STRICT_MODE forbids " + allowDangerousCosmosAdapterFallback
+	if err.Error() != expected {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsPeerRebind(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2451,6 +3219,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsPeerRebind(t *testing.T) {
 func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2477,6 +3246,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *test
 func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutSourceQuorum(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2506,6 +3276,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutSourceQuorum(t 
 func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutOperatorQuorum(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2535,6 +3306,7 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutOperatorQuorum(
 func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequirement(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2570,6 +3342,7 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	s := &Service{
 		prodStrict:            true,
 		betaStrict:            true,
+		exitRelayID:           "exit-local-1",
 		dataMode:              "opaque",
 		dataAddr:              "127.0.0.1:51821",
 		wgBackend:             "command",
@@ -2713,6 +3486,16 @@ func TestNewBetaStrictDefaultStartupSyncTimeout(t *testing.T) {
 	}
 }
 
+func TestNewBetaStrictConflictPreservesStrictMode(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "0")
+	t.Setenv("EXIT_BETA_STRICT", "1")
+
+	s := New()
+	if !s.betaStrict {
+		t.Fatalf("expected strict mode enabled when strict env vars conflict")
+	}
+}
+
 func TestNewCommandBackendDefaultStartupSyncTimeout(t *testing.T) {
 	t.Setenv("BETA_STRICT_MODE", "0")
 	t.Setenv("EXIT_BETA_STRICT", "0")
@@ -2745,6 +3528,16 @@ func TestNewProdStrictEnablesWGOnly(t *testing.T) {
 	s := New()
 	if !s.wgOnlyMode {
 		t.Fatalf("expected prod strict mode to enable wg-only mode")
+	}
+}
+
+func TestNewProdStrictConflictPreservesStrictMode(t *testing.T) {
+	t.Setenv("PROD_STRICT_MODE", "0")
+	t.Setenv("EXIT_PROD_STRICT", "1")
+
+	s := New()
+	if !s.prodStrict {
+		t.Fatalf("expected prod strict mode enabled when strict env vars conflict")
 	}
 }
 
@@ -3449,6 +4242,126 @@ func TestCleanupExpiredSessionsClosesIdleWGProxySessions(t *testing.T) {
 	}
 }
 
+func TestCleanupExpiredSessionsRemovesWGSessionAndFinalizesSettlement(t *testing.T) {
+	now := time.Now()
+	proxyConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen proxy: %v", err)
+	}
+
+	wgManager := &sequentialWGManager{}
+	settlementStub := &settlementServiceStub{}
+	s := &Service{
+		wgInterface: "wg-exit0",
+		wgManager:   wgManager,
+		settlement:  settlementStub,
+		sessions: map[string]sessionInfo{
+			"sid-expired-wg-cleanup": {
+				claims:        crypto.CapabilityClaims{Subject: "client-expired", ExpiryUnix: now.Add(-time.Second).Unix()},
+				seenNonces:    map[uint64]struct{}{},
+				transport:     "wireguard-udp",
+				sessionKeyID:  "sk-expired-wg-cleanup",
+				clientPubKey:  "client-wg-pubkey-expired",
+				clientInnerIP: "10.90.0.9/32",
+				ingressBytes:  1024,
+				egressBytes:   2048,
+			},
+		},
+		wgSessionProxies: map[string]*net.UDPConn{
+			"sid-expired-wg-cleanup": proxyConn,
+		},
+		wgProxyLastSeen: map[string]int64{
+			"sid-expired-wg-cleanup": now.Add(-10 * time.Second).Unix(),
+		},
+		proofNonceSeen: make(map[string]map[string]int64),
+	}
+
+	s.cleanupExpiredSessions(now)
+
+	if _, exists := s.sessions["sid-expired-wg-cleanup"]; exists {
+		t.Fatalf("expected expired session removed from session map")
+	}
+	if _, exists := s.wgSessionProxies["sid-expired-wg-cleanup"]; exists {
+		t.Fatalf("expected expired session proxy removed")
+	}
+	if wgManager.removeSessionCalls != 1 {
+		t.Fatalf("expected one wg remove call for expired session, got %d", wgManager.removeSessionCalls)
+	}
+	if len(wgManager.removedSessionCfgs) != 1 {
+		t.Fatalf("expected one wg remove config, got %d", len(wgManager.removedSessionCfgs))
+	}
+	cfg := wgManager.removedSessionCfgs[0]
+	if cfg.SessionID != "sid-expired-wg-cleanup" {
+		t.Fatalf("expected wg remove for sid-expired-wg-cleanup, got %s", cfg.SessionID)
+	}
+	if cfg.SessionKeyID != "sk-expired-wg-cleanup" {
+		t.Fatalf("expected wg remove session key sk-expired-wg-cleanup, got %s", cfg.SessionKeyID)
+	}
+	if settlementStub.recordUsageCalls != 1 || settlementStub.settleSessionCalls != 1 {
+		t.Fatalf("expected settlement finalized once for expired cleanup, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+	if _, err := proxyConn.WriteToUDP([]byte("x"), proxyConn.LocalAddr().(*net.UDPAddr)); err == nil {
+		t.Fatalf("expected expired session proxy connection closed")
+	}
+}
+
+func TestAllowSessionPeerExpiredSessionTriggersTeardown(t *testing.T) {
+	now := time.Now()
+	proxyConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen proxy: %v", err)
+	}
+
+	wgManager := &sequentialWGManager{}
+	settlementStub := &settlementServiceStub{}
+	s := &Service{
+		wgInterface: "wg-exit0",
+		wgManager:   wgManager,
+		settlement:  settlementStub,
+		sessions: map[string]sessionInfo{
+			"sid-allow-expired": {
+				claims:        crypto.CapabilityClaims{Subject: "client-allow-expired", ExpiryUnix: now.Add(-time.Second).Unix()},
+				seenNonces:    map[uint64]struct{}{},
+				transport:     "wireguard-udp",
+				sessionKeyID:  "sk-allow-expired",
+				clientPubKey:  "client-wg-pubkey-allow-expired",
+				clientInnerIP: "10.90.0.12/32",
+				peerAddr:      "127.0.0.1:51820",
+				ingressBytes:  256,
+				egressBytes:   128,
+			},
+		},
+		wgSessionProxies: map[string]*net.UDPConn{
+			"sid-allow-expired": proxyConn,
+		},
+	}
+
+	allowed, rebound, current := s.allowSessionPeer("sid-allow-expired", "127.0.0.1:51999", now)
+	if allowed || rebound {
+		t.Fatalf("expected expired session source check to reject packet")
+	}
+	if current != "127.0.0.1:51820" {
+		t.Fatalf("expected current peer reported before teardown, got %s", current)
+	}
+	if _, exists := s.sessions["sid-allow-expired"]; exists {
+		t.Fatalf("expected expired session removed by allowSessionPeer teardown")
+	}
+	if _, exists := s.wgSessionProxies["sid-allow-expired"]; exists {
+		t.Fatalf("expected expired session proxy removed by allowSessionPeer teardown")
+	}
+	if wgManager.removeSessionCalls != 1 {
+		t.Fatalf("expected one wg remove call for expired allowSessionPeer teardown, got %d", wgManager.removeSessionCalls)
+	}
+	if settlementStub.recordUsageCalls != 1 || settlementStub.settleSessionCalls != 1 {
+		t.Fatalf("expected settlement finalized once for expired allowSessionPeer teardown, got record=%d settle=%d",
+			settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+	if _, err := proxyConn.WriteToUDP([]byte("x"), proxyConn.LocalAddr().(*net.UDPAddr)); err == nil {
+		t.Fatalf("expected expired allowSessionPeer proxy connection closed")
+	}
+}
+
 func TestAllowSessionPeerRejectsMismatchByDefault(t *testing.T) {
 	now := time.Now()
 	s := &Service{
@@ -3601,6 +4514,157 @@ func TestApplyRevocationFeedRejectsVersionRollback(t *testing.T) {
 	}
 }
 
+func TestApplyRevocationFeedRejectsSameVersionConflict(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	base := proto.RevocationListResponse{
+		Issuer:      "issuer-conflict",
+		Version:     7,
+		GeneratedAt: now,
+		ExpiresAt:   now + 60,
+		Revocations: []proto.Revocation{{JTI: "jti-conflict", Until: now + 300}},
+	}
+	base.Signature = mustSignFeed(t, base, priv)
+
+	s := &Service{
+		issuerPubs:        map[string]ed25519.PublicKey{issuerKeyID(pub): pub},
+		revokedJTI:        map[string]int64{},
+		revocationVersion: map[string]int64{},
+		minTokenEpoch:     map[string]int64{},
+	}
+	if err := s.applyRevocationFeed(base, now); err != nil {
+		t.Fatalf("apply base feed: %v", err)
+	}
+
+	conflict := proto.RevocationListResponse{
+		Issuer:      "issuer-conflict",
+		Version:     7,
+		GeneratedAt: now + 1,
+		ExpiresAt:   now + 60,
+		Revocations: []proto.Revocation{{JTI: "jti-conflict", Until: now + 120}},
+	}
+	conflict.Signature = mustSignFeed(t, conflict, priv)
+
+	err = s.applyRevocationFeed(conflict, now)
+	if err == nil {
+		t.Fatalf("expected same-version conflict rejection")
+	}
+	if !strings.Contains(err.Error(), "revocation feed conflict detected") || !strings.Contains(err.Error(), "shortened_active=1") {
+		t.Fatalf("expected explicit conflict diagnostics, got %v", err)
+	}
+	if !s.isRevoked(issuerKeyID(pub), "jti-conflict", now+200) {
+		t.Fatalf("expected original revocation preserved after conflict")
+	}
+}
+
+func TestApplyRevocationFeedStaleSourceOverwriteAttemptFailsClosed(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	base := proto.RevocationListResponse{
+		Issuer:      "issuer-stale",
+		Version:     11,
+		GeneratedAt: now,
+		ExpiresAt:   now + 60,
+		Revocations: []proto.Revocation{{JTI: "jti-stale", Until: now + 300}},
+	}
+	base.Signature = mustSignFeed(t, base, priv)
+
+	s := &Service{
+		issuerPubs:        map[string]ed25519.PublicKey{issuerKeyID(pub): pub},
+		revokedJTI:        map[string]int64{},
+		revocationVersion: map[string]int64{},
+		minTokenEpoch:     map[string]int64{},
+	}
+	if err := s.applyRevocationFeed(base, now); err != nil {
+		t.Fatalf("apply base feed: %v", err)
+	}
+
+	stale := proto.RevocationListResponse{
+		Issuer:      "issuer-stale",
+		Version:     10,
+		GeneratedAt: now + 1,
+		ExpiresAt:   now + 60,
+		Revocations: []proto.Revocation{},
+	}
+	stale.Signature = mustSignFeed(t, stale, priv)
+
+	err = s.applyRevocationFeed(stale, now)
+	if err == nil {
+		t.Fatalf("expected stale-source overwrite rejection")
+	}
+	if !strings.Contains(err.Error(), "version rollback detected") ||
+		!strings.Contains(err.Error(), "incoming_version=10") ||
+		!strings.Contains(err.Error(), "current_version=11") {
+		t.Fatalf("expected explicit rollback diagnostics, got %v", err)
+	}
+	if got := s.revocationVersion["issuer-stale"]; got != 11 {
+		t.Fatalf("expected revocation version to remain 11, got %d", got)
+	}
+	if !s.isRevoked(issuerKeyID(pub), "jti-stale", now+200) {
+		t.Fatalf("expected stale overwrite attempt not to un-revoke trusted token")
+	}
+}
+
+func TestApplyRevocationFeedPartialSameVersionCannotUnrevoke(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().Unix()
+	base := proto.RevocationListResponse{
+		Issuer:      "issuer-partial",
+		Version:     15,
+		GeneratedAt: now,
+		ExpiresAt:   now + 60,
+		Revocations: []proto.Revocation{
+			{JTI: "jti-a", Until: now + 300},
+			{JTI: "jti-b", Until: now + 300},
+		},
+	}
+	base.Signature = mustSignFeed(t, base, priv)
+
+	s := &Service{
+		issuerPubs:        map[string]ed25519.PublicKey{issuerKeyID(pub): pub},
+		revokedJTI:        map[string]int64{},
+		revocationVersion: map[string]int64{},
+		minTokenEpoch:     map[string]int64{},
+	}
+	if err := s.applyRevocationFeed(base, now); err != nil {
+		t.Fatalf("apply base feed: %v", err)
+	}
+
+	partial := proto.RevocationListResponse{
+		Issuer:      "issuer-partial",
+		Version:     15,
+		GeneratedAt: now + 1,
+		ExpiresAt:   now + 60,
+		Revocations: []proto.Revocation{
+			{JTI: "jti-a", Until: now + 300},
+		},
+	}
+	partial.Signature = mustSignFeed(t, partial, priv)
+
+	err = s.applyRevocationFeed(partial, now)
+	if err == nil {
+		t.Fatalf("expected partial same-version feed rejection")
+	}
+	if !strings.Contains(err.Error(), "revocation feed conflict detected") || !strings.Contains(err.Error(), "missing_active=1") {
+		t.Fatalf("expected explicit partial-feed conflict diagnostics, got %v", err)
+	}
+	if !s.isRevoked(issuerKeyID(pub), "jti-a", now+200) {
+		t.Fatalf("expected jti-a to remain revoked")
+	}
+	if !s.isRevoked(issuerKeyID(pub), "jti-b", now+200) {
+		t.Fatalf("expected jti-b to remain revoked after partial update attempt")
+	}
+}
+
 func TestAcceptsTokenKeyEpoch(t *testing.T) {
 	s := &Service{
 		minTokenEpoch:   map[string]int64{"issuer-a": 4},
@@ -3742,5 +4806,89 @@ func TestTeardownEgressRejectsInvalidCommandInputs(t *testing.T) {
 	}
 	if !s.egressConfigured {
 		t.Fatalf("expected egressConfigured unchanged when teardown validation fails")
+	}
+}
+
+func TestNewSettlementServiceFromEnvWiresBlockchainModeForCosmosAdapter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", srv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "exit-mode-test")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "0")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+
+	const reservationID = "res-exit-blockchain-on"
+	const sessionID = "sess-exit-blockchain-on"
+	reservation, err := svc.ReserveSponsorCredits(ctx, settlement.SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected submitted reservation when cosmos adapter is configured, got %s", reservation.Status)
+	}
+
+	_, err = svc.AuthorizePayment(ctx, settlement.PaymentProof{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+	})
+	if err == nil {
+		t.Fatalf("expected AuthorizePayment to fail until chain finality in blockchain mode")
+	}
+	if !strings.Contains(err.Error(), "chain") {
+		t.Fatalf("expected chain finality error, got %v", err)
+	}
+}
+
+func TestNewSettlementServiceFromEnvKeepsMemoryModeWhenChainAdapterDisabled(t *testing.T) {
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+
+	const reservationID = "res-exit-memory-on"
+	const sessionID = "sess-exit-memory-on"
+	reservation, err := svc.ReserveSponsorCredits(ctx, settlement.SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != settlement.OperationStatusConfirmed {
+		t.Fatalf("expected confirmed reservation in default memory mode, got %s", reservation.Status)
+	}
+
+	auth, err := svc.AuthorizePayment(ctx, settlement.PaymentProof{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+	if auth.ReservationID != reservationID {
+		t.Fatalf("expected authorization for reservation %s, got %s", reservationID, auth.ReservationID)
 	}
 }

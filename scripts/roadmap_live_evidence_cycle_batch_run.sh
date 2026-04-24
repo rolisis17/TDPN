@@ -389,16 +389,19 @@ fi
 
 declare -A pass_count_by_track=()
 declare -A fail_count_by_track=()
+declare -A skipped_count_by_track=()
 declare -A total_count_by_track=()
 for id in "${selected_track_ids[@]}"; do
   pass_count_by_track["$id"]=0
   fail_count_by_track["$id"]=0
+  skipped_count_by_track["$id"]=0
   total_count_by_track["$id"]=0
 done
 
 iteration_results_json='[]'
 executed_iterations=0
 executed_tracks=0
+skipped_tracks=0
 final_rc=0
 first_failure_iteration=0
 first_failure_track_id=""
@@ -557,6 +560,37 @@ if [[ -z "$selection_error" ]]; then
         iter_track_results_json="$(jq -c --argjson row "$result_json" '. + [$row]' <<<"$iter_track_results_json")"
         row_rc="$(jq -r '.rc' <<<"$result_json")"
         if (( row_rc != 0 )) && [[ "$continue_on_fail" == "0" ]]; then
+          if (( idx + 1 < ${#selected_track_ids[@]} )); then
+            for ((skipped_idx=idx+1; skipped_idx<${#selected_track_ids[@]}; skipped_idx++)); do
+              skipped_track_id="${selected_track_ids[$skipped_idx]}"
+              skipped_script_path="${selected_track_scripts[$skipped_idx]}"
+              skipped_log_path="$iter_dir/${skipped_track_id}.log"
+              skipped_result_json="$(jq -c -n \
+                --argjson iteration "$iter" \
+                --arg track_id "$skipped_track_id" \
+                --arg script_path "$skipped_script_path" \
+                --arg log "$skipped_log_path" \
+                --arg started_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg ended_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg status "skipped" \
+                --argjson rc null \
+                --argjson duration_sec 0 \
+                '{
+                  iteration: $iteration,
+                  track_id: $track_id,
+                  script_path: $script_path,
+                  log: $log,
+                  started_at_utc: $started_at_utc,
+                  ended_at_utc: $ended_at_utc,
+                  status: $status,
+                  rc: $rc,
+                  duration_sec: $duration_sec,
+                  failure_kind: "skipped_due_to_fail_closed",
+                  notes: "not executed because a previous track failed and continue_on_fail=0"
+                }')"
+              iter_track_results_json="$(jq -c --argjson row "$skipped_result_json" '. + [$row]' <<<"$iter_track_results_json")"
+            done
+          fi
           break
         fi
       done
@@ -567,7 +601,24 @@ if [[ -z "$selection_error" ]]; then
       for idx in $(seq 0 $((iter_track_count - 1))); do
         row_json="$(jq -c ".[$idx]" <<<"$iter_track_results_json")"
         row_id="$(jq -r '.track_id' <<<"$row_json")"
-        row_rc="$(jq -r '.rc' <<<"$row_json")"
+        if [[ -z "${total_count_by_track[$row_id]+x}" ]]; then
+          total_count_by_track["$row_id"]=0
+          pass_count_by_track["$row_id"]=0
+          fail_count_by_track["$row_id"]=0
+          skipped_count_by_track["$row_id"]=0
+        fi
+        row_status="$(jq -r '.status // ""' <<<"$row_json")"
+        row_rc_raw="$(jq -r '.rc // empty' <<<"$row_json")"
+        if [[ "$row_status" == "skipped" ]]; then
+          skipped_count_by_track["$row_id"]=$((skipped_count_by_track["$row_id"] + 1))
+          skipped_tracks=$((skipped_tracks + 1))
+          echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=skipped iteration=$iter track_id=$row_id reason=fail_closed_previous_failure"
+          continue
+        fi
+        if ! [[ "$row_rc_raw" =~ ^-?[0-9]+$ ]]; then
+          row_rc_raw=125
+        fi
+        row_rc="$row_rc_raw"
         executed_tracks=$((executed_tracks + 1))
         total_count_by_track["$row_id"]=$((total_count_by_track["$row_id"] + 1))
         if (( row_rc == 0 )); then
@@ -591,17 +642,28 @@ if [[ -z "$selection_error" ]]; then
       first_failure_track_id="$iter_failed_track_id"
     fi
 
+    iter_failure_substep=""
+    if [[ "$iter_status" == "fail" ]]; then
+      if [[ -n "$iter_failed_track_id" ]]; then
+        iter_failure_substep="track_failed:$iter_failed_track_id"
+      else
+        iter_failure_substep="track_failed:unknown"
+      fi
+    fi
+
     iter_result_json="$(jq -c -n \
       --argjson iteration "$iter" \
       --arg status "$iter_status" \
       --argjson rc "$iter_rc" \
       --arg failed_track_id "$iter_failed_track_id" \
+      --arg failure_substep "$iter_failure_substep" \
       --argjson tracks "$iter_track_results_json" \
       '{
         iteration: $iteration,
         status: $status,
         rc: $rc,
         failed_track_id: (if $failed_track_id == "" then null else $failed_track_id end),
+        failure_substep: (if $failure_substep == "" then null else $failure_substep end),
         tracks: $tracks
       }')"
     iteration_results_json="$(jq -c --argjson row "$iter_result_json" '. + [$row]' <<<"$iteration_results_json")"
@@ -624,6 +686,21 @@ else
   final_status="fail"
 fi
 
+failure_substep=""
+failure_reason=""
+if [[ -n "$selection_error" ]]; then
+  failure_substep="selection:$selection_error"
+  failure_reason="selection failed before execution"
+elif [[ "$final_status" == "fail" ]]; then
+  if (( first_failure_iteration > 0 )) && [[ -n "$first_failure_track_id" ]]; then
+    failure_substep="execution:iteration_${first_failure_iteration}:track_${first_failure_track_id}"
+    failure_reason="first failing track in deterministic iteration/track order"
+  else
+    failure_substep="execution:unknown"
+    failure_reason="execution failed without first failure metadata"
+  fi
+fi
+
 per_track_json='[]'
 for id in "${selected_track_ids[@]}"; do
   row_json="$(jq -c -n \
@@ -632,12 +709,14 @@ for id in "${selected_track_ids[@]}"; do
     --argjson total "${total_count_by_track[$id]}" \
     --argjson pass "${pass_count_by_track[$id]}" \
     --argjson fail "${fail_count_by_track[$id]}" \
+    --argjson skipped "${skipped_count_by_track[$id]}" \
     '{
       id: $id,
       script_path: $script_path,
       total_runs: $total,
       pass: $pass,
-      fail: $fail
+      fail: $fail,
+      skipped: $skipped
     }')"
   per_track_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$per_track_json")"
 done
@@ -651,6 +730,8 @@ jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$final_status" \
   --argjson rc "$final_rc" \
+  --arg failure_substep "$failure_substep" \
+  --arg failure_reason "$failure_reason" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
   --arg selection_error "$selection_error" \
@@ -674,6 +755,7 @@ jq -n \
   --argjson per_track "$per_track_json" \
   --argjson iterations_results "$iteration_results_json" \
   --argjson executed_tracks "$executed_tracks" \
+  --argjson skipped_tracks "$skipped_tracks" \
   --argjson halt_after_iteration "$halt_after_iteration" \
   --argjson first_failure_iteration "$first_failure_iteration" \
   --arg first_failure_track_id "$first_failure_track_id" \
@@ -683,6 +765,8 @@ jq -n \
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
+    failure_substep: (if $failure_substep == "" then null else $failure_substep end),
+    failure_reason: (if $failure_reason == "" then null else $failure_reason end),
     selection_error: (if $selection_error == "" then null else $selection_error end),
     inputs: {
       iterations: $iterations_requested,
@@ -719,6 +803,7 @@ jq -n \
       iterations_completed: $iterations_completed,
       selected_track_count: ($selected_track_ids | length),
       executed_tracks: $executed_tracks,
+      skipped_tracks: $skipped_tracks,
       halt_after_iteration: ($halt_after_iteration == 1),
       first_failure_iteration: (if $first_failure_iteration == 0 then null else $first_failure_iteration end),
       first_failure_track_id: (if $first_failure_track_id == "" then null else $first_failure_track_id end)
@@ -731,7 +816,10 @@ jq -n \
     }
   }' >"$summary_json"
 
-echo "[roadmap-live-evidence-cycle-batch-run] status=$final_status rc=$final_rc iterations_completed=$executed_iterations selected_tracks=${#selected_track_ids[@]}"
+echo "[roadmap-live-evidence-cycle-batch-run] status=$final_status rc=$final_rc iterations_completed=$executed_iterations selected_tracks=${#selected_track_ids[@]} failure_substep=${failure_substep:-none}"
+if [[ "$final_status" == "fail" && -n "$failure_substep" ]]; then
+  echo "[roadmap-live-evidence-cycle-batch-run] fail_substep=$failure_substep reason=${failure_reason:-unknown}"
+fi
 echo "[roadmap-live-evidence-cycle-batch-run] summary_json=$summary_json"
 
 if [[ "$print_summary_json" == "1" ]]; then

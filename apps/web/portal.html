@@ -77,6 +77,13 @@
           </div>
           <p id="onboarding_next_action" class="helper-copy">Next recommended action: Request Challenge.</p>
         </div>
+        <div id="session_freshness_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Session freshness</div>
+          <div id="session_freshness_line" class="status warn">
+            <strong id="session_freshness_title">Signed out</strong>
+            <span id="session_freshness_detail">No active session token is loaded.</span>
+          </div>
+        </div>
         <div id="policy_posture" class="status-banner" data-kind="warn" role="status" aria-live="polite">
           <div class="status-banner__label">Runtime policy posture</div>
           <div id="policy_posture_line" class="status warn">
@@ -434,6 +441,7 @@
           </div>
           <p class="section-lead">
             Use the workspace tabs to run local tunnel connect/disconnect/status actions while keeping onboarding context in this page.
+            On first run, use tab lock hints plus a quick readiness check before mutating actions.
           </p>
         </div>
         <div id="connection_snapshot" class="status-banner" data-kind="warn" role="status" aria-live="polite">
@@ -455,8 +463,15 @@
             Server
           </button>
         </div>
+        <p id="tab_lock_hint" class="helper-copy locked tab-lock-hint" hidden aria-live="polite"></p>
+        <p id="workspace_first_run_hint" class="helper-copy workspace-first-run-hint">
+          Single-window tabs keep both lanes visible. If a tab is disabled, follow its activation path before retrying.
+        </p>
+        <p id="workspace_platform_hint" class="helper-copy workspace-first-run-hint">
+          First run: verify local readiness, then run Status before Connect or server lifecycle actions.
+        </p>
         <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
-          <p id="client_lock_hint" class="helper-copy">Client controls are available for client-capable roles.</p>
+          <p id="client_lock_hint" class="helper-copy">Client tab guidance appears here, including lock reasons and next steps.</p>
           <p id="connect_policy_hint" class="helper-copy">
             Connect policy: compat from env defaults; the session-trusted bootstrap selector uses the preferred entry; manual bootstrap/invite fields are policy-gated.
           </p>
@@ -504,7 +519,7 @@
           </div>
         </div>
         <div id="panel_server" class="tab-panel" role="tabpanel" aria-labelledby="tab_server">
-          <p id="server_lock_hint" class="helper-copy">Server controls are available only for approved operator/admin roles.</p>
+          <p id="server_lock_hint" class="helper-copy">Server tab guidance appears here, including lock reasons and next steps.</p>
           <p class="helper-copy">
             Server lifecycle actions use readiness policy from Step 3 and require a signed-in eligible session.
           </p>

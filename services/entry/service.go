@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -70,8 +71,11 @@ type Service struct {
 	wgOnlyMode            bool
 	betaStrict            bool
 	prodStrict            bool
+	strictModeParseErr    error
 	operatorID            string
 	requireDistinctExitOp bool
+	requireMiddleRelay    bool
+	requireMiddleRelayErr error
 	exitControlURL        string
 	exitDataAddr          string
 	directoryURLs         []string
@@ -132,6 +136,12 @@ const defaultEntryMaxRateBuckets = 65536
 const defaultEntryMaxAbuseEntries = 65536
 const rateBucketRetentionSec int64 = 3
 const trustedDirectoryKeysFileMaxBytes int64 = 1 * 1024 * 1024
+const middleRelayMinReputationScore = 0.5
+const middleRelayMinUptimeScore = 0.5
+const middleRelayMinCapacityScore = 0.5
+const middleRelayMaxAbusePenalty = 0.5
+
+var sharedAddressSpaceCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 func New() *Service {
 	addr := os.Getenv("ENTRY_ADDR")
@@ -169,8 +179,8 @@ func New() *Service {
 	directoryMinSources := envIntOr("ENTRY_DIRECTORY_MIN_SOURCES", "DIRECTORY_MIN_SOURCES", 1)
 	directoryMinOperators := envIntOr("ENTRY_DIRECTORY_MIN_OPERATORS", "DIRECTORY_MIN_OPERATORS", 1)
 	directoryMinVotes := envIntOr("ENTRY_DIRECTORY_MIN_RELAY_VOTES", "DIRECTORY_MIN_RELAY_VOTES", 1)
-	directoryTrustStrict := envBoolOr("ENTRY_DIRECTORY_TRUST_STRICT", "DIRECTORY_TRUST_STRICT", true)
-	directoryTrustTOFU := envBoolOr("ENTRY_DIRECTORY_TRUST_TOFU", "DIRECTORY_TRUST_TOFU", false)
+	directoryTrustStrict, directoryTrustStrictErr := envStrictBoolOr("ENTRY_DIRECTORY_TRUST_STRICT", "DIRECTORY_TRUST_STRICT", true)
+	directoryTrustTOFU, directoryTrustTOFUErr := envStrictBoolOr("ENTRY_DIRECTORY_TRUST_TOFU", "DIRECTORY_TRUST_TOFU", false)
 	directoryTrustFile := os.Getenv("ENTRY_DIRECTORY_TRUSTED_KEYS_FILE")
 	if directoryTrustFile == "" {
 		directoryTrustFile = os.Getenv("DIRECTORY_TRUSTED_KEYS_FILE")
@@ -183,8 +193,14 @@ func New() *Service {
 		routeTTL = time.Duration(v) * time.Second
 	}
 	liveWGMode := os.Getenv("ENTRY_LIVE_WG_MODE") == "1"
-	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ENTRY_BETA_STRICT") == "1"
-	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ENTRY_PROD_STRICT") == "1"
+	betaStrict, betaStrictErr := envStrictBoolOr("BETA_STRICT_MODE", "ENTRY_BETA_STRICT", false)
+	prodStrict, prodStrictErr := envStrictBoolOr("PROD_STRICT_MODE", "ENTRY_PROD_STRICT", false)
+	strictModeParseErr := firstEnvParseError(
+		annotateEnvParseError("BETA_STRICT_MODE/ENTRY_BETA_STRICT", betaStrictErr),
+		annotateEnvParseError("PROD_STRICT_MODE/ENTRY_PROD_STRICT", prodStrictErr),
+		annotateEnvParseError("ENTRY_DIRECTORY_TRUST_STRICT/DIRECTORY_TRUST_STRICT", directoryTrustStrictErr),
+		annotateEnvParseError("ENTRY_DIRECTORY_TRUST_TOFU/DIRECTORY_TRUST_TOFU", directoryTrustTOFUErr),
+	)
 	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("ENTRY_WG_ONLY_MODE") == "1"
 	if prodStrict {
 		wgOnlyMode = true
@@ -194,6 +210,10 @@ func New() *Service {
 		operatorID = strings.TrimSpace(os.Getenv("DIRECTORY_OPERATOR_ID"))
 	}
 	requireDistinctExitOp := os.Getenv("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR") == "1"
+	requireMiddleRelay, requireMiddleRelayErr := envStrictBoolOr("ENTRY_REQUIRE_MIDDLE_RELAY", "", false)
+	if betaStrict || prodStrict {
+		requireMiddleRelay = true
+	}
 	openRPS := 20
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_OPEN_RPS")); err == nil && v > 0 {
 		openRPS = v
@@ -238,8 +258,11 @@ func New() *Service {
 		wgOnlyMode:            wgOnlyMode,
 		betaStrict:            betaStrict,
 		prodStrict:            prodStrict,
+		strictModeParseErr:    strictModeParseErr,
 		operatorID:            operatorID,
 		requireDistinctExitOp: requireDistinctExitOp,
+		requireMiddleRelay:    requireMiddleRelay,
+		requireMiddleRelayErr: requireMiddleRelayErr,
 		exitControlURL:        exitControlURL,
 		exitDataAddr:          exitDataAddr,
 		directoryURLs:         directoryURLs,
@@ -286,9 +309,9 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
-	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t wg_only=%t distinct_exit_operator=%t operator_id=%s rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
+	log.Printf("entry route discovery: directories=%d min_sources=%d min_operators=%d min_votes=%d trust_strict=%t live_wg_mode=%t wg_only=%t distinct_exit_operator=%t require_middle_relay=%t operator_id=%s rps=%d ban_threshold=%d ban_sec=%d max_inflight=%d client_rebind_sec=%d",
 		len(s.directoryURLs), maxInt(1, s.directoryMinSources), maxInt(1, s.directoryMinOperators), maxInt(1, s.directoryMinVotes), s.directoryTrustStrict,
-		s.liveWGMode, s.wgOnlyMode, s.requireDistinctExitOp, strings.TrimSpace(s.operatorID), s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
+		s.liveWGMode, s.wgOnlyMode, s.requireDistinctExitOp, s.requireMiddleRelay, strings.TrimSpace(s.operatorID), s.openRPS, s.openBanThreshold, int(s.openBanDuration/time.Second), s.openMaxInflight, int(s.clientRebindAfter/time.Second))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
@@ -331,6 +354,15 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.strictModeParseErr != nil {
+		return s.strictModeParseErr
+	}
+	if s.requireMiddleRelayErr != nil {
+		return fmt.Errorf("ENTRY_REQUIRE_MIDDLE_RELAY invalid: %w", s.requireMiddleRelayErr)
+	}
+	if s.betaStrict || s.prodStrict {
+		s.requireMiddleRelay = true
+	}
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
@@ -354,6 +386,9 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if s.directoryTrustTOFU {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_DIRECTORY_TRUST_TOFU=0")
+		}
+		if envEnabled(allowDangerousOutboundPrivateDNS) {
+			return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousOutboundPrivateDNS)
 		}
 		if !s.requireDistinctExitOp {
 			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1")
@@ -576,6 +611,20 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			expires = time.Now().Add(10 * time.Minute).Unix()
 		}
 		transport := normalizePathTransport(resp.Transport, req.Transport)
+		if s.liveWGMode && transport != "wireguard-udp" {
+			s.closeSessionBestEffort(r.Context(), route.controlURL, req.SessionID, strings.TrimSpace(resp.SessionKeyID))
+			log.Printf("entry rejected path open response in live mode due to non-wireguard transport req=%q exit=%q normalized=%q route=%s",
+				strings.TrimSpace(req.Transport), strings.TrimSpace(resp.Transport), transport, route.controlURL)
+			resp.Accepted = false
+			resp.Reason = "transport must be wireguard-udp in entry live mode"
+			resp.SessionID = ""
+			resp.EntryDataAddr = ""
+			resp.SessionExp = 0
+			resp.Transport = ""
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
 		s.mu.Lock()
 		s.sessions[sessionID] = sessionState{
 			exitDataAddr:   route.dataAddr,
@@ -895,11 +944,34 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	s.mu.Lock()
-	delete(s.sessions, req.SessionID)
-	s.mu.Unlock()
+	if resp.Closed {
+		s.mu.Lock()
+		delete(s.sessions, req.SessionID)
+		s.mu.Unlock()
+	} else {
+		log.Printf("entry close session deferred session=%s reason=%s", req.SessionID, strings.TrimSpace(resp.Reason))
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) closeSessionBestEffort(ctx context.Context, exitControlURL string, sessionID string, sessionKeyID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	exitControlURL = strings.TrimSpace(exitControlURL)
+	if sessionID == "" || exitControlURL == "" {
+		return
+	}
+	resp, err := s.forwardPathClose(ctx, exitControlURL, proto.PathCloseRequest{
+		SessionID:    sessionID,
+		SessionKeyID: strings.TrimSpace(sessionKeyID),
+	})
+	if err != nil {
+		log.Printf("entry session cleanup warning session=%s err=%v", sessionID, err)
+		return
+	}
+	if !resp.Closed {
+		log.Printf("entry session cleanup warning session=%s reason=%s", sessionID, strings.TrimSpace(resp.Reason))
+	}
 }
 
 func (s *Service) forwardPathClose(ctx context.Context, exitControlURL string, in proto.PathCloseRequest) (proto.PathCloseResponse, error) {
@@ -1006,7 +1078,7 @@ func allowForwardPayload(transport string, payload []byte, liveWGMode bool) (boo
 		return true, ""
 	}
 	if strings.TrimSpace(transport) != "wireguard-udp" {
-		return true, ""
+		return false, "transport-must-be-wireguard-live"
 	}
 	_, raw, err := relay.ParseOpaquePayload(payload)
 	if err != nil {
@@ -1077,9 +1149,17 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 			if desc.Role != "exit" || desc.RelayID != exitID {
 				continue
 			}
+			descControlURL := normalizeHTTPURL(desc.ControlURL)
+			descDataAddr := strings.TrimSpace(desc.Endpoint)
+			if s.betaStrict || s.prodStrict {
+				if descControlURL == "" || descDataAddr == "" {
+					lastErr = fmt.Errorf("strict mode requires directory route control_url and endpoint")
+					continue
+				}
+			}
 			route := normalizeRoute(exitRoute{
-				controlURL: normalizeHTTPURL(desc.ControlURL),
-				dataAddr:   strings.TrimSpace(desc.Endpoint),
+				controlURL: descControlURL,
+				dataAddr:   descDataAddr,
 				operatorID: strings.TrimSpace(desc.OperatorID),
 				fetchedAt:  now,
 			}, fallback)
@@ -1134,24 +1214,27 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.PathOpenRequest, route exitRoute) string {
 	middleRelayID := strings.TrimSpace(req.MiddleRelayID)
 	if middleRelayID == "" {
+		if s.requireMiddleRelay {
+			return "middle-relay-required"
+		}
 		return ""
 	}
 	exitID := strings.TrimSpace(req.ExitID)
 	if exitID != "" && middleRelayID == exitID {
 		return "middle-relay-equals-exit"
 	}
-	useCache := !(s.betaStrict || s.prodStrict)
+	useCache := !(s.betaStrict || s.prodStrict || s.requireMiddleRelay)
 	desc, err := s.resolveRelayDescriptorWithCachePolicy(ctx, middleRelayID, useCache)
 	if err != nil {
 		return "unknown-middle-relay"
 	}
-	requireCanonicalMiddleRole := s.betaStrict || s.prodStrict
+	requireCanonicalMiddleRole := s.betaStrict || s.prodStrict || s.requireMiddleRelay
 	if !relaySupportsMiddleDescriptorForPolicy(desc, requireCanonicalMiddleRole) {
 		return "middle-relay-role-invalid"
 	}
 	middleOp := strings.TrimSpace(desc.OperatorID)
 	if middleOp == "" {
-		if s.betaStrict || s.prodStrict || s.requireDistinctExitOp {
+		if s.betaStrict || s.prodStrict || s.requireDistinctExitOp || s.requireMiddleRelay {
 			return "middle-relay-operator-missing"
 		}
 		return ""
@@ -1366,7 +1449,10 @@ func relaySupportsMiddleDescriptorForPolicy(relay proto.RelayDescriptor, require
 	if relayDescriptorHasMalformedMiddleRoleMetadata(relay) {
 		return false
 	}
-	return hopRoleIsMiddleDescriptor(relay.Role)
+	if !hopRoleIsMiddleDescriptor(relay.Role) {
+		return false
+	}
+	return !relayDescriptorHasInvalidMiddleRuntimeAdmission(relay)
 }
 
 func relayDescriptorHasMalformedMiddleRoleMetadata(relay proto.RelayDescriptor) bool {
@@ -1380,6 +1466,36 @@ func relayDescriptorHasMalformedMiddleRoleMetadata(relay proto.RelayDescriptor) 
 	}
 	for _, capability := range relay.Capabilities {
 		if hopRoleIsMiddleDescriptor(capability) {
+			return true
+		}
+	}
+	return false
+}
+
+func relayDescriptorHasInvalidMiddleRuntimeAdmission(relay proto.RelayDescriptor) bool {
+	if !hopRoleIsMiddleDescriptor(relay.Role) {
+		return false
+	}
+	if relay.Reputation < middleRelayMinReputationScore {
+		return true
+	}
+	if relay.Uptime < middleRelayMinUptimeScore {
+		return true
+	}
+	if relay.Capacity < middleRelayMinCapacityScore {
+		return true
+	}
+	if relay.AbusePenalty > middleRelayMaxAbusePenalty {
+		return true
+	}
+	for _, hopRole := range relay.HopRoles {
+		if !hopRoleIsMiddleDescriptor(hopRole) {
+			return true
+		}
+	}
+	for _, capability := range relay.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "two-hop", "tiered-policy":
 			return true
 		}
 	}
@@ -1798,6 +1914,11 @@ func isDisallowedOutboundDialIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		if addr, ok := netip.AddrFromSlice(ipv4); ok && sharedAddressSpaceCGNATPrefix.Contains(addr) {
+			return true
+		}
+	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
@@ -1888,6 +2009,9 @@ func (s *Service) enforceDirectoryTrustSet(pubKeys []string) error {
 		}
 	}
 	if s.directoryTrustTOFU && len(trusted) == 0 {
+		if len(filtered) != 1 {
+			return fmt.Errorf("directory TOFU bootstrap requires exactly 1 pubkey, got %d", len(filtered))
+		}
 		if err := appendTrustedKey(s.directoryTrustFile, filtered[0]); err != nil {
 			return err
 		}
@@ -2099,6 +2223,76 @@ func envBoolOr(primary string, fallback string, def bool) bool {
 		return raw == "1"
 	}
 	return def
+}
+
+func parseStrictBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected one of: 1|0|true|false|yes|no|on|off")
+	}
+}
+
+func envStrictBoolOr(primary string, fallback string, def bool) (bool, error) {
+	primarySet := false
+	primaryValue := false
+	if raw, ok := os.LookupEnv(primary); ok {
+		primarySet = true
+		if strings.TrimSpace(raw) == "" {
+			return false, fmt.Errorf("value must not be empty")
+		}
+		parsed, err := parseStrictBool(raw)
+		if err != nil {
+			return false, err
+		}
+		primaryValue = parsed
+	}
+
+	fallbackSet := false
+	fallbackValue := false
+	if fallback != "" {
+		if raw, ok := os.LookupEnv(fallback); ok {
+			fallbackSet = true
+			if strings.TrimSpace(raw) == "" {
+				return false, fmt.Errorf("value must not be empty")
+			}
+			parsed, err := parseStrictBool(raw)
+			if err != nil {
+				return false, err
+			}
+			fallbackValue = parsed
+		}
+	}
+
+	if primarySet && fallbackSet {
+		return primaryValue || fallbackValue, nil
+	}
+	if primarySet {
+		return primaryValue, nil
+	}
+	if fallbackSet {
+		return fallbackValue, nil
+	}
+	return def, nil
+}
+
+func annotateEnvParseError(name string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s invalid: %w", name, err)
+}
+
+func firstEnvParseError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func envEnabled(name string) bool {

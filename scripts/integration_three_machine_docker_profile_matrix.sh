@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash mktemp chmod grep tail mkdir cat; do
+for cmd in bash mktemp chmod grep tail mkdir cat jq; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -146,13 +146,25 @@ if [[ -z "$dry_line_1hop" || -z "$dry_line_2hop" ]]; then
   cat "$dry_run_out"
   exit 1
 fi
-assert_token "$dry_line_1hop" '--subject inv-integration-subject' "missing subject forwarding in 1hop dry-run command"
+assert_token "$dry_line_1hop" '--subject' "missing subject flag forwarding in 1hop dry-run command"
+assert_token "$dry_line_1hop" 'REDACTED' "expected redacted subject value in 1hop dry-run command"
+if [[ "$dry_line_1hop" == *"inv-integration-subject"* ]]; then
+  echo "unexpected plaintext subject leakage in 1hop dry-run command"
+  cat "$dry_run_out"
+  exit 1
+fi
 assert_token "$dry_line_1hop" '--bootstrap-directory http://198.51.100.20:8081' "missing bootstrap-directory forwarding in 1hop dry-run command"
 assert_token "$dry_line_1hop" '--reset-data 1' "expected first profile dry-run command to reset data"
 assert_token "$dry_line_1hop" '--distinct-operators 0' "expected 1hop dry-run command to force --distinct-operators 0"
 assert_token "$dry_line_1hop" '--beta-profile 0' "expected 1hop dry-run command to force --beta-profile 0"
 assert_token "$dry_line_1hop" '--prod-profile 0' "expected 1hop dry-run command to force --prod-profile 0"
-assert_token "$dry_line_2hop" '--subject inv-integration-subject' "missing subject forwarding in 2hop dry-run command"
+assert_token "$dry_line_2hop" '--subject' "missing subject flag forwarding in 2hop dry-run command"
+assert_token "$dry_line_2hop" 'REDACTED' "expected redacted subject value in 2hop dry-run command"
+if [[ "$dry_line_2hop" == *"inv-integration-subject"* ]]; then
+  echo "unexpected plaintext subject leakage in 2hop dry-run command"
+  cat "$dry_run_out"
+  exit 1
+fi
 assert_token "$dry_line_2hop" '--bootstrap-directory http://198.51.100.20:8081' "missing bootstrap-directory forwarding in 2hop dry-run command"
 assert_token "$dry_line_2hop" '--reset-data 0' "expected subsequent profile dry-run command to preserve data"
 assert_token "$dry_line_2hop" '--distinct-operators 1' "expected 2hop dry-run command to keep --distinct-operators 1"
@@ -217,5 +229,125 @@ fi
 assert_token "$dry_line_1hop_strict_flags" '--beta-profile 0' "expected 1hop strict-flag dry-run command to force --beta-profile 0"
 assert_token "$dry_line_1hop_strict_flags" '--prod-profile 0' "expected 1hop strict-flag dry-run command to force --prod-profile 0"
 assert_token "$dry_line_1hop_strict_flags" '--distinct-operators 0' "expected 1hop strict-flag dry-run command to force --distinct-operators 0"
+
+echo "[three-machine-docker-profile-matrix] failing profile summary emits reduction helper contract"
+FAKE_READINESS="$TMP_DIR/fake_three_machine_docker_readiness.sh"
+cat >"$FAKE_READINESS" <<'EOF_FAKE_READINESS'
+#!/usr/bin/env bash
+set -euo pipefail
+
+profile=""
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --path-profile)
+      profile="${2:-}"
+      shift 2
+      ;;
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$profile" || -z "$summary_json" ]]; then
+  echo "fake readiness requires --path-profile and --summary-json"
+  exit 2
+fi
+
+mkdir -p "$(dirname "$summary_json")"
+status="pass"
+rc=0
+notes="synthetic readiness pass"
+command_rc=0
+if [[ "$profile" == "${FAKE_READINESS_FAIL_PROFILE:-2hop}" ]]; then
+  status="fail"
+  rc="${FAKE_READINESS_FAIL_RC:-41}"
+  notes="synthetic readiness fail"
+  command_rc="${FAKE_READINESS_FAIL_COMMAND_RC:-7}"
+fi
+
+cat >"$summary_json" <<EOF_FAKE_READINESS_SUMMARY
+{
+  "version": 1,
+  "status": "$status",
+  "rc": $rc,
+  "notes": "$notes"
+}
+EOF_FAKE_READINESS_SUMMARY
+
+exit "$command_rc"
+EOF_FAKE_READINESS
+chmod +x "$FAKE_READINESS"
+
+matrix_fail_summary="$TMP_DIR/matrix_fail_summary.json"
+matrix_fail_report="$TMP_DIR/matrix_fail_report.md"
+set +e
+THREE_MACHINE_DOCKER_PROFILE_MATRIX_READINESS_SCRIPT="$FAKE_READINESS" \
+FAKE_READINESS_FAIL_PROFILE="2hop" \
+./scripts/three_machine_docker_profile_matrix.sh \
+  --profiles 1hop,2hop \
+  --run-validate 0 \
+  --run-soak 0 \
+  --run-peer-failover 0 \
+  --subject integration-subject-redaction-check \
+  --reports-dir "$TMP_DIR/matrix_fail_reports" \
+  --summary-json "$matrix_fail_summary" \
+  --report-md "$matrix_fail_report" \
+  --print-summary-json 0 >"$TMP_DIR/matrix_fail_run.log" 2>&1
+matrix_fail_rc=$?
+set -e
+
+if [[ "$matrix_fail_rc" -eq 0 ]]; then
+  echo "expected failing synthetic matrix run to return non-zero"
+  cat "$TMP_DIR/matrix_fail_run.log"
+  exit 1
+fi
+if [[ ! -f "$matrix_fail_summary" ]]; then
+  echo "expected failing synthetic matrix summary JSON missing"
+  cat "$TMP_DIR/matrix_fail_run.log"
+  exit 1
+fi
+if [[ ! -f "$matrix_fail_report" ]]; then
+  echo "expected failing synthetic matrix report markdown missing"
+  cat "$TMP_DIR/matrix_fail_run.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .summary.profiles_total == 2
+  and .summary.profiles_pass == 1
+  and .summary.profiles_fail == 1
+  and .reduction.available == true
+  and .reduction.failed_profiles == ["2hop"]
+  and .reduction.failed_profiles_count == 1
+  and .reduction.failed_profiles_csv == "2hop"
+  and (.reduction.rerun_failed_profiles_command | contains("--profiles 2hop"))
+  and (.reduction.rerun_failed_profiles_command | contains("--run-validate 0"))
+  and (.reduction.rerun_failed_profiles_command | contains("--run-soak 0"))
+  and (.reduction.rerun_failed_profiles_command | contains("--run-peer-failover 0"))
+  and (.reduction.rerun_failed_profiles_command | contains("--subject"))
+  and (.reduction.rerun_failed_profiles_command | contains("REDACTED"))
+  and ((.reduction.rerun_failed_profiles_command | contains("integration-subject-redaction-check")) | not)
+' "$matrix_fail_summary" >/dev/null; then
+  echo "failing synthetic matrix summary missing reduction helper contract fields"
+  cat "$matrix_fail_summary"
+  exit 1
+fi
+if ! grep -F '## Reduction Helper' "$matrix_fail_report" >/dev/null 2>&1; then
+  echo "expected reduction helper section in matrix markdown report"
+  cat "$matrix_fail_report"
+  exit 1
+fi
+if ! grep -F -- '--profiles 2hop' "$matrix_fail_report" >/dev/null 2>&1; then
+  echo "expected failing profile rerun helper command in matrix markdown report"
+  cat "$matrix_fail_report"
+  exit 1
+fi
 
 echo "three machine docker profile matrix integration check ok"

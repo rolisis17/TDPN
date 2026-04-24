@@ -101,3 +101,38 @@ func TestHandlePathCloseRetainsSessionOnForwardFailure(t *testing.T) {
 		t.Fatal("expected session to remain when close forwarding fails")
 	}
 }
+
+func TestHandlePathCloseRetainsSessionWhenExitReportsUnclosed(t *testing.T) {
+	t.Parallel()
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		"http://exit.local/v1/path/close": jsonResp(proto.PathCloseResponse{Closed: false, Reason: "wg remove failed"}),
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions: map[string]sessionState{
+			"sess-4": {
+				exitControlURL: "http://exit.local",
+				sessionKeyID:   "good-key",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sess-4","session_key_id":"good-key"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathCloseResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Closed {
+		t.Fatalf("expected unclosed response propagated, got %+v", resp)
+	}
+	if _, ok := s.sessions["sess-4"]; !ok {
+		t.Fatal("expected session retained when exit reports close failure")
+	}
+}

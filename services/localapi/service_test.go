@@ -3059,6 +3059,9 @@ func TestHandleConfig(t *testing.T) {
 		if got, _ := configMap["gpm_auth_verify_require_metadata_policy_source"].(string); got != "production-default" {
 			t.Fatalf("gpm_auth_verify_require_metadata_policy_source=%q want=%q", got, "production-default")
 		}
+		if got, _ := configMap["gpm_auth_verify_require_wallet_extension"].(bool); !got {
+			t.Fatalf("gpm_auth_verify_require_wallet_extension=%v want=true", configMap["gpm_auth_verify_require_wallet_extension"])
+		}
 		if got, _ := configMap["gpm_auth_verify_require_wallet_extension_source"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_require_wallet_extension_source=%v want=true", configMap["gpm_auth_verify_require_wallet_extension_source"])
 		}
@@ -8123,6 +8126,22 @@ func TestGPMOperatorApproveConcurrencyGuard(t *testing.T) {
 		}
 	})
 
+	t.Run("matching if_updated_at_utc accepts stored nanosecond precision", func(t *testing.T) {
+		updatedAt := time.Date(2026, time.January, 15, 4, 5, 6, 789_000_000, time.UTC)
+		svc := newOperatorApproveService(t, updatedAt, "operator-concurrency-nanos")
+		token := "gpm-admin-concurrency-nanos"
+		putAdminSession(svc, token)
+
+		body := `{"wallet_address":"cosmos1approvalconcurrency","approved":true,"if_updated_at_utc":"` + updatedAt.Format(time.RFC3339) + `","session_token":"` + token + `"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["decision"].(string); got != "approved" {
+			t.Fatalf("decision=%q want=approved payload=%v", got, payload)
+		}
+	})
+
 	t.Run("matching if_updated_at_utc allows approval and rejection", func(t *testing.T) {
 		cases := []struct {
 			name         string
@@ -8780,6 +8799,38 @@ func TestReadBootstrapManifestCacheWithHMACKeyReverification(t *testing.T) {
 		}
 		if len(manifest.BootstrapDirectories) != 1 || manifest.BootstrapDirectories[0] != directory {
 			t.Fatalf("bootstrap_directories=%v want=%v", manifest.BootstrapDirectories, []string{directory})
+		}
+	})
+
+	t.Run("compatibility cache write does not force signature_verified true", func(t *testing.T) {
+		svc := newCacheService(t, "")
+		directory := "https://directory-compat-write.globalprivatemesh.example:8081"
+		manifest := newManifest(directory)
+		if err := svc.writeBootstrapManifestCache(manifest, false, nil, ""); err != nil {
+			t.Fatalf("write cache: %v", err)
+		}
+
+		cacheBody, err := os.ReadFile(svc.gpmManifestCache)
+		if err != nil {
+			t.Fatalf("read cache: %v", err)
+		}
+		var cache gpmBootstrapManifestCacheFile
+		if err := json.Unmarshal(cacheBody, &cache); err != nil {
+			t.Fatalf("unmarshal cache: %v", err)
+		}
+		if cache.SignatureVerified {
+			t.Fatalf("cache.signature_verified=%t want=false", cache.SignatureVerified)
+		}
+
+		gotManifest, signatureVerified, err := svc.readBootstrapManifestCache()
+		if err != nil {
+			t.Fatalf("read cache: %v", err)
+		}
+		if signatureVerified {
+			t.Fatalf("signature_verified=%t want=false", signatureVerified)
+		}
+		if len(gotManifest.BootstrapDirectories) != 1 || gotManifest.BootstrapDirectories[0] != directory {
+			t.Fatalf("bootstrap_directories=%v want=%v", gotManifest.BootstrapDirectories, []string{directory})
 		}
 	})
 
@@ -10102,5 +10153,220 @@ func TestGPMAuditRecentHandlerRejectsOversizedAuditFile(t *testing.T) {
 	errMsg, _ := payload["error"].(string)
 	if !strings.Contains(errMsg, "maximum readable size") {
 		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMGapSummaryHandlerSuccess(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "gpm_gap_scan_summary.json")
+	summaryBody, err := json.MarshalIndent(map[string]any{
+		"version": 1,
+		"schema": map[string]any{
+			"id":    "gpm_gap_scan_summary",
+			"major": 1,
+			"minor": 0,
+		},
+		"generated_at_utc": time.Now().UTC().Format(time.RFC3339),
+		"status":           "ok",
+		"counts": map[string]any{
+			"in_progress":  1,
+			"missing_next": 2,
+			"total":        3,
+		},
+		"items": []map[string]any{
+			{
+				"id":              "in_progress_01",
+				"section":         "in_progress",
+				"ordinal":         1,
+				"text":            "Finish relay telemetry contract",
+				"normalized_text": "finish relay telemetry contract",
+			},
+			{
+				"id":              "missing_next_01",
+				"section":         "missing_next",
+				"ordinal":         1,
+				"text":            "Wire strict relay trust binding",
+				"normalized_text": "wire strict relay trust binding",
+			},
+			{
+				"id":              "missing_next_02",
+				"section":         "missing_next",
+				"ordinal":         2,
+				"text":            "Publish operator evidence pack",
+				"normalized_text": "publish operator evidence pack",
+			},
+		},
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal summary fixture: %v", err)
+	}
+	if err := os.WriteFile(summaryPath, summaryBody, 0o600); err != nil {
+		t.Fatalf("write summary fixture: %v", err)
+	}
+
+	svc := &Service{
+		addr:                  "127.0.0.1:8095",
+		allowUnauthLoopback:   true,
+		gpmGapScanSummaryPath: summaryPath,
+		gpmState:              newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if ok, _ := payload["ok"].(bool); !ok {
+		t.Fatalf("ok=%v payload=%v", ok, payload)
+	}
+	if status, _ := payload["status"].(string); status != "ok" {
+		t.Fatalf("status=%q want=ok payload=%v", status, payload)
+	}
+	if gotPath, _ := payload["artifact_path"].(string); gotPath != summaryPath {
+		t.Fatalf("artifact_path=%q want=%q payload=%v", gotPath, summaryPath, payload)
+	}
+
+	counts, _ := payload["counts"].(map[string]any)
+	if counts == nil {
+		t.Fatalf("counts missing payload=%v", payload)
+	}
+	if got, _ := counts["in_progress"].(float64); int(got) != 1 {
+		t.Fatalf("counts.in_progress=%v want=1 payload=%v", got, payload)
+	}
+	if got, _ := counts["missing_next"].(float64); int(got) != 2 {
+		t.Fatalf("counts.missing_next=%v want=2 payload=%v", got, payload)
+	}
+	if got, _ := counts["total"].(float64); int(got) != 3 {
+		t.Fatalf("counts.total=%v want=3 payload=%v", got, payload)
+	}
+
+	keyGaps, _ := payload["key_gaps"].([]any)
+	if len(keyGaps) != 2 {
+		t.Fatalf("key_gaps len=%d want=2 payload=%v", len(keyGaps), payload)
+	}
+	if got, _ := keyGaps[0].(string); got != "Wire strict relay trust binding" {
+		t.Fatalf("key_gaps[0]=%q want=%q payload=%v", got, "Wire strict relay trust binding", payload)
+	}
+	nextActions, _ := payload["next_actions"].([]any)
+	if len(nextActions) != 2 {
+		t.Fatalf("next_actions len=%d want=2 payload=%v", len(nextActions), payload)
+	}
+	if got, _ := nextActions[1].(string); got != "Publish operator evidence pack" {
+		t.Fatalf("next_actions[1]=%q want=%q payload=%v", got, "Publish operator evidence pack", payload)
+	}
+}
+
+func TestGPMGapSummaryHandlerMissingArtifactFailsClosed(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "missing_gpm_gap_scan_summary.json")
+	svc := &Service{
+		addr:                  "127.0.0.1:8095",
+		allowUnauthLoopback:   true,
+		gpmGapScanSummaryPath: summaryPath,
+		gpmState:              newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if status, _ := payload["status"].(string); status != "artifact_missing" {
+		t.Fatalf("status=%q want=artifact_missing payload=%v", status, payload)
+	}
+	if ok, _ := payload["ok"].(bool); ok {
+		t.Fatalf("ok=%v want=false payload=%v", ok, payload)
+	}
+}
+
+func TestGPMGapSummaryHandlerMalformedArtifactFailsClosed(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "malformed_gpm_gap_scan_summary.json")
+	if err := os.WriteFile(summaryPath, []byte(`{"schema":{"id":"gpm_gap_scan_summary"},"status":"ok","counts":{"in_progress":1}}`), 0o600); err != nil {
+		t.Fatalf("write malformed summary fixture: %v", err)
+	}
+	svc := &Service{
+		addr:                  "127.0.0.1:8095",
+		allowUnauthLoopback:   true,
+		gpmGapScanSummaryPath: summaryPath,
+		gpmState:              newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusInternalServerError {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if status, _ := payload["status"].(string); status != "artifact_malformed" {
+		t.Fatalf("status=%q want=artifact_malformed payload=%v", status, payload)
+	}
+	if ok, _ := payload["ok"].(bool); ok {
+		t.Fatalf("ok=%v want=false payload=%v", ok, payload)
+	}
+}
+
+func TestGPMGapSummaryHandlerStaleArtifactFailsClosed(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "stale_gpm_gap_scan_summary.json")
+	staleGeneratedAt := time.Now().UTC().Add(-(gpmGapSummaryMaxAge + time.Hour)).Format(time.RFC3339)
+	body := []byte(`{"schema":{"id":"gpm_gap_scan_summary"},"status":"ok","generated_at_utc":"` + staleGeneratedAt + `","counts":{"in_progress":0,"missing_next":0,"total":0},"items":[]}`)
+	if err := os.WriteFile(summaryPath, body, 0o600); err != nil {
+		t.Fatalf("write stale summary fixture: %v", err)
+	}
+	svc := &Service{
+		addr:                  "127.0.0.1:8095",
+		allowUnauthLoopback:   true,
+		gpmGapScanSummaryPath: summaryPath,
+		gpmState:              newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusInternalServerError {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if status, _ := payload["status"].(string); status != "artifact_malformed" {
+		t.Fatalf("status=%q want=artifact_malformed payload=%v", status, payload)
+	}
+	if ok, _ := payload["ok"].(bool); ok {
+		t.Fatalf("ok=%v want=false payload=%v", ok, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(strings.ToLower(errMsg), "stale") {
+		t.Fatalf("error=%q want stale marker payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMGapSummaryHandlerMethodNotAllowed(t *testing.T) {
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmState:            newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodPost, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusMethodNotAllowed {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if got, _ := payload["error"].(string); got != "method not allowed" {
+		t.Fatalf("error=%q want=method not allowed payload=%v", got, payload)
+	}
+}
+
+func TestGPMGapSummaryHandlerOversizedArtifactFailsClosed(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "oversized_gpm_gap_scan_summary.json")
+	body := []byte("{\"schema\":{\"id\":\"gpm_gap_scan_summary\"},\"status\":\"ok\",\"generated_at_utc\":\"" + time.Now().UTC().Format(time.RFC3339) + "\",\"counts\":{\"in_progress\":0,\"missing_next\":0,\"total\":0},\"items\":[]}")
+	padding := strings.Repeat("x", gpmGapScanSummaryBodyLimit)
+	if err := os.WriteFile(summaryPath, append(body, []byte(padding)...), 0o600); err != nil {
+		t.Fatalf("write oversized summary fixture: %v", err)
+	}
+
+	svc := &Service{
+		addr:                  "127.0.0.1:8095",
+		allowUnauthLoopback:   true,
+		gpmGapScanSummaryPath: summaryPath,
+		gpmState:              newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusInternalServerError {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if status, _ := payload["status"].(string); status != "artifact_unreadable" {
+		t.Fatalf("status=%q want=artifact_unreadable payload=%v", status, payload)
+	}
+	if ok, _ := payload["ok"].(bool); ok {
+		t.Fatalf("ok=%v want=false payload=%v", ok, payload)
 	}
 }

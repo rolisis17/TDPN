@@ -64,11 +64,13 @@ type CosmosAdapter struct {
 
 	signedTxSubmitter cosmosSignedTxSubmitter
 
-	stateMu       sync.Mutex
-	closed        bool
-	deferredOp    map[string]cosmosDeferredOperation
-	deferredOpMax int
-	backlogFull   bool
+	stateMu                         sync.Mutex
+	closed                          bool
+	deferredOp                      map[string]cosmosDeferredOperation
+	deferredOpMax                   int
+	backlogFull                     bool
+	deferredPersistenceFailureCount int
+	deferredPersistenceFailureLast  string
 
 	workerCtx    context.Context
 	workerCancel context.CancelFunc
@@ -659,6 +661,10 @@ func (a *CosmosAdapter) SubmitSlashEvidence(_ context.Context, evidence SlashEvi
 
 func (a *CosmosAdapter) Health(ctx context.Context) error {
 	a.stateMu.Lock()
+	if a.deferredPersistenceFailureCount > 0 {
+		a.stateMu.Unlock()
+		return a.deferredPersistenceFailureError()
+	}
 	if a.backlogFull || a.deferredBacklogLimitReachedLocked() {
 		a.backlogFull = true
 		err := a.deferredBacklogLimitErrorLocked()
@@ -753,6 +759,9 @@ func (a *CosmosAdapter) updateBacklogHealthLocked() {
 func (a *CosmosAdapter) enqueue(op cosmosQueuedOperation) error {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
+	if a.deferredPersistenceFailureCount > 0 {
+		return a.deferredPersistenceFailureErrorLocked()
+	}
 	if a.closed {
 		return fmt.Errorf("cosmos adapter closed")
 	}
@@ -788,7 +797,9 @@ func (a *CosmosAdapter) runWorker() {
 func (a *CosmosAdapter) processQueuedOperation(ctx context.Context, op cosmosQueuedOperation) {
 	attempts, err := a.submitWithRetryCount(ctx, op)
 	if err != nil {
-		_ = a.markDeferredOperation(op, attempts, err, cosmosSubmitErrorRetryable(err))
+		if markErr := a.markDeferredOperation(op, attempts, err, cosmosSubmitErrorRetryable(err)); markErr != nil {
+			a.recordDeferredPersistenceFailure(op, markErr)
+		}
 		return
 	}
 	a.clearDeferredOperation(op.idempotencyKey)
@@ -808,11 +819,48 @@ func (a *CosmosAdapter) drainQueuedOperationsToDeferred(err error) {
 	for {
 		select {
 		case op := <-a.queue:
-			_ = a.markDeferredOperation(op, 0, err, false)
+			if markErr := a.markDeferredOperation(op, 0, err, false); markErr != nil {
+				a.recordDeferredPersistenceFailure(op, markErr)
+			}
 		default:
 			return
 		}
 	}
+}
+
+func (a *CosmosAdapter) recordDeferredPersistenceFailure(op cosmosQueuedOperation, markErr error) {
+	detail := "unknown"
+	if markErr != nil {
+		detail = markErr.Error()
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	a.backlogFull = true
+	a.deferredPersistenceFailureCount++
+	a.deferredPersistenceFailureLast = fmt.Sprintf(
+		"idempotency_key=%s defer_error=%s",
+		strings.TrimSpace(op.idempotencyKey),
+		detail,
+	)
+}
+
+func (a *CosmosAdapter) deferredPersistenceFailureErrorLocked() error {
+	last := strings.TrimSpace(a.deferredPersistenceFailureLast)
+	if last == "" {
+		last = "unknown"
+	}
+	return fmt.Errorf(
+		"%w: accepted operation persistence failures=%d last=%s",
+		errCosmosAdapterDeferredBacklogLimitReached,
+		a.deferredPersistenceFailureCount,
+		last,
+	)
+}
+
+func (a *CosmosAdapter) deferredPersistenceFailureError() error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.deferredPersistenceFailureErrorLocked()
 }
 
 func (a *CosmosAdapter) replayInterval() time.Duration {
@@ -879,6 +927,12 @@ func (a *CosmosAdapter) deferredOperationCount() int {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	return len(a.deferredOp)
+}
+
+func (a *CosmosAdapter) deferredPersistenceFailureSnapshot() (int, string) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.deferredPersistenceFailureCount, a.deferredPersistenceFailureLast
 }
 
 // DeferredOperationCount exposes adapter-internal deferred backlog size through

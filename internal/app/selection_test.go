@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 )
 
@@ -104,6 +107,34 @@ func TestSelectEntryExitFallbackWhenAllUnhealthy(t *testing.T) {
 	}
 	if entry.RelayID != "entry-a" || exit.RelayID != "exit-a" {
 		t.Fatalf("expected first relays fallback, got entry=%s exit=%s", entry.RelayID, exit.RelayID)
+	}
+}
+
+func TestSelectEntryExitStrictModeFailClosedWhenAllUnhealthy(t *testing.T) {
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		"http://entry-a.local/v1/health": statusResp(http.StatusServiceUnavailable),
+		"http://entry-b.local/v1/health": statusResp(http.StatusServiceUnavailable),
+		"http://exit-a.local/v1/health":  statusResp(http.StatusServiceUnavailable),
+		"http://exit-b.local/v1/health":  statusResp(http.StatusServiceUnavailable),
+	}
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: true,
+		healthCacheTTL:     0,
+		healthCache:        map[string]healthProbeState{},
+		httpClient:         &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		betaStrict:         true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "http://entry-a.local"},
+		{RelayID: "entry-b", Role: "entry", ControlURL: "http://entry-b.local"},
+		{RelayID: "exit-a", Role: "exit", ControlURL: "http://exit-a.local"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "http://exit-b.local"},
+	}
+	_, _, ok := c.selectEntryExit(context.Background(), relays)
+	if ok {
+		t.Fatalf("expected strict mode to fail closed when all relay health probes fail")
 	}
 }
 
@@ -249,6 +280,91 @@ func TestAttemptPairsFailsAfterLimit(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected attempt limit respected, got %d calls", calls)
+	}
+}
+
+func TestBootstrapUnknownExitFallbackFlagOffStrict(t *testing.T) {
+	result := runBootstrapUnknownExitFallbackScenario(t, false)
+	if result.err == nil {
+		t.Fatalf("expected bootstrap failure when unknown-exit fallback is disabled")
+	}
+	if !strings.Contains(result.err.Error(), "path open denied: unknown-exit") {
+		t.Fatalf("expected unknown-exit denial, got %v", result.err)
+	}
+	if result.pathOpenCalls != 1 {
+		t.Fatalf("expected strict mode to stop after first unknown-exit, got %d attempts", result.pathOpenCalls)
+	}
+	if len(result.pathOpenExitIDs) != 1 {
+		t.Fatalf("expected only one attempted exit, got %v", result.pathOpenExitIDs)
+	}
+}
+
+func TestBootstrapUnknownExitFallbackFlagOnRetriesNextPair(t *testing.T) {
+	result := runBootstrapUnknownExitFallbackScenario(t, true)
+	if result.err != nil {
+		t.Fatalf("expected bootstrap success with unknown-exit fallback enabled, got %v", result.err)
+	}
+	if result.pathOpenCalls != 2 {
+		t.Fatalf("expected fallback retry to second pair, got %d attempts", result.pathOpenCalls)
+	}
+	if len(result.pathOpenExitIDs) != 2 {
+		t.Fatalf("expected two attempted exits, got %v", result.pathOpenExitIDs)
+	}
+	if result.pathOpenExitIDs[0] == result.pathOpenExitIDs[1] {
+		t.Fatalf("expected fallback to move to a different pair, got attempts %v", result.pathOpenExitIDs)
+	}
+	if result.selectedExit != result.pathOpenExitIDs[1] {
+		t.Fatalf("expected fallback to select second attempted exit, selected=%s attempts=%v", result.selectedExit, result.pathOpenExitIDs)
+	}
+}
+
+func TestBootstrapStrictPreferMiddleReportsMiddleRequirement(t *testing.T) {
+	directoryURL := "http://d1.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	entry := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-a",
+		Role:       "entry",
+		ControlURL: "http://entry-a.local",
+		OperatorID: "op-a",
+		Endpoint:   "127.0.0.1:51820",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	exit := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		ControlURL: "http://exit-a.local",
+		OperatorID: "op-b",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit}}),
+	}
+
+	c := &Client{
+		directoryURLs:         []string{directoryURL},
+		directoryMinSources:   1,
+		directoryMinOperators: 1,
+		directoryMinVotes:     1,
+		subject:               "inv-test",
+		preferMiddleRelay:     true,
+		requireMiddleRelay:    false,
+		betaStrict:            true,
+		healthCheckEnabled:    false,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	err = c.bootstrap(context.Background())
+	if err == nil {
+		t.Fatalf("expected bootstrap failure when strict middle-hop policy cannot be satisfied")
+	}
+	if !strings.Contains(err.Error(), "middle-hop relay requirement not met") {
+		t.Fatalf("expected strict middle-hop failure reason, got %v", err)
 	}
 }
 
@@ -428,6 +544,69 @@ func TestRankRelayPairsThreeHopRequireMiddleRelay(t *testing.T) {
 	pairs := c.rankRelayPairs(context.Background(), relays)
 	if len(pairs) != 0 {
 		t.Fatalf("expected no pairs when strict middle relay requirement cannot be met, got %d", len(pairs))
+	}
+}
+
+func TestRankRelayPairsStrictThreeHopRequiresMiddleRelay(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		pathProfile:        "3hop",
+		preferMiddleRelay:  true,
+		requireMiddleRelay: false, // strict mode should still fail closed for 3-hop paths.
+		betaStrict:         true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
+		{RelayID: "exit-b", Role: "exit", OperatorID: "op-b"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 0 {
+		t.Fatalf("expected strict 3hop to reject entry/exit-only candidates, got %d", len(pairs))
+	}
+}
+
+func TestRankRelayPairsStrictThreeHopAcceptsAliasMiddleRole(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		pathProfile:        "3hop",
+		preferMiddleRelay:  true,
+		betaStrict:         true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
+		{RelayID: "exit-b", Role: "exit", OperatorID: "op-b"},
+		// Role alias only; no HopRoles/Capabilities.
+		{RelayID: "middle-c", Role: "micro-relay", OperatorID: "op-c"},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) == 0 {
+		t.Fatalf("expected strict 3hop to accept alias middle-role relay")
+	}
+	if !pairs[0].hasMiddle {
+		t.Fatalf("expected first ranked strict 3hop pair to include middle relay")
+	}
+	if pairs[0].middle.RelayID != "middle-c" {
+		t.Fatalf("expected middle-c to be selected, got %q", pairs[0].middle.RelayID)
+	}
+}
+
+func TestRelaySupportsMiddleHopRoleAliasesWithoutExtraMetadata(t *testing.T) {
+	aliases := []string{
+		"middle",
+		"relay",
+		"micro-relay",
+		"micro_relay",
+		"transit",
+		"three-hop-middle",
+	}
+	for _, alias := range aliases {
+		if !relaySupportsMiddleHop(proto.RelayDescriptor{Role: alias}) {
+			t.Fatalf("expected alias role %q to be accepted as middle-capable", alias)
+		}
 	}
 }
 
@@ -843,6 +1022,114 @@ func TestParseLocalityFallbackOrder(t *testing.T) {
 	}
 	if got[0] != "country" || got[1] != "region-prefix" || got[2] != "global" {
 		t.Fatalf("unexpected parsed order: %v", got)
+	}
+}
+
+type unknownExitFallbackScenarioResult struct {
+	err             error
+	pathOpenCalls   int
+	pathOpenExitIDs []string
+	selectedExit    string
+}
+
+func runBootstrapUnknownExitFallbackScenario(t *testing.T, allowUnknownFallback bool) unknownExitFallbackScenarioResult {
+	t.Helper()
+
+	directoryURL := "http://d1.local"
+	issuerURL := "http://issuer.local"
+	entryURL := "http://entry.local"
+
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	entry := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-a",
+		Role:       "entry",
+		ControlURL: entryURL,
+		OperatorID: "op-a",
+		Endpoint:   "127.0.0.1:51820",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	exitUnknown := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-unknown",
+		Role:       "exit",
+		ControlURL: "http://exit-unknown.local",
+		OperatorID: "op-b",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	exitGood := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-good",
+		Role:       "exit",
+		ControlURL: "http://exit-good.local",
+		OperatorID: "op-c",
+		Endpoint:   "127.0.0.1:51822",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+
+	pathOpenCalls := 0
+	pathOpenExitIDs := make([]string, 0, 2)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exitUnknown, exitGood}}),
+		issuerURL + "/v1/token": func(req *http.Request) (*http.Response, error) {
+			var in proto.IssueTokenRequest
+			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+				t.Fatalf("decode token request: %v", err)
+			}
+			if len(in.ExitScope) != 1 {
+				t.Fatalf("expected single exit scope, got %+v", in.ExitScope)
+			}
+			return jsonResp(proto.IssueTokenResponse{
+				Token:   "tok-" + in.ExitScope[0],
+				Expires: time.Now().Add(time.Minute).Unix(),
+			})(req)
+		},
+		entryURL + "/v1/path/open": func(req *http.Request) (*http.Response, error) {
+			pathOpenCalls++
+			var in proto.PathOpenRequest
+			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+				t.Fatalf("decode path open request: %v", err)
+			}
+			pathOpenExitIDs = append(pathOpenExitIDs, strings.TrimSpace(in.ExitID))
+			if pathOpenCalls == 1 {
+				return jsonResp(proto.PathOpenResponse{Accepted: false, Reason: "unknown-exit"})(req)
+			}
+			return jsonResp(proto.PathOpenResponse{
+				Accepted:      true,
+				SessionID:     "sess-" + strings.TrimSpace(in.ExitID),
+				SessionExp:    time.Now().Add(time.Minute).Unix(),
+				EntryDataAddr: entry.Endpoint,
+				Transport:     "policy-json",
+			})(req)
+		},
+		entryURL + "/v1/path/close": jsonResp(proto.PathCloseResponse{Closed: true}),
+	}
+
+	c := &Client{
+		directoryURLs:            []string{directoryURL},
+		directoryMinSources:      1,
+		directoryMinOperators:    1,
+		directoryMinVotes:        1,
+		issuerURL:                issuerURL,
+		subject:                  "inv-test",
+		entryURL:                 entryURL,
+		dataMode:                 "json",
+		clientWGPub:              mustRandomWGPublicKeyLike(t),
+		pathOpenMaxAttempts:      2,
+		maxPairCandidates:        2,
+		healthCheckEnabled:       false,
+		allowUnknownExitFallback: allowUnknownFallback,
+		allowDirectExitFallback:  false,
+		httpClient:               &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	err = c.bootstrap(context.Background())
+	return unknownExitFallbackScenarioResult{
+		err:             err,
+		pathOpenCalls:   pathOpenCalls,
+		pathOpenExitIDs: append([]string(nil), pathOpenExitIDs...),
+		selectedExit:    c.lastSelectedExit,
 	}
 }
 

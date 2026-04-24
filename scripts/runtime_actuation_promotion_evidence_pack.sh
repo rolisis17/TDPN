@@ -128,6 +128,18 @@ normalize_status() {
   esac
 }
 
+render_command() {
+  local rendered=""
+  local token=""
+  for token in "$@"; do
+    if [[ -n "$rendered" ]]; then
+      rendered+=" "
+    fi
+    rendered+="$(printf '%q' "$token")"
+  done
+  printf '%s' "$rendered"
+}
+
 discover_latest_promotion_cycle_summary_path() {
   local reports_dir="$1"
   local preferred="$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json"
@@ -143,6 +155,25 @@ discover_latest_promotion_cycle_summary_path() {
       -name 'runtime_actuation_promotion_cycle_*_summary.json' \
       2>/dev/null \
       | while IFS= read -r candidate; do
+          local candidate_name
+          candidate_name="$(basename "$candidate")"
+          case "$candidate_name" in
+            runtime_actuation_promotion_cycle_latest_summary.json)
+              # Preferred alias was already checked above; do not allow nested
+              # alias copies to win fallback selection.
+              continue
+              ;;
+            runtime_actuation_promotion_cycle_*_promotion_check_summary.json)
+              # Promotion-check summaries are a different schema and should not
+              # be selected as cycle summaries.
+              continue
+              ;;
+            runtime_actuation_promotion_cycle_*_summary.json)
+              ;;
+            *)
+              continue
+              ;;
+          esac
           [[ -f "$candidate" ]] || continue
           printf '%s\t%s\n' "$(file_mtime_epoch "$candidate")" "$candidate"
         done \
@@ -234,27 +265,90 @@ evaluate_promotion_cycle_summary_json() {
       elif norm_status == "fail" or norm_status == "error" or norm_status == "failed" then "fail"
       else null
       end;
-    def freshness_value:
-      if (.stages.promotion_check.summary_fresh | type) == "boolean" then
-        {known: true, fresh: .stages.promotion_check.summary_fresh, source: "stages.promotion_check.summary_fresh", generated_at_utc: null, age_sec: null}
-      elif (.summary_fresh | type) == "boolean" then
-        {known: true, fresh: .summary_fresh, source: "summary_fresh", generated_at_utc: null, age_sec: null}
-      elif (.freshness.fresh | type) == "boolean" then
-        {known: true, fresh: .freshness.fresh, source: "freshness.fresh", generated_at_utc: (.freshness.generated_at_utc // null), age_sec: (.freshness.age_sec // null)}
-      elif (.generated_at_utc | type) == "string" then
+    def bool_freshness_signals:
+      [
+        (if (.stages.promotion_check.summary_fresh | type) == "boolean" then
+          {source: "stages.promotion_check.summary_fresh", value: .stages.promotion_check.summary_fresh}
+        else
+          empty
+        end),
+        (if (.summary_fresh | type) == "boolean" then
+          {source: "summary_fresh", value: .summary_fresh}
+        else
+          empty
+        end),
+        (if (.freshness.fresh | type) == "boolean" then
+          {source: "freshness.fresh", value: .freshness.fresh}
+        else
+          empty
+        end)
+      ];
+    def timestamp_freshness_signal:
+      if (.generated_at_utc | type) == "string" then
         (try (.generated_at_utc | fromdateiso8601) catch null) as $generated_epoch
         | if $generated_epoch == null then
-            {known: false, fresh: null, source: null, generated_at_utc: .generated_at_utc, age_sec: null}
+            {
+              present: true,
+              valid: false,
+              source: "generated_at_utc",
+              generated_at_utc: .generated_at_utc,
+              age_sec: null,
+              fresh: null
+            }
           else
-            {known: true,
-             fresh: (($generated_epoch <= now) and ((now - $generated_epoch) <= $max_age_sec)),
-             source: "generated_at_utc",
-             generated_at_utc: .generated_at_utc,
-             age_sec: (now - $generated_epoch)}
+            {
+              present: true,
+              valid: true,
+              source: "generated_at_utc",
+              generated_at_utc: .generated_at_utc,
+              age_sec: (now - $generated_epoch),
+              fresh: (($generated_epoch <= now) and ((now - $generated_epoch) <= $max_age_sec))
+            }
           end
       else
-        {known: false, fresh: null, source: null, generated_at_utc: null, age_sec: null}
+        {
+          present: false,
+          valid: false,
+          source: null,
+          generated_at_utc: null,
+          age_sec: null,
+          fresh: null
+        }
       end;
+    def freshness_value:
+      (bool_freshness_signals) as $bool_signals
+      | (timestamp_freshness_signal) as $time_signal
+      | ($bool_signals | map(select(.value == false)) | length == 0) as $bool_all_fresh
+      | ($bool_signals | map(.source)) as $bool_sources
+      | ($bool_signals | length > 0) as $bool_known
+      | ($time_signal.present and $time_signal.valid) as $time_known
+      | ($time_signal.present and ($time_signal.valid | not)) as $time_invalid
+      | {
+          known: (if $time_invalid then false else ($bool_known or $time_known) end),
+          fresh: (
+            if $time_invalid then
+              false
+            else
+              (if $bool_known then $bool_all_fresh else true end)
+              and (if $time_known then ($time_signal.fresh == true) else true end)
+            end
+          ),
+          source: (
+            if $time_invalid then
+              "generated_at_utc_invalid"
+            elif $bool_known and $time_known then
+              (([$time_signal.source] + $bool_sources) | join("+"))
+            elif $time_known then
+              $time_signal.source
+            elif $bool_known then
+              ($bool_sources | join("+"))
+            else
+              null
+            end
+          ),
+          generated_at_utc: $time_signal.generated_at_utc,
+          age_sec: $time_signal.age_sec
+        };
 
     ((.schema // {}) | if (.id | type) == "string" then .id else "" end) as $schema_id
     | (.decision | canonical_decision) as $decision_norm
@@ -266,6 +360,7 @@ evaluate_promotion_cycle_summary_json() {
         (if $decision_norm == null then "decision_missing_or_invalid" else empty end),
         (if $status_norm == null then "status_missing_or_invalid" else empty end),
         (if $rc == null then "rc_missing_or_invalid" else empty end),
+        (if $freshness.source == "generated_at_utc_invalid" then "freshness_invalid_generated_at_utc" else empty end),
         (if $freshness.known == false then "freshness_unknown"
          elif $freshness.fresh == false then "freshness_stale"
          else empty
@@ -304,6 +399,10 @@ evaluate_promotion_cycle_summary_json() {
         usable: (($reasons | length) == 0)
       }
   ' "$path"
+}
+
+sanitize_json_string_array() {
+  jq -c '[ (. // [])[] | select(type == "string") | gsub("^\\s+|\\s+$"; "") | select(length > 0) ]'
 }
 
 need_cmd jq
@@ -483,16 +582,15 @@ if [[ "$source_usable" == "true" ]]; then
   if [[ "$source_status" != "pass" && "$source_status" != "warn" && "$source_status" != "fail" ]]; then
     reasons+=("runtime_actuation_promotion_cycle:status missing/invalid")
   fi
-  if [[ "$source_rc" != "0" && "$source_rc" != "1" && "$source_rc" != "2" && "$source_rc" != "3" && "$source_rc" != "4" && "$source_rc" != "5" && "$source_rc" != "6" && "$source_rc" != "7" && "$source_rc" != "8" && "$source_rc" != "9" ]]; then
-    :
+  if [[ "$source_decision" == "GO" && "$source_status" != "pass" ]]; then
+    reasons+=("runtime_actuation_promotion_cycle:go_status_not_pass")
+  fi
+  if [[ "$source_decision" == "GO" && "$source_rc" != "0" ]]; then
+    reasons+=("runtime_actuation_promotion_cycle:go_rc_non_zero")
   fi
 fi
 
-fail_closed="false"
-if [[ "$source_usable" != "true" ]]; then
-  fail_closed="true"
-fi
-
+fail_closed="true"
 decision="NO-GO"
 status="fail"
 final_rc=1
@@ -500,19 +598,32 @@ notes="Fail-closed: runtime-actuation promotion-cycle evidence is missing, inval
 
 if [[ "$source_usable" == "true" ]]; then
   decision="$source_decision"
+  fail_closed="false"
   if [[ "$decision" == "GO" && "$source_status" == "pass" && "$source_rc" == "0" ]]; then
     status="pass"
     final_rc=0
     notes="Runtime-actuation promotion evidence is healthy."
-  else
+  elif [[ "$decision" == "GO" ]]; then
+    status="fail"
+    final_rc=1
+    fail_closed="true"
+    notes="Fail-closed: runtime-actuation promotion-cycle decision is GO but source status/rc is degraded (status=${source_status:-unknown}, rc=${source_rc:-null})."
+  elif [[ "$decision" == "NO-GO" ]]; then
+    reasons+=("runtime_actuation_promotion_cycle:decision_no_go")
     if [[ "$fail_on_no_go_compat" == "1" ]]; then
       status="fail"
       final_rc=1
+      notes="Evidence is usable and runtime-actuation promotion-cycle decision is NO-GO; fail-on-no-go enforcement is active."
     else
       status="warn"
       final_rc=0
+      notes="Evidence is usable and runtime-actuation promotion-cycle decision is NO-GO; compatibility mode allows warn-only hold (fail-on-no-go=0)."
     fi
-    notes="Evidence is usable but runtime-actuation promotion-cycle decision is NO-GO."
+  else
+    status="fail"
+    final_rc=1
+    fail_closed="true"
+    notes="Fail-closed: runtime-actuation promotion-cycle decision is missing or invalid."
   fi
 fi
 
@@ -533,7 +644,17 @@ fi
 next_command=""
 next_command_reason=""
 if [[ "$needs_attention" == "true" ]]; then
-  next_command="./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/runtime_actuation_promotion_evidence_pack_summary.json --print-summary-json 1"
+  next_command="$(render_command \
+    "./scripts/easy_node.sh" \
+    "runtime-actuation-promotion-evidence-pack" \
+    "--reports-dir" "$reports_dir" \
+    "--promotion-cycle-summary-json" "$promotion_cycle_summary_json" \
+    "--fail-on-no-go" "1" \
+    "--max-age-sec" "$max_age_sec" \
+    "--summary-json" "$summary_json" \
+    "--report-md" "$report_md" \
+    "--print-summary-json" "1" \
+    "--print-report" "1")"
   if [[ "${#reasons[@]}" -gt 0 ]]; then
     next_command_reason="${reasons[0]}"
   else
@@ -542,6 +663,12 @@ if [[ "$needs_attention" == "true" ]]; then
 fi
 
 reasons_json="$(printf '%s\n' "${reasons[@]:-}" | jq -R . | jq -s '.')"
+reasons_json="$(sanitize_json_string_array <<<"$reasons_json")"
+source_eval_output_json="$(jq -c '
+  .reasons = (
+    [ (.reasons // [])[] | select(type == "string") | gsub("^\\s+|\\s+$"; "") | select(length > 0) ]
+  )
+' <<<"$source_eval_json")"
 
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
@@ -556,9 +683,10 @@ jq -n \
   --arg report_md "$report_md" \
   --arg source_summary_json "$promotion_cycle_summary_json" \
   --argjson rc "$final_rc" \
+  --argjson fail_closed "$fail_closed" \
   --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson max_age_sec "$max_age_sec" \
-  --argjson source_eval "$source_eval_json" \
+  --argjson source_eval "$source_eval_output_json" \
   --argjson reasons "$reasons_json" \
   '{
     version: 1,
@@ -572,7 +700,7 @@ jq -n \
     available: ($source_eval.usable == true),
     helper_available: true,
     needs_attention: (if $status == "pass" and $decision == "GO" and $rc == 0 then false else true end),
-    fail_closed: (if $source_eval.usable == true then false else true end),
+    fail_closed: $fail_closed,
     reasons: $reasons,
     notes: $notes,
     next_operator_action: $next_operator_action,
@@ -607,7 +735,7 @@ jq -n \
     },
     enforcement: {
       fail_on_no_go: ($fail_on_no_go == 1),
-      fail_closed: (if $source_eval.usable == true then false else true end),
+      fail_closed: $fail_closed,
       no_go_detected: ($decision == "NO-GO"),
       no_go_enforced: ($decision == "NO-GO" and ($fail_on_no_go == 1))
     },

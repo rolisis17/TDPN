@@ -28,6 +28,8 @@ What the script does:
 - refreshes the session `PATH` from machine/user values and common install locations
 - resolves Node tooling to `npm.cmd`/`npx.cmd` (never `npm.ps1`/`npx.ps1`) for policy-safe invocation
 - routes child script launches through `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ...`
+- checks desktop icon/resources preflight (`icon.svg`, valid `icon.ico`, and `tauri.conf.json` bundle icon entry)
+- in fix mode, auto-remediates common icon/resource drift (regenerates `icon.ico` and patches `bundle.icon` with `icons/icon.ico` when possible)
 - finishes with a verification block for `go version`, `node -v`, `npm -v`, `npx -v`, `rustc -V`, and `cargo -V`
 
 Expected healthy output at the end:
@@ -89,6 +91,14 @@ scripts\windows\desktop_node.cmd npm run generate:windows-icon
 scripts\windows\desktop_node.cmd npm run tauri -- dev
 ```
 
+If source/resource wiring drifted, run these exact fixes:
+
+```powershell
+git checkout -- apps/desktop/src-tauri/icons/icon.svg
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg='apps/desktop/src-tauri/tauri.conf.json'; $json=Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json; if($null -eq $json.bundle){$json | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{})}; $icons=@(); if($null -ne $json.bundle.icon){$icons=@($json.bundle.icon)}; if($icons -notcontains 'icons/icon.ico'){$json.bundle.icon=@($icons + 'icons/icon.ico')}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $cfg -Encoding UTF8"
+scripts\windows\desktop_node.cmd npm run generate:windows-icon
+```
+
 ## Wrapper-First Flow
 
 End-to-end desktop + local API with policy-safe defaults:
@@ -96,6 +106,18 @@ End-to-end desktop + local API with policy-safe defaults:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1 -InstallMissing -EnablePolicyBypass
 ```
+
+Windows installer build (one command, no WSL required):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_installer.ps1 -Mode build -InstallMissing
+```
+
+What this build mode does:
+- runs `desktop_doctor` preflight automatically before build
+- applies safe auto-remediation when `-InstallMissing` is provided
+- fails closed with exact remediation commands when blockers remain
+- writes installer summary JSON to `.easy-node-logs\desktop_installer_windows_summary.json`
 
 Local API only:
 

@@ -758,6 +758,22 @@ label.check input {
   color: #805b1b;
 }
 
+.tab-lock-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(214, 174, 95, 0.55);
+  border-radius: 10px;
+  background: rgba(255, 244, 220, 0.88);
+}
+
+.workspace-first-run-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(169, 194, 214, 0.7);
+  background: rgba(239, 246, 252, 0.84);
+}
+
 #server_lifecycle_hint {
   margin-bottom: 2px;
 }

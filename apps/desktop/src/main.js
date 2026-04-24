@@ -54,6 +54,9 @@ const connectionStateEl = document.getElementById("connection_state");
 const connectionDetailEl = document.getElementById("connection_detail");
 const routingModeEl = document.getElementById("routing_mode");
 const routingDetailEl = document.getElementById("routing_detail");
+const readinessFreshnessCardEl = document.getElementById("readiness_freshness_card");
+const readinessFreshnessStateEl = document.getElementById("readiness_freshness_state");
+const readinessFreshnessDetailEl = document.getElementById("readiness_freshness_detail");
 const signInPolicyHintEl = document.getElementById("signin_policy_hint");
 const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
 
@@ -69,6 +72,8 @@ const tabServerEl = byId("tab_server");
 const panelClientEl = byId("panel_client");
 const panelServerEl = byId("panel_server");
 const tabLockHintEl = document.getElementById("tab_lock_hint");
+const workspaceFirstRunHintEl = document.getElementById("workspace_first_run_hint");
+const workspacePlatformHintEl = document.getElementById("workspace_platform_hint");
 const compatAdvancedSectionEl = document.getElementById("legacy_compat_section");
 const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
@@ -96,6 +101,9 @@ const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 const ROUTING_DEFAULT_MODE = "Unknown";
 const ROUTING_DEFAULT_DETAIL = "No routing telemetry yet";
+const READINESS_HEARTBEAT_INTERVAL_MS = 90 * 1000;
+const READINESS_HEARTBEAT_STALE_MS = 5 * 60 * 1000;
+const READINESS_HEARTBEAT_ERROR_MAX_CHARS = 160;
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
 const COMPAT_ADVANCED_DEFAULT_HINT = "Optional legacy fields for support-only compatibility flows.";
@@ -203,11 +211,18 @@ const state = {
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
   routingMode: ROUTING_DEFAULT_MODE,
   routingDetail: ROUTING_DEFAULT_DETAIL,
+  readinessHeartbeatInFlight: false,
+  readinessFreshnessLastAttemptMs: 0,
+  readinessFreshnessLastUpdatedMs: 0,
+  readinessFreshnessLastError: "",
   operatorListNextCursor: "",
   operatorListRequestContext: null,
   walletSignatureContext: null,
   authChallengeMessage: ""
 };
+
+let readinessHeartbeatTimer = null;
+let readinessHeartbeatListenersBound = false;
 
 function readPersistedValue(key) {
   try {
@@ -411,6 +426,135 @@ function normalizeLegacyEnvNameDisplayPayload(payload, depth = 0) {
 function print(label, payload) {
   const text = formatPayloadForDisplay(payload);
   outputEl.textContent = `[${new Date().toISOString()}] ${label}\n${text}`;
+}
+
+function truncateOneLineText(value, maxChars = READINESS_HEARTBEAT_ERROR_MAX_CHARS) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxChars - 1))}\u2026`;
+}
+
+function heartbeatErrorText(err) {
+  const raw =
+    err && typeof err === "object" && typeof err.message === "string" && err.message.trim()
+      ? err.message
+      : String(err ?? "");
+  return truncateOneLineText(raw, READINESS_HEARTBEAT_ERROR_MAX_CHARS);
+}
+
+function formatDurationSince(epochMs) {
+  if (!Number.isFinite(epochMs) || epochMs <= 0) {
+    return "";
+  }
+  const elapsedMs = Math.max(0, Date.now() - epochMs);
+  const elapsedSec = Math.floor(elapsedMs / 1000);
+  if (elapsedSec < 60) {
+    return `${elapsedSec}s ago`;
+  }
+  const elapsedMin = Math.floor(elapsedSec / 60);
+  if (elapsedMin < 60) {
+    return `${elapsedMin}m ago`;
+  }
+  const elapsedHours = Math.floor(elapsedMin / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h ago`;
+  }
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays}d ago`;
+}
+
+function formatLocalTimestamp(epochMs) {
+  if (!Number.isFinite(epochMs) || epochMs <= 0) {
+    return "";
+  }
+  const timestamp = new Date(epochMs);
+  if (Number.isNaN(timestamp.getTime())) {
+    return "";
+  }
+  return timestamp.toLocaleString();
+}
+
+function syncReadinessFreshnessIndicator() {
+  if (!readinessFreshnessStateEl || !readinessFreshnessDetailEl) {
+    return;
+  }
+
+  const hasSession = !!state.sessionToken;
+  const hasLastUpdate = Number.isFinite(state.readinessFreshnessLastUpdatedMs) && state.readinessFreshnessLastUpdatedMs > 0;
+  const hasLastAttempt = Number.isFinite(state.readinessFreshnessLastAttemptMs) && state.readinessFreshnessLastAttemptMs > 0;
+  const staleByAge = hasLastUpdate && Date.now() - state.readinessFreshnessLastUpdatedMs > READINESS_HEARTBEAT_STALE_MS;
+  const lastError = truncateOneLineText(state.readinessFreshnessLastError, READINESS_HEARTBEAT_ERROR_MAX_CHARS);
+
+  let indicatorState = "idle";
+  let title = "Idle";
+  let detail = "Sign in to start readiness/auth heartbeat.";
+
+  if (hasSession) {
+    indicatorState = "refreshing";
+    title = "Refreshing";
+    detail = "Readiness/auth heartbeat is initializing.";
+
+    if (hasLastUpdate) {
+      const ageText = formatDurationSince(state.readinessFreshnessLastUpdatedMs);
+      const localTime = formatLocalTimestamp(state.readinessFreshnessLastUpdatedMs);
+      indicatorState = staleByAge ? "stale" : "fresh";
+      title = staleByAge ? "Stale" : "Fresh";
+      detail = `Last updated ${ageText}${localTime ? ` (${localTime})` : ""}.`;
+      if (lastError && staleByAge) {
+        detail += ` Last refresh error: ${lastError}`;
+      }
+    } else if (lastError) {
+      indicatorState = "warning";
+      title = "Attention";
+      detail = `Unable to refresh readiness/auth state yet: ${lastError}`;
+    } else if (hasLastAttempt) {
+      const ageText = formatDurationSince(state.readinessFreshnessLastAttemptMs);
+      const localTime = formatLocalTimestamp(state.readinessFreshnessLastAttemptMs);
+      indicatorState = "warning";
+      title = "Pending";
+      detail = `Last attempt ${ageText}${localTime ? ` (${localTime})` : ""}; waiting for first successful refresh.`;
+    }
+  }
+
+  if (state.readinessHeartbeatInFlight && hasSession && !hasLastUpdate) {
+    indicatorState = "refreshing";
+    title = "Refreshing";
+    detail = "Refreshing readiness/auth state\u2026";
+  }
+
+  readinessFreshnessStateEl.textContent = title;
+  readinessFreshnessDetailEl.textContent = detail;
+  if (readinessFreshnessCardEl) {
+    readinessFreshnessCardEl.dataset.state = indicatorState;
+  }
+}
+
+function markReadinessHeartbeatSuccess(options = {}) {
+  const expectedSessionToken =
+    options && typeof options.expectedSessionToken === "string" ? options.expectedSessionToken.trim() : "";
+  const currentSessionToken = typeof state.sessionToken === "string" ? state.sessionToken.trim() : "";
+  if (!currentSessionToken) {
+    syncReadinessFreshnessIndicator();
+    return false;
+  }
+  if (expectedSessionToken && expectedSessionToken !== currentSessionToken) {
+    syncReadinessFreshnessIndicator();
+    return false;
+  }
+  const now = Date.now();
+  state.readinessFreshnessLastAttemptMs = now;
+  state.readinessFreshnessLastUpdatedMs = now;
+  state.readinessFreshnessLastError = "";
+  syncReadinessFreshnessIndicator();
+  return true;
 }
 
 function numberOrUndefined(value) {
@@ -1521,15 +1665,15 @@ function syncConnectActionButtons() {
   let connectLabel = "Connect";
   let connectDisabled = !clientControlsUnlocked;
   let connectTitle = clientControlsUnlocked
-    ? "Establish VPN connection."
+    ? "Establish GPM tunnel connection."
     : `Connect is unavailable: ${clientLockReason}`;
   let disconnectDisabled = false;
-  let disconnectTitle = "Disconnect VPN connection.";
+  let disconnectTitle = "Disconnect GPM tunnel connection.";
 
   if (stateKey === "connected" || stateKey === "healthy") {
     connectLabel = "Connected";
     connectDisabled = true;
-    connectTitle = "VPN connection is active.";
+    connectTitle = "GPM tunnel connection is active.";
     disconnectDisabled = false;
   } else if (stateKey === "connecting") {
     connectLabel = "Connecting...";
@@ -3972,6 +4116,40 @@ function ensureSentence(value) {
   return `${normalized}.`;
 }
 
+function isWindowsRuntimePlatform() {
+  const platform = String(
+    firstDefined(navigator.userAgentData && navigator.userAgentData.platform, navigator.platform, navigator.userAgent) || ""
+  ).toLowerCase();
+  return platform.includes("win");
+}
+
+function formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible) {
+  if (clientTabVisible && serverTabVisible) {
+    return "Both Client and Server tabs are available for this session.";
+  }
+  if (!clientTabVisible && !serverTabVisible) {
+    return "Client and Server tabs are disabled by role/readiness policy. Use the lock message activation paths before retrying.";
+  }
+  if (!clientTabVisible) {
+    return "Client tab is disabled for this session. Use the lock message activation path to finish Step 2 and unlock client actions.";
+  }
+  return "Server tab is disabled for this session. Use the lock message activation path to finish Step 3 and unlock server actions.";
+}
+
+function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
+  if (workspaceFirstRunHintEl) {
+    workspaceFirstRunHintEl.textContent =
+      `Single-window tabs keep both lanes visible. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
+    workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
+  }
+  if (!workspacePlatformHintEl) {
+    return;
+  }
+  workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
+    ? "Windows-native first run: verify local GPM/WireGuard readiness, then run Status and Service Status before Connect or service lifecycle actions."
+    : "First run: verify local GPM readiness, then run Status and Service Status before Connect or service lifecycle actions.";
+}
+
 function inferTabActivationPathHint(tabName, reason) {
   const normalizedReason = typeof reason === "string" ? reason : "";
   const directPathMatch = normalizedReason.match(/Direct path:\s*([^.;]+)\s*[.;]?/i);
@@ -3992,8 +4170,8 @@ function inferTabActivationPathHint(tabName, reason) {
 
 function formatLockedTabMessage(tabName, reason) {
   const normalizedReason = ensureSentence(reason) || `${tabName} tab is currently locked by role policy.`;
-  const activationPath = ensureSentence(`Activation path: ${inferTabActivationPathHint(tabName.toLowerCase(), normalizedReason)}`);
-  return `${tabName} tab locked: ${normalizedReason} ${activationPath}`;
+  const activationPath = ensureSentence(inferTabActivationPathHint(tabName.toLowerCase(), normalizedReason));
+  return `${tabName} tab is disabled for this session. ${normalizedReason} Next step: ${activationPath}`;
 }
 
 function syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason) {
@@ -4012,7 +4190,8 @@ function syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serve
     tabLockHintEl.hidden = true;
     return;
   }
-  tabLockHintEl.textContent = lockMessages.join(" ");
+  const headline = lockMessages.length > 1 ? "Role locks active." : "Role lock active.";
+  tabLockHintEl.textContent = `${headline} ${lockMessages.join(" ")}`;
   tabLockHintEl.hidden = false;
 }
 
@@ -4071,6 +4250,7 @@ function syncServerRoleLockState() {
   serverLockHintEl.textContent = serverReason;
   serverLockHintEl.classList.toggle("locked", !serverTabVisible);
   syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason);
+  syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible);
   syncConnectActionButtons();
   syncDesktopOnboardingSteps();
   syncDesktopOnboardingBanner();
@@ -4098,6 +4278,10 @@ function setSessionToken(value, options = {}) {
     clearClientRegistrationTrustState();
     clearOperatorListPaginationState();
     state.sessionBootstrapDirectoryOptions = [];
+    state.readinessHeartbeatInFlight = false;
+    state.readinessFreshnessLastAttemptMs = 0;
+    state.readinessFreshnessLastUpdatedMs = 0;
+    state.readinessFreshnessLastError = "";
   }
   state.sessionToken = nextValue;
   sessionTokenEl.value = state.sessionToken;
@@ -4107,6 +4291,7 @@ function setSessionToken(value, options = {}) {
   syncSessionBootstrapDirectoryOptions();
   syncServerRoleLockState();
   syncOperatorListPaginationControlState();
+  syncReadinessFreshnessIndicator();
 }
 
 function setOperatorApplicationStatus(value) {
@@ -4480,6 +4665,7 @@ async function requestOnboardingOverview(options = {}) {
       ? await invoke("control_gpm_onboarding_overview", { request })
       : await call("gpm_onboarding_overview", "control_gpm_onboarding_overview", { request });
     applyOnboardingOverviewState(result);
+    markReadinessHeartbeatSuccess();
     return result;
   } catch (err) {
     if (quiet) {
@@ -5003,6 +5189,7 @@ async function refreshOperatorApplicationStatus(options = {}) {
       : await call("gpm_operator_status", "control_gpm_operator_status", { request });
     setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
     applySelectedOperatorPrefill(extractOperatorPrefillValues(result), { mode: "merge" });
+    markReadinessHeartbeatSuccess();
     return result;
   } catch (err) {
     if (quiet) {
@@ -5029,6 +5216,7 @@ async function refreshServerReadinessStatus(options = {}) {
       ? await invoke("control_gpm_server_status", { request })
       : await call("gpm_server_status", "control_gpm_server_status", { request });
     setServerReadiness(parseServerReadiness(result));
+    markReadinessHeartbeatSuccess();
     return result;
   } catch (err) {
     setServerReadiness(null);
@@ -5057,6 +5245,7 @@ async function refreshClientRegistrationStatus(options = {}) {
       : await call("gpm_client_status", "control_gpm_client_status", { request });
     setClientRegistrationStateFromPayload(result, { allowFallback: true });
     syncDesktopOnboardingSteps();
+    markReadinessHeartbeatSuccess();
     return result;
   } catch (err) {
     if (quiet) {
@@ -5070,6 +5259,7 @@ async function refreshSession(action = "status") {
   if (!state.sessionToken) {
     setOperatorApplicationStatus(undefined);
     setServerReadiness(null);
+    syncReadinessFreshnessIndicator();
     return;
   }
   const sessionAction = action || "status";
@@ -5090,6 +5280,7 @@ async function refreshSession(action = "status") {
     setRole("client");
     setOperatorApplicationStatus(undefined);
     setServerReadiness(null);
+    syncReadinessFreshnessIndicator();
     return result;
   }
   setClientRegistrationStateFromPayload(result, { allowFallback: true });
@@ -5100,30 +5291,164 @@ async function refreshSession(action = "status") {
     await refreshServerReadinessStatus({ quiet: true });
   }
   await refreshOperatorApplicationStatus({ quiet: true });
+  markReadinessHeartbeatSuccess();
   return result;
 }
 
 async function refreshSessionOnInit() {
   if (!state.sessionToken) {
     setServerReadiness(null);
+    syncReadinessFreshnessIndicator();
     return;
   }
   let overview;
+  let refreshed = false;
   try {
     const result = await invoke("control_gpm_session", {
       request: { session_token: state.sessionToken, action: "status" }
     });
     setClientRegistrationStateFromPayload(result, { allowFallback: true });
     setRole(parseSessionRole(result));
+    refreshed = true;
     overview = await requestOnboardingOverview({ quiet: true });
+    refreshed = refreshed || !!overview;
   } catch {
     // Startup status refresh is best-effort and should not block the scaffold.
   }
   if (!overview) {
-    await refreshClientRegistrationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
+    const registrationResult = await refreshClientRegistrationStatus({ quiet: true });
+    const readinessResult = await refreshServerReadinessStatus({ quiet: true });
+    refreshed = refreshed || !!registrationResult || !!readinessResult;
   }
-  await refreshOperatorApplicationStatus({ quiet: true });
+  const operatorResult = await refreshOperatorApplicationStatus({ quiet: true });
+  refreshed = refreshed || !!operatorResult;
+  if (refreshed) {
+    markReadinessHeartbeatSuccess();
+  } else {
+    syncReadinessFreshnessIndicator();
+  }
+}
+
+async function runReadinessHeartbeat(reason = "interval") {
+  if (state.readinessHeartbeatInFlight) {
+    return;
+  }
+  const heartbeatSessionToken = typeof state.sessionToken === "string" ? state.sessionToken.trim() : "";
+  if (!heartbeatSessionToken) {
+    syncReadinessFreshnessIndicator();
+    return;
+  }
+  if (document.hidden && reason === "interval") {
+    syncReadinessFreshnessIndicator();
+    return;
+  }
+
+  state.readinessHeartbeatInFlight = true;
+  state.readinessFreshnessLastAttemptMs = Date.now();
+  syncReadinessFreshnessIndicator();
+
+  let refreshed = false;
+  let errorText = "";
+  let aborted = false;
+  try {
+    const overview = await requestOnboardingOverview({ quiet: true });
+    if (state.sessionToken !== heartbeatSessionToken) {
+      aborted = true;
+      return;
+    }
+    refreshed = !!overview;
+    if (!overview) {
+      try {
+        const sessionResult = await invoke("control_gpm_session", {
+          request: { session_token: heartbeatSessionToken, action: "status" }
+        });
+        if (state.sessionToken !== heartbeatSessionToken) {
+          aborted = true;
+          return;
+        }
+        setClientRegistrationStateFromPayload(sessionResult, { allowFallback: true });
+        setRole(parseSessionRole(sessionResult));
+        refreshed = true;
+      } catch (err) {
+        errorText = heartbeatErrorText(err);
+      }
+
+      const registrationResult = await refreshClientRegistrationStatus({ quiet: true });
+      const readinessResult = await refreshServerReadinessStatus({ quiet: true });
+      const operatorResult = await refreshOperatorApplicationStatus({ quiet: true });
+      if (state.sessionToken !== heartbeatSessionToken) {
+        aborted = true;
+        return;
+      }
+      refreshed = refreshed || !!registrationResult || !!readinessResult || !!operatorResult;
+    } else {
+      const operatorResult = await refreshOperatorApplicationStatus({ quiet: true });
+      if (state.sessionToken !== heartbeatSessionToken) {
+        aborted = true;
+        return;
+      }
+      refreshed = refreshed || !!operatorResult;
+    }
+  } catch (err) {
+    errorText = heartbeatErrorText(err);
+  } finally {
+    state.readinessHeartbeatInFlight = false;
+    if (aborted) {
+      syncReadinessFreshnessIndicator();
+      return;
+    }
+    if (refreshed) {
+      markReadinessHeartbeatSuccess({ expectedSessionToken: heartbeatSessionToken });
+    } else {
+      state.readinessFreshnessLastAttemptMs = Date.now();
+      if (errorText) {
+        state.readinessFreshnessLastError = errorText;
+      } else if (!state.readinessFreshnessLastError) {
+        state.readinessFreshnessLastError = "readiness/auth heartbeat returned no data";
+      }
+      syncReadinessFreshnessIndicator();
+    }
+  }
+}
+
+function startReadinessHeartbeat() {
+  if (readinessHeartbeatTimer) {
+    clearInterval(readinessHeartbeatTimer);
+    readinessHeartbeatTimer = null;
+  }
+  readinessHeartbeatTimer = window.setInterval(() => {
+    void runReadinessHeartbeat("interval");
+  }, READINESS_HEARTBEAT_INTERVAL_MS);
+}
+
+function stopReadinessHeartbeat() {
+  if (readinessHeartbeatTimer) {
+    clearInterval(readinessHeartbeatTimer);
+    readinessHeartbeatTimer = null;
+  }
+}
+
+function bindReadinessHeartbeatListeners() {
+  if (readinessHeartbeatListenersBound) {
+    return;
+  }
+  readinessHeartbeatListenersBound = true;
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      syncReadinessFreshnessIndicator();
+      return;
+    }
+    void runReadinessHeartbeat("visibility");
+  });
+
+  window.addEventListener("focus", () => {
+    void runReadinessHeartbeat("focus");
+  });
+
+  window.addEventListener("beforeunload", () => {
+    stopReadinessHeartbeat();
+  });
 }
 
 async function loadNextPendingOperator() {
@@ -5484,7 +5809,7 @@ byId("reject_operator_btn").addEventListener("click", async () => {
   await refreshSession();
 });
 
-connectBtnEl.addEventListener("click", async () => {
+byId("connect_btn").addEventListener("click", async () => {
   if (!requireClientControlEligibility("Connect")) {
     return;
   }
@@ -5594,6 +5919,7 @@ async function init() {
     state: CONNECTION_DEFAULT_STATE,
     detail: CONNECTION_DEFAULT_DETAIL
   });
+  syncReadinessFreshnessIndicator();
   try {
     const cfg = await invoke("control_config");
     const meta = formatConfigMeta(cfg || {});
@@ -5811,6 +6137,9 @@ async function init() {
   }
 
   await refreshSessionOnInit();
+  bindReadinessHeartbeatListeners();
+  startReadinessHeartbeat();
+  void runReadinessHeartbeat("init");
 }
 
 init();

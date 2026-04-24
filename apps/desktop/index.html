@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Global Private Mesh Desktop</title>
+    <title>Global Private Mesh (GPM) Desktop</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="page-desktop">
@@ -11,7 +11,7 @@
       <header class="hero-card">
         <div class="hero-copy">
           <p class="eyebrow">Desktop Control Scaffold</p>
-          <h1>Global Private Mesh</h1>
+          <h1>Global Private Mesh (GPM)</h1>
           <p>
             Non-production desktop scaffold for wallet login, trusted bootstrap, and role-aware client/server control.
           </p>
@@ -39,6 +39,11 @@
             <span class="status-label">Routing</span>
             <span id="routing_mode">Unknown</span>
             <span id="routing_detail" class="status-detail">No routing telemetry yet</span>
+          </article>
+          <article id="readiness_freshness_card" class="status-tile freshness-tile" data-state="idle">
+            <span class="status-label">Readiness Freshness</span>
+            <span id="readiness_freshness_state">Idle</span>
+            <span id="readiness_freshness_detail" class="status-detail">Last updated: waiting for session refresh.</span>
           </article>
         </div>
       </header>
@@ -275,7 +280,10 @@
         <section class="card panel workspace-panel">
           <div class="section-head">
             <h2>Connection Console</h2>
-            <p>Operate client and server controls in a single desktop window.</p>
+            <p>
+              Operate client and server controls in a single desktop window.
+              On first run, use tab lock hints plus a quick readiness check before mutating actions.
+            </p>
           </div>
 
           <div class="tabs" role="tablist" aria-label="Workspaces">
@@ -301,12 +309,18 @@
             </button>
           </div>
           <p id="tab_lock_hint" class="hint locked tab-lock-hint" hidden aria-live="polite"></p>
+          <p id="workspace_first_run_hint" class="hint workspace-first-run-hint">
+            Single-window tabs keep both lanes visible. If a tab is disabled, follow its activation path before retrying.
+          </p>
+          <p id="workspace_platform_hint" class="hint workspace-first-run-hint">
+            First run: verify local readiness, then run Status and Service Status before Connect or service lifecycle actions.
+          </p>
 
           <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
             <div class="panel-block">
               <h3>Client Workspace</h3>
               <p id="client_lock_hint" class="hint">
-                Client controls are available for client-capable roles.
+                Client tab guidance appears here, including lock reasons and next steps.
               </p>
               <p id="connect_policy_hint" class="hint">
                 Connect policy: compat from env defaults; production mode may hide and lock manual bootstrap/invite fields.
@@ -396,7 +410,7 @@
             <div class="panel-block">
               <h3>Server Workspace</h3>
               <p id="server_lock_hint" class="hint">
-                Server controls are available only for approved operator/admin roles.
+                Server tab guidance appears here, including lock reasons and next steps.
               </p>
               <div class="row">
                 <label>

@@ -229,6 +229,7 @@ Usage:
   ./scripts/easy_node.sh client-vpn-logs [--follow [0|1]] [--tail N]
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
+  ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix-record [three_machine_docker_profile_matrix_record args...]
   ./scripts/easy_node.sh manual-validation-backlog
@@ -328,6 +329,7 @@ Usage:
   ./scripts/easy_node.sh roadmap-live-evidence-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-evidence-archive-run [roadmap_live_evidence_archive_run args...]
   ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID] [--exclude-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
@@ -504,6 +506,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-prod-gate [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--control-timeout-sec N] [--control-soak-rounds N] [--control-soak-pause-sec N] [--control-fault-every N] [--control-fault-command CMD] [--control-continue-on-fail [0|1]] [--wg-client-timeout-sec N] [--wg-session-sec N] [--wg-soak-rounds N] [--wg-soak-pause-sec N] [--wg-slo-profile off|recommended|strict] [--wg-max-consecutive-failures N] [--wg-max-round-duration-sec N] [--wg-max-recovery-sec N] [--wg-max-failure-class CLASS=N] [--wg-disallow-unknown-failure-class [0|1]] [--wg-strict-ingress-rehearsal [0|1]] [--wg-min-selection-lines N] [--wg-min-entry-operators N] [--wg-min-exit-operators N] [--wg-min-cross-operator-pairs N] [--wg-fault-every N] [--wg-fault-command CMD] [--wg-continue-on-fail [0|1]] [--wg-validate-summary-json PATH] [--wg-soak-summary-json PATH] [--gate-summary-json PATH] [--fault-every N] [--fault-command CMD] [--continue-on-fail [0|1]] [--strict-distinct [0|1]] [--skip-control-soak [0|1]] [--skip-wg [0|1]] [--skip-wg-soak [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--report-file PATH]
   ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--incident-snapshot-attach-artifact PATH]... [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
   ./scripts/easy_node.sh three-machine-prod-signoff [three-machine-prod-bundle args...] [--bundle-dir PATH] [--run-report-json PATH] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh three-machine-reminder
   ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix-record [three_machine_docker_profile_matrix_record args...]
@@ -539,6 +542,7 @@ Usage:
   ./scripts/easy_node.sh roadmap-live-evidence-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-live-evidence-archive-run [roadmap_live_evidence_archive_run args...]
   ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID] [--exclude-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
@@ -696,6 +700,7 @@ Notes:
   - three-machine-prod-gate runs production-grade 3-machine sequencing (strict control validate + control soak + real WG validate + WG soak).
   - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), optionally attach extra evidence files into that incident bundle with --incident-snapshot-attach-artifact, and enable fail-close artifact signoff inline with --signoff-check=1.
   - three-machine-prod-signoff wraps three-machine-prod-bundle into one recorded manual-validation step for the final machine-C production signoff rerun, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, and refreshes the shared manual-validation report by default.
+  - three-machine-real-host-validation-pack wraps the real-host validation pack helper path (override with `THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT`) and preserves pass-through args.
   - three-machine-reminder prints the true 3-machine production test checklist.
   - three-machine-docker-profile-matrix wraps the three-machine docker profile matrix helper script with pass-through args.
   - three-machine-docker-profile-matrix-record wraps the three-machine docker profile matrix record helper script with pass-through args.
@@ -729,6 +734,7 @@ Notes:
   - roadmap-live-evidence-actionable-run wraps the roadmap live-evidence actionable helper path, targets live-cycle ids, and emits `roadmap_live_evidence_actionable_run_summary` output.
   - roadmap-live-and-pack-actionable-run wraps the roadmap live+pack actionable helper path, chains live-cycle and pack actions, and emits `roadmap_live_and_pack_actionable_run_summary` output.
   - roadmap-live-evidence-cycle-batch-run wraps the roadmap live-evidence cycle-batch helper path (override with `ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT`) and preserves pass-through args.
+  - roadmap-live-evidence-archive-run wraps the roadmap live-evidence archive helper path (override with `ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCRIPT`) and preserves pass-through args.
   - roadmap-validation-debt-actionable-run wraps the roadmap validation-debt actionable helper path (override with `ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT`) and preserves pass-through args.
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
   - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
@@ -2252,6 +2258,36 @@ is_placeholder_admin_token() {
   local token="$1"
   case "$token" in
     ""|"dev-admin-token"|"replace-with-strong-admin-token"|"change-me")
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+easy_node_strip_optional_wrapping_quotes_01() {
+  local value="$1"
+  local first_char="" last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s\n' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s\n' "$value"
+}
+
+easy_node_invite_subject_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(easy_node_strip_optional_wrapping_quotes_01 "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY)
       return 0
       ;;
   esac
@@ -7778,6 +7814,15 @@ three_machine_docker_readiness_record() {
   "$script" "$@"
 }
 
+three_machine_real_host_validation_pack() {
+  local script="${THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT:-$ROOT_DIR/scripts/three_machine_real_host_validation_pack.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
 three_machine_prod_bundle() {
   ensure_deps_or_die
   local bundle_script="${THREE_MACHINE_PROD_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/prod_gate_bundle.sh}"
@@ -9453,6 +9498,15 @@ roadmap_live_evidence_cycle_batch_run() {
   "$script" "$@"
 }
 
+roadmap_live_evidence_archive_run() {
+  local script="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_evidence_archive_run.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
 roadmap_validation_debt_actionable_run() {
   local script="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_validation_debt_actionable_run.sh}"
   if [[ ! -x "$script" ]]; then
@@ -9973,6 +10027,7 @@ profile_default_gate_live() {
   local heartbeat_interval_sec=""
   local summary_json=".easy-node-logs/profile_compare_campaign_signoff_summary.json"
   local print_summary_json="1"
+  local resolved_invite_key=""
   local -a passthrough=()
 
   while [[ $# -gt 0 ]]; do
@@ -10190,6 +10245,18 @@ profile_default_gate_live() {
   if [[ -z "$host_a" ]]; then
     echo "profile-default-gate-live could not resolve host A from --directory-a-url"
     exit 2
+  fi
+  campaign_subject="$(trim "$campaign_subject")"
+  if easy_node_invite_subject_looks_placeholder_01 "$campaign_subject"; then
+    resolved_invite_key="$(trim "${INVITE_KEY:-}")"
+    if [[ -n "$resolved_invite_key" ]] && ! easy_node_invite_subject_looks_placeholder_01 "$resolved_invite_key"; then
+      campaign_subject="$resolved_invite_key"
+      echo "profile-default-gate-live: resolved invite subject placeholder from env INVITE_KEY"
+    else
+      echo "profile-default-gate-live failed: invite subject placeholder INVITE_KEY could not be resolved from env INVITE_KEY"
+      echo "set INVITE_KEY to a real value or pass --campaign-subject/--subject/--key/--invite-key with a real invite key"
+      exit 2
+    fi
   fi
   if [[ -z "$campaign_subject" ]]; then
     echo "profile-default-gate-live requires invite subject (set --campaign-subject/--subject/--key/--invite-key or INVITE_KEY)"
@@ -17070,6 +17137,10 @@ main() {
       shift
       three_machine_prod_signoff "$@"
       ;;
+    three-machine-real-host-validation-pack)
+      shift
+      three_machine_real_host_validation_pack "$@"
+      ;;
     three-machine-reminder)
       shift
       three_machine_reminder "$@"
@@ -17209,6 +17280,10 @@ main() {
     roadmap-live-evidence-cycle-batch-run)
       shift
       roadmap_live_evidence_cycle_batch_run "$@"
+      ;;
+    roadmap-live-evidence-archive-run)
+      shift
+      roadmap_live_evidence_archive_run "$@"
       ;;
     roadmap-validation-debt-actionable-run)
       shift

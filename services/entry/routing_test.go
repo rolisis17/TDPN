@@ -155,6 +155,19 @@ func TestAllowForwardPayloadLiveModeRejectsMalformedOpaque(t *testing.T) {
 	}
 }
 
+func TestAllowForwardPayloadLiveModeRejectsNonWireGuardTransport(t *testing.T) {
+	raw := make([]byte, 32)
+	raw[0] = 4
+	payload := relay.BuildOpaquePayload(1, raw)
+	ok, reason := allowForwardPayload("policy-json", payload, true)
+	if ok {
+		t.Fatalf("expected live mode to reject non-wireguard transport")
+	}
+	if reason != "transport-must-be-wireguard-live" {
+		t.Fatalf("expected transport-must-be-wireguard-live reason, got %q", reason)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,

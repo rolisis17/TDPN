@@ -2180,6 +2180,66 @@ func TestCosmosAdapterDeferredBacklogCapMarksUnhealthyAndRejectsSubmissions(t *t
 	}
 }
 
+func TestCosmosAdapterDrainDeferredPersistenceFailureMarksUnhealthy(t *testing.T) {
+	adapter := &CosmosAdapter{
+		queue: make(chan cosmosQueuedOperation, 1),
+		deferredOp: map[string]cosmosDeferredOperation{
+			"op-1": {deferredAt: time.Unix(1, 0).UTC()},
+		},
+		deferredOpMax: 1,
+	}
+	adapter.queue <- cosmosQueuedOperation{idempotencyKey: "op-lost"}
+
+	adapter.drainQueuedOperationsToDeferred(errCosmosAdapterClosedWithBacklog)
+
+	if got := adapter.deferredOperationCount(); got != 1 {
+		t.Fatalf("expected deferred backlog to remain at cap after drain failure, got %d", got)
+	}
+	if _, ok := adapter.deferredOperationByID("op-lost"); ok {
+		t.Fatalf("expected op-lost to be missing from deferred backlog when persistence fails")
+	}
+
+	failureCount, failureLast := adapter.deferredPersistenceFailureSnapshot()
+	if failureCount != 1 {
+		t.Fatalf("expected one deferred persistence failure, got %d", failureCount)
+	}
+	if !strings.Contains(failureLast, "op-lost") {
+		t.Fatalf("expected deferred persistence failure detail to include idempotency key, got %q", failureLast)
+	}
+	if !strings.Contains(failureLast, "cosmos adapter deferred backlog limit reached") {
+		t.Fatalf("expected deferred persistence failure detail to include backlog-limit marker, got %q", failureLast)
+	}
+
+	healthErr := adapter.Health(context.Background())
+	if !errors.Is(healthErr, errCosmosAdapterDeferredBacklogLimitReached) {
+		t.Fatalf("expected health check to fail with deferred backlog sentinel, got %v", healthErr)
+	}
+	if !strings.Contains(healthErr.Error(), "accepted operation persistence failures=1") {
+		t.Fatalf("expected health failure detail to include deferred persistence count, got %q", healthErr)
+	}
+}
+
+func TestCosmosAdapterEnqueueFailsClosedAfterDeferredPersistenceFailure(t *testing.T) {
+	adapter := &CosmosAdapter{
+		queue:                           make(chan cosmosQueuedOperation, 2),
+		deferredOp:                      map[string]cosmosDeferredOperation{},
+		deferredOpMax:                   4,
+		deferredPersistenceFailureCount: 1,
+		deferredPersistenceFailureLast:  "idempotency_key=op-lost defer_error=cosmos adapter deferred backlog limit reached: limit=1 current=1",
+	}
+
+	err := adapter.enqueue(cosmosQueuedOperation{idempotencyKey: "op-next"})
+	if !errors.Is(err, errCosmosAdapterDeferredBacklogLimitReached) {
+		t.Fatalf("expected enqueue to fail closed on deferred persistence failure, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "accepted operation persistence failures=1") {
+		t.Fatalf("expected enqueue error to include deferred persistence failure detail, got %q", err)
+	}
+	if got := len(adapter.queue); got != 0 {
+		t.Fatalf("expected enqueue rejection to leave queue untouched, got len=%d", got)
+	}
+}
+
 func TestCosmosAdapterCloseDrainsBacklogToDeferred(t *testing.T) {
 	startedCh := make(chan string, 2)
 	releaseCh := make(chan struct{})

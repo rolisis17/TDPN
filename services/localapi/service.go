@@ -115,6 +115,7 @@ type Service struct {
 	gpmAuthSignatureVerifier                              gpmAuthSignatureVerifier
 	gpmStateStorePath                                     string
 	gpmAuditLogPath                                       string
+	gpmGapScanSummaryPath                                 string
 	gpmState                                              *gpmRuntimeState
 }
 
@@ -554,6 +555,15 @@ func New() *Service {
 	if !gpmAuditLogPathSet {
 		gpmAuditLogPath = ".easy-node-logs/gpm_audit.jsonl"
 	}
+	gpmGapScanSummaryPathRaw, gpmGapScanSummaryPathSource, gpmGapScanSummaryPathSet := preferredEnvValueWithSource(
+		"GPM_GAP_SCAN_SUMMARY_JSON",
+		"TDPN_GAP_SCAN_SUMMARY_JSON",
+	)
+	noteLegacyAlias("GPM_GAP_SCAN_SUMMARY_JSON", gpmGapScanSummaryPathSource)
+	gpmGapScanSummaryPath := gpmGapScanSummaryPathRaw
+	if !gpmGapScanSummaryPathSet {
+		gpmGapScanSummaryPath = ".easy-node-logs/gpm_gap_scan_summary.json"
+	}
 
 	svc := &Service{
 		addr:                          addr,
@@ -614,6 +624,7 @@ func New() *Service {
 		gpmAuthSignatureVerifier:                              defaultGPMAuthSignatureVerifier,
 		gpmStateStorePath:                                     strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:                                       strings.TrimSpace(gpmAuditLogPath),
+		gpmGapScanSummaryPath:                                 strings.TrimSpace(gpmGapScanSummaryPath),
 		gpmState:                                              newGPMRuntimeState(),
 	}
 	svc.loadGPMStateBestEffort()
@@ -646,6 +657,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/gpm/auth/verify", s.handleGPMAuthVerify)
 	mux.HandleFunc("/v1/gpm/session", s.handleGPMSessionStatus)
 	mux.HandleFunc("/v1/gpm/audit/recent", s.handleGPMAuditRecent)
+	mux.HandleFunc("/v1/gpm/gaps/summary", s.handleGPMGapSummary)
 	mux.HandleFunc("/v1/gpm/onboarding/client/register", s.handleGPMClientRegister)
 	mux.HandleFunc("/v1/gpm/onboarding/client/status", s.handleGPMClientStatus)
 	mux.HandleFunc("/v1/gpm/onboarding/server/status", s.handleGPMServerStatus)
@@ -863,6 +875,7 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_auth_verify_require_command_policy_source":                       authVerifyRequireCommandSource,
 			"gpm_auth_verify_require_metadata":                                    s.gpmAuthVerifyRequireMetadata,
 			"gpm_auth_verify_require_metadata_policy_source":                      authVerifyRequireMetadataSource,
+			"gpm_auth_verify_require_wallet_extension":                            s.gpmAuthVerifyRequireWalletExt,
 			"gpm_auth_verify_require_wallet_extension_source":                     s.gpmAuthVerifyRequireWalletExt,
 			"gpm_auth_verify_require_wallet_extension_policy_source":              authVerifyRequireWalletExtSource,
 			"gpm_auth_verify_require_crypto_proof":                                s.gpmAuthVerifyRequireCryptoProof,

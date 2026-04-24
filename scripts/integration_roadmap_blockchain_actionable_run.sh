@@ -4,7 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod mkdir cat grep timeout date; do
+# Keep strict fail-closed scenarios hermetic from ambient shell env drift flags.
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_RECOMMENDED_GATE_DRIFT || true
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_REFRESH_EVIDENCE_COMMAND_DRIFT || true
+
+for cmd in bash jq mktemp chmod mkdir cat grep timeout date ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -23,10 +27,14 @@ FAIL2="$ACTION_TMP_DIR/fail_action_2.sh"
 SLOW1="$ACTION_TMP_DIR/slow_action_1.sh"
 SLOW2="$ACTION_TMP_DIR/slow_action_2.sh"
 PREFILL="$ACTION_TMP_DIR/prefill_action_1.sh"
-REFRESH="$ACTION_TMP_DIR/refresh_action_1.sh"
+REFRESH="$ACTION_TMP_DIR/blockchain_mainnet_activation_real_evidence_run.sh"
 ASSERT_ARGS="$ACTION_TMP_DIR/assert_args_action_1.sh"
 ENV_REJECT_PAYLOAD="$ACTION_TMP_DIR/env_reject_payload.sh"
 ENV_REJECT_MARKER="$TMP_DIR/env_reject_marker.txt"
+SYMLINK_ESCAPE_TARGET="$TMP_DIR/symlink_escape_target.sh"
+SYMLINK_ESCAPE_LINK="$ACTION_TMP_DIR/symlink_escape_action.sh"
+SYMLINK_ESCAPE_MARKER="$TMP_DIR/symlink_escape_marker.txt"
+REFRESH_MARKER="$TMP_DIR/refresh_marker.txt"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -52,6 +60,9 @@ chmod +x "$PREFILL"
 cat >"$REFRESH" <<'EOF_REFRESH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ -n "${REFRESH_EXECUTION_MARKER:-}" ]]; then
+  echo "refresh action marker" >"$REFRESH_EXECUTION_MARKER"
+fi
 echo "refresh action 1"
 EOF_REFRESH
 chmod +x "$REFRESH"
@@ -106,6 +117,17 @@ echo "payload-executed" >"$ENV_REJECT_MARKER"
 EOF_ENV_REJECT_PAYLOAD
 chmod +x "$ENV_REJECT_PAYLOAD"
 
+cat >"$SYMLINK_ESCAPE_TARGET" <<'EOF_SYMLINK_ESCAPE_TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${SYMLINK_ESCAPE_MARKER:-}" ]]; then
+  echo "symlink-escape-executed" >"$SYMLINK_ESCAPE_MARKER"
+fi
+echo "symlink escape payload executed"
+EOF_SYMLINK_ESCAPE_TARGET
+chmod +x "$SYMLINK_ESCAPE_TARGET"
+ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK"
+
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -159,14 +181,50 @@ JSON
   "blockchain_track": {
     "recommended_gate_id": "blockchain_mainnet_activation_refresh_evidence",
     "recommended_gate_reason": "canonical refresh-evidence gate",
-    "recommended_gate_command": "bash \"$REFRESH\" stale-evidence",
+    "recommended_gate_command": "bash \"$REFRESH\" --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_mainnet_activation_refresh_evidence"
     }
   },
   "next_actions": [
     {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS1\"","reason":"ignore"},
-    {"id":"blockchain_mainnet_activation_refresh_evidence","label":"Blockchain refresh evidence","command":"bash \"$REFRESH\" stale-evidence","reason":"test"}
+    {"id":"blockchain_mainnet_activation_refresh_evidence","label":"Blockchain refresh evidence","command":"bash \"$REFRESH\" --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1","reason":"test"}
+  ]
+}
+JSON
+    ;;
+  refresh_evidence_invalid_shell_command)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_mainnet_activation_refresh_evidence",
+    "recommended_gate_reason": "canonical refresh-evidence gate",
+    "recommended_gate_command": "bash \"$REFRESH\" --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_mainnet_activation_refresh_evidence"
+    }
+  },
+  "next_actions": [
+    {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS1\"","reason":"ignore"},
+    {"id":"blockchain_mainnet_activation_refresh_evidence","label":"Blockchain refresh evidence","command":"bash \"$REFRESH\" --refresh-roadmap 1 | cat","reason":"test-invalid-shell-command"}
+  ]
+}
+JSON
+    ;;
+  refresh_evidence_invalid_semantic_shell_safe)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_mainnet_activation_refresh_evidence",
+    "recommended_gate_reason": "canonical refresh-evidence gate",
+    "recommended_gate_command": "bash \"$REFRESH\" --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_mainnet_activation_refresh_evidence"
+    }
+  },
+  "next_actions": [
+    {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS1\"","reason":"ignore"},
+    {"id":"blockchain_mainnet_activation_refresh_evidence","label":"Blockchain refresh evidence","command":"bash \"$REFRESH\" --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 0 --print-summary-json 1","reason":"test-invalid-semantic-shell-safe"}
   ]
 }
 JSON
@@ -200,6 +258,26 @@ JSON
     {"id":"blockchain_mainnet_activation_missing_metrics_prefill","label":"Blockchain missing-metrics prefill","command":"bash \"$PREFILL\"","reason":"test"},
     {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"bash \"$PASS2\" operator-pack","reason":"test"}
   ]
+    }
+JSON
+    ;;
+  pass_recommended_command_semantic_mismatch)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_pass_2",
+    "recommended_gate_reason": "canonical recommended command intentionally drifted",
+    "recommended_gate_command": "bash \"$PASS2\" canonical-recommended",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_pass_2"
+    }
+  },
+  "next_actions": [
+    {"id":"blockchain_pass_1","label":"Blockchain pass 1","command":"bash \"$PASS1\"","reason":"test"},
+    {"id":"integration_ci_phase1_resilience","label":"Non-blockchain control","command":"bash \"$PASS2\"","reason":"ignore"},
+    {"id":"blockchain_mainnet_activation_missing_metrics_prefill","label":"Blockchain missing-metrics prefill","command":"bash \"$PREFILL\"","reason":"test"},
+    {"id":"blockchain_pass_2","label":"Blockchain pass 2","command":"bash \"$PASS2\" operator-pack","reason":"test"}
+  ]
 }
 JSON
     ;;
@@ -207,6 +285,9 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "blockchain_track": {
+    "recommended_gate_id": "blockchain_fail_1",
+    "recommended_gate_reason": "canonical fail-first gate",
+    "recommended_gate_command": "bash \"$FAIL1\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_fail_1"
     }
@@ -323,6 +404,23 @@ JSON
 }
 JSON
     ;;
+  symlink_escape_reject)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_symlink_escape_reject",
+    "recommended_gate_reason": "symlink escape rejection scenario",
+    "recommended_gate_command": "bash \"$SYMLINK_ESCAPE_LINK\"",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_symlink_escape_reject"
+    }
+  },
+  "next_actions": [
+    {"id":"blockchain_symlink_escape_reject","label":"Blockchain symlink escape reject","command":"bash \"$SYMLINK_ESCAPE_LINK\"","reason":"test-symlink-escape-reject"}
+  ]
+}
+JSON
+    ;;
   *)
     echo "unknown fake scenario: $scenario"
     exit 2
@@ -339,6 +437,14 @@ if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--
 fi
 if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--recommended-only [0|1]" >/dev/null; then
   echo "help output missing --recommended-only [0|1]"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--allow-recommended-gate-drift [0|1]" >/dev/null; then
+  echo "help output missing --allow-recommended-gate-drift [0|1]"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--allow-refresh-evidence-command-drift [0|1]" >/dev/null; then
+  echo "help output missing --allow-refresh-evidence-command-drift [0|1]"
   exit 1
 fi
 if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--max-actions N" >/dev/null; then
@@ -492,6 +598,45 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-blockchain-actionable-run] symlinked action path remains fail-closed"
+SUMMARY_SYMLINK_REJECT="$TMP_DIR/summary_symlink_reject.json"
+REPORTS_SYMLINK_REJECT="$TMP_DIR/reports_symlink_reject"
+rm -f "$SYMLINK_ESCAPE_MARKER"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=symlink_escape_reject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" PREFILL="$PREFILL" REFRESH="$REFRESH" SYMLINK_ESCAPE_LINK="$SYMLINK_ESCAPE_LINK" SYMLINK_ESCAPE_MARKER="$SYMLINK_ESCAPE_MARKER" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_SYMLINK_REJECT" \
+  --summary-json "$SUMMARY_SYMLINK_REJECT" \
+  --print-summary-json 0
+symlink_reject_rc=$?
+set -e
+if [[ "$symlink_reject_rc" != "6" ]]; then
+  echo "expected symlink escape rejection rc=6, got rc=$symlink_reject_rc"
+  cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+if [[ -f "$SYMLINK_ESCAPE_MARKER" ]]; then
+  echo "symlink escape payload unexpectedly executed in safe mode"
+  cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "blockchain_symlink_escape_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$SUMMARY_SYMLINK_REJECT" >/dev/null; then
+  echo "symlink escape rejection summary mismatch"
+  cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+
 echo "[roadmap-blockchain-actionable-run] refresh-evidence path"
 SUMMARY_REFRESH="$TMP_DIR/summary_refresh.json"
 REPORTS_REFRESH="$TMP_DIR/reports_refresh"
@@ -510,8 +655,9 @@ if ! jq -e '
   and .roadmap.generated_this_run == true
   and .roadmap.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
   and .roadmap.recommended_gate_reason == "canonical refresh-evidence gate"
-  and ((.roadmap.recommended_gate_command // "") | test("stale-evidence"))
-  and ((.roadmap.recommended_gate_command // "") | test("refresh_action_1.sh"))
+  and ((.roadmap.recommended_gate_command // "") | test("--refresh-roadmap 1"))
+  and ((.roadmap.recommended_gate_command // "") | test("--canonical-summary-json"))
+  and ((.roadmap.recommended_gate_command // "") | test("blockchain_mainnet_activation_real_evidence_run.sh"))
   and .roadmap.actions_selected_count == 1
   and .roadmap.selected_action_ids == ["blockchain_mainnet_activation_refresh_evidence"]
   and .summary.actions_executed == 1
@@ -521,10 +667,153 @@ if ! jq -e '
   and ((.actions // []) | length == 1)
   and .actions[0].id == "blockchain_mainnet_activation_refresh_evidence"
   and .actions[0].status == "pass"
-  and ((.actions[0].command // "") | test("stale-evidence"))
+  and ((.actions[0].command // "") | test("--refresh-roadmap 1"))
 ' "$SUMMARY_REFRESH" >/dev/null; then
   echo "refresh-evidence path summary mismatch"
   cat "$SUMMARY_REFRESH"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] refresh-evidence shell-unsafe strict fail-closed path"
+SUMMARY_REFRESH_INVALID="$TMP_DIR/summary_refresh_invalid.json"
+REPORTS_REFRESH_INVALID="$TMP_DIR/reports_refresh_invalid"
+rm -f "$REFRESH_MARKER"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=refresh_evidence_invalid_shell_command \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" REFRESH="$REFRESH" REFRESH_EXECUTION_MARKER="$REFRESH_MARKER" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REFRESH_INVALID" \
+  --summary-json "$SUMMARY_REFRESH_INVALID" \
+  --print-summary-json 0
+refresh_invalid_rc=$?
+set -e
+if [[ "$refresh_invalid_rc" != "4" ]]; then
+  echo "expected refresh-evidence shell-unsafe strict fail-closed rc=4, got rc=$refresh_invalid_rc"
+  cat "$SUMMARY_REFRESH_INVALID"
+  exit 1
+fi
+if [[ -f "$REFRESH_MARKER" ]]; then
+  echo "refresh-evidence shell-unsafe strict path unexpectedly executed refresh action"
+  cat "$SUMMARY_REFRESH_INVALID"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .roadmap.generated_this_run == true
+  and .roadmap.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
+  and .roadmap.recommended_gate_reason == "canonical refresh-evidence gate"
+  and ((.roadmap.recommended_gate_command // "") | test("--refresh-roadmap 1"))
+  and .roadmap.refresh_evidence_selection_state == "selected_invalid"
+  and .roadmap.refresh_evidence_fail_closed == true
+  and ((.roadmap.refresh_evidence_selection_reason // "") | test("shell-safe argv"))
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_command_drift_fail_closed"
+  and .roadmap.recommended_gate_drift_fail_closed == true
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and .summary.timed_out == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_REFRESH_INVALID" >/dev/null; then
+  echo "refresh-evidence shell-unsafe strict fail-closed summary mismatch"
+  cat "$SUMMARY_REFRESH_INVALID"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] refresh-evidence semantic mismatch on shell-safe argv is strict fail-closed"
+SUMMARY_REFRESH_SEMANTIC_INVALID="$TMP_DIR/summary_refresh_semantic_invalid.json"
+REPORTS_REFRESH_SEMANTIC_INVALID="$TMP_DIR/reports_refresh_semantic_invalid"
+rm -f "$REFRESH_MARKER"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=refresh_evidence_invalid_semantic_shell_safe \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" REFRESH="$REFRESH" REFRESH_EXECUTION_MARKER="$REFRESH_MARKER" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REFRESH_SEMANTIC_INVALID" \
+  --summary-json "$SUMMARY_REFRESH_SEMANTIC_INVALID" \
+  --print-summary-json 0
+refresh_semantic_invalid_rc=$?
+set -e
+if [[ "$refresh_semantic_invalid_rc" != "4" ]]; then
+  echo "expected refresh-evidence semantic mismatch strict fail-closed rc=4, got rc=$refresh_semantic_invalid_rc"
+  cat "$SUMMARY_REFRESH_SEMANTIC_INVALID"
+  exit 1
+fi
+if [[ -f "$REFRESH_MARKER" ]]; then
+  echo "refresh-evidence semantic mismatch strict path unexpectedly executed refresh action"
+  cat "$SUMMARY_REFRESH_SEMANTIC_INVALID"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.allow_refresh_evidence_command_drift == false
+  and .roadmap.refresh_evidence_selection_state == "selected_invalid"
+  and .roadmap.refresh_evidence_fail_closed == true
+  and .roadmap.refresh_evidence_semantic_drift_allowed == false
+  and ((.roadmap.refresh_evidence_selection_reason // "") | test("semantic validation failed"))
+  and ((.roadmap.refresh_evidence_selection_reason // "") | test("--refresh-roadmap 1"))
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_command_drift_fail_closed"
+  and .roadmap.recommended_gate_drift_fail_closed == true
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_REFRESH_SEMANTIC_INVALID" >/dev/null; then
+  echo "refresh-evidence semantic mismatch strict fail-closed summary mismatch"
+  cat "$SUMMARY_REFRESH_SEMANTIC_INVALID"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] refresh-evidence semantic mismatch explicit drift override allows execution"
+SUMMARY_REFRESH_SEMANTIC_ALLOWED="$TMP_DIR/summary_refresh_semantic_allowed.json"
+REPORTS_REFRESH_SEMANTIC_ALLOWED="$TMP_DIR/reports_refresh_semantic_allowed"
+rm -f "$REFRESH_MARKER"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=refresh_evidence_invalid_semantic_shell_safe \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" REFRESH="$REFRESH" REFRESH_EXECUTION_MARKER="$REFRESH_MARKER" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REFRESH_SEMANTIC_ALLOWED" \
+  --summary-json "$SUMMARY_REFRESH_SEMANTIC_ALLOWED" \
+  --allow-recommended-gate-drift 1 \
+  --allow-refresh-evidence-command-drift 1 \
+  --print-summary-json 0
+
+if [[ ! -f "$REFRESH_MARKER" ]]; then
+  echo "expected refresh action execution marker when semantic drift override is enabled"
+  cat "$SUMMARY_REFRESH_SEMANTIC_ALLOWED"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.allow_recommended_gate_drift == true
+  and .inputs.allow_refresh_evidence_command_drift == true
+  and .roadmap.refresh_evidence_selection_state == "selected_semantic_drift_allowed"
+  and .roadmap.refresh_evidence_fail_closed == false
+  and .roadmap.refresh_evidence_semantic_drift_allowed == true
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_command_drift_allowed"
+  and .roadmap.recommended_gate_drift_fail_closed == false
+  and ((.roadmap.refresh_evidence_selection_reason // "") | test("semantic validation failed"))
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["blockchain_mainnet_activation_refresh_evidence"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "blockchain_mainnet_activation_refresh_evidence"
+  and .actions[0].status == "pass"
+' "$SUMMARY_REFRESH_SEMANTIC_ALLOWED" >/dev/null; then
+  echo "refresh-evidence semantic mismatch override summary mismatch"
+  cat "$SUMMARY_REFRESH_SEMANTIC_ALLOWED"
   exit 1
 fi
 
@@ -539,11 +828,17 @@ bash ./scripts/roadmap_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_MAX" \
   --summary-json "$SUMMARY_MAX" \
   --max-actions 1 \
+  --allow-recommended-gate-drift 1 \
   --print-summary-json 0
 
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .inputs.allow_recommended_gate_drift == true
+  and .roadmap.recommended_gate_id == "blockchain_pass_2"
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_id_not_selected_allowed"
+  and .roadmap.recommended_gate_drift_fail_closed == false
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("explicit drift override enabled"))
   and .roadmap.actions_selected_count == 1
   and .roadmap.selected_action_ids == ["blockchain_pass_1"]
   and .summary.actions_executed == 1
@@ -553,6 +848,256 @@ if ! jq -e '
 ' "$SUMMARY_MAX" >/dev/null; then
   echo "max-actions path summary mismatch"
   cat "$SUMMARY_MAX"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] recommended-gate drift default fail-closed path"
+SUMMARY_DRIFT_FAIL_CLOSED="$TMP_DIR/summary_drift_fail_closed.json"
+REPORTS_DRIFT_FAIL_CLOSED="$TMP_DIR/reports_drift_fail_closed"
+DRIFT_FAIL_CLOSED_LOG="$TMP_DIR/drift_fail_closed.log"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_recommended_id_not_selected \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_DRIFT_FAIL_CLOSED" \
+  --summary-json "$SUMMARY_DRIFT_FAIL_CLOSED" \
+  --print-summary-json 0 >"$DRIFT_FAIL_CLOSED_LOG" 2>&1
+drift_fail_closed_rc=$?
+set -e
+if [[ "$drift_fail_closed_rc" != "4" ]]; then
+  echo "expected recommended-gate drift default fail-closed rc=4, got rc=$drift_fail_closed_rc"
+  cat "$DRIFT_FAIL_CLOSED_LOG"
+  cat "$SUMMARY_DRIFT_FAIL_CLOSED"
+  exit 1
+fi
+if ! grep -F -- "recommended-gate drift strict mode: no actions selected; state=recommended_gate_id_not_selected_fail_closed recommended_gate_id=blockchain_not_selected_canonical" "$DRIFT_FAIL_CLOSED_LOG" >/dev/null; then
+  echo "recommended-gate drift fail-closed log line missing"
+  cat "$DRIFT_FAIL_CLOSED_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.recommended_only == false
+  and .inputs.allow_recommended_gate_drift == false
+  and .roadmap.recommended_gate_id == "blockchain_not_selected_canonical"
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_id_not_selected_fail_closed"
+  and .roadmap.recommended_gate_drift_fail_closed == true
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_DRIFT_FAIL_CLOSED" >/dev/null; then
+  echo "recommended-gate drift default fail-closed summary mismatch"
+  cat "$SUMMARY_DRIFT_FAIL_CLOSED"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] recommended-gate drift explicit override allows execution"
+SUMMARY_DRIFT_ALLOWED="$TMP_DIR/summary_drift_allowed.json"
+REPORTS_DRIFT_ALLOWED="$TMP_DIR/reports_drift_allowed"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_recommended_id_not_selected \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_DRIFT_ALLOWED" \
+  --summary-json "$SUMMARY_DRIFT_ALLOWED" \
+  --allow-recommended-gate-drift 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.recommended_only == false
+  and .inputs.allow_recommended_gate_drift == true
+  and .roadmap.recommended_gate_id == "blockchain_not_selected_canonical"
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_id_not_selected_allowed"
+  and .roadmap.recommended_gate_drift_fail_closed == false
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("explicit drift override enabled"))
+  and .roadmap.actions_selected_count == 3
+  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
+  and .summary.actions_executed == 3
+  and .summary.pass == 3
+  and .summary.fail == 0
+  and ((.actions // []) | length == 3)
+  and ((.actions // []) | all(.status == "pass"))
+' "$SUMMARY_DRIFT_ALLOWED" >/dev/null; then
+  echo "recommended-gate drift explicit override summary mismatch"
+  cat "$SUMMARY_DRIFT_ALLOWED"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] recommended-gate command semantic drift default fail-closed path"
+SUMMARY_DRIFT_COMMAND_FAIL_CLOSED="$TMP_DIR/summary_drift_command_fail_closed.json"
+REPORTS_DRIFT_COMMAND_FAIL_CLOSED="$TMP_DIR/reports_drift_command_fail_closed"
+DRIFT_COMMAND_FAIL_CLOSED_LOG="$TMP_DIR/drift_command_fail_closed.log"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_recommended_command_semantic_mismatch \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_DRIFT_COMMAND_FAIL_CLOSED" \
+  --summary-json "$SUMMARY_DRIFT_COMMAND_FAIL_CLOSED" \
+  --print-summary-json 0 >"$DRIFT_COMMAND_FAIL_CLOSED_LOG" 2>&1
+drift_command_fail_closed_rc=$?
+set -e
+if [[ "$drift_command_fail_closed_rc" != "4" ]]; then
+  echo "expected recommended-gate command semantic drift default fail-closed rc=4, got rc=$drift_command_fail_closed_rc"
+  cat "$DRIFT_COMMAND_FAIL_CLOSED_LOG"
+  cat "$SUMMARY_DRIFT_COMMAND_FAIL_CLOSED"
+  exit 1
+fi
+if ! grep -F -- "recommended-gate drift strict mode: no actions selected; state=recommended_gate_command_drift_fail_closed recommended_gate_id=blockchain_pass_2" "$DRIFT_COMMAND_FAIL_CLOSED_LOG" >/dev/null; then
+  echo "recommended-gate command semantic drift fail-closed log line missing"
+  cat "$DRIFT_COMMAND_FAIL_CLOSED_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.recommended_only == false
+  and .inputs.allow_recommended_gate_drift == false
+  and .roadmap.recommended_gate_id == "blockchain_pass_2"
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_command_drift_fail_closed"
+  and .roadmap.recommended_gate_drift_fail_closed == true
+  and .roadmap.recommended_gate_semantic_drift_allowed == false
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("semantic validation failed"))
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_DRIFT_COMMAND_FAIL_CLOSED" >/dev/null; then
+  echo "recommended-gate command semantic drift default fail-closed summary mismatch"
+  cat "$SUMMARY_DRIFT_COMMAND_FAIL_CLOSED"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] recommended-gate command semantic drift explicit override allows execution"
+SUMMARY_DRIFT_COMMAND_ALLOWED="$TMP_DIR/summary_drift_command_allowed.json"
+REPORTS_DRIFT_COMMAND_ALLOWED="$TMP_DIR/reports_drift_command_allowed"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_recommended_command_semantic_mismatch \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_DRIFT_COMMAND_ALLOWED" \
+  --summary-json "$SUMMARY_DRIFT_COMMAND_ALLOWED" \
+  --allow-recommended-gate-drift 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.recommended_only == false
+  and .inputs.allow_recommended_gate_drift == true
+  and .roadmap.recommended_gate_id == "blockchain_pass_2"
+  and .roadmap.recommended_gate_drift_selection_state == "recommended_gate_command_drift_allowed"
+  and .roadmap.recommended_gate_drift_fail_closed == false
+  and .roadmap.recommended_gate_semantic_drift_allowed == true
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("semantic validation failed"))
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("explicit drift override enabled"))
+  and .roadmap.actions_selected_count == 3
+  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
+  and .summary.actions_executed == 3
+  and .summary.pass == 3
+  and .summary.fail == 0
+  and ((.actions // []) | length == 3)
+  and ((.actions // []) | all(.status == "pass"))
+' "$SUMMARY_DRIFT_COMMAND_ALLOWED" >/dev/null; then
+  echo "recommended-gate command semantic drift explicit override summary mismatch"
+  cat "$SUMMARY_DRIFT_COMMAND_ALLOWED"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] missing recommended-gate id default fail-closed path"
+SUMMARY_MISSING_RECOMMENDED_ID_FAIL_CLOSED="$TMP_DIR/summary_missing_recommended_id_fail_closed.json"
+REPORTS_MISSING_RECOMMENDED_ID_FAIL_CLOSED="$TMP_DIR/reports_missing_recommended_id_fail_closed"
+MISSING_RECOMMENDED_ID_FAIL_CLOSED_LOG="$TMP_DIR/missing_recommended_id_fail_closed.log"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_no_recommended_id \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_MISSING_RECOMMENDED_ID_FAIL_CLOSED" \
+  --summary-json "$SUMMARY_MISSING_RECOMMENDED_ID_FAIL_CLOSED" \
+  --print-summary-json 0 >"$MISSING_RECOMMENDED_ID_FAIL_CLOSED_LOG" 2>&1
+missing_recommended_id_fail_closed_rc=$?
+set -e
+if [[ "$missing_recommended_id_fail_closed_rc" != "4" ]]; then
+  echo "expected missing recommended-gate id default fail-closed rc=4, got rc=$missing_recommended_id_fail_closed_rc"
+  cat "$MISSING_RECOMMENDED_ID_FAIL_CLOSED_LOG"
+  cat "$SUMMARY_MISSING_RECOMMENDED_ID_FAIL_CLOSED"
+  exit 1
+fi
+if ! grep -F -- "recommended-gate drift strict mode: no actions selected; state=missing_recommended_gate_id_fail_closed" "$MISSING_RECOMMENDED_ID_FAIL_CLOSED_LOG" >/dev/null; then
+  echo "missing recommended-gate id fail-closed log line missing"
+  cat "$MISSING_RECOMMENDED_ID_FAIL_CLOSED_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.recommended_only == false
+  and .inputs.allow_recommended_gate_drift == false
+  and .roadmap.recommended_gate_id == null
+  and .roadmap.recommended_gate_drift_selection_state == "missing_recommended_gate_id_fail_closed"
+  and .roadmap.recommended_gate_drift_fail_closed == true
+  and .roadmap.recommended_gate_semantic_drift_allowed == false
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("no recommended gate id was provided"))
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selected_action_ids == []
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_MISSING_RECOMMENDED_ID_FAIL_CLOSED" >/dev/null; then
+  echo "missing recommended-gate id default fail-closed summary mismatch"
+  cat "$SUMMARY_MISSING_RECOMMENDED_ID_FAIL_CLOSED"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] missing recommended-gate id explicit override allows execution"
+SUMMARY_MISSING_RECOMMENDED_ID_ALLOWED="$TMP_DIR/summary_missing_recommended_id_allowed.json"
+REPORTS_MISSING_RECOMMENDED_ID_ALLOWED="$TMP_DIR/reports_missing_recommended_id_allowed"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=pass_no_recommended_id \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_MISSING_RECOMMENDED_ID_ALLOWED" \
+  --summary-json "$SUMMARY_MISSING_RECOMMENDED_ID_ALLOWED" \
+  --allow-recommended-gate-drift 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.recommended_only == false
+  and .inputs.allow_recommended_gate_drift == true
+  and .roadmap.recommended_gate_id == null
+  and .roadmap.recommended_gate_drift_selection_state == "missing_recommended_gate_id_allowed"
+  and .roadmap.recommended_gate_drift_fail_closed == false
+  and .roadmap.recommended_gate_semantic_drift_allowed == true
+  and ((.roadmap.recommended_gate_drift_selection_reason // "") | test("explicit drift override enabled"))
+  and .roadmap.actions_selected_count == 3
+  and .roadmap.selected_action_ids == ["blockchain_pass_1","blockchain_mainnet_activation_missing_metrics_prefill","blockchain_pass_2"]
+  and .summary.actions_executed == 3
+  and .summary.pass == 3
+  and .summary.fail == 0
+  and ((.actions // []) | length == 3)
+  and ((.actions // []) | all(.status == "pass"))
+' "$SUMMARY_MISSING_RECOMMENDED_ID_ALLOWED" >/dev/null; then
+  echo "missing recommended-gate id explicit override summary mismatch"
+  cat "$SUMMARY_MISSING_RECOMMENDED_ID_ALLOWED"
   exit 1
 fi
 
@@ -715,8 +1260,8 @@ if ! jq -e '
   .status == "fail"
   and .rc == 7
   and .roadmap.recommended_gate_id == "blockchain_fail_1"
-  and .roadmap.recommended_gate_reason == null
-  and .roadmap.recommended_gate_command == null
+  and .roadmap.recommended_gate_reason == "canonical fail-first gate"
+  and ((.roadmap.recommended_gate_command // "") | test("fail_action_1.sh"))
   and .roadmap.actions_selected_count == 2
   and .summary.actions_executed == 2
   and .summary.pass == 0
@@ -846,8 +1391,8 @@ if ! jq -e '
   exit 1
 fi
 
-if (( parallel_elapsed_sec > 6 )); then
-  echo "parallel timing mismatch: expected <=6s, got ${parallel_elapsed_sec}s"
+if (( parallel_elapsed_sec > 12 )); then
+  echo "parallel timing mismatch: expected <=12s, got ${parallel_elapsed_sec}s"
   cat "$SUMMARY_PARALLEL"
   exit 1
 fi

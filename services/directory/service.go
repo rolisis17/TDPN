@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	urlpkg "net/url"
 	"os"
 	"path/filepath"
@@ -135,6 +136,7 @@ type Service struct {
 	peerTrustFile                    string
 	betaStrict                       bool
 	prodStrict                       bool
+	strictModeParseErr               error
 	peerTrustMu                      sync.Mutex
 	syncStatusMu                     sync.RWMutex
 	peerSyncStatus                   proto.DirectorySyncRunStatus
@@ -206,6 +208,7 @@ const microRelayMinCapacityScore = 0.5
 const microRelayMaxAbusePenalty = 0.5
 
 var errProviderRelayOwnershipConflict = errors.New("provider relay owned by different operator")
+var sharedAddressSpaceCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 func New() *Service {
 	addr := os.Getenv("DIRECTORY_ADDR")
@@ -479,8 +482,12 @@ func New() *Service {
 	if issuerTrustedKeysFile == "" {
 		issuerTrustedKeysFile = defaultIssuerTrustedKeysFile
 	}
-	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_BETA_STRICT") == "1"
-	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("DIRECTORY_PROD_STRICT") == "1"
+	betaStrict, betaStrictErr := envStrictBoolOr("BETA_STRICT_MODE", "DIRECTORY_BETA_STRICT", false)
+	prodStrict, prodStrictErr := envStrictBoolOr("PROD_STRICT_MODE", "DIRECTORY_PROD_STRICT", false)
+	strictModeParseErr := firstEnvParseError(
+		annotateEnvParseError("BETA_STRICT_MODE/DIRECTORY_BETA_STRICT", betaStrictErr),
+		annotateEnvParseError("PROD_STRICT_MODE/DIRECTORY_PROD_STRICT", prodStrictErr),
+	)
 	if betaStrict {
 		providerSplitRoles = true
 	}
@@ -600,6 +607,7 @@ func New() *Service {
 		issuerTrustedKeysFile:            issuerTrustedKeysFile,
 		betaStrict:                       betaStrict,
 		prodStrict:                       prodStrict,
+		strictModeParseErr:               strictModeParseErr,
 		httpClient:                       &http.Client{Timeout: 5 * time.Second},
 		privateKeyPath:                   privateKeyPath,
 		keyRotateEvery:                   keyRotateEvery,
@@ -714,6 +722,9 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.strictModeParseErr != nil {
+		return s.strictModeParseErr
+	}
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
@@ -782,6 +793,12 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.peerTrustTOFU {
 		return fmt.Errorf("BETA_STRICT_MODE requires DIRECTORY_PEER_TRUST_TOFU=0")
+	}
+	if envEnabled(allowDangerousIssuerTrustWithoutAnchors) {
+		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousIssuerTrustWithoutAnchors)
+	}
+	if envEnabled(allowDangerousOutboundPrivateDNS) {
+		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousOutboundPrivateDNS)
 	}
 	if envEnabled(allowDangerousProviderTokenBypass) {
 		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousProviderTokenBypass)
@@ -912,6 +929,76 @@ func envEnabled(name string) bool {
 	default:
 		return false
 	}
+}
+
+func parseStrictBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected one of: 1|0|true|false|yes|no|on|off")
+	}
+}
+
+func envStrictBoolOr(primary string, fallback string, def bool) (bool, error) {
+	primarySet := false
+	primaryValue := false
+	if raw, ok := os.LookupEnv(primary); ok {
+		primarySet = true
+		if strings.TrimSpace(raw) == "" {
+			return false, fmt.Errorf("value must not be empty")
+		}
+		parsed, err := parseStrictBool(raw)
+		if err != nil {
+			return false, err
+		}
+		primaryValue = parsed
+	}
+
+	fallbackSet := false
+	fallbackValue := false
+	if fallback != "" {
+		if raw, ok := os.LookupEnv(fallback); ok {
+			fallbackSet = true
+			if strings.TrimSpace(raw) == "" {
+				return false, fmt.Errorf("value must not be empty")
+			}
+			parsed, err := parseStrictBool(raw)
+			if err != nil {
+				return false, err
+			}
+			fallbackValue = parsed
+		}
+	}
+
+	if primarySet && fallbackSet {
+		return primaryValue || fallbackValue, nil
+	}
+	if primarySet {
+		return primaryValue, nil
+	}
+	if fallbackSet {
+		return fallbackValue, nil
+	}
+	return def, nil
+}
+
+func annotateEnvParseError(name string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s invalid: %w", name, err)
+}
+
+func firstEnvParseError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) runPeerSync(ctx context.Context) {
@@ -3446,6 +3533,18 @@ func validateProviderRelayRuntimeAdmission(desc proto.RelayDescriptor) error {
 			return fmt.Errorf("provider micro-relay capability %q is not allowed", capability)
 		}
 	}
+	if desc.Reputation < microRelayMinReputationScore {
+		return fmt.Errorf("provider micro-relay reputation score %.2f below minimum %.2f", desc.Reputation, microRelayMinReputationScore)
+	}
+	if desc.Uptime < microRelayMinUptimeScore {
+		return fmt.Errorf("provider micro-relay uptime score %.2f below minimum %.2f", desc.Uptime, microRelayMinUptimeScore)
+	}
+	if desc.Capacity < microRelayMinCapacityScore {
+		return fmt.Errorf("provider micro-relay capacity score %.2f below minimum %.2f", desc.Capacity, microRelayMinCapacityScore)
+	}
+	if desc.AbusePenalty > microRelayMaxAbusePenalty {
+		return fmt.Errorf("provider micro-relay abuse penalty %.2f exceeds maximum %.2f", desc.AbusePenalty, microRelayMaxAbusePenalty)
+	}
 	return nil
 }
 
@@ -3536,9 +3635,16 @@ func (s *Service) verifyProviderToken(ctx context.Context, token string, nowUnix
 				lastErr = verifyErr
 				continue
 			}
-			if declaredIssuer != "" && strings.TrimSpace(claims.Issuer) != "" && strings.TrimSpace(claims.Issuer) != declaredIssuer {
-				lastErr = fmt.Errorf("provider token issuer mismatch")
-				continue
+			if declaredIssuer != "" {
+				claimIssuer := strings.TrimSpace(claims.Issuer)
+				if claimIssuer == "" {
+					lastErr = fmt.Errorf("provider token issuer missing")
+					continue
+				}
+				if claimIssuer != declaredIssuer {
+					lastErr = fmt.Errorf("provider token issuer mismatch")
+					continue
+				}
 			}
 			if validateErr := validateProviderTokenClaims(claims, nowUnix); validateErr != nil {
 				lastErr = validateErr
@@ -4439,16 +4545,16 @@ func (s *Service) microRelayEligibleForPublication(
 }
 
 func microRelayScoreEligible(score proto.RelaySelectionScore) bool {
-	if score.Reputation > 0 && score.Reputation < microRelayMinReputationScore {
+	if score.Reputation < microRelayMinReputationScore {
 		return false
 	}
-	if score.Uptime > 0 && score.Uptime < microRelayMinUptimeScore {
+	if score.Uptime < microRelayMinUptimeScore {
 		return false
 	}
-	if score.Capacity > 0 && score.Capacity < microRelayMinCapacityScore {
+	if score.Capacity < microRelayMinCapacityScore {
 		return false
 	}
-	if score.AbusePenalty > 0 && score.AbusePenalty > microRelayMaxAbusePenalty {
+	if score.AbusePenalty > microRelayMaxAbusePenalty {
 		return false
 	}
 	return true
@@ -5199,6 +5305,11 @@ func resolveSafeDialAddress(ctx context.Context, resolver outboundIPResolver, ad
 func isDisallowedOutboundDialIP(ip net.IP) bool {
 	if ip == nil {
 		return true
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		if addr, ok := netip.AddrFromSlice(ipv4); ok && sharedAddressSpaceCGNATPrefix.Contains(addr) {
+			return true
+		}
 	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }

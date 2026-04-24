@@ -17,6 +17,8 @@ ACTION_TMP_DIR="$(mktemp -d "$ROOT_DIR/scripts/.integration_roadmap_evidence_pac
 trap 'rm -rf "$TMP_DIR" "$ACTION_TMP_DIR"' EXIT
 
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
+FAKE_NEXT_ACTIONS_NO_SUMMARY="$TMP_DIR/fake_next_actions_no_summary.sh"
+FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY="$TMP_DIR/fake_next_actions_partial_summary.sh"
 EXEC_LOG="$TMP_DIR/executed_actions.log"
 PASS_EVIDENCE_1="$ACTION_TMP_DIR/pass_profile_default_gate_evidence_pack.sh"
 PASS_EVIDENCE_2="$ACTION_TMP_DIR/pass_runtime_actuation_promotion_evidence_pack.sh"
@@ -202,6 +204,55 @@ echo "# fake roadmap report" >"$report_md"
 EOF_FAKE_ROADMAP
 chmod +x "$FAKE_ROADMAP"
 
+cat >"$FAKE_NEXT_ACTIONS_NO_SUMMARY" <<'EOF_FAKE_NEXT_ACTIONS_NO_SUMMARY'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF_FAKE_NEXT_ACTIONS_NO_SUMMARY
+chmod +x "$FAKE_NEXT_ACTIONS_NO_SUMMARY"
+
+cat >"$FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY" <<'EOF_FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY'
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -z "$summary_json" ]]; then
+  echo "fake next-actions: missing --summary-json"
+  exit 2
+fi
+mkdir -p "$(dirname "$summary_json")"
+cat >"$summary_json" <<'JSON_FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY'
+{
+  "status": "pass",
+  "rc": 0,
+  "roadmap": {
+    "actions_selected_count": 1,
+    "selected_action_ids": ["profile_default_gate_evidence_pack"]
+  },
+  "summary": {
+    "actions_executed": 1,
+    "pass": 0,
+    "fail": 0,
+    "timed_out": 0,
+    "soft_failed": 0
+  },
+  "actions": []
+}
+JSON_FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY
+exit 0
+EOF_FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY
+chmod +x "$FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY"
+
 echo "[roadmap-evidence-pack-actionable-run] help contract"
 if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- "--reports-dir DIR" >/dev/null; then
   echo "help output missing --reports-dir DIR"
@@ -217,6 +268,14 @@ if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- 
 fi
 if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- "--roadmap-report-md PATH" >/dev/null; then
   echo "help output missing --roadmap-report-md PATH"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- "--live-evidence-summary-json PATH" >/dev/null; then
+  echo "help output missing --live-evidence-summary-json PATH"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- "--require-live-derived-evidence-pack-actions [0|1]" >/dev/null; then
+  echo "help output missing --require-live-derived-evidence-pack-actions [0|1]"
   exit 1
 fi
 if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- "--action-timeout-sec N" >/dev/null; then
@@ -251,6 +310,17 @@ if ! bash ./scripts/roadmap_evidence_pack_actionable_run.sh --help | grep -F -- 
   echo "help output missing --print-summary-json [0|1]"
   exit 1
 fi
+
+LIVE_SUMMARY_PROFILE_DEFAULT="$TMP_DIR/live_summary_profile_default.json"
+cat >"$LIVE_SUMMARY_PROFILE_DEFAULT" <<'JSON_LIVE_SUMMARY_PROFILE_DEFAULT'
+{
+  "roadmap": {
+    "derived_evidence_pack_ids": [
+      "profile_default_gate_evidence_pack"
+    ]
+  }
+}
+JSON_LIVE_SUMMARY_PROFILE_DEFAULT
 
 echo "[roadmap-evidence-pack-actionable-run] mixed success path defaults to profile-default family only (max-actions applied)"
 SUMMARY_SUCCESS="$TMP_DIR/summary_success.json"
@@ -873,6 +943,337 @@ fi
 
 if [[ -s "$EXEC_LOG" ]]; then
   echo "expected no executions for scope=auto none inference"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] fail-closed when required live summary path is invalid"
+SUMMARY_REQUIRED_INVALID="$TMP_DIR/summary_required_invalid.json"
+REPORTS_REQUIRED_INVALID="$TMP_DIR/reports_required_invalid"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=mixed_success \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_REQUIRED_INVALID" \
+  --summary-json "$SUMMARY_REQUIRED_INVALID" \
+  --live-evidence-summary-json "$TMP_DIR/live_summary_missing.json" \
+  --require-live-derived-evidence-pack-actions 1 \
+  --print-summary-json 0
+required_invalid_rc=$?
+set -e
+
+if [[ "$required_invalid_rc" != "4" ]]; then
+  echo "expected required-live-summary invalid fail-closed rc=4, got rc=$required_invalid_rc"
+  cat "$SUMMARY_REQUIRED_INVALID"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.require_live_derived_evidence_pack_actions == true
+  and ((.inputs.live_evidence_summary_json // "") | endswith("/live_summary_missing.json"))
+  and .enforcement.live_evidence_summary_present == false
+  and .enforcement.live_evidence_summary_valid == false
+  and .enforcement.live_evidence_summary_load_error == "missing_or_invalid_live_evidence_summary"
+  and .enforcement.live_requirement_fail_closed == true
+  and .enforcement.live_requirement_failure_kind == "required_live_evidence_summary_invalid"
+  and .summary.live_requirement_fail_closed == true
+  and .summary.actions_executed == 0
+  and ((.actions // []) | length == 0)
+  and .delegated_runner.status == "skipped_required_live_evidence_summary_invalid"
+  and .delegated_runner.skip_reason == "required_live_evidence_summary_invalid"
+  and .delegated_runner.rc == 4
+  and .delegated_runner.process_rc == 0
+' "$SUMMARY_REQUIRED_INVALID" >/dev/null; then
+  echo "required-live-summary invalid fail-closed summary mismatch"
+  cat "$SUMMARY_REQUIRED_INVALID"
+  exit 1
+fi
+
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "expected no executions when required live summary is invalid"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] fail-closed when live-derived publish ids are missing from selected scope"
+SUMMARY_REQUIRED_MISSING_SCOPE="$TMP_DIR/summary_required_missing_scope.json"
+REPORTS_REQUIRED_MISSING_SCOPE="$TMP_DIR/reports_required_missing_scope"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=no_suffix \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_REQUIRED_MISSING_SCOPE" \
+  --summary-json "$SUMMARY_REQUIRED_MISSING_SCOPE" \
+  --live-evidence-summary-json "$LIVE_SUMMARY_PROFILE_DEFAULT" \
+  --require-live-derived-evidence-pack-actions 1 \
+  --print-summary-json 0
+required_missing_scope_rc=$?
+set -e
+
+if [[ "$required_missing_scope_rc" != "4" ]]; then
+  echo "expected missing-live-derived publish ids fail-closed rc=4, got rc=$required_missing_scope_rc"
+  cat "$SUMMARY_REQUIRED_MISSING_SCOPE"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.require_live_derived_evidence_pack_actions == true
+  and ((.inputs.live_evidence_summary_json // "") | endswith("/live_summary_profile_default.json"))
+  and .roadmap.live_required_evidence_pack_ids == ["profile_default_gate_evidence_pack"]
+  and .roadmap.live_required_evidence_pack_count == 1
+  and .roadmap.live_required_missing_in_scope_ids == ["profile_default_gate_evidence_pack"]
+  and .roadmap.live_required_missing_in_scope_count == 1
+  and .enforcement.live_requirement_fail_closed == true
+  and .enforcement.live_requirement_failure_kind == "required_live_derived_evidence_pack_actions_missing_from_scope"
+  and .summary.live_requirement_fail_closed == true
+  and .summary.live_required_missing_in_scope_count == 1
+  and .summary.actions_executed == 0
+  and ((.actions // []) | length == 0)
+  and .delegated_runner.status == "skipped_required_live_derived_evidence_pack_actions_missing_from_scope"
+  and .delegated_runner.skip_reason == "required_live_derived_evidence_pack_actions_missing_from_scope"
+  and .delegated_runner.rc == 4
+  and .delegated_runner.process_rc == 0
+' "$SUMMARY_REQUIRED_MISSING_SCOPE" >/dev/null; then
+  echo "missing-live-derived publish ids fail-closed summary mismatch"
+  cat "$SUMMARY_REQUIRED_MISSING_SCOPE"
+  exit 1
+fi
+
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "expected no executions when live-derived publish ids are missing from selected scope"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] required live-derived publish ids pass when selected scope covers them"
+SUMMARY_REQUIRED_PRESENT="$TMP_DIR/summary_required_present.json"
+REPORTS_REQUIRED_PRESENT="$TMP_DIR/reports_required_present"
+: >"$EXEC_LOG"
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=mixed_success \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_REQUIRED_PRESENT" \
+  --summary-json "$SUMMARY_REQUIRED_PRESENT" \
+  --live-evidence-summary-json "$LIVE_SUMMARY_PROFILE_DEFAULT" \
+  --require-live-derived-evidence-pack-actions 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.require_live_derived_evidence_pack_actions == true
+  and .roadmap.live_required_evidence_pack_ids == ["profile_default_gate_evidence_pack"]
+  and .roadmap.live_required_evidence_pack_count == 1
+  and .roadmap.live_required_missing_in_scope_ids == []
+  and .roadmap.live_required_missing_in_scope_count == 0
+  and .enforcement.live_requirement_fail_closed == false
+  and .summary.live_requirement_fail_closed == false
+  and .summary.live_required_missing_in_scope_count == 0
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate_evidence_pack"
+  and .delegated_runner.skip_reason == null
+' "$SUMMARY_REQUIRED_PRESENT" >/dev/null; then
+  echo "required-live-derived publish ids pass summary mismatch"
+  cat "$SUMMARY_REQUIRED_PRESENT"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected one execution when required live-derived publish ids are present"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -Fx "profile_default_gate_evidence_pack" "$EXEC_LOG" >/dev/null; then
+  echo "expected profile_default_gate_evidence_pack execution when required live-derived publish ids are present"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] fail-closed when delegated runner returns rc=0 without summary artifact"
+SUMMARY_DELEGATED_MISSING="$TMP_DIR/summary_delegated_missing.json"
+REPORTS_DELEGATED_MISSING="$TMP_DIR/reports_delegated_missing"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=mixed_success \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_NEXT_ACTIONS_SCRIPT="$FAKE_NEXT_ACTIONS_NO_SUMMARY" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_DELEGATED_MISSING" \
+  --summary-json "$SUMMARY_DELEGATED_MISSING" \
+  --scope profile-default \
+  --print-summary-json 0
+delegated_missing_rc=$?
+set -e
+
+if [[ "$delegated_missing_rc" != "6" ]]; then
+  echo "expected delegated-summary-missing fail-closed rc=6, got rc=$delegated_missing_rc"
+  cat "$SUMMARY_DELEGATED_MISSING"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.delegated_summary_contract_fail_closed == true
+  and .enforcement.delegated_summary_contract_fail_closed == true
+  and .enforcement.delegated_summary_contract_failure_kind == "delegated_summary_missing_or_invalid"
+  and ((.enforcement.delegated_summary_contract_failure_reason // "") | test("summary artifact"))
+  and ((.enforcement.delegated_summary_contract_failure_reasons | length) >= 1)
+  and ((.enforcement.delegated_summary_contract_next_operator_action // "") | test("roadmap_next_actions_run\\.sh"))
+  and .delegated_runner.summary_valid == false
+  and .delegated_runner.process_rc == 0
+  and .delegated_runner.rc == 0
+  and .summary.actions_executed == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_DELEGATED_MISSING" >/dev/null; then
+  echo "delegated-summary-missing fail-closed summary mismatch"
+  cat "$SUMMARY_DELEGATED_MISSING"
+  exit 1
+fi
+
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "expected no executions when delegated summary artifact is missing"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] fail-closed when stale delegated summary exists but runner emits no new summary"
+SUMMARY_DELEGATED_STALE="$TMP_DIR/summary_delegated_stale.json"
+REPORTS_DELEGATED_STALE="$TMP_DIR/reports_delegated_stale"
+mkdir -p "$REPORTS_DELEGATED_STALE"
+cat >"$REPORTS_DELEGATED_STALE/roadmap_next_actions_run_summary.json" <<'JSON_DELEGATED_STALE'
+{
+  "status": "pass",
+  "rc": 0,
+  "roadmap": {
+    "actions_selected_count": 1,
+    "selected_action_ids": ["profile_default_gate_evidence_pack"]
+  },
+  "summary": {
+    "actions_executed": 1,
+    "pass": 1,
+    "fail": 0,
+    "timed_out": 0,
+    "soft_failed": 0
+  },
+  "actions": [
+    {"id":"profile_default_gate_evidence_pack","status":"pass"}
+  ]
+}
+JSON_DELEGATED_STALE
+: >"$EXEC_LOG"
+set +e
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=mixed_success \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_NEXT_ACTIONS_SCRIPT="$FAKE_NEXT_ACTIONS_NO_SUMMARY" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_DELEGATED_STALE" \
+  --summary-json "$SUMMARY_DELEGATED_STALE" \
+  --scope profile-default \
+  --print-summary-json 0
+delegated_stale_rc=$?
+set -e
+
+if [[ "$delegated_stale_rc" != "6" ]]; then
+  echo "expected delegated-stale-summary fail-closed rc=6, got rc=$delegated_stale_rc"
+  cat "$SUMMARY_DELEGATED_STALE"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.delegated_summary_contract_fail_closed == true
+  and .enforcement.delegated_summary_contract_fail_closed == true
+  and .enforcement.delegated_summary_contract_failure_kind == "delegated_summary_missing_or_invalid"
+  and .delegated_runner.summary_valid == false
+  and .delegated_runner.process_rc == 0
+  and .delegated_runner.rc == 0
+  and .summary.actions_executed == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_DELEGATED_STALE" >/dev/null; then
+  echo "delegated-stale-summary fail-closed mismatch"
+  cat "$SUMMARY_DELEGATED_STALE"
+  exit 1
+fi
+
+if [[ -e "$REPORTS_DELEGATED_STALE/roadmap_next_actions_run_summary.json" ]]; then
+  echo "expected stale delegated summary to be cleared before runner invocation"
+  exit 1
+fi
+
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "expected no executions when stale delegated summary is reused"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] fail-closed when delegated summary counters are partial/inconsistent"
+SUMMARY_DELEGATED_PARTIAL="$TMP_DIR/summary_delegated_partial.json"
+REPORTS_DELEGATED_PARTIAL="$TMP_DIR/reports_delegated_partial"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=mixed_success \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_NEXT_ACTIONS_SCRIPT="$FAKE_NEXT_ACTIONS_PARTIAL_SUMMARY" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_DELEGATED_PARTIAL" \
+  --summary-json "$SUMMARY_DELEGATED_PARTIAL" \
+  --scope profile-default \
+  --print-summary-json 0
+delegated_partial_rc=$?
+set -e
+
+if [[ "$delegated_partial_rc" != "6" ]]; then
+  echo "expected delegated-summary-partial fail-closed rc=6, got rc=$delegated_partial_rc"
+  cat "$SUMMARY_DELEGATED_PARTIAL"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.actions_results_count == 0
+  and .summary.delegated_summary_contract_fail_closed == true
+  and .enforcement.delegated_summary_contract_fail_closed == true
+  and .enforcement.delegated_summary_contract_failure_kind == "delegated_summary_contract_violation"
+  and ((.enforcement.delegated_summary_contract_failure_reasons | map(test("counters mismatch|actions length mismatch")) | any))
+  and .delegated_runner.summary_valid == true
+  and .delegated_runner.process_rc == 0
+  and .delegated_runner.rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["profile_default_gate_evidence_pack"]
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_DELEGATED_PARTIAL" >/dev/null; then
+  echo "delegated-summary-partial fail-closed summary mismatch"
+  cat "$SUMMARY_DELEGATED_PARTIAL"
+  exit 1
+fi
+
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "expected no executions when delegated summary contract is partial/inconsistent"
   cat "$EXEC_LOG"
   exit 1
 fi

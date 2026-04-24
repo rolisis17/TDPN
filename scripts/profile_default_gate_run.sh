@@ -45,7 +45,9 @@ Notes:
     CAMPAIGN_SUBJECT env, INVITE_KEY env, CAMPAIGN_SUBJECT file, INVITE_KEY file.
   - Env-file fallback default: $ROOT_DIR/deploy/.env.easy.client
     (override via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE).
-  - Invite subject placeholders (for example literal INVITE_KEY) fail fast.
+  - Invite subject placeholders (for example literal INVITE_KEY) resolve via
+    INVITE_KEY/CAMPAIGN_SUBJECT env fallback when available, and fail fast
+    when unresolved.
   - Host placeholders (for example literal A_HOST/B_HOST) fail fast with
     a copy/paste-ready profile-default-gate-live example command.
   - This wrapper defaults signoff refresh mode to roadmap docker defaults:
@@ -97,15 +99,15 @@ strip_optional_wrapping_quotes() {
 }
 
 invite_subject_looks_placeholder_01() {
-  local value normalized
+  local value
   value="$(trim "${1:-}")"
   value="$(strip_optional_wrapping_quotes "$value")"
-  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
-  case "$normalized" in
-    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY)
-      return 0
-      ;;
-  esac
+  if matches_placeholder_token_01 "$value" "INVITE_KEY"; then
+    return 0
+  fi
+  if matches_placeholder_token_01 "$value" "CAMPAIGN_SUBJECT"; then
+    return 0
+  fi
   return 1
 }
 
@@ -118,7 +120,7 @@ matches_placeholder_token_01() {
   token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
 
   case "$normalized" in
-    "$token"|\$\{"$token"\}|\$"$token"|"<$token>"|"{{$token}}"|YOUR_"$token"|REPLACE_WITH_"$token")
+    "$token"|\$\{"$token"\}|\$"$token"|"<$token>"|"{{$token}}"|YOUR_"$token"|REPLACE_WITH_"$token"|%$token%|\$\{"$token":-*}|\$\{"$token"-*})
       return 0
       ;;
   esac
@@ -400,6 +402,36 @@ extract_flag_value() {
     idx=$((idx + 1))
   done
   printf '%s' "$value"
+}
+
+record_placeholder_subject_candidate_01() {
+  local source="$1"
+  local value="$2"
+  if [[ -z "$source" ]]; then
+    source="unknown"
+  fi
+  if [[ "$subject_placeholder_detected" != "true" ]]; then
+    subject_placeholder_detected=true
+    subject_placeholder_source="$source"
+    subject_placeholder_value="$value"
+  fi
+  placeholder_subject_sources+=("$source")
+}
+
+pick_campaign_subject_candidate_01() {
+  local source="$1"
+  local candidate
+  candidate="$(trim "${2:-}")"
+  if [[ -n "$campaign_subject_effective" || -z "$candidate" ]]; then
+    return 1
+  fi
+  if invite_subject_looks_placeholder_01 "$candidate"; then
+    record_placeholder_subject_candidate_01 "$source" "$candidate"
+    return 2
+  fi
+  campaign_subject_effective="$candidate"
+  subject_source="$source"
+  return 0
 }
 
 parse_and_strip_passthrough_subject_flags() {
@@ -1060,10 +1092,14 @@ fi
 
 campaign_subject_effective=""
 subject_source=""
-campaign_subject_env=""
-invite_key_env=""
-campaign_subject_file=""
-invite_key_file=""
+campaign_subject_env="$(trim "${CAMPAIGN_SUBJECT:-}")"
+invite_key_env="$(trim "${INVITE_KEY:-}")"
+campaign_subject_file="$(trim "$(read_env_key_from_file "$env_client_file" "CAMPAIGN_SUBJECT")")"
+invite_key_file="$(trim "$(read_env_key_from_file "$env_client_file" "INVITE_KEY")")"
+subject_placeholder_detected=false
+subject_placeholder_source=""
+subject_placeholder_value=""
+declare -a placeholder_subject_sources=()
 if [[ "$auth_mode" == "anon_cred" ]]; then
   if [[ -n "$campaign_anon_cred_passthrough" ]]; then
     subject_source="passthrough:--campaign-anon-cred"
@@ -1071,49 +1107,51 @@ if [[ "$auth_mode" == "anon_cred" ]]; then
     subject_source="passthrough:--anon-cred"
   fi
 else
-  if [[ -n "$campaign_subject_passthrough_effective" ]]; then
-    campaign_subject_effective="$campaign_subject_passthrough_effective"
-    subject_source="$campaign_subject_passthrough_source"
-  elif [[ -n "$campaign_subject_cli" ]]; then
-    campaign_subject_effective="$campaign_subject_cli"
-    subject_source="explicit:--campaign-subject"
-  elif [[ -n "$subject_alias_cli" ]]; then
-    campaign_subject_effective="$subject_alias_cli"
-    subject_source="explicit:--subject"
-  elif [[ -n "$key_alias_cli" ]]; then
-    campaign_subject_effective="$key_alias_cli"
-    subject_source="explicit:--key"
-  elif [[ -n "$invite_key_alias_cli" ]]; then
-    campaign_subject_effective="$invite_key_alias_cli"
-    subject_source="explicit:--invite-key"
-  else
-    campaign_subject_env="$(trim "${CAMPAIGN_SUBJECT:-}")"
-    invite_key_env="$(trim "${INVITE_KEY:-}")"
-    campaign_subject_file="$(trim "$(read_env_key_from_file "$env_client_file" "CAMPAIGN_SUBJECT")")"
-    invite_key_file="$(trim "$(read_env_key_from_file "$env_client_file" "INVITE_KEY")")"
-
-    if [[ -n "$campaign_subject_env" ]]; then
-      campaign_subject_effective="$campaign_subject_env"
-      subject_source="env:CAMPAIGN_SUBJECT"
-    elif [[ -n "$invite_key_env" ]]; then
-      campaign_subject_effective="$invite_key_env"
-      subject_source="env:INVITE_KEY"
-    elif [[ -n "$campaign_subject_file" ]]; then
-      campaign_subject_effective="$campaign_subject_file"
-      subject_source="file:CAMPAIGN_SUBJECT"
-    elif [[ -n "$invite_key_file" ]]; then
-      campaign_subject_effective="$invite_key_file"
-      subject_source="file:INVITE_KEY"
+  pick_campaign_subject_candidate_01 "$campaign_subject_passthrough_source" "$campaign_subject_passthrough_effective" || true
+  pick_campaign_subject_candidate_01 "explicit:--campaign-subject" "$campaign_subject_cli" || true
+  pick_campaign_subject_candidate_01 "explicit:--subject" "$subject_alias_cli" || true
+  pick_campaign_subject_candidate_01 "explicit:--key" "$key_alias_cli" || true
+  pick_campaign_subject_candidate_01 "explicit:--invite-key" "$invite_key_alias_cli" || true
+  pick_campaign_subject_candidate_01 "env:CAMPAIGN_SUBJECT" "$campaign_subject_env" || true
+  pick_campaign_subject_candidate_01 "env:INVITE_KEY" "$invite_key_env" || true
+  pick_campaign_subject_candidate_01 "file:CAMPAIGN_SUBJECT" "$campaign_subject_file" || true
+  pick_campaign_subject_candidate_01 "file:INVITE_KEY" "$invite_key_file" || true
+  if [[ "$subject_placeholder_detected" == "true" && -n "$campaign_subject_effective" ]]; then
+    placeholder_sources_csv="unknown"
+    if (( ${#placeholder_subject_sources[@]} > 0 )); then
+      placeholder_sources_csv="$(IFS=,; printf '%s' "${placeholder_subject_sources[*]}")"
     fi
+    echo "[profile-default-gate-run] $(timestamp_utc) subject-placeholder-resolved placeholder_source=$subject_placeholder_source placeholder_sources=$placeholder_sources_csv resolved_source=$subject_source"
   fi
 fi
 
 if [[ "$auth_mode" == "subject" ]]; then
   if [[ -z "$campaign_subject_effective" ]]; then
+    if [[ "$subject_placeholder_detected" == "true" ]]; then
+      placeholder_sources_csv="unknown"
+      if (( ${#placeholder_subject_sources[@]} > 0 )); then
+        placeholder_sources_csv="$(IFS=,; printf '%s' "${placeholder_subject_sources[*]}")"
+      fi
+      env_invite_key_usable="false"
+      env_campaign_subject_usable="false"
+      if [[ -n "$invite_key_env" ]] && ! invite_subject_looks_placeholder_01 "$invite_key_env"; then
+        env_invite_key_usable="true"
+      fi
+      if [[ -n "$campaign_subject_env" ]] && ! invite_subject_looks_placeholder_01 "$campaign_subject_env"; then
+        env_campaign_subject_usable="true"
+      fi
+      echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition reason=placeholder_subject placeholder_source=$subject_placeholder_source placeholder_sources=$placeholder_sources_csv env_invite_key_usable=$env_invite_key_usable env_campaign_subject_usable=$env_campaign_subject_usable env_client_file=$env_client_file"
+      echo "profile-default-gate-run failed: invite key subject appears to be placeholder text and could not be resolved"
+      echo "set INVITE_KEY to a real value or pass a real --campaign-subject/--subject/--key/--invite-key"
+      echo "operator_next_action: ./scripts/profile_default_gate_run.sh --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>"
+      echo "placeholder_sources=$placeholder_sources_csv"
+      exit 2
+    fi
     echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition env_client_file=$env_client_file"
     echo "profile-default-gate-run failed: missing invite key subject"
     echo "provide --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
     echo "or define CAMPAIGN_SUBJECT/INVITE_KEY in $env_client_file"
+    echo "operator_next_action: ./scripts/profile_default_gate_run.sh --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>"
     echo "override env file path via PROFILE_DEFAULT_GATE_RUN_ENV_CLIENT_FILE"
     exit 2
   fi
@@ -1121,6 +1159,7 @@ if [[ "$auth_mode" == "subject" ]]; then
     echo "[profile-default-gate-run] $(timestamp_utc) failure_kind=missing_invite_subject_precondition reason=placeholder_subject"
     echo "profile-default-gate-run failed: invite key subject appears to be placeholder text ($campaign_subject_effective)"
     echo "provide a real invite key via --campaign-subject/--subject/--key/--invite-key, or set CAMPAIGN_SUBJECT/INVITE_KEY"
+    echo "operator_next_action: ./scripts/profile_default_gate_run.sh --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>"
     exit 2
   fi
 fi

@@ -16,6 +16,10 @@ const onboardingStateLineEl = byId("onboarding_state_line");
 const onboardingStateTitleEl = byId("onboarding_state_title");
 const onboardingStateDetailEl = byId("onboarding_state_detail");
 const onboardingNextActionEl = byId("onboarding_next_action");
+const sessionFreshnessBannerEl = byId("session_freshness_banner");
+const sessionFreshnessLineEl = byId("session_freshness_line");
+const sessionFreshnessTitleEl = byId("session_freshness_title");
+const sessionFreshnessDetailEl = byId("session_freshness_detail");
 const policyPostureEl = byId("policy_posture");
 const policyPostureLineEl = byId("policy_posture_line");
 const policyConnectPolicyEl = byId("policy_connect_policy");
@@ -101,6 +105,9 @@ const panelClientEl = byId("panel_client");
 const panelServerEl = byId("panel_server");
 const clientLockHintEl = byId("client_lock_hint");
 const serverLockHintEl = byId("server_lock_hint");
+const tabLockHintEl = document.getElementById("tab_lock_hint");
+const workspaceFirstRunHintEl = document.getElementById("workspace_first_run_hint");
+const workspacePlatformHintEl = document.getElementById("workspace_platform_hint");
 const serverLifecycleHintEl = byId("server_lifecycle_hint");
 const serverStartBtnEl = byId("server_start_btn");
 const serverStopBtnEl = byId("server_stop_btn");
@@ -154,6 +161,7 @@ const CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE = "config_unavailable";
 const LEGACY_ALIAS_ENV_NAME_REGEX = /\bTDPN_[A-Z0-9_]+\b/gi;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
 const PORTAL_WORKSPACE_TAB_STORAGE_KEY = "gpm.portal.workspace_tab.v1";
+const SESSION_EXPIRING_SOON_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
@@ -258,6 +266,8 @@ let connectionDetail = CONNECTION_DEFAULT_DETAIL;
 let connectionRoutingMode = CONNECTION_DEFAULT_ROUTING_MODE;
 let connectionRoutingDetail = CONNECTION_DEFAULT_ROUTING_DETAIL;
 let bootstrapTrustTelemetry = null;
+let sessionExpiryAtMs = undefined;
+let sessionExpiryToken = "";
 
 function localStore() {
   try {
@@ -1497,7 +1507,8 @@ function refreshSessionBootstrapDirectoryControls() {
   if (!sessionBootstrapDirectoryEl) {
     return;
   }
-  const hasSessionToken = Boolean(byId("session_token").value.trim());
+  const freshness = computeSessionFreshnessState();
+  const hasSessionToken = freshness.state !== "signed_out" && freshness.state !== "expired";
   const disabled = !hasSessionToken || compatibilityOverrideEnabled();
   sessionBootstrapDirectoryEl.disabled = disabled;
   sessionBootstrapDirectoryEl.setAttribute("aria-disabled", String(disabled));
@@ -2328,6 +2339,171 @@ function formatDurationCompact(deltaMs) {
   return hoursRemainder > 0 ? `${totalDays}d ${hoursRemainder}h` : `${totalDays}d`;
 }
 
+function sessionReauthGuidance() {
+  return "Rotate Session if still valid, otherwise Sign + Verify (Wallet) or Verify + Create Session.";
+}
+
+function extractSessionExpiryMs(payload) {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const candidates = [
+    payload?.session?.expires_at_utc,
+    payload?.session?.expiresAtUtc,
+    payload?.session?.expires_at,
+    payload?.session?.expiresAt,
+    payload?.expires_at_utc,
+    payload?.expiresAtUtc,
+    payload?.profile?.expires_at_utc,
+    payload?.profile?.expiresAtUtc
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseTimestampMs(candidate);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function clearSessionFreshnessTelemetry() {
+  sessionExpiryAtMs = undefined;
+  sessionExpiryToken = "";
+}
+
+function refreshSessionFreshnessFromPayload(payload, options = {}) {
+  const { clearWhenMissing = false, tokenOverride } = options;
+  const token =
+    nonEmptyString(
+      firstDefined(
+        tokenOverride,
+        payload?.session_token,
+        payload?.session?.session_token,
+        payload?.token
+      )
+    ) || byId("session_token").value.trim();
+  if (!token) {
+    clearSessionFreshnessTelemetry();
+    return;
+  }
+  sessionExpiryToken = token;
+  const expiresAtMs = extractSessionExpiryMs(payload);
+  if (expiresAtMs !== undefined) {
+    sessionExpiryAtMs = expiresAtMs;
+    return;
+  }
+  if (clearWhenMissing) {
+    sessionExpiryAtMs = undefined;
+  }
+}
+
+function markSessionFreshnessUnknownForCurrentToken() {
+  const token = byId("session_token").value.trim();
+  if (!token) {
+    clearSessionFreshnessTelemetry();
+    return;
+  }
+  sessionExpiryToken = token;
+  sessionExpiryAtMs = undefined;
+}
+
+function computeSessionFreshnessState() {
+  const token = byId("session_token").value.trim();
+  if (!token) {
+    return {
+      state: "signed_out",
+      kind: "warn",
+      title: "Signed out",
+      detail: "No active session token is loaded."
+    };
+  }
+  if (sessionExpiryToken && sessionExpiryToken !== token) {
+    return {
+      state: "unknown",
+      kind: "warn",
+      title: "Session expiry unknown",
+      detail: "Session token changed. Refresh Session to validate expiry and avoid stale auth."
+    };
+  }
+  if (typeof sessionExpiryAtMs !== "number" || !Number.isFinite(sessionExpiryAtMs) || sessionExpiryAtMs <= 0) {
+    return {
+      state: "unknown",
+      kind: "warn",
+      title: "Session expiry unknown",
+      detail: "Session token is loaded, but expires_at_utc is unavailable. Refresh Session to validate freshness."
+    };
+  }
+  const deltaMs = sessionExpiryAtMs - Date.now();
+  const expiresAtIso = new Date(sessionExpiryAtMs).toISOString();
+  if (deltaMs <= 0) {
+    return {
+      state: "expired",
+      kind: "bad",
+      title: "Session expired",
+      detail: `Session expired ${formatDurationCompact(deltaMs)} ago (${expiresAtIso}). ${sessionReauthGuidance()}`,
+      expiresAtMs: sessionExpiryAtMs
+    };
+  }
+  if (deltaMs <= SESSION_EXPIRING_SOON_MS) {
+    return {
+      state: "expiring_soon",
+      kind: "warn",
+      title: "Session expiring soon",
+      detail: `Session expires in ${formatDurationCompact(deltaMs)} (${expiresAtIso}). Rotate Session now to avoid auth failures.`,
+      expiresAtMs: sessionExpiryAtMs
+    };
+  }
+  return {
+    state: "active",
+    kind: "good",
+    title: "Session active",
+    detail: `Session expires in ${formatDurationCompact(deltaMs)} (${expiresAtIso}).`,
+    expiresAtMs: sessionExpiryAtMs
+  };
+}
+
+function assertSessionFreshForAction(actionLabel, options = {}) {
+  const { requireToken = false } = options;
+  const token = byId("session_token").value.trim();
+  if (!token) {
+    if (requireToken) {
+      throw new Error(`${actionLabel} is unavailable: session_token is required. Sign in first.`);
+    }
+    return;
+  }
+  const freshness = computeSessionFreshnessState();
+  if (freshness.state === "expired") {
+    throw new Error(`${actionLabel} is unavailable: ${freshness.detail}`);
+  }
+}
+
+function optionalFreshSessionToken(actionLabel, options = {}) {
+  const { allowWalletFallback = false, walletAddress = "" } = options;
+  const token = byId("session_token").value.trim();
+  if (!token) {
+    return undefined;
+  }
+  const freshness = computeSessionFreshnessState();
+  if (freshness.state !== "expired") {
+    return token;
+  }
+  if (allowWalletFallback && nonEmptyString(walletAddress)) {
+    return undefined;
+  }
+  throw new Error(`${actionLabel} is unavailable: ${freshness.detail}`);
+}
+
+function syncSessionFreshnessBanner() {
+  const freshness = computeSessionFreshnessState();
+  sessionFreshnessBannerEl.dataset.kind = freshness.kind || "warn";
+  sessionFreshnessLineEl.classList.remove("good", "warn", "bad");
+  if (freshness.kind) {
+    sessionFreshnessLineEl.classList.add(freshness.kind);
+  }
+  sessionFreshnessTitleEl.textContent = freshness.title;
+  sessionFreshnessDetailEl.textContent = freshness.detail;
+}
+
 function formatBootstrapManifestExpiryLabel(expiresAtMs) {
   if (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs) || expiresAtMs <= 0) {
     return "unknown";
@@ -3138,9 +3314,98 @@ function computeServerTabLockHintText() {
   return readiness.guidanceText;
 }
 
+function ensureSentence(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return "";
+  }
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function isWindowsRuntimePlatform() {
+  const platform = String(
+    firstDefined(navigator.userAgentData && navigator.userAgentData.platform, navigator.platform, navigator.userAgent) || ""
+  ).toLowerCase();
+  return platform.includes("win");
+}
+
+function formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible) {
+  if (clientTabVisible && serverTabVisible) {
+    return "Both Client and Server tabs are available for this session.";
+  }
+  if (!clientTabVisible && !serverTabVisible) {
+    return "Client and Server tabs are disabled by role/readiness policy. Use the lock message activation paths before retrying.";
+  }
+  if (!clientTabVisible) {
+    return "Client tab is disabled for this session. Use the lock message activation path to finish Step 2 and unlock client actions.";
+  }
+  return "Server tab is disabled for this session. Use the lock message activation path to finish Step 3 and unlock server actions.";
+}
+
+function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
+  if (workspaceFirstRunHintEl) {
+    workspaceFirstRunHintEl.textContent =
+      `Single-window tabs keep both lanes visible. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
+    workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
+  }
+  if (!workspacePlatformHintEl) {
+    return;
+  }
+  workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
+    ? "Windows-native first run: verify local GPM/WireGuard readiness, then run Status before Connect or server lifecycle actions."
+    : "First run: verify local GPM readiness, then run Status before Connect or server lifecycle actions.";
+}
+
+function inferWorkspaceTabActivationPathHint(tabName, reason) {
+  const normalizedReason = typeof reason === "string" ? reason : "";
+  const directPathMatch = normalizedReason.match(/Direct path:\s*([^.;]+)\s*[.;]?/i);
+  if (directPathMatch && directPathMatch[1]) {
+    return directPathMatch[1].trim();
+  }
+  const hasSessionToken = byId("session_token").value.trim().length > 0;
+  if (tabName === "client") {
+    if (!hasSessionToken) {
+      return "Request Challenge, run Sign + Verify (Wallet) or Verify + Create Session, then Register Client";
+    }
+    return "Register Client to unlock client lane actions";
+  }
+  if (!hasSessionToken) {
+    return "Request Challenge, run Sign + Verify (Wallet) or Verify + Create Session, then Apply Operator Role";
+  }
+  return "Apply Operator Role, wait for approval, then refresh Session or Check Operator Status";
+}
+
+function formatWorkspaceLockedTabMessage(tabName, reason) {
+  const normalizedReason = ensureSentence(reason) || `${tabName} tab is currently locked by role policy.`;
+  const activationPath = ensureSentence(inferWorkspaceTabActivationPathHint(tabName.toLowerCase(), normalizedReason));
+  return `${tabName} tab is disabled for this session. ${normalizedReason} Next step: ${activationPath}`;
+}
+
+function syncWorkspaceTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason) {
+  if (!tabLockHintEl) {
+    return;
+  }
+  const lockMessages = [];
+  if (!clientTabVisible && clientReason) {
+    lockMessages.push(formatWorkspaceLockedTabMessage("Client", clientReason));
+  }
+  if (!serverTabVisible && serverReason) {
+    lockMessages.push(formatWorkspaceLockedTabMessage("Server", serverReason));
+  }
+  if (lockMessages.length === 0) {
+    tabLockHintEl.textContent = "";
+    tabLockHintEl.hidden = true;
+    return;
+  }
+  const headline = lockMessages.length > 1 ? "Role locks active." : "Role lock active.";
+  tabLockHintEl.textContent = `${headline} ${lockMessages.join(" ")}`;
+  tabLockHintEl.hidden = false;
+}
+
 function computeServerLifecycleControlState() {
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
   const sessionToken = byId("session_token").value.trim();
+  const sessionFreshness = computeSessionFreshnessState();
   if (!isServerTabVisibleRole(role)) {
     return {
       disabled: true,
@@ -3154,6 +3419,14 @@ function computeServerLifecycleControlState() {
       disabled: true,
       locked: true,
       hint: failClosedMutatingActionStatusDetail()
+    };
+  }
+
+  if (sessionFreshness.state === "expired") {
+    return {
+      disabled: true,
+      locked: true,
+      hint: `Session expired. ${sessionReauthGuidance()}`
     };
   }
 
@@ -3251,12 +3524,40 @@ function activateWorkspaceTab(name) {
 function syncWorkspaceTabLockState() {
   const clientTabVisible = isClientTabVisibleRole();
   const serverTabVisible = isServerTabVisibleRole();
+  const clientReason = computeClientTabLockHintText();
+  const serverReason = computeServerTabLockHintText();
+  const clientLockedMessage = formatWorkspaceLockedTabMessage("Client", clientReason);
+  const serverLockedMessage = formatWorkspaceLockedTabMessage("Server", serverReason);
+
   tabClientEl.disabled = !clientTabVisible;
   tabClientEl.classList.toggle("locked", !clientTabVisible);
   panelClientEl.classList.toggle("locked", !clientTabVisible);
+  tabClientEl.setAttribute("aria-disabled", clientTabVisible ? "false" : "true");
+  tabClientEl.title = clientTabVisible ? "Open Client workspace." : clientLockedMessage;
+  tabClientEl.setAttribute(
+    "aria-label",
+    clientTabVisible ? "Client workspace tab." : `Client workspace tab locked. ${clientLockedMessage}`
+  );
+  if (!clientTabVisible && tabLockHintEl) {
+    tabClientEl.setAttribute("aria-describedby", "tab_lock_hint");
+  } else {
+    tabClientEl.removeAttribute("aria-describedby");
+  }
+
   tabServerEl.disabled = !serverTabVisible;
   tabServerEl.classList.toggle("locked", !serverTabVisible);
   panelServerEl.classList.toggle("locked", !serverTabVisible);
+  tabServerEl.setAttribute("aria-disabled", serverTabVisible ? "false" : "true");
+  tabServerEl.title = serverTabVisible ? "Open Server workspace." : serverLockedMessage;
+  tabServerEl.setAttribute(
+    "aria-label",
+    serverTabVisible ? "Server workspace tab." : `Server workspace tab locked. ${serverLockedMessage}`
+  );
+  if (!serverTabVisible && tabLockHintEl) {
+    tabServerEl.setAttribute("aria-describedby", "tab_lock_hint");
+  } else {
+    tabServerEl.removeAttribute("aria-describedby");
+  }
 
   const clientTabActive = tabClientEl.classList.contains("active");
   const serverTabActive = tabServerEl.classList.contains("active");
@@ -3270,10 +3571,12 @@ function syncWorkspaceTabLockState() {
     activateWorkspaceTab(activeWorkspaceTab);
   }
 
-  clientLockHintEl.textContent = computeClientTabLockHintText();
+  clientLockHintEl.textContent = clientReason;
   clientLockHintEl.classList.toggle("locked", !clientTabVisible);
-  serverLockHintEl.textContent = computeServerTabLockHintText();
+  serverLockHintEl.textContent = serverReason;
   serverLockHintEl.classList.toggle("locked", !serverTabVisible);
+  syncWorkspaceTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason);
+  syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible);
   syncServerLifecycleActionState();
 }
 
@@ -3301,7 +3604,7 @@ function setStepState(el, state) {
 
 function refreshOnboardingSteps() {
   const clientReadiness = computeClientReadiness();
-  const hasSession = clientReadiness.state !== "not_signed_in";
+  const hasSession = clientReadiness.state !== "not_signed_in" && clientReadiness.state !== "session_expired";
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase();
   const backendOperatorStatus = serverReadiness?.operatorApplicationStatus || operatorApplicationStatus;
   const step3Done =
@@ -3358,6 +3661,13 @@ function computePortalNextRecommendedAction() {
     }
     return "Verify + Create Session.";
   }
+  const sessionFreshness = computeSessionFreshnessState();
+  if (sessionFreshness.state === "expired") {
+    return "Re-authenticate with Sign + Verify (Wallet) or Verify + Create Session.";
+  }
+  if (sessionFreshness.state === "expiring_soon") {
+    return "Rotate Session.";
+  }
 
   const clientReadiness = computeClientReadiness();
   if (
@@ -3409,6 +3719,28 @@ function computePortalOnboardingState() {
       detail: "Challenge and signature are ready, but session verification is still pending."
     };
   }
+  const sessionFreshness = computeSessionFreshnessState();
+  if (sessionFreshness.state === "expired") {
+    return {
+      kind: "bad",
+      title: "Session expired",
+      detail: sessionFreshness.detail
+    };
+  }
+  if (sessionFreshness.state === "expiring_soon") {
+    return {
+      kind: "warn",
+      title: "Session expiring soon",
+      detail: sessionFreshness.detail
+    };
+  }
+  if (sessionFreshness.state === "unknown") {
+    return {
+      kind: "warn",
+      title: "Session expiry unknown",
+      detail: sessionFreshness.detail
+    };
+  }
 
   const operatorStatus = effectivePortalOperatorApplicationStatus();
   if (operatorStatus === "pending") {
@@ -3449,6 +3781,7 @@ function syncPortalOnboardingStateBanner() {
   onboardingStateTitleEl.textContent = onboardingState.title;
   onboardingStateDetailEl.textContent = onboardingState.detail;
   onboardingNextActionEl.textContent = `Next recommended action: ${computePortalNextRecommendedAction()}`;
+  syncSessionFreshnessBanner();
 }
 
 function syncSessionDerivedState(result) {
@@ -3662,6 +3995,7 @@ function setClientRegistrationTrustDriftState(trustDrift, guidanceText = "") {
 }
 
 function applyClientRegistrationPayload(payload) {
+  refreshSessionFreshnessFromPayload(payload);
   const registrationStatus = parseClientRegistrationStatus(payload);
   if (registrationStatus !== undefined) {
     clientRegistered = registrationStatus;
@@ -3704,7 +4038,9 @@ function setOperatorChecklistStep(itemEl, pillEl, detailEl, state, detail) {
 
 function computeOperatorUnlockPlanModel() {
   const token = byId("session_token").value.trim();
-  const hasSession = token.length > 0;
+  const sessionFreshness = computeSessionFreshnessState();
+  const hasSession = token.length > 0 && sessionFreshness.state !== "expired";
+  const sessionExpired = token.length > 0 && sessionFreshness.state === "expired";
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
   const operatorStatus = effectivePortalOperatorApplicationStatus();
   const readiness = computeOperatorReadiness();
@@ -3724,6 +4060,10 @@ function computeOperatorUnlockPlanModel() {
       planKind = "bad";
       lockTitle = "Locked reason: runtime policy unavailable";
       lockDetail = failClosedMutatingActionStatusDetail();
+    } else if (sessionExpired) {
+      planKind = "bad";
+      lockTitle = "Locked reason: session expired";
+      lockDetail = sessionFreshness.detail;
     } else if (!hasSession) {
       lockTitle = "Locked reason: no active session";
       lockDetail = "Sign in first to establish session_token for operator onboarding.";
@@ -3750,9 +4090,18 @@ function computeOperatorUnlockPlanModel() {
 
   let sessionStepState = "pending";
   let sessionStepDetail = "Session state pending refresh.";
-  if (!hasSession) {
+  if (!token) {
     sessionStepState = "blocked";
     sessionStepDetail = "No active session token. Complete wallet sign-in first.";
+  } else if (sessionFreshness.state === "expired") {
+    sessionStepState = "blocked";
+    sessionStepDetail = sessionFreshness.detail;
+  } else if (sessionFreshness.state === "unknown") {
+    sessionStepState = "pending";
+    sessionStepDetail = sessionFreshness.detail;
+  } else if (sessionFreshness.state === "expiring_soon") {
+    sessionStepState = "done";
+    sessionStepDetail = sessionFreshness.detail;
   } else {
     sessionStepState = "done";
     sessionStepDetail = "Session token is active.";
@@ -3796,9 +4145,12 @@ function computeOperatorUnlockPlanModel() {
 
   let lifecycleStepState = "pending";
   let lifecycleStepDetail = "Lifecycle lock state pending refresh.";
-  if (!hasSession) {
+  if (!token) {
     lifecycleStepState = "blocked";
     lifecycleStepDetail = "Lifecycle unlock requires an active session.";
+  } else if (sessionFreshness.state === "expired") {
+    lifecycleStepState = "blocked";
+    lifecycleStepDetail = sessionFreshness.detail;
   } else if (!serverTabVisible) {
     lifecycleStepState = "blocked";
     lifecycleStepDetail =
@@ -3818,7 +4170,10 @@ function computeOperatorUnlockPlanModel() {
   }
 
   const nextActions = [];
-  if (!hasSession) {
+  if (sessionExpired) {
+    pushUniqueNonEmptyString(nextActions, "Rotate Session");
+    pushUniqueNonEmptyString(nextActions, "Sign + Verify (Wallet)");
+  } else if (!hasSession) {
     pushUniqueNonEmptyString(nextActions, "Request Challenge");
     pushUniqueNonEmptyString(nextActions, "Sign + Verify (Wallet)");
   } else {
@@ -4078,12 +4433,32 @@ function setClientReadiness(kind, statusText, guidanceText, state) {
 function syncFailClosedMutatingActionState() {
   const isBusy = document.body.classList.contains("is-busy");
   const lockByFailClosed = configEndpointUnavailableFailClosedMode();
-  const disabled = isBusy || lockByFailClosed;
+  const sessionFreshness = computeSessionFreshnessState();
+  const lockBySessionExpired = sessionFreshness.state === "expired";
+
+  const adminToken = adminTokenEl ? adminTokenEl.value.trim() : "";
+  const moderationCanUseAdminFallback =
+    lockBySessionExpired &&
+    !lockByFailClosed &&
+    operatorApprovalRequireSession !== true &&
+    adminToken.length > 0;
+
   for (const button of [connectBtnEl, applyOperatorBtnEl, approveOperatorBtnEl, rejectOperatorBtnEl]) {
+    const isModerationAction = button === approveOperatorBtnEl || button === rejectOperatorBtnEl;
+    const lockByExpiredSessionForButton = lockBySessionExpired && !(isModerationAction && moderationCanUseAdminFallback);
+    const disabled = isBusy || lockByFailClosed || lockByExpiredSessionForButton;
     button.disabled = disabled;
     button.setAttribute("aria-disabled", String(disabled));
     if (lockByFailClosed) {
       button.title = failClosedMutatingActionStatusDetail();
+      continue;
+    }
+    if (lockByExpiredSessionForButton) {
+      button.title = sessionFreshness.detail;
+      continue;
+    }
+    if (isModerationAction && moderationCanUseAdminFallback) {
+      button.title = "Session expired; admin token fallback is active for this action.";
       continue;
     }
     button.removeAttribute("title");
@@ -4097,7 +4472,10 @@ function syncClientRegistrationAction(readiness) {
   }
   const isBusy = document.body.classList.contains("is-busy");
   const lockByFailClosed = configEndpointUnavailableFailClosedMode();
-  const lockByState = readiness.state === "role_locked" || readiness.state === "not_signed_in";
+  const lockByState =
+    readiness.state === "role_locked" ||
+    readiness.state === "not_signed_in" ||
+    readiness.state === "session_expired";
   const disabled = isBusy || lockByState || lockByFailClosed;
   registerClientBtnEl.disabled = disabled;
   registerClientBtnEl.setAttribute("aria-disabled", String(disabled));
@@ -4117,7 +4495,11 @@ function assertClientRegistrationActionAllowed() {
     throw new Error(`Client registration is unavailable: ${failClosedMutatingActionStatusDetail()}`);
   }
   const readiness = computeClientReadiness();
-  if (readiness.state === "not_signed_in" || readiness.state === "role_locked") {
+  if (
+    readiness.state === "not_signed_in" ||
+    readiness.state === "role_locked" ||
+    readiness.state === "session_expired"
+  ) {
     throw new Error(`Client registration is unavailable: ${readiness.guidanceText}`);
   }
 }
@@ -4131,9 +4513,19 @@ function composeClientRegistrationTrustDriftGuidance() {
 
 function computeClientReadiness() {
   const token = byId("session_token").value.trim();
+  const sessionFreshness = computeSessionFreshnessState();
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
   const clientTabVisible = serverReadiness?.clientTabVisible;
   const clientLockReason = serverReadiness?.clientLockReason;
+
+  if (sessionFreshness.state === "expired") {
+    return {
+      state: "session_expired",
+      kind: "bad",
+      statusText: "Session expired",
+      guidanceText: sessionFreshness.detail
+    };
+  }
 
   if (!token) {
     return {
@@ -4196,10 +4588,19 @@ function computeClientReadiness() {
 
 function computeOperatorReadiness() {
   const token = byId("session_token").value.trim();
+  const sessionFreshness = computeSessionFreshnessState();
   const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
   const statusLabel = formatOperatorApplicationStatusLabel(
     serverReadiness?.operatorApplicationStatus || operatorApplicationStatus
   );
+
+  if (sessionFreshness.state === "expired") {
+    return {
+      kind: "bad",
+      statusText: "Session expired",
+      guidanceText: sessionFreshness.detail
+    };
+  }
 
   if (!token && !serverReadiness) {
     return {
@@ -4380,6 +4781,7 @@ function setOperatorApplicationStatus(value) {
 
 function bindReadinessListeners() {
   byId("session_token").addEventListener("input", () => {
+    markSessionFreshnessUnknownForCurrentToken();
     setServerReadiness(null);
     setOperatorApplicationStatus(undefined);
     setSelectedApplicationUpdatedAt("");
@@ -4408,6 +4810,11 @@ function bindReadinessListeners() {
   byId("wallet_provider").addEventListener("change", () => {
     syncWalletExtensionReadinessHint();
   });
+  if (adminTokenEl) {
+    adminTokenEl.addEventListener("input", () => {
+      syncFailClosedMutatingActionState();
+    });
+  }
   walletChainIdEl.addEventListener("input", () => {
     syncWalletExtensionReadinessHint();
   });
@@ -4577,6 +4984,7 @@ function applySession(result) {
   byId("session_token").value = token;
   const role = result.session?.role || result.role || result.profile?.role || "client";
   byId("role").value = role;
+  refreshSessionFreshnessFromPayload(result, { tokenOverride: token, clearWhenMissing: true });
   refreshSessionBootstrapDirectoryOptions(result);
   refreshOperatorReadiness();
   persistPortalState();
@@ -5028,17 +5436,27 @@ async function requestSessionLifecycle(action = "status") {
 }
 
 async function requestOperatorStatus() {
+  const walletAddress = byId("wallet_address").value.trim();
+  const sessionToken = optionalFreshSessionToken("Operator status", {
+    allowWalletFallback: true,
+    walletAddress
+  });
   const request = {
-    session_token: byId("session_token").value.trim() || undefined,
-    wallet_address: byId("wallet_address").value.trim() || undefined
+    session_token: sessionToken,
+    wallet_address: walletAddress || undefined
   };
   return post("/v1/gpm/onboarding/operator/status", request);
 }
 
 async function requestClientStatus() {
+  const walletAddress = byId("wallet_address").value.trim();
+  const sessionToken = optionalFreshSessionToken("Client status", {
+    allowWalletFallback: true,
+    walletAddress
+  });
   const request = {
-    session_token: byId("session_token").value.trim() || undefined,
-    wallet_address: byId("wallet_address").value.trim() || undefined
+    session_token: sessionToken,
+    wallet_address: walletAddress || undefined
   };
   return post("/v1/gpm/onboarding/client/status", request);
 }
@@ -5047,6 +5465,7 @@ function applyOnboardingOverviewPayload(payload) {
   if (!payload || typeof payload !== "object") {
     return;
   }
+  refreshSessionFreshnessFromPayload(payload);
   syncSessionDerivedState(payload);
   refreshSessionBootstrapDirectoryOptions(payload);
   const role = sessionRoleFromResult(payload);
@@ -5059,14 +5478,20 @@ function applyOnboardingOverviewPayload(payload) {
 }
 
 async function requestOverview() {
+  assertSessionFreshForAction("Onboarding overview", { requireToken: true });
   const sessionToken = byId("session_token").value.trim();
   return post("/v1/gpm/onboarding/overview", { session_token: sessionToken });
 }
 
 async function requestServerStatus() {
+  const walletAddress = byId("wallet_address").value.trim();
+  const sessionToken = optionalFreshSessionToken("Server status", {
+    allowWalletFallback: true,
+    walletAddress
+  });
   const request = {
-    session_token: byId("session_token").value.trim() || undefined,
-    wallet_address: byId("wallet_address").value.trim() || undefined
+    session_token: sessionToken,
+    wallet_address: walletAddress || undefined
   };
   return post("/v1/gpm/onboarding/server/status", request);
 }
@@ -5131,6 +5556,7 @@ function assertConnectActionAllowed(request) {
   if (!sessionToken) {
     return;
   }
+  assertSessionFreshForAction("Connect");
   const readiness = computeClientReadiness();
   if (!isClientTabVisibleRole() || readiness.state === "role_locked") {
     throw new Error(`Connect is unavailable: ${readiness.guidanceText}`);
@@ -5146,12 +5572,16 @@ function assertOperatorMutationActionAllowed(actionLabel) {
 function buildOperatorModerationAuthRequest(actionLabel) {
   const sessionToken = byId("session_token").value.trim();
   const adminToken = adminTokenEl.value.trim();
+  const sessionFreshness = computeSessionFreshnessState();
 
   if (operatorApprovalRequireSession === true) {
     if (!sessionToken) {
       throw new Error(
         `${actionLabel} requires session_token by policy; legacy admin_token fallback is disabled. Sign in with an admin session and retry.`
       );
+    }
+    if (sessionFreshness.state === "expired") {
+      throw new Error(`${actionLabel} is unavailable: ${sessionFreshness.detail}`);
     }
     return {
       session_token: sessionToken
@@ -5160,6 +5590,15 @@ function buildOperatorModerationAuthRequest(actionLabel) {
 
   if (!sessionToken && !adminToken) {
     throw new Error(`${actionLabel} requires session_token or admin_token.`);
+  }
+
+  if (sessionToken && sessionFreshness.state === "expired") {
+    if (!adminToken) {
+      throw new Error(`${actionLabel} is unavailable: ${sessionFreshness.detail}`);
+    }
+    return {
+      admin_token: adminToken
+    };
   }
 
   return {
@@ -5194,6 +5633,7 @@ async function requestServiceLifecycle(action) {
     throw new Error("service lifecycle action must be start, stop, or restart.");
   }
   assertServiceLifecycleActionAllowed(normalizedAction);
+  assertSessionFreshForAction(`Service ${normalizedAction}`, { requireToken: true });
   const sessionToken = byId("session_token").value.trim();
   if (!sessionToken) {
     throw new Error("session_token is required for server lifecycle actions. Sign in first.");
@@ -5223,6 +5663,7 @@ async function requestAuditRecent() {
 }
 
 async function requestOperatorList(statusOrOptions, limitValue) {
+  assertSessionFreshForAction("Operator list", { requireToken: true });
   const sessionToken = byId("session_token").value.trim();
   if (!sessionToken) {
     throw new Error("session_token is required to list operators. Sign in first.");
@@ -5427,6 +5868,7 @@ async function refreshServerReadinessStatus(options = {}) {
   }
   try {
     const result = await requestServerStatus();
+    refreshSessionFreshnessFromPayload(result);
     setServerReadiness(parseServerReadiness(result));
     return result;
   } catch (err) {
@@ -5532,6 +5974,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
     const result = await requestSessionLifecycle("revoke");
     clientRegistered = false;
     setClientRegistrationTrustDriftState(false, "");
+    clearSessionFreshnessTelemetry();
     byId("session_token").value = "";
     byId("role").value = "client";
     setOperatorApplicationStatus(undefined);
@@ -5613,6 +6056,7 @@ byId("overview_status_btn").addEventListener("click", () =>
 byId("apply_operator_btn").addEventListener("click", () =>
   run("operator_apply", async () => {
     assertOperatorMutationActionAllowed("Operator apply");
+    assertSessionFreshForAction("Operator apply", { requireToken: true });
     const request = {
       session_token: byId("session_token").value.trim(),
       chain_operator_id: byId("chain_operator_id").value.trim(),
@@ -5633,6 +6077,7 @@ byId("apply_operator_btn").addEventListener("click", () =>
 byId("operator_status_btn").addEventListener("click", () =>
   run("operator_status", async () => {
     const result = await requestOperatorStatus();
+    refreshSessionFreshnessFromPayload(result);
     setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
     applySelectedOperatorPrefill(extractOperatorPrefillValues(result), { mode: "merge" });
     await refreshServerReadinessStatus({ quiet: true });
@@ -5923,6 +6368,7 @@ byId("status_btn_server").addEventListener("click", () =>
 async function restoreSessionStatusBestEffort() {
   const token = byId("session_token").value.trim();
   if (!token) {
+    clearSessionFreshnessTelemetry();
     setServerReadiness(null);
     setOperatorApplicationStatus(undefined);
     setSelectedApplicationUpdatedAt("");
@@ -5935,7 +6381,14 @@ async function restoreSessionStatusBestEffort() {
     applySession(result);
     persistPortalState();
     print("session_status (auto)", result);
-    setStatus("good", "Session restored", "Stored session token is active.");
+    const freshness = computeSessionFreshnessState();
+    if (freshness.state === "expired") {
+      setStatus("bad", "Session expired", freshness.detail);
+    } else if (freshness.state === "expiring_soon" || freshness.state === "unknown") {
+      setStatus("warn", "Session restored", freshness.detail);
+    } else {
+      setStatus("good", "Session restored", "Stored session token is active.");
+    }
   } catch (err) {
     print("session_status (auto, non-fatal)", String(err && err.message ? err.message : err));
     setStatus("warn", "Session check skipped", "Stored session token could not be validated. You can refresh or sign in again.");

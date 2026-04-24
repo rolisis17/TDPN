@@ -112,6 +112,8 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .failure_substep == null
+  and .failure_reason == null
   and .selection_error == null
   and .stages.selection.status == "pass"
   and .stages.execution.status == "pass"
@@ -126,6 +128,7 @@ if ! jq -e '
   and .summary.iterations_completed == 2
   and .summary.selected_track_count == 3
   and .summary.executed_tracks == 6
+  and .summary.skipped_tracks == 0
   and .summary.halt_after_iteration == false
   and .selection_accounting.include_track_ids_requested_count == 0
   and .selection_accounting.exclude_track_ids_requested_count == 0
@@ -135,8 +138,10 @@ if ! jq -e '
   and ([.per_track[].total_runs] == [2,2,2])
   and ([.per_track[].pass] == [2,2,2])
   and ([.per_track[].fail] == [0,0,0])
+  and ([.per_track[].skipped] == [0,0,0])
   and (.iterations | length == 2)
   and ([.iterations[].status] == ["pass","pass"])
+  and ([.iterations[].failure_substep] == [null,null])
 ' "$SUCCESS_SUMMARY" >/dev/null; then
   echo "success summary mismatch"
   cat "$SUCCESS_SUMMARY"
@@ -176,12 +181,15 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
+  and .failure_substep == "selection:no_tracks_selected"
+  and .failure_reason == "selection failed before execution"
   and .selection_error == "no_tracks_selected"
   and .stages.selection.status == "fail"
   and .stages.selection.reason == "no_tracks_selected"
   and .stages.execution.status == "skip_due_to_selection_error"
   and .summary.iterations_completed == 0
   and .summary.executed_tracks == 0
+  and .summary.skipped_tracks == 0
   and .inputs.selected_track_ids == []
   and .selection_accounting.selected_track_ids_count == 0
   and (.per_track | length == 0)
@@ -226,8 +234,12 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 23
+  and .failure_substep == "execution:iteration_1:track_runtime_actuation_promotion_cycle"
+  and .failure_reason == "first failing track in deterministic iteration/track order"
   and .summary.iterations_requested == 3
   and .summary.iterations_completed == 1
+  and .summary.executed_tracks == 2
+  and .summary.skipped_tracks == 1
   and .summary.halt_after_iteration == true
   and .summary.first_failure_iteration == 1
   and .summary.first_failure_track_id == "runtime_actuation_promotion_cycle"
@@ -235,15 +247,24 @@ if ! jq -e '
   and .per_track[0].total_runs == 1
   and .per_track[0].pass == 1
   and .per_track[0].fail == 0
+  and .per_track[0].skipped == 0
   and .per_track[1].total_runs == 1
   and .per_track[1].pass == 0
   and .per_track[1].fail == 1
+  and .per_track[1].skipped == 0
   and .per_track[2].total_runs == 0
   and .per_track[2].pass == 0
   and .per_track[2].fail == 0
+  and .per_track[2].skipped == 1
   and (.iterations | length == 1)
   and .iterations[0].status == "fail"
   and .iterations[0].rc == 23
+  and .iterations[0].failure_substep == "track_failed:runtime_actuation_promotion_cycle"
+  and (.iterations[0].tracks | length == 3)
+  and ([.iterations[0].tracks[].status] == ["pass","fail","skipped"])
+  and .iterations[0].tracks[2].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .iterations[0].tracks[2].rc == null
+  and .iterations[0].tracks[2].failure_kind == "skipped_due_to_fail_closed"
 ' "$FAIL_CLOSED_SUMMARY" >/dev/null; then
   echo "fail-closed summary mismatch"
   cat "$FAIL_CLOSED_SUMMARY"
@@ -289,9 +310,12 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 23
+  and .failure_substep == "execution:iteration_1:track_runtime_actuation_promotion_cycle"
+  and .failure_reason == "first failing track in deterministic iteration/track order"
   and .summary.iterations_requested == 2
   and .summary.iterations_completed == 2
   and .summary.executed_tracks == 6
+  and .summary.skipped_tracks == 0
   and .summary.halt_after_iteration == false
   and .summary.first_failure_iteration == 1
   and .summary.first_failure_track_id == "runtime_actuation_promotion_cycle"
@@ -299,14 +323,18 @@ if ! jq -e '
   and .per_track[0].total_runs == 2
   and .per_track[0].pass == 2
   and .per_track[0].fail == 0
+  and .per_track[0].skipped == 0
   and .per_track[1].total_runs == 2
   and .per_track[1].pass == 0
   and .per_track[1].fail == 2
+  and .per_track[1].skipped == 0
   and .per_track[2].total_runs == 2
   and .per_track[2].pass == 2
   and .per_track[2].fail == 0
+  and .per_track[2].skipped == 0
   and (.iterations | length == 2)
   and ([.iterations[].status] == ["fail","fail"])
+  and ([.iterations[].failure_substep] == ["track_failed:runtime_actuation_promotion_cycle","track_failed:runtime_actuation_promotion_cycle"])
 ' "$CONTINUE_SUMMARY" >/dev/null; then
   echo "continue-on-fail summary mismatch"
   cat "$CONTINUE_SUMMARY"
@@ -338,16 +366,20 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .failure_substep == null
+  and .failure_reason == null
   and .inputs.include_track_ids == ["profile_default_gate_stability_cycle","runtime_actuation_promotion_cycle"]
   and .inputs.exclude_track_ids == ["runtime_actuation_promotion_cycle"]
   and .inputs.selected_track_ids == ["profile_default_gate_stability_cycle"]
   and .summary.selected_track_count == 1
   and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 0
   and (.per_track | length == 1)
   and .per_track[0].id == "profile_default_gate_stability_cycle"
   and .per_track[0].total_runs == 1
   and .per_track[0].pass == 1
   and .per_track[0].fail == 0
+  and .per_track[0].skipped == 0
   and (.iterations | length == 1)
   and (.iterations[0].tracks | length == 1)
   and .iterations[0].tracks[0].track_id == "profile_default_gate_stability_cycle"

@@ -80,6 +80,8 @@ ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT="$FAKE_SCRIPT" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CAPTURE_FILE="$CAPTURE" \
 ./scripts/easy_node.sh roadmap-validation-debt-actionable-run \
   --summary-json .easy-node-logs/validation_debt_actionable_contract_summary.json \
+  --include-id m3_three_machine_real_host_validation_pack \
+  --exclude-id m1_client_3hop_runtime \
   --max-actions 3 >"$STDOUT_OUT"
 
 line="$(tail -n 1 "$CAPTURE" || true)"
@@ -89,9 +91,11 @@ if [[ -z "$line" ]]; then
   exit 1
 fi
 assert_token "$line" $'\t--summary-json\t.easy-node-logs/validation_debt_actionable_contract_summary.json' "missing --summary-json forwarding"
+assert_token "$line" $'\t--include-id\tm3_three_machine_real_host_validation_pack' "missing --include-id forwarding"
+assert_token "$line" $'\t--exclude-id\tm1_client_3hop_runtime' "missing --exclude-id forwarding"
 assert_token "$line" $'\t--max-actions\t3' "missing --max-actions forwarding"
 
-if ! grep -F -- 'fake roadmap validation-debt actionable run: --summary-json .easy-node-logs/validation_debt_actionable_contract_summary.json --max-actions 3' "$STDOUT_OUT" >/dev/null 2>&1; then
+if ! grep -F -- 'fake roadmap validation-debt actionable run: --summary-json .easy-node-logs/validation_debt_actionable_contract_summary.json --include-id m3_three_machine_real_host_validation_pack --exclude-id m1_client_3hop_runtime --max-actions 3' "$STDOUT_OUT" >/dev/null 2>&1; then
   echo "missing wrapper output from fake script"
   cat "$STDOUT_OUT"
   exit 1

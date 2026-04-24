@@ -45,6 +45,7 @@ BOOTSTRAP_GATE_LOG="$TMP_DIR/bootstrap_gate.log"
 PHASE7_ENV_LOG="$TMP_DIR/phase7_env.log"
 PHASE7_INVALID_LOG="$TMP_DIR/phase7_invalid.log"
 EXPLICIT_GATE_NO_METRICS_LOG="$TMP_DIR/explicit_gate_no_metrics.log"
+ENV_GATE_NO_METRICS_LOG="$TMP_DIR/env_gate_no_metrics.log"
 GATE_FAIL_LOG="$TMP_DIR/gate_fail.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 
@@ -60,6 +61,7 @@ BOOTSTRAP_GATE_REPORTS_DIR="$TMP_DIR/reports_bootstrap_gate"
 PHASE7_ENV_REPORTS_DIR="$TMP_DIR/reports_phase7_env"
 PHASE7_INVALID_REPORTS_DIR="$TMP_DIR/reports_phase7_invalid"
 EXPLICIT_GATE_NO_METRICS_REPORTS_DIR="$TMP_DIR/reports_explicit_gate_no_metrics"
+ENV_GATE_NO_METRICS_REPORTS_DIR="$TMP_DIR/reports_env_gate_no_metrics"
 GATE_FAIL_REPORTS_DIR="$TMP_DIR/reports_gate_fail"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 
@@ -75,6 +77,7 @@ BOOTSTRAP_GATE_SUMMARY_JSON="$TMP_DIR/summary_bootstrap_gate.json"
 PHASE7_ENV_SUMMARY_JSON="$TMP_DIR/summary_phase7_env.json"
 PHASE7_INVALID_SUMMARY_JSON="$TMP_DIR/summary_phase7_invalid.json"
 EXPLICIT_GATE_NO_METRICS_SUMMARY_JSON="$TMP_DIR/summary_explicit_gate_no_metrics.json"
+ENV_GATE_NO_METRICS_SUMMARY_JSON="$TMP_DIR/summary_env_gate_no_metrics.json"
 GATE_FAIL_SUMMARY_JSON="$TMP_DIR/summary_gate_fail.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_success.json"
@@ -88,6 +91,7 @@ BOOTSTRAP_GATE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_bootstrap_gate
 PHASE7_ENV_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_phase7_env.json"
 PHASE7_INVALID_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_phase7_invalid.json"
 EXPLICIT_GATE_NO_METRICS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_explicit_gate_no_metrics.json"
+ENV_GATE_NO_METRICS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_env_gate_no_metrics.json"
 GATE_FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_gate_fail.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_summary_fail.json"
 SUCCESS_METRICS_JSON="$SUCCESS_REPORTS_DIR/blockchain_mainnet_activation_metrics.json"
@@ -743,7 +747,13 @@ BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON="$PHASE7_SOURCE_J
   --reports-dir "$PHASE7_ENV_REPORTS_DIR" \
   --summary-json "$PHASE7_ENV_SUMMARY_JSON" \
   --run-blockchain-mainnet-activation-operator-pack 1 \
-  --print-summary-json 0 >"$PHASE7_ENV_LOG" 2>&1
+  --print-summary-json 0 >"$PHASE7_ENV_LOG" 2>&1 || phase7_env_rc=$?
+phase7_env_rc="${phase7_env_rc:-0}"
+if [[ "$phase7_env_rc" -ne 66 ]]; then
+  echo "phase7-env run should fail-closed with rc=66 when activation metrics prereq is missing (got rc=$phase7_env_rc)"
+  cat "$PHASE7_ENV_LOG"
+  exit 1
+fi
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS_WITH_OPERATOR_PACK[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_operator_pack" "--reports-dir" "$PHASE7_ENV_REPORTS_DIR/blockchain_mainnet_activation_operator_pack"
@@ -757,8 +767,8 @@ if [[ ! -f "$PHASE7_ENV_SUMMARY_JSON" ]]; then
   exit 1
 fi
 if ! jq -e --arg phase7_summary "$PHASE7_SOURCE_JSON" '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 66
   and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_summary
   and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_summary
   and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_summary
@@ -771,7 +781,8 @@ if ! jq -e --arg phase7_summary "$PHASE7_SOURCE_JSON" '
   and .steps.blockchain_mainnet_activation_operator_pack.artifacts.metrics_summary_json == null
   and .inputs.run_blockchain_mainnet_activation_gate == true
   and .steps.blockchain_mainnet_activation_gate.enabled == true
-  and .steps.blockchain_mainnet_activation_gate.status == "skip"
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 66
   and .steps.blockchain_mainnet_activation_gate.reason == "missing_metrics_prereq"
   and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == null
   and .phase7_mainnet_cutover_summary_report.signals.tdpnd_grpc_auth_live_smoke_ok == false
@@ -796,12 +807,18 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$DEFAULT_PHASE7_REPORTS_DIR/canonica
 "$GATE_SCRIPT" \
   --reports-dir "$DEFAULT_PHASE7_REPORTS_DIR" \
   --summary-json "$DEFAULT_PHASE7_SUMMARY_JSON" \
-  --print-summary-json 0 >"$TMP_DIR/phase7_default.log" 2>&1
+  --print-summary-json 0 >"$TMP_DIR/phase7_default.log" 2>&1 || default_phase7_rc=$?
+default_phase7_rc="${default_phase7_rc:-0}"
+if [[ "$default_phase7_rc" -ne 66 ]]; then
+  echo "phase7 default-path run should fail-closed with rc=66 when activation metrics prereq is missing (got rc=$default_phase7_rc)"
+  cat "$TMP_DIR/phase7_default.log"
+  exit 1
+fi
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
 if ! jq -e --arg expected_input "$DEFAULT_PHASE7_REPORT_JSON" '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 66
   and .inputs.phase7_mainnet_cutover_summary_report_json == $expected_input
   and .artifacts.phase7_mainnet_cutover_summary_report_json == $expected_input
   and .phase7_mainnet_cutover_summary_report.input_summary_json == $expected_input
@@ -819,7 +836,8 @@ if ! jq -e --arg expected_input "$DEFAULT_PHASE7_REPORT_JSON" '
   and .phase7_mainnet_cutover_summary_report.signals.bootstrap_governance_graduation_gate_go_ok == true
   and .inputs.run_blockchain_mainnet_activation_gate == true
   and .steps.blockchain_mainnet_activation_gate.enabled == true
-  and .steps.blockchain_mainnet_activation_gate.status == "skip"
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 66
   and .steps.blockchain_mainnet_activation_gate.reason == "missing_metrics_prereq"
   and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == null
 ' "$DEFAULT_PHASE7_SUMMARY_JSON" >/dev/null; then
@@ -1043,7 +1061,13 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SAME_PATH_SUMMARY_JSON" \
   --reports-dir "$SAME_PATH_REPORTS_DIR" \
   --summary-json "$SAME_PATH_SUMMARY_JSON" \
   --phase7-mainnet-cutover-summary-report-json "$PHASE7_MISSING_JSON" \
-  --print-summary-json 0 >"$SAME_PATH_LOG" 2>&1
+  --print-summary-json 0 >"$SAME_PATH_LOG" 2>&1 || same_path_rc=$?
+same_path_rc="${same_path_rc:-0}"
+if [[ "$same_path_rc" -ne 66 ]]; then
+  echo "same-path run should fail-closed with rc=66 when activation metrics prereq is missing (got rc=$same_path_rc)"
+  cat "$SAME_PATH_LOG"
+  exit 1
+fi
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
 
@@ -1053,14 +1077,15 @@ if [[ ! -f "$SAME_PATH_SUMMARY_JSON" ]]; then
   exit 1
 fi
 if ! jq -e --arg gate_summary "$SAME_PATH_GATE_SUMMARY_JSON" --arg phase7_missing "$PHASE7_MISSING_JSON" '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 66
   and .inputs.run_blockchain_mainnet_activation_metrics == false
   and .steps.blockchain_mainnet_activation_metrics.enabled == false
   and .steps.blockchain_mainnet_activation_metrics.status == "skip"
   and .steps.blockchain_mainnet_activation_metrics.reason == "disabled"
   and .steps.blockchain_mainnet_activation_gate.enabled == true
-  and .steps.blockchain_mainnet_activation_gate.status == "skip"
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 66
   and .steps.blockchain_mainnet_activation_gate.reason == "missing_metrics_prereq"
   and .inputs.blockchain_mainnet_activation_gate_summary_json == $gate_summary
   and .artifacts.blockchain_mainnet_activation_gate_summary_json == $gate_summary
@@ -1089,12 +1114,12 @@ if ! jq -e --arg gate_summary "$SAME_PATH_GATE_SUMMARY_JSON" --arg phase7_missin
   and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == null
   and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.bootstrap_governance_graduation_gate_go_ok == null
 ' "$SAME_PATH_SUMMARY_JSON" >/dev/null; then
-  echo "same-path summary missing pass status or canonical artifact equality"
+  echo "same-path summary missing fail-closed status or canonical artifact equality"
   cat "$SAME_PATH_SUMMARY_JSON"
   exit 1
 fi
-if ! grep -Fq -- '[blockchain-fastlane] status=pass rc=0 dry_run=0' "$SAME_PATH_LOG"; then
-  echo "same-path log missing final pass status line"
+if ! grep -Fq -- '[blockchain-fastlane] status=fail rc=66 dry_run=0' "$SAME_PATH_LOG"; then
+  echo "same-path log missing final fail status line"
   cat "$SAME_PATH_LOG"
   exit 1
 fi
@@ -1108,7 +1133,13 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$PHASE7_INVALID_CANONICAL_SUMMARY_JS
   --reports-dir "$PHASE7_INVALID_REPORTS_DIR" \
   --summary-json "$PHASE7_INVALID_SUMMARY_JSON" \
   --phase7-mainnet-cutover-summary-report-json "$PHASE7_INVALID_JSON" \
-  --print-summary-json 0 >"$PHASE7_INVALID_LOG" 2>&1
+  --print-summary-json 0 >"$PHASE7_INVALID_LOG" 2>&1 || phase7_invalid_rc=$?
+phase7_invalid_rc="${phase7_invalid_rc:-0}"
+if [[ "$phase7_invalid_rc" -ne 66 ]]; then
+  echo "phase7-invalid run should fail-closed with rc=66 when activation metrics prereq is missing (got rc=$phase7_invalid_rc)"
+  cat "$PHASE7_INVALID_LOG"
+  exit 1
+fi
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
 
@@ -1118,8 +1149,8 @@ if [[ ! -f "$PHASE7_INVALID_SUMMARY_JSON" ]]; then
   exit 1
 fi
 if ! jq -e --arg phase7_invalid "$PHASE7_INVALID_JSON" '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 66
   and .inputs.phase7_mainnet_cutover_summary_report_json == $phase7_invalid
   and .artifacts.phase7_mainnet_cutover_summary_report_json == $phase7_invalid
   and .phase7_mainnet_cutover_summary_report.input_summary_json == $phase7_invalid
@@ -1137,7 +1168,8 @@ if ! jq -e --arg phase7_invalid "$PHASE7_INVALID_JSON" '
   and .phase7_mainnet_cutover_summary_report.signals.bootstrap_governance_graduation_gate_go_ok == null
   and .inputs.run_blockchain_mainnet_activation_gate == true
   and .steps.blockchain_mainnet_activation_gate.enabled == true
-  and .steps.blockchain_mainnet_activation_gate.status == "skip"
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 66
   and .steps.blockchain_mainnet_activation_gate.reason == "missing_metrics_prereq"
   and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == null
   and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.status == "invalid"
@@ -1145,12 +1177,12 @@ if ! jq -e --arg phase7_invalid "$PHASE7_INVALID_JSON" '
   and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.mainnet_activation_gate_go_ok == null
   and .steps.ci_phase7_mainnet_cutover.artifacts.phase7_mainnet_cutover_summary_report.signals.bootstrap_governance_graduation_gate_go_ok == null
 ' "$PHASE7_INVALID_SUMMARY_JSON" >/dev/null; then
-  echo "phase7-invalid summary missing expected fail-soft accounting"
+  echo "phase7-invalid summary missing expected fail-closed accounting"
   cat "$PHASE7_INVALID_SUMMARY_JSON"
   exit 1
 fi
-if ! grep -Fq -- '[blockchain-fastlane] status=pass rc=0 dry_run=0' "$PHASE7_INVALID_LOG"; then
-  echo "phase7-invalid log missing final pass status line"
+if ! grep -Fq -- '[blockchain-fastlane] status=fail rc=66 dry_run=0' "$PHASE7_INVALID_LOG"; then
+  echo "phase7-invalid log missing final fail status line"
   cat "$PHASE7_INVALID_LOG"
   exit 1
 fi
@@ -1194,6 +1226,53 @@ if ! jq -e --arg gate_summary "$EXPLICIT_GATE_NO_METRICS_GATE_SUMMARY_JSON" '
 fi
 assert_generated_at_iso_utc "$EXPLICIT_GATE_NO_METRICS_GATE_SUMMARY_JSON" "mainnet activation gate"
 assert_canonical_summary_artifact "$EXPLICIT_GATE_NO_METRICS_SUMMARY_JSON" "$EXPLICIT_GATE_NO_METRICS_CANONICAL_SUMMARY_JSON" "$EXPLICIT_GATE_NO_METRICS_LOG"
+
+echo "[blockchain-fastlane] env activation-gate flag without metrics prereq remains fail-closed"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$ENV_GATE_NO_METRICS_CANONICAL_SUMMARY_JSON" \
+BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE=1 \
+"$GATE_SCRIPT" \
+  --reports-dir "$ENV_GATE_NO_METRICS_REPORTS_DIR" \
+  --summary-json "$ENV_GATE_NO_METRICS_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ENV_GATE_NO_METRICS_LOG" 2>&1
+env_gate_no_metrics_rc=$?
+set -e
+if [[ "$env_gate_no_metrics_rc" -ne 66 ]]; then
+  echo "env activation-gate flag should fail-closed with rc=66 when metrics prereq is missing (got rc=$env_gate_no_metrics_rc)"
+  cat "$ENV_GATE_NO_METRICS_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS[@]}"
+
+if [[ ! -f "$ENV_GATE_NO_METRICS_SUMMARY_JSON" ]]; then
+  echo "missing env-gate-no-metrics summary json: $ENV_GATE_NO_METRICS_SUMMARY_JSON"
+  cat "$ENV_GATE_NO_METRICS_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 66
+  and .inputs.run_blockchain_mainnet_activation_gate == true
+  and .steps.blockchain_mainnet_activation_gate.enabled == true
+  and .steps.blockchain_mainnet_activation_gate.status == "fail"
+  and .steps.blockchain_mainnet_activation_gate.rc == 66
+  and .steps.blockchain_mainnet_activation_gate.reason == "missing_metrics_prereq"
+  and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_json == null
+  and .steps.blockchain_mainnet_activation_gate.artifacts.metrics_source == null
+' "$ENV_GATE_NO_METRICS_SUMMARY_JSON" >/dev/null; then
+  echo "env-gate-no-metrics summary missing expected fail-closed env-override contract"
+  cat "$ENV_GATE_NO_METRICS_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq -- '[blockchain-fastlane] status=fail rc=66 dry_run=0' "$ENV_GATE_NO_METRICS_LOG"; then
+  echo "env-gate-no-metrics log missing final fail status line"
+  cat "$ENV_GATE_NO_METRICS_LOG"
+  exit 1
+fi
+assert_canonical_summary_artifact "$ENV_GATE_NO_METRICS_SUMMARY_JSON" "$ENV_GATE_NO_METRICS_CANONICAL_SUMMARY_JSON" "$ENV_GATE_NO_METRICS_LOG"
 
 echo "[blockchain-fastlane] dry-run skip accounting"
 : >"$CAPTURE"

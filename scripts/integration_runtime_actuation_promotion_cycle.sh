@@ -74,6 +74,8 @@ campaign_check_summary_json=""
 campaign_summary_json=""
 campaign_report_md=""
 reports_dir=""
+campaign_subject=""
+campaign_anon_cred=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -117,6 +119,22 @@ while [[ $# -gt 0 ]]; do
       reports_dir="${1#*=}"
       shift
       ;;
+    --campaign-subject|--subject|--key|--invite-key)
+      campaign_subject="${2:-}"
+      shift 2
+      ;;
+    --campaign-subject=*|--subject=*|--key=*|--invite-key=*)
+      campaign_subject="${1#*=}"
+      shift
+      ;;
+    --campaign-anon-cred|--anon-cred)
+      campaign_anon_cred="${2:-}"
+      shift 2
+      ;;
+    --campaign-anon-cred=*|--anon-cred=*)
+      campaign_anon_cred="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -134,8 +152,8 @@ if [[ "$summary_json" =~ _signoff_([0-9]+)\.json$ ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'signoff\tscenario=%s\tcycle=%s\treports_dir=%s\tsummary_json=%s\tcampaign_check_summary_json=%s\tcampaign_summary_json=%s\tcampaign_report_md=%s\n' \
-    "$scenario" "$cycle_index" "$reports_dir" "$summary_json" "$campaign_check_summary_json" "$campaign_summary_json" "$campaign_report_md" >>"$capture_file"
+  printf 'signoff\tscenario=%s\tcycle=%s\treports_dir=%s\tsummary_json=%s\tcampaign_check_summary_json=%s\tcampaign_summary_json=%s\tcampaign_report_md=%s\tcampaign_subject=%s\tcampaign_anon_cred=%s\n' \
+    "$scenario" "$cycle_index" "$reports_dir" "$summary_json" "$campaign_check_summary_json" "$campaign_summary_json" "$campaign_report_md" "$campaign_subject" "$campaign_anon_cred" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail_cycle2" && "$cycle_index" == "2" ]]; then
@@ -144,20 +162,37 @@ if [[ "$scenario" == "fail_cycle2" && "$cycle_index" == "2" ]]; then
 fi
 
 mkdir -p "$(dirname "$summary_json")"
+signoff_status="ok"
+signoff_final_rc=0
+signoff_decision="GO"
+signoff_runtime_status="pass"
+signoff_next_operator_action="No action required"
+if [[ "$scenario" == "no_go_summary" ]]; then
+  signoff_status="fail"
+  signoff_final_rc=1
+  signoff_decision="NO-GO"
+  signoff_runtime_status="fail"
+  signoff_next_operator_action="resolve runtime-actuation blockers"
+fi
 if [[ -n "$campaign_check_summary_json" ]]; then
   mkdir -p "$(dirname "$campaign_check_summary_json")"
-  jq -n '{
+  jq -n \
+    --arg signoff_status "$signoff_status" \
+    --arg signoff_decision "$signoff_decision" \
+    --arg signoff_runtime_status "$signoff_runtime_status" \
+    --argjson signoff_final_rc "$signoff_final_rc" \
+    '{
     version: 1,
-    status: "ok",
-    rc: 0,
-    decision: "GO",
+    status: $signoff_status,
+    rc: $signoff_final_rc,
+    decision: $signoff_decision,
     decision_diagnostics: {
       m4_policy: {
         gate_evaluation: {
           runtime_actuation_status_pass: {
             required: true,
-            observed: true,
-            status: "pass",
+            observed: ($signoff_decision == "GO"),
+            status: $signoff_runtime_status,
             source: "explicit_campaign_summary"
           }
         }
@@ -175,24 +210,29 @@ if [[ -n "$campaign_report_md" ]]; then
 fi
 
 jq -n \
+  --arg signoff_status "$signoff_status" \
+  --arg signoff_decision "$signoff_decision" \
+  --arg signoff_runtime_status "$signoff_runtime_status" \
+  --arg signoff_next_operator_action "$signoff_next_operator_action" \
+  --argjson signoff_final_rc "$signoff_final_rc" \
   --arg campaign_check_summary_json "$campaign_check_summary_json" \
   '{
     version: 1,
-    status: "ok",
-    final_rc: 0,
+    status: $signoff_status,
+    final_rc: $signoff_final_rc,
     decision: {
-      decision: "GO",
+      decision: $signoff_decision,
       campaign_check_gate_diagnostics: {
         runtime_actuation_status_pass: {
           required: true,
           available: true,
-          blocking: false,
-          status: "pass",
-          observed: true,
+          blocking: ($signoff_decision != "GO"),
+          status: $signoff_runtime_status,
+          observed: ($signoff_decision == "GO"),
           source: "explicit_campaign_summary"
         }
       },
-      next_operator_action: "No action required"
+      next_operator_action: $signoff_next_operator_action
     },
     artifacts: {
       campaign_check_summary_json: (if $campaign_check_summary_json == "" then null else $campaign_check_summary_json end)
@@ -756,6 +796,189 @@ if ! jq -e '
 ' "$CYCLE_FAIL_SOFT_FLAG_SUMMARY" >/dev/null 2>&1; then
   echo "cycle-failure with fail-on-no-go=0 summary mismatch"
   cat "$CYCLE_FAIL_SOFT_FLAG_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] signoff NO-GO summary is fail-closed even when command rc=0"
+SIGNOFF_NOGO_SUMMARY="$TMP_DIR/signoff_nogo_summary.json"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$TMP_DIR/signoff_nogo_capture.log" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="no_go_summary" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 2 \
+  --reports-dir "$TMP_DIR/signoff_nogo_reports" \
+  --fail-on-no-go 1 \
+  --summary-json "$SIGNOFF_NOGO_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_signoff_nogo.log 2>&1
+signoff_nogo_rc=$?
+set -e
+
+if [[ "$signoff_nogo_rc" -eq 0 ]]; then
+  echo "expected signoff NO-GO summary path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_signoff_nogo.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "cycles"
+  and .stages.cycles.failed >= 1
+  and ((.cycles | length) == 2)
+  and (.cycles[0].summary.decision == "NO-GO")
+  and (.cycles[0].summary.has_usable_decision == true)
+  and (.cycles[0].summary.rc != 0)
+  and (.promotion_check.decision == "GO")
+  and .outcome.should_promote == false
+  and .outcome.action == "hold_promotion_blocked"
+' "$SIGNOFF_NOGO_SUMMARY" >/dev/null 2>&1; then
+  echo "signoff NO-GO summary fail-closed contract mismatch"
+  cat "$SIGNOFF_NOGO_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] placeholder subject passthrough resolves from env"
+PLACEHOLDER_RESOLVE_SUMMARY="$TMP_DIR/placeholder_resolve_summary.json"
+PLACEHOLDER_RESOLVE_CAPTURE="$TMP_DIR/placeholder_resolve_capture.log"
+set +e
+INVITE_KEY="inv-resolved-from-env" \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$PLACEHOLDER_RESOLVE_CAPTURE" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 1 \
+  --reports-dir "$TMP_DIR/placeholder_resolve_reports" \
+  --subject INVITE_KEY \
+  --summary-json "$PLACEHOLDER_RESOLVE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_placeholder_resolve.log 2>&1
+placeholder_resolve_rc=$?
+set -e
+
+if [[ "$placeholder_resolve_rc" -ne 0 ]]; then
+  echo "expected placeholder subject resolution path rc=0, got rc=$placeholder_resolve_rc"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_resolve.log
+  exit 1
+fi
+if ! grep -q $'^signoff\t' "$PLACEHOLDER_RESOLVE_CAPTURE"; then
+  echo "expected signoff capture for placeholder resolution path"
+  cat "$PLACEHOLDER_RESOLVE_CAPTURE"
+  exit 1
+fi
+if grep -q 'campaign_subject=INVITE_KEY' "$PLACEHOLDER_RESOLVE_CAPTURE"; then
+  echo "placeholder subject was not resolved before signoff invocation"
+  cat "$PLACEHOLDER_RESOLVE_CAPTURE"
+  exit 1
+fi
+if ! grep -q 'campaign_subject=inv-resolved-from-env' "$PLACEHOLDER_RESOLVE_CAPTURE"; then
+  echo "resolved invite key was not forwarded to signoff"
+  cat "$PLACEHOLDER_RESOLVE_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .inputs.credential_resolution.campaign_subject_mode == "placeholder_replaced"
+  and .inputs.credential_resolution.campaign_subject_source == "env:INVITE_KEY"
+  and .inputs.credential_resolution.signoff_has_subject_credential == true
+' "$PLACEHOLDER_RESOLVE_SUMMARY" >/dev/null 2>&1; then
+  echo "placeholder resolution summary contract mismatch"
+  cat "$PLACEHOLDER_RESOLVE_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] unresolved placeholder subject fails closed before cycles"
+PLACEHOLDER_FAIL_SUMMARY="$TMP_DIR/placeholder_fail_summary.json"
+PLACEHOLDER_FAIL_CAPTURE="$TMP_DIR/placeholder_fail_capture.log"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$PLACEHOLDER_FAIL_CAPTURE" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 1 \
+  --reports-dir "$TMP_DIR/placeholder_fail_reports" \
+  --subject INVITE_KEY \
+  --summary-json "$PLACEHOLDER_FAIL_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log 2>&1
+placeholder_fail_rc=$?
+set -e
+
+if [[ "$placeholder_fail_rc" != "2" ]]; then
+  echo "expected unresolved placeholder subject path rc=2, got rc=$placeholder_fail_rc"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
+  exit 1
+fi
+if [[ -s "$PLACEHOLDER_FAIL_CAPTURE" ]]; then
+  echo "expected no signoff invocations when placeholder subject is unresolved"
+  cat "$PLACEHOLDER_FAIL_CAPTURE"
+  exit 1
+fi
+if ! grep -q 'placeholder invite subject' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
+  echo "expected unresolved placeholder diagnostic in fail-closed path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: ./scripts/runtime_actuation_promotion_cycle.sh' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
+  echo "expected exact rerun command operator guidance in unresolved placeholder path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q -- '--subject REPLACE_WITH_INVITE_SUBJECT' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
+  echo "expected placeholder subject rerun guidance in unresolved placeholder path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT ./scripts/runtime_actuation_promotion_cycle.sh' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
+  echo "expected CAMPAIGN_SUBJECT rerun guidance in unresolved placeholder path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] missing subject value fails closed before cycles"
+MISSING_SUBJECT_VALUE_SUMMARY="$TMP_DIR/missing_subject_value_summary.json"
+MISSING_SUBJECT_VALUE_CAPTURE="$TMP_DIR/missing_subject_value_capture.log"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$MISSING_SUBJECT_VALUE_CAPTURE" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 1 \
+  --reports-dir "$TMP_DIR/missing_subject_value_reports" \
+  --subject \
+  --summary-json "$MISSING_SUBJECT_VALUE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log 2>&1
+missing_subject_value_rc=$?
+set -e
+
+if [[ "$missing_subject_value_rc" != "2" ]]; then
+  echo "expected missing subject value path rc=2, got rc=$missing_subject_value_rc"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
+  exit 1
+fi
+if [[ -s "$MISSING_SUBJECT_VALUE_CAPTURE" ]]; then
+  echo "expected no signoff invocation when subject value is missing"
+  cat "$MISSING_SUBJECT_VALUE_CAPTURE"
+  exit 1
+fi
+if ! grep -q 'requires a value in signoff passthrough args' /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log; then
+  echo "expected missing subject value diagnostic"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: ./scripts/runtime_actuation_promotion_cycle.sh' /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log; then
+  echo "expected exact rerun command operator guidance in missing-subject-value path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
+  exit 1
+fi
+if ! grep -q -- '--subject REPLACE_WITH_INVITE_SUBJECT' /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log; then
+  echo "expected placeholder subject rerun guidance in missing-subject-value path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
   exit 1
 fi
 

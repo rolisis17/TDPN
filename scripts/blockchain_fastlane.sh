@@ -206,9 +206,6 @@ run_blockchain_mainnet_activation_operator_pack="${BLOCKCHAIN_FASTLANE_RUN_BLOCK
 blockchain_mainnet_activation_operator_pack_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SUMMARY_JSON:-}"
 run_blockchain_mainnet_activation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE:-1}"
 run_blockchain_mainnet_activation_gate_explicit=0
-if [[ -n "${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_MAINNET_ACTIVATION_GATE+x}" ]]; then
-  run_blockchain_mainnet_activation_gate_explicit=1
-fi
 blockchain_mainnet_activation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON:-}"
 run_blockchain_bootstrap_governance_graduation_gate="${BLOCKCHAIN_FASTLANE_RUN_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE:-0}"
 blockchain_bootstrap_governance_graduation_gate_summary_json="${BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON:-}"
@@ -552,6 +549,7 @@ blockchain_mainnet_activation_gate_missing_metrics_prereq=0
 if [[ "$run_blockchain_mainnet_activation_gate" == "1" && "$run_blockchain_mainnet_activation_gate_explicit" != "1" && -z "$blockchain_activation_gate_metrics_json" ]]; then
   blockchain_mainnet_activation_gate_missing_metrics_prereq=1
 fi
+blockchain_mainnet_activation_gate_missing_metrics_fail_rc=66
 
 blockchain_mainnet_activation_operator_pack_reports_dir=""
 blockchain_mainnet_activation_operator_pack_canonical_summary_json=""
@@ -754,7 +752,12 @@ for stage_id in "${stage_ids[@]}"; do
       echo "[blockchain-fastlane] step=${stage_id} status=skip reason=dry-run"
     elif [[ "$stage_id" == "blockchain_mainnet_activation_gate" && "$blockchain_mainnet_activation_gate_missing_metrics_prereq" == "1" ]]; then
       stage_reason["$stage_id"]="missing_metrics_prereq"
-      echo "[blockchain-fastlane] step=${stage_id} status=skip reason=missing_metrics_prereq"
+      stage_status["$stage_id"]="fail"
+      stage_rc["$stage_id"]=$blockchain_mainnet_activation_gate_missing_metrics_fail_rc
+      echo "[blockchain-fastlane] step=${stage_id} status=fail rc=${blockchain_mainnet_activation_gate_missing_metrics_fail_rc} reason=missing_metrics_prereq"
+      if (( final_rc == 0 )); then
+        final_rc=$blockchain_mainnet_activation_gate_missing_metrics_fail_rc
+      fi
     elif run_step "$stage_id" "${stage_args[@]}"; then
       stage_status["$stage_id"]="pass"
       stage_rc["$stage_id"]=0

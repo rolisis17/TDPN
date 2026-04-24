@@ -54,6 +54,43 @@ trim() {
   printf '%s' "$value"
 }
 
+strip_optional_wrapping_quotes_01() {
+  local value="${1:-}"
+  local first_char=""
+  local last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+is_invite_subject_placeholder() {
+  local value=""
+  local normalized=""
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY|%INVITE_KEY%|\$\{INVITE_KEY:-*}|\$\{INVITE_KEY-*}|CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|%CAMPAIGN_SUBJECT%|\$\{CAMPAIGN_SUBJECT:-*}|\$\{CAMPAIGN_SUBJECT-*})
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -107,6 +144,17 @@ normalize_decision() {
   esac
 }
 
+normalize_status() {
+  local status
+  status="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$status" in
+    pass|ok|success) printf '%s\n' "pass" ;;
+    warn|warning) printf '%s\n' "warn" ;;
+    fail|failed|error) printf '%s\n' "fail" ;;
+    *) printf '%s\n' "$status" ;;
+  esac
+}
+
 quote_cmd() {
   local arg
   for arg in "$@"; do
@@ -143,6 +191,61 @@ array_to_json() {
     return
   fi
   printf '%s\n' "$@" | jq -R . | jq -s '.'
+}
+
+render_command_line_from_argv_01() {
+  local arg=""
+  local rendered=""
+  for arg in "$@"; do
+    rendered="${rendered}${rendered:+ }$(printf '%q' "$arg")"
+  done
+  printf '%s' "$rendered"
+}
+
+build_runtime_actuation_base_command_01() {
+  local -a cmd=("./scripts/runtime_actuation_promotion_cycle.sh")
+  cmd+=(--cycles "$cycles")
+  cmd+=(--reports-dir "$reports_dir")
+  if [[ -n "$signoff_summary_list" ]]; then
+    cmd+=(--summary-list "$signoff_summary_list")
+  fi
+  if [[ -n "$promotion_summary_json" ]]; then
+    cmd+=(--promotion-summary-json "$promotion_summary_json")
+  fi
+  if [[ -n "$summary_json" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  cmd+=(--fail-on-no-go "$fail_on_no_go")
+  cmd+=(--show-json "$show_json")
+  cmd+=(--print-summary-json "$print_summary_json")
+
+  render_command_line_from_argv_01 "${cmd[@]}"
+}
+
+build_runtime_actuation_subject_operator_command_01() {
+  local -a cmd=()
+  cmd=(./scripts/runtime_actuation_promotion_cycle.sh)
+  cmd+=(--cycles "$cycles")
+  cmd+=(--reports-dir "$reports_dir")
+  if [[ -n "$signoff_summary_list" ]]; then
+    cmd+=(--summary-list "$signoff_summary_list")
+  fi
+  if [[ -n "$promotion_summary_json" ]]; then
+    cmd+=(--promotion-summary-json "$promotion_summary_json")
+  fi
+  if [[ -n "$summary_json" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  cmd+=(--fail-on-no-go "$fail_on_no_go")
+  cmd+=(--show-json "$show_json")
+  cmd+=(--print-summary-json "$print_summary_json")
+  cmd+=(--subject "REPLACE_WITH_INVITE_SUBJECT")
+
+  render_command_line_from_argv_01 "${cmd[@]}"
+}
+
+build_runtime_actuation_subject_env_operator_command_01() {
+  printf 'CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT %s' "$(build_runtime_actuation_base_command_01)"
 }
 
 write_alias_content_atomic() {
@@ -425,6 +528,130 @@ bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
+resolved_campaign_subject=""
+resolved_campaign_subject_source=""
+for subject_source in CAMPAIGN_SUBJECT INVITE_KEY; do
+  subject_candidate="$(trim "${!subject_source:-}")"
+  if [[ -z "$subject_candidate" ]]; then
+    continue
+  fi
+  if is_invite_subject_placeholder "$subject_candidate"; then
+    continue
+  fi
+  resolved_campaign_subject="$subject_candidate"
+  resolved_campaign_subject_source="env:${subject_source}"
+  break
+done
+
+signoff_has_subject_credential="false"
+signoff_has_anon_credential="false"
+campaign_subject_injected="false"
+campaign_subject_placeholder_replaced="false"
+campaign_subject_resolution_mode="none"
+
+if ((${#signoff_passthrough_args[@]} > 0)); then
+  declare -a normalized_signoff_passthrough_args=()
+  idx=0
+  while (( idx < ${#signoff_passthrough_args[@]} )); do
+    token="${signoff_passthrough_args[$idx]}"
+    case "$token" in
+      --campaign-subject|--subject|--key|--invite-key)
+        signoff_has_subject_credential="true"
+        normalized_signoff_passthrough_args+=("$token")
+        idx=$((idx + 1))
+        if (( idx >= ${#signoff_passthrough_args[@]} )); then
+          echo "runtime-actuation-promotion-cycle: $token requires a value in signoff passthrough args"
+          echo "operator_next_action: $(build_runtime_actuation_subject_operator_command_01)"
+          exit 2
+        fi
+        token_value="${signoff_passthrough_args[$idx]}"
+        if [[ -z "$(trim "$token_value")" ]]; then
+          echo "runtime-actuation-promotion-cycle: $token requires a non-empty value in signoff passthrough args"
+          echo "operator_next_action: $(build_runtime_actuation_subject_operator_command_01)"
+          exit 2
+        fi
+        if is_invite_subject_placeholder "$token_value"; then
+          if [[ -n "$resolved_campaign_subject" ]]; then
+            normalized_signoff_passthrough_args+=("$resolved_campaign_subject")
+            campaign_subject_placeholder_replaced="true"
+          else
+            echo "runtime-actuation-promotion-cycle: placeholder invite subject in signoff passthrough ($token) cannot be resolved"
+            echo "provide a real value via $token or set CAMPAIGN_SUBJECT/INVITE_KEY"
+            echo "operator_next_action: $(build_runtime_actuation_subject_operator_command_01)"
+            echo "operator_next_action: $(build_runtime_actuation_subject_env_operator_command_01)"
+            exit 2
+          fi
+        else
+          normalized_signoff_passthrough_args+=("$token_value")
+        fi
+        idx=$((idx + 1))
+        ;;
+      --campaign-subject=*|--subject=*|--key=*|--invite-key=*)
+        signoff_has_subject_credential="true"
+        token_key="${token%%=*}"
+        token_value="${token#*=}"
+        if [[ -z "$(trim "$token_value")" ]]; then
+          echo "runtime-actuation-promotion-cycle: ${token_key}= requires a non-empty value in signoff passthrough args"
+          echo "operator_next_action: $(build_runtime_actuation_subject_operator_command_01)"
+          exit 2
+        fi
+        if is_invite_subject_placeholder "$token_value"; then
+          if [[ -n "$resolved_campaign_subject" ]]; then
+            normalized_signoff_passthrough_args+=("${token_key}=${resolved_campaign_subject}")
+            campaign_subject_placeholder_replaced="true"
+          else
+            echo "runtime-actuation-promotion-cycle: placeholder invite subject in signoff passthrough (${token_key}=...) cannot be resolved"
+            echo "provide a real value via $token_key or set CAMPAIGN_SUBJECT/INVITE_KEY"
+            echo "operator_next_action: $(build_runtime_actuation_subject_operator_command_01)"
+            echo "operator_next_action: $(build_runtime_actuation_subject_env_operator_command_01)"
+            exit 2
+          fi
+        else
+          normalized_signoff_passthrough_args+=("$token")
+        fi
+        idx=$((idx + 1))
+        ;;
+      --campaign-anon-cred|--anon-cred)
+        signoff_has_anon_credential="true"
+        normalized_signoff_passthrough_args+=("$token")
+        idx=$((idx + 1))
+        if (( idx >= ${#signoff_passthrough_args[@]} )); then
+          echo "runtime-actuation-promotion-cycle: $token requires a value in signoff passthrough args"
+          exit 2
+        fi
+        normalized_signoff_passthrough_args+=("${signoff_passthrough_args[$idx]}")
+        idx=$((idx + 1))
+        ;;
+      --campaign-anon-cred=*|--anon-cred=*)
+        signoff_has_anon_credential="true"
+        normalized_signoff_passthrough_args+=("$token")
+        idx=$((idx + 1))
+        ;;
+      *)
+        normalized_signoff_passthrough_args+=("$token")
+        idx=$((idx + 1))
+        ;;
+    esac
+  done
+  signoff_passthrough_args=("${normalized_signoff_passthrough_args[@]}")
+fi
+
+if [[ "$signoff_has_subject_credential" != "true" && "$signoff_has_anon_credential" != "true" && -n "$resolved_campaign_subject" ]]; then
+  signoff_passthrough_args+=(--campaign-subject "$resolved_campaign_subject")
+  signoff_has_subject_credential="true"
+  campaign_subject_injected="true"
+fi
+
+if [[ "$campaign_subject_placeholder_replaced" == "true" ]]; then
+  campaign_subject_resolution_mode="placeholder_replaced"
+elif [[ "$campaign_subject_injected" == "true" ]]; then
+  campaign_subject_resolution_mode="injected"
+fi
+
+if [[ "$campaign_subject_resolution_mode" != "none" ]]; then
+  echo "[runtime-actuation-promotion-cycle] $(timestamp_utc) campaign-subject resolution mode=$campaign_subject_resolution_mode source=$resolved_campaign_subject_source"
+fi
+
 if [[ ! -f "$SIGNOFF_SCRIPT" ]]; then
   echo "campaign signoff script not found: $SIGNOFF_SCRIPT"
   exit 2
@@ -502,7 +729,10 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
   signoff_summary_valid="false"
   signoff_summary_fresh="false"
   signoff_status=""
+  signoff_status_normalized=""
   signoff_decision=""
+  signoff_decision_usable="false"
+  signoff_summary_rc_json="null"
   cycle_status="fail"
   cycle_error=""
 
@@ -518,6 +748,7 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
       signoff_summary_fresh="true"
     fi
     signoff_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
+    signoff_status_normalized="$(normalize_status "$signoff_status")"
     signoff_decision="$(jq -r '
       if (.decision.decision | type) == "string" then .decision.decision
       elif (.decision | type) == "string" then .decision
@@ -525,6 +756,15 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
       end
     ' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
     signoff_decision="$(normalize_decision "$signoff_decision")"
+    if [[ "$signoff_decision" == "GO" || "$signoff_decision" == "NO-GO" ]]; then
+      signoff_decision_usable="true"
+    fi
+    signoff_summary_rc_json="$(jq -r '
+      if (.final_rc | type) == "number" then .final_rc
+      elif (.rc | type) == "number" then .rc
+      else "null"
+      end
+    ' "$signoff_summary_path" 2>/dev/null || printf '%s' "null")"
   fi
 
   if [[ "$signoff_rc" -ne 0 ]]; then
@@ -533,6 +773,14 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     cycle_error="signoff summary is missing or invalid JSON"
   elif [[ "$signoff_summary_fresh" != "true" ]]; then
     cycle_error="signoff summary is stale (not refreshed by current cycle)"
+  elif [[ "$signoff_decision_usable" != "true" ]]; then
+    cycle_error="signoff summary is missing a usable decision"
+  elif [[ "$signoff_summary_rc_json" != "0" ]]; then
+    cycle_error="signoff summary rc indicates failure"
+  elif [[ "$signoff_decision" != "GO" ]]; then
+    cycle_error="signoff decision is ${signoff_decision:-unrecognized}"
+  elif [[ "$signoff_status_normalized" != "pass" ]]; then
+    cycle_error="signoff status is ${signoff_status_normalized:-unrecognized}"
   else
     cycle_status="pass"
   fi
@@ -559,7 +807,10 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     --arg signoff_summary_valid "$signoff_summary_valid" \
     --arg signoff_summary_fresh "$signoff_summary_fresh" \
     --arg signoff_status "$signoff_status" \
+    --arg signoff_status_normalized "$signoff_status_normalized" \
     --arg signoff_decision "$signoff_decision" \
+    --arg signoff_decision_usable "$signoff_decision_usable" \
+    --argjson signoff_summary_rc "$signoff_summary_rc_json" \
     '{
       cycle_index: $cycle_index,
       status: $status,
@@ -573,7 +824,10 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
         valid_json: ($signoff_summary_valid == "true"),
         fresh: ($signoff_summary_fresh == "true"),
         status: (if $signoff_status == "" then null else $signoff_status end),
-        decision: (if $signoff_decision == "" then null else $signoff_decision end)
+        status_normalized: (if $signoff_status_normalized == "" then null else $signoff_status_normalized end),
+        decision: (if $signoff_decision == "" then null else $signoff_decision end),
+        has_usable_decision: ($signoff_decision_usable == "true"),
+        rc: $signoff_summary_rc
       },
       artifacts: {
         campaign_check_summary_json: $campaign_check_summary_json,
@@ -829,6 +1083,10 @@ jq -n \
   --argjson promotion_rc "$promotion_rc_json" \
   --argjson show_json "$show_json" \
   --argjson print_summary_json "$print_summary_json" \
+  --arg campaign_subject_resolution_mode "$campaign_subject_resolution_mode" \
+  --arg campaign_subject_resolution_source "$resolved_campaign_subject_source" \
+  --arg signoff_has_subject_credential "$signoff_has_subject_credential" \
+  --arg signoff_has_anon_credential "$signoff_has_anon_credential" \
   --argjson signoff_passthrough_args "$signoff_passthrough_args_json" \
   --argjson signoff_summary_paths "$signoff_summary_paths_json" \
   --argjson signoff_logs "$signoff_logs_json" \
@@ -854,6 +1112,12 @@ jq -n \
       stage_scripts: {
         campaign_signoff_script: $signoff_script,
         runtime_actuation_promotion_check_script: $promotion_check_script
+      },
+      credential_resolution: {
+        campaign_subject_mode: $campaign_subject_resolution_mode,
+        campaign_subject_source: (if $campaign_subject_resolution_source == "" then null else $campaign_subject_resolution_source end),
+        signoff_has_subject_credential: ($signoff_has_subject_credential == "true"),
+        signoff_has_anon_credential: ($signoff_has_anon_credential == "true")
       },
       signoff_passthrough_args: $signoff_passthrough_args,
       show_json: ($show_json == 1),

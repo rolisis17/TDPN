@@ -653,3 +653,87 @@ func TestHandleSettlementStatusIncludesConfirmedCounterWhenNoBacklog(t *testing.
 		t.Fatalf("expected reconcile call count 1, got %d", stub.calls)
 	}
 }
+
+func TestNewSettlementServiceFromEnvWiresBlockchainModeForCosmosAdapter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", srv.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "issuer-mode-test")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "0")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+
+	const reservationID = "res-blockchain-on"
+	const sessionID = "sess-blockchain-on"
+	reservation, err := svc.ReserveSponsorCredits(ctx, settlement.SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected submitted reservation when cosmos adapter is configured, got %s", reservation.Status)
+	}
+
+	_, err = svc.AuthorizePayment(ctx, settlement.PaymentProof{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+	})
+	if err == nil {
+		t.Fatalf("expected AuthorizePayment to fail until chain finality in blockchain mode")
+	}
+	if !strings.Contains(err.Error(), "chain") {
+		t.Fatalf("expected chain finality error, got %v", err)
+	}
+}
+
+func TestNewSettlementServiceFromEnvKeepsMemoryModeWhenChainAdapterDisabled(t *testing.T) {
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", "")
+
+	svc := newSettlementServiceFromEnv()
+	ctx := context.Background()
+
+	const reservationID = "res-memory-on"
+	const sessionID = "sess-memory-on"
+	reservation, err := svc.ReserveSponsorCredits(ctx, settlement.SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != settlement.OperationStatusConfirmed {
+		t.Fatalf("expected confirmed reservation in default memory mode, got %s", reservation.Status)
+	}
+
+	auth, err := svc.AuthorizePayment(ctx, settlement.PaymentProof{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-a",
+		SubjectID:     "subject-a",
+		SessionID:     sessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+	if auth.ReservationID != reservationID {
+		t.Fatalf("expected authorization for reservation %s, got %s", reservationID, auth.ReservationID)
+	}
+}

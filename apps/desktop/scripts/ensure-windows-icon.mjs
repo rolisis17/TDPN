@@ -9,6 +9,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
 const defaultSourceIconPath = path.join(appRoot, "src-tauri", "icons", "icon.svg");
 const defaultOutputIconPath = path.join(appRoot, "src-tauri", "icons", "icon.ico");
+const defaultTauriConfigPath = path.join(appRoot, "src-tauri", "tauri.conf.json");
 const tauriCliScriptPath = path.join(appRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
 
 function parseBoolean(value) {
@@ -93,13 +94,45 @@ function manualRemediationCommand() {
   return "npm run generate:windows-icon";
 }
 
+function tauriResourceRemediationCommand() {
+  return "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass";
+}
+
 function printRemediation(sourceIconPath, outputIconPath, reason) {
   const sourceRelative = path.relative(appRoot, sourceIconPath) || sourceIconPath;
   const outputRelative = path.relative(appRoot, outputIconPath) || outputIconPath;
   console.error(`desktop icon prebuild failed (${reason}): ${outputRelative}`);
   console.error(`source icon: ${sourceRelative}`);
   console.error(`manual remediation: cd apps/desktop && ${manualRemediationCommand()}`);
+  console.error(`resource remediation: ${tauriResourceRemediationCommand()}`);
   console.error("if the generator reports missing tooling, run `npm install` in apps/desktop first");
+}
+
+function normalizePathForCompare(value) {
+  return String(value || "").trim().replace(/\\/g, "/").toLowerCase();
+}
+
+async function readTauriBundleIconState(tauriConfigPath, expectedIconRelativePath) {
+  if (!(await fileExists(tauriConfigPath))) {
+    return { configured: false, reason: "missing_tauri_conf" };
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(await fsp.readFile(tauriConfigPath, "utf8"));
+  } catch {
+    return { configured: false, reason: "invalid_tauri_conf_json" };
+  }
+
+  const icons = parsed?.bundle?.icon;
+  const iconEntries = Array.isArray(icons) ? icons : icons ? [icons] : [];
+  const expected = normalizePathForCompare(expectedIconRelativePath);
+  const hasExpected = iconEntries.some((entry) => normalizePathForCompare(entry) === expected);
+  if (!hasExpected) {
+    return { configured: false, reason: "missing_bundle_icon_entry" };
+  }
+
+  return { configured: true, reason: "configured" };
 }
 
 async function generateIcon(sourceIconPath, outputIconPath) {
@@ -169,6 +202,24 @@ async function main() {
     process.env.GPM_DESKTOP_ICON_OUTPUT_PATH,
     defaultOutputIconPath
   );
+  const tauriConfigPath = resolvePath(
+    process.env.GPM_DESKTOP_TAURI_CONFIG_PATH,
+    defaultTauriConfigPath
+  );
+
+  const tauriBundleIconState = await readTauriBundleIconState(
+    tauriConfigPath,
+    "icons/icon.ico"
+  );
+  if (!tauriBundleIconState.configured) {
+    printRemediation(
+      sourceIconPath,
+      outputIconPath,
+      `tauri bundle icon resource ${tauriBundleIconState.reason} (${path.relative(appRoot, tauriConfigPath)})`
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   if (!(await fileExists(sourceIconPath))) {
     if (args.dryRun) {

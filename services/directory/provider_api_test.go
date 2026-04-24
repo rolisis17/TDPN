@@ -52,6 +52,43 @@ func TestVerifyProviderTokenCachesIssuerPubKeysOnRepeatedFailures(t *testing.T) 
 	}
 }
 
+func TestVerifyProviderTokenRejectsMissingIssuerWhenIssuerDeclared(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	issuerURL := "http://127.0.0.1:8082"
+	issuerID := "issuer-local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  issuerID,
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+	s := &Service{
+		httpClient:                &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		providerIssuerURLs:        []string{issuerURL},
+		providerIssuerPubCacheTTL: time.Minute,
+		providerIssuerPubCache:    make(map[string]providerIssuerPubCacheEntry),
+	}
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Audience:   "provider",
+		Subject:    "provider-op-issuerless",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-issuerless",
+	})
+
+	_, err = s.verifyProviderToken(context.Background(), token, time.Now().Unix())
+	if err == nil {
+		t.Fatalf("expected provider token missing issuer to be rejected")
+	}
+	if !strings.Contains(err.Error(), "provider token issuer missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHandleProviderRelayUpsertAcceptsProviderToken(t *testing.T) {
 	t.Setenv(allowDangerousProviderTokenBypass, "1")
 
@@ -1439,6 +1476,10 @@ func TestHandleProviderRelayUpsertAllowsTier1MicroRelayProvider(t *testing.T) {
 		Endpoint:     "127.0.0.1:52820",
 		ControlURL:   "http://127.0.0.1:9283",
 		Capabilities: []string{"wg"},
+		Reputation:   0.8,
+		Uptime:       0.85,
+		Capacity:     0.75,
+		AbusePenalty: 0.2,
 	}
 	body, _ := json.Marshal(in)
 	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
@@ -1510,6 +1551,10 @@ func TestHandleProviderRelayUpsertCanonicalizesMicroRelayAliases(t *testing.T) {
 				Endpoint:     fmt.Sprintf("127.0.0.1:%d", 52830+idx),
 				ControlURL:   fmt.Sprintf("http://127.0.0.1:%d", 9290+idx),
 				Capabilities: []string{"wg"},
+				Reputation:   0.83,
+				Uptime:       0.88,
+				Capacity:     0.79,
+				AbusePenalty: 0.21,
 			}
 			body, _ := json.Marshal(in)
 			req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
@@ -1559,6 +1604,124 @@ func TestHandleProviderRelayUpsertRejectsUnknownRole(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "provider relay role must be entry, exit, or micro-relay") {
 		t.Fatalf("expected clear unknown role validation message, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertRejectsInvalidMicroRelayScores(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  "issuer-local",
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+
+	s := &Service{
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:       []string{"127.0.0.1:51820"},
+		endpointRotateSec:    30,
+		providerIssuerURLs:   []string{issuerURL},
+		providerRelayMaxTTL:  3 * time.Minute,
+		providerMinEntryTier: 1,
+		providerMinExitTier:  2,
+		providerRelays:       make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-micro-invalid-scores",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-micro-invalid-scores",
+	})
+
+	tests := []struct {
+		name        string
+		mutateBody  func(body map[string]any)
+		wantErrPart string
+	}{
+		{
+			name: "missing scores",
+			mutateBody: func(body map[string]any) {
+				// Intentionally omit score fields.
+			},
+			wantErrPart: "provider micro-relay reputation score",
+		},
+		{
+			name: "zero scores explicit",
+			mutateBody: func(body map[string]any) {
+				body["reputation_score"] = 0.0
+				body["uptime_score"] = 0.0
+				body["capacity_score"] = 0.0
+				body["abuse_penalty"] = 0.0
+			},
+			wantErrPart: "provider micro-relay reputation score",
+		},
+		{
+			name: "under-threshold reputation",
+			mutateBody: func(body map[string]any) {
+				body["reputation_score"] = 0.49
+				body["uptime_score"] = 0.9
+				body["capacity_score"] = 0.9
+				body["abuse_penalty"] = 0.1
+			},
+			wantErrPart: "provider micro-relay reputation score",
+		},
+		{
+			name: "abuse penalty above max",
+			mutateBody: func(body map[string]any) {
+				body["reputation_score"] = 0.9
+				body["uptime_score"] = 0.9
+				body["capacity_score"] = 0.9
+				body["abuse_penalty"] = 0.51
+			},
+			wantErrPart: "provider micro-relay abuse penalty",
+		},
+	}
+
+	for i, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			relayPub, _, err := crypto.GenerateEd25519Keypair()
+			if err != nil {
+				t.Fatalf("relay keygen: %v", err)
+			}
+			body := map[string]any{
+				"relay_id":     fmt.Sprintf("micro-invalid-score-%d", i),
+				"role":         "micro-relay",
+				"pub_key":      base64.RawURLEncoding.EncodeToString(relayPub),
+				"endpoint":     fmt.Sprintf("127.0.0.1:%d", 52860+i),
+				"control_url":  fmt.Sprintf("http://127.0.0.1:%d", 9380+i),
+				"capabilities": []string{"wg"},
+			}
+			tc.mutateBody(body)
+
+			payload, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(payload))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rr := httptest.NewRecorder()
+
+			s.handleProviderRelayUpsert(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid micro-relay scores, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), tc.wantErrPart) {
+				t.Fatalf("expected error containing %q, got %q", tc.wantErrPart, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -1915,6 +2078,10 @@ func TestUpsertProviderRelayRuntimeAdmissionMicroRelayRoleDescriptors(t *testing
 		ControlURL:   "http://127.0.0.1:9389",
 		Capabilities: []string{"wg"},
 		HopRoles:     []string{"middle"},
+		Reputation:   0.82,
+		Uptime:       0.9,
+		Capacity:     0.86,
+		AbusePenalty: 0.2,
 		ValidUntil:   time.Now().Add(5 * time.Minute),
 	}
 	tests := []struct {
@@ -1977,6 +2144,39 @@ func TestUpsertProviderRelayRuntimeAdmissionMicroRelayRoleDescriptors(t *testing
 				return d
 			}(),
 			wantErrPart: "provider micro-relay operator id invalid",
+		},
+		{
+			name: "malformed micro descriptor with missing quality scores",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-missing-scores"
+				d.Reputation = 0
+				d.Uptime = 0
+				d.Capacity = 0
+				d.AbusePenalty = 0
+				return d
+			}(),
+			wantErrPart: "provider micro-relay reputation score",
+		},
+		{
+			name: "malformed micro descriptor with under-threshold quality score",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-under-reputation"
+				d.Reputation = 0.49
+				return d
+			}(),
+			wantErrPart: "provider micro-relay reputation score",
+		},
+		{
+			name: "malformed micro descriptor with high abuse penalty",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-relay-high-abuse"
+				d.AbusePenalty = 0.51
+				return d
+			}(),
+			wantErrPart: "provider micro-relay abuse penalty",
 		},
 	}
 

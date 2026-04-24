@@ -125,6 +125,14 @@ quote_cmd() {
   printf '\n'
 }
 
+array_to_json() {
+  if (( $# == 0 )); then
+    printf '%s' "[]"
+  else
+    printf '%s\n' "$@" | jq -R . | jq -s '.'
+  fi
+}
+
 json_file_valid_01() {
   local path="$1"
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -132,6 +140,34 @@ json_file_valid_01() {
     return
   fi
   if jq -e 'type == "object"' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+json_schema_id() {
+  local path="$1"
+  jq -r 'if (.schema.id | type) == "string" then .schema.id else "" end' "$path" 2>/dev/null || true
+}
+
+run_summary_schema_valid_01() {
+  local schema_id
+  schema_id="$(trim "${1:-}")"
+  case "$schema_id" in
+    profile_compare_multi_vm_stability_run_summary|profile_compare_multi_vm_stability_summary)
+      printf '1'
+      ;;
+    *)
+      printf '0'
+      ;;
+  esac
+}
+
+check_summary_schema_valid_01() {
+  local schema_id
+  schema_id="$(trim "${1:-}")"
+  if [[ "$schema_id" == "profile_compare_multi_vm_stability_check_summary" ]]; then
     printf '1'
   else
     printf '0'
@@ -147,11 +183,62 @@ file_fingerprint_01() {
   cksum "$path" 2>/dev/null | awk '{print $1 ":" $2}' || true
 }
 
+extract_run_stage_failure_hint() {
+  local run_log_path="$1"
+  local hint=""
+  if [[ -z "$run_log_path" || ! -f "$run_log_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  hint="$(grep -m1 '^operator_next_action:' "$run_log_path" 2>/dev/null || true)"
+  if [[ -n "$hint" ]]; then
+    printf '%s' "$hint"
+    return
+  fi
+  hint="$(grep -m1 'at least one --vm-command or --vm-command-file is required' "$run_log_path" 2>/dev/null || true)"
+  if [[ -n "$hint" ]]; then
+    printf '%s' "$hint"
+    return
+  fi
+  printf '%s' ""
+}
+
+extract_run_stage_failure_hints_json() {
+  local run_log_path="$1"
+  local line=""
+  local -a hints=()
+  if [[ -z "$run_log_path" || ! -f "$run_log_path" ]]; then
+    printf '%s' "[]"
+    return
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    if [[ -z "$line" ]]; then
+      continue
+    fi
+    case "$line" in
+      operator_next_action:*|preflight_diag:*|fallback\ checks:*|vm-command-file\ preflight\ checks:*|at\ least\ one\ --vm-command\ or\ --vm-command-file\ is\ required|no\ usable\ VM\ command\ fallback\ was\ discovered*|vm\ command\ file\ preflight\ failed:*|vm\ command\ file:*)
+        hints+=("$line")
+        ;;
+      -\ source=*)
+        hints+=("${line#- }")
+        ;;
+      source=*)
+        if [[ "$line" == *"reason="* || "$line" == *"result="* ]]; then
+          hints+=("$line")
+        fi
+        ;;
+    esac
+  done <"$run_log_path"
+  array_to_json "${hints[@]}"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
 need_cmd mkdir
 need_cmd cksum
+need_cmd grep
 
 reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 run_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SUMMARY_JSON:-}"
@@ -590,7 +677,11 @@ check_command_display="$(quote_cmd "${check_cmd[@]}")"
 
 run_summary_exists="false"
 run_summary_valid="false"
+run_summary_schema_id=""
+run_summary_schema_valid="false"
 run_summary_fresh="false"
+run_stage_failure_hint=""
+run_stage_failure_hints_json="[]"
 
 echo "[profile-compare-multi-vm-stability-cycle] $(timestamp_utc) run-stage start reports_dir=$reports_dir run_summary_json=$run_summary_json"
 pre_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
@@ -598,22 +689,31 @@ set +e
 "${run_cmd[@]}" >"$run_log" 2>&1
 run_stage_rc=$?
 set -e
+run_stage_failure_hints_json="$(extract_run_stage_failure_hints_json "$run_log")"
 
 run_stage_status="pass"
 if [[ "$run_stage_rc" -ne 0 ]]; then
   run_stage_status="fail"
+  run_stage_failure_hint="$(extract_run_stage_failure_hint "$run_log")"
 fi
 
 if [[ -f "$run_summary_json" ]]; then
   run_summary_exists="true"
 fi
 if [[ "$(json_file_valid_01 "$run_summary_json")" == "1" ]]; then
-  run_summary_valid="true"
-  post_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
-  if [[ -z "$pre_run_summary_fingerprint" && -n "$post_run_summary_fingerprint" ]]; then
-    run_summary_fresh="true"
-  elif [[ -n "$post_run_summary_fingerprint" && "$post_run_summary_fingerprint" != "$pre_run_summary_fingerprint" ]]; then
-    run_summary_fresh="true"
+  run_summary_schema_id="$(json_schema_id "$run_summary_json")"
+  if [[ "$(run_summary_schema_valid_01 "$run_summary_schema_id")" == "1" ]]; then
+    run_summary_valid="true"
+    run_summary_schema_valid="true"
+    post_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
+    if [[ -z "$pre_run_summary_fingerprint" && -n "$post_run_summary_fingerprint" ]]; then
+      run_summary_fresh="true"
+    elif [[ -n "$post_run_summary_fingerprint" && "$post_run_summary_fingerprint" != "$pre_run_summary_fingerprint" ]]; then
+      run_summary_fresh="true"
+    fi
+  else
+    run_summary_valid="false"
+    run_summary_schema_valid="false"
   fi
 fi
 
@@ -624,6 +724,8 @@ check_stage_rc=0
 
 check_summary_exists="false"
 check_summary_valid="false"
+check_summary_schema_id=""
+check_summary_schema_valid="false"
 check_summary_fresh="false"
 check_decision=""
 check_status=""
@@ -640,7 +742,11 @@ final_rc=1
 
 if [[ "$run_stage_rc" -ne 0 ]]; then
   failure_stage="run"
-  failure_reason="stability run failed (rc=$run_stage_rc)"
+  if [[ -n "$run_stage_failure_hint" ]]; then
+    failure_reason="$run_stage_failure_hint"
+  else
+    failure_reason="stability run failed (rc=$run_stage_rc)"
+  fi
   decision="NO-GO"
   status="fail"
   final_rc="$run_stage_rc"
@@ -650,7 +756,11 @@ if [[ "$run_stage_rc" -ne 0 ]]; then
 elif [[ "$run_summary_valid" != "true" ]]; then
   run_stage_status="fail"
   failure_stage="run"
-  failure_reason="stability run summary is missing or invalid"
+  if [[ "$run_summary_exists" == "true" && -n "$run_summary_schema_id" && "$run_summary_schema_valid" != "true" ]]; then
+    failure_reason="stability run summary schema.id mismatch (expected profile_compare_multi_vm_stability_run_summary)"
+  else
+    failure_reason="stability run summary is missing or invalid"
+  fi
   decision="NO-GO"
   status="fail"
   final_rc=1
@@ -678,30 +788,37 @@ else
 
   if [[ "$(json_file_valid_01 "$check_summary_json")" == "1" ]]; then
     check_summary_exists="true"
-    check_summary_valid="true"
-    post_check_summary_fingerprint="$(file_fingerprint_01 "$check_summary_json")"
-    if [[ -z "$pre_check_summary_fingerprint" && -n "$post_check_summary_fingerprint" ]]; then
-      check_summary_fresh="true"
-    elif [[ -n "$post_check_summary_fingerprint" && "$post_check_summary_fingerprint" != "$pre_check_summary_fingerprint" ]]; then
-      check_summary_fresh="true"
+    check_summary_schema_id="$(json_schema_id "$check_summary_json")"
+    if [[ "$(check_summary_schema_valid_01 "$check_summary_schema_id")" == "1" ]]; then
+      check_summary_valid="true"
+      check_summary_schema_valid="true"
+      post_check_summary_fingerprint="$(file_fingerprint_01 "$check_summary_json")"
+      if [[ -z "$pre_check_summary_fingerprint" && -n "$post_check_summary_fingerprint" ]]; then
+        check_summary_fresh="true"
+      elif [[ -n "$post_check_summary_fingerprint" && "$post_check_summary_fingerprint" != "$pre_check_summary_fingerprint" ]]; then
+        check_summary_fresh="true"
+      fi
+      check_decision="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+      check_decision="$(normalize_decision "$check_decision")"
+      check_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+      check_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else "null" end' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
+      check_modal_recommended_profile="$(jq -r '
+        if (.observed.modal_recommended_profile | type) == "string"
+        then .observed.modal_recommended_profile
+        else ""
+        end
+      ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+      check_modal_support_rate_pct_json="$(jq -r '
+        if (.observed.modal_support_rate_pct | type) == "number"
+        then .observed.modal_support_rate_pct
+        else "null"
+        end
+      ' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
+      check_errors_json="$(jq -c 'if (.errors | type) == "array" then .errors else [] end' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
+    else
+      check_summary_valid="false"
+      check_summary_schema_valid="false"
     fi
-    check_decision="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
-    check_decision="$(normalize_decision "$check_decision")"
-    check_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$check_summary_json" 2>/dev/null || printf '%s' "")"
-    check_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else "null" end' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
-    check_modal_recommended_profile="$(jq -r '
-      if (.observed.modal_recommended_profile | type) == "string"
-      then .observed.modal_recommended_profile
-      else ""
-      end
-    ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
-    check_modal_support_rate_pct_json="$(jq -r '
-      if (.observed.modal_support_rate_pct | type) == "number"
-      then .observed.modal_support_rate_pct
-      else "null"
-      end
-    ' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
-    check_errors_json="$(jq -c 'if (.errors | type) == "array" then .errors else [] end' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
   elif [[ -f "$check_summary_json" ]]; then
     check_summary_exists="true"
     check_summary_valid="false"
@@ -747,7 +864,11 @@ else
     status="fail"
     final_rc=1
     failure_stage="check"
-    failure_reason="stability check summary is missing or invalid"
+    if [[ "$check_summary_exists" == "true" && -n "$check_summary_schema_id" && "$check_summary_schema_valid" != "true" ]]; then
+      failure_reason="stability check summary schema.id mismatch (expected profile_compare_multi_vm_stability_check_summary)"
+    else
+      failure_reason="stability check summary is missing or invalid"
+    fi
   elif [[ "$check_summary_fresh" != "true" ]]; then
     decision="NO-GO"
     status="fail"
@@ -802,15 +923,21 @@ jq -n \
   --arg check_command "$check_command_display" \
   --arg reports_dir "$reports_dir" \
   --arg run_stage_status "$run_stage_status" \
+  --arg run_stage_failure_hint "$run_stage_failure_hint" \
+  --argjson run_stage_failure_hints "$run_stage_failure_hints_json" \
   --arg check_stage_attempted "$check_stage_attempted" \
   --arg check_stage_status "$check_stage_status" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
   --arg run_summary_exists "$run_summary_exists" \
   --arg run_summary_valid "$run_summary_valid" \
+  --arg run_summary_schema_id "$run_summary_schema_id" \
+  --arg run_summary_schema_valid "$run_summary_schema_valid" \
   --arg run_summary_fresh "$run_summary_fresh" \
   --arg check_summary_exists "$check_summary_exists" \
   --arg check_summary_valid "$check_summary_valid" \
+  --arg check_summary_schema_id "$check_summary_schema_id" \
+  --arg check_summary_schema_valid "$check_summary_schema_valid" \
   --arg check_summary_fresh "$check_summary_fresh" \
   --arg check_decision "$check_decision" \
   --arg check_status "$check_status" \
@@ -907,11 +1034,21 @@ jq -n \
     run: {
       summary_exists: ($run_summary_exists == "true"),
       summary_valid_json: ($run_summary_valid == "true"),
-      summary_fresh: ($run_summary_fresh == "true")
+      summary_schema_id: (if $run_summary_schema_id == "" then null else $run_summary_schema_id end),
+      summary_schema_valid: ($run_summary_schema_valid == "true"),
+      summary_fresh: ($run_summary_fresh == "true"),
+      failure_hint: (
+        if $run_stage_failure_hint == "" then null
+        else $run_stage_failure_hint
+        end
+      ),
+      failure_hints: $run_stage_failure_hints
     },
     check: {
       summary_exists: ($check_summary_exists == "true"),
       summary_valid_json: ($check_summary_valid == "true"),
+      summary_schema_id: (if $check_summary_schema_id == "" then null else $check_summary_schema_id end),
+      summary_schema_valid: ($check_summary_schema_valid == "true"),
       summary_fresh: ($check_summary_fresh == "true"),
       decision: (if $check_decision == "" then null else $check_decision end),
       status: (if $check_status == "" then null else $check_status end),

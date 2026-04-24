@@ -288,11 +288,57 @@ command_string_to_argv() {
   [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
 }
 
+path_is_symlink_free_under_scripts_dir() {
+  local candidate="${1:-}"
+  local scripts_root="$ROOT_DIR/scripts"
+  local current=""
+  if [[ -z "$candidate" ]]; then
+    return 1
+  fi
+  current="$candidate"
+  while :; do
+    if [[ -L "$current" ]]; then
+      return 1
+    fi
+    if [[ "$current" == "$scripts_root" ]]; then
+      return 0
+    fi
+    current="$(dirname "$current")"
+    if [[ "$current" != "$scripts_root" && "$current" != "$scripts_root/"* ]]; then
+      return 1
+    fi
+  done
+}
+
+canonical_existing_file_path() {
+  local candidate="${1:-}"
+  local parent_dir=""
+  local base_name=""
+  if [[ -z "$candidate" || ! -f "$candidate" ]]; then
+    return 1
+  fi
+  parent_dir="$(dirname "$candidate")"
+  base_name="$(basename "$candidate")"
+  if ! parent_dir="$(cd -P "$parent_dir" 2>/dev/null && pwd)"; then
+    return 1
+  fi
+  printf '%s/%s' "$parent_dir" "$base_name"
+}
+
+ACTION_COMMAND_VALIDATED_SCRIPT_PATH=""
+
 action_command_argv_allowed() {
   local -a argv=("$@")
   local cmd
   local script_path
+  local scripts_root="$ROOT_DIR/scripts"
+  local scripts_root_canonical=""
+  local canonical_script_path=""
+  ACTION_COMMAND_VALIDATED_SCRIPT_PATH=""
   if [[ "${#argv[@]}" -eq 0 ]]; then
+    return 1
+  fi
+  if ! scripts_root_canonical="$(cd -P "$scripts_root" 2>/dev/null && pwd)"; then
     return 1
   fi
   cmd="${argv[0]}"
@@ -305,29 +351,11 @@ action_command_argv_allowed() {
       # Keep shell-evaluated modes blocked in argv-safe path mode.
       return 1
     fi
-    case "$script_path" in
-      "$ROOT_DIR"/scripts/*)
-        ;;
-      scripts/*)
-        script_path="$ROOT_DIR/$script_path"
-        ;;
-      ./scripts/*)
-        script_path="$ROOT_DIR/${script_path#./}"
-        ;;
-      *)
-        return 1
-        ;;
-    esac
-    if [[ "$script_path" == *".."* ]]; then
-      return 1
-    fi
-    [[ -f "$script_path" ]]
-    return
   else
     script_path="$cmd"
   fi
   case "$script_path" in
-    "$ROOT_DIR"/scripts/*)
+    "$scripts_root"/*)
       ;;
     scripts/*)
       script_path="$ROOT_DIR/$script_path"
@@ -339,10 +367,20 @@ action_command_argv_allowed() {
       return 1
       ;;
   esac
-  if [[ "$script_path" == *".."* ]]; then
+  if [[ ! -f "$script_path" ]]; then
     return 1
   fi
-  [[ -f "$script_path" ]]
+  if ! path_is_symlink_free_under_scripts_dir "$script_path"; then
+    return 1
+  fi
+  if ! canonical_script_path="$(canonical_existing_file_path "$script_path")"; then
+    return 1
+  fi
+  if [[ "$canonical_script_path" != "$scripts_root_canonical/"* ]]; then
+    return 1
+  fi
+  ACTION_COMMAND_VALIDATED_SCRIPT_PATH="$canonical_script_path"
+  return 0
 }
 
 run_action_command_string() {
@@ -353,6 +391,9 @@ run_action_command_string() {
   local -a command_argv=()
   local -a env_prefix=()
   local token
+  local validated_script_path_initial=""
+  local validated_script_path_pre_exec=""
+  local pre_exec_revalidate_delay_sec="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC:-0}"
 
   if [[ -z "$command_text" ]]; then
     return 4
@@ -376,12 +417,36 @@ run_action_command_string() {
         } >"$log_path"
         return 6
       fi
+      validated_script_path_initial="$ACTION_COMMAND_VALIDATED_SCRIPT_PATH"
       if [[ "${#env_prefix[@]}" -gt 0 && "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
         {
           echo "refusing env-prefixed action command (set --allow-unsafe-shell-commands 1 to override)"
           echo "command: $redacted_command_text"
         } >"$log_path"
         return 5
+      fi
+      if [[ "$pre_exec_revalidate_delay_sec" != "0" && "$pre_exec_revalidate_delay_sec" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        sleep "$pre_exec_revalidate_delay_sec"
+      fi
+      if ! action_command_argv_allowed "${command_argv[@]}"; then
+        {
+          echo "refusing untrusted action command (pre-exec validation mismatch)"
+          echo "command: $redacted_command_text"
+          if [[ -n "$validated_script_path_initial" ]]; then
+            echo "validated_path_initial: $validated_script_path_initial"
+          fi
+        } >"$log_path"
+        return 6
+      fi
+      validated_script_path_pre_exec="$ACTION_COMMAND_VALIDATED_SCRIPT_PATH"
+      if [[ -n "$validated_script_path_initial" && "$validated_script_path_initial" != "$validated_script_path_pre_exec" ]]; then
+        {
+          echo "refusing untrusted action command (pre-exec validation mismatch)"
+          echo "command: $redacted_command_text"
+          echo "validated_path_initial: $validated_script_path_initial"
+          echo "validated_path_pre_exec: $validated_script_path_pre_exec"
+        } >"$log_path"
+        return 6
       fi
       if (( timeout_sec > 0 )); then
         if [[ "${#env_prefix[@]}" -gt 0 ]]; then

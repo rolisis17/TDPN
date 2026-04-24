@@ -1090,12 +1090,18 @@ func (s *Service) ensureClientPaymentAuthorization(
 		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof required")
 	}
 	requestSubject := strings.TrimSpace(req.Subject)
+	defaultSubject = strings.TrimSpace(defaultSubject)
 	subject := strings.TrimSpace(req.PaymentProof.Subject)
-	if subject != "" && requestSubject != "" && subject != requestSubject {
-		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: request subject mismatch")
+	if subject != "" {
+		if requestSubject != "" && subject != requestSubject {
+			return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: request subject mismatch")
+		}
+		if requestSubject == "" && defaultSubject != "" && subject != defaultSubject {
+			return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: request subject mismatch")
+		}
 	}
 	if subject == "" {
-		subject = strings.TrimSpace(defaultSubject)
+		subject = defaultSubject
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -2690,7 +2696,7 @@ func newSettlementServiceFromEnv() settlement.Service {
 		} else if err != nil {
 			failCosmosInit("issuer settlement: cosmos adapter init failed (%v)", err)
 		} else {
-			opts = append(opts, settlement.WithChainAdapter(adapter))
+			opts = append(opts, settlement.WithChainAdapter(adapter), settlement.WithBlockchainMode(true))
 			log.Printf("issuer settlement: cosmos adapter enabled endpoint=%s", redactEndpointForLog(endpoint))
 		}
 

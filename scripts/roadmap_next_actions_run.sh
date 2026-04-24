@@ -64,6 +64,11 @@ Exit behavior:
     conflicting commands after dedupe/filtering, to avoid stale ambiguous runs.
   - With --profile-default-gate-subject, profile_default_gate actions append
     --campaign-subject when no subject/anon override flag is already present.
+  - profile_default_gate placeholder subject tokens in commands
+    (INVITE_KEY/CAMPAIGN_SUBJECT forms) are normalized using first available:
+    --profile-default-gate-subject, CAMPAIGN_SUBJECT, INVITE_KEY.
+  - profile_default_gate placeholder subject tokens fail closed (rc=2) when no
+    real subject value is available from the configured override/env fallback.
   - With global --action-timeout-sec=0, profile_default_gate gets a default
     per-action timeout from ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC.
   - With --allow-profile-default-gate-unreachable=1, profile_default_gate can
@@ -201,6 +206,84 @@ render_log_token() {
   fi
 }
 
+render_command_line_from_argv() {
+  local arg=""
+  local rendered=""
+  for arg in "$@"; do
+    rendered="${rendered}${rendered:+ }$(render_log_token "$arg")"
+  done
+  printf '%s' "$rendered"
+}
+
+build_profile_default_gate_subject_operator_command() {
+  local -a cmd=("./scripts/roadmap_next_actions_run.sh")
+  local filter_value=""
+
+  if [[ -n "${reports_dir:-}" ]]; then
+    cmd+=(--reports-dir "$reports_dir")
+  fi
+  if [[ -n "${summary_json:-}" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  if [[ -n "${roadmap_summary_json:-}" ]]; then
+    cmd+=(--roadmap-summary-json "$roadmap_summary_json")
+  fi
+  if [[ -n "${roadmap_report_md:-}" ]]; then
+    cmd+=(--roadmap-report-md "$roadmap_report_md")
+  fi
+  if [[ "${refresh_manual_validation:-0}" == "1" ]]; then
+    cmd+=(--refresh-manual-validation 1)
+  fi
+  if [[ "${refresh_single_machine_readiness:-0}" == "1" ]]; then
+    cmd+=(--refresh-single-machine-readiness 1)
+  fi
+  if [[ "${parallel:-0}" == "1" ]]; then
+    cmd+=(--parallel 1)
+  fi
+  if [[ "${max_actions:-0}" != "0" ]]; then
+    cmd+=(--max-actions "$max_actions")
+  fi
+  if [[ "${action_timeout_sec:-0}" != "0" ]]; then
+    cmd+=(--action-timeout-sec "$action_timeout_sec")
+  fi
+  if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
+    cmd+=(--allow-unsafe-shell-commands 1)
+  fi
+  if [[ "${allow_profile_default_gate_unreachable:-0}" == "1" ]]; then
+    cmd+=(--allow-profile-default-gate-unreachable 1)
+  fi
+  if [[ -n "${include_id_prefix:-}" ]]; then
+    cmd+=(--include-id-prefix "$include_id_prefix")
+  fi
+  if [[ -n "${exclude_id_prefix:-}" ]]; then
+    cmd+=(--exclude-id-prefix "$exclude_id_prefix")
+  fi
+  for filter_value in "${include_ids[@]:-}"; do
+    if [[ -n "$filter_value" ]]; then
+      cmd+=(--include-id "$filter_value")
+    fi
+  done
+  for filter_value in "${exclude_ids[@]:-}"; do
+    if [[ -n "$filter_value" ]]; then
+      cmd+=(--exclude-id "$filter_value")
+    fi
+  done
+  for filter_value in "${include_id_suffixes[@]:-}"; do
+    if [[ -n "$filter_value" ]]; then
+      cmd+=(--include-id-suffix "$filter_value")
+    fi
+  done
+  for filter_value in "${exclude_id_suffixes[@]:-}"; do
+    if [[ -n "$filter_value" ]]; then
+      cmd+=(--exclude-id-suffix "$filter_value")
+    fi
+  done
+  cmd+=(--print-summary-json "${print_summary_json:-1}")
+  cmd+=(--profile-default-gate-subject "REPLACE_WITH_INVITE_SUBJECT")
+
+  render_command_line_from_argv "${cmd[@]}"
+}
+
 command_has_profile_subject_or_anon_arg() {
   local command_text="${1:-}"
   [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]|$) ]] && return 0
@@ -212,29 +295,236 @@ command_has_profile_subject_or_anon_arg() {
   return 1
 }
 
-command_has_profile_subject_placeholder_invite_key() {
-  local command_text="${1:-}"
-  [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
-  [[ "$command_text" =~ (^|[[:space:]])--subject([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
-  [[ "$command_text" =~ (^|[[:space:]])--key([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
-  [[ "$command_text" =~ (^|[[:space:]])--invite-key([[:space:]=]+)INVITE_KEY([[:space:]]|$) ]] && return 0
+strip_optional_wrapping_quotes() {
+  local value="${1:-}"
+  local first_char=""
+  local last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+profile_subject_looks_placeholder() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY|%INVITE_KEY%|\$\{INVITE_KEY:-*}|\$\{INVITE_KEY-*}|CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|%CAMPAIGN_SUBJECT%|\$\{CAMPAIGN_SUBJECT:-*}|\$\{CAMPAIGN_SUBJECT-*})
+      return 0
+      ;;
+  esac
   return 1
 }
 
+is_profile_subject_flag() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--key|--invite-key)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+command_has_profile_subject_placeholder_invite_key() {
+  local command_text="${1:-}"
+  local token=""
+  local key=""
+  local value=""
+  local idx=0
+  local token_count=0
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      if is_profile_subject_flag "$token"; then
+        if (( idx + 1 < token_count )); then
+          value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if profile_subject_looks_placeholder "$value"; then
+            return 0
+          fi
+          idx=$((idx + 2))
+          continue
+        fi
+      elif [[ "$token" == --*=* ]]; then
+        key="${token%%=*}"
+        if is_profile_subject_flag "$key"; then
+          value="${token#*=}"
+          if profile_subject_looks_placeholder "$value"; then
+            return 0
+          fi
+        fi
+      fi
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  [[ "$command_text" =~ (^|[[:space:]])--campaign-subject([[:space:]=]+)(INVITE_KEY|CAMPAIGN_SUBJECT)([[:space:]]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--subject([[:space:]=]+)(INVITE_KEY|CAMPAIGN_SUBJECT)([[:space:]]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--key([[:space:]=]+)(INVITE_KEY|CAMPAIGN_SUBJECT)([[:space:]]|$) ]] && return 0
+  [[ "$command_text" =~ (^|[[:space:]])--invite-key([[:space:]=]+)(INVITE_KEY|CAMPAIGN_SUBJECT)([[:space:]]|$) ]] && return 0
+  return 1
+}
+
+COMMAND_PROFILE_SUBJECT_PLACEHOLDER_REPLACED="0"
 command_replace_profile_subject_placeholder() {
   local command_text="${1:-}"
   local subject_value="${2:-}"
-  local escaped_subject
-  escaped_subject="$(printf '%q' "$subject_value")"
-  command_text="${command_text//--campaign-subject INVITE_KEY/--campaign-subject ${escaped_subject}}"
-  command_text="${command_text//--subject INVITE_KEY/--subject ${escaped_subject}}"
-  command_text="${command_text//--key INVITE_KEY/--key ${escaped_subject}}"
-  command_text="${command_text//--invite-key INVITE_KEY/--invite-key ${escaped_subject}}"
-  command_text="${command_text//--campaign-subject=INVITE_KEY/--campaign-subject=${escaped_subject}}"
-  command_text="${command_text//--subject=INVITE_KEY/--subject=${escaped_subject}}"
-  command_text="${command_text//--key=INVITE_KEY/--key=${escaped_subject}}"
-  command_text="${command_text//--invite-key=INVITE_KEY/--invite-key=${escaped_subject}}"
-  printf '%s' "$command_text"
+  local token=""
+  local key=""
+  local value=""
+  local idx=0
+  local token_count=0
+  local replaced="0"
+  local -a out_argv=()
+
+  if ! command_string_to_argv "$command_text"; then
+    COMMAND_PROFILE_SUBJECT_PLACEHOLDER_REPLACED="0"
+    printf '%s' "$command_text"
+    return
+  fi
+
+  token_count="${#COMMAND_STRING_ARGV[@]}"
+  while (( idx < token_count )); do
+    token="${COMMAND_STRING_ARGV[$idx]}"
+
+    if is_profile_subject_flag "$token"; then
+      out_argv+=("$token")
+      if (( idx + 1 < token_count )); then
+        value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+        if profile_subject_looks_placeholder "$value"; then
+          out_argv+=("$subject_value")
+          replaced="1"
+        else
+          out_argv+=("$value")
+        fi
+        idx=$((idx + 2))
+        continue
+      fi
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$token" == --*=* ]]; then
+      key="${token%%=*}"
+      if is_profile_subject_flag "$key"; then
+        value="${token#*=}"
+        if profile_subject_looks_placeholder "$value"; then
+          out_argv+=("${key}=${subject_value}")
+          replaced="1"
+        else
+          out_argv+=("$token")
+        fi
+        idx=$((idx + 1))
+        continue
+      fi
+    fi
+
+    out_argv+=("$token")
+    idx=$((idx + 1))
+  done
+
+  COMMAND_PROFILE_SUBJECT_PLACEHOLDER_REPLACED="$replaced"
+  profile_default_gate_command_from_argv "${out_argv[@]}"
+}
+
+PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE=""
+PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE=""
+PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL=""
+resolve_profile_default_gate_subject_value() {
+  local candidate=""
+  local detail=""
+
+  PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE=""
+  PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE=""
+  PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL=""
+
+  candidate="$(trim "${profile_default_gate_subject:-}")"
+  if [[ -n "$candidate" ]]; then
+    if profile_subject_looks_placeholder "$candidate"; then
+      detail="profile_default_gate_subject=placeholder"
+    else
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE="$candidate"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE="profile_default_gate_subject"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="profile_default_gate_subject=resolved"
+      return 0
+    fi
+  else
+    detail="profile_default_gate_subject=missing"
+  fi
+
+  candidate="$(trim "${CAMPAIGN_SUBJECT:-}")"
+  if [[ -n "$candidate" ]]; then
+    if profile_subject_looks_placeholder "$candidate"; then
+      detail="${detail},CAMPAIGN_SUBJECT=placeholder"
+    else
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE="$candidate"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE="CAMPAIGN_SUBJECT"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="${detail},CAMPAIGN_SUBJECT=resolved"
+      return 0
+    fi
+  else
+    detail="${detail},CAMPAIGN_SUBJECT=missing"
+  fi
+
+  candidate="$(trim "${INVITE_KEY:-}")"
+  if [[ -n "$candidate" ]]; then
+    if profile_subject_looks_placeholder "$candidate"; then
+      detail="${detail},INVITE_KEY=placeholder"
+    else
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE="$candidate"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE="INVITE_KEY"
+      PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="${detail},INVITE_KEY=resolved"
+      return 0
+    fi
+  else
+    detail="${detail},INVITE_KEY=missing"
+  fi
+
+  PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL="$detail"
+  return 1
+}
+
+write_profile_default_gate_subject_precondition_log() {
+  local log_path="${1:-}"
+  local command_redacted="${2:-}"
+  local notes="${3:-}"
+  local resolve_detail="${4:-}"
+  local next_operator_action="${5:-}"
+
+  if [[ -z "$log_path" ]]; then
+    return
+  fi
+  if [[ -z "$next_operator_action" ]]; then
+    next_operator_action="$(build_profile_default_gate_subject_operator_command)"
+  fi
+
+  {
+    echo "failure_kind=missing_invite_subject_precondition"
+    echo "profile_default_gate invite subject precondition failed before execution"
+    if [[ -n "$notes" ]]; then
+      echo "$notes"
+    fi
+    if [[ -n "$resolve_detail" ]]; then
+      echo "resolve_detail=$resolve_detail"
+    fi
+    if [[ -n "$command_redacted" ]]; then
+      echo "command=$command_redacted"
+    fi
+    echo "operator_next_action: $next_operator_action"
+    echo "operator_next_action: CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT ./scripts/roadmap_next_actions_run.sh --reports-dir $reports_dir --summary-json $summary_json --print-summary-json ${print_summary_json:-1}"
+  } >"$log_path"
 }
 
 redact_command_secrets() {
@@ -574,11 +864,57 @@ command_string_to_argv() {
   [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
 }
 
+path_is_symlink_free_under_scripts_dir() {
+  local candidate="${1:-}"
+  local scripts_root="$ROOT_DIR/scripts"
+  local current=""
+  if [[ -z "$candidate" ]]; then
+    return 1
+  fi
+  current="$candidate"
+  while :; do
+    if [[ -L "$current" ]]; then
+      return 1
+    fi
+    if [[ "$current" == "$scripts_root" ]]; then
+      return 0
+    fi
+    current="$(dirname "$current")"
+    if [[ "$current" != "$scripts_root" && "$current" != "$scripts_root/"* ]]; then
+      return 1
+    fi
+  done
+}
+
+canonical_existing_file_path() {
+  local candidate="${1:-}"
+  local parent_dir=""
+  local base_name=""
+  if [[ -z "$candidate" || ! -f "$candidate" ]]; then
+    return 1
+  fi
+  parent_dir="$(dirname "$candidate")"
+  base_name="$(basename "$candidate")"
+  if ! parent_dir="$(cd -P "$parent_dir" 2>/dev/null && pwd)"; then
+    return 1
+  fi
+  printf '%s/%s' "$parent_dir" "$base_name"
+}
+
+ACTION_COMMAND_VALIDATED_SCRIPT_PATH=""
+
 action_command_argv_allowed() {
   local -a argv=("$@")
   local cmd
   local script_path
+  local scripts_root="$ROOT_DIR/scripts"
+  local scripts_root_canonical=""
+  local canonical_script_path=""
+  ACTION_COMMAND_VALIDATED_SCRIPT_PATH=""
   if [[ "${#argv[@]}" -eq 0 ]]; then
+    return 1
+  fi
+  if ! scripts_root_canonical="$(cd -P "$scripts_root" 2>/dev/null && pwd)"; then
     return 1
   fi
   cmd="${argv[0]}"
@@ -591,29 +927,11 @@ action_command_argv_allowed() {
       # Keep shell-evaluated modes blocked in argv-safe path mode.
       return 1
     fi
-    case "$script_path" in
-      "$ROOT_DIR"/scripts/*)
-        ;;
-      scripts/*)
-        script_path="$ROOT_DIR/$script_path"
-        ;;
-      ./scripts/*)
-        script_path="$ROOT_DIR/${script_path#./}"
-        ;;
-      *)
-        return 1
-        ;;
-    esac
-    if [[ "$script_path" == *".."* ]]; then
-      return 1
-    fi
-    [[ -f "$script_path" ]]
-    return
   else
     script_path="$cmd"
   fi
   case "$script_path" in
-    "$ROOT_DIR"/scripts/*)
+    "$scripts_root"/*)
       ;;
     scripts/*)
       script_path="$ROOT_DIR/$script_path"
@@ -625,10 +943,20 @@ action_command_argv_allowed() {
       return 1
       ;;
   esac
-  if [[ "$script_path" == *".."* ]]; then
+  if [[ ! -f "$script_path" ]]; then
     return 1
   fi
-  [[ -f "$script_path" ]]
+  if ! path_is_symlink_free_under_scripts_dir "$script_path"; then
+    return 1
+  fi
+  if ! canonical_script_path="$(canonical_existing_file_path "$script_path")"; then
+    return 1
+  fi
+  if [[ "$canonical_script_path" != "$scripts_root_canonical/"* ]]; then
+    return 1
+  fi
+  ACTION_COMMAND_VALIDATED_SCRIPT_PATH="$canonical_script_path"
+  return 0
 }
 
 run_action_command_string() {
@@ -639,6 +967,9 @@ run_action_command_string() {
   local -a command_argv=()
   local -a env_prefix=()
   local token
+  local validated_script_path_initial=""
+  local validated_script_path_pre_exec=""
+  local pre_exec_revalidate_delay_sec="${ROADMAP_NEXT_ACTIONS_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC:-0}"
 
   if [[ -z "$command_text" ]]; then
     return 4
@@ -662,12 +993,36 @@ run_action_command_string() {
         } >"$log_path"
         return 6
       fi
+      validated_script_path_initial="$ACTION_COMMAND_VALIDATED_SCRIPT_PATH"
       if [[ "${#env_prefix[@]}" -gt 0 && "${allow_unsafe_shell_commands:-0}" != "1" ]]; then
         {
           echo "refusing env-prefixed action command (set --allow-unsafe-shell-commands 1 to override)"
           echo "command: $redacted_command_text"
         } >"$log_path"
         return 5
+      fi
+      if [[ "$pre_exec_revalidate_delay_sec" != "0" && "$pre_exec_revalidate_delay_sec" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        sleep "$pre_exec_revalidate_delay_sec"
+      fi
+      if ! action_command_argv_allowed "${command_argv[@]}"; then
+        {
+          echo "refusing untrusted action command (pre-exec validation mismatch)"
+          echo "command: $redacted_command_text"
+          if [[ -n "$validated_script_path_initial" ]]; then
+            echo "validated_path_initial: $validated_script_path_initial"
+          fi
+        } >"$log_path"
+        return 6
+      fi
+      validated_script_path_pre_exec="$ACTION_COMMAND_VALIDATED_SCRIPT_PATH"
+      if [[ -n "$validated_script_path_initial" && "$validated_script_path_initial" != "$validated_script_path_pre_exec" ]]; then
+        {
+          echo "refusing untrusted action command (pre-exec validation mismatch)"
+          echo "command: $redacted_command_text"
+          echo "validated_path_initial: $validated_script_path_initial"
+          echo "validated_path_pre_exec: $validated_script_path_pre_exec"
+        } >"$log_path"
+        return 6
       fi
       if (( timeout_sec > 0 )); then
         if [[ "${#env_prefix[@]}" -gt 0 ]]; then
@@ -1176,6 +1531,12 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_label="$(printf '%s\n' "$action_json" | jq -r '.label // ""')"
   action_reason="$(printf '%s\n' "$action_json" | jq -r '.reason // ""')"
   action_command="$(printf '%s\n' "$action_json" | jq -r '.command // ""')"
+  action_preflight_failure_kind=""
+  action_preflight_notes=""
+  action_profile_subject_resolve_detail=""
+  action_preflight_next_operator_action=""
+  action_has_subject_placeholder="0"
+  action_resolved_subject_value=""
   action_timeout_sec_effective="$action_timeout_sec"
   if [[ "$action_id" == "profile_default_gate" && "$action_timeout_sec" == "0" ]]; then
     action_timeout_sec_effective="$profile_default_gate_default_timeout_sec"
@@ -1188,13 +1549,37 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "${B_HOST:-}"
     )"
   fi
-  if [[ "$action_id" == "profile_default_gate" \
-     && -n "$profile_default_gate_subject" \
-     && -n "$action_command" ]]; then
+  if [[ "$action_id" == "profile_default_gate" && -n "$action_command" ]]; then
     if command_has_profile_subject_placeholder_invite_key "$action_command"; then
-      action_command="$(command_replace_profile_subject_placeholder "$action_command" "$profile_default_gate_subject")"
-    elif ! command_has_profile_subject_or_anon_arg "$action_command"; then
-      action_command="$action_command --campaign-subject $(printf '%q' "$profile_default_gate_subject")"
+      action_has_subject_placeholder="1"
+      if resolve_profile_default_gate_subject_value; then
+        action_resolved_subject_value="$PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE"
+        action_command="$(command_replace_profile_subject_placeholder "$action_command" "$action_resolved_subject_value")"
+        if [[ "$COMMAND_PROFILE_SUBJECT_PLACEHOLDER_REPLACED" != "1" ]] \
+           && command_has_profile_subject_placeholder_invite_key "$action_command"; then
+          action_preflight_failure_kind="missing_invite_subject_precondition"
+          action_preflight_notes="profile_default_gate subject placeholder token remains unresolved after normalization"
+          action_profile_subject_resolve_detail="replacement_failed_resolved_source=${PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_SOURCE:-unknown}"
+        fi
+      else
+        action_preflight_failure_kind="missing_invite_subject_precondition"
+        action_preflight_notes="profile_default_gate subject placeholder token unresolved"
+        action_profile_subject_resolve_detail="${PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL:-}"
+      fi
+    fi
+
+    if [[ -z "$action_preflight_failure_kind" \
+       && -n "$profile_default_gate_subject" \
+       && "$action_has_subject_placeholder" != "1" ]] \
+       && ! command_has_profile_subject_or_anon_arg "$action_command"; then
+      if resolve_profile_default_gate_subject_value; then
+        action_resolved_subject_value="$PROFILE_DEFAULT_GATE_SUBJECT_RESOLVED_VALUE"
+        action_command="$action_command --campaign-subject $(printf '%q' "$action_resolved_subject_value")"
+      else
+        action_preflight_failure_kind="missing_invite_subject_precondition"
+        action_preflight_notes="profile_default_gate subject override unresolved"
+        action_profile_subject_resolve_detail="${PROFILE_DEFAULT_GATE_SUBJECT_RESOLVE_DETAIL:-}"
+      fi
     fi
   fi
   action_id_safe="$(sanitize_id "$action_id")"
@@ -1211,7 +1596,44 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_timeout_secs[$idx]="$action_timeout_sec_effective"
   action_result_files[$idx]="$action_result_file"
 
-  if [[ -z "$action_command" ]]; then
+  if [[ -n "$action_preflight_failure_kind" ]]; then
+    action_preflight_next_operator_action="$(build_profile_default_gate_subject_operator_command)"
+    write_profile_default_gate_subject_precondition_log \
+      "$action_log" \
+      "$action_command_redacted" \
+      "$action_preflight_notes" \
+      "$action_profile_subject_resolve_detail" \
+      "$action_preflight_next_operator_action"
+    jq -cn \
+      --arg id "$action_id" \
+      --arg label "$action_label" \
+      --arg reason "$action_reason" \
+      --arg command "$action_command_redacted" \
+      --arg status "fail" \
+      --arg notes "$action_preflight_notes" \
+      --arg next_operator_action "$action_preflight_next_operator_action" \
+      --arg log "$action_log" \
+      --arg failure_kind "$action_preflight_failure_kind" \
+      --argjson rc 2 \
+      --argjson command_rc 2 \
+      --argjson timed_out false \
+      --argjson timeout_sec "$action_timeout_sec_effective" \
+      '{
+        id: $id,
+        label: $label,
+        reason: $reason,
+        command: $command,
+        status: $status,
+        rc: $rc,
+        command_rc: $command_rc,
+        timed_out: $timed_out,
+        timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+        failure_kind: $failure_kind,
+        notes: (if $notes == "" then null else $notes end),
+        next_operator_action: (if $next_operator_action == "" then null else $next_operator_action end),
+        artifacts: { log: $log }
+      }' >"$action_result_file"
+  elif [[ -z "$action_command" ]]; then
     jq -cn \
       --arg id "$action_id" \
       --arg label "$action_label" \

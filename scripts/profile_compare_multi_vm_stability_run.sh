@@ -35,8 +35,18 @@ Notes:
   - Per-run artifacts/logs are archived under timestamped run directories.
   - Fail closed by default; allow partial completion with --allow-partial 1
     only when configured thresholds are satisfied.
+  - vm-command-file preflight rejects conflicting duplicate VM_ID entries to
+    keep command routing deterministic.
   - Cycle script path can be overridden by:
     PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT
+  - If no --vm-command/--vm-command-file values are provided, fail-closed
+    fallback discovery checks, in order:
+    <reports-dir>/profile_compare_multi_vm_stability_vm_commands.txt (canonical)
+    PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE
+    PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE
+    PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE
+    <reports-dir>/profile_compare_multi_vm_vm_commands.txt (legacy)
+    <reports-dir>/vm_commands.txt (legacy)
 USAGE
 }
 
@@ -64,6 +74,101 @@ abs_path() {
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
+}
+
+resolve_path_with_base() {
+  local candidate
+  local base_file
+  local base_dir=""
+  candidate="$(trim "${1:-}")"
+  base_file="$(trim "${2:-}")"
+  if [[ -z "$candidate" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$candidate" == /* ]]; then
+    printf '%s' "$candidate"
+    return
+  fi
+  if [[ -n "$base_file" ]]; then
+    base_dir="$(cd "$(dirname "$base_file")" 2>/dev/null && pwd || true)"
+    if [[ -n "$base_dir" ]]; then
+      printf '%s' "$base_dir/$candidate"
+      return
+    fi
+  fi
+  printf '%s' "$ROOT_DIR/$candidate"
+}
+
+array_to_json() {
+  if (( $# == 0 )); then
+    printf '%s' "[]"
+  else
+    printf '%s\n' "$@" | jq -R . | jq -s '.'
+  fi
+}
+
+render_command_line_from_argv_01() {
+  local arg=""
+  local rendered=""
+  for arg in "$@"; do
+    rendered="${rendered}${rendered:+ }$(printf '%q' "$arg")"
+  done
+  printf '%s' "$rendered"
+}
+
+validate_vm_command_file_or_reason() {
+  local path="$1"
+  local line=""
+  local line_number=0
+  local vm_id=""
+  local vm_command=""
+  local vm_id_key=""
+  local vm_command_existing=""
+  local runnable_specs=0
+  declare -A vm_command_by_id=()
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '%s\n' "not_found"
+    return 1
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_number=$((line_number + 1))
+    line="$(trim "$line")"
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    if [[ "$line" != *"::"* ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_missing_delimiter"
+      return 1
+    fi
+    vm_id="$(trim "${line%%::*}")"
+    vm_command="$(trim "${line#*::}")"
+    if [[ -z "$vm_id" || -z "$vm_command" ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_empty_vm_or_command"
+      return 1
+    fi
+    if [[ "$vm_id" =~ [[:space:]] ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_vm_id_contains_whitespace"
+      return 1
+    fi
+    vm_id_key="$vm_id"
+    if [[ -n "${vm_command_by_id["$vm_id_key"]+present}" ]]; then
+      vm_command_existing="${vm_command_by_id["$vm_id_key"]}"
+      if [[ "$vm_command_existing" != "$vm_command" ]]; then
+        printf '%s\n' "invalid_vm_command_spec_line_${line_number}_duplicate_vm_id_conflict"
+        return 1
+      fi
+      continue
+    fi
+    vm_command_by_id["$vm_id_key"]="$vm_command"
+    runnable_specs=$((runnable_specs + 1))
+  done <"$path"
+  if (( runnable_specs < 1 )); then
+    printf '%s\n' "no_runnable_specs"
+    return 1
+  fi
+  printf '%s\n' "ready"
+  return 0
 }
 
 require_value_or_die() {
@@ -114,6 +219,24 @@ normalize_decision() {
   esac
 }
 
+cycle_summary_schema_id() {
+  local summary_path="$1"
+  jq -r 'if (.schema.id | type) == "string" then .schema.id else "" end' "$summary_path" 2>/dev/null || true
+}
+
+cycle_summary_schema_valid_01() {
+  local schema_id
+  schema_id="$(trim "${1:-}")"
+  case "$schema_id" in
+    profile_compare_multi_vm_cycle_summary|profile_compare_multi_vm_stability_cycle_summary)
+      printf '1'
+      ;;
+    *)
+      printf '0'
+      ;;
+  esac
+}
+
 is_non_negative_decimal() {
   local value="$1"
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
@@ -154,6 +277,220 @@ print_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_PRINT_SUMMARY_JSON:
 declare -a vm_command_specs=()
 declare -a vm_command_files=()
 declare -a cycle_args=()
+declare -a vm_command_fallback_diagnostics=()
+declare -a vm_command_preflight_diagnostics=()
+vm_command_fallback_used="0"
+vm_command_fallback_source=""
+vm_command_fallback_file=""
+
+build_profile_compare_stability_run_command_01() {
+  local vm_flag="$1"
+  local vm_value="$2"
+  local cycle_arg=""
+  local vm_spec=""
+  local vm_file=""
+  local -a cmd=("./scripts/profile_compare_multi_vm_stability_run.sh")
+
+  cmd+=(--runs "$runs")
+  cmd+=(--sleep-between-sec "$sleep_between_sec")
+  cmd+=(--allow-partial "$allow_partial")
+  cmd+=(--min-completed-runs "$min_completed_runs")
+  cmd+=(--min-pass-runs "$min_pass_runs")
+  cmd+=(--reports-dir "$reports_dir")
+  if [[ -n "$summary_json" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  if [[ -n "$canonical_summary_json" ]]; then
+    cmd+=(--canonical-summary-json "$canonical_summary_json")
+  fi
+  if [[ -n "$report_md" ]]; then
+    cmd+=(--report-md "$report_md")
+  fi
+  if [[ "$cycle_timeout_sec" != "0" ]]; then
+    cmd+=(--cycle-timeout-sec "$cycle_timeout_sec")
+  fi
+  if [[ -n "$sweep_command_timeout_sec" ]]; then
+    cmd+=(--sweep-command-timeout-sec "$sweep_command_timeout_sec")
+  fi
+  for vm_spec in "${vm_command_specs[@]}"; do
+    cmd+=(--vm-command "$vm_spec")
+  done
+  for vm_file in "${vm_command_files[@]}"; do
+    cmd+=(--vm-command-file "$vm_file")
+  done
+  for cycle_arg in "${cycle_args[@]}"; do
+    cmd+=(--cycle-arg "$cycle_arg")
+  done
+  cmd+=(--show-json "$show_json")
+  cmd+=(--print-summary-json "$print_summary_json")
+  cmd+=("$vm_flag" "$vm_value")
+
+  render_command_line_from_argv_01 "${cmd[@]}"
+}
+
+record_vm_command_fallback_diag() {
+  vm_command_fallback_diagnostics+=("$1")
+}
+
+record_vm_command_preflight_diag() {
+  vm_command_preflight_diagnostics+=("$1")
+}
+
+print_vm_command_preflight_diagnostics() {
+  local diag=""
+  if (( ${#vm_command_fallback_diagnostics[@]} > 0 )); then
+    echo "fallback checks:"
+    for diag in "${vm_command_fallback_diagnostics[@]}"; do
+      echo "  - $diag"
+      echo "preflight_diag: $diag"
+    done
+  fi
+  if (( ${#vm_command_preflight_diagnostics[@]} > 0 )); then
+    echo "vm-command-file preflight checks:"
+    for diag in "${vm_command_preflight_diagnostics[@]}"; do
+      echo "  - $diag"
+      echo "preflight_diag: $diag"
+    done
+  fi
+}
+
+discover_vm_command_file_fallback() {
+  local canonical_candidate=""
+  local explicit_source=""
+  local explicit_value=""
+  local explicit_path=""
+  local env_var=""
+  local -a env_fallback_vars=(
+    "PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE"
+    "PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE"
+    "PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE"
+  )
+  local candidate=""
+  local vm_command_file_reason=""
+  local -a legacy_artifact_candidates=(
+    "$reports_dir/profile_compare_multi_vm_vm_commands.txt"
+    "$reports_dir/vm_commands.txt"
+  )
+
+  canonical_candidate="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_vm_commands.txt")"
+  if [[ ! -f "$canonical_candidate" ]]; then
+    record_vm_command_fallback_diag "source=reports-dir-canonical path=$canonical_candidate reason=not_found"
+  elif ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$canonical_candidate")"; then
+    record_vm_command_fallback_diag "source=reports-dir-canonical path=$canonical_candidate reason=$vm_command_file_reason"
+  else
+    vm_command_files+=("$canonical_candidate")
+    vm_command_fallback_used="1"
+    vm_command_fallback_source="reports-dir-canonical"
+    vm_command_fallback_file="$canonical_candidate"
+    record_vm_command_fallback_diag "source=reports-dir-canonical path=$canonical_candidate result=selected"
+    return
+  fi
+
+  for env_var in "${env_fallback_vars[@]}"; do
+    explicit_source="$env_var"
+    explicit_value="${!env_var:-}"
+    if [[ -z "$explicit_value" ]]; then
+      continue
+    fi
+    explicit_path="$(abs_path "$explicit_value")"
+    if [[ -z "$explicit_path" ]]; then
+      record_vm_command_fallback_diag "source=$explicit_source reason=empty_path"
+    elif [[ ! -f "$explicit_path" ]]; then
+      record_vm_command_fallback_diag "source=$explicit_source path=$explicit_path reason=not_found"
+    elif ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$explicit_path")"; then
+      record_vm_command_fallback_diag "source=$explicit_source path=$explicit_path reason=$vm_command_file_reason"
+    else
+      vm_command_files+=("$explicit_path")
+      vm_command_fallback_used="1"
+      vm_command_fallback_source="env:$explicit_source"
+      vm_command_fallback_file="$explicit_path"
+      record_vm_command_fallback_diag "source=$explicit_source path=$explicit_path result=selected"
+      return
+    fi
+  done
+
+  for candidate in "${legacy_artifact_candidates[@]}"; do
+    candidate="$(abs_path "$candidate")"
+    if [[ ! -f "$candidate" ]]; then
+      record_vm_command_fallback_diag "source=reports-dir-legacy path=$candidate reason=not_found"
+      continue
+    fi
+    if ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$candidate")"; then
+      record_vm_command_fallback_diag "source=reports-dir-legacy path=$candidate reason=$vm_command_file_reason"
+      continue
+    fi
+    vm_command_files+=("$candidate")
+    vm_command_fallback_used="1"
+    vm_command_fallback_source="reports-dir-legacy"
+    vm_command_fallback_file="$candidate"
+    record_vm_command_fallback_diag "source=reports-dir-legacy path=$candidate result=selected"
+    return
+  done
+}
+
+fail_vm_command_file_preflight() {
+  local reason="$1"
+  local path="${2:-}"
+  local command_path_hint="REPLACE_WITH_VM_COMMAND_FILE"
+  local rerun_command=""
+  local canonical_write_target="$reports_dir/profile_compare_multi_vm_stability_vm_commands.txt"
+  local canonical_write_command=""
+  if [[ -n "$path" ]]; then
+    command_path_hint="$path"
+  fi
+  rerun_command="$(build_profile_compare_stability_run_command_01 --vm-command-file "$command_path_hint")"
+  canonical_write_command="$(render_command_line_from_argv_01 bash -lc "printf 'vm_a::ssh vm-a.example\n' > $(printf '%q' "$canonical_write_target")")"
+  echo "vm command file preflight failed: $reason"
+  if [[ -n "$path" ]]; then
+    echo "vm command file: $path"
+  fi
+  print_vm_command_preflight_diagnostics
+  echo "operator_next_action: $rerun_command"
+  echo "operator_next_action: $canonical_write_command"
+  exit 2
+}
+
+preflight_validate_vm_command_files_or_die() {
+  local raw_path=""
+  local resolved_path=""
+  local vm_command_file_reason=""
+  local -a resolved_files=()
+  for raw_path in "${vm_command_files[@]}"; do
+    resolved_path="$(abs_path "$raw_path")"
+    if [[ -z "$resolved_path" ]]; then
+      record_vm_command_preflight_diag "source=vm-command-file path=<empty> reason=empty_path"
+      fail_vm_command_file_preflight "empty_path" "$raw_path"
+    fi
+    if [[ ! -f "$resolved_path" ]]; then
+      record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path reason=not_found"
+      fail_vm_command_file_preflight "not_found" "$resolved_path"
+    fi
+    if ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$resolved_path")"; then
+      record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path reason=$vm_command_file_reason"
+      fail_vm_command_file_preflight "$vm_command_file_reason" "$resolved_path"
+    fi
+    record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path result=ready"
+    resolved_files+=("$resolved_path")
+  done
+  vm_command_files=("${resolved_files[@]}")
+}
+
+fail_vm_command_inputs_missing() {
+  local rerun_with_inline_command=""
+  local rerun_with_file_command=""
+  local canonical_write_target="$reports_dir/profile_compare_multi_vm_stability_vm_commands.txt"
+  local canonical_write_command=""
+  echo "at least one --vm-command or --vm-command-file is required"
+  echo "no usable VM command fallback was discovered (fail-closed)."
+  print_vm_command_preflight_diagnostics
+  rerun_with_inline_command="$(build_profile_compare_stability_run_command_01 --vm-command "VM_ID::COMMAND")"
+  rerun_with_file_command="$(build_profile_compare_stability_run_command_01 --vm-command-file "REPLACE_WITH_VM_COMMAND_FILE")"
+  canonical_write_command="$(render_command_line_from_argv_01 bash -lc "printf 'vm_a::ssh vm-a.example\n' > $(printf '%q' "$canonical_write_target")")"
+  echo "operator_next_action: $rerun_with_inline_command"
+  echo "operator_next_action: $rerun_with_file_command"
+  echo "operator_next_action: $canonical_write_command"
+  exit 2
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -389,10 +726,14 @@ if [[ ! -f "$CYCLE_SCRIPT" ]]; then
   echo "cycle script not found: $CYCLE_SCRIPT"
   exit 2
 fi
+
 if [[ ${#vm_command_specs[@]} -eq 0 && ${#vm_command_files[@]} -eq 0 ]]; then
-  echo "at least one --vm-command or --vm-command-file is required"
-  exit 2
+  discover_vm_command_file_fallback
 fi
+if [[ ${#vm_command_specs[@]} -eq 0 && ${#vm_command_files[@]} -eq 0 ]]; then
+  fail_vm_command_inputs_missing
+fi
+preflight_validate_vm_command_files_or_die
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
 archive_root="$reports_dir/profile_compare_multi_vm_stability_run_${run_stamp}"
@@ -423,6 +764,14 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[profile-compare-multi-vm-stability-run] $(timestamp_utc) start runs=$runs allow_partial=$allow_partial min_completed_runs=$min_completed_runs min_pass_runs=$min_pass_runs archive_root=$archive_root"
+if [[ "$vm_command_fallback_used" == "1" ]]; then
+  echo "[profile-compare-multi-vm-stability-run] $(timestamp_utc) vm-command-fallback source=$vm_command_fallback_source path=$vm_command_fallback_file"
+fi
+if (( ${#vm_command_preflight_diagnostics[@]} > 0 )); then
+  for diag in "${vm_command_preflight_diagnostics[@]}"; do
+    echo "[profile-compare-multi-vm-stability-run] $(timestamp_utc) vm-command-preflight $diag"
+  done
+fi
 
 run_index=0
 while (( run_index < runs )); do
@@ -470,6 +819,9 @@ while (( run_index < runs )); do
   fi
 
   summary_exists="0"
+  summary_json_valid="0"
+  summary_schema_id=""
+  summary_schema_valid="0"
   summary_valid="0"
   completed="0"
   run_status="fail"
@@ -484,57 +836,65 @@ while (( run_index < runs )); do
   if [[ -f "$run_cycle_summary_json" ]]; then
     summary_exists="1"
     if jq -e 'type == "object"' "$run_cycle_summary_json" >/dev/null 2>&1; then
-      summary_valid="1"
-      completed="1"
-      cycle_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$run_cycle_summary_json" 2>/dev/null || true)"
-      run_status="$(normalize_status "$cycle_status")"
-      if [[ "$run_status" == "other" ]]; then
-        run_status="fail"
-        failure_reason="cycle_summary_status_unrecognized"
-      fi
+      summary_json_valid="1"
+      summary_schema_id="$(cycle_summary_schema_id "$run_cycle_summary_json")"
+      summary_schema_valid="$(cycle_summary_schema_valid_01 "$summary_schema_id")"
+      if [[ "$summary_schema_valid" == "1" ]]; then
+        summary_valid="1"
+        completed="1"
+        cycle_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$run_cycle_summary_json" 2>/dev/null || true)"
+        run_status="$(normalize_status "$cycle_status")"
+        if [[ "$run_status" == "other" ]]; then
+          run_status="fail"
+          failure_reason="cycle_summary_status_unrecognized"
+        fi
 
-      cycle_decision="$(jq -r '
-        if (.decision | type) == "string" then .decision
-        elif (.check.decision | type) == "string" then .check.decision
-        elif (.reducer.decision | type) == "string" then .reducer.decision
-        else ""
-        end
-      ' "$run_cycle_summary_json" 2>/dev/null || true)"
-      cycle_decision="$(normalize_decision "$cycle_decision")"
-
-      recommended_profile="$(jq -r '
-        if (.check.recommended_profile | type) == "string" then .check.recommended_profile
-        elif (.reducer.recommended_profile | type) == "string" then .reducer.recommended_profile
-        elif (.decision.recommended_profile | type) == "string" then .decision.recommended_profile
-        else ""
-        end
-      ' "$run_cycle_summary_json" 2>/dev/null || true)"
-      recommended_profile="$(trim "$recommended_profile")"
-
-      support_rate_raw="$(jq -r '
-        (.check.recommendation_support_rate_pct // .reducer.support_rate_pct // .decision.support_rate_pct // null) as $v
-        | if $v == null then ""
-          elif ($v | type) == "number" then ($v | tostring)
-          elif ($v | type) == "string" and ($v | test("^-?[0-9]+([.][0-9]+)?$")) then ($v | tonumber | tostring)
+        cycle_decision="$(jq -r '
+          if (.decision | type) == "string" then .decision
+          elif (.check.decision | type) == "string" then .check.decision
+          elif (.reducer.decision | type) == "string" then .reducer.decision
           else ""
           end
-      ' "$run_cycle_summary_json" 2>/dev/null || true)"
-      if [[ -n "$support_rate_raw" ]] && is_non_negative_decimal "$support_rate_raw"; then
-        support_rate_pct_json="$support_rate_raw"
-      fi
+        ' "$run_cycle_summary_json" 2>/dev/null || true)"
+        cycle_decision="$(normalize_decision "$cycle_decision")"
 
-      cycle_report_md="$(jq -r '
-        if (.artifacts.report_md | type) == "string" then .artifacts.report_md
-        elif (.artifacts.sweep_report_md | type) == "string" then .artifacts.sweep_report_md
-        else ""
-        end
-      ' "$run_cycle_summary_json" 2>/dev/null || true)"
-      cycle_report_md="$(trim "$cycle_report_md")"
-      if [[ -n "$cycle_report_md" ]]; then
-        cycle_report_md="$(abs_path "$cycle_report_md")"
-        if [[ -f "$cycle_report_md" ]]; then
-          cycle_report_exists="1"
+        recommended_profile="$(jq -r '
+          if (.check.recommended_profile | type) == "string" then .check.recommended_profile
+          elif (.reducer.recommended_profile | type) == "string" then .reducer.recommended_profile
+          elif (.decision.recommended_profile | type) == "string" then .decision.recommended_profile
+          else ""
+          end
+        ' "$run_cycle_summary_json" 2>/dev/null || true)"
+        recommended_profile="$(trim "$recommended_profile")"
+
+        support_rate_raw="$(jq -r '
+          (.check.recommendation_support_rate_pct // .reducer.support_rate_pct // .decision.support_rate_pct // null) as $v
+          | if $v == null then ""
+            elif ($v | type) == "number" then ($v | tostring)
+            elif ($v | type) == "string" and ($v | test("^-?[0-9]+([.][0-9]+)?$")) then ($v | tonumber | tostring)
+            else ""
+            end
+        ' "$run_cycle_summary_json" 2>/dev/null || true)"
+        if [[ -n "$support_rate_raw" ]] && is_non_negative_decimal "$support_rate_raw"; then
+          support_rate_pct_json="$support_rate_raw"
         fi
+
+        cycle_report_md="$(jq -r '
+          if (.artifacts.report_md | type) == "string" then .artifacts.report_md
+          elif (.artifacts.sweep_report_md | type) == "string" then .artifacts.sweep_report_md
+          else ""
+          end
+        ' "$run_cycle_summary_json" 2>/dev/null || true)"
+        cycle_report_md="$(trim "$cycle_report_md")"
+        if [[ -n "$cycle_report_md" ]]; then
+          cycle_report_md="$(abs_path "$cycle_report_md")"
+          if [[ -f "$cycle_report_md" ]]; then
+            cycle_report_exists="1"
+          fi
+        fi
+      else
+        run_status="fail"
+        failure_reason="cycle_summary_schema_mismatch"
       fi
     fi
   fi
@@ -544,6 +904,10 @@ while (( run_index < runs )); do
     if [[ -z "$failure_reason" ]]; then
       if [[ "$summary_exists" != "1" ]]; then
         failure_reason="cycle_summary_missing"
+      elif [[ "$summary_json_valid" != "1" ]]; then
+        failure_reason="cycle_summary_invalid"
+      elif [[ "$summary_schema_valid" != "1" ]]; then
+        failure_reason="cycle_summary_schema_mismatch"
       else
         failure_reason="cycle_summary_invalid"
       fi
@@ -552,9 +916,11 @@ while (( run_index < runs )); do
   if [[ "$timed_out" == "1" ]]; then
     run_status="fail"
     failure_reason="cycle_timeout"
-  elif [[ "$command_rc" -ne 0 && "$run_status" == "pass" ]]; then
+  elif [[ "$command_rc" -ne 0 ]]; then
     run_status="fail"
-    failure_reason="cycle_rc_nonzero"
+    if [[ -z "$failure_reason" ]]; then
+      failure_reason="cycle_rc_nonzero"
+    fi
   fi
   if [[ "$run_status" == "fail" && -z "$failure_reason" ]]; then
     failure_reason="cycle_failed"
@@ -573,7 +939,10 @@ while (( run_index < runs )); do
     --arg decision "$cycle_decision" \
     --arg recommended_profile "$recommended_profile" \
     --arg summary_exists "$summary_exists" \
+    --arg summary_json_valid "$summary_json_valid" \
     --arg summary_valid "$summary_valid" \
+    --arg summary_schema_id "$summary_schema_id" \
+    --arg summary_schema_valid "$summary_schema_valid" \
     --arg completed "$completed" \
     --arg timed_out "$timed_out" \
     --arg cycle_report_exists "$cycle_report_exists" \
@@ -599,7 +968,10 @@ while (( run_index < runs )); do
       artifacts: {
         cycle_summary_json: $summary_json,
         cycle_summary_exists: ($summary_exists == "1"),
+        cycle_summary_json_valid: ($summary_json_valid == "1"),
         cycle_summary_valid: ($summary_valid == "1"),
+        cycle_summary_schema_id: (if $summary_schema_id == "" then null else $summary_schema_id end),
+        cycle_summary_schema_valid: ($summary_schema_valid == "1"),
         cycle_report_md: (if $report_md == "" then null else $report_md end),
         cycle_report_exists: ($cycle_report_exists == "1"),
         cycle_log: $run_log
@@ -687,6 +1059,8 @@ modal_support_rate_pct_json="null"
 if [[ -n "$modal_support_rate_raw" ]] && is_non_negative_decimal "$modal_support_rate_raw"; then
   modal_support_rate_pct_json="$modal_support_rate_raw"
 fi
+vm_command_fallback_diagnostics_json="$(array_to_json "${vm_command_fallback_diagnostics[@]}")"
+vm_command_preflight_diagnostics_json="$(array_to_json "${vm_command_preflight_diagnostics[@]}")"
 
 overall_decision="$modal_decision"
 if [[ -z "$overall_decision" || "$decision_split_detected" == "1" ]]; then
@@ -769,6 +1143,11 @@ jq -n \
   --argjson vm_command_count "${#vm_command_specs[@]}" \
   --argjson vm_command_file_count "${#vm_command_files[@]}" \
   --argjson cycle_arg_count "${#cycle_args[@]}" \
+  --arg vm_command_fallback_used "$vm_command_fallback_used" \
+  --arg vm_command_fallback_source "$vm_command_fallback_source" \
+  --arg vm_command_fallback_file "$vm_command_fallback_file" \
+  --argjson vm_command_fallback_diagnostics "$vm_command_fallback_diagnostics_json" \
+  --argjson vm_command_preflight_diagnostics "$vm_command_preflight_diagnostics_json" \
   --argjson runs_json "$runs_json" \
   '{
     version: 1,
@@ -795,6 +1174,19 @@ jq -n \
       sweep_command_timeout_sec: $sweep_command_timeout_sec,
       vm_command_count: $vm_command_count,
       vm_command_file_count: $vm_command_file_count,
+      vm_command_fallback_used: ($vm_command_fallback_used == "1"),
+      vm_command_fallback_source: (
+        if $vm_command_fallback_source == "" then null
+        else $vm_command_fallback_source
+        end
+      ),
+      vm_command_fallback_file: (
+        if $vm_command_fallback_file == "" then null
+        else $vm_command_fallback_file
+        end
+      ),
+      vm_command_fallback_diagnostics: $vm_command_fallback_diagnostics,
+      vm_command_preflight_diagnostics: $vm_command_preflight_diagnostics,
       cycle_arg_count: $cycle_arg_count
     },
     counts: {

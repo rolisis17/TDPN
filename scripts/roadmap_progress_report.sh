@@ -154,13 +154,54 @@ need_cmd() {
   fi
 }
 
+declare -A ROADMAP_JSON_VALID_CACHE=()
+declare -A ROADMAP_BOOL_SIGNAL_CACHE=()
+declare -A ROADMAP_STRING_SIGNAL_CACHE=()
+ROADMAP_CACHE_EMPTY_SENTINEL="__ROADMAP_CACHE_EMPTY__"
+ROADMAP_RESILIENCE_JSON_INDEX_ROOT=""
+ROADMAP_RESILIENCE_JSON_INDEX_FILE=""
+
+roadmap_invalidate_json_signal_caches() {
+  ROADMAP_JSON_VALID_CACHE=()
+  ROADMAP_BOOL_SIGNAL_CACHE=()
+  ROADMAP_STRING_SIGNAL_CACHE=()
+}
+
+roadmap_invalidate_resilience_json_index_cache() {
+  ROADMAP_RESILIENCE_JSON_INDEX_ROOT=""
+  ROADMAP_RESILIENCE_JSON_INDEX_FILE=""
+}
+
+roadmap_rebuild_post_refresh_discovery_snapshot() {
+  # Refresh-generated artifacts must be visible to downstream checks in the
+  # same run; clear stale cache state and rebuild a deterministic index once.
+  roadmap_invalidate_json_signal_caches
+  roadmap_invalidate_resilience_json_index_cache
+  roadmap_resilience_json_index_file >/dev/null || true
+}
+
+roadmap_cache_key() {
+  local path="$1"
+  local field="$2"
+  printf '%s\x1f%s' "$path" "$field"
+}
+
 json_file_valid_01() {
   local path="$1"
-  if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
-    printf '1'
-  else
+  if [[ -z "$path" ]]; then
     printf '0'
+    return
   fi
+  if [[ -n "${ROADMAP_JSON_VALID_CACHE[$path]+x}" ]]; then
+    printf '%s' "${ROADMAP_JSON_VALID_CACHE[$path]}"
+    return
+  fi
+  if [[ -f "$path" ]] && jq -e . "$path" >/dev/null 2>&1; then
+    ROADMAP_JSON_VALID_CACHE[$path]="1"
+  else
+    ROADMAP_JSON_VALID_CACHE[$path]="0"
+  fi
+  printf '%s' "${ROADMAP_JSON_VALID_CACHE[$path]}"
 }
 
 json_first_string_field_from_path() {
@@ -1747,6 +1788,32 @@ evidence_pack_summary_stale_01() {
   printf '0'
 }
 
+runtime_actuation_promotion_evidence_pack_preferred_candidate_path() {
+  local candidate="$1"
+  local canonical_candidate="$candidate"
+  if [[ "$candidate" == *"runtime_actuation_multi_vm_"* ]]; then
+    canonical_candidate="${candidate/runtime_actuation_multi_vm_/runtime_actuation_promotion_}"
+    if [[ "$canonical_candidate" != "$candidate" ]] && [[ -f "$canonical_candidate" ]]; then
+      printf '%s' "$canonical_candidate"
+      return
+    fi
+  fi
+  printf '%s' "$candidate"
+}
+
+profile_compare_multi_vm_stability_promotion_evidence_pack_preferred_candidate_path() {
+  local candidate="$1"
+  local canonical_candidate="$candidate"
+  if [[ "$candidate" == *"runtime_actuation_multi_vm_"* ]]; then
+    canonical_candidate="${candidate/runtime_actuation_multi_vm_/profile_compare_multi_vm_stability_promotion_}"
+    if [[ "$canonical_candidate" != "$candidate" ]] && [[ -f "$canonical_candidate" ]]; then
+      printf '%s' "$canonical_candidate"
+      return
+    fi
+  fi
+  printf '%s' "$candidate"
+}
+
 resolve_profile_default_gate_evidence_pack_summary_path() {
   local manual_summary_path="$1"
   local reports_dir="$2"
@@ -1796,6 +1863,7 @@ resolve_runtime_actuation_promotion_evidence_pack_summary_path() {
   local manual_summary_path="$1"
   local reports_dir="$2"
   local candidate=""
+  local preferred_candidate=""
   local first_candidate=""
   if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
     while IFS= read -r candidate; do
@@ -1804,6 +1872,11 @@ resolve_runtime_actuation_promotion_evidence_pack_summary_path() {
         if [[ -z "$first_candidate" ]]; then
           first_candidate="$candidate"
         fi
+        preferred_candidate="$(runtime_actuation_promotion_evidence_pack_preferred_candidate_path "$candidate")"
+        if [[ "$preferred_candidate" != "$candidate" ]] && [[ -f "$preferred_candidate" ]]; then
+          printf '%s' "$preferred_candidate"
+          return
+        fi
         if [[ -f "$candidate" ]]; then
           printf '%s' "$candidate"
           return
@@ -1811,14 +1884,14 @@ resolve_runtime_actuation_promotion_evidence_pack_summary_path() {
       fi
     done < <(jq -r '
       [
-        (.summary.runtime_actuation_multi_vm_evidence_pack.summary_json // ""),
-        (.summary.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
-        (.summary.profile_default_gate.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
         (.summary.runtime_actuation_promotion_evidence_pack.summary_json // ""),
         (.summary.runtime_actuation_promotion_evidence_pack_summary_json // ""),
         (.summary.profile_default_gate.artifacts.runtime_actuation_promotion_evidence_pack_summary_json // ""),
-        (.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
-        (.artifacts.runtime_actuation_promotion_evidence_pack_summary_json // "")
+        (.artifacts.runtime_actuation_promotion_evidence_pack_summary_json // ""),
+        (.summary.runtime_actuation_multi_vm_evidence_pack.summary_json // ""),
+        (.summary.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
+        (.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // "")
       ]
       | .[]
       | strings
@@ -1826,12 +1899,12 @@ resolve_runtime_actuation_promotion_evidence_pack_summary_path() {
     ' "$manual_summary_path" 2>/dev/null || true)
   fi
   if [[ -z "$first_candidate" ]] && [[ -n "$reports_dir" ]]; then
-    if [[ -f "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json" ]]; then
-      first_candidate="$(abs_path "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json")"
-    elif [[ -f "$reports_dir/runtime_actuation_promotion_evidence_pack_summary.json" ]]; then
+    if [[ -f "$reports_dir/runtime_actuation_promotion_evidence_pack_summary.json" ]]; then
       first_candidate="$(abs_path "$reports_dir/runtime_actuation_promotion_evidence_pack_summary.json")"
-    else
+    elif [[ -f "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json" ]]; then
       first_candidate="$(abs_path "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json")"
+    else
+      first_candidate="$(abs_path "$reports_dir/runtime_actuation_promotion_evidence_pack_summary.json")"
     fi
   fi
   printf '%s' "$first_candidate"
@@ -1841,6 +1914,7 @@ resolve_profile_compare_multi_vm_stability_promotion_evidence_pack_summary_path(
   local manual_summary_path="$1"
   local reports_dir="$2"
   local candidate=""
+  local preferred_candidate=""
   local first_candidate=""
   if [[ "$(json_file_valid_01 "$manual_summary_path")" == "1" ]]; then
     while IFS= read -r candidate; do
@@ -1849,6 +1923,11 @@ resolve_profile_compare_multi_vm_stability_promotion_evidence_pack_summary_path(
         if [[ -z "$first_candidate" ]]; then
           first_candidate="$candidate"
         fi
+        preferred_candidate="$(profile_compare_multi_vm_stability_promotion_evidence_pack_preferred_candidate_path "$candidate")"
+        if [[ "$preferred_candidate" != "$candidate" ]] && [[ -f "$preferred_candidate" ]]; then
+          printf '%s' "$preferred_candidate"
+          return
+        fi
         if [[ -f "$candidate" ]]; then
           printf '%s' "$candidate"
           return
@@ -1856,14 +1935,14 @@ resolve_profile_compare_multi_vm_stability_promotion_evidence_pack_summary_path(
       fi
     done < <(jq -r '
       [
-        (.summary.runtime_actuation_multi_vm_evidence_pack.summary_json // ""),
-        (.summary.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
-        (.summary.profile_default_gate.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
         (.summary.profile_compare_multi_vm_stability_promotion_evidence_pack.summary_json // ""),
         (.summary.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json // ""),
         (.summary.profile_default_gate.artifacts.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json // ""),
-        (.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
-        (.artifacts.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json // "")
+        (.artifacts.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json // ""),
+        (.summary.runtime_actuation_multi_vm_evidence_pack.summary_json // ""),
+        (.summary.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
+        (.summary.profile_default_gate.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // ""),
+        (.artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json // "")
       ]
       | .[]
       | strings
@@ -1871,12 +1950,12 @@ resolve_profile_compare_multi_vm_stability_promotion_evidence_pack_summary_path(
     ' "$manual_summary_path" 2>/dev/null || true)
   fi
   if [[ -z "$first_candidate" ]] && [[ -n "$reports_dir" ]]; then
-    if [[ -f "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json" ]]; then
-      first_candidate="$(abs_path "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json")"
-    elif [[ -f "$reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json" ]]; then
+    if [[ -f "$reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json" ]]; then
       first_candidate="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json")"
-    else
+    elif [[ -f "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json" ]]; then
       first_candidate="$(abs_path "$reports_dir/runtime_actuation_multi_vm_evidence_pack_summary.json")"
+    else
+      first_candidate="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json")"
     fi
   fi
   printf '%s' "$first_candidate"
@@ -2270,7 +2349,7 @@ profile_default_gate_host_is_non_localhost_01() {
     return
   fi
   case "${host,,}" in
-    localhost|127.*|[::1]|::1)
+    localhost|127.*|[::1]|::1|a_host|b_host|host_a|host_b)
       printf '%s' "0"
       ;;
     *)
@@ -2485,6 +2564,336 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   printf '%s' "$rebuilt"
 }
 
+profile_default_gate_command_apply_env_host_placeholders() {
+  local cmd
+  local host_a
+  local host_b
+  local token=""
+  local -a rebuilt_argv=()
+  cmd="$(trim "${1:-}")"
+  host_a="$(trim "${2:-}")"
+  host_b="$(trim "${3:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ -z "$host_a" && -z "$host_b" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if [[ "$(profile_default_gate_command_supports_subject_placeholder_01 "$cmd")" != "1" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    if [[ -n "$host_a" ]]; then
+      cmd="${cmd//HOST_A/$host_a}"
+      cmd="${cmd//A_HOST/$host_a}"
+    fi
+    if [[ -n "$host_b" ]]; then
+      cmd="${cmd//HOST_B/$host_b}"
+      cmd="${cmd//B_HOST/$host_b}"
+    fi
+    printf '%s' "$cmd"
+    return
+  fi
+  for token in "${COMMAND_STRING_ARGV[@]}"; do
+    if [[ -n "$host_a" ]]; then
+      token="${token//HOST_A/$host_a}"
+      token="${token//A_HOST/$host_a}"
+    fi
+    if [[ -n "$host_b" ]]; then
+      token="${token//HOST_B/$host_b}"
+      token="${token//B_HOST/$host_b}"
+    fi
+    rebuilt_argv+=("$token")
+  done
+  profile_default_gate_command_from_argv "${rebuilt_argv[@]}"
+}
+
+resolve_dir_with_base() {
+  local candidate
+  local base_file
+  local base_dir=""
+  candidate="$(trim "${1:-}")"
+  base_file="$(trim "${2:-}")"
+  if [[ -z "$candidate" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$candidate" == /* ]]; then
+    printf '%s' "$candidate"
+    return
+  fi
+  if [[ -n "$base_file" ]]; then
+    base_dir="$(cd "$(dirname "$base_file")" && pwd)"
+    printf '%s' "$base_dir/$candidate"
+    return
+  fi
+  printf '%s' "$ROOT_DIR/$candidate"
+}
+
+summary_reports_dir_from_path_or_fallback() {
+  local summary_path
+  local fallback_reports_dir
+  local reports_dir=""
+  summary_path="$(trim "${1:-}")"
+  fallback_reports_dir="$(trim "${2:-}")"
+  if [[ -n "$summary_path" ]]; then
+    if [[ "$(json_file_valid_01 "$summary_path")" == "1" ]]; then
+      reports_dir="$(jq -r '
+        if (.inputs.reports_dir | type) == "string" then .inputs.reports_dir
+        else ""
+        end
+      ' "$summary_path" 2>/dev/null || true)"
+      reports_dir="$(resolve_dir_with_base "$reports_dir" "$summary_path")"
+    fi
+    if [[ -z "$reports_dir" ]]; then
+      reports_dir="$(dirname "$summary_path" 2>/dev/null || true)"
+      reports_dir="$(trim "$reports_dir")"
+    fi
+  fi
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir="$fallback_reports_dir"
+  fi
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  printf '%s' "$reports_dir"
+}
+
+multi_vm_vm_command_file_has_runnable_specs_01() {
+  local path
+  local line=""
+  local vm_id=""
+  local vm_command=""
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '0'
+    return
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    if [[ "$line" != *"::"* ]]; then
+      continue
+    fi
+    vm_id="$(trim "${line%%::*}")"
+    vm_command="$(trim "${line#*::}")"
+    if [[ -n "$vm_id" && -n "$vm_command" ]]; then
+      printf '1'
+      return
+    fi
+  done <"$path"
+  printf '0'
+}
+
+resolve_multi_vm_stability_vm_command_file_path() {
+  local check_summary_path
+  local run_summary_path=""
+  local candidate=""
+  local run_reports_dir=""
+  local check_reports_dir=""
+  local artifact_name=""
+  local -a artifact_names=(
+    "profile_compare_multi_vm_stability_vm_commands.txt"
+    "profile_compare_multi_vm_vm_commands.txt"
+    "vm_commands.txt"
+  )
+  check_summary_path="$(trim "${1:-}")"
+  if [[ -z "$check_summary_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$(json_file_valid_01 "$check_summary_path")" == "1" ]]; then
+    run_summary_path="$(jq -r '
+      if (.inputs.stability_summary_json | type) == "string" then .inputs.stability_summary_json
+      else ""
+      end
+    ' "$check_summary_path" 2>/dev/null || true)"
+    run_summary_path="$(resolve_path_with_base "$run_summary_path" "$check_summary_path")"
+  fi
+  if [[ "$(json_file_valid_01 "$run_summary_path")" == "1" ]]; then
+    candidate="$(jq -r '
+      if (.inputs.vm_command_fallback_file | type) == "string" then .inputs.vm_command_fallback_file
+      else ""
+      end
+    ' "$run_summary_path" 2>/dev/null || true)"
+    candidate="$(resolve_path_with_base "$candidate" "$run_summary_path")"
+    if [[ "$(multi_vm_vm_command_file_has_runnable_specs_01 "$candidate")" == "1" ]]; then
+      printf '%s' "$candidate"
+      return
+    fi
+    run_reports_dir="$(jq -r '
+      if (.inputs.reports_dir | type) == "string" then .inputs.reports_dir
+      else ""
+      end
+    ' "$run_summary_path" 2>/dev/null || true)"
+    run_reports_dir="$(resolve_dir_with_base "$run_reports_dir" "$run_summary_path")"
+  fi
+  if [[ -z "$run_reports_dir" && -n "$run_summary_path" ]]; then
+    run_reports_dir="$(dirname "$run_summary_path" 2>/dev/null || true)"
+    run_reports_dir="$(trim "$run_reports_dir")"
+  fi
+  if [[ -n "$run_reports_dir" ]]; then
+    for artifact_name in "${artifact_names[@]}"; do
+      candidate="$(abs_path "$run_reports_dir/$artifact_name")"
+      if [[ "$(multi_vm_vm_command_file_has_runnable_specs_01 "$candidate")" == "1" ]]; then
+        printf '%s' "$candidate"
+        return
+      fi
+    done
+  fi
+  check_reports_dir="$(dirname "$check_summary_path" 2>/dev/null || true)"
+  check_reports_dir="$(trim "$check_reports_dir")"
+  if [[ -n "$check_reports_dir" ]]; then
+    for artifact_name in "${artifact_names[@]}"; do
+      candidate="$(abs_path "$check_reports_dir/$artifact_name")"
+      if [[ "$(multi_vm_vm_command_file_has_runnable_specs_01 "$candidate")" == "1" ]]; then
+        printf '%s' "$candidate"
+        return
+      fi
+    done
+  fi
+  printf '%s' ""
+}
+
+build_multi_vm_stability_cycle_next_command() {
+  local reports_dir
+  local vm_command_file
+  local summary_json_path
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  vm_command_file="$(trim "${2:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  summary_json_path="$reports_dir/profile_compare_multi_vm_stability_cycle_summary.json"
+  argv=("./scripts/easy_node.sh" "profile-compare-multi-vm-stability-cycle" "--reports-dir" "$reports_dir")
+  if [[ -n "$vm_command_file" ]]; then
+    argv+=("--vm-command-file" "$vm_command_file")
+  fi
+  argv+=("--fail-on-no-go" "1" "--summary-json" "$summary_json_path" "--print-summary-json" "1")
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
+build_profile_default_gate_stability_run_next_command() {
+  local reports_dir
+  local summary_json_path
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  summary_json_path="$reports_dir/profile_default_gate_stability_summary.json"
+  argv=(
+    "./scripts/easy_node.sh"
+    "profile-default-gate-stability-run"
+    "--host-a" "HOST_A"
+    "--host-b" "HOST_B"
+    "--campaign-subject" "INVITE_KEY"
+    "--reports-dir" "$reports_dir"
+    "--summary-json" "$summary_json_path"
+    "--print-summary-json" "1"
+  )
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
+build_profile_default_gate_stability_check_next_command() {
+  local reports_dir
+  local stability_summary_json
+  local summary_json_path
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  stability_summary_json="$(trim "${2:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  if [[ -z "$stability_summary_json" ]]; then
+    stability_summary_json="$reports_dir/profile_default_gate_stability_summary.json"
+  fi
+  summary_json_path="$reports_dir/profile_default_gate_stability_check_summary.json"
+  argv=(
+    "./scripts/easy_node.sh"
+    "profile-default-gate-stability-check"
+    "--stability-summary-json" "$stability_summary_json"
+    "--fail-on-no-go" "1"
+    "--summary-json" "$summary_json_path"
+    "--print-summary-json" "1"
+  )
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
+build_profile_default_gate_stability_cycle_next_command() {
+  local reports_dir
+  local summary_json_path
+  local stability_summary_json
+  local stability_check_summary_json
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  stability_summary_json="$(trim "${2:-}")"
+  stability_check_summary_json="$(trim "${3:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  summary_json_path="$reports_dir/profile_default_gate_stability_cycle_summary.json"
+  argv=(
+    "./scripts/easy_node.sh"
+    "profile-default-gate-stability-cycle"
+    "--host-a" "HOST_A"
+    "--host-b" "HOST_B"
+    "--campaign-subject" "INVITE_KEY"
+    "--reports-dir" "$reports_dir"
+  )
+  if [[ -n "$stability_summary_json" ]]; then
+    argv+=("--stability-summary-json" "$stability_summary_json")
+  fi
+  if [[ -n "$stability_check_summary_json" ]]; then
+    argv+=("--stability-check-summary-json" "$stability_check_summary_json")
+  fi
+  argv+=("--summary-json" "$summary_json_path" "--print-summary-json" "1" "--fail-on-no-go" "1")
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
+build_multi_vm_stability_promotion_cycle_next_command() {
+  local reports_dir
+  local cycles
+  local summary_json_path
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  cycles="$(trim "${2:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  summary_json_path="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+  argv=("./scripts/easy_node.sh" "profile-compare-multi-vm-stability-promotion-cycle" "--reports-dir" "$reports_dir")
+  if [[ "$cycles" =~ ^[1-9][0-9]*$ ]]; then
+    argv+=("--cycles" "$cycles")
+  fi
+  argv+=("--fail-on-no-go" "1" "--summary-json" "$summary_json_path" "--print-summary-json" "1")
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
+build_runtime_actuation_promotion_cycle_next_command() {
+  local reports_dir
+  local cycles
+  local summary_json_path
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  cycles="$(trim "${2:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  if [[ ! "$cycles" =~ ^[1-9][0-9]*$ ]]; then
+    cycles="3"
+  fi
+  summary_json_path="$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json"
+  argv=("./scripts/easy_node.sh" "runtime-actuation-promotion-cycle" "--reports-dir" "$reports_dir" "--cycles" "$cycles" "--fail-on-no-go" "1" "--summary-json" "$summary_json_path" "--print-summary-json" "1")
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
 resilience_summary_usable_01() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -2502,6 +2911,61 @@ roadmap_resilience_logs_root() {
   local logs_root="${ROADMAP_PROGRESS_LOGS_ROOT:-${ROADMAP_PROGRESS_LOG_DIR:-${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}}}"
   logs_root="$(abs_path "$logs_root")"
   printf '%s' "$logs_root"
+}
+
+roadmap_resilience_json_index_file() {
+  local logs_root=""
+  local index_file=""
+
+  logs_root="$(roadmap_resilience_logs_root)"
+  if [[ ! -d "$logs_root" ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  if [[ "$ROADMAP_RESILIENCE_JSON_INDEX_ROOT" != "$logs_root" ]] \
+    || [[ -z "$ROADMAP_RESILIENCE_JSON_INDEX_FILE" ]] \
+    || [[ ! -f "$ROADMAP_RESILIENCE_JSON_INDEX_FILE" ]]; then
+    if ! index_file="$(mktemp)"; then
+      printf '%s' ""
+      return
+    fi
+    roadmap_progress_register_temp_file "$index_file"
+    find "$logs_root" -type f -name '*.json' -print0 >"$index_file" 2>/dev/null || true
+    ROADMAP_RESILIENCE_JSON_INDEX_ROOT="$logs_root"
+    ROADMAP_RESILIENCE_JSON_INDEX_FILE="$index_file"
+  fi
+
+  printf '%s' "$ROADMAP_RESILIENCE_JSON_INDEX_FILE"
+}
+
+roadmap_resilience_json_candidates_matching_basename() {
+  local candidate=""
+  local candidate_base=""
+  local pattern=""
+
+  # Avoid command substitution here so the cached index path persists in this
+  # shell and we do not re-run recursive find for every call site.
+  roadmap_resilience_json_index_file >/dev/null
+  if [[ -z "$ROADMAP_RESILIENCE_JSON_INDEX_FILE" ]] || [[ ! -f "$ROADMAP_RESILIENCE_JSON_INDEX_FILE" ]]; then
+    return
+  fi
+  if (( $# == 0 )); then
+    return
+  fi
+
+  while IFS= read -r -d '' candidate; do
+    if [[ -z "$candidate" ]]; then
+      continue
+    fi
+    candidate_base="$(basename "$candidate")"
+    for pattern in "$@"; do
+      if [[ "$candidate_base" == $pattern ]]; then
+        printf '%s\0' "$candidate"
+        break
+      fi
+    done
+  done <"$ROADMAP_RESILIENCE_JSON_INDEX_FILE"
 }
 
 file_mtime_epoch() {
@@ -2633,7 +3097,7 @@ find_latest_resilience_summary_json() {
       # Deterministic tie-break when mtimes are equal.
       best_path="$candidate"
     fi
-  done < <(find "$logs_root" -type f -name 'vpn_rc_resilience_path_summary.json' -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename 'vpn_rc_resilience_path_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -2740,11 +3204,10 @@ find_latest_phase1_resilience_handoff_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'phase1_resilience_handoff_run_summary.json' \
-       -o -name 'phase1_resilience_handoff_check_summary.json' \
-       -o -name 'ci_phase1_resilience_summary.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'phase1_resilience_handoff_run_summary.json' \
+    'phase1_resilience_handoff_check_summary.json' \
+    'ci_phase1_resilience_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -3033,8 +3496,21 @@ resolve_phase1_string_with_source_chain() {
 candidate_bool_signal_value_or_empty() {
   local path="$1"
   local signal="$2"
+  local cache_key=""
+  local cached=""
   local value=""
+  cache_key="$(roadmap_cache_key "$path" "$signal")"
+  if [[ -n "${ROADMAP_BOOL_SIGNAL_CACHE[$cache_key]+x}" ]]; then
+    cached="${ROADMAP_BOOL_SIGNAL_CACHE[$cache_key]}"
+    if [[ "$cached" == "$ROADMAP_CACHE_EMPTY_SENTINEL" ]]; then
+      printf '%s' ""
+    else
+      printf '%s' "$cached"
+    fi
+    return
+  fi
   if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    ROADMAP_BOOL_SIGNAL_CACHE[$cache_key]="$ROADMAP_CACHE_EMPTY_SENTINEL"
     printf '%s' ""
     return
   fi
@@ -3074,9 +3550,11 @@ candidate_bool_signal_value_or_empty() {
   ' "$path" 2>/dev/null || true)"
   case "$value" in
     true|false)
+      ROADMAP_BOOL_SIGNAL_CACHE[$cache_key]="$value"
       printf '%s' "$value"
       ;;
     *)
+      ROADMAP_BOOL_SIGNAL_CACHE[$cache_key]="$ROADMAP_CACHE_EMPTY_SENTINEL"
       printf '%s' ""
       ;;
   esac
@@ -3097,8 +3575,21 @@ candidate_bool_signal_present_01() {
 candidate_string_signal_value_or_empty() {
   local path="$1"
   local signal="$2"
+  local cache_key=""
+  local cached=""
   local value=""
+  cache_key="$(roadmap_cache_key "$path" "$signal")"
+  if [[ -n "${ROADMAP_STRING_SIGNAL_CACHE[$cache_key]+x}" ]]; then
+    cached="${ROADMAP_STRING_SIGNAL_CACHE[$cache_key]}"
+    if [[ "$cached" == "$ROADMAP_CACHE_EMPTY_SENTINEL" ]]; then
+      printf '%s' ""
+    else
+      printf '%s' "$cached"
+    fi
+    return
+  fi
   if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    ROADMAP_STRING_SIGNAL_CACHE[$cache_key]="$ROADMAP_CACHE_EMPTY_SENTINEL"
     printf '%s' ""
     return
   fi
@@ -3136,8 +3627,10 @@ candidate_string_signal_value_or_empty() {
       end
   ' "$path" 2>/dev/null || true)"
   if [[ -n "$value" && "$value" != "null" ]]; then
+    ROADMAP_STRING_SIGNAL_CACHE[$cache_key]="$value"
     printf '%s' "$value"
   else
+    ROADMAP_STRING_SIGNAL_CACHE[$cache_key]="$ROADMAP_CACHE_EMPTY_SENTINEL"
     printf '%s' ""
   fi
 }
@@ -3603,9 +4096,9 @@ find_latest_phase2_linux_prod_candidate_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'phase2_linux_prod_candidate_run_summary.json' -o -name 'phase2_linux_prod_candidate_check_summary.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'phase2_linux_prod_candidate_run_summary.json' \
+    'phase2_linux_prod_candidate_check_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -3715,13 +4208,12 @@ find_latest_phase3_windows_client_beta_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'phase3_windows_client_beta_handoff_check_summary.json' \
-       -o -name 'phase3_windows_client_beta_handoff_summary.json' \
-       -o -name 'phase3_windows_client_beta_handoff_run_summary.json' \
-       -o -name 'phase3_windows_client_beta_check_summary.json' \
-       -o -name 'phase3_windows_client_beta_run_summary.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'phase3_windows_client_beta_handoff_check_summary.json' \
+    'phase3_windows_client_beta_handoff_summary.json' \
+    'phase3_windows_client_beta_handoff_run_summary.json' \
+    'phase3_windows_client_beta_check_summary.json' \
+    'phase3_windows_client_beta_run_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -3831,13 +4323,12 @@ find_latest_phase4_windows_full_parity_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'phase4_windows_full_parity_handoff_check_summary.json' \
-       -o -name 'phase4_windows_full_parity_handoff_summary.json' \
-       -o -name 'phase4_windows_full_parity_handoff_run_summary.json' \
-       -o -name 'phase4_windows_full_parity_check_summary.json' \
-       -o -name 'phase4_windows_full_parity_run_summary.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'phase4_windows_full_parity_handoff_check_summary.json' \
+    'phase4_windows_full_parity_handoff_summary.json' \
+    'phase4_windows_full_parity_handoff_run_summary.json' \
+    'phase4_windows_full_parity_check_summary.json' \
+    'phase4_windows_full_parity_run_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -3998,13 +4489,12 @@ find_latest_phase5_settlement_layer_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'phase5_settlement_layer_handoff_check_summary.json' \
-       -o -name 'phase5_settlement_layer_handoff_summary.json' \
-       -o -name 'phase5_settlement_layer_handoff_run_summary.json' \
-       -o -name 'phase5_settlement_layer_check_summary.json' \
-       -o -name 'phase5_settlement_layer_run_summary.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'phase5_settlement_layer_handoff_check_summary.json' \
+    'phase5_settlement_layer_handoff_summary.json' \
+    'phase5_settlement_layer_handoff_run_summary.json' \
+    'phase5_settlement_layer_check_summary.json' \
+    'phase5_settlement_layer_run_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -4279,15 +4769,14 @@ phase5_best_signal_source_summary_json() {
   if [[ -d "$logs_root" ]]; then
     while IFS= read -r -d '' candidate; do
       candidates+=("$candidate")
-    done < <(find "$logs_root" -type f \
-      \( -name 'phase5_settlement_layer_handoff_check_summary.json' \
-         -o -name 'phase5_settlement_layer_handoff_summary.json' \
-         -o -name 'phase5_settlement_layer_handoff_run_summary.json' \
-         -o -name 'phase5_settlement_layer_check_summary.json' \
-         -o -name 'phase5_settlement_layer_run_summary.json' \
-         -o -name 'ci_phase5_settlement_layer_summary.json' \
-         -o -name 'phase5_settlement_layer_ci_summary.json' \) \
-      -print0 2>/dev/null || true)
+    done < <(roadmap_resilience_json_candidates_matching_basename \
+      'phase5_settlement_layer_handoff_check_summary.json' \
+      'phase5_settlement_layer_handoff_summary.json' \
+      'phase5_settlement_layer_handoff_run_summary.json' \
+      'phase5_settlement_layer_check_summary.json' \
+      'phase5_settlement_layer_run_summary.json' \
+      'ci_phase5_settlement_layer_summary.json' \
+      'phase5_settlement_layer_ci_summary.json')
   fi
 
   for candidate in "${candidates[@]}"; do
@@ -4837,11 +5326,10 @@ find_latest_blockchain_mainnet_activation_gate_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'blockchain_mainnet_activation_gate_summary.json' \
-       -o -name 'mainnet_activation_gate_summary.json' \
-       -o -name '*activation*gate*summary*.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'blockchain_mainnet_activation_gate_summary.json' \
+    'mainnet_activation_gate_summary.json' \
+    '*activation*gate*summary*.json')
   printf '%s' "$best_path"
 }
 
@@ -5077,11 +5565,10 @@ find_latest_blockchain_bootstrap_governance_graduation_gate_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'blockchain_bootstrap_governance_graduation_gate_summary.json' \
-       -o -name 'bootstrap_governance_graduation_gate_summary.json' \
-       -o -name '*bootstrap*governance*graduation*gate*summary*.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'blockchain_bootstrap_governance_graduation_gate_summary.json' \
+    'bootstrap_governance_graduation_gate_summary.json' \
+    '*bootstrap*governance*graduation*gate*summary*.json')
   printf '%s' "$best_path"
 }
 
@@ -5272,18 +5759,17 @@ find_latest_phase6_cosmos_l1_summary_json() {
         fi
       fi
     fi
-  done < <(find "$logs_root" -type f \
-    \( -name 'phase6_cosmos_l1_build_testnet_handoff_check_summary.json' \
-       -o -name 'phase6_cosmos_l1_build_testnet_handoff_run_summary.json' \
-       -o -name 'phase6_cosmos_l1_build_testnet_check_summary.json' \
-       -o -name 'phase6_cosmos_l1_build_testnet_run_summary.json' \
-       -o -name 'phase6_cosmos_l1_build_testnet_suite_summary.json' \
-       -o -name 'phase6_cosmos_l1_build_testnet_ci_summary.json' \
-       -o -name 'phase6_cosmos_l1_contracts_summary.json' \
-       -o -name 'phase6_cosmos_l1_summary_report.json' \
-       -o -name 'ci_phase6_cosmos_l1_build_testnet_summary.json' \
-       -o -name 'ci_phase6_cosmos_l1_contracts_summary.json' \) \
-    -print0 2>/dev/null || true)
+  done < <(roadmap_resilience_json_candidates_matching_basename \
+    'phase6_cosmos_l1_build_testnet_handoff_check_summary.json' \
+    'phase6_cosmos_l1_build_testnet_handoff_run_summary.json' \
+    'phase6_cosmos_l1_build_testnet_check_summary.json' \
+    'phase6_cosmos_l1_build_testnet_run_summary.json' \
+    'phase6_cosmos_l1_build_testnet_suite_summary.json' \
+    'phase6_cosmos_l1_build_testnet_ci_summary.json' \
+    'phase6_cosmos_l1_contracts_summary.json' \
+    'phase6_cosmos_l1_summary_report.json' \
+    'ci_phase6_cosmos_l1_build_testnet_summary.json' \
+    'ci_phase6_cosmos_l1_contracts_summary.json')
   printf '%s' "$best_path"
 }
 
@@ -5690,6 +6176,7 @@ mkdir -p "$(dirname "$single_machine_summary_json")"
 
 log_dir="$default_log_dir"
 mkdir -p "$log_dir"
+
 ts="$(date +%Y%m%d_%H%M%S)"
 manual_refresh_log="$log_dir/roadmap_progress_manual_validation_${ts}.log"
 single_machine_refresh_log="$log_dir/roadmap_progress_single_machine_${ts}.log"
@@ -5828,6 +6315,10 @@ if [[ "$refresh_manual_validation" != "1" ]]; then
     manual_summary_valid_after_run="true"
   fi
 fi
+
+# Build a deterministic post-refresh discovery snapshot. This ensures files
+# emitted during refresh in this run are visible to downstream selectors.
+roadmap_rebuild_post_refresh_discovery_snapshot
 
 if [[ ! -f "$manual_validation_summary_json" ]]; then
   echo "manual-validation summary JSON not found: $manual_validation_summary_json"
@@ -8284,6 +8775,7 @@ optional_check_ids_json="$(jq -c '(.summary.optional_check_ids // []) | if type 
 pending_real_host_checks_json="$(jq -c '
   . as $root
   | ((.checks // []) | if type == "array" then . else [] end) as $checks
+  | ((.summary.real_host_gate.blockers // []) | if type == "array" then . else [] end) as $blockers
   | (
       [
         $checks[]
@@ -8297,31 +8789,37 @@ pending_real_host_checks_json="$(jq -c '
           }
       ]
     ) as $from_checks
-  | if ($from_checks | length) > 0 then
-      $from_checks
-    else
-      ((.summary.real_host_gate.blockers // []) | if type == "array" then . else [] end) as $blockers
-      | [
-          $blockers[]
-          | select(. == "machine_c_vpn_smoke" or . == "three_machine_prod_signoff")
-          | {
-              check_id: .,
-              label: (if . == "machine_c_vpn_smoke" then "Machine C VPN smoke test" else "True 3-machine production signoff" end),
-              status: "pending",
-              command: (
-                if . == "machine_c_vpn_smoke" then
-                  ($root.summary.real_host_gate.next_command // $root.summary.next_action_command // "")
-                else
-                  (
-                    [ $checks[] | select(.check_id == "three_machine_prod_signoff") | .command ][0]
-                    // ""
-                  )
-                end
-              ),
-              notes: ""
-            }
-        ]
-    end
+  | (
+      [
+        $blockers[]
+        | select(. == "machine_c_vpn_smoke" or . == "three_machine_prod_signoff")
+        | {
+            check_id: .,
+            label: (if . == "machine_c_vpn_smoke" then "Machine C VPN smoke test" else "True 3-machine production signoff" end),
+            status: "pending",
+            command: (
+              if . == "machine_c_vpn_smoke" then
+                ($root.summary.real_host_gate.next_command // $root.summary.next_action_command // "")
+              else
+                (
+                  [ $checks[] | select(.check_id == "three_machine_prod_signoff") | .command ][0]
+                  // ""
+                )
+              end
+            ),
+            notes: ""
+          }
+      ]
+    ) as $from_blockers
+  | ($from_checks + $from_blockers)
+  | reduce .[] as $item (
+      [];
+      if any(.[]; (.check_id // "") == ($item.check_id // "")) then
+        .
+      else
+        . + [$item]
+      end
+    )
 ' "$manual_validation_summary_json")"
 pending_real_host_check_count="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r 'length')"
 docker_rehearsal_ready_json="$(
@@ -8544,14 +9042,21 @@ multi_vm_stability_recommended_profile_counts_json="null"
 multi_vm_stability_reasons_json='[]'
 multi_vm_stability_notes_json=""
 multi_vm_stability_needs_attention_json="true"
+multi_vm_stability_command_reports_dir="$(
+  summary_reports_dir_from_path_or_fallback "$multi_vm_stability_input_summary_json" ".easy-node-logs"
+)"
+multi_vm_stability_vm_command_file="$(
+  resolve_multi_vm_stability_vm_command_file_path "$profile_compare_multi_vm_stability_check_summary_json"
+)"
+multi_vm_stability_legacy_default_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_cycle_summary.json --print-summary-json 1"
 multi_vm_stability_next_command="$(jq -r '
   .summary.profile_compare_multi_vm_stability.next_command
   // .summary.profile_compare_multi_vm_stability.command
   // .summary.profile_compare_multi_vm_stability_check.next_command
   // ""
 ' "$manual_validation_summary_json" 2>/dev/null || true)"
-if [[ -z "$multi_vm_stability_next_command" ]]; then
-  multi_vm_stability_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_cycle_summary.json --print-summary-json 1"
+if [[ -z "$multi_vm_stability_next_command" || "$multi_vm_stability_next_command" == "$multi_vm_stability_legacy_default_next_command" ]]; then
+  multi_vm_stability_next_command="$(build_multi_vm_stability_cycle_next_command "$multi_vm_stability_command_reports_dir" "$multi_vm_stability_vm_command_file")"
 fi
 multi_vm_stability_next_command_reason="multi-VM stability evidence is missing; run stability cycle to refresh and publish evidence"
 if [[ -n "$profile_compare_multi_vm_stability_check_summary_json" ]] \
@@ -8667,7 +9172,23 @@ multi_vm_stability_promotion_no_go_json="null"
 multi_vm_stability_promotion_reasons_json='[]'
 multi_vm_stability_promotion_notes_json=""
 multi_vm_stability_promotion_needs_attention_json="true"
-multi_vm_stability_promotion_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-cycle --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json --print-summary-json 1"
+multi_vm_stability_promotion_command_reports_dir="$(
+  summary_reports_dir_from_path_or_fallback "$multi_vm_stability_promotion_input_summary_json" ".easy-node-logs"
+)"
+multi_vm_stability_promotion_command_cycles=""
+if [[ "$(json_file_valid_01 "$profile_compare_multi_vm_stability_promotion_summary_json")" == "1" ]]; then
+  multi_vm_stability_promotion_command_cycles="$(jq -r '
+    if (.inputs.cycle_orchestration.cycles | type) == "number"
+       and ((.inputs.cycle_orchestration.cycles | floor) == .inputs.cycle_orchestration.cycles)
+       and (.inputs.cycle_orchestration.cycles >= 1) then (.inputs.cycle_orchestration.cycles | tostring)
+    elif (.inputs.cycles | type) == "number"
+       and ((.inputs.cycles | floor) == .inputs.cycles)
+       and (.inputs.cycles >= 1) then (.inputs.cycles | tostring)
+    else ""
+    end
+  ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || true)"
+fi
+multi_vm_stability_promotion_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles")"
 multi_vm_stability_promotion_next_command_reason="multi-VM stability promotion evidence is missing; run promotion cycle to produce fail-closed GO/NO-GO evidence"
 if [[ -n "$profile_compare_multi_vm_stability_promotion_summary_json" ]] \
    && [[ "$(profile_compare_multi_vm_stability_promotion_summary_usable_01 "$profile_compare_multi_vm_stability_promotion_summary_json")" == "1" ]]; then
@@ -8867,7 +9388,23 @@ runtime_actuation_promotion_no_go_json="null"
 runtime_actuation_promotion_reasons_json='[]'
 runtime_actuation_promotion_notes_json=""
 runtime_actuation_promotion_needs_attention_json="true"
-runtime_actuation_promotion_next_command="./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --cycles 3 --fail-on-no-go 1 --summary-json .easy-node-logs/runtime_actuation_promotion_cycle_latest_summary.json --print-summary-json 1"
+runtime_actuation_promotion_command_reports_dir="$(
+  summary_reports_dir_from_path_or_fallback "$runtime_actuation_promotion_input_summary_json" ".easy-node-logs"
+)"
+runtime_actuation_promotion_command_cycles="3"
+if [[ "$(json_file_valid_01 "$runtime_actuation_promotion_summary_json")" == "1" ]]; then
+  runtime_actuation_promotion_command_cycles="$(jq -r '
+    if (.inputs.cycles | type) == "number"
+       and ((.inputs.cycles | floor) == .inputs.cycles)
+       and (.inputs.cycles >= 1) then (.inputs.cycles | tostring)
+    elif (.inputs.cycle_orchestration.cycles | type) == "number"
+       and ((.inputs.cycle_orchestration.cycles | floor) == .inputs.cycle_orchestration.cycles)
+       and (.inputs.cycle_orchestration.cycles >= 1) then (.inputs.cycle_orchestration.cycles | tostring)
+    else "3"
+    end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "3")"
+fi
+runtime_actuation_promotion_next_command="$(build_runtime_actuation_promotion_cycle_next_command "$runtime_actuation_promotion_command_reports_dir" "$runtime_actuation_promotion_command_cycles")"
 runtime_actuation_promotion_next_command_reason="runtime-actuation promotion evidence is missing; run promotion cycle to produce fresh fail-closed GO/NO-GO evidence"
 if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
    && [[ "$(runtime_actuation_promotion_summary_usable_01 "$runtime_actuation_promotion_summary_json")" == "1" ]]; then
@@ -9080,9 +9617,48 @@ profile_default_gate_evidence_pack_helper_available_json="false"
 if [[ "$(easy_node_supports_subcommand_01 "$profile_default_gate_evidence_pack_helper_subcommand")" == "1" ]]; then
   profile_default_gate_evidence_pack_helper_available_json="true"
 fi
+profile_default_gate_stability_run_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "profile-default-gate-stability-run")" == "1" ]]; then
+  profile_default_gate_stability_run_helper_available_json="true"
+fi
+profile_default_gate_stability_check_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "profile-default-gate-stability-check")" == "1" ]]; then
+  profile_default_gate_stability_check_helper_available_json="true"
+fi
+profile_default_gate_stability_cycle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "profile-default-gate-stability-cycle")" == "1" ]]; then
+  profile_default_gate_stability_cycle_helper_available_json="true"
+fi
 profile_default_gate_evidence_pack_input_summary_json="$(
   resolve_profile_default_gate_evidence_pack_summary_path "$manual_validation_summary_json" "$default_log_dir"
 )"
+profile_default_gate_evidence_pack_command_reports_dir="$(
+  summary_reports_dir_from_path_or_fallback "$profile_default_gate_evidence_pack_input_summary_json" ".easy-node-logs"
+)"
+profile_default_gate_evidence_pack_prereq_missing_json="false"
+profile_default_gate_evidence_pack_prereq_next_command=""
+profile_default_gate_evidence_pack_prereq_next_reason=""
+if [[ "$profile_default_gate_stability_cycle_summary_available_json" != "true" ]]; then
+  profile_default_gate_evidence_pack_prereq_missing_json="true"
+  if [[ "$profile_default_gate_stability_cycle_helper_available_json" == "true" ]]; then
+    profile_default_gate_evidence_pack_prereq_next_command="$(build_profile_default_gate_stability_cycle_next_command "$profile_default_gate_evidence_pack_command_reports_dir" "$profile_default_gate_stability_summary_json" "$profile_default_gate_stability_check_summary_json")"
+    if [[ "$profile_default_gate_stability_summary_available_json" != "true" ]]; then
+      profile_default_gate_evidence_pack_prereq_next_reason="profile-default evidence-pack prerequisites are missing (stability summary unavailable); run profile-default-gate-stability-cycle first"
+    elif [[ "$profile_default_gate_stability_check_summary_available_json" != "true" ]]; then
+      profile_default_gate_evidence_pack_prereq_next_reason="profile-default evidence-pack prerequisites are missing (stability-check summary unavailable); run profile-default-gate-stability-cycle first"
+    else
+      profile_default_gate_evidence_pack_prereq_next_reason="profile-default evidence-pack prerequisites are missing (stability-cycle summary unavailable); run profile-default-gate-stability-cycle first"
+    fi
+  elif [[ "$profile_default_gate_stability_check_helper_available_json" == "true" ]] && [[ "$profile_default_gate_stability_summary_available_json" == "true" ]]; then
+    profile_default_gate_evidence_pack_prereq_next_command="$(build_profile_default_gate_stability_check_next_command "$profile_default_gate_evidence_pack_command_reports_dir" "$profile_default_gate_stability_summary_json")"
+    profile_default_gate_evidence_pack_prereq_next_reason="profile-default evidence-pack prerequisites are missing (stability-check summary unavailable); run profile-default-gate-stability-check first"
+  elif [[ "$profile_default_gate_stability_run_helper_available_json" == "true" ]]; then
+    profile_default_gate_evidence_pack_prereq_next_command="$(build_profile_default_gate_stability_run_next_command "$profile_default_gate_evidence_pack_command_reports_dir")"
+    profile_default_gate_evidence_pack_prereq_next_reason="profile-default evidence-pack prerequisites are missing (stability summary unavailable); run profile-default-gate-stability-run first"
+  else
+    profile_default_gate_evidence_pack_prereq_next_reason="profile-default evidence-pack prerequisites are missing, but stability run/check/cycle helpers are unavailable in this checkout; merge helper slices and rerun"
+  fi
+fi
 profile_default_gate_evidence_pack_source_summary_json=""
 profile_default_gate_evidence_pack_available_json="false"
 profile_default_gate_evidence_pack_status_json="missing"
@@ -9095,8 +9671,17 @@ profile_default_gate_evidence_pack_notes_json=""
 profile_default_gate_evidence_pack_needs_attention_json="true"
 profile_default_gate_evidence_pack_next_command=""
 profile_default_gate_evidence_pack_next_command_reason="profile-default evidence-pack summary is missing; publish a fresh evidence pack"
-if [[ "$profile_default_gate_evidence_pack_helper_available_json" == "true" ]]; then
-  profile_default_gate_evidence_pack_next_command="./scripts/easy_node.sh profile-default-gate-stability-evidence-pack --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_default_gate_evidence_pack_summary.json --print-summary-json 1"
+if [[ "$profile_default_gate_evidence_pack_prereq_missing_json" == "true" ]]; then
+  profile_default_gate_evidence_pack_next_command="$profile_default_gate_evidence_pack_prereq_next_command"
+  profile_default_gate_evidence_pack_next_command_reason="$profile_default_gate_evidence_pack_prereq_next_reason"
+elif [[ "$profile_default_gate_evidence_pack_helper_available_json" == "true" ]]; then
+  profile_default_gate_evidence_pack_next_command="$(profile_default_gate_command_from_argv \
+    "./scripts/easy_node.sh" \
+    "profile-default-gate-stability-evidence-pack" \
+    "--reports-dir" "$profile_default_gate_evidence_pack_command_reports_dir" \
+    "--fail-on-no-go" "1" \
+    "--summary-json" "$profile_default_gate_evidence_pack_command_reports_dir/profile_default_gate_evidence_pack_summary.json" \
+    "--print-summary-json" "1")"
 else
   profile_default_gate_evidence_pack_next_command_reason="profile-default evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
@@ -9211,6 +9796,15 @@ if [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] \
    && [[ -z "$profile_default_gate_evidence_pack_next_command" ]]; then
   profile_default_gate_evidence_pack_next_command_reason="profile-default evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
+if [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] \
+   && [[ "$profile_default_gate_evidence_pack_prereq_missing_json" == "true" ]]; then
+  if [[ -n "$profile_default_gate_evidence_pack_prereq_next_command" ]]; then
+    profile_default_gate_evidence_pack_next_command="$profile_default_gate_evidence_pack_prereq_next_command"
+  fi
+  if [[ -n "$profile_default_gate_evidence_pack_prereq_next_reason" ]]; then
+    profile_default_gate_evidence_pack_next_command_reason="$profile_default_gate_evidence_pack_prereq_next_reason"
+  fi
+fi
 
 runtime_actuation_promotion_evidence_pack_helper_subcommand="runtime-actuation-promotion-evidence-pack"
 runtime_actuation_promotion_evidence_pack_helper_available_json="false"
@@ -9220,6 +9814,32 @@ fi
 runtime_actuation_promotion_evidence_pack_input_summary_json="$(
   resolve_runtime_actuation_promotion_evidence_pack_summary_path "$manual_validation_summary_json" "$default_log_dir"
 )"
+runtime_actuation_promotion_evidence_pack_command_reports_dir="$(
+  summary_reports_dir_from_path_or_fallback "$runtime_actuation_promotion_evidence_pack_input_summary_json" "$runtime_actuation_promotion_command_reports_dir"
+)"
+runtime_actuation_promotion_cycle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "runtime-actuation-promotion-cycle")" == "1" ]]; then
+  runtime_actuation_promotion_cycle_helper_available_json="true"
+fi
+runtime_actuation_promotion_evidence_pack_prereq_missing_json="false"
+runtime_actuation_promotion_evidence_pack_prereq_next_command=""
+runtime_actuation_promotion_evidence_pack_prereq_next_reason=""
+if [[ "$runtime_actuation_promotion_available_json" != "true" ]]; then
+  runtime_actuation_promotion_evidence_pack_prereq_missing_json="true"
+  if [[ "$runtime_actuation_promotion_cycle_helper_available_json" == "true" ]]; then
+    runtime_actuation_promotion_evidence_pack_prereq_next_command="$runtime_actuation_promotion_next_command"
+    if [[ -z "$runtime_actuation_promotion_evidence_pack_prereq_next_command" ]]; then
+      runtime_actuation_promotion_evidence_pack_prereq_next_command="$(build_runtime_actuation_promotion_cycle_next_command "$runtime_actuation_promotion_evidence_pack_command_reports_dir" "$runtime_actuation_promotion_command_cycles")"
+    fi
+    if [[ -n "$runtime_actuation_promotion_evidence_pack_prereq_next_command" ]]; then
+      runtime_actuation_promotion_evidence_pack_prereq_next_reason="runtime-actuation evidence-pack prerequisites are missing (promotion-cycle summary unavailable); run runtime-actuation-promotion-cycle first"
+    else
+      runtime_actuation_promotion_evidence_pack_prereq_next_reason="runtime-actuation evidence-pack prerequisites are missing (promotion-cycle summary unavailable), but no promotion-cycle command is available in this checkout"
+    fi
+  else
+    runtime_actuation_promotion_evidence_pack_prereq_next_reason="runtime-actuation evidence-pack prerequisites are missing (promotion-cycle summary unavailable), but runtime-actuation-promotion-cycle is unavailable in this checkout"
+  fi
+fi
 runtime_actuation_promotion_evidence_pack_source_summary_json=""
 runtime_actuation_promotion_evidence_pack_available_json="false"
 runtime_actuation_promotion_evidence_pack_status_json="missing"
@@ -9232,8 +9852,17 @@ runtime_actuation_promotion_evidence_pack_notes_json=""
 runtime_actuation_promotion_evidence_pack_needs_attention_json="true"
 runtime_actuation_promotion_evidence_pack_next_command=""
 runtime_actuation_promotion_evidence_pack_next_command_reason="runtime-actuation promotion evidence-pack summary is missing; publish a fresh evidence pack"
-if [[ "$runtime_actuation_promotion_evidence_pack_helper_available_json" == "true" ]]; then
-  runtime_actuation_promotion_evidence_pack_next_command="./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/runtime_actuation_promotion_evidence_pack_summary.json --print-summary-json 1"
+if [[ "$runtime_actuation_promotion_evidence_pack_prereq_missing_json" == "true" ]]; then
+  runtime_actuation_promotion_evidence_pack_next_command="$runtime_actuation_promotion_evidence_pack_prereq_next_command"
+  runtime_actuation_promotion_evidence_pack_next_command_reason="$runtime_actuation_promotion_evidence_pack_prereq_next_reason"
+elif [[ "$runtime_actuation_promotion_evidence_pack_helper_available_json" == "true" ]]; then
+  runtime_actuation_promotion_evidence_pack_next_command="$(profile_default_gate_command_from_argv \
+    "./scripts/easy_node.sh" \
+    "runtime-actuation-promotion-evidence-pack" \
+    "--reports-dir" "$runtime_actuation_promotion_evidence_pack_command_reports_dir" \
+    "--fail-on-no-go" "1" \
+    "--summary-json" "$runtime_actuation_promotion_evidence_pack_command_reports_dir/runtime_actuation_promotion_evidence_pack_summary.json" \
+    "--print-summary-json" "1")"
 else
   runtime_actuation_promotion_evidence_pack_next_command_reason="runtime-actuation promotion evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
@@ -9348,6 +9977,15 @@ if [[ "$runtime_actuation_promotion_evidence_pack_needs_attention_json" == "true
    && [[ -z "$runtime_actuation_promotion_evidence_pack_next_command" ]]; then
   runtime_actuation_promotion_evidence_pack_next_command_reason="runtime-actuation promotion evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
+if [[ "$runtime_actuation_promotion_evidence_pack_needs_attention_json" == "true" ]] \
+   && [[ "$runtime_actuation_promotion_evidence_pack_prereq_missing_json" == "true" ]]; then
+  if [[ -n "$runtime_actuation_promotion_evidence_pack_prereq_next_command" ]]; then
+    runtime_actuation_promotion_evidence_pack_next_command="$runtime_actuation_promotion_evidence_pack_prereq_next_command"
+  fi
+  if [[ -n "$runtime_actuation_promotion_evidence_pack_prereq_next_reason" ]]; then
+    runtime_actuation_promotion_evidence_pack_next_command_reason="$runtime_actuation_promotion_evidence_pack_prereq_next_reason"
+  fi
+fi
 
 multi_vm_stability_promotion_evidence_pack_helper_subcommand="profile-compare-multi-vm-stability-promotion-evidence-pack"
 multi_vm_stability_promotion_evidence_pack_helper_available_json="false"
@@ -9357,6 +9995,51 @@ fi
 multi_vm_stability_promotion_evidence_pack_input_summary_json="$(
   resolve_profile_compare_multi_vm_stability_promotion_evidence_pack_summary_path "$manual_validation_summary_json" "$default_log_dir"
 )"
+multi_vm_stability_promotion_evidence_pack_command_reports_dir="$(
+  summary_reports_dir_from_path_or_fallback "$multi_vm_stability_promotion_evidence_pack_input_summary_json" "$multi_vm_stability_promotion_command_reports_dir"
+)"
+multi_vm_stability_cycle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "profile-compare-multi-vm-stability-cycle")" == "1" ]]; then
+  multi_vm_stability_cycle_helper_available_json="true"
+fi
+multi_vm_stability_promotion_cycle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "profile-compare-multi-vm-stability-promotion-cycle")" == "1" ]]; then
+  multi_vm_stability_promotion_cycle_helper_available_json="true"
+fi
+multi_vm_stability_promotion_evidence_pack_prereq_missing_json="false"
+multi_vm_stability_promotion_evidence_pack_prereq_next_command=""
+multi_vm_stability_promotion_evidence_pack_prereq_next_reason=""
+if [[ "$multi_vm_stability_available_json" != "true" ]]; then
+  multi_vm_stability_promotion_evidence_pack_prereq_missing_json="true"
+  if [[ "$multi_vm_stability_cycle_helper_available_json" == "true" ]]; then
+    multi_vm_stability_promotion_evidence_pack_prereq_next_command="$multi_vm_stability_next_command"
+    if [[ -z "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
+      multi_vm_stability_promotion_evidence_pack_prereq_next_command="$(build_multi_vm_stability_cycle_next_command "$multi_vm_stability_command_reports_dir" "$multi_vm_stability_vm_command_file")"
+    fi
+    if [[ -n "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
+      multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (multi-VM stability check summary unavailable); run profile-compare-multi-vm-stability-cycle first"
+    else
+      multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (multi-VM stability check summary unavailable), but no stability-cycle command is available in this checkout"
+    fi
+  else
+    multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (multi-VM stability check summary unavailable), but profile-compare-multi-vm-stability-cycle is unavailable in this checkout"
+  fi
+elif [[ "$multi_vm_stability_promotion_available_json" != "true" ]]; then
+  multi_vm_stability_promotion_evidence_pack_prereq_missing_json="true"
+  if [[ "$multi_vm_stability_promotion_cycle_helper_available_json" == "true" ]]; then
+    multi_vm_stability_promotion_evidence_pack_prereq_next_command="$multi_vm_stability_promotion_next_command"
+    if [[ -z "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
+      multi_vm_stability_promotion_evidence_pack_prereq_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles")"
+    fi
+    if [[ -n "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
+      multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (promotion-cycle summary unavailable); run profile-compare-multi-vm-stability-promotion-cycle first"
+    else
+      multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (promotion-cycle summary unavailable), but no promotion-cycle command is available in this checkout"
+    fi
+  else
+    multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (promotion-cycle summary unavailable), but profile-compare-multi-vm-stability-promotion-cycle is unavailable in this checkout"
+  fi
+fi
 multi_vm_stability_promotion_evidence_pack_source_summary_json=""
 multi_vm_stability_promotion_evidence_pack_available_json="false"
 multi_vm_stability_promotion_evidence_pack_status_json="missing"
@@ -9369,8 +10052,17 @@ multi_vm_stability_promotion_evidence_pack_notes_json=""
 multi_vm_stability_promotion_evidence_pack_needs_attention_json="true"
 multi_vm_stability_promotion_evidence_pack_next_command=""
 multi_vm_stability_promotion_evidence_pack_next_command_reason="multi-VM stability promotion evidence-pack summary is missing; publish a fresh evidence pack"
-if [[ "$multi_vm_stability_promotion_evidence_pack_helper_available_json" == "true" ]]; then
-  multi_vm_stability_promotion_evidence_pack_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json --print-summary-json 1"
+if [[ "$multi_vm_stability_promotion_evidence_pack_prereq_missing_json" == "true" ]]; then
+  multi_vm_stability_promotion_evidence_pack_next_command="$multi_vm_stability_promotion_evidence_pack_prereq_next_command"
+  multi_vm_stability_promotion_evidence_pack_next_command_reason="$multi_vm_stability_promotion_evidence_pack_prereq_next_reason"
+elif [[ "$multi_vm_stability_promotion_evidence_pack_helper_available_json" == "true" ]]; then
+  multi_vm_stability_promotion_evidence_pack_next_command="$(profile_default_gate_command_from_argv \
+    "./scripts/easy_node.sh" \
+    "profile-compare-multi-vm-stability-promotion-evidence-pack" \
+    "--reports-dir" "$multi_vm_stability_promotion_evidence_pack_command_reports_dir" \
+    "--fail-on-no-go" "1" \
+    "--summary-json" "$multi_vm_stability_promotion_evidence_pack_command_reports_dir/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json" \
+    "--print-summary-json" "1")"
 else
   multi_vm_stability_promotion_evidence_pack_next_command_reason="multi-VM stability promotion evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
@@ -9485,6 +10177,15 @@ if [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "tru
    && [[ -z "$multi_vm_stability_promotion_evidence_pack_next_command" ]]; then
   multi_vm_stability_promotion_evidence_pack_next_command_reason="multi-VM stability promotion evidence-pack helper is unavailable in this checkout; merge helper slice and rerun"
 fi
+if [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]] \
+   && [[ "$multi_vm_stability_promotion_evidence_pack_prereq_missing_json" == "true" ]]; then
+  if [[ -n "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
+    multi_vm_stability_promotion_evidence_pack_next_command="$multi_vm_stability_promotion_evidence_pack_prereq_next_command"
+  fi
+  if [[ -n "$multi_vm_stability_promotion_evidence_pack_prereq_next_reason" ]]; then
+    multi_vm_stability_promotion_evidence_pack_next_command_reason="$multi_vm_stability_promotion_evidence_pack_prereq_next_reason"
+  fi
+fi
 
 profile_default_gate_signoff_resolution="$(resolve_profile_default_gate_signoff_status "$profile_compare_signoff_summary_json" "$manual_validation_summary_json")"
 profile_default_gate_signoff_status="${profile_default_gate_signoff_resolution%%$'\x1f'*}"
@@ -9590,6 +10291,12 @@ if [[ -n "$profile_default_gate_next_command_host_b_effective" ]] \
    && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_host_b_effective")" != "1" ]]; then
   profile_default_gate_next_command_host_b_effective=""
 fi
+profile_default_gate_next_command="$(
+  profile_default_gate_command_apply_env_host_placeholders \
+    "$profile_default_gate_next_command" \
+    "$profile_default_gate_next_command_host_a_effective" \
+    "$profile_default_gate_next_command_host_b_effective"
+)"
 if [[ -z "$profile_default_gate_next_command_host_a_effective" ]]; then
   profile_default_gate_next_command_host_a_extracted="$(profile_default_gate_extract_live_wrapper_host_from_cmd "$profile_default_gate_next_command" "a")"
   if [[ -n "$profile_default_gate_next_command_host_a_extracted" ]] \
@@ -9622,6 +10329,12 @@ if [[ -n "$profile_default_gate_next_command_sudo_host_b_effective" ]] \
    && [[ "$(profile_default_gate_host_is_non_localhost_01 "$profile_default_gate_next_command_sudo_host_b_effective")" != "1" ]]; then
   profile_default_gate_next_command_sudo_host_b_effective=""
 fi
+profile_default_gate_next_command_sudo="$(
+  profile_default_gate_command_apply_env_host_placeholders \
+    "$profile_default_gate_next_command_sudo" \
+    "$profile_default_gate_next_command_sudo_host_a_effective" \
+    "$profile_default_gate_next_command_sudo_host_b_effective"
+)"
 if [[ -z "$profile_default_gate_next_command_sudo_host_a_effective" ]]; then
   profile_default_gate_next_command_sudo_host_a_extracted="$(profile_default_gate_extract_live_wrapper_host_from_cmd "$profile_default_gate_next_command_sudo" "a")"
   if [[ -n "$profile_default_gate_next_command_sudo_host_a_extracted" ]] \
@@ -10005,13 +10718,19 @@ if [[ "$runtime_actuation_promotion_needs_attention_json" == "true" ]] && [[ -n 
   next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
 fi
 next_actions_evidence_pack_pending_action_count=0
-if [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] && [[ -n "$profile_default_gate_evidence_pack_next_command" ]]; then
+if [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] \
+   && [[ -n "$profile_default_gate_evidence_pack_next_command" ]] \
+   && [[ "$profile_default_gate_evidence_pack_next_command" == *"evidence-pack"* ]]; then
   next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
 fi
-if [[ "$runtime_actuation_promotion_evidence_pack_needs_attention_json" == "true" ]] && [[ -n "$runtime_actuation_promotion_evidence_pack_next_command" ]]; then
+if [[ "$runtime_actuation_promotion_evidence_pack_needs_attention_json" == "true" ]] \
+   && [[ -n "$runtime_actuation_promotion_evidence_pack_next_command" ]] \
+   && [[ "$runtime_actuation_promotion_evidence_pack_next_command" == *"evidence-pack"* ]]; then
   next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
 fi
-if [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_promotion_evidence_pack_next_command" ]]; then
+if [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]] \
+   && [[ -n "$multi_vm_stability_promotion_evidence_pack_next_command" ]] \
+   && [[ "$multi_vm_stability_promotion_evidence_pack_next_command" == *"evidence-pack"* ]]; then
   next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
 fi
 
@@ -10020,8 +10739,19 @@ live_evidence_cycle_batch_helper_available_json="false"
 if [[ "$(easy_node_supports_subcommand_01 "$live_evidence_cycle_batch_helper_subcommand")" == "1" ]]; then
   live_evidence_cycle_batch_helper_available_json="true"
 fi
+live_evidence_archive_helper_subcommand="roadmap-live-evidence-archive-run"
+live_evidence_archive_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$live_evidence_archive_helper_subcommand")" == "1" ]]; then
+  live_evidence_archive_helper_available_json="true"
+fi
+three_machine_real_host_validation_pack_helper_subcommand="three-machine-real-host-validation-pack"
+three_machine_real_host_validation_pack_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$three_machine_real_host_validation_pack_helper_subcommand")" == "1" ]]; then
+  three_machine_real_host_validation_pack_helper_available_json="true"
+fi
+three_machine_real_host_validation_pack_signoff_pending_json="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r 'any(.[]?; (.check_id // "") == "three_machine_prod_signoff")')"
 
-next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
+next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" --argjson live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" --argjson three_machine_real_host_validation_pack_helper_available "$three_machine_real_host_validation_pack_helper_available_json" --argjson three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -10081,6 +10811,18 @@ next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_ch
       command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "repeat pending live evidence cycles across tracks in one helper run"
     } else empty end),
+    (if ($next_actions_live_evidence_pending_action_count > 0 and $live_evidence_archive_helper_available == true) then {
+      id: "roadmap_live_evidence_archive_run",
+      label: "Roadmap live-evidence archive run",
+      command: "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1",
+      reason: "archive current live evidence artifacts before rerunning cycles"
+    } else empty end),
+    (if ($three_machine_real_host_validation_pack_signoff_pending == true and $three_machine_real_host_validation_pack_helper_available == true) then {
+      id: "three_machine_real_host_validation_pack",
+      label: "Three-machine real-host validation pack",
+      command: "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1",
+      reason: "package current three-machine validation evidence while real-host signoff is still pending"
+    } else empty end),
     (if ($profile_default_gate_evidence_pack_needs_attention == true and ($profile_default_gate_evidence_pack_next_command // "") != "") then {
       id: "profile_default_gate_evidence_pack",
       label: "Profile default evidence-pack publish",
@@ -10099,11 +10841,7 @@ next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_ch
       command: $multi_vm_stability_promotion_evidence_pack_next_command,
       reason: (if ($multi_vm_stability_promotion_evidence_pack_next_command_reason // "") != "" then $multi_vm_stability_promotion_evidence_pack_next_command_reason else "multi-VM promotion evidence-pack requires refresh/publish" end)
     } else empty end),
-    (if (
-      ($profile_default_gate_evidence_pack_needs_attention == true and ($profile_default_gate_evidence_pack_next_command // "") != "")
-      or ($runtime_actuation_promotion_evidence_pack_needs_attention == true and ($runtime_actuation_promotion_evidence_pack_next_command // "") != "")
-      or ($multi_vm_stability_promotion_evidence_pack_needs_attention == true and ($multi_vm_stability_promotion_evidence_pack_next_command // "") != "")
-    ) then {
+    (if ($next_actions_evidence_pack_pending_action_count > 0) then {
       id: "roadmap_evidence_pack_actionable_run",
       label: "Roadmap evidence-pack actionable run",
       command: "./scripts/easy_node.sh roadmap-evidence-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
@@ -10168,6 +10906,10 @@ next_actions_json="$(printf '%s\n' "$next_actions_candidate_json" | jq -c --argj
 next_actions_live_evidence_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")')"
 next_actions_live_evidence_cycle_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")')"
 next_actions_live_evidence_cycle_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_evidence_cycle_batch_run")] | length')"
+next_actions_live_evidence_archive_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_archive_run")')"
+next_actions_live_evidence_archive_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_evidence_archive_run")] | length')"
+next_actions_three_machine_real_host_validation_pack_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "three_machine_real_host_validation_pack")')"
+next_actions_three_machine_real_host_validation_pack_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "three_machine_real_host_validation_pack")] | length')"
 next_actions_live_and_pack_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_and_pack_actionable_run")')"
 next_actions_live_and_pack_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_and_pack_actionable_run")] | length')"
 next_actions_live_evidence_individual_suppression_applied_json="$(jq -n \
@@ -10761,6 +11503,13 @@ summary_payload_jq_args=(
   --argjson next_actions_live_evidence_batch_helper_emitted "$next_actions_live_evidence_batch_helper_emitted_json" \
   --argjson next_actions_live_evidence_cycle_batch_helper_emitted "$next_actions_live_evidence_cycle_batch_helper_emitted_json" \
   --argjson next_actions_live_evidence_cycle_batch_helper_count "$next_actions_live_evidence_cycle_batch_helper_count_json" \
+  --argjson next_actions_live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" \
+  --argjson next_actions_live_evidence_archive_helper_emitted "$next_actions_live_evidence_archive_helper_emitted_json" \
+  --argjson next_actions_live_evidence_archive_helper_count "$next_actions_live_evidence_archive_helper_count_json" \
+  --argjson next_actions_three_machine_real_host_validation_pack_helper_available "$three_machine_real_host_validation_pack_helper_available_json" \
+  --argjson next_actions_three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" \
+  --argjson next_actions_three_machine_real_host_validation_pack_helper_emitted "$next_actions_three_machine_real_host_validation_pack_helper_emitted_json" \
+  --argjson next_actions_three_machine_real_host_validation_pack_helper_count "$next_actions_three_machine_real_host_validation_pack_helper_count_json" \
   --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" \
   --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" \
   --argjson next_actions_live_and_pack_batch_helper_emitted "$next_actions_live_and_pack_batch_helper_emitted_json" \
@@ -11314,6 +12063,13 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       live_evidence_batch_helper_emitted: $next_actions_live_evidence_batch_helper_emitted,
       live_evidence_cycle_batch_helper_emitted: $next_actions_live_evidence_cycle_batch_helper_emitted,
       live_evidence_cycle_batch_helper_count: $next_actions_live_evidence_cycle_batch_helper_count,
+      live_evidence_archive_helper_available: $next_actions_live_evidence_archive_helper_available,
+      live_evidence_archive_helper_emitted: $next_actions_live_evidence_archive_helper_emitted,
+      live_evidence_archive_helper_count: $next_actions_live_evidence_archive_helper_count,
+      three_machine_real_host_validation_pack_helper_available: $next_actions_three_machine_real_host_validation_pack_helper_available,
+      three_machine_real_host_validation_pack_signoff_pending: $next_actions_three_machine_real_host_validation_pack_signoff_pending,
+      three_machine_real_host_validation_pack_helper_emitted: $next_actions_three_machine_real_host_validation_pack_helper_emitted,
+      three_machine_real_host_validation_pack_helper_count: $next_actions_three_machine_real_host_validation_pack_helper_count,
       live_evidence_pending_action_count: $next_actions_live_evidence_pending_action_count,
       evidence_pack_pending_action_count: $next_actions_evidence_pack_pending_action_count,
       live_and_pack_batch_helper_emitted: $next_actions_live_and_pack_batch_helper_emitted,
@@ -11674,6 +12430,8 @@ $pending_real_host_checks_md
 ## Next Actions
 
 - Live-evidence individual suppression applied: $(jq -r '.next_actions_summary.live_evidence_individual_suppression_applied | tostring' "$summary_json") (mode=$(jq -r '.next_actions_summary.live_evidence_individual_suppression_mode | tostring' "$summary_json"), batch_helper=$(jq -r '.next_actions_summary.live_evidence_batch_helper_emitted | tostring' "$summary_json"))
+- Live-evidence archive helper: available=$(jq -r '.next_actions_summary.live_evidence_archive_helper_available | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.live_evidence_archive_helper_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.live_evidence_archive_helper_count | tostring' "$summary_json")
+- Three-machine validation pack helper: available=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_available | tostring' "$summary_json"), signoff_pending=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_signoff_pending | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_count | tostring' "$summary_json")
 
 $next_actions_md
 
@@ -11790,6 +12548,7 @@ echo "[roadmap-progress-report] runtime_actuation_promotion_evidence_pack_availa
 echo "[roadmap-progress-report] runtime_actuation_promotion_evidence_pack_status=${runtime_actuation_promotion_evidence_pack_status_json:-} rc=$runtime_actuation_promotion_evidence_pack_rc_json decision=${runtime_actuation_promotion_evidence_pack_decision_json:-} go=$runtime_actuation_promotion_evidence_pack_go_json no_go=$runtime_actuation_promotion_evidence_pack_no_go_json needs_attention=$runtime_actuation_promotion_evidence_pack_needs_attention_json next_command=${runtime_actuation_promotion_evidence_pack_next_command:-} next_command_reason=${runtime_actuation_promotion_evidence_pack_next_command_reason:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_available=$multi_vm_stability_promotion_evidence_pack_available_json helper_available=$multi_vm_stability_promotion_evidence_pack_helper_available_json input_summary_json=${multi_vm_stability_promotion_evidence_pack_input_summary_json:-} source_summary_json=${multi_vm_stability_promotion_evidence_pack_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_status=${multi_vm_stability_promotion_evidence_pack_status_json:-} rc=$multi_vm_stability_promotion_evidence_pack_rc_json decision=${multi_vm_stability_promotion_evidence_pack_decision_json:-} go=$multi_vm_stability_promotion_evidence_pack_go_json no_go=$multi_vm_stability_promotion_evidence_pack_no_go_json needs_attention=$multi_vm_stability_promotion_evidence_pack_needs_attention_json next_command=${multi_vm_stability_promotion_evidence_pack_next_command:-} next_command_reason=${multi_vm_stability_promotion_evidence_pack_next_command_reason:-}"
+echo "[roadmap-progress-report] live_evidence_archive_helper_available=$live_evidence_archive_helper_available_json live_evidence_archive_helper_emitted=$next_actions_live_evidence_archive_helper_emitted_json live_evidence_archive_helper_count=$next_actions_live_evidence_archive_helper_count_json three_machine_real_host_validation_pack_helper_available=$three_machine_real_host_validation_pack_helper_available_json three_machine_real_host_validation_pack_signoff_pending=$three_machine_real_host_validation_pack_signoff_pending_json three_machine_real_host_validation_pack_helper_emitted=$next_actions_three_machine_real_host_validation_pack_helper_emitted_json three_machine_real_host_validation_pack_helper_count=$next_actions_three_machine_real_host_validation_pack_helper_count_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"

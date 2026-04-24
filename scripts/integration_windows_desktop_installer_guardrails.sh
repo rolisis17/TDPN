@@ -106,6 +106,7 @@ assert_json_expr() {
 
 echo "[windows-desktop-installer-guardrails] parameter and marker contract"
 for marker in \
+  '\$Mode' \
   '\$InstallerPath' \
   '\$InstallerType' \
   '\$BuildIfMissing' \
@@ -118,6 +119,21 @@ for marker in \
 do
   if ! grep -qE -- "$marker" "$SCRIPT_UNDER_TEST"; then
     echo "windows desktop installer guardrails failed: missing marker '$marker' in $SCRIPT_UNDER_TEST"
+    exit 1
+  fi
+done
+
+for marker in \
+  'Invoke-DesktopBuildPreflight' \
+  'Invoke-ReleaseBundleBuild' \
+  'preflight_status' \
+  'preflight_summary_json' \
+  'recommended_commands' \
+  'wsl_required=false' \
+  'desktop preflight reported blocking issues'
+do
+  if ! grep -q -- "$marker" "$SCRIPT_UNDER_TEST"; then
+    echo "windows desktop installer guardrails failed: missing build preflight marker '$marker' in $SCRIPT_UNDER_TEST"
     exit 1
   fi
 done
@@ -214,6 +230,63 @@ fi
 assert_json_expr "$MISSING_SUMMARY_JSON" '.status == "fail"' "missing installer summary must have status=fail"
 assert_json_expr "$MISSING_SUMMARY_JSON" '.failure_stage == "installer_validate"' "missing installer summary must have failure_stage=installer_validate"
 
+echo "[windows-desktop-installer-guardrails] build mode rejects explicit installer path"
+BUILD_MODE_EXPLICIT_FAIL_SUMMARY="$TMP_DIR/build_mode_explicit_fail_summary.json"
+BUILD_MODE_EXPLICIT_FAIL_SUMMARY_PS="$(to_powershell_path "$BUILD_MODE_EXPLICIT_FAIL_SUMMARY")"
+run_expect_fail_regex \
+  "build_mode_explicit_path_fail" \
+  "build mode does not accept -InstallerPath" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Mode build \
+    -InstallerPath "$EXE_INSTALLER_PS" \
+    -DryRun \
+    -SummaryJson "$BUILD_MODE_EXPLICIT_FAIL_SUMMARY_PS" \
+    -PrintSummaryJson 0
+
+if [[ ! -f "$BUILD_MODE_EXPLICIT_FAIL_SUMMARY" ]]; then
+  echo "windows desktop installer guardrails failed: missing summary json for build-mode explicit-path failure"
+  cat "$TMP_DIR/build_mode_explicit_path_fail.log"
+  exit 1
+fi
+assert_json_expr "$BUILD_MODE_EXPLICIT_FAIL_SUMMARY" '.status == "fail"' "build-mode explicit path summary must have status=fail"
+assert_json_expr "$BUILD_MODE_EXPLICIT_FAIL_SUMMARY" '.failure_stage == "runtime"' "build-mode explicit path summary must have failure_stage=runtime"
+
+echo "[windows-desktop-installer-guardrails] build mode dry-run emits WSL-free preflight/build summary"
+BUILD_MODE_DRY_RUN_SUMMARY="$TMP_DIR/build_mode_dry_run_summary.json"
+BUILD_MODE_DRY_RUN_SUMMARY_PS="$(to_powershell_path "$BUILD_MODE_DRY_RUN_SUMMARY")"
+run_expect_pass \
+  "build_mode_dry_run" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -Mode build \
+    -DryRun \
+    -SummaryJson "$BUILD_MODE_DRY_RUN_SUMMARY_PS" \
+    -PrintSummaryJson 0
+
+if [[ ! -f "$BUILD_MODE_DRY_RUN_SUMMARY" ]]; then
+  echo "windows desktop installer guardrails failed: missing summary json for build mode dry-run"
+  cat "$TMP_DIR/build_mode_dry_run.log"
+  exit 1
+fi
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.status == "dry-run"' "build mode dry-run summary must have status=dry-run"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.installer_mode == "build"' "build mode dry-run summary must have installer_mode=build"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.build_mode == true' "build mode dry-run summary must have build_mode=true"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.wsl_required == false' "build mode dry-run summary must keep wsl_required=false"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.build_triggered == true' "build mode dry-run summary must mark build_triggered=true"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.preflight_status == "dry_run_skipped"' "build mode dry-run summary must set preflight_status=dry_run_skipped"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.release_bundle_summary_json | strings | length > 0' "build mode dry-run summary must include release_bundle_summary_json"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.launch_after_install == false' "build mode dry-run summary must disable launch_after_install"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.launch_status == "disabled_build_mode"' "build mode dry-run summary must set launch_status=disabled_build_mode"
+if ! grep -Fq 'preflight command:' "$TMP_DIR/build_mode_dry_run.log"; then
+  echo "windows desktop installer guardrails failed: missing preflight command marker in build mode dry-run log"
+  cat "$TMP_DIR/build_mode_dry_run.log"
+  exit 1
+fi
+if ! grep -Fq 'build command:' "$TMP_DIR/build_mode_dry_run.log"; then
+  echo "windows desktop installer guardrails failed: missing build command marker in build mode dry-run log"
+  cat "$TMP_DIR/build_mode_dry_run.log"
+  exit 1
+fi
+
 echo "[windows-desktop-installer-guardrails] print-summary marker appears when enabled"
 PRINT_SUMMARY_JSON="$TMP_DIR/print_summary.json"
 PRINT_SUMMARY_JSON_PS="$(to_powershell_path "$PRINT_SUMMARY_JSON")"
@@ -249,8 +322,8 @@ if ! grep -qE '"-ExecutionPolicy"[[:space:]]*,[[:space:]]*"Bypass"' "$SCRIPT_UND
   echo "windows desktop installer guardrails failed: missing powershell -ExecutionPolicy Bypass build invocation marker"
   exit 1
 fi
-if ! grep -qE '"-File"[[:space:]]*,[[:space:]]*\$releaseBundleScript' "$SCRIPT_UNDER_TEST"; then
-  echo "windows desktop installer guardrails failed: missing powershell -File \$releaseBundleScript build invocation marker"
+if ! grep -qE '"-File"[[:space:]]*,[[:space:]]*\$ReleaseBundleScriptPath' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop installer guardrails failed: missing powershell -File \$ReleaseBundleScriptPath build invocation marker"
   exit 1
 fi
 if ! grep -qE '&[[:space:]]+powershell[[:space:]]+@buildArgs' "$SCRIPT_UNDER_TEST"; then

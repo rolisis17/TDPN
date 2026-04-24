@@ -730,11 +730,47 @@ if [[ "$missing_subject_rc" -ne 2 ]]; then
 fi
 assert_file_contains "$MISSING_SUBJECT_LOG" "missing invite key subject" "missing clear missing-subject error text"
 assert_file_contains "$MISSING_SUBJECT_LOG" "failure_kind=missing_invite_subject_precondition" "missing stable missing-subject failure marker"
+assert_file_contains "$MISSING_SUBJECT_LOG" "operator_next_action: ./scripts/profile_default_gate_run.sh --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>" "missing exact missing-subject operator next command"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   echo "missing-subject path should not invoke signoff"
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
+
+echo "[profile-default-gate-run] placeholder subject resolves from INVITE_KEY env"
+: >"$SIGNOFF_CAPTURE"
+PLACEHOLDER_SUBJECT_RESOLVE_LOG="$TMP_DIR/profile_default_gate_run_placeholder_subject_resolve.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$TMP_DIR/curl_counter_placeholder_subject_resolve.txt" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="" \
+INVITE_KEY="inv-placeholder-subject-resolved" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --subject "INVITE_KEY" >"$PLACEHOLDER_SUBJECT_RESOLVE_LOG" 2>&1
+placeholder_subject_resolve_rc=$?
+set -e
+if [[ "$placeholder_subject_resolve_rc" -ne 0 ]]; then
+  echo "expected placeholder-subject env resolution path rc=0, got rc=$placeholder_subject_resolve_rc"
+  cat "$PLACEHOLDER_SUBJECT_RESOLVE_LOG"
+  exit 1
+fi
+placeholder_subject_resolve_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$placeholder_subject_resolve_line" ]]; then
+  echo "missing captured signoff invocation in placeholder-subject env resolution path"
+  cat "$PLACEHOLDER_SUBJECT_RESOLVE_LOG"
+  exit 1
+fi
+placeholder_subject_resolve_line_sp="${placeholder_subject_resolve_line//$'\t'/ }"
+assert_contains "$placeholder_subject_resolve_line_sp" "env_CAMPAIGN_SUBJECT=inv-placeholder-subject-resolved" "missing placeholder-subject env resolution forwarding"
+assert_not_contains "$placeholder_subject_resolve_line_sp" "--campaign-subject inv-placeholder-subject-resolved" "unexpected forwarded --campaign-subject credential arg in placeholder-subject env resolution path"
+assert_not_contains "$placeholder_subject_resolve_line_sp" "--subject INVITE_KEY" "unexpected forwarded --subject placeholder arg in placeholder-subject env resolution path"
+assert_file_contains "$PLACEHOLDER_SUBJECT_RESOLVE_LOG" "subject-placeholder-resolved" "missing placeholder-subject env resolution diagnostic marker"
+assert_file_contains "$PLACEHOLDER_SUBJECT_RESOLVE_LOG" "resolved_source=env:INVITE_KEY" "missing placeholder-subject resolved source marker"
 
 echo "[profile-default-gate-run] placeholder subject fails fast before endpoint wait"
 : >"$SIGNOFF_CAPTURE"
@@ -760,6 +796,7 @@ if [[ "$placeholder_subject_rc" -ne 2 ]]; then
 fi
 assert_file_contains "$PLACEHOLDER_SUBJECT_LOG" "failure_kind=missing_invite_subject_precondition reason=placeholder_subject" "missing placeholder-subject failure marker"
 assert_file_contains "$PLACEHOLDER_SUBJECT_LOG" "invite key subject appears to be placeholder text" "missing placeholder-subject rejection text"
+assert_file_contains "$PLACEHOLDER_SUBJECT_LOG" "operator_next_action: ./scripts/profile_default_gate_run.sh --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key>" "missing exact placeholder-subject operator next command"
 if [[ -s "$SIGNOFF_CAPTURE" ]]; then
   echo "placeholder-subject path should not invoke signoff"
   cat "$SIGNOFF_CAPTURE"
@@ -1150,6 +1187,60 @@ assert_contains "$live_wrapper_line_sp" "--campaign-timeout-sec 777" "missing li
 assert_contains "$live_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_summary.json" "missing live forwarded --summary-json"
 assert_contains "$live_wrapper_line_sp" "--print-summary-json 1" "missing live forwarded --print-summary-json"
 assert_contains "$live_wrapper_line_sp" "--omega 10 value" "missing live forwarded passthrough args"
+
+echo "[profile-default-gate-live] placeholder subject resolves from env INVITE_KEY"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_RESOLVE_LOG="$TMP_DIR/easy_node_profile_default_gate_live_placeholder_subject_resolve.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+INVITE_KEY="inv-live-placeholder-resolved" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "wrapper-live-placeholder-a.test" \
+  --host-b "wrapper-live-placeholder-b.test" \
+  --subject "INVITE_KEY" \
+  --reports-dir "$TMP_DIR/live_reports_placeholder_subject" \
+  --campaign-timeout-sec 779 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_placeholder_subject_summary.json" >"$EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_RESOLVE_LOG" 2>&1
+
+live_placeholder_subject_resolve_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_placeholder_subject_resolve_line" ]]; then
+  echo "missing easy_node live placeholder-subject env resolution forwarding capture"
+  cat "$EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_RESOLVE_LOG"
+  exit 1
+fi
+live_placeholder_subject_resolve_line_sp="${live_placeholder_subject_resolve_line//$'\t'/ }"
+assert_contains "$live_placeholder_subject_resolve_line_sp" "env_CAMPAIGN_SUBJECT=inv-live-placeholder-resolved" "missing live placeholder-subject env resolution forwarding"
+assert_not_contains "$live_placeholder_subject_resolve_line_sp" "--campaign-subject INVITE_KEY" "unexpected live placeholder --campaign-subject credential arg forwarding"
+assert_not_contains "$live_placeholder_subject_resolve_line_sp" "--subject INVITE_KEY" "unexpected live placeholder --subject credential arg forwarding"
+assert_file_contains "$EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_RESOLVE_LOG" "resolved invite subject placeholder from env INVITE_KEY" "missing live placeholder-subject env resolution diagnostic marker"
+
+echo "[profile-default-gate-live] unresolved placeholder subject fails closed before wrapper invocation"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_UNRESOLVED_LOG="$TMP_DIR/easy_node_profile_default_gate_live_placeholder_subject_unresolved.log"
+set +e
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+INVITE_KEY="" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "wrapper-live-placeholder-a.test" \
+  --host-b "wrapper-live-placeholder-b.test" \
+  --campaign-subject "INVITE_KEY" \
+  --reports-dir "$TMP_DIR/live_reports_placeholder_subject_unresolved" \
+  --campaign-timeout-sec 780 \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_placeholder_subject_unresolved_summary.json" >"$EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_UNRESOLVED_LOG" 2>&1
+live_placeholder_subject_unresolved_rc=$?
+set -e
+if [[ "$live_placeholder_subject_unresolved_rc" -ne 2 ]]; then
+  echo "expected profile-default-gate-live unresolved placeholder-subject path rc=2, got rc=$live_placeholder_subject_unresolved_rc"
+  cat "$EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_UNRESOLVED_LOG"
+  exit 1
+fi
+assert_file_contains "$EASY_NODE_LIVE_PLACEHOLDER_SUBJECT_UNRESOLVED_LOG" "invite subject placeholder INVITE_KEY could not be resolved from env INVITE_KEY" "missing live unresolved placeholder-subject fail-closed diagnostic marker"
+if [[ -s "$WRAPPER_CAPTURE" ]]; then
+  echo "profile-default-gate-live unresolved placeholder-subject path should not invoke wrapper"
+  cat "$WRAPPER_CAPTURE"
+  exit 1
+fi
 
 echo "[profile-default-gate-live] invalid --allow-remote-http-probe value fails closed"
 : >"$WRAPPER_CAPTURE"

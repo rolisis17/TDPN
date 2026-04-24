@@ -41,13 +41,13 @@ for arg in "$@"; do
     continue
   fi
   case "$arg" in
-    --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--parallel|--max-actions|--print-summary-json)
+    --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--run-live-archive|--archive-root|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--parallel|--max-actions|--print-summary-json)
       expect_value=1
       ;;
     --*=*)
       flag="${arg%%=*}"
       case "$flag" in
-        --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--parallel|--max-actions|--print-summary-json)
+        --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--run-live-archive|--archive-root|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--parallel|--max-actions|--print-summary-json)
           ;;
         *)
           echo "unknown argument: $arg" >&2
@@ -129,6 +129,8 @@ ROADMAP_LIVE_AND_PACK_ACTIONABLE_CAPTURE_FILE="$CAPTURE" \
 ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run \
   --reports-dir .easy-node-logs/roadmap_live_and_pack_actionable_contract \
   --summary-json .easy-node-logs/roadmap_live_and_pack_actionable_contract_summary.json \
+  --run-live-archive 1 \
+  --archive-root .easy-node-logs/roadmap_live_and_pack_actionable_contract_archive \
   --print-summary-json 1 \
   --max-actions 2 \
   --parallel 1 >"$STDOUT_OUT"
@@ -141,6 +143,8 @@ if [[ -z "$line" ]]; then
 fi
 assert_token "$line" $'\t--reports-dir\t.easy-node-logs/roadmap_live_and_pack_actionable_contract' "missing --reports-dir forwarding"
 assert_token "$line" $'\t--summary-json\t.easy-node-logs/roadmap_live_and_pack_actionable_contract_summary.json' "missing --summary-json forwarding"
+assert_token "$line" $'\t--run-live-archive\t1' "missing --run-live-archive forwarding"
+assert_token "$line" $'\t--archive-root\t.easy-node-logs/roadmap_live_and_pack_actionable_contract_archive' "missing --archive-root forwarding"
 assert_token "$line" $'\t--print-summary-json\t1' "missing --print-summary-json forwarding"
 assert_token "$line" $'\t--max-actions\t2' "missing --max-actions forwarding"
 assert_token "$line" $'\t--parallel\t1' "missing --parallel forwarding"
@@ -156,7 +160,7 @@ set +e
 ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_SCRIPT="$FAKE_SCRIPT" \
 ROADMAP_LIVE_AND_PACK_ACTIONABLE_CAPTURE_FILE="$CAPTURE" \
 FAKE_ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_RC=7 \
-./scripts/easy_node.sh roadmap-live-and-pack-actionable-run --parallel 1 >"$STDOUT_OUT" 2>"$STDERR_OUT"
+./scripts/easy_node.sh roadmap-live-and-pack-actionable-run --parallel 1 --run-live-archive 0 >"$STDOUT_OUT" 2>"$STDERR_OUT"
 rc=$?
 set -e
 if [[ "$rc" -ne 7 ]]; then
@@ -165,7 +169,7 @@ if [[ "$rc" -ne 7 ]]; then
   cat "$STDERR_OUT"
   exit 1
 fi
-if ! grep -F -- 'fake roadmap live-and-pack actionable run: --parallel 1' "$STDOUT_OUT" >/dev/null 2>&1; then
+if ! grep -F -- 'fake roadmap live-and-pack actionable run: --parallel 1 --run-live-archive 0' "$STDOUT_OUT" >/dev/null 2>&1; then
   echo "missing forwarded output text for non-zero exit contract"
   cat "$STDOUT_OUT"
   exit 1

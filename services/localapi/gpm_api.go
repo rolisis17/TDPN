@@ -42,6 +42,8 @@ const (
 	gpmAuthSignatureMaxLen         = 8 * 1024
 	gpmAuthSignatureEnvelopeMaxLen = 16 * 1024
 	gpmAuthVerifierOutputLimit     = 8 * 1024
+	gpmGapScanSummaryBodyLimit     = 2 << 20
+	gpmGapSummaryMaxAge            = 24 * time.Hour
 )
 
 var (
@@ -50,6 +52,9 @@ var (
 	errConnectSessionNotRegistered         = errors.New("session is not fully registered for connect")
 	errConnectSessionBootstrapTrustError   = errors.New("session bootstrap trust revalidation failed")
 	errConnectSessionBootstrapRevoked      = errors.New("session bootstrap directories are no longer trusted")
+	errGPMGapSummaryArtifactMissing        = errors.New("gpm gap summary artifact missing")
+	errGPMGapSummaryArtifactUnreadable     = errors.New("gpm gap summary artifact unreadable")
+	errGPMGapSummaryArtifactMalformed      = errors.New("gpm gap summary artifact malformed")
 
 	secp256k1FieldPrime   = mustBigIntFromHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
 	secp256k1CurveOrder   = mustBigIntFromHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
@@ -130,6 +135,38 @@ type gpmTrustedBootstrapManifestCache struct {
 	SignatureVerified bool
 	FetchedAtUTC      time.Time
 	SourceURL         string
+}
+
+type gpmGapScanSummaryFile struct {
+	Schema struct {
+		ID string `json:"id"`
+	} `json:"schema"`
+	GeneratedAtUTC string                  `json:"generated_at_utc"`
+	Status         string                  `json:"status"`
+	Counts         gpmGapSummaryCounts     `json:"counts"`
+	Items          []gpmGapScanSummaryItem `json:"items"`
+}
+
+type gpmGapSummaryCounts struct {
+	InProgress  int `json:"in_progress"`
+	MissingNext int `json:"missing_next"`
+	Total       int `json:"total"`
+}
+
+type gpmGapScanSummaryItem struct {
+	ID             string `json:"id"`
+	Section        string `json:"section"`
+	Ordinal        int    `json:"ordinal"`
+	Text           string `json:"text"`
+	NormalizedText string `json:"normalized_text,omitempty"`
+}
+
+type gpmGapSummarySnapshot struct {
+	SchemaID       string
+	GeneratedAtUTC string
+	Counts         gpmGapSummaryCounts
+	InProgress     []gpmGapScanSummaryItem
+	MissingNext    []gpmGapScanSummaryItem
 }
 
 type gpmAuthChallengeRequest struct {
@@ -956,6 +993,62 @@ func (s *Service) handleGPMAuditRecent(w http.ResponseWriter, r *http.Request) {
 			"order":          orderFilter,
 		},
 		"entries": result.Entries,
+	})
+}
+
+func (s *Service) handleGPMGapSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+
+	summary, artifactPath, err := s.readGPMGapSummarySnapshot()
+	if err != nil {
+		statusCode := http.StatusInternalServerError
+		status := "artifact_unreadable"
+		switch {
+		case errors.Is(err, errGPMGapSummaryArtifactMissing):
+			statusCode = http.StatusServiceUnavailable
+			status = "artifact_missing"
+		case errors.Is(err, errGPMGapSummaryArtifactMalformed):
+			status = "artifact_malformed"
+		case errors.Is(err, errGPMGapSummaryArtifactUnreadable):
+			status = "artifact_unreadable"
+		}
+		writeJSON(w, statusCode, map[string]any{
+			"ok":            false,
+			"status":        status,
+			"artifact_path": strings.TrimSpace(artifactPath),
+			"error":         err.Error(),
+		})
+		return
+	}
+
+	keyGaps := make([]string, 0, len(summary.MissingNext))
+	nextActions := make([]string, 0, len(summary.MissingNext))
+	for _, item := range summary.MissingNext {
+		keyGaps = append(keyGaps, item.Text)
+		nextActions = append(nextActions, item.Text)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":               true,
+		"status":           "ok",
+		"artifact_path":    strings.TrimSpace(artifactPath),
+		"schema_id":        summary.SchemaID,
+		"generated_at_utc": summary.GeneratedAtUTC,
+		"counts": map[string]any{
+			"in_progress":  summary.Counts.InProgress,
+			"missing_next": summary.Counts.MissingNext,
+			"total":        summary.Counts.Total,
+		},
+		"in_progress":  summary.InProgress,
+		"missing_next": summary.MissingNext,
+		"key_gaps":     keyGaps,
+		"next_actions": nextActions,
 	})
 }
 
@@ -1804,8 +1897,8 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 			})
 			return
 		}
-		currentUpdatedAtUTC := app.UpdatedAt.UTC()
-		if !ifUpdatedAtUTC.Equal(currentUpdatedAtUTC) {
+		currentUpdatedAtUTC := gpmOperatorPreconditionTimestamp(app.UpdatedAt)
+		if !gpmOperatorPreconditionTimestamp(ifUpdatedAtUTC).Equal(currentUpdatedAtUTC) {
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"ok":                     false,
 				"error":                  "operator application is stale; refresh and retry with latest updated_at_utc",
@@ -1830,7 +1923,7 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 	}
 	app.Status = decision
 	app.Reason = reason
-	app.UpdatedAt = time.Now().UTC()
+	app.UpdatedAt = gpmOperatorPreconditionTimestamp(time.Now().UTC())
 	s.gpmState.upsertOperator(app)
 
 	// Keep wallet sessions synchronized with the operator decision.
@@ -1851,6 +1944,10 @@ func (s *Service) handleGPMOperatorApprove(w http.ResponseWriter, r *http.Reques
 		"decision_auth": decisionAuth,
 		"application":   serializeGPMOperator(app),
 	})
+}
+
+func gpmOperatorPreconditionTimestamp(ts time.Time) time.Time {
+	return ts.UTC().Truncate(time.Second)
 }
 
 func serializeGPMSession(session gpmSession) map[string]any {
@@ -3047,9 +3144,6 @@ func (s *Service) writeBootstrapManifestCache(manifest gpmBootstrapManifest, sig
 		SignatureVerified: signatureVerified,
 		Manifest:          manifest,
 	}
-	if !s.hasManifestSignatureVerifierConfigured() && !s.gpmManifestRequireSignature {
-		cache.SignatureVerified = true
-	}
 	if s.hasManifestSignatureVerifierConfigured() && signatureVerified && len(manifestBody) > 0 && strings.TrimSpace(manifestSignature) != "" {
 		cache.ManifestPayloadBase64 = base64.StdEncoding.EncodeToString(manifestBody)
 		cache.ManifestSignature = strings.TrimSpace(manifestSignature)
@@ -3212,6 +3306,116 @@ func parseManifestSourceURL(raw string) (*urlpkg.URL, error) {
 		return nil, errors.New("url fragment is not allowed")
 	}
 	return parsed, nil
+}
+
+func (s *Service) readGPMGapSummarySnapshot() (gpmGapSummarySnapshot, string, error) {
+	artifactPath := strings.TrimSpace(s.gpmGapScanSummaryPath)
+	if artifactPath == "" {
+		return gpmGapSummarySnapshot{}, "", fmt.Errorf("%w: path is empty", errGPMGapSummaryArtifactMissing)
+	}
+
+	body, err := readFileWithHardLimit(artifactPath, gpmGapScanSummaryBodyLimit)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return gpmGapSummarySnapshot{}, artifactPath, fmt.Errorf("%w: %s", errGPMGapSummaryArtifactMissing, artifactPath)
+		}
+		return gpmGapSummarySnapshot{}, artifactPath, fmt.Errorf("%w: %v", errGPMGapSummaryArtifactUnreadable, err)
+	}
+
+	var parsed gpmGapScanSummaryFile
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return gpmGapSummarySnapshot{}, artifactPath, fmt.Errorf("%w: invalid json: %v", errGPMGapSummaryArtifactMalformed, err)
+	}
+
+	summary, err := normalizeGPMGapSummary(parsed)
+	if err != nil {
+		return gpmGapSummarySnapshot{}, artifactPath, fmt.Errorf("%w: %v", errGPMGapSummaryArtifactMalformed, err)
+	}
+	return summary, artifactPath, nil
+}
+
+func normalizeGPMGapSummary(in gpmGapScanSummaryFile) (gpmGapSummarySnapshot, error) {
+	schemaID := strings.TrimSpace(in.Schema.ID)
+	if schemaID != "gpm_gap_scan_summary" {
+		return gpmGapSummarySnapshot{}, fmt.Errorf("unsupported schema id %q", schemaID)
+	}
+
+	status := strings.TrimSpace(strings.ToLower(in.Status))
+	if status != "ok" {
+		return gpmGapSummarySnapshot{}, fmt.Errorf("artifact status must be ok, got %q", strings.TrimSpace(in.Status))
+	}
+
+	generatedAtUTC := strings.TrimSpace(in.GeneratedAtUTC)
+	if generatedAtUTC == "" {
+		return gpmGapSummarySnapshot{}, errors.New("generated_at_utc is required")
+	}
+	generatedAt, err := time.Parse(time.RFC3339, generatedAtUTC)
+	if err != nil {
+		return gpmGapSummarySnapshot{}, fmt.Errorf("generated_at_utc invalid: %w", err)
+	}
+	now := time.Now().UTC()
+	if generatedAt.After(now.Add(gpmManifestCacheFutureSkew)) {
+		return gpmGapSummarySnapshot{}, errors.New("generated_at_utc is in the future")
+	}
+	if now.Sub(generatedAt) > gpmGapSummaryMaxAge {
+		return gpmGapSummarySnapshot{}, errors.New("artifact summary is stale")
+	}
+
+	if in.Counts.InProgress < 0 || in.Counts.MissingNext < 0 || in.Counts.Total < 0 {
+		return gpmGapSummarySnapshot{}, errors.New("counts must be non-negative")
+	}
+
+	inProgress := make([]gpmGapScanSummaryItem, 0, len(in.Items))
+	missingNext := make([]gpmGapScanSummaryItem, 0, len(in.Items))
+	for idx, item := range in.Items {
+		section := strings.TrimSpace(strings.ToLower(item.Section))
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			return gpmGapSummarySnapshot{}, fmt.Errorf("item[%d] text is required", idx)
+		}
+		if item.Ordinal <= 0 {
+			return gpmGapSummarySnapshot{}, fmt.Errorf("item[%d] ordinal must be > 0", idx)
+		}
+
+		normalized := gpmGapScanSummaryItem{
+			ID:             strings.TrimSpace(item.ID),
+			Section:        section,
+			Ordinal:        item.Ordinal,
+			Text:           text,
+			NormalizedText: strings.TrimSpace(item.NormalizedText),
+		}
+		switch section {
+		case "in_progress":
+			inProgress = append(inProgress, normalized)
+		case "missing_next":
+			missingNext = append(missingNext, normalized)
+		default:
+			return gpmGapSummarySnapshot{}, fmt.Errorf("item[%d] section %q is unsupported", idx, item.Section)
+		}
+	}
+
+	if in.Counts.InProgress != len(inProgress) {
+		return gpmGapSummarySnapshot{}, fmt.Errorf("counts.in_progress=%d does not match parsed items=%d", in.Counts.InProgress, len(inProgress))
+	}
+	if in.Counts.MissingNext != len(missingNext) {
+		return gpmGapSummarySnapshot{}, fmt.Errorf("counts.missing_next=%d does not match parsed items=%d", in.Counts.MissingNext, len(missingNext))
+	}
+	expectedTotal := len(inProgress) + len(missingNext)
+	if in.Counts.Total != expectedTotal {
+		return gpmGapSummarySnapshot{}, fmt.Errorf("counts.total=%d does not match parsed items=%d", in.Counts.Total, expectedTotal)
+	}
+
+	return gpmGapSummarySnapshot{
+		SchemaID:       schemaID,
+		GeneratedAtUTC: generatedAtUTC,
+		Counts: gpmGapSummaryCounts{
+			InProgress:  len(inProgress),
+			MissingNext: len(missingNext),
+			Total:       expectedTotal,
+		},
+		InProgress:  inProgress,
+		MissingNext: missingNext,
+	}, nil
 }
 
 func readFileWithHardLimit(path string, maxBytes int64) ([]byte, error) {

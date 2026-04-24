@@ -178,6 +178,10 @@ if ! grep -qF 'npm.cmd run tauri -- dev' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing tauri dev remediation command marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'scripts\windows\desktop_node.cmd npm run generate:windows-icon' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing windows icon generation remediation command marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 if ! grep -qF 'desktop_one_click.ps1' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing one-click rerun remediation marker in $SCRIPT_UNDER_TEST"
   exit 1
@@ -210,6 +214,18 @@ if ! grep -qF 'developer.microsoft.com/windows/downloads/windows-sdk/' "$SCRIPT_
 fi
 if ! grep -qF 'developer.microsoft.com/microsoft-edge/webview2/' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing WebView2 official remediation hint marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'desktop asset report:' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing desktop asset report marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'desktop_assets' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing desktop_assets summary marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'desktop_asset_issue_ids' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing desktop_asset_issue_ids summary marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
 
@@ -278,6 +294,11 @@ if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd r
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '.recommended_commands | any(type == "string" and contains("generate:windows-icon"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing windows icon generation remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! jq -e 'if ((.tool_report.jq // "") | tostring | length) == 0 then (.missing_package_ids | index("jqlang.jq") != null) else true end' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: missing package ids do not include jqlang.jq when jq tool is missing"
   cat "$SUMMARY_JSON"
@@ -295,6 +316,16 @@ if ! jq -e 'if .desktop_prerequisites.windows_sdk.installed == false then (.reco
 fi
 if ! jq -e '.desktop_prerequisites | type == "object" and has("msvc_build_tools_x64") and has("windows_sdk") and has("webview2_runtime")' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing desktop_prerequisites object with expected keys"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.desktop_assets | type == "object" and has("source_icon") and has("generated_icon") and has("tauri_bundle_icon")' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing desktop_assets object with expected keys"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.desktop_asset_issue_ids | type == "array"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing desktop_asset_issue_ids array"
   cat "$SUMMARY_JSON"
   exit 1
 fi

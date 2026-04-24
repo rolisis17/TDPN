@@ -1,4 +1,6 @@
 param(
+  [ValidateSet("install", "build")]
+  [string]$Mode = "install",
   [string]$InstallerPath = "",
   [ValidateSet("auto", "nsis", "msi")]
   [string]$InstallerType = "auto",
@@ -21,6 +23,47 @@ $ErrorActionPreference = "Stop"
 function Write-Step {
   param([string]$Message)
   Write-Host "[desktop-installer] $Message"
+}
+
+function New-RemediationMessage {
+  param(
+    [string]$Headline,
+    [string[]]$Hints
+  )
+
+  $lines = @($Headline)
+  foreach ($hint in @($Hints)) {
+    if ([string]::IsNullOrWhiteSpace($hint)) {
+      continue
+    }
+    $lines += "- $hint"
+  }
+  return ($lines -join [Environment]::NewLine)
+}
+
+function Convert-ToStringArray {
+  param(
+    [object]$Values
+  )
+
+  $result = @()
+  if ($null -eq $Values) {
+    return @($result)
+  }
+
+  foreach ($value in @($Values)) {
+    if ($null -eq $value) {
+      continue
+    }
+
+    $text = [string]$value
+    if ([string]::IsNullOrWhiteSpace($text)) {
+      continue
+    }
+    $result += $text.Trim()
+  }
+
+  return @($result)
 }
 
 function Resolve-InstallerTypeFromPath {
@@ -115,6 +158,188 @@ function Get-CommandDisplay {
     $parts += ("'" + ($arg -replace "'", "''") + "'")
   }
   return ($parts -join " ")
+}
+
+function Invoke-DesktopBuildPreflight {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRootPath,
+    [bool]$InstallMissingRequested,
+    [bool]$DryRunRequested
+  )
+
+  $doctorScript = Join-Path $RepoRootPath "scripts\windows\desktop_doctor.ps1"
+  if (-not (Test-Path -LiteralPath $doctorScript -PathType Leaf)) {
+    throw (New-RemediationMessage -Headline "desktop preflight script was not found: $doctorScript" -Hints @(
+      "Restore the repository script path and rerun.",
+      "Manual fallback: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode check"
+    ))
+  }
+
+  $doctorMode = if ($InstallMissingRequested) { "fix" } else { "check" }
+  $doctorSummaryPath = Join-Path $RepoRootPath ".easy-node-logs\desktop_installer_preflight_summary.json"
+  $doctorArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $doctorScript,
+    "-Mode", $doctorMode,
+    "-EnablePolicyBypass",
+    "-SummaryJson", $doctorSummaryPath,
+    "-PrintSummaryJson", "0"
+  )
+  if ($InstallMissingRequested) {
+    $doctorArgs += "-InstallMissing"
+  }
+  if ($DryRunRequested) {
+    $doctorArgs += "-DryRun"
+  }
+
+  Write-Step ("preflight command: powershell {0}" -f (Get-CommandDisplay -Path "powershell" -Arguments $doctorArgs))
+
+  if ($DryRunRequested) {
+    Write-Step "dry-run enabled; preflight execution skipped"
+    return [pscustomobject]@{
+      attempted = $false
+      mode = $doctorMode
+      status = "dry_run_skipped"
+      summary_path = $doctorSummaryPath
+      missing_package_ids = @()
+      desktop_asset_issue_ids = @()
+      recommended_commands = @()
+    }
+  }
+
+  & powershell @doctorArgs
+  $doctorRc = $LASTEXITCODE
+  if ($doctorRc -ne 0) {
+    throw (New-RemediationMessage -Headline ("desktop preflight command failed with exit code {0}." -f $doctorRc) -Hints @(
+      "Rerun explicitly to inspect details: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode $doctorMode -SummaryJson .\.easy-node-logs\desktop_installer_preflight_summary.json -PrintSummaryJson 1",
+      "If policy/tooling drift exists, run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
+    ))
+  }
+
+  if (-not (Test-Path -LiteralPath $doctorSummaryPath -PathType Leaf)) {
+    throw (New-RemediationMessage -Headline "desktop preflight did not write its summary JSON." -Hints @(
+      "Rerun desktop_doctor with explicit output path and inspect the failure:",
+      "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode $doctorMode -SummaryJson .\.easy-node-logs\desktop_installer_preflight_summary.json -PrintSummaryJson 1"
+    ))
+  }
+
+  $doctorSummary = $null
+  try {
+    $doctorSummary = Get-Content -Raw -LiteralPath $doctorSummaryPath | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    throw (New-RemediationMessage -Headline ("desktop preflight summary could not be parsed: {0}" -f $doctorSummaryPath) -Hints @(
+      "Delete the corrupted summary file and rerun desktop_doctor preflight.",
+      "If this persists, rerun with -PrintSummaryJson 1 and inspect the JSON payload."
+    ))
+  }
+
+  $missingPackageIds = @()
+  $desktopAssetIssueIds = @()
+  $recommendedCommands = @()
+  $doctorStatus = ""
+
+  if ($null -ne $doctorSummary) {
+    $missingPackageIds = Convert-ToStringArray -Values $doctorSummary.missing_package_ids
+    $desktopAssetIssueIds = Convert-ToStringArray -Values $doctorSummary.desktop_asset_issue_ids
+    $recommendedCommands = Convert-ToStringArray -Values $doctorSummary.recommended_commands
+    if ($doctorSummary.PSObject.Properties.Name -contains "status" -and $null -ne $doctorSummary.status) {
+      $doctorStatus = [string]$doctorSummary.status
+    }
+  }
+
+  $hasBlocking = $missingPackageIds.Count -gt 0 -or $desktopAssetIssueIds.Count -gt 0
+  if (-not $hasBlocking -and -not [string]::IsNullOrWhiteSpace($doctorStatus)) {
+    $normalizedStatus = $doctorStatus.Trim().ToLowerInvariant()
+    if ($normalizedStatus -eq "missing" -or $normalizedStatus -eq "error") {
+      $hasBlocking = $true
+    }
+  }
+
+  if ($hasBlocking) {
+    $hints = @(
+      "Desktop installer build is fail-closed on preflight blockers.",
+      "Run automatic remediation: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
+    )
+
+    foreach ($command in $recommendedCommands) {
+      if ([string]::IsNullOrWhiteSpace($command)) {
+        continue
+      }
+      $hints += ("recommended: {0}" -f $command)
+    }
+
+    $statusHint = if ([string]::IsNullOrWhiteSpace($doctorStatus)) { "unknown" } else { $doctorStatus }
+    throw (New-RemediationMessage -Headline ("desktop preflight reported blocking issues (status={0})." -f $statusHint) -Hints $hints)
+  }
+
+  return [pscustomobject]@{
+    attempted = $true
+    mode = $doctorMode
+    status = if ([string]::IsNullOrWhiteSpace($doctorStatus)) { "ok" } else { $doctorStatus }
+    summary_path = $doctorSummaryPath
+    missing_package_ids = @($missingPackageIds)
+    desktop_asset_issue_ids = @($desktopAssetIssueIds)
+    recommended_commands = @($recommendedCommands)
+  }
+}
+
+function Invoke-ReleaseBundleBuild {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ReleaseBundleScriptPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ChannelValue,
+    [bool]$InstallMissingRequested,
+    [bool]$DryRunRequested,
+    [Parameter(Mandatory = $true)]
+    [string]$ReleaseSummaryPath
+  )
+
+  if (-not (Test-Path -LiteralPath $ReleaseBundleScriptPath -PathType Leaf)) {
+    throw "desktop release bundle script not found: $ReleaseBundleScriptPath"
+  }
+
+  $buildArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $ReleaseBundleScriptPath,
+    "-Channel", $ChannelValue,
+    "-SummaryJson", $ReleaseSummaryPath,
+    "-PrintSummaryJson", "0"
+  )
+  if ($InstallMissingRequested) {
+    $buildArgs += "-InstallMissing"
+  }
+
+  Write-Step ("build command: powershell {0}" -f (Get-CommandDisplay -Path "powershell" -Arguments $buildArgs))
+
+  if ($DryRunRequested) {
+    Write-Step "dry-run enabled; release bundle build execution skipped"
+    return [pscustomobject]@{
+      attempted = $false
+      summary_path = $ReleaseSummaryPath
+      rc = 0
+      status = "dry_run_skipped"
+    }
+  }
+
+  & powershell @buildArgs
+  $buildRc = $LASTEXITCODE
+  if ($buildRc -ne 0) {
+    throw (New-RemediationMessage -Headline ("desktop release bundle failed with exit code {0}." -f $buildRc) -Hints @(
+      "Rerun directly for detailed output: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_release_bundle.ps1 -Channel $ChannelValue -InstallMissing",
+      "If prerequisites are still missing, run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
+    ))
+  }
+
+  return [pscustomobject]@{
+    attempted = $true
+    summary_path = $ReleaseSummaryPath
+    rc = $buildRc
+    status = "ok"
+  }
 }
 
 function Normalize-PathCandidate {
@@ -351,8 +576,10 @@ $summary = [ordered]@{
   status = "fail"
   rc = 1
   platform = "windows"
-  mode = "desktop_installer_scaffold"
+  mode = if ($Mode -eq "build") { "desktop_installer_build_scaffold" } else { "desktop_installer_scaffold" }
+  installer_mode = $Mode
   channel = $Channel
+  wsl_required = $false
   installer_path = ""
   installer_type = ""
   installer_source = ""
@@ -360,6 +587,15 @@ $summary = [ordered]@{
   dry_run = [bool]$DryRun
   build_if_missing = [bool]$BuildIfMissing
   build_triggered = $false
+  build_mode = [bool]($Mode -eq "build")
+  preflight_attempted = $false
+  preflight_mode = ""
+  preflight_status = "not_run"
+  preflight_summary_json = ""
+  preflight_missing_package_ids = @()
+  preflight_desktop_asset_issue_ids = @()
+  preflight_recommended_commands = @()
+  release_bundle_summary_json = ""
   launch_after_install = [bool]$LaunchAfterInstall
   launch_attempted = $false
   launch_status = if ([bool]$LaunchAfterInstall) { "not_attempted" } else { "disabled" }
@@ -367,6 +603,7 @@ $summary = [ordered]@{
   launch_failure_reason = ""
   icon_scaffold_created = $false
   icon_scaffold_error = ""
+  recommended_commands = @()
   failure_stage = ""
 }
 
@@ -374,6 +611,8 @@ $exitCode = 1
 
 try {
   Write-Step "mode=scaffold-non-production"
+  Write-Step "installer_mode=$Mode"
+  Write-Step "wsl_required=false"
   Write-Step "repo_root=$repoRoot"
   Write-Step "bundle_root=$bundleRoot"
   Write-Step "installer_type=$InstallerType"
@@ -384,9 +623,24 @@ try {
   Write-Step "launch_after_install=$([bool]$LaunchAfterInstall)"
   Write-Step ("installed_executable_path_override={0}" -f (Normalize-PathCandidate -Value $InstalledExecutablePath))
 
+  $summary.recommended_commands = @(
+    "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_installer.ps1 -Mode build -InstallMissing",
+    "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass",
+    "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_release_bundle.ps1 -Channel $Channel -InstallMissing"
+  )
+
+  $buildMode = $Mode -eq "build"
+  if ($buildMode) {
+    $summary.build_if_missing = $true
+    Write-Step "build mode forces release-bundle build path"
+  }
   $selectedInstallerPath = ""
   $selectedInstallerType = ""
   $selectedInstallerSource = ""
+
+  if ($buildMode -and -not [string]::IsNullOrWhiteSpace($InstallerPath)) {
+    throw "build mode does not accept -InstallerPath. Use -Mode build without explicit artifacts so the script can run preflight and build installers."
+  }
 
   if (-not [string]::IsNullOrWhiteSpace($InstallerPath)) {
     $summary.failure_stage = "installer_validate"
@@ -411,7 +665,22 @@ try {
   } else {
     $summary.failure_stage = "installer_discovery"
     $found = Find-InstallerArtifact -BundleRoot $bundleRoot -RequestedType $InstallerType
-    if ($null -eq $found -and $BuildIfMissing) {
+    $releaseBundleSummaryPath = Join-Path $repoRoot ".easy-node-logs\desktop_installer_release_bundle_summary.json"
+
+    if ($buildMode) {
+      $summary.failure_stage = "preflight"
+      $preflightResult = Invoke-DesktopBuildPreflight -RepoRootPath $repoRoot -InstallMissingRequested ([bool]$InstallMissing) -DryRunRequested ([bool]$DryRun)
+      $summary.preflight_attempted = [bool]$preflightResult.attempted
+      $summary.preflight_mode = [string]$preflightResult.mode
+      $summary.preflight_status = [string]$preflightResult.status
+      $summary.preflight_summary_json = [string]$preflightResult.summary_path
+      $summary.preflight_missing_package_ids = @($preflightResult.missing_package_ids)
+      $summary.preflight_desktop_asset_issue_ids = @($preflightResult.desktop_asset_issue_ids)
+      $summary.preflight_recommended_commands = @($preflightResult.recommended_commands)
+      if (@($summary.preflight_recommended_commands).Count -gt 0) {
+        $summary.recommended_commands = @($summary.preflight_recommended_commands + $summary.recommended_commands)
+      }
+
       try {
         $summary.icon_scaffold_created = [bool](Ensure-TauriIconScaffoldForBuild -RepoRoot $repoRoot)
       } catch {
@@ -420,129 +689,178 @@ try {
         Write-Step "warning=icon_scaffold_failed error=$($summary.icon_scaffold_error)"
       }
 
-      if (-not (Test-Path -LiteralPath $releaseBundleScript -PathType Leaf)) {
-        throw "desktop release bundle script not found: $releaseBundleScript"
+      $summary.build_triggered = $true
+      $summary.failure_stage = "build"
+      $summary.release_bundle_summary_json = $releaseBundleSummaryPath
+      [void](Invoke-ReleaseBundleBuild -ReleaseBundleScriptPath $releaseBundleScript -ChannelValue $Channel -InstallMissingRequested ([bool]$InstallMissing) -DryRunRequested ([bool]$DryRun) -ReleaseSummaryPath $releaseBundleSummaryPath)
+
+      $summary.failure_stage = "installer_discovery"
+      $found = Find-InstallerArtifact -BundleRoot $bundleRoot -RequestedType $InstallerType
+    } elseif ($null -eq $found -and $BuildIfMissing) {
+      $summary.failure_stage = "preflight"
+      $preflightResult = Invoke-DesktopBuildPreflight -RepoRootPath $repoRoot -InstallMissingRequested ([bool]$InstallMissing) -DryRunRequested ([bool]$DryRun)
+      $summary.preflight_attempted = [bool]$preflightResult.attempted
+      $summary.preflight_mode = [string]$preflightResult.mode
+      $summary.preflight_status = [string]$preflightResult.status
+      $summary.preflight_summary_json = [string]$preflightResult.summary_path
+      $summary.preflight_missing_package_ids = @($preflightResult.missing_package_ids)
+      $summary.preflight_desktop_asset_issue_ids = @($preflightResult.desktop_asset_issue_ids)
+      $summary.preflight_recommended_commands = @($preflightResult.recommended_commands)
+      if (@($summary.preflight_recommended_commands).Count -gt 0) {
+        $summary.recommended_commands = @($summary.preflight_recommended_commands + $summary.recommended_commands)
+      }
+
+      try {
+        $summary.icon_scaffold_created = [bool](Ensure-TauriIconScaffoldForBuild -RepoRoot $repoRoot)
+      } catch {
+        $summary.icon_scaffold_created = $false
+        $summary.icon_scaffold_error = [string]$_.Exception.Message
+        Write-Step "warning=icon_scaffold_failed error=$($summary.icon_scaffold_error)"
       }
 
       $summary.build_triggered = $true
       $summary.failure_stage = "build"
-      $buildArgs = @(
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", $releaseBundleScript,
-        "-Channel", $Channel
-      )
-      if ($InstallMissing) {
-        $buildArgs += "-InstallMissing"
-      }
-
-      Write-Step ("installer not found; triggering build: powershell {0}" -f (Get-CommandDisplay -Path "powershell" -Arguments $buildArgs))
-      & powershell @buildArgs
-      $buildRc = $LASTEXITCODE
-      if ($buildRc -ne 0) {
-        throw "desktop release bundle failed with exit code $buildRc"
-      }
+      $summary.release_bundle_summary_json = $releaseBundleSummaryPath
+      [void](Invoke-ReleaseBundleBuild -ReleaseBundleScriptPath $releaseBundleScript -ChannelValue $Channel -InstallMissingRequested ([bool]$InstallMissing) -DryRunRequested ([bool]$DryRun) -ReleaseSummaryPath $releaseBundleSummaryPath)
 
       $summary.failure_stage = "installer_discovery"
       $found = Find-InstallerArtifact -BundleRoot $bundleRoot -RequestedType $InstallerType
     }
 
     if ($null -eq $found) {
-      throw "installer artifact not found under bundle root: $bundleRoot"
+      if ($buildMode -and $DryRun) {
+        $selectedInstallerPath = ""
+        $selectedInstallerType = if ($InstallerType -eq "auto") { "" } else { $InstallerType }
+        $selectedInstallerSource = "dry_run_unresolved"
+        Write-Step "dry-run build mode: installer discovery skipped because build execution was not run"
+      } else {
+        throw (New-RemediationMessage -Headline "installer artifact not found under bundle root: $bundleRoot" -Hints @(
+          "Run Windows-native build with remediation: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_installer.ps1 -Mode build -InstallMissing",
+          "Or call release bundle directly: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_release_bundle.ps1 -Channel $Channel -InstallMissing",
+          "Then rerun this installer flow."
+        ))
+      }
+    } else {
+      $selectedInstallerPath = [string]$found.installer_path
+      $selectedInstallerType = [string]$found.installer_type
+      $selectedInstallerSource = if ($summary.build_triggered) { "discovered_after_build" } else { "discovered" }
+      Write-Step "installer discovered from release bundle artifacts"
     }
-
-    $selectedInstallerPath = [string]$found.installer_path
-    $selectedInstallerType = [string]$found.installer_type
-    $selectedInstallerSource = if ($summary.build_triggered) { "discovered_after_build" } else { "discovered" }
-    Write-Step "installer discovered from release bundle artifacts"
   }
 
   $summary.installer_path = $selectedInstallerPath
   $summary.installer_type = $selectedInstallerType
   $summary.installer_source = $selectedInstallerSource
 
-  $summary.failure_stage = "install"
-  $processPath = $selectedInstallerPath
-  $processArgs = @()
-
-  if ($selectedInstallerType -eq "msi") {
-    $processPath = "msiexec.exe"
-    $processArgs = @("/i", $selectedInstallerPath)
-    if ($Silent) {
-      $processArgs += "/quiet"
-      $processArgs += "/norestart"
+  if ($buildMode) {
+    $summary.launch_after_install = $false
+    $summary.launch_attempted = $false
+    $summary.launch_status = "disabled_build_mode"
+    $summary.launch_failure_reason = ""
+    if ($DryRun) {
+      $summary.status = "dry-run"
+      Write-Step "dry-run enabled; build-only mode completed without executing release build"
+    } else {
+      $summary.status = "ok"
+      if ([string]::IsNullOrWhiteSpace($selectedInstallerPath)) {
+        Write-Step "build-only mode complete; installer artifact location unresolved"
+      } else {
+        Write-Step "build-only mode complete; installer artifact ready"
+      }
     }
-  } elseif ($selectedInstallerType -eq "nsis") {
-    if ($Silent) {
-      $processArgs += "/S"
-    }
-  } else {
-    throw "unsupported installer type: $selectedInstallerType"
-  }
-
-  $installCommand = Get-CommandDisplay -Path $processPath -Arguments $processArgs
-  Write-Step "install command: $installCommand"
-
-  if ($DryRun) {
-    Write-Step "dry-run enabled; installer execution skipped"
+    $summary.failure_stage = ""
     $exitCode = 0
   } else {
-    $process = Start-Process -FilePath $processPath -ArgumentList $processArgs -Wait -PassThru
-    $exitCode = [int]$process.ExitCode
-    Write-Step "installer exited rc=$exitCode"
-  }
+    $summary.failure_stage = "install"
+    $processPath = $selectedInstallerPath
+    $processArgs = @()
 
-  if ($exitCode -eq 0) {
-    $summary.status = "ok"
-    $summary.failure_stage = ""
-
-    if ([bool]$LaunchAfterInstall) {
-      $launchTarget = Resolve-LaunchExecutableTarget -OverridePath $InstalledExecutablePath -RepoRootPath $repoRoot
-      $launchPath = [string]$launchTarget.path
-      $summary.launched_executable_path = $launchPath
-
-      if ([string]::IsNullOrWhiteSpace($launchPath)) {
-        $summary.launch_status = "warning_missing_executable"
-        $summary.launch_failure_reason = "unable to resolve installed executable path automatically"
-        Write-Step "warning=launch_target_missing reason=$($summary.launch_failure_reason)"
-      } else {
-        $launchCommand = Get-CommandDisplay -Path $launchPath -Arguments @()
-        Write-Step "launch command: $launchCommand"
-
-        if ($DryRun) {
-          $summary.launch_status = "dry_run_would_launch"
-          $summary.launch_attempted = $false
-          $summary.launch_failure_reason = ""
-          Write-Step "dry-run enabled; launch execution skipped"
-        } elseif (-not [bool]$launchTarget.exists) {
-          $summary.launch_status = "warning_missing_executable"
-          $summary.launch_failure_reason = "launch target does not exist: $launchPath"
-          Write-Step "warning=launch_target_missing reason=$($summary.launch_failure_reason)"
-        } else {
-          try {
-            $summary.launch_attempted = $true
-            Start-Process -FilePath $launchPath | Out-Null
-            $summary.launch_status = "launched"
-            $summary.launch_failure_reason = ""
-            Write-Step "launch started"
-          } catch {
-            $summary.launch_status = "warning_launch_failed"
-            $summary.launch_failure_reason = [string]$_.Exception.Message
-            Write-Step "warning=launch_failed error=$($summary.launch_failure_reason)"
-          }
-        }
+    if ($selectedInstallerType -eq "msi") {
+      $processPath = "msiexec.exe"
+      $processArgs = @("/i", $selectedInstallerPath)
+      if ($Silent) {
+        $processArgs += "/quiet"
+        $processArgs += "/norestart"
+      }
+    } elseif ($selectedInstallerType -eq "nsis") {
+      if ($Silent) {
+        $processArgs += "/S"
       }
     } else {
-      $summary.launch_status = "disabled"
-      $summary.launch_attempted = $false
-      $summary.launch_failure_reason = ""
+      throw "unsupported installer type: $selectedInstallerType"
     }
-  } else {
-    $summary.status = "fail"
+
+    $installCommand = Get-CommandDisplay -Path $processPath -Arguments $processArgs
+    Write-Step "install command: $installCommand"
+
+    if ($DryRun) {
+      Write-Step "dry-run enabled; installer execution skipped"
+      $exitCode = 0
+    } else {
+      $process = Start-Process -FilePath $processPath -ArgumentList $processArgs -Wait -PassThru
+      $exitCode = [int]$process.ExitCode
+      Write-Step "installer exited rc=$exitCode"
+    }
+
+    if ($exitCode -eq 0) {
+      $summary.status = "ok"
+      $summary.failure_stage = ""
+
+      if ([bool]$LaunchAfterInstall) {
+        $launchTarget = Resolve-LaunchExecutableTarget -OverridePath $InstalledExecutablePath -RepoRootPath $repoRoot
+        $launchPath = [string]$launchTarget.path
+        $summary.launched_executable_path = $launchPath
+
+        if ([string]::IsNullOrWhiteSpace($launchPath)) {
+          $summary.launch_status = "warning_missing_executable"
+          $summary.launch_failure_reason = "unable to resolve installed executable path automatically"
+          Write-Step "warning=launch_target_missing reason=$($summary.launch_failure_reason)"
+        } else {
+          $launchCommand = Get-CommandDisplay -Path $launchPath -Arguments @()
+          Write-Step "launch command: $launchCommand"
+
+          if ($DryRun) {
+            $summary.launch_status = "dry_run_would_launch"
+            $summary.launch_attempted = $false
+            $summary.launch_failure_reason = ""
+            Write-Step "dry-run enabled; launch execution skipped"
+          } elseif (-not [bool]$launchTarget.exists) {
+            $summary.launch_status = "warning_missing_executable"
+            $summary.launch_failure_reason = "launch target does not exist: $launchPath"
+            Write-Step "warning=launch_target_missing reason=$($summary.launch_failure_reason)"
+          } else {
+            try {
+              $summary.launch_attempted = $true
+              Start-Process -FilePath $launchPath | Out-Null
+              $summary.launch_status = "launched"
+              $summary.launch_failure_reason = ""
+              Write-Step "launch started"
+            } catch {
+              $summary.launch_status = "warning_launch_failed"
+              $summary.launch_failure_reason = [string]$_.Exception.Message
+              Write-Step "warning=launch_failed error=$($summary.launch_failure_reason)"
+            }
+          }
+        }
+      } else {
+        $summary.launch_status = "disabled"
+        $summary.launch_attempted = $false
+        $summary.launch_failure_reason = ""
+      }
+    } else {
+      $summary.status = "fail"
+    }
   }
 } catch {
+  $summary.status = "fail"
   if ([string]::IsNullOrWhiteSpace($summary.failure_stage)) {
     $summary.failure_stage = "runtime"
+  }
+  if ($summary.recommended_commands.Count -eq 0) {
+    $summary.recommended_commands = @(
+      "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_installer.ps1 -Mode build -InstallMissing",
+      "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
+    )
   }
   Write-Step "error=$($_.Exception.Message)"
   $exitCode = 1

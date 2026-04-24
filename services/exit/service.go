@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -107,8 +108,10 @@ type Service struct {
 	settlementReconcileSec           int
 	startupSyncTimeout               time.Duration
 	verifyRefreshMinInterval         time.Duration
+	exitRelayID                      string
 	betaStrict                       bool
 	prodStrict                       bool
+	strictModeParseErr               error
 	enforcer                         *policy.Enforcer
 	httpClient                       *http.Client
 	httpSrv                          *http.Server
@@ -218,8 +221,9 @@ const allowDangerousIssuerKeysetReplacement = "EXIT_ALLOW_DANGEROUS_ISSUER_KEYSE
 const allowDangerousCosmosAdapterFallback = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
 
 var (
-	egressChainPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	egressIfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,64}$`)
+	egressChainPattern            = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	egressIfacePattern            = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,64}$`)
+	sharedAddressSpaceCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
 )
 
 func New() *Service {
@@ -434,8 +438,13 @@ func New() *Service {
 			verifyRefreshMinInterval = time.Duration(n) * time.Millisecond
 		}
 	}
-	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("EXIT_BETA_STRICT") == "1"
-	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("EXIT_PROD_STRICT") == "1"
+	exitRelayID := strings.TrimSpace(os.Getenv("EXIT_RELAY_ID"))
+	betaStrict, betaStrictErr := envStrictBoolOr("BETA_STRICT_MODE", "EXIT_BETA_STRICT", false)
+	prodStrict, prodStrictErr := envStrictBoolOr("PROD_STRICT_MODE", "EXIT_PROD_STRICT", false)
+	strictModeParseErr := firstEnvParseError(
+		annotateEnvParseError("BETA_STRICT_MODE/EXIT_BETA_STRICT", betaStrictErr),
+		annotateEnvParseError("PROD_STRICT_MODE/EXIT_PROD_STRICT", prodStrictErr),
+	)
 	sessionReserve := int64(200000)
 	if raw := strings.TrimSpace(os.Getenv("EXIT_SESSION_RESERVE_MICROS")); raw != "" {
 		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
@@ -512,8 +521,10 @@ func New() *Service {
 		settlementReconcileSec:           settlementReconcileSec,
 		startupSyncTimeout:               startupSyncTimeout,
 		verifyRefreshMinInterval:         verifyRefreshMinInterval,
+		exitRelayID:                      exitRelayID,
 		betaStrict:                       betaStrict,
 		prodStrict:                       prodStrict,
+		strictModeParseErr:               strictModeParseErr,
 		enforcer:                         policy.NewEnforcer(),
 		httpClient:                       &http.Client{Timeout: 5 * time.Second},
 		issuerPubs:                       make(map[string]ed25519.PublicKey),
@@ -641,7 +652,7 @@ func newSettlementServiceFromEnv() settlement.Service {
 		} else if err != nil {
 			failCosmosInit("exit settlement: cosmos adapter init failed (%v)", err)
 		} else {
-			opts = append(opts, settlement.WithChainAdapter(adapter))
+			opts = append(opts, settlement.WithChainAdapter(adapter), settlement.WithBlockchainMode(true))
 			log.Printf("exit settlement: cosmos adapter enabled endpoint=%s", endpoint)
 		}
 
@@ -836,6 +847,12 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.strictModeParseErr != nil {
+		return s.strictModeParseErr
+	}
+	if s.enforcePathOpenExitIdentityBinding() && strings.TrimSpace(s.exitRelayID) == "" {
+		return fmt.Errorf("strict exit identity binding requires EXIT_RELAY_ID")
+	}
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
@@ -966,6 +983,15 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if s.peerRebindAfter > 0 {
 			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_PEER_REBIND_SEC=0")
+		}
+		if envEnabled(allowDangerousOutboundPrivateDNS) {
+			return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousOutboundPrivateDNS)
+		}
+		if envEnabled(allowDangerousIssuerKeysetReplacement) {
+			return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousIssuerKeysetReplacement)
+		}
+		if envEnabled(allowDangerousCosmosAdapterFallback) {
+			return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousCosmosAdapterFallback)
 		}
 		if s.startupSyncTimeout <= 0 {
 			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_STARTUP_SYNC_TIMEOUT_SEC>0")
@@ -1331,22 +1357,22 @@ func (s *Service) singleActiveSession(nowUnix int64) string {
 
 func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string, uint64, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	session, ok := s.sessions[sessionID]
 	if !ok {
+		s.mu.Unlock()
 		return "", 0, false
 	}
 	if now.Unix() >= session.claims.ExpiryUnix {
-		staleProxy := s.takeWGProxyLocked(sessionID, false)
-		delete(s.sessions, sessionID)
-		s.metrics.ActiveSessions = uint64(len(s.sessions))
-		if staleProxy != nil {
-			_ = staleProxy.Close()
+		s.mu.Unlock()
+		teardown := s.teardownSession(context.Background(), sessionID, sessionTeardownOptions{})
+		if teardown.wgRemoveErr != nil {
+			log.Printf("exit expired session teardown warning session=%s err=%v", sessionID, teardown.wgRemoveErr)
 		}
 		return "", 0, false
 	}
 	target := strings.TrimSpace(session.peerAddr)
 	if target == "" {
+		s.mu.Unlock()
 		return "", 0, false
 	}
 	session.downNonce++
@@ -1361,6 +1387,7 @@ func (s *Service) resolveDownlinkTarget(sessionID string, now time.Time) (string
 		}
 		s.wgProxyLastSeen[sessionID] = now.Unix()
 	}
+	s.mu.Unlock()
 	return target, session.downNonce, true
 }
 
@@ -1556,7 +1583,12 @@ func (s *Service) allowSessionPeer(sessionID string, peerAddr string, now time.T
 		return false, false, ""
 	}
 	if nowUnix >= session.claims.ExpiryUnix {
-		return false, false, strings.TrimSpace(session.peerAddr)
+		currentPeer := strings.TrimSpace(session.peerAddr)
+		teardown := s.teardownSession(context.Background(), sessionID, sessionTeardownOptions{})
+		if teardown.wgRemoveErr != nil {
+			log.Printf("exit expired session teardown warning session=%s err=%v", sessionID, teardown.wgRemoveErr)
+		}
+		return false, false, currentPeer
 	}
 	return peerSessionDecision(session, peerAddr, nowUnix, rebindAfterSec)
 }
@@ -1574,14 +1606,13 @@ func (s *Service) bindSessionPeer(sessionID string, peerAddr string, now time.Ti
 	}
 	nowUnix := now.Unix()
 	if nowUnix >= session.claims.ExpiryUnix {
-		staleProxy := s.takeWGProxyLocked(sessionID, false)
-		delete(s.sessions, sessionID)
-		s.metrics.ActiveSessions = uint64(len(s.sessions))
+		currentPeer := strings.TrimSpace(session.peerAddr)
 		s.mu.Unlock()
-		if staleProxy != nil {
-			_ = staleProxy.Close()
+		teardown := s.teardownSession(context.Background(), sessionID, sessionTeardownOptions{})
+		if teardown.wgRemoveErr != nil {
+			log.Printf("exit expired session teardown warning session=%s err=%v", sessionID, teardown.wgRemoveErr)
 		}
-		return false, false, strings.TrimSpace(session.peerAddr)
+		return false, false, currentPeer
 	}
 	allowed, rebound, previousPeer := peerSessionDecision(session, peerAddr, nowUnix, int64(s.peerRebindAfter/time.Second))
 	if !allowed {
@@ -1593,6 +1624,108 @@ func (s *Service) bindSessionPeer(sessionID string, peerAddr string, now time.Ti
 	s.sessions[sessionID] = session
 	s.mu.Unlock()
 	return true, rebound, previousPeer
+}
+
+type sessionTeardownOptions struct {
+	requireSessionKeyMatch bool
+	expectedSessionKeyID   string
+}
+
+type sessionTeardownResult struct {
+	closed      bool
+	keyMismatch bool
+	wgRemoveErr error
+}
+
+func (s *Service) sessionWGConfigForTeardown(sessionID string, session sessionInfo) (wg.SessionConfig, bool) {
+	if session.transport != "wireguard-udp" {
+		return wg.SessionConfig{}, false
+	}
+	return wg.SessionConfig{
+		SessionID:     sessionID,
+		SessionKeyID:  session.sessionKeyID,
+		Interface:     s.wgInterface,
+		ClientPubKey:  session.clientPubKey,
+		ClientInnerIP: session.clientInnerIP,
+	}, true
+}
+
+func sameSessionForTeardown(before, after sessionInfo) bool {
+	if subtle.ConstantTimeCompare([]byte(before.sessionKeyID), []byte(after.sessionKeyID)) != 1 {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(before.clientPubKey), []byte(after.clientPubKey)) != 1 {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(before.clientInnerIP), []byte(after.clientInnerIP)) != 1 {
+		return false
+	}
+	return before.transport == after.transport && before.claims.ExpiryUnix == after.claims.ExpiryUnix
+}
+
+func (s *Service) teardownSession(ctx context.Context, sessionID string, opts sessionTeardownOptions) sessionTeardownResult {
+	sessionID = strings.TrimSpace(sessionID)
+	opts.expectedSessionKeyID = strings.TrimSpace(opts.expectedSessionKeyID)
+	if sessionID == "" {
+		return sessionTeardownResult{closed: true}
+	}
+
+	s.mu.Lock()
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		s.mu.Unlock()
+		return sessionTeardownResult{closed: true}
+	}
+	if opts.requireSessionKeyMatch &&
+		session.sessionKeyID != "" &&
+		subtle.ConstantTimeCompare([]byte(opts.expectedSessionKeyID), []byte(session.sessionKeyID)) != 1 {
+		s.mu.Unlock()
+		return sessionTeardownResult{keyMismatch: true}
+	}
+	wgCfg, needsWGTeardown := s.sessionWGConfigForTeardown(sessionID, session)
+	s.mu.Unlock()
+
+	if needsWGTeardown {
+		if s.wgManager == nil {
+			return sessionTeardownResult{wgRemoveErr: errors.New("wg manager unavailable")}
+		}
+		if err := s.wgManager.RemoveSession(ctx, wgCfg); err != nil {
+			s.mu.Lock()
+			current, exists := s.sessions[sessionID]
+			s.mu.Unlock()
+			if !exists || !sameSessionForTeardown(session, current) {
+				return sessionTeardownResult{closed: true}
+			}
+			return sessionTeardownResult{wgRemoveErr: err}
+		}
+	}
+
+	s.mu.Lock()
+	current, exists := s.sessions[sessionID]
+	if !exists {
+		s.mu.Unlock()
+		return sessionTeardownResult{closed: true}
+	}
+	if opts.requireSessionKeyMatch &&
+		current.sessionKeyID != "" &&
+		subtle.ConstantTimeCompare([]byte(opts.expectedSessionKeyID), []byte(current.sessionKeyID)) != 1 {
+		s.mu.Unlock()
+		return sessionTeardownResult{keyMismatch: true}
+	}
+	if !sameSessionForTeardown(session, current) {
+		s.mu.Unlock()
+		return sessionTeardownResult{}
+	}
+	staleProxy := s.takeWGProxyLocked(sessionID, false)
+	delete(s.sessions, sessionID)
+	s.metrics.ActiveSessions = uint64(len(s.sessions))
+	s.mu.Unlock()
+
+	if staleProxy != nil {
+		_ = staleProxy.Close()
+	}
+	s.finalizeSettlementForSession(ctx, sessionID, current)
+	return sessionTeardownResult{closed: true}
 }
 
 func peerSessionDecision(session sessionInfo, peerAddr string, nowUnix int64, rebindAfterSec int64) (bool, bool, string) {
@@ -1704,6 +1837,10 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
 		return
 	}
+	if s.pathOpenExitIdentityMismatch(req.ExitID) {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "exit identity mismatch"})
+		return
+	}
 	if err := s.checkAndRememberProofNonce(claims, req, nowUnix); err != nil {
 		if err.Error() == "token proof replay" {
 			s.recordTokenProofReplayDrop()
@@ -1755,6 +1892,11 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.allocateClientInnerIP()
 
 	s.mu.Lock()
+	if _, exists := s.sessions[req.SessionID]; exists {
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "session already exists"})
+		return
+	}
 	if s.sessionCapacityReachedLocked(req.SessionID) {
 		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "session capacity reached"})
@@ -1836,45 +1978,54 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.SessionKeyID = strings.TrimSpace(req.SessionKeyID)
-	s.mu.Lock()
-	session, exists := s.sessions[req.SessionID]
-	if !exists {
-		s.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "unknown-session"})
-		return
-	}
-	if session.sessionKeyID != "" &&
-		subtle.ConstantTimeCompare([]byte(req.SessionKeyID), []byte(session.sessionKeyID)) != 1 {
-		s.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
+	teardown := s.teardownSession(r.Context(), req.SessionID, sessionTeardownOptions{
+		requireSessionKeyMatch: true,
+		expectedSessionKeyID:   req.SessionKeyID,
+	})
+	if teardown.keyMismatch {
 		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "session-key-id-mismatch"})
 		return
 	}
-	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
-	delete(s.sessions, req.SessionID)
-	s.metrics.ActiveSessions = uint64(len(s.sessions))
-	s.mu.Unlock()
-	if staleProxy != nil {
-		_ = staleProxy.Close()
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if session.transport == "wireguard-udp" {
-		wgCfg := wg.SessionConfig{
-			SessionID:     req.SessionID,
-			SessionKeyID:  session.sessionKeyID,
-			Interface:     s.wgInterface,
-			ClientPubKey:  session.clientPubKey,
-			ClientInnerIP: session.clientInnerIP,
+	if teardown.wgRemoveErr != nil {
+		// Close requests are idempotent. If a concurrent close completed while this
+		// call was handling a transient WG remove error, report success instead of
+		// a false-negative failure.
+		for attempt := 0; attempt < 5; attempt++ {
+			s.mu.RLock()
+			_, stillActive := s.sessions[req.SessionID]
+			s.mu.RUnlock()
+			if !stillActive {
+				log.Printf("exit closed session=%s", req.SessionID)
+				_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: true})
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
-		if err := s.wgManager.RemoveSession(r.Context(), wgCfg); err != nil {
-			_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "wg remove failed"})
-			return
-		}
+		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "wg remove failed"})
+		return
 	}
-	s.finalizeSettlementForSession(r.Context(), req.SessionID, session)
+	if !teardown.closed {
+		_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: false, Reason: "unknown-session"})
+		return
+	}
 	log.Printf("exit closed session=%s", req.SessionID)
 	_ = json.NewEncoder(w).Encode(proto.PathCloseResponse{Closed: true})
+}
+
+func (s *Service) enforcePathOpenExitIdentityBinding() bool {
+	return s.betaStrict || s.prodStrict
+}
+
+func (s *Service) pathOpenExitIdentityMismatch(reqExitID string) bool {
+	if !s.enforcePathOpenExitIdentityBinding() {
+		return false
+	}
+	configuredExitID := strings.TrimSpace(s.exitRelayID)
+	if configuredExitID == "" {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(reqExitID)), []byte(configuredExitID)) != 1
 }
 
 func (s *Service) authorizePacket(sessionID string, inner proto.InnerPacket, now time.Time) (crypto.CapabilityClaims, error) {
@@ -2515,11 +2666,10 @@ func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) 
 		return crypto.CapabilityClaims{}, errors.New("unknown-session")
 	}
 	if now.Unix() >= session.claims.ExpiryUnix {
-		staleProxy := s.takeWGProxyLocked(sessionID, false)
-		delete(s.sessions, sessionID)
 		s.mu.Unlock()
-		if staleProxy != nil {
-			_ = staleProxy.Close()
+		teardown := s.teardownSession(context.Background(), sessionID, sessionTeardownOptions{})
+		if teardown.wgRemoveErr != nil {
+			log.Printf("exit expired session teardown warning session=%s err=%v", sessionID, teardown.wgRemoveErr)
 		}
 		return crypto.CapabilityClaims{}, errors.New("session-expired")
 	}
@@ -2561,17 +2711,24 @@ func (s *Service) authorizeNonce(sessionID string, nonce uint64, now time.Time) 
 }
 
 func (s *Service) cleanupExpiredSessions(now time.Time) {
-	s.mu.Lock()
-	var staleProxies []*net.UDPConn
 	nowUnix := now.Unix()
+	s.mu.RLock()
+	expiredSessions := make([]string, 0)
 	for sid, session := range s.sessions {
 		if nowUnix >= session.claims.ExpiryUnix {
-			delete(s.sessions, sid)
-			if proxyConn := s.takeWGProxyLocked(sid, false); proxyConn != nil {
-				staleProxies = append(staleProxies, proxyConn)
-			}
+			expiredSessions = append(expiredSessions, sid)
 		}
 	}
+	s.mu.RUnlock()
+	for _, sid := range expiredSessions {
+		teardown := s.teardownSession(context.Background(), sid, sessionTeardownOptions{})
+		if teardown.wgRemoveErr != nil {
+			log.Printf("exit cleanup expired session teardown warning session=%s err=%v", sid, teardown.wgRemoveErr)
+		}
+	}
+
+	s.mu.Lock()
+	var staleProxies []*net.UDPConn
 	if s.wgKernelProxyIdle > 0 {
 		cutoff := now.Add(-s.wgKernelProxyIdle).Unix()
 		idleSessions := make([]string, 0)
@@ -3388,17 +3545,20 @@ func (s *Service) refreshRevocations(ctx context.Context) error {
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("revocations endpoint returned %d", resp.StatusCode)
+			log.Printf("exit revocation source rejected url=%s err=%v", u, lastErr)
 			continue
 		}
 		var out proto.RevocationListResponse
 		if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 			_ = resp.Body.Close()
 			lastErr = err
+			log.Printf("exit revocation source rejected url=%s err=%v", u, lastErr)
 			continue
 		}
 		_ = resp.Body.Close()
 		if err := s.applyRevocationFeed(out, now); err != nil {
 			lastErr = err
+			log.Printf("exit revocation source rejected url=%s err=%v", u, lastErr)
 			continue
 		}
 		success++
@@ -3468,12 +3628,18 @@ func (s *Service) applyRevocationFeed(feed proto.RevocationListResponse, now int
 	if s.revokedJTI == nil {
 		s.revokedJTI = make(map[string]int64)
 	}
+	prevVersion, hasPrevVersion := s.revocationVersion[issuerID]
 	if feed.Version > 0 {
-		if prev, ok := s.revocationVersion[issuerID]; ok && feed.Version < prev {
+		if hasPrevVersion && feed.Version < prevVersion {
 			s.mu.Unlock()
-			return errors.New("revocation feed version rollback detected")
+			return fmt.Errorf(
+				"revocation feed version rollback detected issuer=%q signer=%q incoming_version=%d current_version=%d",
+				issuerID,
+				keyID,
+				feed.Version,
+				prevVersion,
+			)
 		}
-		s.revocationVersion[issuerID] = feed.Version
 	}
 	requiredEpoch := feed.MinTokenEpoch
 	if requiredEpoch <= 0 {
@@ -3484,16 +3650,73 @@ func (s *Service) applyRevocationFeed(feed proto.RevocationListResponse, now int
 			s.minTokenEpoch[issuerID] = requiredEpoch
 		}
 	}
-	for k := range s.revokedJTI {
-		if strings.HasPrefix(k, keyID+"|") {
-			delete(s.revokedJTI, k)
+	keyPrefix := keyID + "|"
+	existingByJTI := make(map[string]int64)
+	for k, until := range s.revokedJTI {
+		if !strings.HasPrefix(k, keyPrefix) {
+			continue
 		}
+		if now >= until {
+			delete(s.revokedJTI, k)
+			continue
+		}
+		existingByJTI[strings.TrimPrefix(k, keyPrefix)] = until
 	}
+
+	incomingByJTI := make(map[string]int64, len(feed.Revocations))
 	for _, r := range feed.Revocations {
 		if r.JTI == "" || now >= r.Until {
 			continue
 		}
-		s.revokedJTI[keyID+"|"+r.JTI] = r.Until
+		if prevUntil, ok := incomingByJTI[r.JTI]; !ok || r.Until > prevUntil {
+			incomingByJTI[r.JTI] = r.Until
+		}
+	}
+
+	if feed.Version > 0 && hasPrevVersion && feed.Version == prevVersion {
+		missingActive := 0
+		shortenedActive := 0
+		sampleJTI := ""
+		for jti, existingUntil := range existingByJTI {
+			incomingUntil, ok := incomingByJTI[jti]
+			if !ok {
+				missingActive++
+				if sampleJTI == "" {
+					sampleJTI = jti
+				}
+				continue
+			}
+			if incomingUntil < existingUntil {
+				shortenedActive++
+				if sampleJTI == "" {
+					sampleJTI = jti
+				}
+			}
+		}
+		if missingActive > 0 || shortenedActive > 0 {
+			s.mu.Unlock()
+			return fmt.Errorf(
+				"revocation feed conflict detected issuer=%q signer=%q version=%d generated_at=%d missing_active=%d shortened_active=%d sample_jti=%q",
+				issuerID,
+				keyID,
+				feed.Version,
+				feed.GeneratedAt,
+				missingActive,
+				shortenedActive,
+				sampleJTI,
+			)
+		}
+	}
+
+	for jti, until := range incomingByJTI {
+		compound := keyPrefix + jti
+		if prevUntil, ok := s.revokedJTI[compound]; !ok || until > prevUntil {
+			s.revokedJTI[compound] = until
+		}
+	}
+
+	if feed.Version > 0 && (!hasPrevVersion || feed.Version > prevVersion) {
+		s.revocationVersion[issuerID] = feed.Version
 	}
 	s.mu.Unlock()
 	return nil
@@ -3594,6 +3817,76 @@ func envEnabled(name string) bool {
 	default:
 		return false
 	}
+}
+
+func parseStrictBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected one of: 1|0|true|false|yes|no|on|off")
+	}
+}
+
+func envStrictBoolOr(primary string, fallback string, def bool) (bool, error) {
+	primarySet := false
+	primaryValue := false
+	if raw, ok := os.LookupEnv(primary); ok {
+		primarySet = true
+		if strings.TrimSpace(raw) == "" {
+			return false, fmt.Errorf("value must not be empty")
+		}
+		parsed, err := parseStrictBool(raw)
+		if err != nil {
+			return false, err
+		}
+		primaryValue = parsed
+	}
+
+	fallbackSet := false
+	fallbackValue := false
+	if fallback != "" {
+		if raw, ok := os.LookupEnv(fallback); ok {
+			fallbackSet = true
+			if strings.TrimSpace(raw) == "" {
+				return false, fmt.Errorf("value must not be empty")
+			}
+			parsed, err := parseStrictBool(raw)
+			if err != nil {
+				return false, err
+			}
+			fallbackValue = parsed
+		}
+	}
+
+	if primarySet && fallbackSet {
+		return primaryValue || fallbackValue, nil
+	}
+	if primarySet {
+		return primaryValue, nil
+	}
+	if fallbackSet {
+		return fallbackValue, nil
+	}
+	return def, nil
+}
+
+func annotateEnvParseError(name string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s invalid: %w", name, err)
+}
+
+func firstEnvParseError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalizeHTTPURL(raw string) string {
@@ -3797,6 +4090,11 @@ func resolveSafeDialAddress(ctx context.Context, resolver outboundIPResolver, ad
 func isDisallowedOutboundDialIP(ip net.IP) bool {
 	if ip == nil {
 		return true
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		if addr, ok := netip.AddrFromSlice(ipv4); ok && sharedAddressSpaceCGNATPrefix.Contains(addr) {
+			return true
+		}
 	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }

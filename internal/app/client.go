@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1011,8 +1012,12 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	}
 
 	pairs := c.rankRelayPairs(ctx, relays)
+	strictRequireMiddle := c.requireMiddleRelay
+	if (c.betaStrict || c.prodStrict) && (c.preferMiddleRelay || c.requireMiddleRelay) {
+		strictRequireMiddle = true
+	}
 	if len(pairs) == 0 {
-		if c.requireMiddleRelay {
+		if strictRequireMiddle {
 			return fmt.Errorf("no suitable relay path found: middle-hop relay requirement not met")
 		}
 		if c.strictExitLocality && (c.preferredExitCountry != "" || c.preferredExitRegion != "") {
@@ -1151,6 +1156,9 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			}
 		}
 		if openErr != nil {
+			if isUnknownExitPathOpenError(openErr) && !c.shouldRetryUnknownExitFallback(openErr) {
+				return stopPairRetries(openErr)
+			}
 			return openErr
 		}
 
@@ -1294,7 +1302,7 @@ func (c *Client) shouldRetryUnknownExitFallback(err error) bool {
 	if err == nil || !c.allowUnknownExitFallback {
 		return false
 	}
-	return strings.Contains(err.Error(), "path open denied: unknown-exit")
+	return isUnknownExitPathOpenError(err)
 }
 
 func (c *Client) shouldRetryDirectExitFallback(err error) bool {
@@ -1302,8 +1310,15 @@ func (c *Client) shouldRetryDirectExitFallback(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "path open denied: unknown-exit") ||
+	return isUnknownExitPathOpenError(err) ||
 		strings.Contains(msg, "path open denied: entry-exit-operator-collision")
+}
+
+func isUnknownExitPathOpenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "path open denied: unknown-exit")
 }
 
 func requestedTransport(mode string) string {
@@ -3202,6 +3217,7 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 
 	healthyEntries := entries
 	healthyExits := exits
+	strictHealthFailClosed := c.betaStrict || c.prodStrict
 	if c.healthCheckEnabled {
 		healthyEntries = filterHealthy(entries, func(r proto.RelayDescriptor) bool {
 			return c.relayHealthy(ctx, c.entryControlURLFor(r))
@@ -3210,9 +3226,17 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			return c.relayHealthy(ctx, c.exitControlURLFor(r))
 		})
 		if len(healthyEntries) == 0 {
+			if strictHealthFailClosed {
+				log.Printf("client strict health gating rejected selection: healthy_entries=0 total_entries=%d", len(entries))
+				return nil
+			}
 			healthyEntries = entries
 		}
 		if len(healthyExits) == 0 {
+			if strictHealthFailClosed {
+				log.Printf("client strict health gating rejected selection: healthy_exits=0 total_exits=%d", len(exits))
+				return nil
+			}
 			healthyExits = exits
 		}
 	}
@@ -3242,6 +3266,15 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 		log.Printf("client exit weighted ordering mode=%s candidates=%d exploration_pct=%d", weightedMode, len(selectedExits), c.exitExplorationPct)
 	}
 	middleCandidates := middleRelayCandidates(relays)
+	effectivePreferMiddle := c.preferMiddleRelay
+	effectiveRequireMiddle := c.requireMiddleRelay
+	// In strict modes, a 3-hop selection policy must fail closed when no valid middle relay is available.
+	if c.betaStrict || c.prodStrict {
+		if c.preferMiddleRelay || c.requireMiddleRelay {
+			effectivePreferMiddle = true
+			effectiveRequireMiddle = true
+		}
+	}
 
 	pairs := make([]relayPair, 0, len(healthyEntries)*len(selectedExits))
 	seen := make(map[string]struct{})
@@ -3283,7 +3316,7 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			}
 		}
 		pair := relayPair{entry: entry, exit: exit}
-		if c.preferMiddleRelay || c.requireMiddleRelay {
+		if effectivePreferMiddle || effectiveRequireMiddle {
 			middle, status := c.selectMiddleRelayForPair(middleCandidates, entry, exit)
 			switch status {
 			case middleSelectionFound:
@@ -3291,17 +3324,17 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 				pair.hasMiddle = true
 			case middleSelectionOperatorConflict:
 				droppedMiddleOperatorConflict++
-				if c.requireMiddleRelay {
+				if effectiveRequireMiddle {
 					return
 				}
 			case middleSelectionCountryConflict:
 				droppedMiddleCountryConflict++
-				if c.requireMiddleRelay {
+				if effectiveRequireMiddle {
 					return
 				}
 			default:
 				droppedMissingMiddle++
-				if c.requireMiddleRelay {
+				if effectiveRequireMiddle {
 					return
 				}
 			}
@@ -3325,7 +3358,7 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			addPair(e, x)
 		}
 	}
-	if c.preferMiddleRelay {
+	if effectivePreferMiddle {
 		pairs = prioritizePairsWithMiddle(pairs)
 		if len(middleCandidates) == 0 {
 			log.Printf("client 3hop profile fallback: no middle-capable relays advertised, using entry+exit path")
@@ -3340,7 +3373,7 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 		log.Printf("client distinct-country filter applied: dropped_same_country=%d dropped_missing_country=%d",
 			droppedSameCountry, droppedMissingCountry)
 	}
-	if c.requireMiddleRelay && (droppedMissingMiddle > 0 || droppedMiddleOperatorConflict > 0 || droppedMiddleCountryConflict > 0) {
+	if effectiveRequireMiddle && (droppedMissingMiddle > 0 || droppedMiddleOperatorConflict > 0 || droppedMiddleCountryConflict > 0) {
 		log.Printf("client middle-relay filter applied: dropped_missing_middle=%d dropped_operator_conflict=%d dropped_country_conflict=%d",
 			droppedMissingMiddle, droppedMiddleOperatorConflict, droppedMiddleCountryConflict)
 	}
@@ -3397,7 +3430,7 @@ func middleRelayCandidates(relays []proto.RelayDescriptor) []proto.RelayDescript
 
 func relaySupportsMiddleHop(relay proto.RelayDescriptor) bool {
 	role := strings.ToLower(strings.TrimSpace(relay.Role))
-	if role == "middle" {
+	if hopRoleIsMiddle(role) {
 		return true
 	}
 	for _, hopRole := range relay.HopRoles {
@@ -3416,7 +3449,7 @@ func relaySupportsMiddleHop(relay proto.RelayDescriptor) bool {
 
 func hopRoleIsMiddle(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "middle", "relay", "micro-relay", "micro_relay":
+	case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
 		return true
 	default:
 		return false
@@ -3981,6 +4014,25 @@ func pickWeightedIndex(pool []scoredExit, rng *mrand.Rand, inverse bool) int {
 	return len(pool) - 1
 }
 
+type stopPairRetriesError struct {
+	err error
+}
+
+func (e stopPairRetriesError) Error() string {
+	return e.err.Error()
+}
+
+func (e stopPairRetriesError) Unwrap() error {
+	return e.err
+}
+
+func stopPairRetries(err error) error {
+	if err == nil {
+		return nil
+	}
+	return stopPairRetriesError{err: err}
+}
+
 func attemptPairs(pairs []relayPair, maxAttempts int, attempt func(relayPair) error) (relayPair, error) {
 	if len(pairs) == 0 {
 		return relayPair{}, fmt.Errorf("no relay pairs available")
@@ -4000,9 +4052,13 @@ func attemptPairs(pairs []relayPair, maxAttempts int, attempt func(relayPair) er
 			return pair, nil
 		} else {
 			failures = append(failures, fmt.Sprintf("%s->%s: %v", pair.entry.RelayID, pair.exit.RelayID, err))
+			var stopErr stopPairRetriesError
+			if errors.As(err, &stopErr) {
+				break
+			}
 		}
 	}
-	return relayPair{}, fmt.Errorf("all path-open attempts failed (%d/%d): %s", limit, len(pairs), strings.Join(failures, "; "))
+	return relayPair{}, fmt.Errorf("all path-open attempts failed (%d/%d): %s", len(failures), len(pairs), strings.Join(failures, "; "))
 }
 
 func (c *Client) relayHealthy(ctx context.Context, controlURL string) bool {

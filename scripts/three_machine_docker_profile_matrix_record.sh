@@ -353,6 +353,9 @@ matrix_summary_valid="0"
 matrix_summary_status=""
 matrix_dry_run_mode="0"
 matrix_ran="0"
+matrix_reduction_available="0"
+matrix_failed_profiles_json='[]'
+matrix_rerun_failed_profiles_command=""
 
 manual_validation_report_status="skipped"
 manual_validation_report_rc=0
@@ -389,6 +392,9 @@ write_summary_json() {
     --argjson matrix_summary_valid "$matrix_summary_valid" \
     --argjson matrix_dry_run_mode "$matrix_dry_run_mode" \
     --argjson matrix_ran "$matrix_ran" \
+    --argjson matrix_reduction_available "$matrix_reduction_available" \
+    --argjson matrix_failed_profiles "$matrix_failed_profiles_json" \
+    --arg matrix_rerun_failed_profiles_command "$matrix_rerun_failed_profiles_command" \
     --argjson matrix "$matrix_json" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
@@ -442,6 +448,18 @@ write_summary_json() {
           summary_json: $matrix_summary_json,
           log: $matrix_log,
           matrix_log: $matrix_log_from_summary,
+          reduction: {
+            available: ($matrix_reduction_available == 1),
+            failed_profiles: $matrix_failed_profiles,
+            failed_profiles_count: ($matrix_failed_profiles | length),
+            rerun_failed_profiles_command: (
+              if $matrix_rerun_failed_profiles_command == "" then
+                null
+              else
+                $matrix_rerun_failed_profiles_command
+              end
+            )
+          },
           summary: $matrix
         },
         manual_validation_report: {
@@ -631,6 +649,13 @@ if [[ -f "$matrix_summary_json" ]] && jq -e . "$matrix_summary_json" >/dev/null 
   if [[ -z "$matrix_log_path" ]]; then
     matrix_log_path="$(jq -r '.artifacts.summary_log // ""' <<<"$matrix_json")"
   fi
+  matrix_failed_profiles_json="$(jq -c '.reduction.failed_profiles // []' <<<"$matrix_json" 2>/dev/null || printf '[]')"
+  matrix_rerun_failed_profiles_command="$(jq -r '.reduction.rerun_failed_profiles_command // ""' <<<"$matrix_json" 2>/dev/null || true)"
+  if jq -e '.reduction.available == true' <<<"$matrix_json" >/dev/null 2>&1; then
+    matrix_reduction_available="1"
+  else
+    matrix_reduction_available="0"
+  fi
   if [[ "$matrix_summary_rc" =~ ^[0-9]+$ ]]; then
     matrix_rc="$matrix_summary_rc"
   fi
@@ -638,6 +663,9 @@ else
   matrix_summary_valid="0"
   matrix_json='{}'
   matrix_summary_status="missing"
+  matrix_reduction_available="0"
+  matrix_failed_profiles_json='[]'
+  matrix_rerun_failed_profiles_command=""
 fi
 
 if [[ "$matrix_summary_valid" == "1" ]]; then

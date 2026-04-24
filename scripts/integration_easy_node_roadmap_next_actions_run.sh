@@ -51,11 +51,27 @@ assert_token() {
 
 echo "[easy-node-roadmap-next-actions] help contract"
 ./scripts/easy_node.sh help >"$HELP_OUT"
-if ! grep -F -- './scripts/easy_node.sh roadmap-next-actions-run [--max-actions N] [--action-timeout-sec N] [--parallel [0|1]] [--allow-profile-default-gate-unreachable [0|1]] [--profile-default-gate-subject ID] [--include-id-prefix PREFIX] [--exclude-id-prefix PREFIX] [roadmap_next_actions_run args...]' "$HELP_OUT" >/dev/null 2>&1; then
-  echo "easy_node help missing roadmap-next-actions-run command contract"
-  cat "$HELP_OUT"
-  exit 1
-fi
+for token in \
+  './scripts/easy_node.sh roadmap-next-actions-run' \
+  '--max-actions N' \
+  '--action-timeout-sec N' \
+  '--parallel [0|1]' \
+  '--allow-profile-default-gate-unreachable [0|1]' \
+  '--profile-default-gate-subject ID' \
+  '--include-id ID' \
+  '--exclude-id ID' \
+  '--include-id-prefix PREFIX' \
+  '--exclude-id-prefix PREFIX' \
+  '--include-id-suffix SUFFIX' \
+  '--exclude-id-suffix SUFFIX' \
+  '[roadmap_next_actions_run args...]'
+do
+  if ! grep -F -- "$token" "$HELP_OUT" >/dev/null 2>&1; then
+    echo "easy_node help missing roadmap-next-actions-run token: $token"
+    cat "$HELP_OUT"
+    exit 1
+  fi
+done
 
 echo "[easy-node-roadmap-next-actions] env override + forwarding contract"
 : >"$CAPTURE"
@@ -67,8 +83,12 @@ ROADMAP_NEXT_ACTIONS_CAPTURE_FILE="$CAPTURE" \
   --parallel 1 \
   --allow-profile-default-gate-unreachable 1 \
   --profile-default-gate-subject inv-forwarded-subject \
+  --include-id blockchain_mainnet_activation_refresh_evidence \
+  --exclude-id profile_default_gate \
   --include-id-prefix blockchain_ \
   --exclude-id-prefix profile_ \
+  --include-id-suffix _evidence_pack \
+  --exclude-id-suffix _cycle \
   --reports-dir .easy-node-logs/roadmap_next_actions_contract \
   --summary-json .easy-node-logs/roadmap_next_actions_contract_summary.json \
   --print-summary-json 1 >"$STDOUT_OUT"
@@ -84,8 +104,12 @@ assert_token "$line" $'\t--action-timeout-sec\t9' "missing --action-timeout-sec 
 assert_token "$line" $'\t--parallel\t1' "missing --parallel forwarding"
 assert_token "$line" $'\t--allow-profile-default-gate-unreachable\t1' "missing --allow-profile-default-gate-unreachable forwarding"
 assert_token "$line" $'\t--profile-default-gate-subject\tinv-forwarded-subject' "missing --profile-default-gate-subject forwarding"
+assert_token "$line" $'\t--include-id\tblockchain_mainnet_activation_refresh_evidence' "missing --include-id forwarding"
+assert_token "$line" $'\t--exclude-id\tprofile_default_gate' "missing --exclude-id forwarding"
 assert_token "$line" $'\t--include-id-prefix\tblockchain_' "missing --include-id-prefix forwarding"
 assert_token "$line" $'\t--exclude-id-prefix\tprofile_' "missing --exclude-id-prefix forwarding"
+assert_token "$line" $'\t--include-id-suffix\t_evidence_pack' "missing --include-id-suffix forwarding"
+assert_token "$line" $'\t--exclude-id-suffix\t_cycle' "missing --exclude-id-suffix forwarding"
 assert_token "$line" $'\t--reports-dir\t.easy-node-logs/roadmap_next_actions_contract' "missing --reports-dir forwarding"
 assert_token "$line" $'\t--summary-json\t.easy-node-logs/roadmap_next_actions_contract_summary.json' "missing --summary-json forwarding"
 assert_token "$line" $'\t--print-summary-json\t1' "missing --print-summary-json forwarding"

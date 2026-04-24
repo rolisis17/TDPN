@@ -361,6 +361,14 @@ function Resolve-GitBashPath {
   return ""
 }
 
+function Resolve-RepoRoot {
+  $scriptDir = $PSScriptRoot
+  if ([string]::IsNullOrWhiteSpace($scriptDir)) {
+    $scriptDir = Split-Path -Parent $PSCommandPath
+  }
+  return (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+}
+
 function Get-VswherePath {
   $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
   $candidate = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
@@ -590,6 +598,451 @@ function Get-DesktopPrerequisiteReport {
   return [PSCustomObject]@{
     entries = $entries
     missing_package_ids = $missingPackageIds
+  }
+}
+
+function Test-IcoBytesAreValid {
+  param(
+    [byte[]]$Bytes
+  )
+
+  if ($null -eq $Bytes -or $Bytes.Length -lt 22) {
+    return $false
+  }
+
+  $reserved = [BitConverter]::ToUInt16($Bytes, 0)
+  $imageType = [BitConverter]::ToUInt16($Bytes, 2)
+  $imageCount = [BitConverter]::ToUInt16($Bytes, 4)
+  if ($reserved -ne 0 -or $imageType -ne 1 -or $imageCount -le 0) {
+    return $false
+  }
+
+  $imageSize = [BitConverter]::ToUInt32($Bytes, 14)
+  $imageOffset = [BitConverter]::ToUInt32($Bytes, 18)
+  if ($imageSize -le 0 -or $imageOffset -lt 22) {
+    return $false
+  }
+
+  $imageEnd = [int64]$imageOffset + [int64]$imageSize
+  return $imageEnd -le [int64]$Bytes.Length
+}
+
+function Test-IcoFileValid {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return [pscustomobject]@{
+      valid = $false
+      reason = "missing"
+    }
+  }
+
+  try {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+  } catch {
+    return [pscustomobject]@{
+      valid = $false
+      reason = ("unreadable: {0}" -f $_.Exception.Message)
+    }
+  }
+
+  if (Test-IcoBytesAreValid -Bytes $bytes) {
+    return [pscustomobject]@{
+      valid = $true
+      reason = "valid"
+    }
+  }
+
+  return [pscustomobject]@{
+    valid = $false
+    reason = "invalid_ico"
+  }
+}
+
+function Get-TauriBundleIconRepairCommand {
+  return 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg=''apps/desktop/src-tauri/tauri.conf.json''; $json=Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json; if($null -eq $json.bundle){$json | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{})}; $icons=@(); if($null -ne $json.bundle.icon){$icons=@($json.bundle.icon)}; if($icons -notcontains ''icons/icon.ico''){$json.bundle.icon=@($icons + ''icons/icon.ico'')}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $cfg -Encoding UTF8"'
+}
+
+function Ensure-TauriBundleIconResource {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedIconRelativePath
+  )
+
+  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
+    throw "tauri config missing: $TauriConfigPath"
+  }
+
+  $config = Get-Content -Raw -LiteralPath $TauriConfigPath | ConvertFrom-Json -ErrorAction Stop
+  $changed = $false
+
+  if ($null -eq $config.bundle) {
+    $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{}) -Force
+    $changed = $true
+  }
+
+  $icons = @()
+  if ($null -ne $config.bundle.icon) {
+    foreach ($iconValue in @($config.bundle.icon)) {
+      if ($null -eq $iconValue) {
+        continue
+      }
+      $iconText = [string]$iconValue
+      if ([string]::IsNullOrWhiteSpace($iconText)) {
+        continue
+      }
+      $icons += $iconText.Trim()
+    }
+  }
+
+  $expectedNormalized = $ExpectedIconRelativePath.Replace("\", "/").Trim().ToLowerInvariant()
+  $hasExpected = $false
+  foreach ($icon in $icons) {
+    $normalized = [string]$icon
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+      continue
+    }
+    $normalized = $normalized.Trim().Replace("\", "/").ToLowerInvariant()
+    if ($normalized -eq $expectedNormalized) {
+      $hasExpected = $true
+      break
+    }
+  }
+
+  if (-not $hasExpected) {
+    $icons += $ExpectedIconRelativePath
+    $config.bundle | Add-Member -NotePropertyName icon -NotePropertyValue @($icons) -Force
+    $changed = $true
+  }
+
+  if ($changed) {
+    $jsonOut = $config | ConvertTo-Json -Depth 20
+    Set-Content -LiteralPath $TauriConfigPath -Value $jsonOut -Encoding UTF8
+  }
+
+  return $changed
+}
+
+function Test-TauriBundleIconConfigured {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedIconRelativePath
+  )
+
+  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
+    return [pscustomobject]@{
+      configured = $false
+      reason = "missing_tauri_conf"
+      icon_entries = @()
+    }
+  }
+
+  $config = $null
+  try {
+    $config = Get-Content -Raw -LiteralPath $TauriConfigPath | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return [pscustomobject]@{
+      configured = $false
+      reason = "invalid_tauri_conf_json"
+      icon_entries = @()
+    }
+  }
+
+  $icons = @()
+  if ($null -ne $config -and $null -ne $config.bundle -and $null -ne $config.bundle.icon) {
+    foreach ($iconValue in @($config.bundle.icon)) {
+      if ($null -eq $iconValue) {
+        continue
+      }
+      $iconText = [string]$iconValue
+      if ([string]::IsNullOrWhiteSpace($iconText)) {
+        continue
+      }
+      $icons += $iconText.Trim()
+    }
+  }
+
+  $expectedNormalized = $ExpectedIconRelativePath.Replace("\", "/").Trim().ToLowerInvariant()
+  foreach ($icon in $icons) {
+    $normalized = [string]$icon
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+      continue
+    }
+    $normalized = $normalized.Trim().Replace("\", "/").ToLowerInvariant()
+    if ($normalized -eq $expectedNormalized) {
+      return [pscustomobject]@{
+        configured = $true
+        reason = "configured"
+        icon_entries = @($icons)
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    configured = $false
+    reason = "missing_bundle_icon_entry"
+    icon_entries = @($icons)
+  }
+}
+
+function Get-DefaultDesktopAssetSummary {
+  return [ordered]@{
+    source_icon = [ordered]@{
+      path = "apps/desktop/src-tauri/icons/icon.svg"
+      exists = $false
+      status = "missing"
+      remediation_hint = "git checkout -- apps/desktop/src-tauri/icons/icon.svg"
+    }
+    generated_icon = [ordered]@{
+      path = "apps/desktop/src-tauri/icons/icon.ico"
+      exists = $false
+      valid_ico = $false
+      status = "missing"
+      remediation_hint = "scripts\\windows\\desktop_node.cmd npm run generate:windows-icon"
+    }
+    tauri_bundle_icon = [ordered]@{
+      path = "apps/desktop/src-tauri/tauri.conf.json"
+      expected_entry = "icons/icon.ico"
+      configured = $false
+      status = "missing_bundle_icon_entry"
+      remediation_hint = (Get-TauriBundleIconRepairCommand)
+      icon_entries = @()
+    }
+  }
+}
+
+function Get-DesktopAssetReport {
+  $repoRoot = Resolve-RepoRoot
+  $desktopRoot = Join-Path $repoRoot "apps\desktop"
+
+  $sourceRelativePath = "apps/desktop/src-tauri/icons/icon.svg"
+  $iconRelativePath = "apps/desktop/src-tauri/icons/icon.ico"
+  $tauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json"
+  $sourcePath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\icon.svg"
+  $iconPath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\icon.ico"
+  $tauriConfigPath = Join-Path $repoRoot "apps\desktop\src-tauri\tauri.conf.json"
+
+  $entries = Get-DefaultDesktopAssetSummary
+  $entries.source_icon.path = $sourceRelativePath
+  $entries.generated_icon.path = $iconRelativePath
+  $entries.tauri_bundle_icon.path = $tauriConfigRelativePath
+
+  $sourceExists = Test-Path -LiteralPath $sourcePath -PathType Leaf
+  $entries.source_icon.exists = [bool]$sourceExists
+  $entries.source_icon.status = $(if ($sourceExists) { "ok" } else { "missing" })
+
+  $iconValidation = Test-IcoFileValid -Path $iconPath
+  $iconExists = Test-Path -LiteralPath $iconPath -PathType Leaf
+  $entries.generated_icon.exists = [bool]$iconExists
+  $entries.generated_icon.valid_ico = [bool]$iconValidation.valid
+  if (-not $iconExists) {
+    $entries.generated_icon.status = "missing"
+  } elseif ($iconValidation.valid) {
+    $entries.generated_icon.status = "ok"
+  } else {
+    $entries.generated_icon.status = [string]$iconValidation.reason
+  }
+
+  $tauriConfigState = Test-TauriBundleIconConfigured -TauriConfigPath $tauriConfigPath -ExpectedIconRelativePath "icons/icon.ico"
+  $entries.tauri_bundle_icon.configured = [bool]$tauriConfigState.configured
+  $entries.tauri_bundle_icon.status = [string]$tauriConfigState.reason
+  $entries.tauri_bundle_icon.icon_entries = @($tauriConfigState.icon_entries)
+
+  $issueIds = @()
+  if (-not $entries.source_icon.exists) {
+    $issueIds += "desktop_icon_source_missing"
+  }
+  if (-not $entries.generated_icon.exists) {
+    $issueIds += "desktop_icon_missing"
+  } elseif (-not $entries.generated_icon.valid_ico) {
+    $issueIds += "desktop_icon_invalid"
+  }
+  if (-not $entries.tauri_bundle_icon.configured) {
+    switch ($entries.tauri_bundle_icon.status) {
+      "missing_tauri_conf" { $issueIds += "desktop_tauri_conf_missing" }
+      "invalid_tauri_conf_json" { $issueIds += "desktop_tauri_conf_invalid_json" }
+      default { $issueIds += "desktop_tauri_bundle_icon_missing" }
+    }
+  }
+
+  return [pscustomobject]@{
+    repo_root = $repoRoot
+    desktop_root = $desktopRoot
+    entries = $entries
+    issue_ids = @($issueIds)
+  }
+}
+
+function Convert-DesktopAssetReport {
+  param(
+    [pscustomobject]$Report
+  )
+
+  if ($null -eq $Report -or $null -eq $Report.entries) {
+    return (Get-DefaultDesktopAssetSummary)
+  }
+
+  return [ordered]@{
+    source_icon = [ordered]@{
+      path = [string]$Report.entries.source_icon.path
+      exists = [bool]$Report.entries.source_icon.exists
+      status = [string]$Report.entries.source_icon.status
+      remediation_hint = [string]$Report.entries.source_icon.remediation_hint
+    }
+    generated_icon = [ordered]@{
+      path = [string]$Report.entries.generated_icon.path
+      exists = [bool]$Report.entries.generated_icon.exists
+      valid_ico = [bool]$Report.entries.generated_icon.valid_ico
+      status = [string]$Report.entries.generated_icon.status
+      remediation_hint = [string]$Report.entries.generated_icon.remediation_hint
+    }
+    tauri_bundle_icon = [ordered]@{
+      path = [string]$Report.entries.tauri_bundle_icon.path
+      expected_entry = [string]$Report.entries.tauri_bundle_icon.expected_entry
+      configured = [bool]$Report.entries.tauri_bundle_icon.configured
+      status = [string]$Report.entries.tauri_bundle_icon.status
+      remediation_hint = [string]$Report.entries.tauri_bundle_icon.remediation_hint
+      icon_entries = @($Report.entries.tauri_bundle_icon.icon_entries)
+    }
+  }
+}
+
+function Show-DesktopAssetReport {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Report
+  )
+
+  Write-Host "desktop asset report:"
+  $sourceState = if ([bool]$Report.entries.source_icon.exists) { "ok" } else { "missing" }
+  Write-Host ("  - source icon ({0}): {1}" -f $Report.entries.source_icon.path, $sourceState)
+  if (-not [bool]$Report.entries.source_icon.exists) {
+    Write-Host ("    remediation: {0}" -f $Report.entries.source_icon.remediation_hint)
+  }
+
+  $iconState = [string]$Report.entries.generated_icon.status
+  Write-Host ("  - generated icon ({0}): {1}" -f $Report.entries.generated_icon.path, $iconState)
+  if ($iconState -ne "ok") {
+    Write-Host ("    remediation: {0}" -f $Report.entries.generated_icon.remediation_hint)
+  }
+
+  $resourceState = if ([bool]$Report.entries.tauri_bundle_icon.configured) { "ok" } else { [string]$Report.entries.tauri_bundle_icon.status }
+  Write-Host ("  - tauri bundle icon resource ({0} -> {1}): {2}" -f $Report.entries.tauri_bundle_icon.path, $Report.entries.tauri_bundle_icon.expected_entry, $resourceState)
+  if (-not [bool]$Report.entries.tauri_bundle_icon.configured) {
+    Write-Host ("    remediation: {0}" -f $Report.entries.tauri_bundle_icon.remediation_hint)
+  }
+}
+
+function Invoke-DesktopAssetRemediation {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$DesktopAssetReport,
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$ToolReport
+  )
+
+  $attempted = $false
+  $completed = $false
+  $updatedTauriConfig = $false
+  $generatedIcon = $false
+  $issueIds = @($DesktopAssetReport.issue_ids)
+  if ($issueIds.Count -eq 0) {
+    return [pscustomobject]@{
+      attempted = $false
+      completed = $true
+      tauri_config_updated = $false
+      icon_generated = $false
+      report = $DesktopAssetReport
+    }
+  }
+
+  $repoRoot = [string]$DesktopAssetReport.repo_root
+  $desktopRoot = [string]$DesktopAssetReport.desktop_root
+  $sourcePath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\icon.svg"
+  $iconPath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\icon.ico"
+  $tauriConfigPath = Join-Path $repoRoot "apps\desktop\src-tauri\tauri.conf.json"
+
+  if ($issueIds -contains "desktop_tauri_bundle_icon_missing") {
+    $attempted = $true
+    if ($DryRun) {
+      Write-Step "dry-run desktop asset remediation: would add icons/icon.ico to apps/desktop/src-tauri/tauri.conf.json bundle.icon"
+    } else {
+      try {
+        $updatedTauriConfig = [bool](Ensure-TauriBundleIconResource -TauriConfigPath $tauriConfigPath -ExpectedIconRelativePath "icons/icon.ico")
+        if ($updatedTauriConfig) {
+          Write-Step "desktop asset remediation: updated apps/desktop/src-tauri/tauri.conf.json bundle.icon with icons/icon.ico"
+        }
+      } catch {
+        Write-Step ("desktop asset remediation could not update tauri config: {0}" -f $_.Exception.Message)
+      }
+    }
+  }
+
+  if (($issueIds -contains "desktop_icon_missing" -or $issueIds -contains "desktop_icon_invalid") -and -not ($issueIds -contains "desktop_icon_source_missing")) {
+    $attempted = $true
+    if ([string]::IsNullOrWhiteSpace([string]$ToolReport.npm)) {
+      Write-Step "desktop asset remediation skipped icon generation: npm is missing in this shell"
+    } elseif (-not (Test-Path -LiteralPath (Join-Path $desktopRoot "package.json") -PathType Leaf)) {
+      Write-Step ("desktop asset remediation skipped icon generation: missing package.json at {0}" -f $desktopRoot)
+    } elseif (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+      Write-Step ("desktop asset remediation skipped icon generation: source icon missing at {0}" -f $sourcePath)
+    } else {
+      if ($DryRun) {
+        Write-Step "dry-run desktop asset remediation: npm.cmd run generate:windows-icon"
+      } else {
+        Push-Location $desktopRoot
+        try {
+          Write-Step "desktop asset remediation: running npm.cmd run generate:windows-icon"
+          & $ToolReport.npm run generate:windows-icon
+          if ($LASTEXITCODE -eq 0) {
+            $generatedIcon = $true
+          } else {
+            Write-Step ("desktop asset remediation icon generation failed with exit code {0}" -f $LASTEXITCODE)
+          }
+        } finally {
+          Pop-Location
+        }
+      }
+    }
+  }
+
+  if (($issueIds -contains "desktop_icon_missing" -or $issueIds -contains "desktop_icon_invalid") -and -not $generatedIcon) {
+    if ($DryRun) {
+      Write-Step "dry-run desktop asset scaffold fallback: would create placeholder apps/desktop/src-tauri/icons/icon.ico"
+    } elseif (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
+      $iconDir = Split-Path -Parent $iconPath
+      if (-not (Test-Path -LiteralPath $iconDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
+      }
+      $icoBytes = [byte[]]@(
+        0x00,0x00,0x01,0x00,0x01,0x00,
+        0x01,0x01,0x00,0x00,0x01,0x00,0x20,0x00,0x30,0x00,0x00,0x00,0x16,0x00,0x00,0x00,
+        0x28,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x01,0x00,0x20,0x00,
+        0x00,0x00,0x00,0x00,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0xFF,0xFF,0xFF,0xFF,
+        0x00,0x00,0x00,0x00
+      )
+      [System.IO.File]::WriteAllBytes($iconPath, $icoBytes)
+      Write-Step "desktop asset remediation fallback: created placeholder apps/desktop/src-tauri/icons/icon.ico"
+    }
+  }
+
+  $postReport = Get-DesktopAssetReport
+  $completed = (@($postReport.issue_ids).Count -eq 0)
+  return [pscustomobject]@{
+    attempted = $attempted
+    completed = $completed
+    tauri_config_updated = [bool]$updatedTauriConfig
+    icon_generated = [bool]$generatedIcon
+    report = $postReport
   }
 }
 
@@ -857,10 +1310,41 @@ function Get-DependencyRecommendedCommands {
   return @($commands.ToArray())
 }
 
+function Get-DesktopAssetRecommendedCommands {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$IssueIds = @()
+  )
+
+  $commands = New-Object System.Collections.ArrayList
+  if ($IssueIds.Count -eq 0) {
+    return @()
+  }
+
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run generate:windows-icon"
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run tauri -- dev"
+  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass")
+  Add-UniqueValue -List $commands -Value ("powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy dev -InstallMissing -EnablePolicyBypass")
+
+  if ($IssueIds -contains "desktop_icon_source_missing") {
+    Add-UniqueValue -List $commands -Value "git checkout -- apps/desktop/src-tauri/icons/icon.svg"
+  }
+  if ($IssueIds -contains "desktop_tauri_conf_missing") {
+    Add-UniqueValue -List $commands -Value "git checkout -- apps/desktop/src-tauri/tauri.conf.json"
+  }
+  if ($IssueIds -contains "desktop_tauri_conf_invalid_json" -or $IssueIds -contains "desktop_tauri_bundle_icon_missing") {
+    Add-UniqueValue -List $commands -Value (Get-TauriBundleIconRepairCommand)
+  }
+
+  return @($commands.ToArray())
+}
+
 function Get-RecommendedCommands {
   param(
     [AllowEmptyCollection()]
-    [string[]]$MissingPackageIds = @()
+    [string[]]$MissingPackageIds = @(),
+    [AllowEmptyCollection()]
+    [string[]]$DesktopAssetIssueIds = @()
   )
 
   $commands = New-Object System.Collections.ArrayList
@@ -880,7 +1364,12 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_shell.cmd npm run tauri -- dev"
   Add-UniqueValue -List $commands -Value "npm.cmd install"
   Add-UniqueValue -List $commands -Value "npm.cmd run tauri -- dev"
+  Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run generate:windows-icon"
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -File .\scripts\windows\desktop_one_click.ps1 -EnablePolicyBypass"
+
+  foreach ($assetCommand in @(Get-DesktopAssetRecommendedCommands -IssueIds $DesktopAssetIssueIds)) {
+    Add-UniqueValue -List $commands -Value $assetCommand
+  }
 
   return @($commands.ToArray())
 }
@@ -917,6 +1406,45 @@ function Show-MissingDependencies {
     $label = Get-DependencyLabel -PackageId $packageId
     $hint = Get-DependencyInstallHint -PackageId $packageId
     Write-Host ("  - {0}: {1}" -f $label, $hint)
+  }
+}
+
+function Show-DesktopAssetIssues {
+  param(
+    [AllowEmptyCollection()]
+    [string[]]$IssueIds = @()
+  )
+
+  if ($IssueIds.Count -eq 0) {
+    Write-Step "desktop icon/resource checks passed"
+    return
+  }
+
+  Write-Step ("desktop icon/resource issue ids: " + ($IssueIds -join ", "))
+  foreach ($issueId in $IssueIds) {
+    switch ($issueId) {
+      "desktop_icon_source_missing" {
+        Write-Host "  - source icon missing: git checkout -- apps/desktop/src-tauri/icons/icon.svg"
+      }
+      "desktop_icon_missing" {
+        Write-Host "  - generated icon missing: scripts\windows\desktop_node.cmd npm run generate:windows-icon"
+      }
+      "desktop_icon_invalid" {
+        Write-Host "  - generated icon invalid: scripts\windows\desktop_node.cmd npm run generate:windows-icon"
+      }
+      "desktop_tauri_conf_missing" {
+        Write-Host "  - tauri config missing: git checkout -- apps/desktop/src-tauri/tauri.conf.json"
+      }
+      "desktop_tauri_conf_invalid_json" {
+        Write-Host ("  - tauri config invalid json: {0}" -f (Get-TauriBundleIconRepairCommand))
+      }
+      "desktop_tauri_bundle_icon_missing" {
+        Write-Host ("  - tauri bundle icon resource missing: {0}" -f (Get-TauriBundleIconRepairCommand))
+      }
+      default {
+        Write-Host ("  - {0}" -f $issueId)
+      }
+    }
   }
 }
 
@@ -1048,13 +1576,17 @@ $summary = [ordered]@{
   mode = $Mode
   tool_report = [ordered]@{}
   desktop_prerequisites = (Get-DefaultDesktopPrerequisiteSummary)
+  desktop_assets = (Get-DefaultDesktopAssetSummary)
   missing_package_ids = @()
+  desktop_asset_issue_ids = @()
   install_missing_enabled = [bool]$InstallMissing
   install_attempted = $false
   install_completed = $false
   install_attempted_package_ids = @()
   install_completed_package_ids = @()
   install_failed_package_ids = @()
+  asset_remediation_attempted = $false
+  asset_remediation_completed = $false
   install_skipped_reason = ""
   recommended_commands = @()
   generated_at_utc = ""
@@ -1082,10 +1614,15 @@ try {
   $desktopPrerequisiteReport = Get-DesktopPrerequisiteReport
   $summary.desktop_prerequisites = Convert-DesktopPrerequisiteReport -Report $desktopPrerequisiteReport
   Show-DesktopPrerequisiteReport -Report $desktopPrerequisiteReport
+  $desktopAssetReport = Get-DesktopAssetReport
+  $summary.desktop_assets = Convert-DesktopAssetReport -Report $desktopAssetReport
+  $summary.desktop_asset_issue_ids = @($desktopAssetReport.issue_ids)
+  Show-DesktopAssetReport -Report $desktopAssetReport
 
   $missingPackageIds = @(Get-MissingPackageIds -Report $report -DesktopPrerequisiteReport $desktopPrerequisiteReport)
   $summary.missing_package_ids = @($missingPackageIds)
   Show-MissingDependencies -PackageIds $missingPackageIds
+  Show-DesktopAssetIssues -IssueIds @($summary.desktop_asset_issue_ids)
 
   if ($Mode -eq "fix") {
     if ($InstallMissing) {
@@ -1140,27 +1677,37 @@ try {
         $summary.install_skipped_reason = "nothing installable via winget"
         Write-Step "no installable package ids pending remediation"
       }
+
+      $assetRemediationResult = Invoke-DesktopAssetRemediation -DesktopAssetReport $desktopAssetReport -ToolReport $report
+      $summary.asset_remediation_attempted = [bool]$assetRemediationResult.attempted
+      $summary.asset_remediation_completed = [bool]$assetRemediationResult.completed
+      $desktopAssetReport = $assetRemediationResult.report
+      $summary.desktop_assets = Convert-DesktopAssetReport -Report $desktopAssetReport
+      $summary.desktop_asset_issue_ids = @($desktopAssetReport.issue_ids)
+      Show-DesktopAssetReport -Report $desktopAssetReport
+      Show-DesktopAssetIssues -IssueIds @($summary.desktop_asset_issue_ids)
     } else {
       $summary.install_skipped_reason = "InstallMissing switch not provided"
       Write-Step "fix mode selected without -InstallMissing; remediation skipped"
     }
   }
 
-  if ($summary.missing_package_ids.Count -eq 0) {
+  $hasBlockingIssues = @($summary.missing_package_ids).Count -gt 0 -or @($summary.desktop_asset_issue_ids).Count -gt 0
+  if (-not $hasBlockingIssues) {
     if ($Mode -eq "fix" -and $summary.install_attempted) {
       $summary.status = "fixed"
     } else {
       $summary.status = "ok"
     }
   } else {
-    if ($Mode -eq "fix" -and $InstallMissing -and $DryRun -and $summary.install_attempted) {
+    if ($Mode -eq "fix" -and $InstallMissing -and $DryRun -and ($summary.install_attempted -or $summary.asset_remediation_attempted)) {
       $summary.status = "dry-run"
     } else {
       $summary.status = "missing"
     }
   }
 
-  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($summary.missing_package_ids))
+  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($summary.missing_package_ids) -DesktopAssetIssueIds @($summary.desktop_asset_issue_ids))
   $summary.recommended_commands = @($recommendedCommands)
 
   Write-Step "status=$($summary.status)"

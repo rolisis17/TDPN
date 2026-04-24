@@ -432,6 +432,29 @@ func TestResolveExitRouteStrictRejectsLoopbackControlURL(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteStrictRejectsMissingDescriptorRouteFields(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", Endpoint: "", ControlURL: ""},
+	})
+
+	s := &Service{
+		exitControlURL:      "https://198.51.100.10:8084",
+		exitDataAddr:        "198.51.100.10:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		betaStrict:          true,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	if _, err := s.resolveExitRoute(context.Background(), "exit-a"); err == nil {
+		t.Fatalf("expected strict mode to reject descriptors missing control_url/endpoint instead of using local fallback route")
+	}
+}
+
 func TestEnforceDirectoryTrustSetRejectsAdditionalUntrustedKeys(t *testing.T) {
 	keyA, _, err := nodecrypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -464,6 +487,40 @@ func TestEnforceDirectoryTrustSetRejectsAdditionalUntrustedKeys(t *testing.T) {
 	}
 	if _, ok := trusted[keyBB64]; ok {
 		t.Fatalf("expected additional key to remain untrusted")
+	}
+}
+
+func TestEnforceDirectoryTrustSetTOFUBootstrapRejectsMultipleKeys(t *testing.T) {
+	keyA, _, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen A: %v", err)
+	}
+	keyB, _, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen B: %v", err)
+	}
+	keyAB64 := base64.RawURLEncoding.EncodeToString(keyA)
+	keyBB64 := base64.RawURLEncoding.EncodeToString(keyB)
+	trustFile := filepath.Join(t.TempDir(), "trusted_keys.txt")
+
+	s := &Service{
+		directoryTrustStrict: true,
+		directoryTrustTOFU:   true,
+		directoryTrustFile:   trustFile,
+	}
+	err = s.enforceDirectoryTrustSet([]string{keyAB64, keyBB64})
+	if err == nil {
+		t.Fatalf("expected TOFU bootstrap to reject multiple pubkeys")
+	}
+	if !strings.Contains(err.Error(), "TOFU bootstrap requires exactly 1 pubkey") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	trusted, err := loadTrustedKeys(trustFile)
+	if err != nil {
+		t.Fatalf("load trusted keys: %v", err)
+	}
+	if len(trusted) != 0 {
+		t.Fatalf("expected no keys pinned when TOFU bootstrap rejects, got %d", len(trusted))
 	}
 }
 

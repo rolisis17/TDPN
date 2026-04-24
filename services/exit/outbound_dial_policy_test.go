@@ -158,6 +158,18 @@ func TestResolveSafeDialAddressBlocksLiteralPrivateIPByDefault(t *testing.T) {
 	}
 }
 
+func TestResolveSafeDialAddressBlocksLiteralCGNATIPByDefault(t *testing.T) {
+	t.Parallel()
+
+	_, err := resolveSafeDialAddress(context.Background(), stubOutboundResolver{}, "100.64.0.9:8082", false, false)
+	if err == nil {
+		t.Fatalf("expected literal shared-address-space ip to be blocked by default")
+	}
+	if !strings.Contains(err.Error(), "blocked by outbound dial policy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveSafeDialAddressDangerousOverrideAllowsPrivateDNS(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +224,7 @@ func TestIsDisallowedOutboundDialIP(t *testing.T) {
 	}{
 		{name: "loopback", ip: "127.0.0.1", want: true},
 		{name: "private", ip: "10.0.0.1", want: true},
+		{name: "shared-address-space", ip: "100.64.0.1", want: true},
 		{name: "link-local-unicast", ip: "169.254.10.10", want: true},
 		{name: "multicast", ip: "224.0.0.1", want: true},
 		{name: "unspecified", ip: "0.0.0.0", want: true},

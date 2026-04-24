@@ -4,6 +4,41 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Keep fallback discovery checks hermetic from ambient environment.
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_REPORTS_DIR || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_SHOW_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CYCLE_PRINT_SUMMARY_JSON || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_STATUS_PASS || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_COMPLETED || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MAX_RUNS_FAIL || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_DECISION_CONSENSUS || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_RECOMMENDED_PROFILE || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_ALLOW_RECOMMENDED_PROFILES || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MODAL_SUPPORT_RATE_PCT || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_FAIL_ON_NO_GO || true
+unset REQUIRE_STATUS_PASS || true
+unset REQUIRE_MIN_RUNS_REQUESTED || true
+unset REQUIRE_MIN_RUNS_COMPLETED || true
+unset REQUIRE_MAX_RUNS_FAIL || true
+unset REQUIRE_DECISION_CONSENSUS || true
+unset REQUIRE_MODAL_DECISION || true
+unset REQUIRE_MODAL_DECISION_SUPPORT_RATE_PCT || true
+unset REQUIRE_RECOMMENDED_PROFILE || true
+unset ALLOW_RECOMMENDED_PROFILES || true
+unset REQUIRE_MODAL_SUPPORT_RATE_PCT || true
+unset FAIL_ON_NO_GO || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE || true
+unset PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE || true
+unset PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE || true
+
 for cmd in bash jq mktemp grep chmod cat; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
@@ -102,10 +137,15 @@ if [[ -z "$summary_json" ]]; then
   exit 2
 fi
 
+schema_id="profile_compare_multi_vm_stability_run_summary"
+if [[ "$scenario" == "bad_schema" ]]; then
+  schema_id="runtime_actuation_multi_vm_summary"
+fi
+
 mkdir -p "$(dirname "$summary_json")"
-jq -n '{
+jq -n --arg schema_id "$schema_id" '{
   version: 1,
-  schema: { id: "profile_compare_multi_vm_stability_run_summary" },
+  schema: { id: $schema_id },
   status: "pass",
   counts: {
     requested: 3,
@@ -254,6 +294,22 @@ if [[ "$scenario" == "go" ]]; then
   exit 0
 fi
 
+if [[ "$scenario" == "bad_schema" ]]; then
+  jq -n '{
+    version: 1,
+    schema: { id: "runtime_actuation_multi_vm_check_summary" },
+    decision: "GO",
+    status: "ok",
+    rc: 0,
+    observed: {
+      modal_recommended_profile: "balanced",
+      modal_support_rate_pct: 100
+    },
+    errors: []
+  }' >"$summary_json"
+  exit 0
+fi
+
 check_rc=0
 if [[ "$fail_on_no_go" == "1" ]]; then
   check_rc=1
@@ -275,6 +331,117 @@ jq -n \
 exit "$check_rc"
 EOF_FAKE_CHECK
 chmod +x "$FAKE_CHECK_SCRIPT"
+
+REAL_RUN_FAKE_CYCLE_SCRIPT="$TMP_DIR/fake_profile_compare_multi_vm_cycle_for_real_run.sh"
+cat >"$REAL_RUN_FAKE_CYCLE_SCRIPT" <<'EOF_REAL_RUN_FAKE_CYCLE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+capture_file="${FAKE_MULTI_VM_STABILITY_REAL_RUN_CAPTURE_FILE:-}"
+summary_json=""
+reports_dir=""
+vm_cmd_count=0
+vm_cmd_file_count=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --summary-json=*)
+      summary_json="${1#*=}"
+      shift
+      ;;
+    --reports-dir)
+      reports_dir="${2:-}"
+      shift 2
+      ;;
+    --reports-dir=*)
+      reports_dir="${1#*=}"
+      shift
+      ;;
+    --vm-command)
+      vm_cmd_count=$((vm_cmd_count + 1))
+      shift 2
+      ;;
+    --vm-command=*)
+      vm_cmd_count=$((vm_cmd_count + 1))
+      shift
+      ;;
+    --vm-command-file)
+      vm_cmd_file_count=$((vm_cmd_file_count + 1))
+      shift 2
+      ;;
+    --vm-command-file=*)
+      vm_cmd_file_count=$((vm_cmd_file_count + 1))
+      shift
+      ;;
+    --show-json|--print-summary-json)
+      if [[ $# -ge 2 && "$2" != --* ]]; then
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      if [[ "$1" == --*=* ]]; then
+        shift
+      elif [[ $# -ge 2 && "$2" != --* ]]; then
+        shift 2
+      else
+        shift
+      fi
+      ;;
+  esac
+done
+
+if [[ -z "$summary_json" ]]; then
+  echo "fake real-run cycle missing --summary-json" >&2
+  exit 2
+fi
+if [[ -z "$reports_dir" ]]; then
+  reports_dir="$(dirname "$summary_json")"
+fi
+
+mkdir -p "$(dirname "$summary_json")" "$reports_dir"
+report_md="$reports_dir/fake_real_run_cycle_report.md"
+printf '# fake real-run cycle report\n' >"$report_md"
+
+if [[ -n "$capture_file" ]]; then
+  printf 'real_run_cycle\tvm_cmd=%s\tvm_cmd_file=%s\treports_dir=%s\tsummary_json=%s\n' \
+    "$vm_cmd_count" "$vm_cmd_file_count" "$reports_dir" "$summary_json" >>"$capture_file"
+fi
+
+jq -n \
+  --arg summary_json "$summary_json" \
+  --arg report_md "$report_md" \
+  '{
+    version: 1,
+    schema: { id: "profile_compare_multi_vm_cycle_summary" },
+    status: "pass",
+    rc: 0,
+    decision: "GO",
+    reducer: {
+      status: "ok",
+      decision: "GO",
+      recommended_profile: "balanced",
+      support_rate_pct: 100
+    },
+    check: {
+      status: "ok",
+      decision: "GO",
+      recommended_profile: "balanced",
+      recommendation_support_rate_pct: 100
+    },
+    artifacts: {
+      summary_json: $summary_json,
+      report_md: $report_md
+    }
+  }' >"$summary_json"
+exit 0
+EOF_REAL_RUN_FAKE_CYCLE
+chmod +x "$REAL_RUN_FAKE_CYCLE_SCRIPT"
 
 echo "[profile-compare-multi-vm-stability-cycle] happy path"
 HAPPY_SUMMARY="$TMP_DIR/cycle_happy_summary.json"
@@ -454,6 +621,47 @@ if grep -q '^check' "$RUN_FAIL_CAPTURE"; then
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-stability-cycle] run summary schema mismatch fails closed"
+RUN_SCHEMA_SUMMARY="$TMP_DIR/cycle_run_schema_mismatch_summary.json"
+RUN_SCHEMA_CAPTURE="$TMP_DIR/cycle_run_schema_mismatch_capture.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$RUN_SCHEMA_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_RUN_SCENARIO="bad_schema" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/run_schema_mismatch_reports" \
+  --summary-json "$RUN_SCHEMA_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_run_schema_mismatch.log 2>&1
+run_schema_rc=$?
+set -e
+
+if [[ "$run_schema_rc" -eq 0 ]]; then
+  echo "expected run-schema-mismatch path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_run_schema_mismatch.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "run"
+  and ((.failure_reason // "") | test("schema\\.id mismatch"))
+  and .run.summary_valid_json == false
+  and .run.summary_schema_valid == false
+  and .run.summary_schema_id == "runtime_actuation_multi_vm_summary"
+  and .stages.check.attempted == false
+' "$RUN_SCHEMA_SUMMARY" >/dev/null 2>&1; then
+  echo "run-schema-mismatch cycle summary mismatch"
+  cat "$RUN_SCHEMA_SUMMARY"
+  exit 1
+fi
+if grep -q '^check' "$RUN_SCHEMA_CAPTURE"; then
+  echo "check stage should not run when run summary schema mismatches"
+  cat "$RUN_SCHEMA_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-stability-cycle] stale run summary fails closed"
 STALE_RUN_INPUT="$TMP_DIR/stale_run_input_summary.json"
 cat >"$STALE_RUN_INPUT" <<'EOF_STALE_RUN_INPUT'
@@ -553,6 +761,248 @@ if ! jq -e '
 ' "$CHECK_STALE_SUMMARY" >/dev/null 2>&1; then
   echo "stale-check cycle summary mismatch"
   cat "$CHECK_STALE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-cycle] check summary schema mismatch fails closed"
+CHECK_SCHEMA_SUMMARY="$TMP_DIR/cycle_check_schema_mismatch_summary.json"
+CHECK_SCHEMA_CAPTURE="$TMP_DIR/cycle_check_schema_mismatch_capture.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$CHECK_SCHEMA_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_RUN_SCENARIO="pass" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="bad_schema" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/check_schema_mismatch_reports" \
+  --summary-json "$CHECK_SCHEMA_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_check_schema_mismatch.log 2>&1
+check_schema_rc=$?
+set -e
+
+if [[ "$check_schema_rc" -eq 0 ]]; then
+  echo "expected check-schema-mismatch path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_check_schema_mismatch.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "check"
+  and ((.failure_reason // "") | test("schema\\.id mismatch"))
+  and .check.summary_valid_json == false
+  and .check.summary_schema_valid == false
+  and .check.summary_schema_id == "runtime_actuation_multi_vm_check_summary"
+  and .stages.check.attempted == true
+' "$CHECK_SCHEMA_SUMMARY" >/dev/null 2>&1; then
+  echo "check-schema-mismatch cycle summary mismatch"
+  cat "$CHECK_SCHEMA_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-cycle] real run fallback command-file discovery from reports-dir artifact"
+REAL_FALLBACK_REPORTS="$TMP_DIR/real_run_fallback_reports"
+REAL_FALLBACK_SUMMARY="$TMP_DIR/cycle_real_run_fallback_summary.json"
+REAL_FALLBACK_CAPTURE="$TMP_DIR/cycle_real_run_fallback_capture.log"
+mkdir -p "$REAL_FALLBACK_REPORTS"
+printf 'vm_real_fb::echo vm-real-fallback\n' >"$REAL_FALLBACK_REPORTS/profile_compare_multi_vm_stability_vm_commands.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$REAL_RUN_FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$REAL_FALLBACK_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_REAL_RUN_CAPTURE_FILE="$REAL_FALLBACK_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$REAL_FALLBACK_REPORTS" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --require-min-runs-requested 1 \
+  --require-min-runs-completed 1 \
+  --require-max-runs-fail 0 \
+  --require-modal-decision-support-rate-pct 0 \
+  --require-modal-support-rate-pct 0 \
+  --summary-json "$REAL_FALLBACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_fallback.log 2>&1
+real_fallback_rc=$?
+set -e
+
+if [[ "$real_fallback_rc" -ne 0 ]]; then
+  echo "expected real-run fallback path rc=0, got rc=$real_fallback_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_fallback.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .decision == "GO"
+  and .failure_stage == null
+' "$REAL_FALLBACK_SUMMARY" >/dev/null 2>&1; then
+  echo "real-run fallback summary mismatch"
+  cat "$REAL_FALLBACK_SUMMARY"
+  exit 1
+fi
+if ! grep -q $'^real_run_cycle\tvm_cmd=0\tvm_cmd_file=1\t' "$REAL_FALLBACK_CAPTURE"; then
+  echo "expected real-run cycle fallback command forwarding capture not found"
+  cat "$REAL_FALLBACK_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-cycle] real run fallback missing remains fail-closed with operator diagnostics"
+REAL_MISSING_REPORTS="$TMP_DIR/real_run_missing_fallback_reports"
+REAL_MISSING_SUMMARY="$TMP_DIR/cycle_real_run_missing_fallback_summary.json"
+REAL_MISSING_CAPTURE="$TMP_DIR/cycle_real_run_missing_fallback_capture.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$REAL_RUN_FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$REAL_MISSING_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_REAL_RUN_CAPTURE_FILE="$REAL_MISSING_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$REAL_MISSING_REPORTS" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --require-min-runs-requested 1 \
+  --require-min-runs-completed 1 \
+  --require-max-runs-fail 0 \
+  --require-modal-decision-support-rate-pct 0 \
+  --require-modal-support-rate-pct 0 \
+  --summary-json "$REAL_MISSING_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_missing_fallback.log 2>&1
+real_missing_rc=$?
+set -e
+
+if [[ "$real_missing_rc" -eq 0 ]]; then
+  echo "expected real-run missing-fallback path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_missing_fallback.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "run"
+  and ((.failure_reason // "") | test("operator_next_action"))
+  and ((.run.failure_hint // "") | test("operator_next_action"))
+  and (.run.failure_hints | type) == "array"
+  and (.run.failure_hints | map(test("^preflight_diag:")) | any)
+  and (.run.failure_hints | map(test("profile_compare_multi_vm_stability_vm_commands\\.txt")) | any)
+  and .stages.check.attempted == false
+' "$REAL_MISSING_SUMMARY" >/dev/null 2>&1; then
+  echo "real-run missing-fallback summary mismatch"
+  cat "$REAL_MISSING_SUMMARY"
+  exit 1
+fi
+if [[ -f "$REAL_MISSING_CAPTURE" ]] && [[ -s "$REAL_MISSING_CAPTURE" ]]; then
+  echo "run-stage missing-fallback should fail before fake run-cycle/check invocation"
+  cat "$REAL_MISSING_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-cycle] real run malformed fallback fails closed during preflight"
+REAL_INVALID_REPORTS="$TMP_DIR/real_run_invalid_fallback_reports"
+REAL_INVALID_SUMMARY="$TMP_DIR/cycle_real_run_invalid_fallback_summary.json"
+REAL_INVALID_CAPTURE="$TMP_DIR/cycle_real_run_invalid_fallback_capture.log"
+mkdir -p "$REAL_INVALID_REPORTS"
+printf 'vm_invalid_without_delimiter\n' >"$REAL_INVALID_REPORTS/profile_compare_multi_vm_stability_vm_commands.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$REAL_RUN_FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$REAL_INVALID_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_REAL_RUN_CAPTURE_FILE="$REAL_INVALID_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$REAL_INVALID_REPORTS" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --require-min-runs-requested 1 \
+  --require-min-runs-completed 1 \
+  --require-max-runs-fail 0 \
+  --require-modal-decision-support-rate-pct 0 \
+  --require-modal-support-rate-pct 0 \
+  --summary-json "$REAL_INVALID_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_invalid_fallback.log 2>&1
+real_invalid_rc=$?
+set -e
+
+if [[ "$real_invalid_rc" -eq 0 ]]; then
+  echo "expected real-run invalid-fallback path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_invalid_fallback.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "run"
+  and ((.failure_reason // "") | test("operator_next_action"))
+  and ((.run.failure_hint // "") | test("operator_next_action"))
+  and (.run.failure_hints | type) == "array"
+  and (.run.failure_hints | map(test("invalid_vm_command_spec_line_1_missing_delimiter")) | any)
+  and .stages.check.attempted == false
+' "$REAL_INVALID_SUMMARY" >/dev/null 2>&1; then
+  echo "real-run invalid-fallback summary mismatch"
+  cat "$REAL_INVALID_SUMMARY"
+  exit 1
+fi
+if [[ -f "$REAL_INVALID_CAPTURE" ]] && [[ -s "$REAL_INVALID_CAPTURE" ]]; then
+  echo "run-stage invalid-fallback should fail before fake run-cycle/check invocation"
+  cat "$REAL_INVALID_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-cycle] real run duplicate VM_ID fallback conflict fails closed during preflight"
+REAL_DUPLICATE_CONFLICT_REPORTS="$TMP_DIR/real_run_duplicate_conflict_fallback_reports"
+REAL_DUPLICATE_CONFLICT_SUMMARY="$TMP_DIR/cycle_real_run_duplicate_conflict_fallback_summary.json"
+REAL_DUPLICATE_CONFLICT_CAPTURE="$TMP_DIR/cycle_real_run_duplicate_conflict_fallback_capture.log"
+mkdir -p "$REAL_DUPLICATE_CONFLICT_REPORTS"
+cat >"$REAL_DUPLICATE_CONFLICT_REPORTS/profile_compare_multi_vm_stability_vm_commands.txt" <<'EOF_REAL_DUPLICATE_CONFLICT'
+vm_dup::echo vm-first
+vm_dup::echo vm-second
+EOF_REAL_DUPLICATE_CONFLICT
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$REAL_RUN_FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$REAL_DUPLICATE_CONFLICT_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_REAL_RUN_CAPTURE_FILE="$REAL_DUPLICATE_CONFLICT_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$REAL_DUPLICATE_CONFLICT_REPORTS" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --require-min-runs-requested 1 \
+  --require-min-runs-completed 1 \
+  --require-max-runs-fail 0 \
+  --require-modal-decision-support-rate-pct 0 \
+  --require-modal-support-rate-pct 0 \
+  --summary-json "$REAL_DUPLICATE_CONFLICT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_duplicate_conflict_fallback.log 2>&1
+real_duplicate_conflict_rc=$?
+set -e
+
+if [[ "$real_duplicate_conflict_rc" -eq 0 ]]; then
+  echo "expected real-run duplicate-conflict fallback path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_duplicate_conflict_fallback.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "run"
+  and ((.failure_reason // "") | test("operator_next_action"))
+  and ((.run.failure_hint // "") | test("operator_next_action"))
+  and (.run.failure_hints | type) == "array"
+  and (.run.failure_hints | map(test("invalid_vm_command_spec_line_2_duplicate_vm_id_conflict")) | any)
+  and .stages.check.attempted == false
+' "$REAL_DUPLICATE_CONFLICT_SUMMARY" >/dev/null 2>&1; then
+  echo "real-run duplicate-conflict fallback summary mismatch"
+  cat "$REAL_DUPLICATE_CONFLICT_SUMMARY"
+  exit 1
+fi
+if [[ -f "$REAL_DUPLICATE_CONFLICT_CAPTURE" ]] && [[ -s "$REAL_DUPLICATE_CONFLICT_CAPTURE" ]]; then
+  echo "run-stage duplicate-conflict fallback should fail before fake run-cycle/check invocation"
+  cat "$REAL_DUPLICATE_CONFLICT_CAPTURE"
   exit 1
 fi
 

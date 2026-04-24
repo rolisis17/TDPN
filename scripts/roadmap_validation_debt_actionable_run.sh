@@ -27,11 +27,14 @@ Default checks:
       scripts/integration_roadmap_progress_report.sh
   - m3_micro_relay_operator_floor
       scripts/integration_client_vpn_operator_floor.sh
+  - m3_three_machine_real_host_validation_pack
+      scripts/integration_three_machine_real_host_validation_pack.sh
 
 Env-overridable check script paths (for stubbing/integration):
   - ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT
   - ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT
   - ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT
+  - ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT
 
 Include/Exclude env defaults (CSV):
   - ROADMAP_VALIDATION_DEBT_ACTIONABLE_INCLUDE_IDS
@@ -274,26 +277,31 @@ declare -a check_ids=(
   "m1_client_3hop_runtime"
   "m1_roadmap_progress_report_contract"
   "m3_micro_relay_operator_floor"
+  "m3_three_machine_real_host_validation_pack"
 )
 declare -a check_labels=(
   "M1 client 3-hop runtime validation"
   "M1 roadmap progress report contract validation"
   "M3 micro-relay operator-floor validation"
+  "M3 three-machine real-host validation pack contract"
 )
 declare -a check_focus=(
   "m1"
   "m1"
   "m3_micro_relay"
+  "m3_validation_pack"
 )
 declare -a check_default_rel=(
   "scripts/integration_client_3hop_runtime.sh"
   "scripts/integration_roadmap_progress_report.sh"
   "scripts/integration_client_vpn_operator_floor.sh"
+  "scripts/integration_three_machine_real_host_validation_pack.sh"
 )
 declare -a check_env_var=(
   "ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT"
   "ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT"
   "ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT"
+  "ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT"
 )
 declare -a check_script_path=()
 
@@ -741,12 +749,15 @@ jq -n \
   --arg default_client_3hop_rel "${check_default_rel[0]}" \
   --arg default_roadmap_rel "${check_default_rel[1]}" \
   --arg default_micro_relay_rel "${check_default_rel[2]}" \
+  --arg default_m3_validation_pack_rel "${check_default_rel[3]}" \
   --arg default_client_3hop_path "${check_script_path[0]}" \
   --arg default_roadmap_path "${check_script_path[1]}" \
   --arg default_micro_relay_path "${check_script_path[2]}" \
+  --arg default_m3_validation_pack_path "${check_script_path[3]}" \
   --arg default_client_3hop_env "${check_env_var[0]}" \
   --arg default_roadmap_env "${check_env_var[1]}" \
   --arg default_micro_relay_env "${check_env_var[2]}" \
+  --arg default_m3_validation_pack_env "${check_env_var[3]}" \
   --argjson default_count "$default_count" \
   --argjson include_ids_requested_count "$include_ids_requested_count" \
   --argjson include_ids_unique_count "$include_ids_unique_count" \
@@ -806,6 +817,14 @@ jq -n \
         default_script_rel: $default_micro_relay_rel,
         resolved_script_path: $default_micro_relay_path,
         script_override_env: $default_micro_relay_env
+      },
+      {
+        id: "m3_three_machine_real_host_validation_pack",
+        label: "M3 three-machine real-host validation pack contract",
+        focus: "m3_validation_pack",
+        default_script_rel: $default_m3_validation_pack_rel,
+        resolved_script_path: $default_m3_validation_pack_path,
+        script_override_env: $default_m3_validation_pack_env
       }
     ],
     selection_accounting: {

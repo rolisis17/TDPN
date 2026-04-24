@@ -130,6 +130,173 @@ function Get-GitBashSnapshot {
   }
 }
 
+function Resolve-RepoRoot {
+  $scriptDir = $PSScriptRoot
+  if ([string]::IsNullOrWhiteSpace($scriptDir)) {
+    $scriptDir = Split-Path -Parent $PSCommandPath
+  }
+  return (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+}
+
+function Test-IcoBytesAreValid {
+  param(
+    [byte[]]$Bytes
+  )
+
+  if ($null -eq $Bytes -or $Bytes.Length -lt 22) {
+    return $false
+  }
+
+  $reserved = [BitConverter]::ToUInt16($Bytes, 0)
+  $imageType = [BitConverter]::ToUInt16($Bytes, 2)
+  $imageCount = [BitConverter]::ToUInt16($Bytes, 4)
+  if ($reserved -ne 0 -or $imageType -ne 1 -or $imageCount -le 0) {
+    return $false
+  }
+
+  $imageSize = [BitConverter]::ToUInt32($Bytes, 14)
+  $imageOffset = [BitConverter]::ToUInt32($Bytes, 18)
+  if ($imageSize -le 0 -or $imageOffset -lt 22) {
+    return $false
+  }
+
+  $imageEnd = [int64]$imageOffset + [int64]$imageSize
+  return $imageEnd -le [int64]$Bytes.Length
+}
+
+function Test-IcoFileValid {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return [pscustomobject]@{
+      valid = $false
+      reason = "missing"
+    }
+  }
+
+  try {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+  } catch {
+    return [pscustomobject]@{
+      valid = $false
+      reason = ("unreadable: {0}" -f $_.Exception.Message)
+    }
+  }
+
+  if (Test-IcoBytesAreValid -Bytes $bytes) {
+    return [pscustomobject]@{
+      valid = $true
+      reason = "valid"
+    }
+  }
+
+  return [pscustomobject]@{
+    valid = $false
+    reason = "invalid_ico"
+  }
+}
+
+function Test-TauriBundleIconConfigured {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedIconRelativePath
+  )
+
+  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
+    return [pscustomobject]@{
+      configured = $false
+      reason = "missing_tauri_conf"
+    }
+  }
+
+  $config = $null
+  try {
+    $config = Get-Content -Raw -LiteralPath $TauriConfigPath | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return [pscustomobject]@{
+      configured = $false
+      reason = "invalid_tauri_conf_json"
+    }
+  }
+
+  $icons = @()
+  if ($null -ne $config -and $null -ne $config.bundle -and $null -ne $config.bundle.icon) {
+    foreach ($iconValue in @($config.bundle.icon)) {
+      if ($null -eq $iconValue) {
+        continue
+      }
+      $iconText = [string]$iconValue
+      if ([string]::IsNullOrWhiteSpace($iconText)) {
+        continue
+      }
+      $icons += $iconText.Trim()
+    }
+  }
+
+  $expectedNormalized = $ExpectedIconRelativePath.Replace("\", "/").Trim().ToLowerInvariant()
+  foreach ($icon in $icons) {
+    $normalized = [string]$icon
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+      continue
+    }
+    $normalized = $normalized.Trim().Replace("\", "/").ToLowerInvariant()
+    if ($normalized -eq $expectedNormalized) {
+      return [pscustomobject]@{
+        configured = $true
+        reason = "configured"
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    configured = $false
+    reason = "missing_bundle_icon_entry"
+  }
+}
+
+function Get-TauriBundleIconRepairCommand {
+  return 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg=''apps/desktop/src-tauri/tauri.conf.json''; $json=Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json; if($null -eq $json.bundle){$json | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{})}; $icons=@(); if($null -ne $json.bundle.icon){$icons=@($json.bundle.icon)}; if($icons -notcontains ''icons/icon.ico''){$json.bundle.icon=@($icons + ''icons/icon.ico'')}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $cfg -Encoding UTF8"'
+}
+
+function Get-DesktopAssetSnapshot {
+  $repoRoot = Resolve-RepoRoot
+  $sourceIconRelativePath = "apps/desktop/src-tauri/icons/icon.svg"
+  $generatedIconRelativePath = "apps/desktop/src-tauri/icons/icon.ico"
+  $tauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json"
+
+  $sourceIconPath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\icon.svg"
+  $generatedIconPath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\icon.ico"
+  $tauriConfigPath = Join-Path $repoRoot "apps\desktop\src-tauri\tauri.conf.json"
+
+  $sourceIconAvailable = Test-Path -LiteralPath $sourceIconPath -PathType Leaf
+  $generatedIconCheck = Test-IcoFileValid -Path $generatedIconPath
+  $tauriBundleIconCheck = Test-TauriBundleIconConfigured -TauriConfigPath $tauriConfigPath -ExpectedIconRelativePath "icons/icon.ico"
+
+  return [pscustomobject]@{
+    source_icon = [pscustomobject]@{
+      path = $sourceIconRelativePath
+      available = [bool]$sourceIconAvailable
+      status = $(if ($sourceIconAvailable) { "ok" } else { "missing" })
+    }
+    generated_icon = [pscustomobject]@{
+      path = $generatedIconRelativePath
+      available = [bool](Test-Path -LiteralPath $generatedIconPath -PathType Leaf)
+      valid = [bool]$generatedIconCheck.valid
+      status = [string]$generatedIconCheck.reason
+    }
+    tauri_bundle_icon = [pscustomobject]@{
+      path = $tauriConfigRelativePath
+      configured = [bool]$tauriBundleIconCheck.configured
+      status = [string]$tauriBundleIconCheck.reason
+    }
+  }
+}
+
 $appliedActions = New-Object System.Collections.Generic.List[string]
 $applyFailedActions = New-Object System.Collections.Generic.List[string]
 
@@ -180,6 +347,10 @@ if ($npmAvailable) {
 
 $npmPs1PolicyIssue = $npmResolvesToPs1 -and $executionPolicyRisk
 $npmPs1ShimIssue = $npmResolvesToPs1 -and -not $npmCmdSiblingAvailable
+$desktopAssets = Get-DesktopAssetSnapshot
+$sourceIconAvailable = [bool]$desktopAssets.source_icon.available
+$generatedIconValid = [bool]$desktopAssets.generated_icon.valid
+$tauriBundleIconConfigured = [bool]$desktopAssets.tauri_bundle_icon.configured
 
 $issues = New-Object System.Collections.Generic.List[string]
 if ($executionPolicyRisk) { $issues.Add("execution_policy_risk") | Out-Null }
@@ -192,6 +363,9 @@ if (-not $rustAvailable) { $issues.Add("rust_toolchain_missing") | Out-Null }
 if (-not $gitBashAvailable) { $issues.Add("git_bash_missing") | Out-Null }
 if ($npmPs1PolicyIssue) { $issues.Add("npm_ps1_policy_issue") | Out-Null }
 if ($npmPs1ShimIssue) { $issues.Add("npm_ps1_without_npm_cmd") | Out-Null }
+if (-not $sourceIconAvailable) { $issues.Add("desktop_icon_source_missing") | Out-Null }
+if (-not $generatedIconValid) { $issues.Add("desktop_icon_missing_or_invalid") | Out-Null }
+if (-not $tauriBundleIconConfigured) { $issues.Add("desktop_tauri_bundle_icon_resource_missing") | Out-Null }
 if ($applyFailedActions.Count -gt 0) { $issues.Add("execution_policy_apply_failed") | Out-Null }
 
 $safeHints = New-Object System.Collections.Generic.List[string]
@@ -213,6 +387,15 @@ if (-not $gitBashAvailable) {
 if ($npmPs1PolicyIssue) {
   Add-UniqueHint -Hints ([ref]$safeHints) -Command ".\scripts\windows\desktop_node.cmd npm -v"
 }
+if (-not $sourceIconAvailable) {
+  Add-UniqueHint -Hints ([ref]$safeHints) -Command "git checkout -- apps/desktop/src-tauri/icons/icon.svg"
+}
+if (-not $generatedIconValid) {
+  Add-UniqueHint -Hints ([ref]$safeHints) -Command ".\scripts\windows\desktop_node.cmd npm run generate:windows-icon"
+}
+if (-not $tauriBundleIconConfigured) {
+  Add-UniqueHint -Hints ([ref]$safeHints) -Command (Get-TauriBundleIconRepairCommand)
+}
 if ($issues.Count -gt 0) {
   Add-UniqueHint -Hints ([ref]$safeHints) -Command "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode bootstrap -InstallMissing -EnablePolicyBypass"
   Add-UniqueHint -Hints ([ref]$safeHints) -Command "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun"
@@ -228,6 +411,9 @@ $checkResults = [ordered]@{
   git_bash_available = [bool]$gitBashAvailable
   npm_ps1_policy_safe = [bool](-not $npmPs1PolicyIssue)
   npm_ps1_cmd_shim_safe = [bool](-not $npmPs1ShimIssue)
+  desktop_icon_source_available = [bool]$sourceIconAvailable
+  desktop_generated_icon_valid = [bool]$generatedIconValid
+  desktop_tauri_bundle_icon_configured = [bool]$tauriBundleIconConfigured
 }
 
 $passCount = 0
@@ -263,6 +449,9 @@ if ($Compact) {
   Write-Step ("rustc: {0}" -f $(if ($rustcAvailable) { $rustcPath } else { "missing" }))
   Write-Step ("cargo: {0}" -f $(if ($cargoAvailable) { $cargoPath } else { "missing" }))
   Write-Step ("git-bash: {0}" -f $(if ($gitBashAvailable) { "$($gitBashSnapshot.path) [$($gitBashSnapshot.source)]" } else { "missing" }))
+  Write-Step ("desktop source icon: {0} ({1})" -f $desktopAssets.source_icon.path, $(if ($sourceIconAvailable) { "ok" } else { "missing" }))
+  Write-Step ("desktop generated icon: {0} ({1})" -f $desktopAssets.generated_icon.path, $desktopAssets.generated_icon.status)
+  Write-Step ("desktop tauri bundle icon resource: {0} ({1})" -f $desktopAssets.tauri_bundle_icon.path, $(if ($tauriBundleIconConfigured) { "configured" } else { $desktopAssets.tauri_bundle_icon.status }))
   if ($npmResolvesToPs1) {
     Write-Step ("npm.ps1 resolver detected; sibling npm.cmd={0}" -f $(if ($npmCmdSiblingAvailable) { $npmCmdSiblingPath } else { "missing" }))
   }
@@ -333,6 +522,24 @@ $summary = [ordered]@{
       path = $gitBashSnapshot.path
       source = $gitBashSnapshot.source
       checked_candidates = @($gitBashSnapshot.checked_candidates)
+    }
+    desktop_assets = [ordered]@{
+      source_icon = [ordered]@{
+        path = [string]$desktopAssets.source_icon.path
+        available = [bool]$sourceIconAvailable
+        status = [string]$desktopAssets.source_icon.status
+      }
+      generated_icon = [ordered]@{
+        path = [string]$desktopAssets.generated_icon.path
+        available = [bool]$desktopAssets.generated_icon.available
+        valid = [bool]$generatedIconValid
+        status = [string]$desktopAssets.generated_icon.status
+      }
+      tauri_bundle_icon = [ordered]@{
+        path = [string]$desktopAssets.tauri_bundle_icon.path
+        configured = [bool]$tauriBundleIconConfigured
+        status = [string]$desktopAssets.tauri_bundle_icon.status
+      }
     }
   }
   remediation_hints = @($safeHints)

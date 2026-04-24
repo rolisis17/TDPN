@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Keep integration behavior hermetic from ambient env overrides.
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_NEXT_ACTIONS_SCRIPT || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_PARALLEL || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_MAX_ACTIONS || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_SCOPE || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC || true
+unset ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ALLOW_UNSAFE_SHELL_COMMANDS || true
+
 for cmd in bash jq mktemp chmod mkdir cat grep; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
@@ -105,6 +116,8 @@ case "$scenario" in
   mixed_success)
     cat >"$summary_json" <<JSON
 {
+  "status": "warn",
+  "rc": 0,
   "next_actions": [
     {"id":"vpn_rc_standard_path","label":"Non-target (must not run)","command":"bash \"$NON_TARGET_FAIL\"","reason":"must-not-run"},
     {"id":"profile_default_gate","label":"Profile default gate","command":"bash \"$PASS_PROFILE_DEFAULT_GATE\"","reason":"live-cycle"},
@@ -118,6 +131,8 @@ JSON
   mixed_fail_first)
     cat >"$summary_json" <<JSON
 {
+  "status": "warn",
+  "rc": 0,
   "next_actions": [
     {"id":"client_vpn_smoke","label":"Non-target (must not run)","command":"bash \"$NON_TARGET_FAIL\"","reason":"must-not-run"},
     {"id":"profile_compare_multi_vm_stability","label":"Profile compare multi-vm stability fail","command":"bash \"$FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY\"","reason":"live-cycle"},
@@ -129,12 +144,14 @@ JSON
   duplicates_ordering)
     cat >"$summary_json" <<JSON
 {
+  "status": "warn",
+  "rc": 0,
   "next_actions": [
     {"id":"runtime_actuation_promotion","label":"Runtime pass first","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"live-cycle"},
     {"id":"profile_default_gate","label":"Profile pass second","command":"bash \"$PASS_PROFILE_DEFAULT_GATE\"","reason":"live-cycle"},
-    {"id":"runtime_actuation_promotion","label":"Runtime duplicate must be deduped","command":"bash \"$NON_TARGET_FAIL\"","reason":"duplicate-should-not-run"},
+    {"id":"runtime_actuation_promotion","label":"Runtime duplicate must be deduped","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"duplicate-should-not-run"},
     {"id":"profile_compare_multi_vm_stability","label":"Multi-vm pass third","command":"bash \"$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY\"","reason":"live-cycle"},
-    {"id":"profile_default_gate","label":"Profile duplicate must be deduped","command":"bash \"$NON_TARGET_FAIL\"","reason":"duplicate-should-not-run"},
+    {"id":"profile_default_gate","label":"Profile duplicate must be deduped","command":"bash \"$PASS_PROFILE_DEFAULT_GATE\"","reason":"duplicate-should-not-run"},
     {"id":"profile_compare_multi_vm_stability_promotion","label":"Target id with empty command","command":"","reason":"empty-command"}
   ]
 }
@@ -143,11 +160,13 @@ JSON
   derived_projection)
     cat >"$summary_json" <<JSON
 {
+  "status": "warn",
+  "rc": 0,
   "next_actions": [
     {"id":"runtime_actuation_promotion","label":"Runtime pass first","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"live-cycle"},
     {"id":"profile_default_gate","label":"Profile pass second","command":"bash \"$PASS_PROFILE_DEFAULT_GATE\"","reason":"live-cycle"},
     {"id":"profile_compare_multi_vm_stability","label":"Multi-vm pass third","command":"bash \"$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY\"","reason":"live-cycle"},
-    {"id":"runtime_actuation_promotion","label":"Runtime duplicate must be deduped","command":"bash \"$NON_TARGET_FAIL\"","reason":"duplicate-should-not-run"},
+    {"id":"runtime_actuation_promotion","label":"Runtime duplicate must be deduped","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"duplicate-should-not-run"},
     {"id":"profile_compare_multi_vm_stability_promotion","label":"Multi-vm promotion pass fourth","command":"bash \"$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION\"","reason":"live-cycle"},
     {"id":"runtime_actuation_promotion_evidence_pack","label":"Derived evidence-pack present","command":"bash \"$NON_TARGET_FAIL\"","reason":"snapshot-only"},
     {"id":"profile_compare_multi_vm_stability_promotion_evidence_pack","label":"Derived evidence-pack present","command":"bash \"$NON_TARGET_FAIL\"","reason":"snapshot-only"},
@@ -156,9 +175,40 @@ JSON
 }
 JSON
     ;;
+  deterministic_command_conflict)
+    cat >"$summary_json" <<JSON
+{
+  "status": "warn",
+  "rc": 0,
+  "next_actions": [
+    {"id":"runtime_actuation_promotion","label":"Runtime first command","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"live-cycle"},
+    {"id":"runtime_actuation_promotion","label":"Runtime conflicting duplicate","command":"bash \"$NON_TARGET_FAIL\"","reason":"live-cycle-conflict"},
+    {"id":"profile_default_gate","label":"Profile default gate","command":"bash \"$PASS_PROFILE_DEFAULT_GATE\"","reason":"live-cycle"}
+  ]
+}
+JSON
+    ;;
+  whitespace_commands)
+    cat >"$summary_json" <<JSON
+{
+  "status": "warn",
+  "rc": 0,
+  "next_actions": [
+    {"id":"profile_default_gate","label":"Whitespace command should be ignored","command":"   ","reason":"invalid-command"},
+    {"id":"runtime_actuation_promotion","label":"Runtime pass command","command":"bash \"$PASS_RUNTIME_ACTUATION_PROMOTION\"","reason":"live-cycle"},
+    {"id":"profile_compare_multi_vm_stability","label":"Tab-only command should be ignored","command":"\t\t","reason":"invalid-command"}
+  ]
+}
+JSON
+    ;;
+  missing_summary_output)
+    # Intentionally emit no summary payload to verify stale-summary reuse protection.
+    ;;
   no_targets)
     cat >"$summary_json" <<JSON
 {
+  "status": "warn",
+  "rc": 0,
   "next_actions": [
     {"id":"profile_default_gate_evidence_pack","label":"Evidence-pack publish only","command":"bash \"$NON_TARGET_FAIL\"","reason":"must-not-run"},
     {"id":"runtime_actuation_promotion_evidence_pack","label":"Evidence-pack publish only","command":"bash \"$NON_TARGET_FAIL\"","reason":"must-not-run"}
@@ -229,7 +279,7 @@ if ! bash ./scripts/roadmap_live_evidence_actionable_run.sh --help | grep -F -- 
   exit 1
 fi
 
-echo "[roadmap-live-evidence-actionable-run] mixed success path selects only target ids and delegates execution"
+echo "[roadmap-live-evidence-actionable-run] default auto scope selects all pending live families and delegates execution"
 SUMMARY_SUCCESS="$TMP_DIR/summary_success.json"
 REPORTS_SUCCESS="$TMP_DIR/reports_success"
 : >"$EXEC_LOG"
@@ -246,7 +296,7 @@ bash ./scripts/roadmap_live_evidence_actionable_run.sh \
   --refresh-manual-validation 1 \
   --refresh-single-machine-readiness 1 \
   --parallel 1 \
-  --max-actions 1 \
+  --max-actions 0 \
   --action-timeout-sec 2 \
   --print-summary-json 0
 
@@ -258,63 +308,76 @@ if ! jq -e '
   and .inputs.refresh_manual_validation == true
   and .inputs.refresh_single_machine_readiness == true
   and .inputs.parallel == true
-  and .inputs.scope == "profile-default"
-  and .inputs.resolved_scope == "profile-default"
-  and (.inputs.scope_inference_reason | contains("explicit scope: profile-default"))
-  and .inputs.max_actions == 1
+  and .inputs.scope == "auto"
+  and .inputs.resolved_scope == "all"
+  and (.inputs.scope_inference_reason | contains("auto: inferred mixed pending families"))
+  and .inputs.max_actions == 0
   and .inputs.action_timeout_sec == 2
   and .inputs.allow_unsafe_shell_commands == false
   and .inputs.target_action_ids == ["profile_default_gate","runtime_actuation_promotion","profile_compare_multi_vm_stability","profile_compare_multi_vm_stability_promotion"]
-  and .roadmap.resolved_scope == "profile-default"
-  and (.roadmap.scope_inference_reason | contains("explicit scope: profile-default"))
+  and .roadmap.resolved_scope == "all"
+  and (.roadmap.scope_inference_reason | contains("auto: inferred mixed pending families"))
   and .roadmap.generated_this_run == true
+  and .roadmap.summary_contract_state == "valid"
+  and .roadmap.summary_contract_reason == "status/rc contract satisfied"
   and .roadmap.target_match_count == 2
   and .roadmap.target_match_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
   and .roadmap.target_match_unique_count == 2
   and .roadmap.target_match_unique_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
-  and .roadmap.scope_target_action_ids == ["profile_default_gate"]
-  and .roadmap.scope_match_count == 1
-  and .roadmap.scope_match_action_ids == ["profile_default_gate"]
-  and .roadmap.scope_match_unique_count == 1
-  and .roadmap.scope_match_unique_action_ids == ["profile_default_gate"]
+  and .roadmap.scope_target_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
+  and .roadmap.scope_match_count == 2
+  and .roadmap.scope_match_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
+  and .roadmap.scope_match_unique_count == 2
+  and .roadmap.scope_match_unique_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
   and .roadmap.derived_evidence_pack_map == [
-    {"live_action_id":"profile_default_gate","evidence_pack_id":"profile_default_gate_evidence_pack"}
+    {"live_action_id":"profile_default_gate","evidence_pack_id":"profile_default_gate_evidence_pack"},
+    {"live_action_id":"runtime_actuation_promotion","evidence_pack_id":"runtime_actuation_promotion_evidence_pack"}
   ]
-  and .roadmap.derived_evidence_pack_ids == ["profile_default_gate_evidence_pack"]
-  and .roadmap.derived_evidence_pack_count == 1
+  and .roadmap.derived_evidence_pack_ids == ["profile_default_gate_evidence_pack","runtime_actuation_promotion_evidence_pack"]
+  and .roadmap.derived_evidence_pack_count == 2
   and .roadmap.derived_evidence_pack_missing_ids_in_snapshot == ["profile_default_gate_evidence_pack"]
   and .roadmap.derived_evidence_pack_missing_count_in_snapshot == 1
-  and .roadmap.selected_unique_count == 1
-  and .roadmap.actions_selected_count == 1
-  and .roadmap.selected_action_ids == ["profile_default_gate"]
-  and .summary.derived_evidence_pack_count == 1
+  and .roadmap.selected_unique_count == 2
+  and .roadmap.actions_selected_count == 2
+  and .roadmap.selected_action_ids == ["profile_default_gate","runtime_actuation_promotion"]
+  and .summary.derived_evidence_pack_count == 2
   and .summary.derived_evidence_pack_missing_count_in_snapshot == 1
-  and .summary.selected_unique_count == 1
-  and .summary.actions_executed == 1
-  and .summary.pass == 1
+  and .summary.selected_unique_count == 2
+  and .summary.actions_executed == 2
+  and .summary.pass == 2
   and .summary.fail == 0
   and .delegated_runner.summary_valid == true
+  and .delegated_runner.contract_valid == true
+  and .delegated_runner.contract_failure_reason == null
+  and .delegated_runner.failure_substep == null
   and .delegated_runner.status == "pass"
   and .delegated_runner.rc == 0
   and .delegated_runner.process_rc == 0
   and (.artifacts.summary_json | type == "string" and length > 0)
   and (.artifacts.next_actions_summary_json | type == "string" and length > 0)
-  and ((.actions // []) | length == 1)
+  and ((.actions // []) | length == 2)
   and .actions[0].id == "profile_default_gate"
   and .actions[0].status == "pass"
+  and .actions[1].id == "runtime_actuation_promotion"
+  and .actions[1].status == "pass"
 ' "$SUMMARY_SUCCESS" >/dev/null; then
   echo "mixed success summary mismatch"
   cat "$SUMMARY_SUCCESS"
   exit 1
 fi
 
-if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
-  echo "expected exactly one executed action log entry for mixed success path"
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "2" ]]; then
+  echo "expected exactly two executed action log entries for mixed success path"
   cat "$EXEC_LOG"
   exit 1
 fi
 if ! grep -Fx "profile_default_gate" "$EXEC_LOG" >/dev/null; then
   echo "expected executed log to contain profile_default_gate"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -Fx "runtime_actuation_promotion" "$EXEC_LOG" >/dev/null; then
+  echo "expected executed log to contain runtime_actuation_promotion"
   cat "$EXEC_LOG"
   exit 1
 fi
@@ -353,6 +416,8 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 17
+  and .roadmap.summary_contract_state == "valid"
+  and .roadmap.summary_contract_reason == "status/rc contract satisfied"
   and .roadmap.target_match_count == 2
   and .roadmap.target_match_action_ids == ["profile_compare_multi_vm_stability","runtime_actuation_promotion"]
   and .roadmap.target_match_unique_count == 2
@@ -375,6 +440,9 @@ if ! jq -e '
   and .summary.pass == 1
   and .summary.fail == 1
   and .delegated_runner.summary_valid == true
+  and .delegated_runner.contract_valid == true
+  and .delegated_runner.contract_failure_reason == null
+  and .delegated_runner.failure_substep == "delegated_runner_action_failure"
   and .delegated_runner.status == "fail"
   and .delegated_runner.rc == 17
   and .delegated_runner.process_rc == 17
@@ -584,6 +652,137 @@ if [[ "${derived_executed_ids[0]:-}" != "runtime_actuation_promotion" || "${deri
   exit 1
 fi
 
+echo "[roadmap-live-evidence-actionable-run] conflicting duplicate commands fail closed before delegation"
+SUMMARY_CONFLICT="$TMP_DIR/summary_conflict.json"
+REPORTS_CONFLICT="$TMP_DIR/reports_conflict"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCENARIO=deterministic_command_conflict \
+PASS_PROFILE_DEFAULT_GATE="$PASS_PROFILE_DEFAULT_GATE" \
+PASS_RUNTIME_ACTUATION_PROMOTION="$PASS_RUNTIME_ACTUATION_PROMOTION" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION" \
+FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY="$FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+NON_TARGET_FAIL="$NON_TARGET_FAIL" \
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_live_evidence_actionable_run.sh \
+  --reports-dir "$REPORTS_CONFLICT" \
+  --summary-json "$SUMMARY_CONFLICT" \
+  --scope all \
+  --parallel 0 \
+  --print-summary-json 0
+conflict_rc=$?
+set -e
+if [[ "$conflict_rc" != "4" ]]; then
+  echo "expected deterministic-command-conflict rc=4, got rc=$conflict_rc"
+  cat "$SUMMARY_CONFLICT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 4
+  and .inputs.deterministic_conflict_mode == true
+  and .roadmap.target_match_count == 3
+  and .roadmap.target_match_action_ids == ["runtime_actuation_promotion","runtime_actuation_promotion","profile_default_gate"]
+  and .roadmap.target_match_unique_count == 2
+  and .roadmap.target_match_unique_action_ids == ["runtime_actuation_promotion","profile_default_gate"]
+  and .roadmap.target_match_command_conflict_count == 1
+  and (.roadmap.target_match_command_conflicts | length) == 1
+  and .roadmap.target_match_command_conflicts[0].id == "runtime_actuation_promotion"
+  and (.roadmap.target_match_command_conflicts[0].commands | length) == 2
+  and .roadmap.deterministic_command_selection_valid == false
+  and ((.roadmap.deterministic_command_selection_reason | type) == "string")
+  and (.roadmap.deterministic_command_selection_reason | contains("runtime_actuation_promotion"))
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and ((.actions // []) | length == 0)
+  and .delegated_runner.summary_valid == false
+  and .delegated_runner.contract_valid == false
+  and .delegated_runner.failure_substep == "deterministic_command_conflict"
+  and .delegated_runner.status == "skipped_deterministic_command_conflict"
+  and .delegated_runner.rc == 4
+  and .delegated_runner.process_rc == 4
+' "$SUMMARY_CONFLICT" >/dev/null; then
+  echo "deterministic command conflict summary mismatch"
+  cat "$SUMMARY_CONFLICT"
+  exit 1
+fi
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "deterministic command conflict path should not execute any live action"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-actionable-run] whitespace-only commands are filtered from target selection"
+SUMMARY_WHITESPACE="$TMP_DIR/summary_whitespace.json"
+REPORTS_WHITESPACE="$TMP_DIR/reports_whitespace"
+: >"$EXEC_LOG"
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCENARIO=whitespace_commands \
+PASS_PROFILE_DEFAULT_GATE="$PASS_PROFILE_DEFAULT_GATE" \
+PASS_RUNTIME_ACTUATION_PROMOTION="$PASS_RUNTIME_ACTUATION_PROMOTION" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION" \
+FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY="$FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+NON_TARGET_FAIL="$NON_TARGET_FAIL" \
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_live_evidence_actionable_run.sh \
+  --reports-dir "$REPORTS_WHITESPACE" \
+  --summary-json "$SUMMARY_WHITESPACE" \
+  --scope all \
+  --parallel 0 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.deterministic_conflict_mode == false
+  and .roadmap.target_match_count == 1
+  and .roadmap.target_match_action_ids == ["runtime_actuation_promotion"]
+  and .roadmap.target_match_unique_count == 1
+  and .roadmap.target_match_unique_action_ids == ["runtime_actuation_promotion"]
+  and .roadmap.target_match_command_conflict_count == 0
+  and .roadmap.target_match_command_conflicts == []
+  and .roadmap.deterministic_command_selection_valid == true
+  and .roadmap.scope_match_count == 1
+  and .roadmap.scope_match_action_ids == ["runtime_actuation_promotion"]
+  and .roadmap.scope_match_unique_count == 1
+  and .roadmap.scope_match_unique_action_ids == ["runtime_actuation_promotion"]
+  and .roadmap.selected_unique_count == 1
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["runtime_actuation_promotion"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "runtime_actuation_promotion"
+  and .actions[0].status == "pass"
+  and .delegated_runner.summary_valid == true
+  and .delegated_runner.contract_valid == true
+  and .delegated_runner.status == "pass"
+  and .delegated_runner.rc == 0
+  and .delegated_runner.process_rc == 0
+' "$SUMMARY_WHITESPACE" >/dev/null; then
+  echo "whitespace-command filtering summary mismatch"
+  cat "$SUMMARY_WHITESPACE"
+  exit 1
+fi
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected exactly one executed action log entry for whitespace-command filtering path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -Fx "runtime_actuation_promotion" "$EXEC_LOG" >/dev/null; then
+  echo "expected runtime_actuation_promotion to execute in whitespace-command filtering path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "profile_default_gate" "$EXEC_LOG" >/dev/null || grep -F "profile_compare_multi_vm_stability" "$EXEC_LOG" >/dev/null || grep -F "non_target_should_not_run" "$EXEC_LOG" >/dev/null; then
+  echo "unexpected action executed in whitespace-command filtering path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
 echo "[roadmap-live-evidence-actionable-run] print-only mode outputs derived evidence-pack ids and skips delegation"
 SUMMARY_DERIVED_PRINT_ONLY="$TMP_DIR/summary_derived_print_only.json"
 REPORTS_DERIVED_PRINT_ONLY="$TMP_DIR/reports_derived_print_only"
@@ -709,6 +908,46 @@ fi
 if [[ -s "$EXEC_LOG" ]]; then
   echo "expected no action executions in no-targets path"
   cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-actionable-run] stale roadmap summary is not reused when generator emits no summary"
+SUMMARY_STALE_ROADMAP="$TMP_DIR/summary_stale_roadmap.json"
+REPORTS_STALE_ROADMAP="$TMP_DIR/reports_stale_roadmap"
+STALE_ROADMAP_SUMMARY="$REPORTS_STALE_ROADMAP/roadmap_progress_summary.json"
+mkdir -p "$REPORTS_STALE_ROADMAP"
+cat >"$STALE_ROADMAP_SUMMARY" <<'EOF_STALE_ROADMAP'
+{
+  "status": "pass",
+  "rc": 0,
+  "next_actions": [
+    {"id":"profile_default_gate","command":"echo stale"}
+  ],
+  "notes": "stale roadmap summary fixture"
+}
+EOF_STALE_ROADMAP
+set +e
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCENARIO=missing_summary_output \
+PASS_PROFILE_DEFAULT_GATE="$PASS_PROFILE_DEFAULT_GATE" \
+PASS_RUNTIME_ACTUATION_PROMOTION="$PASS_RUNTIME_ACTUATION_PROMOTION" \
+PASS_PROFILE_COMPARE_MULTI_VM_STABILITY="$PASS_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY="$FAIL_PROFILE_COMPARE_MULTI_VM_STABILITY" \
+NON_TARGET_FAIL="$NON_TARGET_FAIL" \
+ROADMAP_LIVE_EVIDENCE_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_live_evidence_actionable_run.sh \
+  --reports-dir "$REPORTS_STALE_ROADMAP" \
+  --summary-json "$SUMMARY_STALE_ROADMAP" \
+  --print-summary-json 0
+stale_roadmap_rc=$?
+set -e
+if [[ "$stale_roadmap_rc" != "3" ]]; then
+  echo "expected stale-roadmap reuse protection rc=3 when generated summary is missing, got rc=$stale_roadmap_rc"
+  cat "$SUMMARY_STALE_ROADMAP" 2>/dev/null || true
+  exit 1
+fi
+if [[ -f "$STALE_ROADMAP_SUMMARY" ]]; then
+  echo "expected stale roadmap summary fixture to be removed before generation"
+  ls -l "$STALE_ROADMAP_SUMMARY"
   exit 1
 fi
 

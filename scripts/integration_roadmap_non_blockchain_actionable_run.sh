@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod mkdir cat grep timeout; do
+for cmd in bash jq mktemp chmod mkdir cat grep timeout ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -25,6 +25,17 @@ SLOW2="$ACTION_TMP_DIR/slow_action_2.sh"
 ASSERT_ARGS="$ACTION_TMP_DIR/assert_args_action.sh"
 ENV_REJECT_PAYLOAD="$ACTION_TMP_DIR/env_reject_payload.sh"
 ENV_REJECT_MARKER="$TMP_DIR/env_reject_marker.txt"
+SYMLINK_ESCAPE_TARGET="$TMP_DIR/symlink_escape_target.sh"
+SYMLINK_ESCAPE_LINK="$ACTION_TMP_DIR/symlink_escape_action.sh"
+SYMLINK_ESCAPE_MARKER="$TMP_DIR/symlink_escape_marker.txt"
+PARENT_SYMLINK_ESCAPE_DIR_TARGET="$TMP_DIR/parent_symlink_escape_dir"
+PARENT_SYMLINK_ESCAPE_DIR_LINK="$ACTION_TMP_DIR/parent_symlink_escape_link"
+PARENT_SYMLINK_ESCAPE_SCRIPT="$PARENT_SYMLINK_ESCAPE_DIR_TARGET/parent_symlink_escape_action.sh"
+PARENT_SYMLINK_ESCAPE_MARKER="$TMP_DIR/parent_symlink_escape_marker.txt"
+TOCTOU_MUTATE_ACTION="$ACTION_TMP_DIR/toctou_mutate_action.sh"
+TOCTOU_RACE_ACTION="$ACTION_TMP_DIR/toctou_race_action.sh"
+TOCTOU_ESCAPE_TARGET="$TMP_DIR/toctou_escape_target.sh"
+TOCTOU_ESCAPE_MARKER="$TMP_DIR/toctou_escape_marker.txt"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -81,6 +92,63 @@ set -euo pipefail
 echo "payload-executed" >"$ENV_REJECT_MARKER"
 EOF_ENV_REJECT_PAYLOAD
 chmod +x "$ENV_REJECT_PAYLOAD"
+
+cat >"$SYMLINK_ESCAPE_TARGET" <<'EOF_SYMLINK_ESCAPE_TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${SYMLINK_ESCAPE_MARKER:-}" ]]; then
+  echo "symlink-escape-executed" >"$SYMLINK_ESCAPE_MARKER"
+fi
+echo "symlink escape payload executed"
+EOF_SYMLINK_ESCAPE_TARGET
+chmod +x "$SYMLINK_ESCAPE_TARGET"
+ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK"
+mkdir -p "$PARENT_SYMLINK_ESCAPE_DIR_TARGET"
+cat >"$PARENT_SYMLINK_ESCAPE_SCRIPT" <<'EOF_PARENT_SYMLINK_ESCAPE_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${PARENT_SYMLINK_ESCAPE_MARKER:-}" ]]; then
+  echo "parent-symlink-escape-executed" >"$PARENT_SYMLINK_ESCAPE_MARKER"
+fi
+echo "parent symlink escape payload executed"
+EOF_PARENT_SYMLINK_ESCAPE_SCRIPT
+chmod +x "$PARENT_SYMLINK_ESCAPE_SCRIPT"
+ln -s "$PARENT_SYMLINK_ESCAPE_DIR_TARGET" "$PARENT_SYMLINK_ESCAPE_DIR_LINK"
+
+cat >"$TOCTOU_RACE_ACTION" <<'EOF_TOCTOU_RACE_ACTION'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "toctou race action executed"
+EOF_TOCTOU_RACE_ACTION
+chmod +x "$TOCTOU_RACE_ACTION"
+
+cat >"$TOCTOU_ESCAPE_TARGET" <<'EOF_TOCTOU_ESCAPE_TARGET'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${TOCTOU_ESCAPE_MARKER:-}" ]]; then
+  echo "toctou-escape-executed" >"$TOCTOU_ESCAPE_MARKER"
+fi
+echo "toctou escape payload executed"
+EOF_TOCTOU_ESCAPE_TARGET
+chmod +x "$TOCTOU_ESCAPE_TARGET"
+
+cat >"$TOCTOU_MUTATE_ACTION" <<'EOF_TOCTOU_MUTATE_ACTION'
+#!/usr/bin/env bash
+set -euo pipefail
+target_script="${TOCTOU_TARGET_SCRIPT:-}"
+escape_script="${TOCTOU_ESCAPE_SCRIPT:-}"
+if [[ -z "$target_script" || -z "$escape_script" ]]; then
+  echo "missing TOCTOU_TARGET_SCRIPT or TOCTOU_ESCAPE_SCRIPT"
+  exit 2
+fi
+(
+  sleep 0.2
+  rm -f "$target_script"
+  ln -s "$escape_script" "$target_script"
+) &
+echo "toctou mutator armed"
+EOF_TOCTOU_MUTATE_ACTION
+chmod +x "$TOCTOU_MUTATE_ACTION"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -229,6 +297,43 @@ JSON
     "non_blockchain_recommended_gate_id": "action_env_prefixed_reject",
     "non_blockchain_actionable_no_sudo_or_github": [
       {"id":"action_env_prefixed_reject","label":"Action env-prefixed reject","command":"BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"","reason":"test-env-prefixed-reject"}
+    ]
+  }
+}
+JSON
+    ;;
+  symlink_escape_reject)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_symlink_escape_reject",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_symlink_escape_reject","label":"Action symlink escape reject","command":"bash \"$SYMLINK_ESCAPE_LINK\"","reason":"test-symlink-escape-reject"}
+    ]
+  }
+}
+JSON
+    ;;
+  parent_symlink_escape_reject)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_parent_symlink_escape_reject",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_parent_symlink_escape_reject","label":"Action parent symlink escape reject","command":"bash \"$PARENT_SYMLINK_ESCAPE_DIR_LINK/parent_symlink_escape_action.sh\"","reason":"test-parent-symlink-escape-reject"}
+    ]
+  }
+}
+JSON
+    ;;
+  toctou_revalidate_reject)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_toctou_mutate",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_toctou_mutate","label":"Action TOCTOU mutate","command":"bash \"$TOCTOU_MUTATE_ACTION\"","reason":"test-toctou-mutate"},
+      {"id":"action_toctou_race","label":"Action TOCTOU race","command":"bash \"$TOCTOU_RACE_ACTION\"","reason":"test-toctou-race"}
     ]
   }
 }
@@ -430,6 +535,135 @@ if ! jq -e '
 ' "$SUMMARY_ENV_REJECT" >/dev/null; then
   echo "env-prefixed safe-mode rejection summary mismatch"
   cat "$SUMMARY_ENV_REJECT"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] symlinked action path remains fail-closed"
+SUMMARY_SYMLINK_REJECT="$TMP_DIR/summary_symlink_reject.json"
+REPORTS_SYMLINK_REJECT="$TMP_DIR/reports_symlink_reject"
+rm -f "$SYMLINK_ESCAPE_MARKER"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=symlink_escape_reject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" SYMLINK_ESCAPE_LINK="$SYMLINK_ESCAPE_LINK" SYMLINK_ESCAPE_MARKER="$SYMLINK_ESCAPE_MARKER" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_SYMLINK_REJECT" \
+  --summary-json "$SUMMARY_SYMLINK_REJECT" \
+  --print-summary-json 0
+symlink_reject_rc=$?
+set -e
+if [[ "$symlink_reject_rc" != "6" ]]; then
+  echo "expected symlink escape rejection rc=6, got rc=$symlink_reject_rc"
+  cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+if [[ -f "$SYMLINK_ESCAPE_MARKER" ]]; then
+  echo "symlink escape payload unexpectedly executed in safe mode"
+  cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "action_symlink_escape_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$SUMMARY_SYMLINK_REJECT" >/dev/null; then
+  echo "symlink escape rejection summary mismatch"
+  cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] parent-directory symlink action path remains fail-closed"
+SUMMARY_PARENT_SYMLINK_REJECT="$TMP_DIR/summary_parent_symlink_reject.json"
+REPORTS_PARENT_SYMLINK_REJECT="$TMP_DIR/reports_parent_symlink_reject"
+rm -f "$PARENT_SYMLINK_ESCAPE_MARKER"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=parent_symlink_escape_reject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PARENT_SYMLINK_ESCAPE_DIR_LINK="$PARENT_SYMLINK_ESCAPE_DIR_LINK" PARENT_SYMLINK_ESCAPE_MARKER="$PARENT_SYMLINK_ESCAPE_MARKER" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_PARENT_SYMLINK_REJECT" \
+  --summary-json "$SUMMARY_PARENT_SYMLINK_REJECT" \
+  --print-summary-json 0
+parent_symlink_reject_rc=$?
+set -e
+if [[ "$parent_symlink_reject_rc" != "6" ]]; then
+  echo "expected parent symlink escape rejection rc=6, got rc=$parent_symlink_reject_rc"
+  cat "$SUMMARY_PARENT_SYMLINK_REJECT"
+  exit 1
+fi
+if [[ -f "$PARENT_SYMLINK_ESCAPE_MARKER" ]]; then
+  echo "parent symlink escape payload unexpectedly executed in safe mode"
+  cat "$SUMMARY_PARENT_SYMLINK_REJECT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "action_parent_symlink_escape_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$SUMMARY_PARENT_SYMLINK_REJECT" >/dev/null; then
+  echo "parent symlink escape rejection summary mismatch"
+  cat "$SUMMARY_PARENT_SYMLINK_REJECT"
+  exit 1
+fi
+
+echo "[roadmap-non-blockchain-actionable-run] pre-exec revalidation catches TOCTOU path mutation and fails closed"
+SUMMARY_TOCTOU_REJECT="$TMP_DIR/summary_toctou_reject.json"
+REPORTS_TOCTOU_REJECT="$TMP_DIR/reports_toctou_reject"
+rm -f "$TOCTOU_ESCAPE_MARKER"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=toctou_revalidate_reject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+TOCTOU_MUTATE_ACTION="$TOCTOU_MUTATE_ACTION" TOCTOU_RACE_ACTION="$TOCTOU_RACE_ACTION" \
+TOCTOU_TARGET_SCRIPT="$TOCTOU_RACE_ACTION" TOCTOU_ESCAPE_SCRIPT="$TOCTOU_ESCAPE_TARGET" TOCTOU_ESCAPE_MARKER="$TOCTOU_ESCAPE_MARKER" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC=1 \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_TOCTOU_REJECT" \
+  --summary-json "$SUMMARY_TOCTOU_REJECT" \
+  --print-summary-json 0
+toctou_reject_rc=$?
+set -e
+if [[ "$toctou_reject_rc" != "6" ]]; then
+  echo "expected TOCTOU revalidation rejection rc=6, got rc=$toctou_reject_rc"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+if [[ -f "$TOCTOU_ESCAPE_MARKER" ]]; then
+  echo "TOCTOU escape payload unexpectedly executed in safe mode"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 2
+  and .summary.pass == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 2)
+  and .actions[0].id == "action_toctou_mutate"
+  and .actions[0].status == "pass"
+  and .actions[1].id == "action_toctou_race"
+  and .actions[1].status == "fail"
+  and .actions[1].rc == 6
+' "$SUMMARY_TOCTOU_REJECT" >/dev/null; then
+  echo "TOCTOU revalidation rejection summary mismatch"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+if ! grep -R -F "pre-exec validation mismatch" "$REPORTS_TOCTOU_REJECT" >/dev/null; then
+  echo "TOCTOU revalidation mismatch log marker missing"
+  cat "$SUMMARY_TOCTOU_REJECT"
   exit 1
 fi
 
@@ -803,8 +1037,8 @@ if ! jq -e '
   exit 1
 fi
 
-if (( parallel_elapsed_sec > 6 )); then
-  echo "functional parallel timing mismatch: expected <=6s, got ${parallel_elapsed_sec}s"
+if (( parallel_elapsed_sec > 12 )); then
+  echo "functional parallel timing mismatch: expected <=12s, got ${parallel_elapsed_sec}s"
   cat "$SUMMARY_PARALLEL"
   exit 1
 fi

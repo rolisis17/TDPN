@@ -26,6 +26,7 @@ EXEC_LOG="$TMP_DIR/executed_checks.log"
 PASS_CLIENT="$ACTION_TMP_DIR/pass_client_3hop_runtime.sh"
 PASS_ROADMAP="$ACTION_TMP_DIR/pass_roadmap_progress_report.sh"
 PASS_MICRO="$ACTION_TMP_DIR/pass_micro_relay_operator_floor.sh"
+PASS_M3_PACK="$ACTION_TMP_DIR/pass_m3_three_machine_real_host_validation_pack.sh"
 FAIL_ROADMAP="$ACTION_TMP_DIR/fail_roadmap_progress_report.sh"
 
 cat >"$PASS_CLIENT" <<EOF_PASS_CLIENT
@@ -51,6 +52,14 @@ echo "m3_micro_relay_operator_floor" >>"$EXEC_LOG"
 echo "pass micro relay operator floor"
 EOF_PASS_MICRO
 chmod +x "$PASS_MICRO"
+
+cat >"$PASS_M3_PACK" <<EOF_PASS_M3_PACK
+#!/usr/bin/env bash
+set -euo pipefail
+echo "m3_three_machine_real_host_validation_pack" >>"$EXEC_LOG"
+echo "pass m3 three-machine real-host validation pack"
+EOF_PASS_M3_PACK
+chmod +x "$PASS_M3_PACK"
 
 cat >"$FAIL_ROADMAP" <<EOF_FAIL_ROADMAP
 #!/usr/bin/env bash
@@ -98,6 +107,7 @@ REPORTS_SUCCESS="$TMP_DIR/reports_success"
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT="$PASS_CLIENT" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT="$PASS_ROADMAP" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT="$PASS_MICRO" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT="$PASS_M3_PACK" \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$REPORTS_SUCCESS" \
   --summary-json "$SUMMARY_SUCCESS" \
@@ -112,31 +122,32 @@ if ! jq -e '
   and .selection_error == null
   and .stages.selection.status == "pass"
   and .stages.execution.status == "pass"
+  and ([.checks_catalog[].id] == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor","m3_three_machine_real_host_validation_pack"])
   and .inputs.parallel == false
   and .inputs.max_actions == 0
-  and .checks_selected_count == 3
-  and .checks_selected_ids == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor"]
-  and .selection_accounting.default_count == 3
+  and .checks_selected_count == 4
+  and .checks_selected_ids == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor","m3_three_machine_real_host_validation_pack"]
+  and .selection_accounting.default_count == 4
   and .selection_accounting.include_ids_requested_count == 0
   and .selection_accounting.include_ids_unique_count == 0
   and .selection_accounting.exclude_ids_requested_count == 0
   and .selection_accounting.exclude_ids_unique_count == 0
   and .selection_accounting.include_filter_applied == false
   and .selection_accounting.exclude_filter_applied == false
-  and .selection_accounting.after_include_count == 3
-  and .selection_accounting.after_exclude_count == 3
-  and .selection_accounting.after_max_actions_count == 3
-  and .selection_accounting.before_dedupe_count == 3
+  and .selection_accounting.after_include_count == 4
+  and .selection_accounting.after_exclude_count == 4
+  and .selection_accounting.after_max_actions_count == 4
+  and .selection_accounting.before_dedupe_count == 4
   and .selection_accounting.deduped_duplicate_count == 0
-  and .selection_accounting.after_dedupe_count == 3
+  and .selection_accounting.after_dedupe_count == 4
   and .selection_accounting.unknown_include_ids == []
   and .selection_accounting.unknown_exclude_ids == []
   and .selection_accounting.conflicting_duplicate_check_ids == []
-  and .summary.checks_executed == 3
-  and .summary.pass == 3
+  and .summary.checks_executed == 4
+  and .summary.pass == 4
   and .summary.fail == 0
-  and ((.checks // []) | length == 3)
-  and ([.checks[].id] == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor"])
+  and ((.checks // []) | length == 4)
+  and ([.checks[].id] == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor","m3_three_machine_real_host_validation_pack"])
   and ((.checks // []) | all(.status == "pass"))
   and ((.checks // []) | all(.rc == 0))
 ' "$SUMMARY_SUCCESS" >/dev/null; then
@@ -145,13 +156,13 @@ if ! jq -e '
   exit 1
 fi
 
-if [[ "$(wc -l <"$EXEC_LOG" | tr -d '[:space:]')" != "3" ]]; then
-  echo "expected three executed checks in success path"
+if [[ "$(wc -l <"$EXEC_LOG" | tr -d '[:space:]')" != "4" ]]; then
+  echo "expected four executed checks in success path"
   cat "$EXEC_LOG"
   exit 1
 fi
 mapfile -t success_exec_order <"$EXEC_LOG"
-if [[ "${success_exec_order[0]:-}" != "m1_client_3hop_runtime" || "${success_exec_order[1]:-}" != "m1_roadmap_progress_report_contract" || "${success_exec_order[2]:-}" != "m3_micro_relay_operator_floor" ]]; then
+if [[ "${success_exec_order[0]:-}" != "m1_client_3hop_runtime" || "${success_exec_order[1]:-}" != "m1_roadmap_progress_report_contract" || "${success_exec_order[2]:-}" != "m3_micro_relay_operator_floor" || "${success_exec_order[3]:-}" != "m3_three_machine_real_host_validation_pack" ]]; then
   echo "unexpected success-path execution order"
   cat "$EXEC_LOG"
   exit 1
@@ -165,6 +176,7 @@ set +e
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT="$PASS_CLIENT" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT="$PASS_ROADMAP" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT="$PASS_MICRO" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT="$PASS_M3_PACK" \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$REPORTS_NO_SELECTION" \
   --summary-json "$SUMMARY_NO_SELECTION" \
@@ -214,6 +226,7 @@ set +e
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT="$PASS_CLIENT" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT="$PASS_ROADMAP" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT="$PASS_MICRO" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT="$PASS_M3_PACK" \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$REPORTS_UNKNOWN_IDS" \
   --summary-json "$SUMMARY_UNKNOWN_IDS" \
@@ -260,11 +273,13 @@ REPORTS_FILTERED="$TMP_DIR/reports_filtered"
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT="$PASS_CLIENT" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT="$PASS_ROADMAP" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT="$PASS_MICRO" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT="$PASS_M3_PACK" \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$REPORTS_FILTERED" \
   --summary-json "$SUMMARY_FILTERED" \
   --include-id m1_client_3hop_runtime \
   --include-id m3_micro_relay_operator_floor \
+  --include-id m3_three_machine_real_host_validation_pack \
   --exclude-id m1_client_3hop_runtime \
   --max-actions 1 \
   --print-summary-json 0
@@ -273,15 +288,15 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .selection_error == null
-  and .inputs.include_ids == ["m1_client_3hop_runtime","m3_micro_relay_operator_floor"]
+  and .inputs.include_ids == ["m1_client_3hop_runtime","m3_micro_relay_operator_floor","m3_three_machine_real_host_validation_pack"]
   and .inputs.exclude_ids == ["m1_client_3hop_runtime"]
   and .inputs.max_actions == 1
   and .checks_selected_count == 1
   and .checks_selected_ids == ["m3_micro_relay_operator_floor"]
   and .selection_accounting.include_filter_applied == true
   and .selection_accounting.exclude_filter_applied == true
-  and .selection_accounting.after_include_count == 2
-  and .selection_accounting.after_exclude_count == 1
+  and .selection_accounting.after_include_count == 3
+  and .selection_accounting.after_exclude_count == 2
   and .selection_accounting.after_max_actions_count == 1
   and .summary.checks_executed == 1
   and .summary.pass == 1
@@ -315,6 +330,7 @@ set +e
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT="$PASS_CLIENT" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT="$FAIL_ROADMAP" \
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT="$PASS_MICRO" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT="$PASS_M3_PACK" \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$REPORTS_FAIL" \
   --summary-json "$SUMMARY_FAIL" \
@@ -334,12 +350,12 @@ if ! jq -e '
   and .rc == 17
   and .selection_error == null
   and .inputs.parallel == true
-  and .checks_selected_count == 3
-  and .checks_selected_ids == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor"]
-  and .summary.checks_executed == 3
-  and .summary.pass == 2
+  and .checks_selected_count == 4
+  and .checks_selected_ids == ["m1_client_3hop_runtime","m1_roadmap_progress_report_contract","m3_micro_relay_operator_floor","m3_three_machine_real_host_validation_pack"]
+  and .summary.checks_executed == 4
+  and .summary.pass == 3
   and .summary.fail == 1
-  and ((.checks // []) | length == 3)
+  and ((.checks // []) | length == 4)
   and .checks[0].id == "m1_client_3hop_runtime"
   and .checks[0].status == "pass"
   and .checks[1].id == "m1_roadmap_progress_report_contract"
@@ -347,14 +363,16 @@ if ! jq -e '
   and .checks[1].rc == 17
   and .checks[2].id == "m3_micro_relay_operator_floor"
   and .checks[2].status == "pass"
+  and .checks[3].id == "m3_three_machine_real_host_validation_pack"
+  and .checks[3].status == "pass"
 ' "$SUMMARY_FAIL" >/dev/null; then
   echo "fail-path summary mismatch"
   cat "$SUMMARY_FAIL"
   exit 1
 fi
 
-if [[ "$(wc -l <"$EXEC_LOG" | tr -d '[:space:]')" != "3" ]]; then
-  echo "expected three executed checks in fail path"
+if [[ "$(wc -l <"$EXEC_LOG" | tr -d '[:space:]')" != "4" ]]; then
+  echo "expected four executed checks in fail path"
   cat "$EXEC_LOG"
   exit 1
 fi
@@ -370,6 +388,11 @@ if [[ "$(grep -c '^m1_roadmap_progress_report_contract$' "$EXEC_LOG" || true)" !
 fi
 if [[ "$(grep -c '^m3_micro_relay_operator_floor$' "$EXEC_LOG" || true)" != "1" ]]; then
   echo "missing/duplicate micro-relay execution marker in fail path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if [[ "$(grep -c '^m3_three_machine_real_host_validation_pack$' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "missing/duplicate m3 validation-pack execution marker in fail path"
   cat "$EXEC_LOG"
   exit 1
 fi

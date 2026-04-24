@@ -18,6 +18,8 @@ Usage:
     [--refresh-single-machine-readiness [0|1]] \
     [--parallel [0|1]] \
     [--recommended-only [0|1]] \
+    [--allow-recommended-gate-drift [0|1]] \
+    [--allow-refresh-evidence-command-drift [0|1]] \
     [--max-actions N] \
     [--print-summary-json [0|1]]
 
@@ -32,6 +34,8 @@ Defaults:
   --refresh-single-machine-readiness 0
   --parallel 0
   --recommended-only 0
+  --allow-recommended-gate-drift 0
+  --allow-refresh-evidence-command-drift 0
   --max-actions 0   (0 = no limit)
   --print-summary-json 1
 
@@ -286,10 +290,231 @@ command_string_to_argv() {
   [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
 }
 
+command_argv_flag_value() {
+  local flag="${1:-}"
+  shift || true
+  local -a argv=("$@")
+  local idx=0
+  local token=""
+  if [[ -z "$flag" ]]; then
+    return 1
+  fi
+  for (( idx = 0; idx < ${#argv[@]}; idx++ )); do
+    token="${argv[$idx]}"
+    if [[ "$token" == "$flag" ]]; then
+      if (( idx + 1 < ${#argv[@]} )); then
+        printf '%s' "${argv[$((idx + 1))]}"
+      else
+        printf '%s' ""
+      fi
+      return 0
+    fi
+    if [[ "$token" == "$flag="* ]]; then
+      printf '%s' "${token#*=}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+recommended_gate_command_semantic_validate() {
+  local expected_command="${1:-}"
+  local selected_command="${2:-}"
+  RECOMMENDED_GATE_SEMANTIC_REASON=""
+  local -a expected_argv=()
+  local -a selected_argv=()
+  local idx=0
+
+  if [[ -z "$expected_command" ]]; then
+    RECOMMENDED_GATE_SEMANTIC_REASON="recommended gate command is missing"
+    return 1
+  fi
+  if [[ -z "$selected_command" ]]; then
+    RECOMMENDED_GATE_SEMANTIC_REASON="selected recommended action command is missing"
+    return 1
+  fi
+  if command_requires_shell_execution "$expected_command"; then
+    RECOMMENDED_GATE_SEMANTIC_REASON="recommended gate command is not deterministic shell-safe argv"
+    return 1
+  fi
+  if command_requires_shell_execution "$selected_command"; then
+    RECOMMENDED_GATE_SEMANTIC_REASON="selected recommended action command is not deterministic shell-safe argv"
+    return 1
+  fi
+  if ! command_string_to_argv "$expected_command"; then
+    RECOMMENDED_GATE_SEMANTIC_REASON="recommended gate command could not be parsed as argv"
+    return 1
+  fi
+  expected_argv=("${COMMAND_STRING_ARGV[@]}")
+  if ! command_string_to_argv "$selected_command"; then
+    RECOMMENDED_GATE_SEMANTIC_REASON="selected recommended action command could not be parsed as argv"
+    return 1
+  fi
+  selected_argv=("${COMMAND_STRING_ARGV[@]}")
+  if (( ${#expected_argv[@]} != ${#selected_argv[@]} )); then
+    RECOMMENDED_GATE_SEMANTIC_REASON="recommended gate command semantic validation failed: argv token count mismatch"
+    return 1
+  fi
+  for (( idx = 0; idx < ${#expected_argv[@]}; idx++ )); do
+    if [[ "${expected_argv[$idx]}" != "${selected_argv[$idx]}" ]]; then
+      RECOMMENDED_GATE_SEMANTIC_REASON="recommended gate command semantic validation failed: argv token mismatch at index $idx"
+      return 1
+    fi
+  done
+  RECOMMENDED_GATE_SEMANTIC_REASON=""
+  return 0
+}
+
+refresh_evidence_command_semantic_validate() {
+  local command_text="${1:-}"
+  REFRESH_EVIDENCE_SEMANTIC_REASON=""
+  local -a argv=()
+  local -a semantic_errors=()
+  local family_valid="0"
+  local cmd=""
+  local script_path=""
+  local script_base=""
+  local subcommand=""
+  local input_json=""
+  local reports_dir_value=""
+  local summary_json_value=""
+  local canonical_summary_json_value=""
+  local refresh_roadmap_value=""
+  local print_summary_json_value=""
+  local semantic_error_joined=""
+  local semantic_idx=0
+
+  if ! command_string_to_argv "$command_text"; then
+    REFRESH_EVIDENCE_SEMANTIC_REASON="refresh-evidence action command could not be parsed as argv"
+    return 1
+  fi
+  argv=("${COMMAND_STRING_ARGV[@]}")
+  if (( ${#argv[@]} == 0 )); then
+    REFRESH_EVIDENCE_SEMANTIC_REASON="refresh-evidence action command is empty"
+    return 1
+  fi
+
+  cmd="${argv[0]}"
+  if [[ "$cmd" == "bash" ]]; then
+    if (( ${#argv[@]} < 2 )); then
+      semantic_errors+=("missing script path after bash")
+    else
+      script_path="${argv[1]}"
+      script_base="${script_path##*/}"
+      case "$script_base" in
+        easy_node.sh)
+          if (( ${#argv[@]} < 3 )); then
+            semantic_errors+=("missing easy_node subcommand")
+          else
+            subcommand="${argv[2]}"
+            if [[ "$subcommand" == "blockchain-mainnet-activation-real-evidence-run" ]]; then
+              family_valid="1"
+            else
+              semantic_errors+=("easy_node subcommand must be blockchain-mainnet-activation-real-evidence-run")
+            fi
+          fi
+          ;;
+        blockchain_mainnet_activation_real_evidence_run.sh)
+          family_valid="1"
+          ;;
+        *)
+          semantic_errors+=("command family must target easy_node.sh blockchain-mainnet-activation-real-evidence-run or blockchain_mainnet_activation_real_evidence_run.sh")
+          ;;
+      esac
+    fi
+  else
+    script_path="$cmd"
+    script_base="${script_path##*/}"
+    case "$script_base" in
+      easy_node.sh)
+        if (( ${#argv[@]} < 2 )); then
+          semantic_errors+=("missing easy_node subcommand")
+        else
+          subcommand="${argv[1]}"
+          if [[ "$subcommand" == "blockchain-mainnet-activation-real-evidence-run" ]]; then
+            family_valid="1"
+          else
+            semantic_errors+=("easy_node subcommand must be blockchain-mainnet-activation-real-evidence-run")
+          fi
+        fi
+        ;;
+      blockchain_mainnet_activation_real_evidence_run.sh)
+        family_valid="1"
+        ;;
+      *)
+        semantic_errors+=("command family must target easy_node.sh blockchain-mainnet-activation-real-evidence-run or blockchain_mainnet_activation_real_evidence_run.sh")
+        ;;
+    esac
+  fi
+
+  input_json="$(command_argv_flag_value "--input-json" "${argv[@]}" || true)"
+  reports_dir_value="$(command_argv_flag_value "--reports-dir" "${argv[@]}" || true)"
+  summary_json_value="$(command_argv_flag_value "--summary-json" "${argv[@]}" || true)"
+  canonical_summary_json_value="$(command_argv_flag_value "--canonical-summary-json" "${argv[@]}" || true)"
+  refresh_roadmap_value="$(command_argv_flag_value "--refresh-roadmap" "${argv[@]}" || true)"
+  print_summary_json_value="$(command_argv_flag_value "--print-summary-json" "${argv[@]}" || true)"
+
+  if [[ -z "$input_json" ]]; then
+    semantic_errors+=("missing required --input-json")
+  fi
+  if [[ -z "$reports_dir_value" ]]; then
+    semantic_errors+=("missing required --reports-dir")
+  fi
+  if [[ -z "$summary_json_value" ]]; then
+    semantic_errors+=("missing required --summary-json")
+  fi
+  if [[ -z "$canonical_summary_json_value" ]]; then
+    semantic_errors+=("missing required --canonical-summary-json")
+  fi
+  if [[ "$refresh_roadmap_value" != "1" ]]; then
+    semantic_errors+=("expected --refresh-roadmap 1")
+  fi
+  if [[ "$print_summary_json_value" != "1" ]]; then
+    semantic_errors+=("expected --print-summary-json 1")
+  fi
+  if [[ "$family_valid" != "1" ]]; then
+    :
+  fi
+
+  if (( ${#semantic_errors[@]} > 0 )); then
+    semantic_error_joined="${semantic_errors[0]}"
+    for (( semantic_idx = 1; semantic_idx < ${#semantic_errors[@]}; semantic_idx++ )); do
+      semantic_error_joined="${semantic_error_joined}; ${semantic_errors[$semantic_idx]}"
+    done
+    REFRESH_EVIDENCE_SEMANTIC_REASON="refresh-evidence action command semantic validation failed: $semantic_error_joined"
+    return 1
+  fi
+  REFRESH_EVIDENCE_SEMANTIC_REASON=""
+  return 0
+}
+
+path_is_symlink_free_under_scripts_dir() {
+  local candidate="${1:-}"
+  local scripts_root="$ROOT_DIR/scripts"
+  local current=""
+  if [[ -z "$candidate" ]]; then
+    return 1
+  fi
+  current="$candidate"
+  while :; do
+    if [[ -L "$current" ]]; then
+      return 1
+    fi
+    if [[ "$current" == "$scripts_root" ]]; then
+      return 0
+    fi
+    current="$(dirname "$current")"
+    if [[ "$current" != "$scripts_root" && "$current" != "$scripts_root/"* ]]; then
+      return 1
+    fi
+  done
+}
+
 action_command_argv_allowed() {
   local -a argv=("$@")
   local cmd
   local script_path
+  local scripts_root="$ROOT_DIR/scripts"
   if [[ "${#argv[@]}" -eq 0 ]]; then
     return 1
   fi
@@ -303,7 +528,7 @@ action_command_argv_allowed() {
     script_path="$cmd"
   fi
   case "$script_path" in
-    "$ROOT_DIR"/scripts/*)
+    "$scripts_root"/*)
       ;;
     scripts/*)
       script_path="$ROOT_DIR/$script_path"
@@ -318,7 +543,13 @@ action_command_argv_allowed() {
   if [[ "$script_path" == *".."* ]]; then
     return 1
   fi
-  [[ -f "$script_path" ]]
+  if [[ ! -f "$script_path" ]]; then
+    return 1
+  fi
+  if [[ "$script_path" != "$scripts_root/"* ]]; then
+    return 1
+  fi
+  path_is_symlink_free_under_scripts_dir "$script_path"
 }
 
 run_action_command_string() {
@@ -410,6 +641,8 @@ refresh_manual_validation="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_MANUAL_VA
 refresh_single_machine_readiness="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL:-0}"
 recommended_only="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_RECOMMENDED_ONLY:-0}"
+allow_recommended_gate_drift="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_RECOMMENDED_GATE_DRIFT:-0}"
+allow_refresh_evidence_command_drift="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_REFRESH_EVIDENCE_COMMAND_DRIFT:-0}"
 max_actions="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_MAX_ACTIONS:-0}"
 print_summary_json="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC:-0}"
@@ -487,6 +720,24 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --allow-recommended-gate-drift)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_recommended_gate_drift="${2:-}"
+        shift 2
+      else
+        allow_recommended_gate_drift="1"
+        shift
+      fi
+      ;;
+    --allow-refresh-evidence-command-drift)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_refresh_evidence_command_drift="${2:-}"
+        shift 2
+      else
+        allow_refresh_evidence_command_drift="1"
+        shift
+      fi
+      ;;
     --max-actions)
       require_value_or_die "$1" "${2:-}"
       max_actions="${2:-}"
@@ -517,6 +768,8 @@ bool_arg_or_die "--refresh-manual-validation" "$refresh_manual_validation"
 bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_readiness"
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--recommended-only" "$recommended_only"
+bool_arg_or_die "--allow-recommended-gate-drift" "$allow_recommended_gate_drift"
+bool_arg_or_die "--allow-refresh-evidence-command-drift" "$allow_refresh_evidence_command_drift"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 int_arg_or_die "--max-actions" "$max_actions"
@@ -605,9 +858,18 @@ recommended_id="$(jq -r '(.blockchain_track.recommended_gate_id // .blockchain_t
 recommended_reason="$(jq -r '(.blockchain_track.recommended_gate_reason // .blockchain_track.mainnet_activation_missing_metrics_action.reason // "")' "$roadmap_summary_json")"
 recommended_command="$(jq -r '(.blockchain_track.recommended_gate_command // .blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command // .blockchain_track.mainnet_activation_missing_metrics_action.operator_pack_command // .blockchain_track.mainnet_activation_missing_metrics_action.command // "")' "$roadmap_summary_json")"
 recommended_command_redacted="$(redact_command_secrets "$recommended_command")"
+refresh_evidence_action_id="blockchain_mainnet_activation_refresh_evidence"
+refresh_evidence_selection_state="not_selected"
+refresh_evidence_selection_reason=""
+refresh_evidence_fail_closed="0"
+refresh_evidence_semantic_drift_allowed="0"
 recommended_id_matches_selected="0"
 recommended_only_selection_state="disabled"
 recommended_only_selection_reason=""
+recommended_gate_drift_selection_state="not_evaluated"
+recommended_gate_drift_selection_reason=""
+recommended_gate_drift_fail_closed="0"
+recommended_gate_semantic_drift_allowed="0"
 if [[ -n "$recommended_id" ]] && printf '%s\n' "$selected_actions_json" | jq -e --arg rid "$recommended_id" 'any(.[]; (.id // "") == $rid)' >/dev/null; then
   recommended_id_matches_selected="1"
 fi
@@ -630,6 +892,94 @@ fi
 if (( max_actions > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson max_actions "$max_actions" '.[:$max_actions]')"
 fi
+if printf '%s\n' "$selected_actions_json" | jq -e --arg rid "$refresh_evidence_action_id" 'any(.[]; (.id // "") == $rid)' >/dev/null; then
+  refresh_evidence_action_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg rid "$refresh_evidence_action_id" 'first(.[] | select((.id // "") == $rid))')"
+  refresh_evidence_action_command="$(printf '%s\n' "$refresh_evidence_action_json" | jq -r '.command // ""')"
+  refresh_evidence_selection_state="selected_valid"
+  if [[ -z "$refresh_evidence_action_command" ]]; then
+    refresh_evidence_selection_state="selected_invalid"
+    refresh_evidence_selection_reason="refresh-evidence action command is missing"
+    refresh_evidence_fail_closed="1"
+  elif command_requires_shell_execution "$refresh_evidence_action_command"; then
+    refresh_evidence_selection_state="selected_invalid"
+    refresh_evidence_selection_reason="refresh-evidence action command is not deterministic shell-safe argv"
+    refresh_evidence_fail_closed="1"
+  elif ! command_string_to_argv "$refresh_evidence_action_command"; then
+    refresh_evidence_selection_state="selected_invalid"
+    refresh_evidence_selection_reason="refresh-evidence action command could not be parsed as argv"
+    refresh_evidence_fail_closed="1"
+  elif ! refresh_evidence_command_semantic_validate "$refresh_evidence_action_command"; then
+    if [[ "$allow_refresh_evidence_command_drift" == "1" ]]; then
+      refresh_evidence_selection_state="selected_semantic_drift_allowed"
+      refresh_evidence_selection_reason="$REFRESH_EVIDENCE_SEMANTIC_REASON"
+      refresh_evidence_fail_closed="0"
+      refresh_evidence_semantic_drift_allowed="1"
+    else
+      refresh_evidence_selection_state="selected_invalid"
+      refresh_evidence_selection_reason="$REFRESH_EVIDENCE_SEMANTIC_REASON"
+      refresh_evidence_fail_closed="1"
+    fi
+  fi
+  if [[ "$refresh_evidence_fail_closed" == "1" ]]; then
+    selected_actions_json="$(printf '%s\n' "$refresh_evidence_action_json" | jq -c '[.]')"
+    echo "[roadmap-blockchain-actionable-run] refresh-evidence strict mode: selected action rejected; reason=invalid_refresh_evidence_command action_id=$refresh_evidence_action_id"
+  fi
+fi
+
+recommended_id_matches_selected_post_filter="0"
+if [[ -n "$recommended_id" ]] && printf '%s\n' "$selected_actions_json" | jq -e --arg rid "$recommended_id" 'any(.[]; (.id // "") == $rid)' >/dev/null; then
+  recommended_id_matches_selected_post_filter="1"
+fi
+if [[ -z "$recommended_id" ]]; then
+  if printf '%s\n' "$selected_actions_json" | jq -e 'length > 0' >/dev/null; then
+    if [[ "$allow_recommended_gate_drift" == "1" ]]; then
+      recommended_gate_drift_selection_state="missing_recommended_gate_id_allowed"
+      recommended_gate_drift_selection_reason="no recommended gate id was provided for selected blockchain actions (explicit drift override enabled)"
+      recommended_gate_semantic_drift_allowed="1"
+      echo "[roadmap-blockchain-actionable-run] recommended-gate drift override enabled; state=$recommended_gate_drift_selection_state"
+    else
+      recommended_gate_drift_selection_state="missing_recommended_gate_id_fail_closed"
+      recommended_gate_drift_selection_reason="no recommended gate id was provided for selected blockchain actions"
+      recommended_gate_drift_fail_closed="1"
+      selected_actions_json="[]"
+      echo "[roadmap-blockchain-actionable-run] recommended-gate drift strict mode: no actions selected; state=$recommended_gate_drift_selection_state"
+    fi
+  else
+    recommended_gate_drift_selection_state="missing_recommended_gate_id"
+  fi
+elif [[ "$recommended_id_matches_selected_post_filter" == "1" ]]; then
+  recommended_gate_selected_action_json="$(printf '%s\n' "$selected_actions_json" | jq -c --arg rid "$recommended_id" 'first(.[] | select((.id // "") == $rid))')"
+  recommended_gate_selected_action_command="$(printf '%s\n' "$recommended_gate_selected_action_json" | jq -r '.command // ""')"
+  if recommended_gate_command_semantic_validate "$recommended_command" "$recommended_gate_selected_action_command"; then
+    recommended_gate_drift_selection_state="recommended_gate_selected"
+  else
+    if [[ "$allow_recommended_gate_drift" == "1" ]]; then
+      recommended_gate_drift_selection_state="recommended_gate_command_drift_allowed"
+      recommended_gate_drift_selection_reason="$RECOMMENDED_GATE_SEMANTIC_REASON (explicit drift override enabled)"
+      recommended_gate_semantic_drift_allowed="1"
+      echo "[roadmap-blockchain-actionable-run] recommended-gate drift override enabled; state=$recommended_gate_drift_selection_state recommended_gate_id=$recommended_id"
+    else
+      recommended_gate_drift_selection_state="recommended_gate_command_drift_fail_closed"
+      recommended_gate_drift_selection_reason="$RECOMMENDED_GATE_SEMANTIC_REASON"
+      recommended_gate_drift_fail_closed="1"
+      selected_actions_json="[]"
+      echo "[roadmap-blockchain-actionable-run] recommended-gate drift strict mode: no actions selected; state=$recommended_gate_drift_selection_state recommended_gate_id=$recommended_id"
+    fi
+  fi
+else
+  if [[ "$allow_recommended_gate_drift" == "1" ]]; then
+    recommended_gate_drift_selection_state="recommended_gate_id_not_selected_allowed"
+    recommended_gate_drift_selection_reason="recommended gate id '$recommended_id' was not present in selected blockchain actions (explicit drift override enabled)"
+    recommended_gate_semantic_drift_allowed="1"
+    echo "[roadmap-blockchain-actionable-run] recommended-gate drift override enabled; state=$recommended_gate_drift_selection_state recommended_gate_id=$recommended_id"
+  else
+    recommended_gate_drift_selection_state="recommended_gate_id_not_selected_fail_closed"
+    recommended_gate_drift_selection_reason="recommended gate id '$recommended_id' was not present in selected blockchain actions"
+    recommended_gate_drift_fail_closed="1"
+    selected_actions_json="[]"
+    echo "[roadmap-blockchain-actionable-run] recommended-gate drift strict mode: no actions selected; state=$recommended_gate_drift_selection_state recommended_gate_id=$recommended_id"
+  fi
+fi
 
 actions_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 selected_action_ids_json="$(printf '%s\n' "$selected_actions_json" | jq -c '[.[] | .id // "" | select(length > 0)]')"
@@ -639,9 +989,12 @@ if [[ -z "$selected_action_ids_csv" ]]; then
 fi
 echo "[roadmap-blockchain-actionable-run] selected_actions=$actions_count parallel=$parallel action_timeout_sec=$action_timeout_sec recommended_only=$recommended_only recommended_gate_id=${recommended_id:-none}"
 echo "[roadmap-blockchain-actionable-run] allow_unsafe_shell_commands=$allow_unsafe_shell_commands"
+echo "[roadmap-blockchain-actionable-run] allow_recommended_gate_drift=$allow_recommended_gate_drift allow_refresh_evidence_command_drift=$allow_refresh_evidence_command_drift"
 echo "[roadmap-blockchain-actionable-run] action_ids=$selected_action_ids_csv"
 if (( actions_count == 0 )); then
-  if [[ "$recommended_only" == "1" && "$recommended_only_selection_state" != "selected_recommended_action" ]]; then
+  if [[ "$recommended_gate_drift_fail_closed" == "1" ]]; then
+    echo "[roadmap-blockchain-actionable-run] no actions selected; fail-closed on recommended-gate drift state=$recommended_gate_drift_selection_state"
+  elif [[ "$recommended_only" == "1" && "$recommended_only_selection_state" != "selected_recommended_action" ]]; then
     echo "[roadmap-blockchain-actionable-run] no actions selected; fail-closed in recommended-only strict mode state=$recommended_only_selection_state"
   else
     echo "[roadmap-blockchain-actionable-run] no actions selected; writing pass summary"
@@ -689,7 +1042,40 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_logs[$idx]="$action_log"
   action_result_files[$idx]="$action_result_file"
 
-  if [[ -z "$action_command" ]]; then
+  if [[ "$refresh_evidence_fail_closed" == "1" && "$action_id" == "$refresh_evidence_action_id" ]]; then
+    {
+      echo "refusing refresh-evidence action command in strict mode"
+      echo "reason: $refresh_evidence_selection_reason"
+      echo "command: $action_command_redacted"
+    } >"$action_log"
+    jq -cn \
+      --arg id "$action_id" \
+      --arg label "$action_label" \
+      --arg reason "$action_reason" \
+      --arg command "$action_command_redacted" \
+      --arg status "fail" \
+      --arg notes "$refresh_evidence_selection_reason" \
+      --arg log "$action_log" \
+      --arg failure_kind "refresh_evidence_command_invalid" \
+      --argjson rc 4 \
+      --argjson command_rc 4 \
+      --argjson timed_out false \
+      --argjson timeout_sec "$action_timeout_sec" \
+      '{
+        id: $id,
+        label: $label,
+        reason: $reason,
+        command: $command,
+        status: $status,
+        rc: $rc,
+        command_rc: $command_rc,
+        timed_out: $timed_out,
+        timeout_sec: (if $timeout_sec > 0 then $timeout_sec else null end),
+        failure_kind: $failure_kind,
+        notes: (if $notes == "" then null else $notes end),
+        artifacts: { log: $log }
+      }' >"$action_result_file"
+  elif [[ -z "$action_command" ]]; then
     jq -cn \
       --arg id "$action_id" \
       --arg label "$action_label" \
@@ -952,8 +1338,15 @@ done
 
 actions_results_json="$(jq -s '.' "$actions_tmp")"
 if (( actions_count == 0 )); then
+  no_actions_fail_closed="0"
   if [[ "$recommended_only" == "1" && "$recommended_only_selection_state" != "selected_recommended_action" ]]; then
     recommended_only_fail_closed="1"
+    no_actions_fail_closed="1"
+  fi
+  if [[ "$recommended_gate_drift_fail_closed" == "1" ]]; then
+    no_actions_fail_closed="1"
+  fi
+  if [[ "$no_actions_fail_closed" == "1" ]]; then
     final_status="fail"
     if (( final_rc == 0 )); then
       final_rc=4
@@ -982,14 +1375,24 @@ jq -n \
   --arg recommended_id "$recommended_id" \
   --arg recommended_reason "$recommended_reason" \
   --arg recommended_command "$recommended_command_redacted" \
+  --arg refresh_evidence_selection_state "$refresh_evidence_selection_state" \
+  --arg refresh_evidence_selection_reason "$refresh_evidence_selection_reason" \
+  --argjson refresh_evidence_fail_closed "$refresh_evidence_fail_closed" \
+  --argjson refresh_evidence_semantic_drift_allowed "$refresh_evidence_semantic_drift_allowed" \
   --arg recommended_only_selection_state "$recommended_only_selection_state" \
   --arg recommended_only_selection_reason "$recommended_only_selection_reason" \
   --argjson recommended_only_fail_closed "$recommended_only_fail_closed" \
+  --arg recommended_gate_drift_selection_state "$recommended_gate_drift_selection_state" \
+  --arg recommended_gate_drift_selection_reason "$recommended_gate_drift_selection_reason" \
+  --argjson recommended_gate_drift_fail_closed "$recommended_gate_drift_fail_closed" \
+  --argjson recommended_gate_semantic_drift_allowed "$recommended_gate_semantic_drift_allowed" \
   --argjson ran_roadmap_report "$ran_roadmap_report" \
   --argjson refresh_manual_validation "$refresh_manual_validation" \
   --argjson refresh_single_machine_readiness "$refresh_single_machine_readiness" \
   --argjson parallel "$parallel" \
   --argjson recommended_only "$recommended_only" \
+  --argjson allow_recommended_gate_drift "$allow_recommended_gate_drift" \
+  --argjson allow_refresh_evidence_command_drift "$allow_refresh_evidence_command_drift" \
   --argjson max_actions "$max_actions" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
@@ -1012,6 +1415,8 @@ jq -n \
       refresh_single_machine_readiness: ($refresh_single_machine_readiness == 1),
       parallel: ($parallel == 1),
       recommended_only: ($recommended_only == 1),
+      allow_recommended_gate_drift: ($allow_recommended_gate_drift == 1),
+      allow_refresh_evidence_command_drift: ($allow_refresh_evidence_command_drift == 1),
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1)
@@ -1021,9 +1426,17 @@ jq -n \
       recommended_gate_id: (if $recommended_id == "" then null else $recommended_id end),
       recommended_gate_reason: (if $recommended_reason == "" then null else $recommended_reason end),
       recommended_gate_command: (if $recommended_command == "" then null else $recommended_command end),
+      refresh_evidence_selection_state: $refresh_evidence_selection_state,
+      refresh_evidence_selection_reason: (if $refresh_evidence_selection_reason == "" then null else $refresh_evidence_selection_reason end),
+      refresh_evidence_fail_closed: ($refresh_evidence_fail_closed == 1),
+      refresh_evidence_semantic_drift_allowed: ($refresh_evidence_semantic_drift_allowed == 1),
       recommended_only_selection_state: $recommended_only_selection_state,
       recommended_only_selection_reason: (if $recommended_only_selection_reason == "" then null else $recommended_only_selection_reason end),
       recommended_only_fail_closed: ($recommended_only_fail_closed == 1),
+      recommended_gate_drift_selection_state: $recommended_gate_drift_selection_state,
+      recommended_gate_drift_selection_reason: (if $recommended_gate_drift_selection_reason == "" then null else $recommended_gate_drift_selection_reason end),
+      recommended_gate_drift_fail_closed: ($recommended_gate_drift_fail_closed == 1),
+      recommended_gate_semantic_drift_allowed: ($recommended_gate_semantic_drift_allowed == 1),
       actions_selected_count: $actions_count,
       selected_action_ids: $selected_action_ids
     },

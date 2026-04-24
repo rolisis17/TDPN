@@ -137,6 +137,46 @@ func (a *switchableAdapter) settlementCalls() int {
 	return a.sessionSubmitCalls
 }
 
+type statusCapturingReplayAdapter struct {
+	mu                 sync.Mutex
+	failFirst          bool
+	settlementStatuses []OperationStatus
+}
+
+func (a *statusCapturingReplayAdapter) SubmitSessionSettlement(_ context.Context, settlement SessionSettlement) (string, error) {
+	a.mu.Lock()
+	a.settlementStatuses = append(a.settlementStatuses, settlement.Status)
+	call := len(a.settlementStatuses)
+	fail := a.failFirst && call == 1
+	a.mu.Unlock()
+	if fail {
+		return "", errFakeAdapter
+	}
+	return "chain-set-" + settlement.SessionID, nil
+}
+
+func (a *statusCapturingReplayAdapter) SubmitRewardIssue(_ context.Context, _ RewardIssue) (string, error) {
+	return "chain-rew-ok", nil
+}
+
+func (a *statusCapturingReplayAdapter) SubmitSponsorReservation(_ context.Context, _ SponsorCreditReservation) (string, error) {
+	return "chain-sponsor-res-ok", nil
+}
+
+func (a *statusCapturingReplayAdapter) SubmitSlashEvidence(_ context.Context, _ SlashEvidence) (string, error) {
+	return "chain-slash-ok", nil
+}
+
+func (a *statusCapturingReplayAdapter) Health(_ context.Context) error {
+	return nil
+}
+
+func (a *statusCapturingReplayAdapter) settlementStatusesSnapshot() []OperationStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]OperationStatus(nil), a.settlementStatuses...)
+}
+
 type replayConfirmingAdapter struct {
 	mu                 sync.Mutex
 	fail               bool
@@ -556,6 +596,208 @@ func TestMemoryServiceSettleIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceSessionSubjectConsistencyRejectsMismatches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("record usage rejects mismatch with existing reservation subject", func(t *testing.T) {
+		s := NewMemoryService()
+		const (
+			sessionID        = "sess-subject-mismatch-record-1"
+			reservationSubj  = "client-subject-good-1"
+			recordUsageSubj  = "client-subject-bad-1"
+			reservationFunds = int64(10_000)
+		)
+
+		if _, err := s.ReserveFunds(ctx, FundReservation{
+			SessionID:    sessionID,
+			SubjectID:    reservationSubj,
+			AmountMicros: reservationFunds,
+			Currency:     "TDPNC",
+		}); err != nil {
+			t.Fatalf("ReserveFunds: %v", err)
+		}
+		err := s.RecordUsage(ctx, UsageRecord{
+			SessionID:    sessionID,
+			SubjectID:    recordUsageSubj,
+			BytesIngress: 1024,
+		})
+		if err == nil {
+			t.Fatalf("expected mismatched usage subject to fail")
+		}
+		if !strings.Contains(err.Error(), "session subject mismatch for session "+sessionID) {
+			t.Fatalf("unexpected mismatch error: %v", err)
+		}
+	})
+
+	t.Run("reserve funds rejects mismatch with existing usage subject", func(t *testing.T) {
+		s := NewMemoryService()
+		const (
+			sessionID       = "sess-subject-mismatch-reservation-1"
+			usageSubject    = "client-subject-good-2"
+			reserveSubject  = "client-subject-bad-2"
+			reservationFund = int64(20_000)
+		)
+
+		if err := s.RecordUsage(ctx, UsageRecord{
+			SessionID:    sessionID,
+			SubjectID:    usageSubject,
+			BytesIngress: 1024,
+		}); err != nil {
+			t.Fatalf("RecordUsage: %v", err)
+		}
+		_, err := s.ReserveFunds(ctx, FundReservation{
+			SessionID:    sessionID,
+			SubjectID:    reserveSubject,
+			AmountMicros: reservationFund,
+			Currency:     "TDPNC",
+		})
+		if err == nil {
+			t.Fatalf("expected mismatched reservation subject to fail")
+		}
+		if !strings.Contains(err.Error(), "session subject mismatch for session "+sessionID) {
+			t.Fatalf("unexpected mismatch error: %v", err)
+		}
+	})
+
+	t.Run("reserve sponsor credits rejects mismatch with existing usage subject", func(t *testing.T) {
+		s := NewMemoryService()
+		const (
+			sessionID                = "sess-subject-mismatch-sponsor-reservation-1"
+			usageSubject             = "client-subject-good-2a"
+			sponsorProofSubj         = "client-subject-bad-2a"
+			sponsorReserveID         = "sres-subject-mismatch-sponsor-reservation-1"
+			sponsorReservationAmount = int64(20_000)
+		)
+
+		if err := s.RecordUsage(ctx, UsageRecord{
+			SessionID:    sessionID,
+			SubjectID:    usageSubject,
+			BytesIngress: 1024,
+		}); err != nil {
+			t.Fatalf("RecordUsage: %v", err)
+		}
+		_, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+			ReservationID: sponsorReserveID,
+			SponsorID:     "sponsor-subject-mismatch-2a",
+			SubjectID:     sponsorProofSubj,
+			SessionID:     sessionID,
+			AmountMicros:  sponsorReservationAmount,
+			Currency:      "TDPNC",
+		})
+		if err == nil {
+			t.Fatalf("expected mismatched sponsor reservation subject to fail")
+		}
+		if !strings.Contains(err.Error(), "session subject mismatch for session "+sessionID) {
+			t.Fatalf("unexpected mismatch error: %v", err)
+		}
+
+		s.mu.Lock()
+		_, ok := s.sponsorReservationsByID[sponsorReserveID]
+		s.mu.Unlock()
+		if ok {
+			t.Fatalf("expected mismatched sponsor reservation to not be stored")
+		}
+	})
+
+	t.Run("settle session rejects mixed usage subjects fail closed", func(t *testing.T) {
+		s := NewMemoryService(WithPricePerMiBMicros(1024 * 1024))
+		const (
+			sessionID      = "sess-subject-mismatch-settle-1"
+			sessionSubject = "client-subject-good-3"
+		)
+
+		if _, err := s.ReserveFunds(ctx, FundReservation{
+			SessionID:    sessionID,
+			SubjectID:    sessionSubject,
+			AmountMicros: 3_000_000,
+			Currency:     "TDPNC",
+		}); err != nil {
+			t.Fatalf("ReserveFunds: %v", err)
+		}
+		if err := s.RecordUsage(ctx, UsageRecord{
+			SessionID:    sessionID,
+			SubjectID:    sessionSubject,
+			BytesIngress: 1024 * 1024,
+		}); err != nil {
+			t.Fatalf("RecordUsage: %v", err)
+		}
+
+		s.mu.Lock()
+		s.usageBySession[sessionID] = append(s.usageBySession[sessionID], UsageRecord{
+			SessionID:    sessionID,
+			SubjectID:    "client-subject-bad-3",
+			BytesIngress: 1024,
+		})
+		s.mu.Unlock()
+
+		_, err := s.SettleSession(ctx, sessionID)
+		if err == nil {
+			t.Fatalf("expected mixed subject usage to fail settlement")
+		}
+		if !strings.Contains(err.Error(), "session subject mismatch for session "+sessionID) {
+			t.Fatalf("unexpected settle mismatch error: %v", err)
+		}
+	})
+}
+
+func TestMemoryServiceSessionSubjectConsistencyValidLifecycle(t *testing.T) {
+	s := NewMemoryService(WithPricePerMiBMicros(1_000_000))
+	ctx := context.Background()
+	const (
+		sessionID = "sess-subject-consistent-valid-1"
+		subjectID = "client-subject-consistent-valid-1"
+	)
+
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		BytesIngress: 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage first: %v", err)
+	}
+
+	reservationA, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: 3_000_000,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds first: %v", err)
+	}
+	reservationB, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: 9_999_999,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds second: %v", err)
+	}
+	if reservationA.ReservationID != reservationB.ReservationID {
+		t.Fatalf("expected idempotent reservation replay for consistent subject")
+	}
+
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:   sessionID,
+		SubjectID:   subjectID,
+		BytesEgress: 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage second: %v", err)
+	}
+
+	settlement, err := s.SettleSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	if settlement.SubjectID != subjectID {
+		t.Fatalf("expected settlement subject %s, got %s", subjectID, settlement.SubjectID)
+	}
+	if settlement.ChargedMicros != 2_000_000 {
+		t.Fatalf("expected charged micros 2000000, got %d", settlement.ChargedMicros)
+	}
+}
+
 func TestMemoryServiceAdapterDeferredOnFailure(t *testing.T) {
 	s := NewMemoryService(WithChainAdapter(fakeAdapter{fail: true}))
 	ctx := context.Background()
@@ -630,6 +872,400 @@ func TestMemoryServiceAdapterDeferredOnFailure(t *testing.T) {
 	}
 	if len(s.deferredAdapterOps) != 4 {
 		t.Fatalf("expected deferred backlog entries 4, got %d", len(s.deferredAdapterOps))
+	}
+}
+
+func TestMemoryServiceBlockchainModeWithoutAdapterFailsClosed(t *testing.T) {
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithBlockchainMode(true),
+	)
+	ctx := context.Background()
+
+	_, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-blockchain-no-adapter-1",
+		SubjectID:    "client-blockchain-no-adapter-1",
+		AmountMicros: 10_000,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-blockchain-no-adapter-1",
+		SubjectID:    "client-blockchain-no-adapter-1",
+		BytesIngress: 1024,
+		BytesEgress:  1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	settlement, err := s.SettleSession(ctx, "sess-blockchain-no-adapter-1")
+	if err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	if settlement.Status != OperationStatusPending {
+		t.Fatalf("expected pending settlement status when blockchain mode has no adapter, got %s", settlement.Status)
+	}
+	if !settlement.AdapterDeferred || settlement.AdapterSubmitted {
+		t.Fatalf("expected settlement adapter state deferred=true submitted=false when adapter is missing")
+	}
+	settlementRef := cosmosID("settlement", settlement.SettlementID, settlement.SessionID)
+	if settlement.AdapterReferenceID != settlementRef {
+		t.Fatalf("expected settlement adapter reference id %s, got %s", settlementRef, settlement.AdapterReferenceID)
+	}
+
+	reward, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          "rew-blockchain-no-adapter-1",
+		ProviderSubjectID: "provider-blockchain-no-adapter-1",
+		SessionID:         "sess-blockchain-no-adapter-1",
+		RewardMicros:      50,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("IssueReward: %v", err)
+	}
+	if reward.Status != OperationStatusPending || !reward.AdapterDeferred || reward.AdapterSubmitted {
+		t.Fatalf("expected reward pending+deferred when blockchain mode has no adapter")
+	}
+	rewardRef := cosmosID("reward", reward.RewardID, reward.SessionID)
+	if reward.AdapterReferenceID != rewardRef {
+		t.Fatalf("expected reward adapter reference id %s, got %s", rewardRef, reward.AdapterReferenceID)
+	}
+
+	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-blockchain-no-adapter-1",
+		SponsorID:     "sponsor-blockchain-no-adapter-1",
+		SubjectID:     "client-blockchain-no-adapter-1",
+		SessionID:     "sess-blockchain-no-adapter-1",
+		AmountMicros:  100,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != OperationStatusPending || !reservation.AdapterDeferred || reservation.AdapterSubmitted {
+		t.Fatalf("expected sponsor reservation pending+deferred when blockchain mode has no adapter")
+	}
+	reservationRef := cosmosID("sponsor-reservation", reservation.ReservationID, reservation.SessionID)
+	if reservation.AdapterReferenceID != reservationRef {
+		t.Fatalf("expected reservation adapter reference id %s, got %s", reservationRef, reservation.AdapterReferenceID)
+	}
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: reservation.ReservationID,
+		SponsorID:     reservation.SponsorID,
+		SubjectID:     reservation.SubjectID,
+		SessionID:     reservation.SessionID,
+	})
+	if err == nil {
+		t.Fatalf("expected authorize payment to fail for pending deferred reservation in blockchain mode")
+	}
+	if err.Error() != "reservation pending chain submission: sres-blockchain-no-adapter-1" {
+		t.Fatalf("unexpected authorize payment error for pending deferred reservation: %v", err)
+	}
+
+	evidence, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-blockchain-no-adapter-1",
+		SubjectID:     "provider-blockchain-no-adapter-1",
+		SessionID:     "sess-blockchain-no-adapter-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   "obj://validator/double-sign/sess-blockchain-no-adapter-1",
+		SlashMicros:   7,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+	if evidence.Status != OperationStatusPending || !evidence.AdapterDeferred || evidence.AdapterSubmitted {
+		t.Fatalf("expected slash evidence pending+deferred when blockchain mode has no adapter")
+	}
+	evidenceRef := cosmosID("slash", evidence.EvidenceID, evidence.SubjectID)
+	if evidence.AdapterReferenceID != evidenceRef {
+		t.Fatalf("expected slash evidence adapter reference id %s, got %s", evidenceRef, evidence.AdapterReferenceID)
+	}
+
+	report, err := s.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations != 4 {
+		t.Fatalf("expected pending adapter operations 4 when adapter is missing in blockchain mode, got %d", report.PendingAdapterOperations)
+	}
+	if report.PendingOperations != 4 {
+		t.Fatalf("expected pending operations 4 when adapter is missing in blockchain mode, got %d", report.PendingOperations)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	storedReservation := s.sponsorReservationsByID["sres-blockchain-no-adapter-1"]
+	if storedReservation.Status != OperationStatusPending || !storedReservation.AdapterDeferred || storedReservation.AdapterSubmitted {
+		t.Fatalf("expected pending deferred sponsor reservation to remain unchanged after failed authorize")
+	}
+	if !storedReservation.ConsumedAt.IsZero() {
+		t.Fatalf("expected pending deferred sponsor reservation to remain unconsumed after failed authorize")
+	}
+	if _, ok := s.paymentAuthByReservationID["sres-blockchain-no-adapter-1"]; ok {
+		t.Fatalf("expected no payment authorization record for pending deferred sponsor reservation")
+	}
+	if len(s.deferredAdapterOps) != 4 {
+		t.Fatalf("expected deferred backlog entries 4, got %d", len(s.deferredAdapterOps))
+	}
+	for _, idempotencyKey := range []string{settlementRef, rewardRef, reservationRef, evidenceRef} {
+		op, ok := s.deferredAdapterOps[idempotencyKey]
+		if !ok {
+			t.Fatalf("expected deferred operation for %s", idempotencyKey)
+		}
+		if op.LastError != errChainAdapterNotConfigured.Error() {
+			t.Fatalf("expected deferred operation error %q for %s, got %q", errChainAdapterNotConfigured.Error(), idempotencyKey, op.LastError)
+		}
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRequiresFinalizedStateInBlockchainMode(t *testing.T) {
+	s := NewMemoryService(WithBlockchainMode(true))
+	ctx := context.Background()
+
+	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-deferred-states-1",
+		SponsorID:     "sponsor-deferred-states-1",
+		SubjectID:     "client-deferred-states-1",
+		SessionID:     "sess-deferred-states-1",
+		AmountMicros:  100,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != OperationStatusPending || !reservation.AdapterDeferred || reservation.AdapterSubmitted {
+		t.Fatalf("expected initial blockchain-mode reservation to be pending+deferred")
+	}
+
+	proof := PaymentProof{
+		ReservationID: reservation.ReservationID,
+		SponsorID:     reservation.SponsorID,
+		SubjectID:     reservation.SubjectID,
+		SessionID:     reservation.SessionID,
+	}
+
+	testCases := []struct {
+		name             string
+		status           OperationStatus
+		adapterDeferred  bool
+		adapterSubmitted bool
+		wantErr          string
+	}{
+		{
+			name:             "pending deferred",
+			status:           OperationStatusPending,
+			adapterDeferred:  true,
+			adapterSubmitted: false,
+			wantErr:          "reservation pending chain submission: sres-deferred-states-1",
+		},
+		{
+			name:             "failed deferred",
+			status:           OperationStatusFailed,
+			adapterDeferred:  true,
+			adapterSubmitted: false,
+			wantErr:          "reservation not chain-finalized: sres-deferred-states-1",
+		},
+		{
+			name:             "submitted deferred",
+			status:           OperationStatusSubmitted,
+			adapterDeferred:  true,
+			adapterSubmitted: true,
+			wantErr:          "reservation not chain-finalized: sres-deferred-states-1",
+		},
+		{
+			name:             "submitted non-deferred",
+			status:           OperationStatusSubmitted,
+			adapterDeferred:  false,
+			adapterSubmitted: true,
+			wantErr:          "reservation not chain-finalized: sres-deferred-states-1",
+		},
+		{
+			name:             "confirmed deferred",
+			status:           OperationStatusConfirmed,
+			adapterDeferred:  true,
+			adapterSubmitted: true,
+			wantErr:          "",
+		},
+		{
+			name:             "confirmed non-deferred",
+			status:           OperationStatusConfirmed,
+			adapterDeferred:  false,
+			adapterSubmitted: true,
+			wantErr:          "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s.mu.Lock()
+			stored := s.sponsorReservationsByID[reservation.ReservationID]
+			stored.Status = tc.status
+			stored.AdapterDeferred = tc.adapterDeferred
+			stored.AdapterSubmitted = tc.adapterSubmitted
+			stored.ConsumedAt = time.Time{}
+			s.sponsorReservationsByID[reservation.ReservationID] = stored
+			delete(s.paymentAuthByReservationID, reservation.ReservationID)
+			s.mu.Unlock()
+
+			auth, err := s.AuthorizePayment(ctx, proof)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected authorize to fail for status %s", tc.status)
+				}
+				if err.Error() != tc.wantErr {
+					t.Fatalf("unexpected authorize error for status %s: got %v want %s", tc.status, err, tc.wantErr)
+				}
+				s.mu.Lock()
+				after := s.sponsorReservationsByID[reservation.ReservationID]
+				_, hasAuth := s.paymentAuthByReservationID[reservation.ReservationID]
+				s.mu.Unlock()
+				if !after.ConsumedAt.IsZero() {
+					t.Fatalf("expected reservation to remain unconsumed after failed authorize for status %s", tc.status)
+				}
+				if hasAuth {
+					t.Fatalf("expected no payment authorization record after failed authorize for status %s", tc.status)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("expected authorize to succeed for status %s, got %v", tc.status, err)
+			}
+			if auth.Status != OperationStatusConfirmed {
+				t.Fatalf("expected confirmed authorization status for status %s, got %s", tc.status, auth.Status)
+			}
+			s.mu.Lock()
+			after := s.sponsorReservationsByID[reservation.ReservationID]
+			_, hasAuth := s.paymentAuthByReservationID[reservation.ReservationID]
+			s.mu.Unlock()
+			if after.ConsumedAt.IsZero() {
+				t.Fatalf("expected reservation to be consumed after successful authorize for status %s", tc.status)
+			}
+			if !hasAuth {
+				t.Fatalf("expected payment authorization record after successful authorize for status %s", tc.status)
+			}
+		})
+	}
+}
+
+func TestMemoryServiceDefaultMemoryModeWithoutAdapterStaysConfirmed(t *testing.T) {
+	s := NewMemoryService(WithPricePerMiBMicros(1024 * 1024))
+	ctx := context.Background()
+	_, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    "sess-memory-no-adapter-1",
+		SubjectID:    "client-memory-no-adapter-1",
+		AmountMicros: 2_000_000,
+		Currency:     "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	err = s.RecordUsage(ctx, UsageRecord{
+		SessionID:    "sess-memory-no-adapter-1",
+		SubjectID:    "client-memory-no-adapter-1",
+		BytesIngress: 1024 * 1024,
+		RecordedAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	settlement, err := s.SettleSession(ctx, "sess-memory-no-adapter-1")
+	if err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+	if settlement.Status != OperationStatusConfirmed {
+		t.Fatalf("expected confirmed settlement status in default memory mode, got %s", settlement.Status)
+	}
+	if settlement.AdapterDeferred || settlement.AdapterSubmitted {
+		t.Fatalf("expected settlement adapter state deferred=false submitted=false in default memory mode")
+	}
+	if settlement.AdapterReferenceID != "" {
+		t.Fatalf("expected empty settlement adapter reference id in default memory mode, got %s", settlement.AdapterReferenceID)
+	}
+	reward, err := s.IssueReward(ctx, RewardIssue{
+		RewardID:          "rew-memory-no-adapter-1",
+		ProviderSubjectID: "provider-memory-no-adapter-1",
+		SessionID:         "sess-memory-no-adapter-1",
+		RewardMicros:      55,
+		Currency:          "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("IssueReward: %v", err)
+	}
+	if reward.Status != OperationStatusConfirmed || reward.AdapterDeferred || reward.AdapterSubmitted {
+		t.Fatalf("expected reward to remain confirmed and non-deferred in default memory mode")
+	}
+	if reward.AdapterReferenceID != "" {
+		t.Fatalf("expected empty reward adapter reference id in default memory mode, got %s", reward.AdapterReferenceID)
+	}
+	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-memory-no-adapter-1",
+		SponsorID:     "sponsor-memory-no-adapter-1",
+		SubjectID:     "client-memory-no-adapter-1",
+		SessionID:     "sess-memory-no-adapter-1",
+		AmountMicros:  300,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	if reservation.Status != OperationStatusConfirmed || reservation.AdapterDeferred || reservation.AdapterSubmitted {
+		t.Fatalf("expected sponsor reservation to remain confirmed and non-deferred in default memory mode")
+	}
+	if reservation.AdapterReferenceID != "" {
+		t.Fatalf("expected empty sponsor reservation adapter reference id in default memory mode, got %s", reservation.AdapterReferenceID)
+	}
+	auth, err := s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: reservation.ReservationID,
+		SponsorID:     reservation.SponsorID,
+		SubjectID:     reservation.SubjectID,
+		SessionID:     reservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+	if auth.Status != OperationStatusConfirmed {
+		t.Fatalf("expected payment authorization confirmed in default memory mode, got %s", auth.Status)
+	}
+	storedReservation, err := s.GetSponsorReservation(ctx, reservation.ReservationID)
+	if err != nil {
+		t.Fatalf("GetSponsorReservation: %v", err)
+	}
+	if storedReservation.Status != OperationStatusConfirmed {
+		t.Fatalf("expected consumed sponsor reservation to remain confirmed in default memory mode, got %s", storedReservation.Status)
+	}
+	if storedReservation.ConsumedAt.IsZero() {
+		t.Fatalf("expected consumed sponsor reservation timestamp to be set in default memory mode")
+	}
+	evidence, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
+		EvidenceID:    "ev-memory-no-adapter-1",
+		SubjectID:     "provider-memory-no-adapter-1",
+		SessionID:     "sess-memory-no-adapter-1",
+		ViolationType: "double-sign",
+		EvidenceRef:   testSHA256Ref("ev-memory-no-adapter-1"),
+		SlashMicros:   9,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+	if evidence.Status != OperationStatusConfirmed || evidence.AdapterDeferred || evidence.AdapterSubmitted {
+		t.Fatalf("expected slash evidence to remain confirmed and non-deferred in default memory mode")
+	}
+	if evidence.AdapterReferenceID != "" {
+		t.Fatalf("expected empty slash evidence adapter reference id in default memory mode, got %s", evidence.AdapterReferenceID)
+	}
+	report, err := s.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations != 0 {
+		t.Fatalf("expected no deferred adapter operations in default memory mode, got %d", report.PendingAdapterOperations)
+	}
+	if report.PendingOperations != 0 {
+		t.Fatalf("expected no pending operations in default memory mode, got %d", report.PendingOperations)
 	}
 }
 
@@ -802,6 +1438,33 @@ func TestMemoryServiceReconcileReplaySuccessClearsBacklog(t *testing.T) {
 	}
 	if !settlement.AdapterSubmitted || settlement.AdapterDeferred {
 		t.Fatalf("expected settlement adapter state submitted=true deferred=false after replay")
+	}
+}
+
+func TestMemoryServiceDeferredReplayUsesNormalizedSubmissionStatus(t *testing.T) {
+	adapter := &statusCapturingReplayAdapter{failFirst: true}
+	s := NewMemoryService(
+		WithPricePerMiBMicros(1024*1024),
+		WithChainAdapter(adapter),
+	)
+	setupDeferredSettlement(t, s, "sess-replay-status-normalization-1")
+
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.PendingAdapterOperations != 0 {
+		t.Fatalf("expected deferred backlog to clear after replay, got %d", report.PendingAdapterOperations)
+	}
+
+	statuses := adapter.settlementStatusesSnapshot()
+	if len(statuses) != 2 {
+		t.Fatalf("expected exactly two settlement submissions (initial fail + replay), got %d", len(statuses))
+	}
+	for idx, status := range statuses {
+		if status != OperationStatusSubmitted {
+			t.Fatalf("expected settlement submission call %d to use status %q, got %q", idx+1, OperationStatusSubmitted, status)
+		}
 	}
 }
 

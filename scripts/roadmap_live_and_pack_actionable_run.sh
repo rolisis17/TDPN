@@ -12,6 +12,8 @@ Usage:
     [--summary-json PATH] \
     [--roadmap-summary-json PATH] \
     [--roadmap-report-md PATH] \
+    [--run-live-archive [0|1]] \
+    [--archive-root DIR] \
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
     [--refresh-manual-validation [0|1]] \
@@ -25,24 +27,29 @@ Usage:
 Purpose:
   Execute the roadmap evidence pipeline in one command:
     1) roadmap_live_evidence_actionable_run.sh
-    2) roadmap_evidence_pack_actionable_run.sh
+    2) optional roadmap_live_evidence_archive_run.sh
+    3) roadmap_evidence_pack_actionable_run.sh
 
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
   --allow-unsafe-shell-commands 0
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
-  --scope profile-default
+  --run-live-archive 0
+  --archive-root <reports-dir>/live_evidence_archive
+  --scope auto
   --parallel 0
   --max-actions 0   (0 = no limit)
   --continue-on-live-fail 0
   --print-summary-json 1
 
 Exit behavior:
-  - Runs live-evidence stage first, then evidence-pack stage.
+  - Runs live-evidence stage first, optional archive stage second, and
+    evidence-pack stage last.
   - With --continue-on-live-fail=0 (default), evidence-pack is skipped when live fails.
   - With --continue-on-live-fail=1, evidence-pack still runs even when live fails.
-  - Final rc is first failing stage rc (live first, then evidence-pack), else 0.
+  - When --run-live-archive=1, evidence-pack runs only if archive stage passes.
+  - Final rc is first failing stage rc (live first, archive second, pack third), else 0.
 USAGE
 }
 
@@ -148,7 +155,9 @@ print_summary_json="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1
 action_timeout_sec="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
 continue_on_live_fail="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_CONTINUE_ON_LIVE_FAIL:-0}"
-scope="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_SCOPE:-${ROADMAP_LIVE_AND_PACK_ACTIONABLE_SCOPE:-profile-default}}"
+run_live_archive="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_RUN_LIVE_ARCHIVE:-0}"
+archive_root="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_ROOT:-}"
+scope="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_SCOPE:-${ROADMAP_LIVE_AND_PACK_ACTIONABLE_SCOPE:-auto}}"
 original_args=("$@")
 
 while [[ $# -gt 0 ]]; do
@@ -171,6 +180,20 @@ while [[ $# -gt 0 ]]; do
     --roadmap-report-md)
       require_value_or_die "$1" "${2:-}"
       roadmap_report_md="${2:-}"
+      shift 2
+      ;;
+    --run-live-archive)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        run_live_archive="${2:-}"
+        shift 2
+      else
+        run_live_archive="1"
+        shift
+      fi
+      ;;
+    --archive-root)
+      require_value_or_die "$1" "${2:-}"
+      archive_root="${2:-}"
       shift 2
       ;;
     --action-timeout-sec)
@@ -260,6 +283,7 @@ bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 bool_arg_or_die "--continue-on-live-fail" "$continue_on_live_fail"
+bool_arg_or_die "--run-live-archive" "$run_live_archive"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
 scope_arg_or_die "$scope"
@@ -289,7 +313,14 @@ fi
 summary_json="$(abs_path "$summary_json")"
 mkdir -p "$(dirname "$summary_json")"
 
+if [[ -z "$archive_root" ]]; then
+  archive_root="$reports_dir/live_evidence_archive"
+fi
+archive_root="$(abs_path "$archive_root")"
+mkdir -p "$archive_root"
+
 live_script="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_LIVE_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_evidence_actionable_run.sh}"
+archive_script="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_evidence_archive_run.sh}"
 pack_script="${ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PACK_SCRIPT:-$ROOT_DIR/scripts/roadmap_evidence_pack_actionable_run.sh}"
 
 if [[ ! -f "$live_script" ]]; then
@@ -299,6 +330,16 @@ fi
 if [[ ! -r "$live_script" ]]; then
   echo "live-evidence script is not readable: $live_script"
   exit 2
+fi
+if [[ "$run_live_archive" == "1" ]]; then
+  if [[ ! -f "$archive_script" ]]; then
+    echo "missing live-evidence archive script: $archive_script"
+    exit 2
+  fi
+  if [[ ! -r "$archive_script" ]]; then
+    echo "live-evidence archive script is not readable: $archive_script"
+    exit 2
+  fi
 fi
 if [[ ! -f "$pack_script" ]]; then
   echo "missing evidence-pack script: $pack_script"
@@ -312,6 +353,8 @@ fi
 live_reports_dir="$reports_dir/live_evidence"
 live_summary_json="$reports_dir/roadmap_live_evidence_actionable_run_summary.json"
 live_log="$reports_dir/roadmap_live_evidence_actionable_run.log"
+archive_summary_json="$reports_dir/roadmap_live_evidence_archive_run_summary.json"
+archive_log="$reports_dir/roadmap_live_evidence_archive_run.log"
 pack_reports_dir="$reports_dir/evidence_pack"
 pack_summary_json="$reports_dir/roadmap_evidence_pack_actionable_run_summary.json"
 pack_log="$reports_dir/roadmap_evidence_pack_actionable_run.log"
@@ -326,6 +369,8 @@ live_status="fail"
 live_rc=125
 live_process_rc=125
 live_summary_valid=0
+live_contract_valid=0
+live_contract_failure_reason=""
 live_selected_actions_count_num=0
 live_actions_executed_num=0
 live_pass_num=0
@@ -339,6 +384,7 @@ live_fail_json="null"
 live_timed_out_json="null"
 live_soft_failed_json="null"
 live_selected_action_ids_json="[]"
+live_stage_pass=0
 
 pack_status="skipped"
 pack_skip_reason=""
@@ -347,6 +393,8 @@ pack_process_rc_num=0
 pack_rc_json="null"
 pack_process_rc_json="null"
 pack_summary_valid=0
+pack_contract_valid=0
+pack_contract_failure_reason=""
 pack_selected_actions_count_num=0
 pack_actions_executed_num=0
 pack_pass_num=0
@@ -360,6 +408,32 @@ pack_fail_json="null"
 pack_timed_out_json="null"
 pack_soft_failed_json="null"
 pack_selected_action_ids_json="[]"
+pack_stage_pass=0
+
+archive_attempted=0
+archive_status="skipped"
+archive_skip_reason="archive_not_requested"
+archive_rc_num=0
+archive_process_rc_num=0
+archive_rc_json="null"
+archive_process_rc_json="null"
+archive_summary_valid=0
+archive_contract_valid=0
+archive_contract_failure_reason=""
+archive_summary_status_json="null"
+archive_summary_rc_json="null"
+archive_candidate_total_num=0
+archive_copied_total_num=0
+archive_missing_total_num=0
+archive_copy_error_total_num=0
+archive_missing_family_count_num=0
+archive_candidate_total_json="null"
+archive_copied_total_json="null"
+archive_missing_total_json="null"
+archive_copy_error_total_json="null"
+archive_missing_family_count_json="null"
+archive_archive_dir=""
+archive_fail_closed_blocking=0
 
 shared_roadmap_summary_json="$roadmap_summary_json"
 shared_roadmap_report_md="$roadmap_report_md"
@@ -383,6 +457,7 @@ if [[ "$roadmap_paths_provided" == "1" ]]; then
 fi
 
 echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence status=running"
+rm -f "$live_summary_json"
 set +e
 "${live_cmd[@]}" >"$live_log" 2>&1
 live_process_rc=$?
@@ -391,17 +466,56 @@ set -e
 if [[ -f "$live_summary_json" ]] && jq -e . "$live_summary_json" >/dev/null 2>&1; then
   live_summary_valid=1
   live_status="$(jq -r '.status // ""' "$live_summary_json")"
-  live_rc="$(jq -r '.rc // 125' "$live_summary_json")"
-  if [[ -z "$live_status" ]]; then
-    if (( live_rc == 0 )); then
-      live_status="pass"
-    else
+  live_rc_raw="$(jq -r '.rc // empty' "$live_summary_json")"
+  if [[ -z "$live_status" || -z "$live_rc_raw" ]]; then
+    live_contract_valid=0
+    live_contract_failure_reason="live summary contract requires both status and rc fields"
+    live_rc=1
+    live_status="fail"
+  elif ! [[ "$live_rc_raw" =~ ^-?[0-9]+$ ]]; then
+    live_contract_valid=0
+    live_contract_failure_reason="live summary rc must be an integer"
+    live_rc=125
+    live_status="fail"
+  else
+    live_rc="$live_rc_raw"
+    live_status_norm="$(printf '%s' "${live_status:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    if [[ "$live_status_norm" != "pass" && "$live_status_norm" != "fail" ]]; then
+      live_contract_valid=0
+      live_contract_failure_reason="live summary status must be pass or fail"
       live_status="fail"
+      if (( live_rc == 0 )); then
+        live_rc=1
+      fi
+    elif (( live_rc == 0 )) && [[ "$live_status_norm" != "pass" ]]; then
+      live_contract_valid=0
+      live_contract_failure_reason="live summary contract mismatch: rc=0 requires status=pass"
+      live_status="fail"
+      live_rc=1
+    elif (( live_rc != 0 )) && [[ "$live_status_norm" != "fail" ]]; then
+      live_contract_valid=0
+      live_contract_failure_reason="live summary contract mismatch: non-zero rc requires status=fail"
+      live_status="fail"
+    else
+      live_contract_valid=1
+      live_contract_failure_reason=""
     fi
   fi
   if (( live_process_rc != 0 && live_rc == 0 )); then
+    live_contract_valid=0
+    live_contract_failure_reason="live process rc and summary rc mismatch (process non-zero, summary rc=0)"
     live_rc="$live_process_rc"
     live_status="fail"
+  fi
+  live_status_norm="$(printf '%s' "${live_status:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [[ "$live_status_norm" == "pass" ]] && (( live_rc == 0 )) && (( live_contract_valid == 1 )); then
+    live_stage_pass=1
+  else
+    live_stage_pass=0
+    if (( live_rc == 0 )); then
+      # Fail closed when stage status is not explicit pass.
+      live_rc=1
+    fi
   fi
 
   live_selected_action_ids_json="$(jq -c '.roadmap.selected_action_ids // []' "$live_summary_json")"
@@ -452,22 +566,164 @@ if [[ -f "$live_summary_json" ]] && jq -e . "$live_summary_json" >/dev/null 2>&1
   fi
 else
   live_summary_valid=0
+  live_contract_valid=0
+  live_contract_failure_reason="live summary missing or invalid after stage execution"
   live_rc="$live_process_rc"
   if (( live_rc == 0 )); then
-    live_status="pass"
-  else
-    live_status="fail"
+    # Fail closed when the stage exits 0 but emits no valid summary artifact.
+    live_rc=125
   fi
+  live_status="fail"
+  live_stage_pass=0
 fi
 
-echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence status=$live_status rc=$live_rc"
+echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence status=$live_status rc=$live_rc contract_valid=$live_contract_valid"
+if [[ "$live_status" != "pass" && -n "$live_contract_failure_reason" ]]; then
+  echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence fail_reason=$live_contract_failure_reason"
+fi
 echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence summary_json=$live_summary_json log=$live_log"
 
 run_pack_stage=1
-if (( live_rc != 0 )) && [[ "$continue_on_live_fail" != "1" ]]; then
+allow_post_live=1
+if (( live_stage_pass != 1 )) && [[ "$continue_on_live_fail" != "1" ]]; then
+  allow_post_live=0
+fi
+
+if [[ "$run_live_archive" == "1" ]]; then
+  if (( allow_post_live == 1 )); then
+    archive_attempted=1
+    archive_cmd=(
+      bash
+      "$archive_script"
+      --reports-dir "$reports_dir"
+      --archive-root "$archive_root"
+      --scope "$scope"
+      --summary-json "$archive_summary_json"
+      --print-summary-json 0
+    )
+    if [[ -n "${shared_roadmap_summary_json:-}" ]]; then
+      archive_cmd+=(--roadmap-summary-json "$shared_roadmap_summary_json")
+    fi
+
+    echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence_archive status=running"
+    rm -f "$archive_summary_json"
+    set +e
+    "${archive_cmd[@]}" >"$archive_log" 2>&1
+    archive_process_rc_num=$?
+    set -e
+
+    if [[ -f "$archive_summary_json" ]] && jq -e . "$archive_summary_json" >/dev/null 2>&1; then
+      archive_summary_valid=1
+      archive_status="$(jq -r '.status // ""' "$archive_summary_json")"
+      archive_rc_raw="$(jq -r '.rc // empty' "$archive_summary_json")"
+      if [[ -z "$archive_status" || -z "$archive_rc_raw" ]]; then
+        archive_contract_valid=0
+        archive_contract_failure_reason="archive summary contract requires both status and rc fields"
+        archive_status="fail"
+        archive_rc_num=1
+      elif ! [[ "$archive_rc_raw" =~ ^-?[0-9]+$ ]]; then
+        archive_contract_valid=0
+        archive_contract_failure_reason="archive summary rc must be an integer"
+        archive_status="fail"
+        archive_rc_num=125
+      else
+        archive_rc_num="$archive_rc_raw"
+        archive_status_norm="$(printf '%s' "${archive_status:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+        if [[ "$archive_status_norm" != "pass" && "$archive_status_norm" != "fail" ]]; then
+          archive_contract_valid=0
+          archive_contract_failure_reason="archive summary status must be pass or fail"
+          archive_status="fail"
+          if (( archive_rc_num == 0 )); then
+            archive_rc_num=1
+          fi
+        elif (( archive_rc_num == 0 )) && [[ "$archive_status_norm" != "pass" ]]; then
+          archive_contract_valid=0
+          archive_contract_failure_reason="archive summary contract mismatch: rc=0 requires status=pass"
+          archive_status="fail"
+          archive_rc_num=1
+        elif (( archive_rc_num != 0 )) && [[ "$archive_status_norm" != "fail" ]]; then
+          archive_contract_valid=0
+          archive_contract_failure_reason="archive summary contract mismatch: non-zero rc requires status=fail"
+          archive_status="fail"
+        else
+          archive_contract_valid=1
+          archive_contract_failure_reason=""
+        fi
+      fi
+      if (( archive_process_rc_num != 0 && archive_rc_num == 0 )); then
+        archive_contract_valid=0
+        archive_contract_failure_reason="archive process rc and summary rc mismatch (process non-zero, summary rc=0)"
+        archive_rc_num="$archive_process_rc_num"
+        archive_status="fail"
+      fi
+
+      archive_summary_status_json="$(jq -c '.status // null' "$archive_summary_json")"
+      archive_summary_rc_json="$(jq -c '.rc // null' "$archive_summary_json")"
+
+      value="$(jq -r '.summary.candidate_total // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_candidate_total_num="$value"
+        archive_candidate_total_json="$value"
+      fi
+      value="$(jq -r '.summary.copied_total // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_copied_total_num="$value"
+        archive_copied_total_json="$value"
+      fi
+      value="$(jq -r '.summary.missing_total // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_missing_total_num="$value"
+        archive_missing_total_json="$value"
+      fi
+      value="$(jq -r '.summary.copy_error_total // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_copy_error_total_num="$value"
+        archive_copy_error_total_json="$value"
+      fi
+      value="$(jq -r '.summary.missing_family_count // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_missing_family_count_num="$value"
+        archive_missing_family_count_json="$value"
+      fi
+      archive_archive_dir="$(jq -r '.artifacts.archive_dir // ""' "$archive_summary_json")"
+    else
+      archive_summary_valid=0
+      archive_contract_valid=0
+      archive_contract_failure_reason="archive summary missing or invalid after stage execution"
+      archive_rc_num="$archive_process_rc_num"
+      if (( archive_rc_num == 0 )); then
+        # Fail closed when the stage exits 0 but emits no valid summary artifact.
+        archive_rc_num=125
+      fi
+      archive_status="fail"
+    fi
+
+    if [[ "$archive_status" != "pass" ]] || (( archive_rc_num != 0 )); then
+      archive_fail_closed_blocking=1
+    fi
+    archive_rc_json="$archive_rc_num"
+    archive_process_rc_json="$archive_process_rc_num"
+    echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence_archive status=$archive_status rc=$archive_rc_num contract_valid=$archive_contract_valid"
+    if [[ "$archive_status" != "pass" && -n "$archive_contract_failure_reason" ]]; then
+      echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence_archive fail_reason=$archive_contract_failure_reason"
+    fi
+    echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence_archive summary_json=$archive_summary_json log=$archive_log"
+  else
+    archive_status="skipped"
+    archive_skip_reason="live_step_failed_fail_closed"
+    echo "[roadmap-live-and-pack-actionable-run] stage=live_evidence_archive status=skipped reason=$archive_skip_reason"
+  fi
+fi
+
+if (( allow_post_live == 0 )); then
   run_pack_stage=0
   pack_status="skipped"
   pack_skip_reason="live_step_failed_fail_closed"
+fi
+if [[ "$run_live_archive" == "1" ]] && (( allow_post_live == 1 )) && (( archive_fail_closed_blocking == 1 )); then
+  run_pack_stage=0
+  pack_status="skipped"
+  pack_skip_reason="archive_step_failed_fail_closed"
 fi
 
 if (( run_pack_stage == 1 )); then
@@ -484,6 +740,8 @@ if (( run_pack_stage == 1 )); then
     --parallel "$parallel"
     --max-actions "$max_actions"
     --print-summary-json 0
+    --live-evidence-summary-json "$live_summary_json"
+    --require-live-derived-evidence-pack-actions 1
   )
 
   if [[ -n "${shared_roadmap_summary_json:-}" && -n "${shared_roadmap_report_md:-}" ]]; then
@@ -491,6 +749,7 @@ if (( run_pack_stage == 1 )); then
   fi
 
   echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack status=running"
+  rm -f "$pack_summary_json"
   set +e
   "${pack_cmd[@]}" >"$pack_log" 2>&1
   pack_process_rc_num=$?
@@ -499,17 +758,56 @@ if (( run_pack_stage == 1 )); then
   if [[ -f "$pack_summary_json" ]] && jq -e . "$pack_summary_json" >/dev/null 2>&1; then
     pack_summary_valid=1
     pack_status="$(jq -r '.status // ""' "$pack_summary_json")"
-    pack_rc_num="$(jq -r '.rc // 125' "$pack_summary_json")"
-    if [[ -z "$pack_status" ]]; then
-      if (( pack_rc_num == 0 )); then
-        pack_status="pass"
-      else
+    pack_rc_raw="$(jq -r '.rc // empty' "$pack_summary_json")"
+    if [[ -z "$pack_status" || -z "$pack_rc_raw" ]]; then
+      pack_contract_valid=0
+      pack_contract_failure_reason="evidence-pack summary contract requires both status and rc fields"
+      pack_status="fail"
+      pack_rc_num=1
+    elif ! [[ "$pack_rc_raw" =~ ^-?[0-9]+$ ]]; then
+      pack_contract_valid=0
+      pack_contract_failure_reason="evidence-pack summary rc must be an integer"
+      pack_status="fail"
+      pack_rc_num=125
+    else
+      pack_rc_num="$pack_rc_raw"
+      pack_status_norm="$(printf '%s' "${pack_status:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+      if [[ "$pack_status_norm" != "pass" && "$pack_status_norm" != "fail" ]]; then
+        pack_contract_valid=0
+        pack_contract_failure_reason="evidence-pack summary status must be pass or fail"
         pack_status="fail"
+        if (( pack_rc_num == 0 )); then
+          pack_rc_num=1
+        fi
+      elif (( pack_rc_num == 0 )) && [[ "$pack_status_norm" != "pass" ]]; then
+        pack_contract_valid=0
+        pack_contract_failure_reason="evidence-pack summary contract mismatch: rc=0 requires status=pass"
+        pack_status="fail"
+        pack_rc_num=1
+      elif (( pack_rc_num != 0 )) && [[ "$pack_status_norm" != "fail" ]]; then
+        pack_contract_valid=0
+        pack_contract_failure_reason="evidence-pack summary contract mismatch: non-zero rc requires status=fail"
+        pack_status="fail"
+      else
+        pack_contract_valid=1
+        pack_contract_failure_reason=""
       fi
     fi
     if (( pack_process_rc_num != 0 && pack_rc_num == 0 )); then
+      pack_contract_valid=0
+      pack_contract_failure_reason="evidence-pack process rc and summary rc mismatch (process non-zero, summary rc=0)"
       pack_rc_num="$pack_process_rc_num"
       pack_status="fail"
+    fi
+    pack_status_norm="$(printf '%s' "${pack_status:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    if [[ "$pack_status_norm" == "pass" ]] && (( pack_rc_num == 0 )) && (( pack_contract_valid == 1 )); then
+      pack_stage_pass=1
+    else
+      pack_stage_pass=0
+      if (( pack_rc_num == 0 )); then
+        # Fail closed when stage status is not explicit pass.
+        pack_rc_num=1
+      fi
     fi
 
     pack_selected_action_ids_json="$(jq -c '.roadmap.selected_action_ids // []' "$pack_summary_json")"
@@ -551,28 +849,51 @@ if (( run_pack_stage == 1 )); then
     fi
   else
     pack_summary_valid=0
+    pack_contract_valid=0
+    pack_contract_failure_reason="evidence-pack summary missing or invalid after stage execution"
     pack_rc_num="$pack_process_rc_num"
     if (( pack_rc_num == 0 )); then
-      pack_status="pass"
-    else
-      pack_status="fail"
+      # Fail closed when the stage exits 0 but emits no valid summary artifact.
+      pack_rc_num=125
     fi
+    pack_status="fail"
+    pack_stage_pass=0
   fi
 
   pack_rc_json="$pack_rc_num"
   pack_process_rc_json="$pack_process_rc_num"
-  echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack status=$pack_status rc=$pack_rc_num"
+  echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack status=$pack_status rc=$pack_rc_num contract_valid=$pack_contract_valid"
+  if [[ "$pack_status" != "pass" && -n "$pack_contract_failure_reason" ]]; then
+    echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack fail_reason=$pack_contract_failure_reason"
+  fi
   echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack summary_json=$pack_summary_json log=$pack_log"
 else
   echo "[roadmap-live-and-pack-actionable-run] stage=evidence_pack status=skipped reason=$pack_skip_reason"
 fi
 
 final_rc=0
-if (( live_rc != 0 )); then
-  final_rc="$live_rc"
+if (( live_stage_pass != 1 )); then
+  if (( live_rc != 0 )); then
+    final_rc="$live_rc"
+  else
+    final_rc=1
+  fi
 fi
-if [[ "$pack_status" != "skipped" ]] && (( pack_rc_num != 0 )) && (( final_rc == 0 )); then
-  final_rc="$pack_rc_num"
+if [[ "$run_live_archive" == "1" ]] && (( archive_attempted == 1 )) && (( final_rc == 0 )); then
+  if (( archive_rc_num != 0 )); then
+    final_rc="$archive_rc_num"
+  elif [[ "$archive_status" != "pass" ]]; then
+    final_rc=1
+  fi
+fi
+if [[ "$pack_status" != "skipped" ]] && (( final_rc == 0 )); then
+  if (( pack_stage_pass != 1 )); then
+    if (( pack_rc_num != 0 )); then
+      final_rc="$pack_rc_num"
+    else
+      final_rc=1
+    fi
+  fi
 fi
 
 if (( final_rc == 0 )); then
@@ -581,14 +902,50 @@ else
   final_status="fail"
 fi
 
+final_failure_substep=""
+if [[ "$final_status" == "fail" ]]; then
+  if (( live_stage_pass != 1 )); then
+    if (( live_contract_valid != 1 )); then
+      final_failure_substep="live_evidence_summary_contract"
+    else
+      final_failure_substep="live_evidence_stage_failed"
+    fi
+  elif [[ "$run_live_archive" == "1" ]] && (( archive_attempted == 1 )) && (( archive_fail_closed_blocking == 1 )); then
+    if (( archive_contract_valid != 1 )); then
+      final_failure_substep="live_evidence_archive_summary_contract"
+    else
+      final_failure_substep="live_evidence_archive_stage_failed"
+    fi
+  elif [[ "$pack_status" != "skipped" ]] && (( pack_stage_pass != 1 )); then
+    if (( pack_contract_valid != 1 )); then
+      final_failure_substep="evidence_pack_summary_contract"
+    else
+      final_failure_substep="evidence_pack_stage_failed"
+    fi
+  elif [[ "$pack_status" == "skipped" ]]; then
+    final_failure_substep="evidence_pack_skipped_due_to_fail_closed_gate"
+  fi
+fi
+
 steps_executed=1
-steps_skipped=1
+steps_skipped=2
 steps_pass=0
 steps_fail=0
 if [[ "$live_status" == "pass" ]]; then
   steps_pass=$((steps_pass + 1))
 else
   steps_fail=$((steps_fail + 1))
+fi
+if [[ "$archive_status" == "skipped" ]]; then
+  :
+else
+  steps_executed=$((steps_executed + 1))
+  steps_skipped=$((steps_skipped - 1))
+  if [[ "$archive_status" == "pass" ]]; then
+    steps_pass=$((steps_pass + 1))
+  else
+    steps_fail=$((steps_fail + 1))
+  fi
 fi
 if [[ "$pack_status" == "skipped" ]]; then
   :
@@ -619,12 +976,19 @@ jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$final_status" \
   --argjson rc "$final_rc" \
+  --arg final_failure_substep "$final_failure_substep" \
   --arg command "$summary_command_redacted" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
   --arg live_reports_dir "$live_reports_dir" \
   --arg live_summary_json "$live_summary_json" \
   --arg live_log "$live_log" \
+  --arg archive_root "$archive_root" \
+  --arg archive_summary_json "$archive_summary_json" \
+  --arg archive_log "$archive_log" \
+  --arg archive_archive_dir "$archive_archive_dir" \
+  --arg archive_status "$archive_status" \
+  --arg archive_skip_reason "$archive_skip_reason" \
   --arg pack_reports_dir "$pack_reports_dir" \
   --arg pack_summary_json "$pack_summary_json" \
   --arg pack_log "$pack_log" \
@@ -635,6 +999,8 @@ jq -n \
   --argjson live_rc "$live_rc" \
   --argjson live_process_rc "$live_process_rc" \
   --argjson live_summary_valid "$live_summary_valid" \
+  --argjson live_contract_valid "$live_contract_valid" \
+  --arg live_contract_failure_reason "$live_contract_failure_reason" \
   --argjson live_selected_actions_count "$live_selected_actions_count_json" \
   --argjson live_selected_action_ids "$live_selected_action_ids_json" \
   --argjson live_actions_executed "$live_actions_executed_json" \
@@ -642,10 +1008,26 @@ jq -n \
   --argjson live_fail "$live_fail_json" \
   --argjson live_timed_out "$live_timed_out_json" \
   --argjson live_soft_failed "$live_soft_failed_json" \
+  --argjson archive_attempted "$archive_attempted" \
+  --argjson archive_rc "$archive_rc_json" \
+  --argjson archive_process_rc "$archive_process_rc_json" \
+  --argjson archive_summary_valid "$archive_summary_valid" \
+  --argjson archive_contract_valid "$archive_contract_valid" \
+  --arg archive_contract_failure_reason "$archive_contract_failure_reason" \
+  --argjson archive_summary_status "$archive_summary_status_json" \
+  --argjson archive_summary_rc "$archive_summary_rc_json" \
+  --argjson archive_candidate_total "$archive_candidate_total_json" \
+  --argjson archive_copied_total "$archive_copied_total_json" \
+  --argjson archive_missing_total "$archive_missing_total_json" \
+  --argjson archive_copy_error_total "$archive_copy_error_total_json" \
+  --argjson archive_missing_family_count "$archive_missing_family_count_json" \
+  --argjson archive_fail_closed_blocking "$archive_fail_closed_blocking" \
   --arg pack_status "$pack_status" \
   --argjson pack_rc "$pack_rc_json" \
   --argjson pack_process_rc "$pack_process_rc_json" \
   --argjson pack_summary_valid "$pack_summary_valid" \
+  --argjson pack_contract_valid "$pack_contract_valid" \
+  --arg pack_contract_failure_reason "$pack_contract_failure_reason" \
   --argjson pack_selected_actions_count "$pack_selected_actions_count_json" \
   --argjson pack_selected_action_ids "$pack_selected_action_ids_json" \
   --argjson pack_actions_executed "$pack_actions_executed_json" \
@@ -661,6 +1043,7 @@ jq -n \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
   --argjson continue_on_live_fail "$continue_on_live_fail" \
+  --argjson run_live_archive "$run_live_archive" \
   --argjson steps_executed "$steps_executed" \
   --argjson steps_skipped "$steps_skipped" \
   --argjson steps_pass "$steps_pass" \
@@ -677,6 +1060,7 @@ jq -n \
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
+    failure_substep: (if $final_failure_substep == "" then null else $final_failure_substep end),
     command: $command,
     inputs: {
       refresh_manual_validation: ($refresh_manual_validation == 1),
@@ -686,7 +1070,8 @@ jq -n \
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1),
-      continue_on_live_fail: ($continue_on_live_fail == 1)
+      continue_on_live_fail: ($continue_on_live_fail == 1),
+      run_live_archive: ($run_live_archive == 1)
     },
     steps: {
       live_evidence: {
@@ -694,6 +1079,8 @@ jq -n \
         rc: $live_rc,
         process_rc: $live_process_rc,
         summary_valid: ($live_summary_valid == 1),
+        contract_valid: ($live_contract_valid == 1),
+        contract_failure_reason: (if $live_contract_failure_reason == "" then null else $live_contract_failure_reason end),
         selected_actions_count: $live_selected_actions_count,
         selected_action_ids: $live_selected_action_ids,
         actions_executed: $live_actions_executed,
@@ -707,11 +1094,37 @@ jq -n \
           log: $live_log
         }
       },
+      live_evidence_archive: {
+        attempted: ($archive_attempted == 1),
+        status: $archive_status,
+        rc: $archive_rc,
+        process_rc: $archive_process_rc,
+        summary_valid: ($archive_summary_valid == 1),
+        contract_valid: ($archive_contract_valid == 1),
+        contract_failure_reason: (if $archive_contract_failure_reason == "" then null else $archive_contract_failure_reason end),
+        skip_reason: (if $archive_status == "skipped" then $archive_skip_reason else null end),
+        fail_closed_blocking: ($archive_fail_closed_blocking == 1),
+        summary_status: $archive_summary_status,
+        summary_rc: $archive_summary_rc,
+        candidate_total: $archive_candidate_total,
+        copied_total: $archive_copied_total,
+        missing_total: $archive_missing_total,
+        copy_error_total: $archive_copy_error_total,
+        missing_family_count: $archive_missing_family_count,
+        artifacts: {
+          archive_root: $archive_root,
+          archive_dir: (if $archive_archive_dir == "" then null else $archive_archive_dir end),
+          summary_json: $archive_summary_json,
+          log: $archive_log
+        }
+      },
       evidence_pack: {
         status: $pack_status,
         rc: $pack_rc,
         process_rc: $pack_process_rc,
         summary_valid: ($pack_summary_valid == 1),
+        contract_valid: ($pack_contract_valid == 1),
+        contract_failure_reason: (if $pack_contract_failure_reason == "" then null else $pack_contract_failure_reason end),
         skip_reason: (if $pack_status == "skipped" then $pack_skip_reason else null end),
         selected_actions_count: $pack_selected_actions_count,
         selected_action_ids: $pack_selected_action_ids,
@@ -728,7 +1141,7 @@ jq -n \
       }
     },
     summary: {
-      steps_total: 2,
+      steps_total: 3,
       steps_executed: $steps_executed,
       steps_skipped: $steps_skipped,
       steps_pass: $steps_pass,
@@ -745,6 +1158,10 @@ jq -n \
       summary_json: $summary_json,
       live_summary_json: $live_summary_json,
       live_log: $live_log,
+      live_archive_summary_json: $archive_summary_json,
+      live_archive_log: $archive_log,
+      live_archive_root: $archive_root,
+      live_archive_dir: (if $archive_archive_dir == "" then null else $archive_archive_dir end),
       evidence_pack_summary_json: $pack_summary_json,
       evidence_pack_log: $pack_log,
       roadmap_summary_json: (if $shared_roadmap_summary_json == "" then null else $shared_roadmap_summary_json end),
@@ -754,7 +1171,10 @@ jq -n \
 
 mv "$summary_tmp" "$summary_json"
 
-echo "[roadmap-live-and-pack-actionable-run] status=$final_status rc=$final_rc scope=$scope continue_on_live_fail=$continue_on_live_fail"
+echo "[roadmap-live-and-pack-actionable-run] status=$final_status rc=$final_rc scope=$scope continue_on_live_fail=$continue_on_live_fail run_live_archive=$run_live_archive failure_substep=${final_failure_substep:-none}"
+if [[ "$final_status" == "fail" && -n "$final_failure_substep" ]]; then
+  echo "[roadmap-live-and-pack-actionable-run] fail_substep=$final_failure_substep"
+fi
 echo "[roadmap-live-and-pack-actionable-run] summary_json=$summary_json"
 
 if [[ "$print_summary_json" == "1" ]]; then

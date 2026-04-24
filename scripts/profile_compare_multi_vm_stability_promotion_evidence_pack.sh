@@ -133,63 +133,51 @@ json_array_from_lines() {
     printf '[]'
     return
   fi
-  printf '%s\n' "$@" | jq -R . | jq -s .
+  printf '%s\n' "$@" \
+    | jq -R 'gsub("^\\s+|\\s+$"; "")' \
+    | jq -s '[ .[] | select(type == "string" and length > 0) ]'
 }
 
-latest_matching_summary_json() {
+list_matching_summary_json_candidates() {
   local reports_dir="$1"
   local prefix="$2"
-  local best_path=""
-  local best_mtime="-1"
   local candidate=""
-  local mtime=""
-  local found_any="0"
+  local candidate_mtime=""
+  local line=""
 
   shopt -s nullglob
-  local candidates=(
+  local candidate_globs=(
     "$reports_dir"/"$prefix"*.json
     "$reports_dir"/"${prefix%_summary}"*/"$prefix".json
   )
   shopt -u nullglob
 
-  for candidate in "${candidates[@]}"; do
+  local -a unsorted_rows=()
+  local -a sorted_rows=()
+  declare -A seen_paths=()
+  for candidate in "${candidate_globs[@]}"; do
     [[ -f "$candidate" ]] || continue
-    found_any="1"
-    mtime="$(file_mtime_epoch "$candidate")"
-    if [[ "$mtime" =~ ^[0-9]+$ ]]; then
-      if (( mtime > best_mtime )); then
-        best_mtime="$mtime"
-        best_path="$candidate"
-      fi
-    elif [[ -z "$best_path" ]]; then
-      best_path="$candidate"
+    candidate_mtime="$(file_mtime_epoch "$candidate")"
+    if ! [[ "$candidate_mtime" =~ ^[0-9]+$ ]]; then
+      candidate_mtime="0"
     fi
+    unsorted_rows+=("${candidate_mtime}"$'\t'"${candidate}")
   done
 
-  if [[ "$found_any" != "1" ]]; then
-    printf '%s' ""
-    return
-  fi
-  printf '%s' "$best_path"
-}
-
-discover_latest_promotion_cycle_summary_path() {
-  local reports_dir="$1"
-  local preferred="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
-  local discovered=""
-
-  if [[ -f "$preferred" ]]; then
-    printf '%s' "$preferred"
+  if ((${#unsorted_rows[@]} == 0)); then
     return
   fi
 
-  discovered="$(latest_matching_summary_json "$reports_dir" "profile_compare_multi_vm_stability_promotion_cycle_summary")"
-  if [[ -n "$discovered" ]]; then
-    printf '%s' "$discovered"
-    return
-  fi
-
-  printf '%s' "$preferred"
+  mapfile -t sorted_rows < <(printf '%s\n' "${unsorted_rows[@]}" | sort -r -n -k1,1 -k2,2)
+  for line in "${sorted_rows[@]}"; do
+    candidate="${line#*$'\t'}"
+    [[ -n "$candidate" ]] || continue
+    if [[ -n "${seen_paths[$candidate]+x}" ]]; then
+      continue
+    fi
+    seen_paths["$candidate"]="1"
+    printf '%s\n' "$candidate"
+  done
 }
 
 collect_promotion_cycle_evidence() {
@@ -209,6 +197,9 @@ collect_promotion_cycle_evidence() {
   local decision_value=""
   local decision_normalized=""
   local decision_valid="false"
+  local decision_status_contract_valid="false"
+  local promotion_contract_ok=""
+  local promotion_contract_ok_present="false"
   local generated_at_utc=""
   local freshness_known="false"
   local freshness_fresh=""
@@ -300,6 +291,45 @@ collect_promotion_cycle_evidence() {
       else ""
       end
     ' "$path" 2>/dev/null || printf '%s' "")"
+
+    promotion_contract_ok="$(jq -r '
+      if (.promotion.contract_ok | type) == "boolean"
+      then (if .promotion.contract_ok then "true" else "false" end)
+      else ""
+      end
+    ' "$path" 2>/dev/null || printf '%s' "")"
+    if [[ "$promotion_contract_ok" == "true" || "$promotion_contract_ok" == "false" ]]; then
+      promotion_contract_ok_present="true"
+      if [[ "$promotion_contract_ok" != "true" ]]; then
+        errors+=("promotion.contract_ok is false")
+      fi
+    fi
+
+    if [[ "$status_valid" == "true" && "$rc_valid" == "true" && "$decision_valid" == "true" ]]; then
+      if [[ "$decision_normalized" == "GO" ]]; then
+        if [[ "$status_normalized" == "pass" || "$status_normalized" == "ok" ]]; then
+          if [[ "$rc_raw" == "0" ]]; then
+            decision_status_contract_valid="true"
+          else
+            errors+=("GO decision requires rc=0 (actual=${rc_raw})")
+          fi
+        else
+          errors+=("GO decision requires pass/ok status (actual=${status_normalized:-unset})")
+        fi
+      elif [[ "$decision_normalized" == "NO-GO" ]]; then
+        if [[ "$status_normalized" == "warn" || "$status_normalized" == "fail" ]]; then
+          if [[ "$status_normalized" == "warn" && "$rc_raw" != "0" ]]; then
+            errors+=("NO-GO warn status requires rc=0 (actual=${rc_raw})")
+          elif [[ "$status_normalized" == "fail" && "$rc_raw" == "0" ]]; then
+            errors+=("NO-GO fail status requires non-zero rc")
+          else
+            decision_status_contract_valid="true"
+          fi
+        else
+          errors+=("NO-GO decision requires warn/fail status (actual=${status_normalized:-unset})")
+        fi
+      fi
+    fi
   fi
 
   local errors_json
@@ -312,6 +342,7 @@ collect_promotion_cycle_evidence() {
     && "$status_valid" == "true" \
     && "$rc_valid" == "true" \
     && "$decision_valid" == "true" \
+    && "$decision_status_contract_valid" == "true" \
     && "$freshness_known" == "true" \
     && "$freshness_fresh" == "true" ]]; then
     usable="true"
@@ -330,6 +361,9 @@ collect_promotion_cycle_evidence() {
     --arg decision_value "$decision_value" \
     --arg decision_normalized "$decision_normalized" \
     --arg decision_valid "$decision_valid" \
+    --arg decision_status_contract_valid "$decision_status_contract_valid" \
+    --arg promotion_contract_ok "$promotion_contract_ok" \
+    --arg promotion_contract_ok_present "$promotion_contract_ok_present" \
     --arg generated_at_utc "$generated_at_utc" \
     --arg freshness_known "$freshness_known" \
     --arg freshness_fresh "$freshness_fresh" \
@@ -361,7 +395,16 @@ collect_promotion_cycle_evidence() {
       decision: {
         value: (if $decision_value == "" then null else $decision_value end),
         normalized: (if $decision_normalized == "" then null else $decision_normalized end),
-        valid: ($decision_valid == "true")
+        valid: ($decision_valid == "true"),
+        status_rc_contract_valid: ($decision_status_contract_valid == "true")
+      },
+      contract: {
+        promotion_contract_ok: (
+          if $promotion_contract_ok_present != "true" then null
+          elif $promotion_contract_ok == "true" then true
+          else false
+          end
+        )
       },
       freshness: {
         generated_at_utc: (if $generated_at_utc == "" then null else $generated_at_utc end),
@@ -382,11 +425,101 @@ collect_promotion_cycle_evidence() {
     }'
 }
 
+RESOLVED_PROMOTION_CYCLE_SUMMARY_JSON=""
+RESOLVED_PROMOTION_CYCLE_EVIDENCE=""
+RESOLVED_PROMOTION_CYCLE_SELECTION_SOURCE=""
+RESOLVED_PROMOTION_CYCLE_SELECTION_FALLBACK_USED="false"
+RESOLVED_PROMOTION_CYCLE_SELECTION_CANDIDATE_COUNT="0"
+
+resolve_promotion_cycle_summary_source() {
+  local reports_dir="$1"
+  local explicit_path="$2"
+  local expected_schema_id="$3"
+  local max_age_sec="$4"
+
+  local canonical_path="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+  local candidate=""
+  local candidate_abs=""
+  local candidate_evidence=""
+  local candidate_usable=""
+  local source_kind="canonical"
+  local fallback_used="false"
+  local selected_path=""
+  local selected_evidence=""
+  local first_candidate_path=""
+  local first_candidate_evidence=""
+  local -a candidate_paths=()
+  local -a discovered_candidates=()
+  local -a unique_candidates=()
+  declare -A seen_candidates=()
+
+  if [[ -n "$explicit_path" ]]; then
+    candidate_paths+=("$explicit_path")
+    source_kind="explicit"
+  else
+    candidate_paths+=("$canonical_path")
+    mapfile -t discovered_candidates < <(list_matching_summary_json_candidates "$reports_dir" "profile_compare_multi_vm_stability_promotion_cycle_summary")
+    for candidate in "${discovered_candidates[@]}"; do
+      [[ -n "$candidate" ]] || continue
+      candidate_paths+=("$candidate")
+    done
+  fi
+
+  for candidate in "${candidate_paths[@]}"; do
+    candidate_abs="$(abs_path "$candidate")"
+    [[ -n "$candidate_abs" ]] || continue
+    if [[ -n "${seen_candidates[$candidate_abs]+x}" ]]; then
+      continue
+    fi
+    seen_candidates["$candidate_abs"]="1"
+    unique_candidates+=("$candidate_abs")
+  done
+
+  for candidate_abs in "${unique_candidates[@]}"; do
+    candidate_evidence="$(collect_promotion_cycle_evidence "$candidate_abs" "$expected_schema_id" "$max_age_sec")"
+    if [[ -z "$first_candidate_path" ]]; then
+      first_candidate_path="$candidate_abs"
+      first_candidate_evidence="$candidate_evidence"
+    fi
+    candidate_usable="$(jq -r '.usable' <<<"$candidate_evidence")"
+    if [[ "$candidate_usable" == "true" ]]; then
+      selected_path="$candidate_abs"
+      selected_evidence="$candidate_evidence"
+      if [[ "$source_kind" != "explicit" && "$candidate_abs" != "$canonical_path" ]]; then
+        source_kind="fallback_candidate"
+        fallback_used="true"
+      fi
+      break
+    fi
+  done
+
+  if [[ -z "$selected_path" ]]; then
+    if [[ -n "$first_candidate_path" ]]; then
+      selected_path="$first_candidate_path"
+      selected_evidence="$first_candidate_evidence"
+      if [[ "$source_kind" != "explicit" && "$selected_path" != "$canonical_path" ]]; then
+        source_kind="fallback_candidate"
+        fallback_used="true"
+      fi
+    else
+      selected_path="$(abs_path "$canonical_path")"
+      selected_evidence="$(collect_promotion_cycle_evidence "$selected_path" "$expected_schema_id" "$max_age_sec")"
+    fi
+  fi
+
+  RESOLVED_PROMOTION_CYCLE_SUMMARY_JSON="$selected_path"
+  RESOLVED_PROMOTION_CYCLE_EVIDENCE="$selected_evidence"
+  RESOLVED_PROMOTION_CYCLE_SELECTION_SOURCE="$source_kind"
+  RESOLVED_PROMOTION_CYCLE_SELECTION_FALLBACK_USED="$fallback_used"
+  RESOLVED_PROMOTION_CYCLE_SELECTION_CANDIDATE_COUNT="${#unique_candidates[@]}"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd stat
 need_cmd find
 need_cmd tail
+need_cmd sort
 
 reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_REPORTS_DIR:-${REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}}"
 promotion_cycle_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_EVIDENCE_PACK_PROMOTION_CYCLE_SUMMARY_JSON:-}"
@@ -506,14 +639,18 @@ fi
 summary_json="$(abs_path "$summary_json")"
 report_md="$(abs_path "$report_md")"
 
-if [[ -z "$promotion_cycle_summary_json" ]]; then
-  promotion_cycle_summary_json="$(discover_latest_promotion_cycle_summary_path "$reports_dir")"
+if [[ -n "$promotion_cycle_summary_json" ]]; then
+  promotion_cycle_summary_json="$(abs_path "$promotion_cycle_summary_json")"
 fi
-promotion_cycle_summary_json="$(abs_path "$promotion_cycle_summary_json")"
 
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 
-promotion_cycle_evidence="$(collect_promotion_cycle_evidence "$promotion_cycle_summary_json" "profile_compare_multi_vm_stability_promotion_cycle_summary" "$max_age_sec")"
+resolve_promotion_cycle_summary_source "$reports_dir" "$promotion_cycle_summary_json" "profile_compare_multi_vm_stability_promotion_cycle_summary" "$max_age_sec"
+promotion_cycle_summary_json="$RESOLVED_PROMOTION_CYCLE_SUMMARY_JSON"
+promotion_cycle_evidence="$RESOLVED_PROMOTION_CYCLE_EVIDENCE"
+promotion_cycle_selection_source="$RESOLVED_PROMOTION_CYCLE_SELECTION_SOURCE"
+promotion_cycle_selection_fallback_used="$RESOLVED_PROMOTION_CYCLE_SELECTION_FALLBACK_USED"
+promotion_cycle_selection_candidate_count="$RESOLVED_PROMOTION_CYCLE_SELECTION_CANDIDATE_COUNT"
 
 declare -a reasons=()
 promotion_cycle_usable="$(jq -r '.usable' <<<"$promotion_cycle_evidence")"
@@ -529,11 +666,17 @@ fi
 
 promotion_cycle_decision="$(jq -r '.decision.normalized // ""' <<<"$promotion_cycle_evidence")"
 promotion_cycle_status="$(jq -r '.status.normalized // ""' <<<"$promotion_cycle_evidence")"
-if [[ "$promotion_cycle_decision" != "GO" && "$promotion_cycle_decision" != "NO-GO" ]]; then
-  reasons+=("promotion_cycle: decision missing/invalid")
-fi
-if [[ "$promotion_cycle_status" != "pass" && "$promotion_cycle_status" != "warn" && "$promotion_cycle_status" != "fail" && "$promotion_cycle_status" != "ok" ]]; then
-  reasons+=("promotion_cycle: status missing/invalid")
+promotion_cycle_rc="$(jq -r '.rc.value // ""' <<<"$promotion_cycle_evidence")"
+if [[ "$promotion_cycle_usable" == "true" ]]; then
+  if [[ "$promotion_cycle_decision" != "GO" && "$promotion_cycle_decision" != "NO-GO" ]]; then
+    reasons+=("promotion_cycle: decision missing/invalid")
+  fi
+  if [[ "$promotion_cycle_status" != "pass" && "$promotion_cycle_status" != "warn" && "$promotion_cycle_status" != "fail" && "$promotion_cycle_status" != "ok" ]]; then
+    reasons+=("promotion_cycle: status missing/invalid")
+  fi
+  if ! [[ "$promotion_cycle_rc" =~ ^-?[0-9]+$ ]]; then
+    reasons+=("promotion_cycle: rc missing/invalid")
+  fi
 fi
 
 input_next_operator_action="$(jq -r '.next_operator_action // ""' <<<"$promotion_cycle_evidence")"
@@ -573,7 +716,7 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
   fi
 else
   failure_reason="${reasons[0]}"
-  next_operator_action="Refresh profile_compare_multi_vm_stability_promotion_cycle_summary.json and rerun profile_compare_multi_vm_stability_promotion_evidence_pack.sh."
+  next_operator_action="Refresh promotion-cycle summary artifact ${promotion_cycle_summary_json} and rerun ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh."
 fi
 
 reasons_json="$(json_array_from_lines "${reasons[@]:-}")"
@@ -585,12 +728,15 @@ summary_payload="$(jq -n \
   --arg failure_reason "$failure_reason" \
   --arg reports_dir "$reports_dir" \
   --arg promotion_cycle_summary_json "$promotion_cycle_summary_json" \
+  --arg promotion_cycle_selection_source "$promotion_cycle_selection_source" \
+  --arg promotion_cycle_selection_fallback_used "$promotion_cycle_selection_fallback_used" \
   --arg summary_json "$summary_json" \
   --arg report_md "$report_md" \
   --arg next_operator_action "$next_operator_action" \
   --arg operator_next_action_command "$operator_next_action_command" \
   --argjson rc "$rc" \
   --argjson fail_on_no_go "$fail_on_no_go_compat" \
+  --argjson promotion_cycle_selection_candidate_count "$promotion_cycle_selection_candidate_count" \
   --argjson reasons "$reasons_json" \
   --argjson promotion_cycle_evidence "$promotion_cycle_evidence" \
   '{
@@ -608,10 +754,28 @@ summary_payload="$(jq -n \
     reasons: $reasons,
     inputs: {
       reports_dir: $reports_dir,
-      fail_on_no_go: ($fail_on_no_go == 1)
+      fail_on_no_go: ($fail_on_no_go == 1),
+      promotion_cycle_summary_selection: {
+        source: (
+          if $promotion_cycle_selection_source == "" then null
+          else $promotion_cycle_selection_source
+          end
+        ),
+        fallback_used: ($promotion_cycle_selection_fallback_used == "true"),
+        candidate_count: $promotion_cycle_selection_candidate_count
+      }
     },
     evidence: {
-      promotion_cycle: $promotion_cycle_evidence
+      promotion_cycle: $promotion_cycle_evidence,
+      selection: {
+        source: (
+          if $promotion_cycle_selection_source == "" then null
+          else $promotion_cycle_selection_source
+          end
+        ),
+        fallback_used: ($promotion_cycle_selection_fallback_used == "true"),
+        candidate_count: $promotion_cycle_selection_candidate_count
+      }
     },
     next_operator_action: $next_operator_action,
     operator_next_action_command: $operator_next_action_command,

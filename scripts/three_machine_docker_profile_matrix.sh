@@ -722,6 +722,50 @@ runs_json="$(jq -s '.' "$runs_file")"
 profiles_total="$(jq 'length' <<<"$runs_json")"
 profiles_pass="$(jq '[.[] | select(.pass == true)] | length' <<<"$runs_json")"
 profiles_fail="$(jq '[.[] | select(.pass != true)] | length' <<<"$runs_json")"
+failed_profiles_json="$(jq -c '[.[] | select(.pass != true) | .profile] | unique' <<<"$runs_json")"
+failed_profiles_csv="$(jq -r 'join(",")' <<<"$failed_profiles_json")"
+rerun_failed_profiles_command=""
+
+if [[ "$profiles_fail" != "0" ]]; then
+  rerun_cmd=(
+    "$0"
+    --profiles "$failed_profiles_csv"
+    --run-validate "$run_validate"
+    --run-soak "$run_soak"
+    --run-peer-failover "$run_peer_failover"
+    --peer-failover-downtime-sec "$peer_failover_downtime_sec"
+    --peer-failover-timeout-sec "$peer_failover_timeout_sec"
+    --keep-stacks "$keep_stacks"
+    --reset-data "$reset_data"
+    --soak-rounds "$soak_rounds"
+    --soak-pause-sec "$soak_pause_sec"
+    --discovery-wait-sec "$discovery_wait_sec"
+    --federation-timeout-sec "$federation_timeout_sec"
+    --timeout-sec "$timeout_sec"
+    --min-sources "$min_sources"
+    --min-operators "$min_operators"
+    --beta-profile "$beta_profile"
+    --prod-profile "$prod_profile"
+    --stack-a-base-port "$stack_a_base_port"
+    --stack-b-base-port "$stack_b_base_port"
+    --docker-host-alias "$docker_host_alias"
+    --print-summary-json 1
+  )
+  if [[ -n "$bootstrap_directory" ]]; then
+    rerun_cmd+=(--bootstrap-directory "$bootstrap_directory")
+  fi
+  if [[ -n "$subject" ]]; then
+    rerun_cmd+=(--subject "$subject")
+  fi
+  if [[ -n "$anon_cred" ]]; then
+    rerun_cmd+=(--anon-cred "$anon_cred")
+  fi
+  if [[ "$profile_3hop_strict" == "1" ]]; then
+    rerun_failed_profiles_command="$(print_cmd env "THREE_MACHINE_DOCKER_PROFILE_MATRIX_3HOP_STRICT=1" "${rerun_cmd[@]}")"
+  else
+    rerun_failed_profiles_command="$(print_cmd "${rerun_cmd[@]}")"
+  fi
+fi
 
 if [[ "$profiles_fail" == "0" ]]; then
   status="pass"
@@ -780,6 +824,8 @@ jq -n \
   --argjson profiles_total "$profiles_total" \
   --argjson profiles_pass "$profiles_pass" \
   --argjson profiles_fail "$profiles_fail" \
+  --argjson failed_profiles "$failed_profiles_json" \
+  --arg rerun_failed_profiles_command "$rerun_failed_profiles_command" \
   --argjson runs "$runs_json" \
   '{
     version: 1,
@@ -820,6 +866,25 @@ jq -n \
       profiles_pass: $profiles_pass,
       profiles_fail: $profiles_fail
     },
+    reduction: {
+      available: ($profiles_fail > 0),
+      failed_profiles: $failed_profiles,
+      failed_profiles_count: ($failed_profiles | length),
+      failed_profiles_csv: (
+        if ($failed_profiles | length) > 0 then
+          ($failed_profiles | join(","))
+        else
+          null
+        end
+      ),
+      rerun_failed_profiles_command: (
+        if $rerun_failed_profiles_command == "" then
+          null
+        else
+          $rerun_failed_profiles_command
+        end
+      )
+    },
     decision: {
       result: (if $profiles_fail == 0 then "pass" else "fail" end),
       pass: ($profiles_fail == 0),
@@ -852,6 +917,11 @@ jq -n \
     .profiles[]
     | "| \(.profile) | \(.status) | \(.rc) | \(.command_rc) | \(.artifacts.summary_json) | \(.artifacts.log) |"
   ' "$summary_json"
+  echo
+  echo "## Reduction Helper"
+  echo
+  echo "- Failed profiles: \`$(jq -r '.reduction.failed_profiles | if length == 0 then "none" else join(",") end' "$summary_json")\`"
+  echo "- Rerun failed profiles command: \`$(jq -r '.reduction.rerun_failed_profiles_command // "none"' "$summary_json")\`"
 } >"$report_md"
 
 echo "three-machine-docker-profile-matrix: status=$status"
