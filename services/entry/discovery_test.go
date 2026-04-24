@@ -770,6 +770,29 @@ func TestResolveExitRouteStrictRejectsLoopbackControlURL(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteStrictRejectsControlURLPathPrefix(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", Endpoint: "8.8.8.8:51821", ControlURL: "https://8.8.8.8:8084/internal"},
+	})
+
+	s := &Service{
+		exitControlURL:      "https://8.8.8.8:8084",
+		exitDataAddr:        "8.8.8.8:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		betaStrict:          true,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	if _, err := s.resolveExitRoute(context.Background(), "exit-a"); err == nil {
+		t.Fatalf("expected strict mode to reject exit control_url path prefixes")
+	}
+}
+
 func TestResolveExitRouteStrictRejectsMissingDescriptorRouteFields(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))

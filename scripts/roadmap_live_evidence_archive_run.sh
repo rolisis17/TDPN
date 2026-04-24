@@ -441,16 +441,76 @@ extract_summary_paths_from_command() {
   local rest="$command"
   local match=""
   local maybe_path=""
-  local summary_path_regex="--(summary-json|canonical-summary-json)[[:space:]]+(\"[^\"]+\"|'[^']+'|[^[:space:]]+)"
+  local summary_path_regex="--(summary-json|canonical-summary-json)([[:space:]]+|=)(\"[^\"]+\"|'[^']+'|[^[:space:]]+)"
   while [[ "$rest" =~ $summary_path_regex ]]; do
     match="${BASH_REMATCH[0]}"
-    maybe_path="$(strip_wrapping_quotes "${BASH_REMATCH[2]}")"
+    maybe_path="$(strip_wrapping_quotes "${BASH_REMATCH[3]}")"
     maybe_path="$(trim "$maybe_path")"
     if [[ -n "$maybe_path" ]]; then
       printf '%s\n' "$maybe_path"
     fi
     rest="${rest#*"$match"}"
   done
+}
+
+next_action_command_has_disallowed_shell_syntax() {
+  local command
+  command="$(trim "${1:-}")"
+  if [[ -z "$command" ]]; then
+    return 0
+  fi
+  if [[ "$command" == *$'\n'* || "$command" == *$'\r'* ]]; then
+    return 0
+  fi
+  if [[ "$command" =~ [\;\|\&\<\>\`] ]]; then
+    return 0
+  fi
+  if [[ "$command" == *'$'* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+next_action_hint_command_is_allowlisted() {
+  local command
+  local maybe_path
+  local normalized_path
+  local absolute_path
+  local resolved_path
+  local canonical_path
+  local found_summary_path=0
+
+  command="$(trim "${1:-}")"
+  if next_action_command_has_disallowed_shell_syntax "$command"; then
+    return 1
+  fi
+
+  while IFS= read -r maybe_path; do
+    [[ -n "$maybe_path" ]] || continue
+    normalized_path="$(normalize_discovered_path "$maybe_path")"
+    normalized_path="$(trim "$normalized_path")"
+    if [[ -z "$normalized_path" || "$normalized_path" == "null" ]]; then
+      return 1
+    fi
+    absolute_path="$(abs_path "$normalized_path")"
+    absolute_path="$(trim "$absolute_path")"
+    if [[ -z "$absolute_path" ]]; then
+      return 1
+    fi
+    found_summary_path=1
+    resolved_path="$absolute_path"
+    canonical_path="$(canonicalize_existing_path "$absolute_path" || true)"
+    if [[ -n "$canonical_path" ]]; then
+      resolved_path="$canonical_path"
+    fi
+    if ! source_path_is_allowlisted "$resolved_path" "next_action_command"; then
+      return 1
+    fi
+  done < <(extract_summary_paths_from_command "$command")
+  if [[ "$found_summary_path" != "1" ]]; then
+    return 1
+  fi
+  return 0
 }
 
 add_candidate() {
@@ -685,9 +745,15 @@ included_family_count="${#included_families[@]}"
 
 build_next_action_hints_json() {
   local family="$1"
+  local roadmap_hints_json
+  local filtered_hints_jsonl
+  local hint_json
+  local hint_command
+  local dropped_hint_count=0
+  local fallback_reason="No family-specific roadmap next_action entry was available in the provided summary."
+
   if [[ "$roadmap_summary_valid" == "1" ]]; then
-    local hints_from_roadmap
-    hints_from_roadmap="$(jq -c --arg family "$family" --argjson ids "$(family_action_ids_json "$family")" '
+    roadmap_hints_json="$(jq -c --arg family "$family" --argjson ids "$(family_action_ids_json "$family")" '
       [
         (.next_actions // [])[]
         | select((.id // "") as $id | ($ids | index($id)) != null)
@@ -699,20 +765,44 @@ build_next_action_hints_json() {
             reason: (.reason // "")
           }
       ]' "$roadmap_summary_json")"
-    if [[ "$(printf '%s\n' "$hints_from_roadmap" | jq -r 'length')" != "0" ]]; then
-      printf '%s\n' "$hints_from_roadmap"
-      return
+
+    if [[ "$(printf '%s\n' "$roadmap_hints_json" | jq -r 'length')" != "0" ]]; then
+      filtered_hints_jsonl="$tmp_dir/family_${family//-/_}_roadmap_hints_filtered.jsonl"
+      : >"$filtered_hints_jsonl"
+      while IFS= read -r hint_json; do
+        [[ -n "$hint_json" ]] || continue
+        hint_command="$(printf '%s\n' "$hint_json" | jq -r '.command // ""')"
+        if next_action_hint_command_is_allowlisted "$hint_command"; then
+          printf '%s\n' "$hint_json" >>"$filtered_hints_jsonl"
+        else
+          dropped_hint_count=$((dropped_hint_count + 1))
+        fi
+      done < <(printf '%s\n' "$roadmap_hints_json" | jq -c '.[]')
+
+      if [[ -s "$filtered_hints_jsonl" ]]; then
+        jq -s '.' "$filtered_hints_jsonl"
+        return
+      fi
+
+      if (( dropped_hint_count > 0 )); then
+        echo "[roadmap-live-evidence-archive-run] stage=next_action_hint_path_allowlist status=warn family=$family dropped_hint_count=$dropped_hint_count" >&2
+      fi
+    fi
+
+    if [[ "$(printf '%s\n' "$roadmap_hints_json" | jq -r 'length')" != "0" ]]; then
+      echo "[roadmap-live-evidence-archive-run] stage=next_action_hint_fallback status=warn family=$family reason=no_roadmap_hints_with_in_scope_summary_paths" >&2
+      fallback_reason="No in-scope family-specific roadmap next_action entry was available in the provided summary."
     fi
   fi
 
-  jq -nc --arg family "$family" --arg command "$(family_default_hint_command "$family")" '
+  jq -nc --arg family "$family" --arg command "$(family_default_hint_command "$family")" --arg reason "$fallback_reason" '
     [
       {
         family: $family,
         id: "",
         label: "Default operator action",
         command: $command,
-        reason: "No family-specific roadmap next_action entry was available in the provided summary."
+        reason: $reason
       }
     ]'
 }

@@ -1511,7 +1511,7 @@ func relaySupportsMiddleDescriptorForPolicy(relay proto.RelayDescriptor, require
 	if relayDescriptorHasMalformedMiddleRoleMetadata(relay) {
 		return false
 	}
-	if !hopRoleIsMiddleDescriptor(relay.Role) {
+	if strings.ToLower(strings.TrimSpace(relay.Role)) != "micro-relay" {
 		return false
 	}
 	return !relayDescriptorHasInvalidMiddleRuntimeAdmission(relay)
@@ -1780,6 +1780,13 @@ func validateStrictExitControlRoute(controlURL, dataAddr string) error {
 	}
 	if !strings.EqualFold(strings.TrimSpace(parsed.Scheme), "https") {
 		return fmt.Errorf("exit control url must use https in strict mode")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("exit control url must not include userinfo, query, or fragment in strict mode")
+	}
+	path := strings.TrimSpace(parsed.Path)
+	if path != "" && path != "/" {
+		return fmt.Errorf("exit control url path must be root in strict mode")
 	}
 	controlHost := normalizeHostForCompare(parsed.Hostname())
 	if controlHost == "" {

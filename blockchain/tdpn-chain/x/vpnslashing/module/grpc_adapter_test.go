@@ -127,6 +127,85 @@ func TestGRPCMsgAdapterNilRequestsMapToValidationClassification(t *testing.T) {
 	}
 }
 
+func TestGRPCMsgAdapterSubmitEvidenceHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	const evidenceID = "evidence-grpc-canceled-submit"
+	_, err := adapter.SubmitEvidence(canceledCtx, &pb.MsgSubmitEvidenceRequest{
+		Evidence: &pb.SlashEvidence{
+			EvidenceId:    evidenceID,
+			ViolationType: "double-sign",
+			Kind:          modtypes.EvidenceKindObjective,
+			ProofHash:     testSHAProof("proof-grpc-canceled-submit"),
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if _, ok := k.GetEvidence(evidenceID); ok {
+		t.Fatal("did not expect evidence persistence on canceled context")
+	}
+}
+
+func TestGRPCMsgAdapterRecordPenaltyHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+
+	const evidenceID = "evidence-grpc-canceled-penalty"
+	const penaltyID = "penalty-grpc-canceled-penalty"
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:    evidenceID,
+		ViolationType: "double-sign",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-grpc-canceled-penalty"),
+	})
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := adapter.RecordPenalty(canceledCtx, &pb.MsgRecordPenaltyRequest{
+		Penalty: &pb.PenaltyDecision{
+			PenaltyId:       penaltyID,
+			EvidenceId:      evidenceID,
+			SlashBasisPoint: 10,
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if _, ok := k.GetPenalty(penaltyID); ok {
+		t.Fatal("did not expect penalty persistence on canceled context")
+	}
+}
+
+func TestGRPCQueryAdapterListMethodsHonorCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, evidenceErr := adapter.ListSlashEvidence(canceledCtx, &pb.QueryListSlashEvidenceRequest{})
+	if !errors.Is(evidenceErr, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListSlashEvidence, got %v", evidenceErr)
+	}
+
+	_, penaltyErr := adapter.ListPenaltyDecisions(canceledCtx, &pb.QueryListPenaltyDecisionsRequest{})
+	if !errors.Is(penaltyErr, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListPenaltyDecisions, got %v", penaltyErr)
+	}
+}
+
 func TestGRPCQueryAdapterNotFoundMapsToFoundFalse(t *testing.T) {
 	t.Parallel()
 

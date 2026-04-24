@@ -34,7 +34,11 @@ func NewGRPCQueryAdapter(query QueryServer) GRPCQueryAdapter {
 	return GRPCQueryAdapter{query: query}
 }
 
-func (a GRPCMsgAdapter) SubmitEvidence(_ context.Context, req *pb.MsgSubmitEvidenceRequest) (*pb.MsgSubmitEvidenceResponse, error) {
+func (a GRPCMsgAdapter) SubmitEvidence(ctx context.Context, req *pb.MsgSubmitEvidenceRequest) (*pb.MsgSubmitEvidenceResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	var evidence *pb.SlashEvidence
 	if req != nil {
 		evidence = req.GetEvidence()
@@ -52,7 +56,11 @@ func (a GRPCMsgAdapter) SubmitEvidence(_ context.Context, req *pb.MsgSubmitEvide
 	}, nil
 }
 
-func (a GRPCMsgAdapter) RecordPenalty(_ context.Context, req *pb.MsgRecordPenaltyRequest) (*pb.MsgRecordPenaltyResponse, error) {
+func (a GRPCMsgAdapter) RecordPenalty(ctx context.Context, req *pb.MsgRecordPenaltyRequest) (*pb.MsgRecordPenaltyResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	var penalty *pb.PenaltyDecision
 	if req != nil {
 		penalty = req.GetPenalty()
@@ -70,7 +78,11 @@ func (a GRPCMsgAdapter) RecordPenalty(_ context.Context, req *pb.MsgRecordPenalt
 	}, nil
 }
 
-func (a GRPCQueryAdapter) SlashEvidence(_ context.Context, req *pb.QuerySlashEvidenceRequest) (*pb.QuerySlashEvidenceResponse, error) {
+func (a GRPCQueryAdapter) SlashEvidence(ctx context.Context, req *pb.QuerySlashEvidenceRequest) (*pb.QuerySlashEvidenceResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	evidenceID := ""
 	if req != nil {
 		evidenceID = req.GetEvidenceId()
@@ -90,7 +102,11 @@ func (a GRPCQueryAdapter) SlashEvidence(_ context.Context, req *pb.QuerySlashEvi
 	}, nil
 }
 
-func (a GRPCQueryAdapter) PenaltyDecision(_ context.Context, req *pb.QueryPenaltyDecisionRequest) (*pb.QueryPenaltyDecisionResponse, error) {
+func (a GRPCQueryAdapter) PenaltyDecision(ctx context.Context, req *pb.QueryPenaltyDecisionRequest) (*pb.QueryPenaltyDecisionResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	penaltyID := ""
 	if req != nil {
 		penaltyID = req.GetPenaltyId()
@@ -110,7 +126,11 @@ func (a GRPCQueryAdapter) PenaltyDecision(_ context.Context, req *pb.QueryPenalt
 	}, nil
 }
 
-func (a GRPCQueryAdapter) ListSlashEvidence(_ context.Context, _ *pb.QueryListSlashEvidenceRequest) (*pb.QueryListSlashEvidenceResponse, error) {
+func (a GRPCQueryAdapter) ListSlashEvidence(ctx context.Context, _ *pb.QueryListSlashEvidenceRequest) (*pb.QueryListSlashEvidenceResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.query.ListEvidence(ListEvidenceRequest{})
 	if err != nil {
 		return nil, err
@@ -124,7 +144,11 @@ func (a GRPCQueryAdapter) ListSlashEvidence(_ context.Context, _ *pb.QueryListSl
 	return &pb.QueryListSlashEvidenceResponse{Evidence: out}, nil
 }
 
-func (a GRPCQueryAdapter) ListPenaltyDecisions(_ context.Context, _ *pb.QueryListPenaltyDecisionsRequest) (*pb.QueryListPenaltyDecisionsResponse, error) {
+func (a GRPCQueryAdapter) ListPenaltyDecisions(ctx context.Context, _ *pb.QueryListPenaltyDecisionsRequest) (*pb.QueryListPenaltyDecisionsResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.query.ListPenalties(ListPenaltiesRequest{})
 	if err != nil {
 		return nil, err
@@ -136,6 +160,13 @@ func (a GRPCQueryAdapter) ListPenaltyDecisions(_ context.Context, _ *pb.QueryLis
 	}
 
 	return &pb.QueryListPenaltyDecisionsResponse{Penalties: out}, nil
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func moduleEvidenceToProto(record modtypes.SlashEvidence) *pb.SlashEvidence {

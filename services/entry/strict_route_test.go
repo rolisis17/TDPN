@@ -64,6 +64,14 @@ func TestValidateStrictExitControlRouteRejectsPublicHTTPHost(t *testing.T) {
 	}
 }
 
+func TestValidateStrictExitControlRouteRejectsControlURLPathPrefix(t *testing.T) {
+	t.Parallel()
+
+	if err := validateStrictExitControlRoute("https://8.8.8.8:8084/internal", "8.8.8.8:51820"); err == nil {
+		t.Fatal("expected strict mode to reject control url path prefixes")
+	}
+}
+
 func TestValidateStrictExitControlRouteRejectsZonedIPv6Host(t *testing.T) {
 	t.Parallel()
 

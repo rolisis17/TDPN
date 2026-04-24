@@ -1490,6 +1490,35 @@ func TestRelaySupportsMiddleDescriptorRoleAliases(t *testing.T) {
 	}
 }
 
+func TestRelaySupportsMiddleDescriptorForPolicyStrictRejectsRoleAliases(t *testing.T) {
+	aliases := []string{
+		"middle",
+		"relay",
+		"micro_relay",
+		"transit",
+		"three-hop-middle",
+	}
+
+	for _, alias := range aliases {
+		alias := alias
+		t.Run(alias, func(t *testing.T) {
+			if relaySupportsMiddleDescriptorForPolicy(proto.RelayDescriptor{Role: alias}, true) {
+				t.Fatalf("expected strict policy to reject alias role %q", alias)
+			}
+		})
+	}
+
+	if !relaySupportsMiddleDescriptorForPolicy(proto.RelayDescriptor{
+		Role:         "micro-relay",
+		Reputation:   0.9,
+		Uptime:       0.9,
+		Capacity:     0.9,
+		AbusePenalty: 0.1,
+	}, true) {
+		t.Fatal("expected strict policy to accept canonical micro-relay role")
+	}
+}
+
 func TestHandlePathOpenAllowsMiddleRelayMicroRelayRoleWithoutHopRoles(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
@@ -1844,7 +1873,7 @@ func TestHandlePathOpenStrictAllowsCanonicalMiddleRelayRole(t *testing.T) {
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
 			RelayID:      "middle-canonical-strict",
-			Role:         "middle",
+			Role:         "micro-relay",
 			OperatorID:   "op-middle",
 			Reputation:   0.9,
 			Uptime:       0.9,
@@ -1990,7 +2019,7 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithoutOperatorID(t *testing.T) {
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
 			RelayID:      "middle-no-operator",
-			Role:         "middle",
+			Role:         "micro-relay",
 			OperatorID:   "",
 			Reputation:   0.9,
 			Uptime:       0.9,
@@ -2128,7 +2157,7 @@ func TestHandlePathOpenRequireMiddleRelayRejectsMiddleRelayWithoutOperatorID(t *
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
 			RelayID:      "middle-no-operator-required",
-			Role:         "middle",
+			Role:         "micro-relay",
 			OperatorID:   "",
 			Reputation:   0.9,
 			Uptime:       0.9,

@@ -2,11 +2,36 @@ package module
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 )
+
+type queryReadErrorPenaltyStore struct {
+	*keeper.InMemoryStore
+	evidenceListErr error
+	penaltyListErr  error
+}
+
+func newQueryReadErrorPenaltyStore() *queryReadErrorPenaltyStore {
+	return &queryReadErrorPenaltyStore{InMemoryStore: keeper.NewInMemoryStore()}
+}
+
+func (s *queryReadErrorPenaltyStore) ListEvidenceWithError() ([]types.SlashEvidence, error) {
+	if s.evidenceListErr != nil {
+		return nil, s.evidenceListErr
+	}
+	return s.InMemoryStore.ListEvidence(), nil
+}
+
+func (s *queryReadErrorPenaltyStore) ListPenaltiesWithError() ([]types.PenaltyDecision, error) {
+	if s.penaltyListErr != nil {
+		return nil, s.penaltyListErr
+	}
+	return s.InMemoryStore.ListPenalties(), nil
+}
 
 func TestQueryServerNilKeeper(t *testing.T) {
 	t.Parallel()
@@ -135,5 +160,54 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	}
 	if penaltiesResp.Penalties[0].PenaltyID != "penalty-a" || penaltiesResp.Penalties[1].PenaltyID != "penalty-b" {
 		t.Fatalf("expected sorted penalty IDs [penalty-a penalty-b], got [%s %s]", penaltiesResp.Penalties[0].PenaltyID, penaltiesResp.Penalties[1].PenaltyID)
+	}
+}
+
+func TestQueryServerListFailsClosedOnReadError(t *testing.T) {
+	t.Parallel()
+
+	store := newQueryReadErrorPenaltyStore()
+	store.UpsertEvidence(types.SlashEvidence{
+		EvidenceID: "evidence-list-fail-closed",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  testSHAProof("proof-list-fail-closed"),
+	})
+	store.UpsertPenalty(types.PenaltyDecision{
+		PenaltyID:       "penalty-list-fail-closed",
+		EvidenceID:      "evidence-list-fail-closed",
+		SlashBasisPoint: 10,
+	})
+	store.evidenceListErr = errors.New("evidence list decode failure")
+	store.penaltyListErr = errors.New("penalty list decode failure")
+
+	k := keeper.NewKeeperWithStore(store)
+	server := NewQueryServer(&k)
+
+	evidenceResp, evidenceErr := server.ListEvidence(ListEvidenceRequest{})
+	if evidenceErr == nil {
+		t.Fatal("expected list evidence to fail closed on read error")
+	}
+	if !errors.Is(evidenceErr, ErrQueryReadFailed) {
+		t.Fatalf("expected ErrQueryReadFailed for evidence list failure, got %v", evidenceErr)
+	}
+	if !strings.Contains(evidenceErr.Error(), "list evidence") {
+		t.Fatalf("expected list evidence context in error, got %v", evidenceErr)
+	}
+	if len(evidenceResp.Evidence) != 0 {
+		t.Fatalf("expected no evidence payload on list failure, got %d records", len(evidenceResp.Evidence))
+	}
+
+	penaltiesResp, penaltiesErr := server.ListPenalties(ListPenaltiesRequest{})
+	if penaltiesErr == nil {
+		t.Fatal("expected list penalties to fail closed on read error")
+	}
+	if !errors.Is(penaltiesErr, ErrQueryReadFailed) {
+		t.Fatalf("expected ErrQueryReadFailed for penalties list failure, got %v", penaltiesErr)
+	}
+	if !strings.Contains(penaltiesErr.Error(), "list penalties") {
+		t.Fatalf("expected list penalties context in error, got %v", penaltiesErr)
+	}
+	if len(penaltiesResp.Penalties) != 0 {
+		t.Fatalf("expected no penalty payload on list failure, got %d records", len(penaltiesResp.Penalties))
 	}
 }

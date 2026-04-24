@@ -83,17 +83,25 @@ func (k *Keeper) GetEvidence(evidenceID string) (types.SlashEvidence, bool) {
 }
 
 func (k *Keeper) ListEvidence() []types.SlashEvidence {
+	evidence, err := k.ListEvidenceWithError()
+	if err != nil {
+		return nil
+	}
+	return evidence
+}
+
+func (k *Keeper) ListEvidenceWithError() ([]types.SlashEvidence, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
 	evidence, err := k.listEvidenceLocked()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	sort.Slice(evidence, func(i, j int) bool {
 		return evidence[i].EvidenceID < evidence[j].EvidenceID
 	})
-	return evidence
+	return evidence, nil
 }
 
 func (k *Keeper) UpsertPenalty(record types.PenaltyDecision) {
@@ -154,17 +162,25 @@ func (k *Keeper) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {
 }
 
 func (k *Keeper) ListPenalties() []types.PenaltyDecision {
+	penalties, err := k.ListPenaltiesWithError()
+	if err != nil {
+		return nil
+	}
+	return penalties
+}
+
+func (k *Keeper) ListPenaltiesWithError() ([]types.PenaltyDecision, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
 	penalties, err := k.listPenaltiesLocked()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	sort.Slice(penalties, func(i, j int) bool {
 		return penalties[i].PenaltyID < penalties[j].PenaltyID
 	})
-	return penalties
+	return penalties, nil
 }
 
 func (k *Keeper) persistPenaltyWithEvidenceAdvanceLocked(

@@ -582,6 +582,12 @@ if ! jq -e --arg reports7 "$REPORTS7" --arg out_of_scope "$R7_PACK_OUT_OF_SCOPE"
   and .summary.copied_total >= 1
   and .summary.copy_error_total >= 1
   and .summary.source_path_reject_total >= 1
+  and ((.next_action_hints | map(select(.family == "runtime-actuation")) | length) >= 1)
+  and (
+    [(.next_action_hints[]? | select(.family == "runtime-actuation") | (.command // "") | contains($out_of_scope))]
+    | any
+    | not
+  )
   and ((.path_safety.source_path_allowlist | index($reports7)) != null)
   and (
     ([.family_results[] | select(.family == "runtime-actuation")][0].copy_errors // [])
@@ -663,5 +669,166 @@ if ! jq -e --arg outside_source "$OUTSIDE8_SOURCE" '
   exit 1
 fi
 rm -rf "$OUTSIDE8_DIR"
+
+echo "[roadmap-live-evidence-archive-run] case: out-of-scope --summary-json= path is rejected"
+CASE9_DIR="$TMP_DIR/case_out_of_scope_equals_form"
+REPORTS9="$CASE9_DIR/reports"
+ARCHIVE_ROOT9="$CASE9_DIR/archive_root"
+SUMMARY9="$CASE9_DIR/archive_summary.json"
+ROADMAP9="$CASE9_DIR/roadmap_summary.json"
+mkdir -p "$REPORTS9" "$ARCHIVE_ROOT9"
+
+R9_PROMO_ALLOWED="$REPORTS9/runtime_actuation_promotion_summary.json"
+touch_json "$R9_PROMO_ALLOWED"
+
+OUTSIDE9_DIR="$(mktemp -d)"
+if [[ "$OUTSIDE9_DIR" == "$ROOT_DIR" || "$OUTSIDE9_DIR" == "$ROOT_DIR/"* ]]; then
+  echo "unable to allocate out-of-scope directory for equals-form case: $OUTSIDE9_DIR"
+  rm -rf "$OUTSIDE9_DIR"
+  exit 1
+fi
+R9_PACK_OUT_OF_SCOPE="$OUTSIDE9_DIR/runtime_actuation_promotion_evidence_pack_summary.json"
+touch_json "$R9_PACK_OUT_OF_SCOPE"
+
+jq -n \
+  --arg r_promo "$R9_PROMO_ALLOWED" \
+  --arg r_pack_out_of_scope "$R9_PACK_OUT_OF_SCOPE" \
+  '{
+    status: "pass",
+    rc: 0,
+    artifacts: {
+      runtime_actuation_promotion_summary_json: $r_promo
+    },
+    next_actions: [
+      {
+        id: "runtime_actuation_promotion_evidence_pack",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json=" + $r_pack_out_of_scope)
+      }
+    ]
+  }' >"$ROADMAP9"
+
+set +e
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS9" \
+  --roadmap-summary-json "$ROADMAP9" \
+  --archive-root "$ARCHIVE_ROOT9" \
+  --scope runtime-actuation \
+  --summary-json "$SUMMARY9" \
+  --print-summary-json 0
+case9_rc=$?
+set -e
+if [[ "$case9_rc" != "1" ]]; then
+  echo "case out-of-scope equals-form path expected rc=1, got rc=$case9_rc"
+  cat "$SUMMARY9"
+  rm -rf "$OUTSIDE9_DIR"
+  exit 1
+fi
+
+if ! jq -e --arg out_of_scope "$R9_PACK_OUT_OF_SCOPE" '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "archive_copy_incomplete"
+  and .summary.copied_total >= 1
+  and .summary.copy_error_total >= 1
+  and .summary.source_path_reject_total >= 1
+  and ((.next_action_hints | map(select(.family == "runtime-actuation")) | length) >= 1)
+  and (
+    [(.next_action_hints[]? | select(.family == "runtime-actuation") | (.command // "") | contains($out_of_scope))]
+    | any
+    | not
+  )
+  and (
+    ([.family_results[] | select(.family == "runtime-actuation")][0].copy_errors // [])
+    | map(select(.reason == "source_path_out_of_scope" and .path == $out_of_scope))
+    | length
+  ) == 1
+  and (
+    ([.family_results[] | select(.family == "runtime-actuation")][0].copied // [])
+    | map(select(.path == $out_of_scope))
+    | length
+  ) == 0
+' "$SUMMARY9" >/dev/null; then
+  echo "case out-of-scope equals-form path assertions failed"
+  cat "$SUMMARY9"
+  rm -rf "$OUTSIDE9_DIR"
+  exit 1
+fi
+rm -rf "$OUTSIDE9_DIR"
+
+echo "[roadmap-live-evidence-archive-run] case: unsafe shell syntax in next_action hint command is dropped"
+CASE10_DIR="$TMP_DIR/case_unsafe_hint_command"
+REPORTS10="$CASE10_DIR/reports"
+ARCHIVE_ROOT10="$CASE10_DIR/archive_root"
+SUMMARY10="$CASE10_DIR/archive_summary.json"
+ROADMAP10="$CASE10_DIR/roadmap_summary.json"
+mkdir -p "$REPORTS10" "$ARCHIVE_ROOT10"
+
+R10_PROMO_PRESENT="$CASE10_DIR/artifacts/runtime_actuation_promotion_summary.json"
+R10_PACK_MISSING="$CASE10_DIR/artifacts/runtime_actuation_promotion_evidence_pack_summary.json"
+touch_json "$R10_PROMO_PRESENT"
+
+jq -n \
+  --arg r_promo "$R10_PROMO_PRESENT" \
+  --arg r_pack_missing "$R10_PACK_MISSING" \
+  '{
+    status: "pass",
+    rc: 0,
+    artifacts: {
+      runtime_actuation_promotion_summary_json: $r_promo,
+      runtime_actuation_promotion_evidence_pack_summary_json: $r_pack_missing
+    },
+    next_actions: [
+      {
+        id: "runtime_actuation_promotion_evidence_pack",
+        label: "Runtime actuation evidence pack",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack_missing + " && echo unsafe"),
+        reason: "publish runtime evidence pack"
+      }
+    ]
+  }' >"$ROADMAP10"
+
+set +e
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS10" \
+  --roadmap-summary-json "$ROADMAP10" \
+  --archive-root "$ARCHIVE_ROOT10" \
+  --scope runtime-actuation \
+  --summary-json "$SUMMARY10" \
+  --print-summary-json 0
+case10_rc=$?
+set -e
+if [[ "$case10_rc" != "0" ]]; then
+  echo "case unsafe hint command expected rc=0 (warn), got rc=$case10_rc"
+  cat "$SUMMARY10"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg r_pack_missing "$R10_PACK_MISSING" \
+  --arg default_cmd "./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --summary-json .easy-node-logs/runtime_actuation_promotion_cycle_latest_summary.json --print-summary-json 1" '
+  .status == "warn"
+  and .rc == 0
+  and .inputs.missing_source_policy == "warn"
+  and .summary.copied_total >= 1
+  and .summary.missing_total >= 1
+  and .summary.copy_error_total == 0
+  and ((.next_action_hints | map(select(.family == "runtime-actuation")) | length) >= 1)
+  and (
+    (.next_action_hints | map(select(.family == "runtime-actuation" and ((.command // "") | contains("&&")))) | length) == 0
+  )
+  and (
+    (.next_action_hints | map(select(.family == "runtime-actuation" and ((.command // "") | contains($r_pack_missing)))) | length) == 0
+  )
+  and (
+    (.next_action_hints | map(select(.family == "runtime-actuation" and (.command // "") == $default_cmd)) | length) >= 1
+  )
+  and (
+    [.family_results[] | select(.family == "runtime-actuation")][0].status == "warn"
+  )
+' "$SUMMARY10" >/dev/null; then
+  echo "case unsafe hint command assertions failed"
+  cat "$SUMMARY10"
+  exit 1
+fi
 
 echo "[integration_roadmap_live_evidence_archive_run] pass"

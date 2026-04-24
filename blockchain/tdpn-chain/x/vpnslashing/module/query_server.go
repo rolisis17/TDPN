@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrPenaltyNotFound = errors.New("vpnslashing: penalty not found")
+	ErrQueryReadFailed = errors.New("vpnslashing: query read failed")
 )
 
 const maxQueryListResults = 1000
@@ -89,7 +90,10 @@ func (s QueryServer) ListEvidence(req ListEvidenceRequest) (ListEvidenceResponse
 		return ListEvidenceResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListEvidence()
+	records, err := s.keeper.ListEvidenceWithError()
+	if err != nil {
+		return ListEvidenceResponse{}, fmt.Errorf("%w: list evidence: %v", ErrQueryReadFailed, err)
+	}
 	return ListEvidenceResponse{Evidence: clampEvidence(records)}, nil
 }
 
@@ -99,7 +103,10 @@ func (s QueryServer) ListPenalties(req ListPenaltiesRequest) (ListPenaltiesRespo
 		return ListPenaltiesResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListPenalties()
+	records, err := s.keeper.ListPenaltiesWithError()
+	if err != nil {
+		return ListPenaltiesResponse{}, fmt.Errorf("%w: list penalties: %v", ErrQueryReadFailed, err)
+	}
 	return ListPenaltiesResponse{Penalties: clampPenalties(records)}, nil
 }
 

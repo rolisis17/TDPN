@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Keep this integration hermetic: ambient subject overrides can bypass
+# placeholder-precondition fail-closed paths and make assertions flaky.
+unset ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT
+unset CAMPAIGN_SUBJECT
+unset INVITE_KEY
+
 for cmd in bash jq mktemp chmod mkdir cat grep timeout date ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"

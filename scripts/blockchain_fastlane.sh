@@ -463,9 +463,15 @@ for stage_id in "${stage_ids[@]}"; do
     exit 2
   fi
 done
-if [[ "$should_run_blockchain_mainnet_activation_metrics_input" == "1" && ! -x "$blockchain_mainnet_activation_metrics_input_script" ]]; then
-  echo "missing executable stage script: $blockchain_mainnet_activation_metrics_input_script"
-  exit 2
+if [[ "$should_run_blockchain_mainnet_activation_metrics_input" == "1" ]]; then
+  if [[ ! -f "$blockchain_mainnet_activation_metrics_input_script" ]]; then
+    echo "missing metrics-input script: $blockchain_mainnet_activation_metrics_input_script"
+    exit 2
+  fi
+  if [[ ! -r "$blockchain_mainnet_activation_metrics_input_script" ]]; then
+    echo "metrics-input script is not readable: $blockchain_mainnet_activation_metrics_input_script"
+    exit 2
+  fi
 fi
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
@@ -519,6 +525,7 @@ if [[ -n "$blockchain_mainnet_activation_metrics_summary_json" ]]; then
 fi
 if [[ "$should_run_blockchain_mainnet_activation_metrics_input" == "1" ]]; then
   metrics_input_cmd=(
+    "$BASH"
     "$blockchain_mainnet_activation_metrics_input_script"
     --input-json "$blockchain_mainnet_activation_metrics_input_json"
     --summary-json "$blockchain_mainnet_activation_metrics_input_summary_json"

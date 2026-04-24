@@ -34,7 +34,13 @@ ENV_REJECT_MARKER="$TMP_DIR/env_reject_marker.txt"
 SYMLINK_ESCAPE_TARGET="$TMP_DIR/symlink_escape_target.sh"
 SYMLINK_ESCAPE_LINK="$ACTION_TMP_DIR/symlink_escape_action.sh"
 SYMLINK_ESCAPE_MARKER="$TMP_DIR/symlink_escape_marker.txt"
+SYMLINK_ESCAPE_PATH="$SYMLINK_ESCAPE_LINK"
+SYMLINK_ESCAPE_MODE="symlink"
 REFRESH_MARKER="$TMP_DIR/refresh_marker.txt"
+TOCTOU_SAFE_HELPER="$ACTION_TMP_DIR/toctou_safe_helper.sh"
+TOCTOU_ESCAPE_TARGET="$TMP_DIR/toctou_escape_target.sh"
+TOCTOU_ESCAPE_MARKER="$TMP_DIR/toctou_escape_marker.txt"
+TOCTOU_PRE_EXEC_READY_FILE="$TMP_DIR/toctou_pre_exec_ready.txt"
 
 cat >"$PASS1" <<'EOF_PASS1'
 #!/usr/bin/env bash
@@ -126,7 +132,28 @@ fi
 echo "symlink escape payload executed"
 EOF_SYMLINK_ESCAPE_TARGET
 chmod +x "$SYMLINK_ESCAPE_TARGET"
-ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK"
+if ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK" 2>/dev/null; then
+  SYMLINK_ESCAPE_PATH="$SYMLINK_ESCAPE_LINK"
+  SYMLINK_ESCAPE_MODE="symlink"
+else
+  SYMLINK_ESCAPE_PATH="$SYMLINK_ESCAPE_TARGET"
+  SYMLINK_ESCAPE_MODE="outside_scripts_fallback"
+fi
+
+cat >"$TOCTOU_SAFE_HELPER" <<'EOF_TOCTOU_SAFE_HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "toctou safe helper executed"
+EOF_TOCTOU_SAFE_HELPER
+chmod +x "$TOCTOU_SAFE_HELPER"
+
+cat >"$TOCTOU_ESCAPE_TARGET" <<EOF_TOCTOU_ESCAPE_TARGET
+#!/usr/bin/env bash
+set -euo pipefail
+echo "toctou-escape-executed" >"$TOCTOU_ESCAPE_MARKER"
+echo "toctou escape payload executed"
+EOF_TOCTOU_ESCAPE_TARGET
+chmod +x "$TOCTOU_ESCAPE_TARGET"
 
 cat >"$FAKE_ROADMAP" <<'EOF_FAKE_ROADMAP'
 #!/usr/bin/env bash
@@ -410,13 +437,30 @@ JSON
   "blockchain_track": {
     "recommended_gate_id": "blockchain_symlink_escape_reject",
     "recommended_gate_reason": "symlink escape rejection scenario",
-    "recommended_gate_command": "bash \"$SYMLINK_ESCAPE_LINK\"",
+    "recommended_gate_command": "bash \"$SYMLINK_ESCAPE_PATH\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_symlink_escape_reject"
     }
   },
   "next_actions": [
-    {"id":"blockchain_symlink_escape_reject","label":"Blockchain symlink escape reject","command":"bash \"$SYMLINK_ESCAPE_LINK\"","reason":"test-symlink-escape-reject"}
+    {"id":"blockchain_symlink_escape_reject","label":"Blockchain symlink escape reject","command":"bash \"$SYMLINK_ESCAPE_PATH\"","reason":"test-symlink-escape-reject"}
+  ]
+}
+JSON
+    ;;
+  toctou_pre_exec_symlink_swap_reject)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_toctou_pre_exec_reject",
+    "recommended_gate_reason": "canonical TOCTOU pre-exec revalidation rejection scenario",
+    "recommended_gate_command": "bash \"$TOCTOU_SAFE_HELPER\"",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_toctou_pre_exec_reject"
+    }
+  },
+  "next_actions": [
+    {"id":"blockchain_toctou_pre_exec_reject","label":"Blockchain TOCTOU pre-exec reject","command":"bash \"$TOCTOU_SAFE_HELPER\"","reason":"test-toctou-pre-exec-reject"}
   ]
 }
 JSON
@@ -598,13 +642,17 @@ if ! jq -e '
   exit 1
 fi
 
-echo "[roadmap-blockchain-actionable-run] symlinked action path remains fail-closed"
+if [[ "$SYMLINK_ESCAPE_MODE" == "symlink" ]]; then
+  echo "[roadmap-blockchain-actionable-run] symlinked action path remains fail-closed"
+else
+  echo "[roadmap-blockchain-actionable-run] symlink unsupported; outside-scripts action path remains fail-closed"
+fi
 SUMMARY_SYMLINK_REJECT="$TMP_DIR/summary_symlink_reject.json"
 REPORTS_SYMLINK_REJECT="$TMP_DIR/reports_symlink_reject"
 rm -f "$SYMLINK_ESCAPE_MARKER"
 set +e
 ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=symlink_escape_reject \
-PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" PREFILL="$PREFILL" REFRESH="$REFRESH" SYMLINK_ESCAPE_LINK="$SYMLINK_ESCAPE_LINK" SYMLINK_ESCAPE_MARKER="$SYMLINK_ESCAPE_MARKER" \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" PREFILL="$PREFILL" REFRESH="$REFRESH" SYMLINK_ESCAPE_PATH="$SYMLINK_ESCAPE_PATH" SYMLINK_ESCAPE_MARKER="$SYMLINK_ESCAPE_MARKER" \
 ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 bash ./scripts/roadmap_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_SYMLINK_REJECT" \
@@ -634,6 +682,107 @@ if ! jq -e '
 ' "$SUMMARY_SYMLINK_REJECT" >/dev/null; then
   echo "symlink escape rejection summary mismatch"
   cat "$SUMMARY_SYMLINK_REJECT"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] TOCTOU pre-exec revalidation remains fail-closed"
+SUMMARY_TOCTOU_REJECT="$TMP_DIR/summary_toctou_reject.json"
+REPORTS_TOCTOU_REJECT="$TMP_DIR/reports_toctou_reject"
+TOCTOU_RUN_LOG="$TMP_DIR/toctou_pre_exec_runner.log"
+rm -f "$TOCTOU_ESCAPE_MARKER" "$TOCTOU_PRE_EXEC_READY_FILE" "$TOCTOU_RUN_LOG"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=toctou_pre_exec_symlink_swap_reject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" REFRESH="$REFRESH" TOCTOU_SAFE_HELPER="$TOCTOU_SAFE_HELPER" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC=2 \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_READY_FILE="$TOCTOU_PRE_EXEC_READY_FILE" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_TOCTOU_REJECT" \
+  --summary-json "$SUMMARY_TOCTOU_REJECT" \
+  --print-summary-json 0 >"$TOCTOU_RUN_LOG" 2>&1 &
+toctou_runner_pid=$!
+set -e
+toctou_ready="0"
+toctou_wait_attempts=0
+while (( toctou_wait_attempts < 120 )); do
+  if [[ -s "$TOCTOU_PRE_EXEC_READY_FILE" ]]; then
+    toctou_ready="1"
+    break
+  fi
+  if ! kill -0 "$toctou_runner_pid" 2>/dev/null; then
+    break
+  fi
+  toctou_wait_attempts=$((toctou_wait_attempts + 1))
+  sleep 0.05
+done
+if [[ "$toctou_ready" != "1" ]]; then
+  set +e
+  wait "$toctou_runner_pid"
+  toctou_wait_rc=$?
+  set -e
+  echo "TOCTOU scenario failed to observe pre-exec revalidation checkpoint (runner rc=$toctou_wait_rc)"
+  cat "$TOCTOU_RUN_LOG"
+  if [[ -f "$SUMMARY_TOCTOU_REJECT" ]]; then
+    cat "$SUMMARY_TOCTOU_REJECT"
+  fi
+  exit 1
+fi
+if ! grep -F -- "$TOCTOU_SAFE_HELPER" "$TOCTOU_PRE_EXEC_READY_FILE" >/dev/null; then
+  echo "TOCTOU checkpoint path mismatch; expected helper path in ready marker"
+  cat "$TOCTOU_PRE_EXEC_READY_FILE"
+  exit 1
+fi
+rm -f "$TOCTOU_SAFE_HELPER"
+ln -s "$TOCTOU_ESCAPE_TARGET" "$TOCTOU_SAFE_HELPER"
+set +e
+wait "$toctou_runner_pid"
+toctou_reject_rc=$?
+set -e
+if [[ "$toctou_reject_rc" != "6" ]]; then
+  echo "expected TOCTOU pre-exec rejection rc=6, got rc=$toctou_reject_rc"
+  cat "$TOCTOU_RUN_LOG"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+if [[ -f "$TOCTOU_ESCAPE_MARKER" ]]; then
+  echo "TOCTOU escape payload unexpectedly executed"
+  cat "$TOCTOU_RUN_LOG"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .summary.actions_executed == 1
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "blockchain_toctou_pre_exec_reject"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 6
+' "$SUMMARY_TOCTOU_REJECT" >/dev/null; then
+  echo "TOCTOU pre-exec rejection summary mismatch"
+  cat "$TOCTOU_RUN_LOG"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+TOCTOU_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_TOCTOU_REJECT")"
+if [[ -z "$TOCTOU_ACTION_LOG" || ! -f "$TOCTOU_ACTION_LOG" ]]; then
+  echo "TOCTOU action log path missing from summary"
+  cat "$TOCTOU_RUN_LOG"
+  cat "$SUMMARY_TOCTOU_REJECT"
+  exit 1
+fi
+if ! grep -F -- "refusing untrusted action command (pre-exec validation mismatch)" "$TOCTOU_ACTION_LOG" >/dev/null; then
+  echo "TOCTOU action log missing pre-exec validation mismatch message"
+  cat "$TOCTOU_ACTION_LOG"
+  cat "$TOCTOU_RUN_LOG"
+  exit 1
+fi
+if ! grep -F -- "validated_path_initial: $TOCTOU_SAFE_HELPER" "$TOCTOU_ACTION_LOG" >/dev/null; then
+  echo "TOCTOU action log missing validated initial path evidence"
+  cat "$TOCTOU_ACTION_LOG"
+  cat "$TOCTOU_RUN_LOG"
   exit 1
 fi
 

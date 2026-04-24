@@ -15,6 +15,7 @@ var (
 	ErrEvidenceConflict = errors.New("vpnslashing: evidence conflict")
 	ErrInvalidPenalty   = errors.New("vpnslashing: invalid penalty")
 	ErrPenaltyConflict  = errors.New("vpnslashing: penalty conflict")
+	ErrPenaltyStoreRead = errors.New("vpnslashing: penalty store read failed")
 	ErrEvidenceNotFound = errors.New("vpnslashing: evidence not found")
 )
 
@@ -90,7 +91,14 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 		_, existed = s.keeper.GetPenalty(req.Penalty.PenaltyID)
 	}
 
-	evidencePenaltyExists, samePenaltyID, evidencePenaltyConflict := s.penaltyForEvidence(req.Penalty.EvidenceID, req.Penalty.PenaltyID)
+	evidencePenaltyExists, samePenaltyID, evidencePenaltyConflict, err := s.penaltyForEvidence(req.Penalty.EvidenceID, req.Penalty.PenaltyID)
+	if err != nil {
+		return ApplyPenaltyResponse{
+			Penalty:    req.Penalty,
+			Existed:    false,
+			Idempotent: false,
+		}, fmt.Errorf("%w: %v", ErrPenaltyStoreRead, err)
+	}
 	if evidencePenaltyConflict || (evidencePenaltyExists && !samePenaltyID) {
 		return ApplyPenaltyResponse{
 			Penalty:    req.Penalty,
@@ -117,14 +125,19 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 	return resp, nil
 }
 
-func (s MsgServer) penaltyForEvidence(evidenceID string, penaltyID string) (bool, bool, bool) {
+func (s MsgServer) penaltyForEvidence(evidenceID string, penaltyID string) (bool, bool, bool, error) {
 	if s.keeper == nil || evidenceID == "" {
-		return false, false, false
+		return false, false, false, nil
+	}
+
+	penalties, err := s.keeper.ListPenaltiesWithError()
+	if err != nil {
+		return false, false, false, fmt.Errorf("list penalties: %w", err)
 	}
 
 	found := false
 	samePenaltyID := false
-	for _, penalty := range s.keeper.ListPenalties() {
+	for _, penalty := range penalties {
 		if penalty.EvidenceID != evidenceID {
 			continue
 		}
@@ -134,5 +147,5 @@ func (s MsgServer) penaltyForEvidence(evidenceID string, penaltyID string) (bool
 		}
 	}
 
-	return found, samePenaltyID, found && !samePenaltyID
+	return found, samePenaltyID, found && !samePenaltyID, nil
 }

@@ -9,6 +9,26 @@ import (
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 )
 
+type msgReadErrorPenaltyStore struct {
+	*keeper.InMemoryStore
+	penaltyListErr error
+}
+
+func newMsgReadErrorPenaltyStore() *msgReadErrorPenaltyStore {
+	return &msgReadErrorPenaltyStore{InMemoryStore: keeper.NewInMemoryStore()}
+}
+
+func (s *msgReadErrorPenaltyStore) ListEvidenceWithError() ([]types.SlashEvidence, error) {
+	return s.InMemoryStore.ListEvidence(), nil
+}
+
+func (s *msgReadErrorPenaltyStore) ListPenaltiesWithError() ([]types.PenaltyDecision, error) {
+	if s.penaltyListErr != nil {
+		return nil, s.penaltyListErr
+	}
+	return s.InMemoryStore.ListPenalties(), nil
+}
+
 func TestMsgServerSubmitSlashEvidenceHappyPath(t *testing.T) {
 	t.Parallel()
 
@@ -458,6 +478,45 @@ func TestMsgServerApplyPenaltyMissingEvidencePropagation(t *testing.T) {
 	}
 	if !errors.Is(err, ErrEvidenceNotFound) {
 		t.Fatalf("expected ErrEvidenceNotFound, got %v", err)
+	}
+}
+
+func TestMsgServerApplyPenaltyFailsClosedWhenPenaltyListReadFails(t *testing.T) {
+	t.Parallel()
+
+	store := newMsgReadErrorPenaltyStore()
+	store.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-msg-read-fail-closed",
+		Kind:          types.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     testSHAProof("proof-msg-read-fail-closed"),
+	})
+	store.penaltyListErr = errors.New("penalty index decode failure")
+
+	k := keeper.NewKeeperWithStore(store)
+	server := NewMsgServer(&k)
+
+	resp, err := server.ApplyPenalty(ApplyPenaltyRequest{
+		Penalty: types.PenaltyDecision{
+			PenaltyID:       "penalty-msg-read-fail-closed",
+			EvidenceID:      "evidence-msg-read-fail-closed",
+			SlashBasisPoint: 10,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected apply penalty to fail closed when penalty list read fails")
+	}
+	if !errors.Is(err, ErrPenaltyStoreRead) {
+		t.Fatalf("expected ErrPenaltyStoreRead, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on read failure")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on read failure")
+	}
+	if _, ok := k.GetPenalty("penalty-msg-read-fail-closed"); ok {
+		t.Fatal("expected no penalty write on read failure")
 	}
 }
 
