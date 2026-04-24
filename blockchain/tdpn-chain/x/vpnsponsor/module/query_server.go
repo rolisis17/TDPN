@@ -88,7 +88,10 @@ func (s QueryServer) ListAuthorizations(_ ListAuthorizationsRequest) (ListAuthor
 		return ListAuthorizationsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListAuthorizations()
+	records, err := s.keeper.ListAuthorizationsWithError()
+	if err != nil {
+		return ListAuthorizationsResponse{}, err
+	}
 	return ListAuthorizationsResponse{
 		Authorizations: clampAuthorizations(records),
 	}, nil
@@ -99,7 +102,10 @@ func (s QueryServer) ListDelegations(_ ListDelegationsRequest) (ListDelegationsR
 		return ListDelegationsResponse{}, ErrNilKeeper
 	}
 
-	records := s.keeper.ListDelegations()
+	records, err := s.keeper.ListDelegationsWithError()
+	if err != nil {
+		return ListDelegationsResponse{}, err
+	}
 	return ListDelegationsResponse{
 		Delegations: clampDelegations(records),
 	}, nil

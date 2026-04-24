@@ -361,6 +361,10 @@ if ! jq -e '
   and .checks[1].id == "m1_roadmap_progress_report_contract"
   and .checks[1].status == "fail"
   and .checks[1].rc == 17
+  and .checks[1].failure_diagnostics.log_tail_lines == ["fail roadmap progress report"]
+  and .checks[1].failure_diagnostics.log_tail_line_count == 1
+  and .checks[1].failure_diagnostics.log_total_line_count == 1
+  and .checks[1].failure_diagnostics.log_tail_truncated == false
   and .checks[2].id == "m3_micro_relay_operator_floor"
   and .checks[2].status == "pass"
   and .checks[3].id == "m3_three_machine_real_host_validation_pack"

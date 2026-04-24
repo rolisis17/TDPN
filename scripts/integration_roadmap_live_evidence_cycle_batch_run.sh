@@ -41,6 +41,7 @@ exec_log="${BATCH_TRACK_EXEC_LOG:?}"
 behavior="${TRACK_B_BEHAVIOR:-pass}"
 echo "B:$behavior" >>"$exec_log"
 if [[ "$behavior" == "fail" ]]; then
+  echo "runtime_actuation_promotion_cycle failed rc=${TRACK_B_RC:-23}"
   exit "${TRACK_B_RC:-23}"
 fi
 exit 0
@@ -262,6 +263,10 @@ if ! jq -e '
   and .iterations[0].failure_substep == "track_failed:runtime_actuation_promotion_cycle"
   and (.iterations[0].tracks | length == 3)
   and ([.iterations[0].tracks[].status] == ["pass","fail","skipped"])
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_lines == ["runtime_actuation_promotion_cycle failed rc=23"]
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_line_count == 1
+  and .iterations[0].tracks[1].failure_diagnostics.log_total_line_count == 1
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_truncated == false
   and .iterations[0].tracks[2].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
   and .iterations[0].tracks[2].rc == null
   and .iterations[0].tracks[2].failure_kind == "skipped_due_to_fail_closed"
@@ -335,6 +340,8 @@ if ! jq -e '
   and (.iterations | length == 2)
   and ([.iterations[].status] == ["fail","fail"])
   and ([.iterations[].failure_substep] == ["track_failed:runtime_actuation_promotion_cycle","track_failed:runtime_actuation_promotion_cycle"])
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_lines == ["runtime_actuation_promotion_cycle failed rc=23"]
+  and .iterations[1].tracks[1].failure_diagnostics.log_tail_lines == ["runtime_actuation_promotion_cycle failed rc=23"]
 ' "$CONTINUE_SUMMARY" >/dev/null; then
   echo "continue-on-fail summary mismatch"
   cat "$CONTINUE_SUMMARY"

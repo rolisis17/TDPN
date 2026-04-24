@@ -187,6 +187,25 @@ record_cycle_hard_failure() {
   fi
 }
 
+json_array_from_lines() {
+  local raw_line normalized_line
+  local -a normalized_lines=()
+
+  for raw_line in "$@"; do
+    normalized_line="$(trim "$raw_line")"
+    if [[ -n "$normalized_line" ]]; then
+      normalized_lines+=("$normalized_line")
+    fi
+  done
+
+  if [[ "${#normalized_lines[@]}" -eq 0 ]]; then
+    printf '[]'
+    return
+  fi
+
+  printf '%s\n' "${normalized_lines[@]}" | jq -R . | jq -s .
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
@@ -861,6 +880,12 @@ promotion_errors_json="[]"
 promotion_outcome_action=""
 promotion_enforcement_no_go_enforced=""
 promotion_notes=""
+promotion_contract_semantic_valid="true"
+promotion_contract_expected_status=""
+promotion_contract_expected_outcome_action=""
+promotion_contract_expected_enforcement_no_go_enforced=""
+promotion_contract_mismatch_codes_json="[]"
+promotion_contract_mismatch_details_json="[]"
 
 declare -a promotion_cmd
 promotion_cmd=(
@@ -882,6 +907,55 @@ promotion_cmd=(
   --print-summary-json 0
 )
 promotion_command_display="$(quote_cmd "${promotion_cmd[@]}")"
+
+declare -a replay_promotion_cmd
+replay_promotion_cmd=(
+  bash "$PROMOTION_CHECK_SCRIPT"
+  --cycle-summary-list "$cycle_summary_list"
+  --reports-dir "$run_dir"
+  --require-min-cycles "$require_min_cycles"
+  --require-min-pass-cycles "$require_min_pass_cycles"
+  --require-max-fail-cycles "$require_max_fail_cycles"
+  --require-max-warn-cycles "$require_max_warn_cycles"
+  --require-min-pass-rate-pct "$require_min_pass_rate_pct"
+  --require-min-go-decision-rate-pct "$require_min_go_decision_rate_pct"
+  --require-check-schema-valid "$require_check_schema_valid"
+  --require-check-usable-decision "$require_check_usable_decision"
+  --require-check-policy-modal-decision "$require_check_policy_modal_decision"
+  --fail-on-no-go "$fail_on_no_go"
+  --summary-json "$promotion_summary_json"
+  --show-json 1
+  --print-summary-json 1
+)
+replay_promotion_command_display="$(quote_cmd "${replay_promotion_cmd[@]}")"
+
+declare -a replay_cycle_cmd
+replay_cycle_cmd=(
+  bash "$STABILITY_CYCLE_SCRIPT"
+  --host-a "$host_a"
+  --host-b "$host_b"
+  --campaign-subject "$campaign_subject"
+  --reports-dir "$run_dir"
+  --run-summary-json "$run_dir/profile_default_gate_stability_run_replay_summary.json"
+  --check-summary-json "$run_dir/profile_default_gate_stability_check_replay_summary.json"
+  --summary-json "$run_dir/profile_default_gate_stability_cycle_replay_summary.json"
+  --fail-on-no-go "$fail_on_no_go"
+  --show-json 0
+  --print-summary-json 1
+)
+if [[ -n "$cycle_runs" ]]; then
+  replay_cycle_cmd+=(--runs "$cycle_runs")
+fi
+if [[ -n "$cycle_campaign_timeout_sec" ]]; then
+  replay_cycle_cmd+=(--campaign-timeout-sec "$cycle_campaign_timeout_sec")
+fi
+if [[ -n "$cycle_sleep_between_sec" ]]; then
+  replay_cycle_cmd+=(--sleep-between-sec "$cycle_sleep_between_sec")
+fi
+if [[ -n "$cycle_allow_partial" ]]; then
+  replay_cycle_cmd+=(--allow-partial "$cycle_allow_partial")
+fi
+replay_cycle_command_display="$(quote_cmd "${replay_cycle_cmd[@]}")"
 
 echo "[profile-default-gate-stability-promotion-cycle] $(timestamp_utc) promotion-stage start summary_json=$promotion_summary_json"
 rm -f "$promotion_summary_json" "$run_dir/profile_default_gate_stability_promotion_check.log"
@@ -927,34 +1001,79 @@ else
   promotion_stage_status="fail"
 fi
 
-hard_failure_count=0
-hard_failure_reason=""
-if (( cycle_collection_hard_failures > 0 )); then
-  hard_failure_count=$((hard_failure_count + 1))
-  hard_failure_reason="cycle_collection_artifact_contract_failed"
-fi
-if [[ "$promotion_summary_exists" != "true" ]]; then
-  hard_failure_count=$((hard_failure_count + 1))
-  hard_failure_reason="promotion_summary_missing"
-elif [[ "$promotion_summary_valid" != "true" ]]; then
-  hard_failure_count=$((hard_failure_count + 1))
-  hard_failure_reason="promotion_summary_invalid_json"
-elif [[ "$promotion_summary_schema_valid" != "true" ]]; then
-  hard_failure_count=$((hard_failure_count + 1))
-  hard_failure_reason="promotion_summary_schema_invalid"
-elif [[ "$promotion_has_usable_decision" != "true" ]]; then
-  hard_failure_count=$((hard_failure_count + 1))
-  hard_failure_reason="promotion_summary_missing_decision"
-fi
-if [[ "$promotion_stage_rc" -ne 0 ]]; then
-  hard_failure_count=$((hard_failure_count + 1))
-  hard_failure_reason="promotion_command_rc_contract_mismatch"
-elif [[ "$promotion_summary_valid" == "true" ]]; then
-  if [[ "$promotion_rc_json" != "0" ]]; then
-    hard_failure_count=$((hard_failure_count + 1))
-    hard_failure_reason="promotion_command_rc_contract_mismatch"
+if [[ "$promotion_stage_rc" -eq 0 && "$promotion_summary_schema_valid" == "true" && "$promotion_has_usable_decision" == "true" ]]; then
+  declare -a promotion_contract_mismatch_codes=()
+  declare -a promotion_contract_mismatch_details=()
+
+  if [[ "$promotion_decision" == "GO" ]]; then
+    promotion_contract_expected_status="ok"
+    promotion_contract_expected_outcome_action="promote_allowed"
+    promotion_contract_expected_enforcement_no_go_enforced="false"
+  elif [[ "$promotion_decision" == "NO-GO" ]]; then
+    promotion_contract_expected_status="fail"
+    if [[ "$fail_on_no_go" == "1" ]]; then
+      promotion_contract_expected_outcome_action="hold_promotion_blocked"
+      promotion_contract_expected_enforcement_no_go_enforced="true"
+    else
+      promotion_contract_expected_outcome_action="hold_promotion_warn_only"
+      promotion_contract_expected_enforcement_no_go_enforced="false"
+    fi
+  fi
+
+  if [[ -n "$promotion_contract_expected_status" && "$promotion_status" != "$promotion_contract_expected_status" ]]; then
+    promotion_contract_mismatch_codes+=("status_mismatch")
+    promotion_contract_mismatch_details+=("promotion status mismatch (expected=${promotion_contract_expected_status} observed=${promotion_status:-unset})")
+  fi
+
+  if [[ -n "$promotion_contract_expected_outcome_action" && "$promotion_outcome_action" != "$promotion_contract_expected_outcome_action" ]]; then
+    promotion_contract_mismatch_codes+=("outcome_action_mismatch")
+    promotion_contract_mismatch_details+=("promotion outcome action mismatch (expected=${promotion_contract_expected_outcome_action} observed=${promotion_outcome_action:-unset})")
+  fi
+
+  if [[ "$promotion_enforcement_no_go_enforced" != "true" && "$promotion_enforcement_no_go_enforced" != "false" ]]; then
+    promotion_contract_mismatch_codes+=("enforcement_no_go_enforced_missing")
+    promotion_contract_mismatch_details+=("promotion enforcement.no_go_enforced missing")
+  elif [[ -n "$promotion_contract_expected_enforcement_no_go_enforced" && "$promotion_enforcement_no_go_enforced" != "$promotion_contract_expected_enforcement_no_go_enforced" ]]; then
+    promotion_contract_mismatch_codes+=("enforcement_no_go_enforced_mismatch")
+    promotion_contract_mismatch_details+=("promotion enforcement.no_go_enforced mismatch (expected=${promotion_contract_expected_enforcement_no_go_enforced} observed=${promotion_enforcement_no_go_enforced:-unset})")
+  fi
+
+  if [[ "${#promotion_contract_mismatch_codes[@]}" -gt 0 ]]; then
+    promotion_contract_semantic_valid="false"
+    promotion_contract_mismatch_codes_json="$(json_array_from_lines "${promotion_contract_mismatch_codes[@]}")"
+    promotion_contract_mismatch_details_json="$(json_array_from_lines "${promotion_contract_mismatch_details[@]}")"
   fi
 fi
+
+declare -a hard_failure_reasons=()
+if (( cycle_collection_hard_failures > 0 )); then
+  hard_failure_reasons+=("cycle_collection_artifact_contract_failed")
+fi
+if [[ "$promotion_summary_exists" != "true" ]]; then
+  hard_failure_reasons+=("promotion_summary_missing")
+elif [[ "$promotion_summary_valid" != "true" ]]; then
+  hard_failure_reasons+=("promotion_summary_invalid_json")
+elif [[ "$promotion_summary_schema_valid" != "true" ]]; then
+  hard_failure_reasons+=("promotion_summary_schema_invalid")
+elif [[ "$promotion_has_usable_decision" != "true" ]]; then
+  hard_failure_reasons+=("promotion_summary_missing_decision")
+elif [[ "$promotion_contract_semantic_valid" != "true" ]]; then
+  hard_failure_reasons+=("promotion_summary_semantic_contract_mismatch")
+fi
+if [[ "$promotion_stage_rc" -ne 0 ]]; then
+  hard_failure_reasons+=("promotion_command_rc_contract_mismatch")
+elif [[ "$promotion_summary_valid" == "true" ]]; then
+  if [[ "$promotion_rc_json" != "0" ]]; then
+    hard_failure_reasons+=("promotion_command_rc_contract_mismatch")
+  fi
+fi
+
+hard_failure_count="${#hard_failure_reasons[@]}"
+hard_failure_reason=""
+if (( hard_failure_count > 0 )); then
+  hard_failure_reason="${hard_failure_reasons[0]}"
+fi
+hard_failure_reasons_json="$(json_array_from_lines "${hard_failure_reasons[@]:-}")"
 
 final_decision="$promotion_decision"
 if [[ -z "$final_decision" ]]; then
@@ -999,6 +1118,32 @@ else
   fi
 fi
 
+failure_reason_category=""
+failure_next_action=""
+failure_next_action_command=""
+case "${failure_reason:-}" in
+  cycle_collection_artifact_contract_failed)
+    failure_reason_category="artifact_contract"
+    failure_next_action="Regenerate cycle artifacts and rerun promotion-cycle closure."
+    failure_next_action_command="$replay_cycle_command_display"
+    ;;
+  promotion_summary_missing|promotion_summary_invalid_json|promotion_summary_schema_invalid|promotion_summary_missing_decision|promotion_summary_semantic_contract_mismatch)
+    failure_reason_category="summary_contract"
+    failure_next_action="Replay promotion-check summary generation and verify promotion summary contract fields."
+    failure_next_action_command="$replay_promotion_command_display"
+    ;;
+  promotion_command_rc_contract_mismatch)
+    failure_reason_category="command_contract"
+    failure_next_action="Replay promotion-check command and reconcile process rc with summary rc."
+    failure_next_action_command="$replay_promotion_command_display"
+    ;;
+  promotion_decision_no_go)
+    failure_reason_category="policy_violation"
+    failure_next_action="Review NO-GO policy violations before attempting promotion."
+    failure_next_action_command="$replay_promotion_command_display"
+    ;;
+esac
+
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$final_status" \
@@ -1023,8 +1168,15 @@ jq -n \
   --arg promotion_status "$promotion_status" \
   --arg promotion_outcome_action "$promotion_outcome_action" \
   --arg promotion_enforcement_no_go_enforced "$promotion_enforcement_no_go_enforced" \
+  --arg promotion_contract_semantic_valid "$promotion_contract_semantic_valid" \
+  --arg promotion_contract_expected_status "$promotion_contract_expected_status" \
+  --arg promotion_contract_expected_outcome_action "$promotion_contract_expected_outcome_action" \
+  --arg promotion_contract_expected_enforcement_no_go_enforced "$promotion_contract_expected_enforcement_no_go_enforced" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
+  --arg failure_reason_category "$failure_reason_category" \
+  --arg failure_next_action "$failure_next_action" \
+  --arg failure_next_action_command "$failure_next_action_command" \
   --arg promotion_command "$promotion_command_display" \
   --argjson rc "$final_rc" \
   --argjson cycles "$cycles" \
@@ -1048,6 +1200,9 @@ jq -n \
   --argjson promotion_rc "$promotion_rc_json" \
   --argjson promotion_violations "$promotion_violations_json" \
   --argjson promotion_errors "$promotion_errors_json" \
+  --argjson promotion_contract_mismatch_codes "$promotion_contract_mismatch_codes_json" \
+  --argjson promotion_contract_mismatch_details "$promotion_contract_mismatch_details_json" \
+  --argjson hard_failure_reasons "$hard_failure_reasons_json" \
   --argjson cycles_json "$cycles_json" \
   '{
     version: 1,
@@ -1130,13 +1285,38 @@ jq -n \
         end
       ),
       violations: $promotion_violations,
-      errors: $promotion_errors
+      errors: $promotion_errors,
+      contract: {
+        semantic_valid: ($promotion_contract_semantic_valid == "true"),
+        expected_status: (if $promotion_contract_expected_status == "" then null else $promotion_contract_expected_status end),
+        expected_outcome_action: (if $promotion_contract_expected_outcome_action == "" then null else $promotion_contract_expected_outcome_action end),
+        expected_enforcement_no_go_enforced: (
+          if $promotion_contract_expected_enforcement_no_go_enforced == "true" then true
+          elif $promotion_contract_expected_enforcement_no_go_enforced == "false" then false
+          else null
+          end
+        ),
+        mismatches: {
+          codes: $promotion_contract_mismatch_codes,
+          details: $promotion_contract_mismatch_details
+        }
+      }
     },
     enforcement: {
       fail_on_no_go: ($fail_on_no_go == 1),
       no_go_detected: ($decision == "NO-GO"),
       no_go_enforced: ($decision == "NO-GO" and ($fail_on_no_go == 1)),
-      fail_closed_hard_failures: ($cycle_collection_hard_failures > 0 or $promotion_summary_valid != "true" or $promotion_summary_schema_valid != "true" or $promotion_has_usable_decision != "true")
+      fail_closed_hard_failures: ($cycle_collection_hard_failures > 0 or $promotion_summary_valid != "true" or $promotion_summary_schema_valid != "true" or $promotion_has_usable_decision != "true" or $promotion_contract_semantic_valid != "true")
+    },
+    diagnostics: {
+      fail_closed: {
+        triggered: ($cycle_collection_hard_failures > 0 or $promotion_summary_valid != "true" or $promotion_summary_schema_valid != "true" or $promotion_has_usable_decision != "true" or $promotion_contract_semantic_valid != "true"),
+        primary_reason_code: (if $failure_reason == "" then null else $failure_reason end),
+        primary_reason_category: (if $failure_reason_category == "" then null else $failure_reason_category end),
+        hard_failure_reasons: $hard_failure_reasons,
+        next_operator_action: (if $failure_next_action == "" then null else $failure_next_action end),
+        next_operator_action_command: (if $failure_next_action_command == "" then null else $failure_next_action_command end)
+      }
     },
     outcome: {
       should_promote: ($status == "pass" and $decision == "GO"),

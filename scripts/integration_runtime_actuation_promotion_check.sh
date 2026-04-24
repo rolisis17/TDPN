@@ -27,6 +27,7 @@ SIGNOFF_UNKNOWN_DUPLICATE="$TMP_DIR/signoff_unknown_duplicate.json"
 SIGNOFF_MISSING_CONTEXT="$TMP_DIR/signoff_missing_context.json"
 FAIL_CAMPAIGN_A="$TMP_DIR/campaign_check_fail_a.json"
 FAIL_CAMPAIGN_B="$TMP_DIR/campaign_check_fail_b.json"
+SOURCE_BLOCKED_CAMPAIGN="$TMP_DIR/campaign_check_source_blocked.json"
 MISSING_DIAGNOSTICS="$TMP_DIR/campaign_check_missing_diagnostics.json"
 
 cat >"$PASS_CAMPAIGN_A" <<'EOF_PASS_CAMPAIGN_A'
@@ -178,6 +179,28 @@ cat >"$FAIL_CAMPAIGN_B" <<'EOF_FAIL_CAMPAIGN_B'
 }
 EOF_FAIL_CAMPAIGN_B
 
+cat >"$SOURCE_BLOCKED_CAMPAIGN" <<'EOF_SOURCE_BLOCKED_CAMPAIGN'
+{
+  "version": 1,
+  "status": "fail",
+  "rc": 0,
+  "decision": "NO-GO",
+  "decision_diagnostics": {
+    "m4_policy": {
+      "gate_evaluation": {
+        "runtime_actuation_status_pass": {
+          "required": true,
+          "observed": true,
+          "status": "pass",
+          "source": "explicit_campaign_summary",
+          "actionable_reason": "resolve upstream campaign blockers before promotion"
+        }
+      }
+    }
+  }
+}
+EOF_SOURCE_BLOCKED_CAMPAIGN
+
 cat >"$MISSING_DIAGNOSTICS" <<'EOF_MISSING_DIAGNOSTICS'
 {
   "version": 1,
@@ -310,6 +333,46 @@ if ! jq -e '
 ' "$MODAL_MISMATCH_SUMMARY" >/dev/null 2>&1; then
   echo "modal mismatch summary mismatch"
   cat "$MODAL_MISMATCH_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-check] upstream NO-GO source fails closed even when thresholds are permissive"
+SOURCE_BLOCKED_SUMMARY="$TMP_DIR/runtime_actuation_promotion_source_blocked.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --campaign-check-summary-json "$SOURCE_BLOCKED_CAMPAIGN" \
+  --require-min-samples 1 \
+  --require-min-pass-samples 0 \
+  --require-max-fail-samples 1 \
+  --require-max-warn-samples 1 \
+  --require-min-ready-rate-pct 0 \
+  --require-modal-runtime-actuation-status pass \
+  --fail-on-no-go 1 \
+  --summary-json "$SOURCE_BLOCKED_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_check_source_blocked.log 2>&1
+source_blocked_rc=$?
+set -e
+
+if [[ "$source_blocked_rc" -eq 0 ]]; then
+  echo "expected upstream NO-GO source path to fail closed with rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_check_source_blocked.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc != 0
+  and .enforcement.no_go_enforced == true
+  and .diagnostics.no_go.primary_driver == "upstream_source_blocked"
+  and ((.diagnostics.no_go.driver_codes | index("source_decision_not_go")) != null)
+  and ((.diagnostics.no_go.driver_codes | index("source_status_not_pass")) != null)
+  and (.diagnostics.no_go.source_contract_violation_count == 2)
+  and ((.violations | map(.code) | index("source_decision_not_go")) != null)
+  and ((.violations | map(.code) | index("source_status_not_pass")) != null)
+  and (.outcome.remediation.next_command | contains("runtime-actuation-promotion-cycle"))
+' "$SOURCE_BLOCKED_SUMMARY" >/dev/null 2>&1; then
+  echo "upstream NO-GO source summary mismatch"
+  cat "$SOURCE_BLOCKED_SUMMARY"
   exit 1
 fi
 

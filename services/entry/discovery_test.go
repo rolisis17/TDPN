@@ -125,6 +125,53 @@ func TestResolveExitRouteCached(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteStrictCacheHitStillValidatesRoute(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", Endpoint: "198.51.100.20:51821", ControlURL: "https://198.51.100.20:8084"},
+	})
+
+	calls := 0
+	origRelays := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		calls++
+		return origRelays(req)
+	}
+
+	s := &Service{
+		betaStrict:          true,
+		exitControlURL:      "http://127.0.0.1:8084",
+		exitDataAddr:        "127.0.0.1:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache: map[string]exitRoute{
+			"exit-a": {
+				controlURL: "http://127.0.0.1:8084",
+				dataAddr:   "127.0.0.1:51821",
+				fetchedAt:  time.Now(),
+			},
+		},
+	}
+
+	route, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err != nil {
+		t.Fatalf("resolve route failed: %v", err)
+	}
+	if route.controlURL != "https://198.51.100.20:8084" {
+		t.Fatalf("expected strict mode to ignore invalid cached route, got control url: %s", route.controlURL)
+	}
+	if route.dataAddr != "198.51.100.20:51821" {
+		t.Fatalf("unexpected data addr: %s", route.dataAddr)
+	}
+	if calls != 1 {
+		t.Fatalf("expected strict mode to re-fetch route when cached route is invalid, got %d relays calls", calls)
+	}
+}
+
 func TestFetchDirectoryPubKeysStrictRejectsLegacyFallback(t *testing.T) {
 	durl := "http://directory.local"
 	pub, _, err := nodecrypto.GenerateEd25519Keypair()

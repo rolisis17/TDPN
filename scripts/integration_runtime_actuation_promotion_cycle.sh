@@ -374,6 +374,42 @@ if [[ "$scenario" == "no_go" ]]; then
   exit "$rc"
 fi
 
+if [[ "$scenario" == "go_wrong_schema" ]]; then
+  jq -n \
+    --argjson samples_total "$samples_total" \
+    --argjson missing_samples "$missing_samples" \
+    '{
+      version: 1,
+      schema: { id: "runtime_actuation_unexpected_summary" },
+      decision: "GO",
+      status: "ok",
+      rc: 0,
+      notes: "simulated GO decision with wrong schema id",
+      observed: {
+        samples_total: $samples_total,
+        samples_pass: $samples_total,
+        samples_fail: 0,
+        runtime_actuation_ready_rate_pct: 100
+      },
+      enforcement: {
+        fail_on_no_go: true,
+        no_go_detected: false,
+        no_go_enforced: false
+      },
+      outcome: {
+        should_promote: true,
+        action: "promote_allowed",
+        next_operator_action: "No action required"
+      },
+      violations: [],
+      errors: [],
+      artifacts: {
+        missing_samples: $missing_samples
+      }
+    }' >"$summary_json"
+  exit 0
+fi
+
 jq -n \
   --argjson samples_total "$samples_total" \
   --argjson missing_samples "$missing_samples" \
@@ -681,6 +717,53 @@ fi
 if grep -q 'stale-preseeded-signoff-list-entry' "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS"; then
   echo "no-summary latest signoff list alias retained stale preseeded content"
   cat "$NO_PROMOTION_SUMMARY_CURRENT_SIGNOFF_LIST_ALIAS"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] promotion-check schema mismatch fails closed"
+SCHEMA_MISMATCH_SUMMARY="$TMP_DIR/schema_mismatch_summary.json"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$TMP_DIR/schema_mismatch_capture.log" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go_wrong_schema" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 2 \
+  --reports-dir "$TMP_DIR/schema_mismatch_reports" \
+  --fail-on-no-go 1 \
+  --summary-json "$SCHEMA_MISMATCH_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_schema_mismatch.log 2>&1
+schema_mismatch_rc=$?
+set -e
+
+if [[ "$schema_mismatch_rc" -eq 0 ]]; then
+  echo "expected schema-mismatch path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_schema_mismatch.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .failure_reason == "runtime actuation promotion summary schema mismatch"
+  and .stages.promotion_check.attempted == true
+  and .stages.promotion_check.rc == 0
+  and .stages.promotion_check.summary_exists == true
+  and .stages.promotion_check.summary_valid_json == true
+  and .stages.promotion_check.summary_fresh == true
+  and .stages.promotion_check.summary_schema_valid == false
+  and .stages.promotion_check.summary_schema_id == "runtime_actuation_unexpected_summary"
+  and .promotion_check.summary_schema_valid == false
+  and .promotion_check.summary_schema_id == "runtime_actuation_unexpected_summary"
+  and .diagnostics.no_go.primary_reason_code == "promotion_summary_schema_mismatch"
+  and .diagnostics.no_go.primary_reason_category == "policy_violation"
+  and .outcome.should_promote == false
+  and .outcome.action == "hold_promotion_blocked"
+  and (.outcome.remediation.next_command | contains("runtime-actuation-promotion-cycle"))
+' "$SCHEMA_MISMATCH_SUMMARY" >/dev/null 2>&1; then
+  echo "schema-mismatch fail-closed summary mismatch"
+  cat "$SCHEMA_MISMATCH_SUMMARY"
   exit 1
 fi
 

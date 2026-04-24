@@ -25,6 +25,7 @@ PASS_CYCLE_B="$TMP_DIR/cycle_pass_b.json"
 PASS_CYCLE_C="$TMP_DIR/cycle_pass_c.json"
 NO_GO_CYCLE="$TMP_DIR/cycle_no_go.json"
 POLICY_MISMATCH_CYCLE="$TMP_DIR/cycle_policy_mismatch.json"
+INVALID_SCHEMA_CYCLE="$TMP_DIR/cycle_invalid_schema.json"
 
 cat >"$PASS_CYCLE_A" <<'EOF_PASS_CYCLE_A'
 {
@@ -91,6 +92,19 @@ cat >"$POLICY_MISMATCH_CYCLE" <<'EOF_POLICY_MISMATCH_CYCLE'
 }
 EOF_POLICY_MISMATCH_CYCLE
 
+cat >"$INVALID_SCHEMA_CYCLE" <<'EOF_INVALID_SCHEMA_CYCLE'
+{
+  "version": 1,
+  "schema": { "id": "unexpected_cycle_schema" },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "inputs": { "check": { "policy": { "require_modal_decision": "GO" } } },
+  "check": { "summary_schema_valid": true, "has_usable_decision": true, "decision": "GO" },
+  "outcome": { "should_promote": true }
+}
+EOF_INVALID_SCHEMA_CYCLE
+
 echo "[profile-default-gate-stability-promotion-check] strict happy path"
 STRICT_SUMMARY="$TMP_DIR/promotion_check_strict_summary.json"
 set +e
@@ -131,6 +145,44 @@ if ! jq -e '
 ' "$STRICT_SUMMARY" >/dev/null 2>&1; then
   echo "strict happy-path summary mismatch"
   cat "$STRICT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-promotion-check] invalid cycle schema is fail-closed"
+INVALID_SCHEMA_SUMMARY="$TMP_DIR/promotion_check_invalid_schema_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --cycle-summary-json "$PASS_CYCLE_A" \
+  --cycle-summary-json "$INVALID_SCHEMA_CYCLE" \
+  --require-min-cycles 2 \
+  --require-min-pass-cycles 1 \
+  --require-max-fail-cycles 10 \
+  --require-max-warn-cycles 10 \
+  --require-min-pass-rate-pct 0 \
+  --require-min-go-decision-rate-pct 0 \
+  --require-check-schema-valid 0 \
+  --require-check-usable-decision 0 \
+  --require-check-policy-modal-decision GO \
+  --fail-on-no-go 1 \
+  --summary-json "$INVALID_SCHEMA_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_promotion_check_invalid_schema.log 2>&1
+invalid_schema_rc=$?
+set -e
+
+if [[ "$invalid_schema_rc" -eq 0 ]]; then
+  echo "expected invalid schema path rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_promotion_check_invalid_schema.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc != 0
+  and .enforcement.no_go_enforced == true
+  and ((.violations | map(.code) | index("cycle_schema_invalid")) != null)
+' "$INVALID_SCHEMA_SUMMARY" >/dev/null 2>&1; then
+  echo "invalid schema summary mismatch"
+  cat "$INVALID_SCHEMA_SUMMARY"
   exit 1
 fi
 

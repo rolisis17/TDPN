@@ -35,6 +35,9 @@ Track path overrides:
   ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT
   ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT
 
+Failure diagnostics:
+  ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_FAILURE_LOG_TAIL_LINES (default: 20)
+
 Exit behavior:
   - With --continue-on-fail=0, stop after first failed track result.
   - With --continue-on-fail=1, execute all selected tracks for all iterations.
@@ -109,6 +112,64 @@ parse_id_list_arg() {
   done
 }
 
+log_tail_window_json() {
+  local log_path="${1:-}"
+  local max_lines="${2:-0}"
+  local total_line_count=0
+  local -a tail_lines=()
+  local line
+  if [[ "$max_lines" =~ ^[0-9]+$ ]] && (( max_lines > 0 )) && [[ -f "$log_path" && -r "$log_path" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      total_line_count=$((total_line_count + 1))
+      tail_lines+=("$line")
+      if (( ${#tail_lines[@]} > max_lines )); then
+        tail_lines=("${tail_lines[@]:1}")
+      fi
+    done < "$log_path"
+  fi
+
+  local tail_lines_json='[]'
+  if (( ${#tail_lines[@]} > 0 )); then
+    tail_lines_json="$(printf '%s\n' "${tail_lines[@]}" | jq -R . | jq -s .)"
+  fi
+  local line_count="${#tail_lines[@]}"
+  local truncated_json="false"
+  if (( total_line_count > line_count )); then
+    truncated_json="true"
+  fi
+
+  jq -cn \
+    --argjson lines "$tail_lines_json" \
+    --argjson line_count "$line_count" \
+    --argjson total_line_count "$total_line_count" \
+    --argjson truncated "$truncated_json" \
+    '{
+      log_tail_lines: $lines,
+      log_tail_line_count: $line_count,
+      log_total_line_count: $total_line_count,
+      log_tail_truncated: $truncated
+    }'
+}
+
+augment_result_file_with_failure_diagnostics() {
+  local result_path="$1"
+  if [[ ! -s "$result_path" ]] || ! jq -e . "$result_path" >/dev/null 2>&1; then
+    return
+  fi
+  local status
+  status="$(jq -r '.status // ""' "$result_path")"
+  if [[ "$status" != "fail" ]]; then
+    return
+  fi
+  local log_path
+  log_path="$(jq -r '.log // .artifacts.log // ""' "$result_path")"
+  local failure_diagnostics_json
+  failure_diagnostics_json="$(log_tail_window_json "$log_path" "$failure_log_tail_lines")"
+  local updated_json
+  updated_json="$(jq -c --argjson failure_diagnostics "$failure_diagnostics_json" '. + {failure_diagnostics: $failure_diagnostics}' "$result_path")"
+  printf '%s\n' "$updated_json" >"$result_path"
+}
+
 need_cmd jq
 need_cmd bash
 need_cmd date
@@ -120,6 +181,7 @@ iterations="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ITERATIONS:-1}"
 continue_on_fail="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_CONTINUE_ON_FAIL:-0}"
 parallel="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_PARALLEL:-0}"
 print_summary_json="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_PRINT_SUMMARY_JSON:-1}"
+failure_log_tail_lines="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_FAILURE_LOG_TAIL_LINES:-20}"
 
 declare -a include_track_ids=()
 declare -a exclude_track_ids=()
@@ -198,6 +260,7 @@ fi
 bool_arg_or_die "--continue-on-fail" "$continue_on_fail"
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+int_arg_or_die "--failure-log-tail-lines" "$failure_log_tail_lines"
 
 include_track_ids_requested_count="${#include_track_ids[@]}"
 exclude_track_ids_requested_count="${#exclude_track_ids[@]}"
@@ -454,6 +517,7 @@ execute_track_to_result_file() {
       rc: $rc,
       duration_sec: $duration_sec
     }' >"$result_path"
+  augment_result_file_with_failure_diagnostics "$result_path"
 }
 
 halt_after_iteration="0"
@@ -519,6 +583,7 @@ if [[ -z "$selection_error" ]]; then
               failure_kind: "runner_error",
               notes: "missing or invalid track result payload"
             }' >"$result_path"
+          augment_result_file_with_failure_diagnostics "$result_path"
         fi
         result_json="$(cat "$result_path")"
         iter_track_results_json="$(jq -c --argjson row "$result_json" '. + [$row]' <<<"$iter_track_results_json")"
@@ -555,6 +620,7 @@ if [[ -z "$selection_error" ]]; then
               failure_kind: "runner_error",
               notes: "missing or invalid track result payload"
             }' >"$result_path"
+          augment_result_file_with_failure_diagnostics "$result_path"
         fi
         result_json="$(cat "$result_path")"
         iter_track_results_json="$(jq -c --argjson row "$result_json" '. + [$row]' <<<"$iter_track_results_json")"
@@ -740,6 +806,7 @@ jq -n \
   --argjson continue_on_fail "$continue_on_fail" \
   --argjson parallel "$parallel" \
   --argjson print_summary_json "$print_summary_json" \
+  --argjson failure_log_tail_lines "$failure_log_tail_lines" \
   --argjson default_track_ids "$default_track_ids_json" \
   --argjson include_track_ids "$include_track_ids_json" \
   --argjson exclude_track_ids "$exclude_track_ids_json" \
@@ -773,6 +840,7 @@ jq -n \
       continue_on_fail: ($continue_on_fail == 1),
       parallel: ($parallel == 1),
       print_summary_json: ($print_summary_json == 1),
+      failure_log_tail_lines: $failure_log_tail_lines,
       default_track_ids: $default_track_ids,
       include_track_ids: $include_track_ids,
       exclude_track_ids: $exclude_track_ids,

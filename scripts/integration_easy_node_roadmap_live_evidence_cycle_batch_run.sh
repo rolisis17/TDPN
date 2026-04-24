@@ -58,10 +58,14 @@ if ! grep -F -- './scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run' "
   exit 1
 fi
 for expected in \
+  '--reports-dir DIR' \
+  '--summary-json PATH' \
   '--iterations N' \
   '--continue-on-fail [0|1]' \
+  '--parallel [0|1]' \
   '--include-track-id ID' \
-  '--exclude-track-id ID'; do
+  '--exclude-track-id ID' \
+  '--print-summary-json [0|1]'; do
   if ! grep -F -- "$expected" "$HELP_OUT" >/dev/null 2>&1; then
     echo "easy_node help missing roadmap-live-evidence-cycle-batch-run flag token: $expected"
     cat "$HELP_OUT"
@@ -74,14 +78,35 @@ if ! grep -F -- 'roadmap-live-evidence-cycle-batch-run wraps the roadmap live-ev
   cat "$HELP_EXPERT_OUT"
   exit 1
 fi
+if ! grep -F -- 'roadmap_live_evidence_cycle_batch_run_summary' "$HELP_EXPERT_OUT" >/dev/null 2>&1; then
+  echo "easy_node expert help missing roadmap-live-evidence-cycle-batch summary schema token"
+  cat "$HELP_EXPERT_OUT"
+  exit 1
+fi
+if ! grep -F -- 'selection_accounting' "$HELP_EXPERT_OUT" >/dev/null 2>&1; then
+  echo "easy_node expert help missing roadmap-live-evidence-cycle-batch selection_accounting token"
+  cat "$HELP_EXPERT_OUT"
+  exit 1
+fi
+if ! grep -F -- 'per-iteration track results' "$HELP_EXPERT_OUT" >/dev/null 2>&1; then
+  echo "easy_node expert help missing roadmap-live-evidence-cycle-batch iteration-results token"
+  cat "$HELP_EXPERT_OUT"
+  exit 1
+fi
 
 echo "[easy-node-roadmap-live-evidence-cycle-batch] env override + forwarding contract"
 : >"$CAPTURE"
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT="$FAKE_SCRIPT" \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_CAPTURE_FILE="$CAPTURE" \
 ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run \
-  --sample-flag alpha \
-  --sample-mode fast >"$STDOUT_OUT"
+  --reports-dir .easy-node-logs/roadmap_live_evidence_cycle_batch_contract \
+  --summary-json .easy-node-logs/roadmap_live_evidence_cycle_batch_contract_summary.json \
+  --iterations 2 \
+  --continue-on-fail 1 \
+  --parallel 1 \
+  --include-track-id runtime_actuation_promotion_cycle \
+  --exclude-track-id profile_compare_multi_vm_stability_promotion_cycle \
+  --print-summary-json 0 >"$STDOUT_OUT"
 
 line="$(tail -n 1 "$CAPTURE" || true)"
 if [[ -z "$line" ]]; then
@@ -89,10 +114,16 @@ if [[ -z "$line" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-assert_token "$line" $'\t--sample-flag\talpha' "missing --sample-flag forwarding"
-assert_token "$line" $'\t--sample-mode\tfast' "missing --sample-mode forwarding"
+assert_token "$line" $'\t--reports-dir\t.easy-node-logs/roadmap_live_evidence_cycle_batch_contract' "missing --reports-dir forwarding"
+assert_token "$line" $'\t--summary-json\t.easy-node-logs/roadmap_live_evidence_cycle_batch_contract_summary.json' "missing --summary-json forwarding"
+assert_token "$line" $'\t--iterations\t2' "missing --iterations forwarding"
+assert_token "$line" $'\t--continue-on-fail\t1' "missing --continue-on-fail forwarding"
+assert_token "$line" $'\t--parallel\t1' "missing --parallel forwarding"
+assert_token "$line" $'\t--include-track-id\truntime_actuation_promotion_cycle' "missing --include-track-id forwarding"
+assert_token "$line" $'\t--exclude-track-id\tprofile_compare_multi_vm_stability_promotion_cycle' "missing --exclude-track-id forwarding"
+assert_token "$line" $'\t--print-summary-json\t0' "missing --print-summary-json forwarding"
 
-if ! grep -F -- 'fake roadmap live-evidence-cycle-batch run: --sample-flag alpha --sample-mode fast' "$STDOUT_OUT" >/dev/null 2>&1; then
+if ! grep -F -- 'fake roadmap live-evidence-cycle-batch run:' "$STDOUT_OUT" >/dev/null 2>&1; then
   echo "missing wrapper output from fake script"
   cat "$STDOUT_OUT"
   exit 1

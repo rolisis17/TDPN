@@ -2,8 +2,10 @@ package module
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
+	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
 )
@@ -175,5 +177,48 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 			delegationsResp.Delegations[1].ReservationID,
 			delegationsResp.Delegations[2].ReservationID,
 		)
+	}
+}
+
+func TestQueryServerListFailsClosedOnMalformedKVSnapshot(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := keeper.NewKVStore(backend)
+	k := keeper.NewKeeperWithStore(store)
+	server := NewQueryServer(&k)
+
+	store.UpsertAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+	})
+	backend.Set([]byte("authorization/bad-json"), []byte("{not-valid-json"))
+
+	_, err := server.ListAuthorizations(ListAuthorizationsRequest{})
+	if err == nil {
+		t.Fatal("expected malformed authorization snapshot to fail closed")
+	}
+	if !strings.Contains(err.Error(), "load authorizations") {
+		t.Fatalf("expected authorization load error, got %v", err)
+	}
+
+	store.UpsertDelegation(types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	})
+	backend.Set([]byte("delegation/bad-json"), []byte("{not-valid-json"))
+
+	_, err = server.ListDelegations(ListDelegationsRequest{})
+	if err == nil {
+		t.Fatal("expected malformed delegation snapshot to fail closed")
+	}
+	if !strings.Contains(err.Error(), "load delegations") {
+		t.Fatalf("expected delegation load error, got %v", err)
 	}
 }

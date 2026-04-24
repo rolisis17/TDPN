@@ -40,6 +40,9 @@ Include/Exclude env defaults (CSV):
   - ROADMAP_VALIDATION_DEBT_ACTIONABLE_INCLUDE_IDS
   - ROADMAP_VALIDATION_DEBT_ACTIONABLE_EXCLUDE_IDS
 
+Failure diagnostics:
+  - ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_FAILURE_LOG_TAIL_LINES (default: 20)
+
 Defaults:
   --parallel 0
   --max-actions 0        (0 = no limit)
@@ -152,6 +155,64 @@ array_to_json() {
   printf '%s\n' "${items[@]}" | jq -R . | jq -s .
 }
 
+log_tail_window_json() {
+  local log_path="${1:-}"
+  local max_lines="${2:-0}"
+  local total_line_count=0
+  local -a tail_lines=()
+  local line
+  if [[ "$max_lines" =~ ^[0-9]+$ ]] && (( max_lines > 0 )) && [[ -f "$log_path" && -r "$log_path" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      total_line_count=$((total_line_count + 1))
+      tail_lines+=("$line")
+      if (( ${#tail_lines[@]} > max_lines )); then
+        tail_lines=("${tail_lines[@]:1}")
+      fi
+    done < "$log_path"
+  fi
+
+  local tail_lines_json='[]'
+  if (( ${#tail_lines[@]} > 0 )); then
+    tail_lines_json="$(printf '%s\n' "${tail_lines[@]}" | jq -R . | jq -s .)"
+  fi
+  local line_count="${#tail_lines[@]}"
+  local truncated_json="false"
+  if (( total_line_count > line_count )); then
+    truncated_json="true"
+  fi
+
+  jq -cn \
+    --argjson lines "$tail_lines_json" \
+    --argjson line_count "$line_count" \
+    --argjson total_line_count "$total_line_count" \
+    --argjson truncated "$truncated_json" \
+    '{
+      log_tail_lines: $lines,
+      log_tail_line_count: $line_count,
+      log_total_line_count: $total_line_count,
+      log_tail_truncated: $truncated
+    }'
+}
+
+augment_result_file_with_failure_diagnostics() {
+  local result_path="$1"
+  if [[ ! -s "$result_path" ]] || ! jq -e . "$result_path" >/dev/null 2>&1; then
+    return
+  fi
+  local status
+  status="$(jq -r '.status // ""' "$result_path")"
+  if [[ "$status" != "fail" ]]; then
+    return
+  fi
+  local log_path
+  log_path="$(jq -r '.artifacts.log // .log // ""' "$result_path")"
+  local failure_diagnostics_json
+  failure_diagnostics_json="$(log_tail_window_json "$log_path" "$failure_log_tail_lines")"
+  local updated_json
+  updated_json="$(jq -c --argjson failure_diagnostics "$failure_diagnostics_json" '. + {failure_diagnostics: $failure_diagnostics}' "$result_path")"
+  printf '%s\n' "$updated_json" >"$result_path"
+}
+
 need_cmd bash
 need_cmd jq
 need_cmd date
@@ -162,6 +223,7 @@ summary_json="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SUMMARY_JSON:-}"
 parallel="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_PARALLEL:-0}"
 max_actions="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_MAX_ACTIONS:-0}"
 print_summary_json="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1}"
+failure_log_tail_lines="${ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_FAILURE_LOG_TAIL_LINES:-20}"
 
 declare -a include_ids=()
 declare -a exclude_ids=()
@@ -258,6 +320,7 @@ done
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 int_arg_or_die "--max-actions" "$max_actions"
+int_arg_or_die "--failure-log-tail-lines" "$failure_log_tail_lines"
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
 if [[ -z "$reports_dir" ]]; then
@@ -691,6 +754,7 @@ if [[ -z "$selection_error" ]]; then
         }' >"$result_path"
       fi
 
+    augment_result_file_with_failure_diagnostics "$result_path"
     check_status="$(jq -r '.status // "fail"' "$result_path")"
     check_rc="$(jq -r '.rc // 125' "$result_path")"
     executed_count=$((executed_count + 1))
@@ -742,6 +806,7 @@ jq -n \
   --argjson parallel "$parallel" \
   --argjson max_actions "$max_actions" \
   --argjson print_summary_json "$print_summary_json" \
+  --argjson failure_log_tail_lines "$failure_log_tail_lines" \
   --argjson include_ids "$include_ids_json" \
   --argjson exclude_ids "$exclude_ids_json" \
   --argjson selected_ids "$selected_ids_json" \
@@ -790,6 +855,7 @@ jq -n \
       parallel: ($parallel == 1),
       max_actions: $max_actions,
       print_summary_json: ($print_summary_json == 1),
+      failure_log_tail_lines: $failure_log_tail_lines,
       include_ids: $include_ids,
       exclude_ids: $exclude_ids
     },

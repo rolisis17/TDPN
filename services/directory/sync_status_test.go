@@ -151,3 +151,54 @@ func TestSyncIssuerTrustUpdatesStatusSuccess(t *testing.T) {
 		t.Fatalf("expected issuer source operator to be declared issuer or key-derived identity, got %q", gotSource)
 	}
 }
+
+func TestNewParsesPeerTrustModeEnvTruthiness(t *testing.T) {
+	t.Setenv("DIRECTORY_PEER_TRUST_STRICT", "true")
+	t.Setenv("DIRECTORY_PEER_TRUST_TOFU", "yes")
+
+	s := New()
+	if !s.peerTrustStrict {
+		t.Fatalf("expected DIRECTORY_PEER_TRUST_STRICT=true to enable strict peer trust")
+	}
+	if !s.peerTrustTOFU {
+		t.Fatalf("expected DIRECTORY_PEER_TRUST_TOFU=yes to enable TOFU peer trust")
+	}
+}
+
+func TestValidateRuntimeConfigRejectsMalformedPeerTrustModeEnv(t *testing.T) {
+	testCases := []struct {
+		name            string
+		key             string
+		value           string
+		wantErrContains string
+	}{
+		{
+			name:            "strict",
+			key:             "DIRECTORY_PEER_TRUST_STRICT",
+			value:           "definitely",
+			wantErrContains: "DIRECTORY_PEER_TRUST_STRICT invalid",
+		},
+		{
+			name:            "tofu",
+			key:             "DIRECTORY_PEER_TRUST_TOFU",
+			value:           "definitely",
+			wantErrContains: "DIRECTORY_PEER_TRUST_TOFU invalid",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DIRECTORY_PEER_TRUST_STRICT", "0")
+			t.Setenv("DIRECTORY_PEER_TRUST_TOFU", "0")
+			t.Setenv(tc.key, tc.value)
+
+			s := New()
+			err := s.validateRuntimeConfig()
+			if err == nil {
+				t.Fatalf("expected malformed %s env to fail closed", tc.key)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

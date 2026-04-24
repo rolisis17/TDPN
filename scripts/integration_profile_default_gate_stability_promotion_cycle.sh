@@ -408,6 +408,29 @@ if [[ "$scenario" == "missing_rc" ]]; then
   exit 0
 fi
 
+if [[ "$scenario" == "go_semantic_mismatch" ]]; then
+  jq -n '{
+    version: 1,
+    schema: { id: "profile_default_gate_stability_promotion_check_summary" },
+    decision: "GO",
+    status: "fail",
+    rc: 0,
+    notes: "simulated contradictory GO summary",
+    enforcement: {
+      fail_on_no_go: true,
+      no_go_detected: false,
+      no_go_enforced: true
+    },
+    outcome: {
+      should_promote: false,
+      action: "hold_promotion_blocked"
+    },
+    violations: [],
+    errors: []
+  }' >"$summary_json"
+  exit 0
+fi
+
 if [[ "$scenario" == "no_go" ]]; then
   promotion_rc=0
   no_go_enforced=false
@@ -733,6 +756,54 @@ if ! jq -e '
 ' "$PROMOTION_INVALID_SUMMARY" >/dev/null 2>&1; then
   echo "invalid promotion summary fail-closed mismatch"
   cat "$PROMOTION_INVALID_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-promotion-cycle] contradictory GO promotion summary fails closed with deterministic diagnostics"
+PROMOTION_SEMANTIC_MISMATCH_SUMMARY="$TMP_DIR/promotion_cycle_promotion_semantic_mismatch_summary.json"
+PROMOTION_SEMANTIC_MISMATCH_CAPTURE="$TMP_DIR/promotion_cycle_promotion_semantic_mismatch_capture.log"
+PROMOTION_SEMANTIC_MISMATCH_COUNTER="$TMP_DIR/promotion_cycle_promotion_semantic_mismatch_counter.txt"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_STABILITY_CYCLE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_PROMOTION_CYCLE_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROMOTION_CYCLE_CAPTURE_FILE="$PROMOTION_SEMANTIC_MISMATCH_CAPTURE" \
+FAKE_PROMOTION_CYCLE_COUNTER_FILE="$PROMOTION_SEMANTIC_MISMATCH_COUNTER" \
+FAKE_PROMOTION_CYCLE_SCENARIOS="pass" \
+FAKE_PROMOTION_CHECK_SCENARIO="go_semantic_mismatch" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "inv-promotion-semantic-mismatch" \
+  --cycles 1 \
+  --sleep-between-cycles-sec 0 \
+  --fail-on-no-go 0 \
+  --summary-json "$PROMOTION_SEMANTIC_MISMATCH_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_promotion_cycle_semantic_mismatch.log 2>&1
+promotion_semantic_mismatch_rc=$?
+set -e
+
+if [[ "$promotion_semantic_mismatch_rc" -eq 0 ]]; then
+  echo "expected semantic mismatch promotion summary path rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_promotion_cycle_semantic_mismatch.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .failure_reason == "promotion_summary_semantic_contract_mismatch"
+  and .promotion.decision == "GO"
+  and .promotion.contract.semantic_valid == false
+  and ((.promotion.contract.mismatches.codes | index("status_mismatch")) != null)
+  and ((.promotion.contract.mismatches.codes | index("outcome_action_mismatch")) != null)
+  and .diagnostics.fail_closed.triggered == true
+  and .diagnostics.fail_closed.primary_reason_code == "promotion_summary_semantic_contract_mismatch"
+  and .diagnostics.fail_closed.primary_reason_category == "summary_contract"
+  and (.diagnostics.fail_closed.next_operator_action_command | contains("profile_default_gate_stability_promotion_check.sh"))
+' "$PROMOTION_SEMANTIC_MISMATCH_SUMMARY" >/dev/null 2>&1; then
+  echo "semantic mismatch fail-closed summary mismatch"
+  cat "$PROMOTION_SEMANTIC_MISMATCH_SUMMARY"
   exit 1
 fi
 

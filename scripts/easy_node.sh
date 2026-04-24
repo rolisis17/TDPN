@@ -330,7 +330,7 @@ Usage:
   ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-archive-run [roadmap_live_evidence_archive_run args...]
-  ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID] [--exclude-id ID] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID]... [--exclude-id ID]... [--print-summary-json [0|1]]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -543,7 +543,7 @@ Usage:
   ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-archive-run [roadmap_live_evidence_archive_run args...]
-  ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID] [--exclude-id ID] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID]... [--exclude-id ID]... [--print-summary-json [0|1]]
   ./scripts/easy_node.sh ci-phase0 [ci_phase0 args...]
   ./scripts/easy_node.sh ci-phase1-resilience [--three-machine-docker-profile-matrix-timeout-sec N] [--profile-compare-docker-matrix-timeout-sec N] [--three-machine-docker-profile-matrix-record-timeout-sec N] [--vpn-rc-matrix-path-timeout-sec N] [--vpn-rc-resilience-path-timeout-sec N] [--session-churn-guard-timeout-sec N] [--3hop-runtime-integration-timeout-sec N] [ci_phase1_resilience args...]
   ./scripts/easy_node.sh phase1-resilience-handoff-check [phase1_resilience_handoff_check args...]
@@ -733,9 +733,9 @@ Notes:
   - roadmap-evidence-pack-actionable-run wraps the roadmap evidence-pack actionable helper path, supports `--scope all|profile-default|runtime-actuation|multi-vm`, and emits `roadmap_evidence_pack_actionable_run_summary` output.
   - roadmap-live-evidence-actionable-run wraps the roadmap live-evidence actionable helper path, targets live-cycle ids, and emits `roadmap_live_evidence_actionable_run_summary` output.
   - roadmap-live-and-pack-actionable-run wraps the roadmap live+pack actionable helper path, chains live-cycle and pack actions, and emits `roadmap_live_and_pack_actionable_run_summary` output.
-  - roadmap-live-evidence-cycle-batch-run wraps the roadmap live-evidence cycle-batch helper path (override with `ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT`) and preserves pass-through args.
+  - roadmap-live-evidence-cycle-batch-run wraps the roadmap live-evidence cycle-batch helper path (override with `ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT`), preserves pass-through args, and emits `roadmap_live_evidence_cycle_batch_run_summary` output with deterministic `selection_accounting` plus per-iteration track results.
   - roadmap-live-evidence-archive-run wraps the roadmap live-evidence archive helper path (override with `ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCRIPT`) and preserves pass-through args.
-  - roadmap-validation-debt-actionable-run wraps the roadmap validation-debt actionable helper path (override with `ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT`) and preserves pass-through args.
+  - roadmap-validation-debt-actionable-run wraps the roadmap validation-debt actionable helper path (override with `ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT`), preserves pass-through args, and emits `roadmap_validation_debt_actionable_run_summary` output with `selection_accounting`, `checks_catalog`, and per-check execution results.
   - ci-phase0 runs the fast Phase-0 simplification gate (launcher wiring/runtime + config-v1 + local API contract checks) with fail-fast behavior.
   - ci-phase1-resilience runs the Phase-1 resilience gate (route profile + peer churn + lifecycle stability checks), forwards per-stage timeout controls (`--*-timeout-sec`), and keeps fail-fast behavior.
   - phase1-resilience-handoff-check wraps the Phase-1 resilience handoff check helper script with pass-through args.

@@ -752,6 +752,16 @@ if awk -v observed="$go_decision_rate_pct_json" -v required="$require_min_go_dec
     "${go_decision_rate_pct_json}%"
 fi
 
+if [[ "$cycle_schema_invalid_cycles" -gt 0 ]]; then
+  append_violation \
+    "cycle_schema_invalid" \
+    "observed.cycle_schema_invalid_cycles" \
+    "one or more cycles use an invalid cycle-summary schema contract" \
+    "regenerate invalid cycle artifacts with profile_default_gate_stability_cycle.sh before promotion gating" \
+    "0" \
+    "$cycle_schema_invalid_cycles"
+fi
+
 if [[ "$require_check_schema_valid" == "1" && "$check_schema_invalid_cycles" -gt 0 ]]; then
   append_violation \
     "check_schema_validation_missing" \

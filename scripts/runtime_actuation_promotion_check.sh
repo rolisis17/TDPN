@@ -1019,6 +1019,26 @@ if (( signoff_context_missing_samples > 0 )); then
     "rerun runtime-actuation promotion cycle with refreshed signoff summaries before re-running promotion check"
 fi
 
+if (( source_not_go_samples > 0 )); then
+  append_violation \
+    "source_decision_not_go" \
+    "observed.source_not_go_samples" \
+    "one or more upstream summaries report decision=NO-GO" \
+    "0" \
+    "$source_not_go_samples" \
+    "resolve upstream NO-GO blockers in campaign-check/signoff evidence before promotion"
+fi
+
+if (( source_not_pass_samples > 0 )); then
+  append_violation \
+    "source_status_not_pass" \
+    "observed.source_not_pass_samples" \
+    "one or more upstream summaries report non-pass status" \
+    "0" \
+    "$source_not_pass_samples" \
+    "stabilize upstream campaign-check/signoff status to pass before promotion"
+fi
+
 decision="GO"
 status="ok"
 notes="runtime-actuation promotion evidence satisfies configured policy thresholds"
@@ -1080,10 +1100,20 @@ runtime_diagnostics_violation_codes_json="$(jq -c '
       )
   ]
 ' <<<"$violations_json")"
+source_contract_violation_codes_json="$(jq -c '
+  [ .[] | select((.code | type) == "string")
+    | .code
+    | select(
+        . == "source_decision_not_go"
+        or . == "source_status_not_pass"
+      )
+  ]
+' <<<"$violations_json")"
 
 threshold_violation_count="$(jq -r 'length' <<<"$threshold_violation_codes_json")"
 signoff_context_violation_count="$(jq -r 'length' <<<"$signoff_context_violation_codes_json")"
 runtime_diagnostics_violation_count="$(jq -r 'length' <<<"$runtime_diagnostics_violation_codes_json")"
+source_contract_violation_count="$(jq -r 'length' <<<"$source_contract_violation_codes_json")"
 
 threshold_recommended_cycles="$require_min_samples"
 threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$require_min_pass_samples")"
@@ -1109,6 +1139,11 @@ if [[ "$decision" == "NO-GO" ]]; then
     no_go_driver_codes_json="$threshold_violation_codes_json"
     remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$threshold_recommended_cycles")"
     remediation_next_command_reason="collect enough pass-ready samples to satisfy runtime-actuation thresholds"
+  elif (( source_contract_violation_count > 0 )); then
+    no_go_primary_driver="upstream_source_blocked"
+    no_go_driver_codes_json="$source_contract_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "")"
+    remediation_next_command_reason="resolve upstream campaign-check/signoff NO-GO or non-pass blockers before promotion"
   elif (( runtime_diagnostics_violation_count > 0 )); then
     no_go_primary_driver="runtime_diagnostics_missing"
     no_go_driver_codes_json="$runtime_diagnostics_violation_codes_json"
@@ -1176,6 +1211,7 @@ jq -n \
   --argjson threshold_violation_count "$threshold_violation_count" \
   --argjson signoff_context_violation_count "$signoff_context_violation_count" \
   --argjson runtime_diagnostics_violation_count "$runtime_diagnostics_violation_count" \
+  --argjson source_contract_violation_count "$source_contract_violation_count" \
   --argjson no_go_driver_codes "$no_go_driver_codes_json" \
   --argjson violations "$violations_json" \
   --argjson errors "$errors_json" \
@@ -1263,6 +1299,7 @@ jq -n \
         threshold_violation_count: $threshold_violation_count,
         signoff_context_violation_count: $signoff_context_violation_count,
         runtime_diagnostics_violation_count: $runtime_diagnostics_violation_count,
+        source_contract_violation_count: $source_contract_violation_count,
         threshold_recommended_cycles: $threshold_recommended_cycles,
         remediation: {
           next_command: (if $remediation_next_command == "" then null else $remediation_next_command end),

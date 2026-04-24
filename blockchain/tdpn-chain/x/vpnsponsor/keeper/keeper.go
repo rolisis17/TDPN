@@ -112,6 +112,25 @@ func (k *Keeper) ListAuthorizations() []types.SponsorAuthorization {
 	return records
 }
 
+func (k *Keeper) ListAuthorizationsWithError() ([]types.SponsorAuthorization, error) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+
+	records, err := k.listAuthorizationsLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	records = append([]types.SponsorAuthorization(nil), records...)
+	for i := range records {
+		records[i] = normalizeAuthorization(records[i])
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].AuthorizationID < records[j].AuthorizationID
+	})
+	return records, nil
+}
+
 func (k *Keeper) UpsertDelegation(record types.DelegatedSessionCredit) {
 	_ = k.UpsertDelegationWithError(record)
 }
@@ -271,6 +290,25 @@ func (k *Keeper) ListDelegations() []types.DelegatedSessionCredit {
 	return records
 }
 
+func (k *Keeper) ListDelegationsWithError() ([]types.DelegatedSessionCredit, error) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+
+	records, err := k.listDelegationsLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	records = append([]types.DelegatedSessionCredit(nil), records...)
+	for i := range records {
+		records[i] = normalizeDelegation(records[i])
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].ReservationID < records[j].ReservationID
+	})
+	return records, nil
+}
+
 func normalizeAuthorization(record types.SponsorAuthorization) types.SponsorAuthorization {
 	record = types.NormalizeSponsorAuthorization(record)
 	if record.Status == "" {
@@ -360,7 +398,18 @@ func checkedAddInt64(left int64, right int64) (int64, bool) {
 	return left + right, false
 }
 
-func (k *Keeper) listDelegationsForAccountingLocked() ([]types.DelegatedSessionCredit, error) {
+func (k *Keeper) listAuthorizationsLocked() ([]types.SponsorAuthorization, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListAuthorizationsWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load authorizations: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListAuthorizations(), nil
+}
+
+func (k *Keeper) listDelegationsLocked() ([]types.DelegatedSessionCredit, error) {
 	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
 		records, err := readAwareStore.ListDelegationsWithError()
 		if err != nil {
@@ -369,6 +418,10 @@ func (k *Keeper) listDelegationsForAccountingLocked() ([]types.DelegatedSessionC
 		return records, nil
 	}
 	return k.store.ListDelegations(), nil
+}
+
+func (k *Keeper) listDelegationsForAccountingLocked() ([]types.DelegatedSessionCredit, error) {
+	return k.listDelegationsLocked()
 }
 
 func canonicalAuthorizationID(value string) string {

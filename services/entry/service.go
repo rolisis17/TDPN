@@ -1137,13 +1137,14 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRoute, error) {
+	strictMode := s.betaStrict || s.prodStrict
 	fallback := exitRoute{
 		controlURL: normalizeHTTPURL(s.exitControlURL),
 		dataAddr:   strings.TrimSpace(s.exitDataAddr),
 		operatorID: strings.TrimSpace(s.operatorID),
 	}
 	if exitID == "" {
-		if s.betaStrict || s.prodStrict {
+		if strictMode {
 			return exitRoute{}, fmt.Errorf("exit id required in strict mode")
 		}
 		return fallback, nil
@@ -1157,7 +1158,13 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	cached, ok := s.exitRouteCache[exitID]
 	s.mu.RUnlock()
 	if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
-		return cached, nil
+		if strictMode {
+			if err := validateStrictExitControlRoute(cached.controlURL, cached.dataAddr); err == nil {
+				return cached, nil
+			}
+		} else {
+			return cached, nil
+		}
 	}
 
 	candidates := make(map[string]routeCandidate)
@@ -1189,7 +1196,7 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 			descControlURL := normalizeHTTPURL(desc.ControlURL)
 			descDataAddr := strings.TrimSpace(desc.Endpoint)
 			if descControlURL == "" || descDataAddr == "" {
-				if s.betaStrict || s.prodStrict {
+				if strictMode {
 					lastErr = fmt.Errorf("strict mode requires directory route control_url and endpoint")
 				} else {
 					lastErr = fmt.Errorf("directory route missing control_url or endpoint")
@@ -1202,7 +1209,7 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 				operatorID: strings.TrimSpace(desc.OperatorID),
 				fetchedAt:  now,
 			}
-			if s.betaStrict || s.prodStrict {
+			if strictMode {
 				if err := validateStrictExitControlRoute(route.controlURL, route.dataAddr); err != nil {
 					lastErr = err
 					continue

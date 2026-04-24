@@ -26,6 +26,7 @@ PASS_CYCLE_C="$TMP_DIR/cycle_pass_c.json"
 NO_GO_CYCLE="$TMP_DIR/cycle_no_go.json"
 POLICY_MISMATCH_CYCLE="$TMP_DIR/cycle_policy_mismatch.json"
 SCHEMA_INVALID_CYCLE="$TMP_DIR/cycle_schema_invalid.json"
+INVALID_CONTRACT_CYCLE="$TMP_DIR/cycle_invalid_contract.json"
 
 cat >"$PASS_CYCLE_A" <<'EOF_PASS_CYCLE_A'
 {
@@ -99,6 +100,18 @@ cat >"$SCHEMA_INVALID_CYCLE" <<'EOF_SCHEMA_INVALID_CYCLE'
 }
 EOF_SCHEMA_INVALID_CYCLE
 
+cat >"$INVALID_CONTRACT_CYCLE" <<'EOF_INVALID_CONTRACT_CYCLE'
+{
+  "version": 1,
+  "schema": { "id": "profile_compare_multi_vm_stability_cycle_summary" },
+  "status": "pass",
+  "rc": 5,
+  "decision": "GO",
+  "inputs": { "check": { "policy": { "require_modal_decision": "GO" } } },
+  "check": { "decision": "GO" }
+}
+EOF_INVALID_CONTRACT_CYCLE
+
 echo "[profile-compare-multi-vm-stability-promotion-check] strict happy path"
 STRICT_SUMMARY="$TMP_DIR/promotion_check_strict_summary.json"
 set +e
@@ -140,6 +153,46 @@ if ! jq -e '
 ' "$STRICT_SUMMARY" >/dev/null 2>&1; then
   echo "strict happy-path summary mismatch"
   cat "$STRICT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-promotion-check] invalid cycle contract is fail-closed even with permissive thresholds"
+CONTRACT_SUMMARY="$TMP_DIR/promotion_check_invalid_contract_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --cycle-summary-json "$INVALID_CONTRACT_CYCLE" \
+  --require-min-cycles 1 \
+  --require-min-pass-cycles 0 \
+  --require-max-fail-cycles 0 \
+  --require-max-warn-cycles 0 \
+  --require-min-pass-rate-pct 0 \
+  --require-min-go-decision-rate-pct 0 \
+  --require-cycle-schema-valid 1 \
+  --require-check-modal-decision GO \
+  --fail-on-no-go 1 \
+  --summary-json "$CONTRACT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_check_contract.log 2>&1
+contract_rc=$?
+set -e
+
+if [[ "$contract_rc" -eq 0 ]]; then
+  echo "expected invalid-contract path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_check_contract.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc != 0
+  and .failure_reason_code == "cycle_contract_invalid"
+  and .observed.cycle_contract_invalid_cycles == 1
+  and ((.violations | map(.code) | index("cycle_contract_invalid")) != null)
+  and (.cycles[0].reasons | map(.code) | index("cycle_contract_invalid")) != null
+  and ((.cycles[0].reasons | map(.message) | join(" ")) | test("decision=GO"))
+  and ((.cycles[0].reasons | map(.message) | join(" ")) | test("rc=5"))
+' "$CONTRACT_SUMMARY" >/dev/null 2>&1; then
+  echo "invalid-contract summary mismatch"
+  cat "$CONTRACT_SUMMARY"
   exit 1
 fi
 

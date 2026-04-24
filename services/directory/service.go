@@ -487,8 +487,8 @@ func New() *Service {
 		}
 	}
 	providerSplitRoles := os.Getenv("DIRECTORY_PROVIDER_SPLIT_ROLES") == "1"
-	peerTrustStrict := os.Getenv("DIRECTORY_PEER_TRUST_STRICT") == "1"
-	peerTrustTOFU := os.Getenv("DIRECTORY_PEER_TRUST_TOFU") == "1"
+	peerTrustStrict, peerTrustStrictErr := envStrictBoolOr("DIRECTORY_PEER_TRUST_STRICT", "", false)
+	peerTrustTOFU, peerTrustTOFUErr := envStrictBoolOr("DIRECTORY_PEER_TRUST_TOFU", "", false)
 	peerTrustFile := os.Getenv("DIRECTORY_PEER_TRUSTED_KEYS_FILE")
 	if peerTrustFile == "" {
 		peerTrustFile = "data/directory_peer_trusted_keys.txt"
@@ -502,6 +502,8 @@ func New() *Service {
 	strictModeParseErr := firstEnvParseError(
 		annotateEnvParseError("BETA_STRICT_MODE/DIRECTORY_BETA_STRICT", betaStrictErr),
 		annotateEnvParseError("PROD_STRICT_MODE/DIRECTORY_PROD_STRICT", prodStrictErr),
+		annotateEnvParseError("DIRECTORY_PEER_TRUST_STRICT", peerTrustStrictErr),
+		annotateEnvParseError("DIRECTORY_PEER_TRUST_TOFU", peerTrustTOFUErr),
 	)
 	if betaStrict {
 		providerSplitRoles = true

@@ -421,6 +421,7 @@ no_go_decision_cycles=0
 usable_decision_cycles=0
 cycle_schema_invalid_cycles=0
 check_policy_modal_decision_mismatch_cycles=0
+cycle_contract_invalid_cycles=0
 
 cycles_json='[]'
 
@@ -433,6 +434,7 @@ for cycle_path in "${cycle_summary_paths[@]}"; do
   artifact_decision=""
   artifact_rc_json="null"
   artifact_check_policy_modal_decision=""
+  artifact_contract_valid="0"
   artifact_promotion_candidate="false"
   artifact_reasons='[]'
 
@@ -542,7 +544,37 @@ for cycle_path in "${cycle_summary_paths[@]}"; do
     status_fail_cycles=$((status_fail_cycles + 1))
   fi
 
-  if [[ "$artifact_valid_json" == "1" && ( "$artifact_schema_valid" == "1" || "$require_cycle_schema_valid" == "0" ) && "$artifact_status" == "pass" && "$artifact_decision" == "GO" && "$artifact_rc_json" == "0" ]]; then
+  if [[ "$artifact_valid_json" == "1" && ( "$artifact_schema_valid" == "1" || "$require_cycle_schema_valid" == "0" ) ]]; then
+    artifact_contract_valid="0"
+    if [[ "$artifact_decision" == "GO" && "$artifact_status" == "pass" && "$artifact_rc_json" == "0" ]]; then
+      artifact_contract_valid="1"
+    elif [[ "$artifact_decision" == "NO-GO" && "$artifact_status" == "warn" && "$artifact_rc_json" == "0" ]]; then
+      artifact_contract_valid="1"
+    elif [[ "$artifact_decision" == "NO-GO" && "$artifact_status" == "fail" && "$artifact_rc_json" != "0" && "$artifact_rc_json" != "null" ]]; then
+      artifact_contract_valid="1"
+    fi
+
+    if [[ "$artifact_contract_valid" != "1" ]]; then
+      cycle_contract_invalid_cycles=$((cycle_contract_invalid_cycles + 1))
+      artifact_reasons="$(jq -c --arg decision "$artifact_decision" --arg status "$artifact_status" --arg rc "$artifact_rc_json" '
+        . + [{
+          code: "cycle_contract_invalid",
+          message: (
+            "cycle decision/status/rc contract invalid (decision="
+            + (if $decision == "" then "unset" else $decision end)
+            + " status="
+            + (if $status == "" then "unset" else $status end)
+            + " rc="
+            + $rc
+            + ")"
+          ),
+          action: "regenerate cycle artifact so GO=pass+rc=0 and NO-GO=(warn+rc=0 or fail+rc!=0)"
+        }]
+      ' <<<"$artifact_reasons")"
+    fi
+  fi
+
+  if [[ "$artifact_valid_json" == "1" && ( "$artifact_schema_valid" == "1" || "$require_cycle_schema_valid" == "0" ) && "$artifact_contract_valid" == "1" && "$artifact_status" == "pass" && "$artifact_decision" == "GO" ]]; then
     if [[ "$artifact_check_policy_modal_decision" != "$require_check_policy_modal_decision" ]]; then
       artifact_promotion_candidate="false"
     else
@@ -714,6 +746,16 @@ if [[ "$check_policy_modal_decision_mismatch_cycles" -gt 0 ]]; then
     "$check_policy_modal_decision_mismatch_cycles"
 fi
 
+if [[ "$cycle_contract_invalid_cycles" -gt 0 ]]; then
+  append_violation \
+    "cycle_contract_invalid" \
+    "observed.cycle_contract_invalid_cycles" \
+    "one or more cycles violate the required decision/status/rc contract" \
+    "regenerate invalid cycle summaries so GO=pass+rc=0 and NO-GO=(warn+rc=0 or fail+rc!=0)" \
+    "0" \
+    "$cycle_contract_invalid_cycles"
+fi
+
 decision="GO"
 status="ok"
 notes="repeated multi-VM stability cycle artifacts satisfy promotion policy thresholds"
@@ -789,6 +831,7 @@ jq -n \
   --argjson usable_decision_cycles "$usable_decision_cycles" \
   --argjson cycle_schema_invalid_cycles "$cycle_schema_invalid_cycles" \
   --argjson check_policy_modal_decision_mismatch_cycles "$check_policy_modal_decision_mismatch_cycles" \
+  --argjson cycle_contract_invalid_cycles "$cycle_contract_invalid_cycles" \
   --argjson promotion_pass_rate_pct "$promotion_pass_rate_pct_json" \
   --argjson go_decision_rate_pct "$go_decision_rate_pct_json" \
   --argjson cycles "$cycles_json" \
@@ -850,6 +893,7 @@ jq -n \
       go_decision_rate_pct: $go_decision_rate_pct,
       cycle_schema_invalid_cycles: $cycle_schema_invalid_cycles,
       check_policy_modal_decision_mismatch_cycles: $check_policy_modal_decision_mismatch_cycles,
+      cycle_contract_invalid_cycles: $cycle_contract_invalid_cycles,
       cycle_summary_list_missing: ($cycle_summary_list_missing == "1")
     },
     enforcement: {

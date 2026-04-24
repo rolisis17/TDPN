@@ -949,6 +949,8 @@ promotion_summary_fresh="false"
 promotion_decision=""
 promotion_status=""
 promotion_rc_json="null"
+promotion_schema_id=""
+promotion_schema_valid="false"
 promotion_notes=""
 promotion_outcome_action=""
 promotion_next_operator_action=""
@@ -973,6 +975,10 @@ if [[ "$(json_file_valid_01 "$promotion_summary_json")" == "1" ]]; then
   promotion_decision="$(normalize_decision "$promotion_decision")"
   promotion_status="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
   promotion_rc_json="$(jq -r 'if (.rc | type) == "number" then .rc else "null" end' "$promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  promotion_schema_id="$(jq -r 'if (.schema.id | type) == "string" then .schema.id else "" end' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  if [[ "$promotion_schema_id" == "runtime_actuation_promotion_check_summary" ]]; then
+    promotion_schema_valid="true"
+  fi
   promotion_notes="$(jq -r 'if (.notes | type) == "string" then .notes else "" end' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
   promotion_outcome_action="$(jq -r 'if (.outcome.action | type) == "string" then .outcome.action else "" end' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
   promotion_next_operator_action="$(jq -r '
@@ -1010,6 +1016,8 @@ if [[ "$promotion_stage_rc" -eq 0 ]]; then
   if [[ "$promotion_summary_valid" != "true" ]]; then
     promotion_stage_status="fail"
   elif [[ "$promotion_summary_fresh" != "true" ]]; then
+    promotion_stage_status="fail"
+  elif [[ "$promotion_schema_valid" != "true" ]]; then
     promotion_stage_status="fail"
   elif [[ "$promotion_has_usable_decision" != "true" ]]; then
     promotion_stage_status="fail"
@@ -1080,6 +1088,12 @@ elif [[ "$promotion_summary_fresh" != "true" ]]; then
   final_rc=1
   failure_stage="promotion_check"
   failure_reason="runtime actuation promotion summary is stale (not refreshed by current run)"
+elif [[ "$promotion_schema_valid" != "true" ]]; then
+  decision="NO-GO"
+  status="fail"
+  final_rc=1
+  failure_stage="promotion_check"
+  failure_reason="runtime actuation promotion summary schema mismatch"
 elif [[ "$promotion_has_usable_decision" != "true" ]]; then
   decision="NO-GO"
   status="fail"
@@ -1181,6 +1195,10 @@ if [[ "$decision" == "NO-GO" ]]; then
       no_go_primary_reason_code="freshness_stale"
       no_go_primary_reason_category="stale_evidence"
       no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
+    elif [[ "$promotion_schema_valid" != "true" ]]; then
+      no_go_primary_reason_code="promotion_summary_schema_mismatch"
+      no_go_primary_reason_category="policy_violation"
+      no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
     elif [[ "$promotion_has_usable_decision" != "true" ]]; then
       no_go_primary_reason_code="promotion_decision_missing"
       no_go_primary_reason_category="policy_violation"
@@ -1250,6 +1268,8 @@ jq -n \
   --arg promotion_summary_exists "$promotion_summary_exists" \
   --arg promotion_summary_valid "$promotion_summary_valid" \
   --arg promotion_summary_fresh "$promotion_summary_fresh" \
+  --arg promotion_schema_id "$promotion_schema_id" \
+  --arg promotion_schema_valid "$promotion_schema_valid" \
   --arg promotion_decision "$promotion_decision" \
   --arg promotion_status "$promotion_status" \
   --arg promotion_notes "$promotion_notes" \
@@ -1334,6 +1354,8 @@ jq -n \
         summary_exists: ($promotion_summary_exists == "true"),
         summary_valid_json: ($promotion_summary_valid == "true"),
         summary_fresh: ($promotion_summary_fresh == "true"),
+        summary_schema_id: (if $promotion_schema_id == "" then null else $promotion_schema_id end),
+        summary_schema_valid: ($promotion_schema_valid == "true"),
         has_usable_decision: ($promotion_has_usable_decision == "true")
       }
     },
@@ -1342,6 +1364,8 @@ jq -n \
       decision: (if $promotion_decision == "" then null else $promotion_decision end),
       status: (if $promotion_status == "" then null else $promotion_status end),
       rc: $promotion_rc,
+      summary_schema_id: (if $promotion_schema_id == "" then null else $promotion_schema_id end),
+      summary_schema_valid: ($promotion_schema_valid == "true"),
       notes: (if $promotion_notes == "" then null else $promotion_notes end),
       outcome_action: (if $promotion_outcome_action == "" then null else $promotion_outcome_action end),
       next_operator_action: (if $promotion_next_operator_action == "" then null else $promotion_next_operator_action end),
