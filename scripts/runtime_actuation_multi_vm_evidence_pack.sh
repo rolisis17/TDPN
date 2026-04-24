@@ -45,6 +45,18 @@ trim() {
   printf '%s' "$value"
 }
 
+render_command() {
+  local rendered=""
+  local token=""
+  for token in "$@"; do
+    if [[ -n "$rendered" ]]; then
+      rendered+=" "
+    fi
+    rendered+="$(printf '%q' "$token")"
+  done
+  printf '%s' "$rendered"
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -509,6 +521,50 @@ multi_vm_eval_json="$(evaluate_multi_vm_cycle_summary_json "$multi_vm_source_sum
 
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 
+runtime_cycle_rerun_command="$(render_command \
+  "./scripts/easy_node.sh" \
+  "runtime-actuation-promotion-cycle" \
+  "--reports-dir" "$reports_dir" \
+  "--cycles" "3" \
+  "--fail-on-no-go" "1" \
+  "--summary-json" "$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json" \
+  "--print-summary-json" "1"
+)"
+
+multi_vm_cycle_rerun_command="$(render_command \
+  "./scripts/easy_node.sh" \
+  "profile-compare-multi-vm-stability-promotion-cycle" \
+  "--reports-dir" "$reports_dir" \
+  "--fail-on-no-go" "1" \
+  "--summary-json" "$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json" \
+  "--print-summary-json" "1"
+)"
+
+combined_cycle_rerun_command="$(render_command \
+  "./scripts/easy_node.sh" \
+  "roadmap-live-evidence-cycle-batch-run" \
+  "--reports-dir" "$reports_dir" \
+  "--include-track-id" "runtime_actuation_promotion_cycle" \
+  "--include-track-id" "profile_compare_multi_vm_stability_promotion_cycle" \
+  "--iterations" "1" \
+  "--continue-on-fail" "0" \
+  "--parallel" "0" \
+  "--print-summary-json" "1"
+)"
+
+evidence_pack_rerun_command="$(render_command \
+  "./scripts/easy_node.sh" \
+  "runtime-actuation-multi-vm-evidence-pack" \
+  "--reports-dir" "$reports_dir" \
+  "--runtime-actuation-promotion-cycle-summary-json" "$runtime_actuation_source_summary_json" \
+  "--multi-vm-stability-promotion-cycle-summary-json" "$multi_vm_source_summary_json" \
+  "--fail-on-no-go" "$fail_on_no_go_compat" \
+  "--summary-json" "$summary_json" \
+  "--report-md" "$report_md" \
+  "--print-summary-json" "1" \
+  "--print-report" "1"
+)"
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg reports_dir "$reports_dir" \
@@ -516,56 +572,152 @@ jq -n \
   --arg multi_vm_input_summary_json "$multi_vm_input_summary_json" \
   --arg summary_json_path "$summary_json" \
   --arg report_md_path "$report_md" \
+  --arg runtime_cycle_rerun_command "$runtime_cycle_rerun_command" \
+  --arg multi_vm_cycle_rerun_command "$multi_vm_cycle_rerun_command" \
+  --arg combined_cycle_rerun_command "$combined_cycle_rerun_command" \
+  --arg evidence_pack_rerun_command "$evidence_pack_rerun_command" \
   --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson runtime "$runtime_eval_json" \
   --argjson multi_vm "$multi_vm_eval_json" \
   '
+    def trim_text:
+      if type == "string" then gsub("^\\s+|\\s+$"; "")
+      else ""
+      end;
+    def placeholder_like:
+      ascii_upcase
+      | test(
+          "REPLACE_WITH_|\\[REDACTED\\]|<SET-REAL-INVITE-KEY>|\\$\\{INVITE_KEY\\}|\\bINVITE_KEY\\b|\\$\\{CAMPAIGN_SUBJECT\\}|\\bCAMPAIGN_SUBJECT\\b|\\$\\{HOST_A\\}|\\bHOST_A\\b|\\$\\{HOST_B\\}|\\bHOST_B\\b|\\$\\{A_HOST\\}|\\bA_HOST\\b|\\$\\{B_HOST\\}|\\bB_HOST\\b|<INVITE_KEY>|<CAMPAIGN_SUBJECT>|<HOST_A>|<HOST_B>|%INVITE_KEY%|%CAMPAIGN_SUBJECT%"
+        );
+    def clean_text:
+      (trim_text) as $t
+      | if $t == "" then null
+        elif ($t | placeholder_like) then null
+        else $t
+        end;
     def promote_ok($gate):
       ($gate.usable == true)
       and (($gate.decision_normalized // "") == "GO")
       and (($gate.status_normalized // "") == "pass")
       and (($gate.rc | type) == "number")
       and ($gate.rc == 0);
+    def missing_invalid_reasons($gate):
+      [
+        ($gate.reasons // [])[]
+        | select(
+            . == "summary_missing"
+            or . == "summary_invalid_json"
+            or . == "schema_mismatch"
+            or . == "decision_missing_or_invalid"
+            or . == "status_missing_or_invalid"
+            or . == "rc_missing_or_invalid"
+          )
+      ];
+    def freshness_reasons($gate):
+      [
+        ($gate.reasons // [])[]
+        | select(. == "freshness_unknown" or . == "freshness_stale")
+      ];
+    def prefixed($prefix; $arr):
+      [($arr // [])[] | ($prefix + ":" + .)];
 
   (promote_ok($runtime) and promote_ok($multi_vm)) as $combined_go
-  | (($runtime.usable == true) and ($multi_vm.usable == true) and (($runtime.decision_normalized // "") == "NO-GO" or ($multi_vm.decision_normalized // "") == "NO-GO")) as $usable_no_go
+  | (($runtime.usable == true) and (($runtime.decision_normalized // "") == "NO-GO")) as $runtime_no_go
+  | (($multi_vm.usable == true) and (($multi_vm.decision_normalized // "") == "NO-GO")) as $multi_vm_no_go
+  | (($runtime_no_go or $multi_vm_no_go) and ($runtime.usable == true) and ($multi_vm.usable == true)) as $usable_no_go
+  | ((missing_invalid_reasons($runtime) | length) > 0) as $runtime_missing_invalid
+  | ((missing_invalid_reasons($multi_vm) | length) > 0) as $multi_vm_missing_invalid
+  | ((freshness_reasons($runtime) | length) > 0) as $runtime_freshness_issue
+  | ((freshness_reasons($multi_vm) | length) > 0) as $multi_vm_freshness_issue
+  | ($runtime_missing_invalid or $multi_vm_missing_invalid) as $has_missing_invalid
+  | ($runtime_freshness_issue or $multi_vm_freshness_issue) as $has_freshness_issue
   | (($runtime.usable != true) or ($multi_vm.usable != true) or ($usable_no_go and ($fail_on_no_go == 1))) as $fail_closed
   | (
-      ((if $runtime.usable != true then ($runtime.reasons // [] | map("runtime_actuation_promotion_cycle:" + .)) else [] end)
-      + (if $multi_vm.usable != true then ($multi_vm.reasons // [] | map("multi_vm_stability_promotion_cycle:" + .)) else [] end)
+      ((if $runtime.usable != true then prefixed("runtime_actuation_promotion_cycle"; ($runtime.reasons // [])) else [] end)
+      + (if $multi_vm.usable != true then prefixed("multi_vm_stability_promotion_cycle"; ($multi_vm.reasons // [])) else [] end)
       + (if $usable_no_go and ($fail_on_no_go == 1) then ["usable_no_go_detected"] else [] end))
     ) as $fail_closed_reasons
   | (
-      if $combined_go then
-        "Promotion evidence pack is healthy."
-      elif $fail_closed then
+      if $combined_go then "none"
+      elif $has_missing_invalid then "missing_or_invalid_source_summary"
+      elif $has_freshness_issue then "stale_or_unknown_freshness"
+      elif $usable_no_go then "usable_no_go"
+      else "policy_violation_or_non_pass"
+      end
+    ) as $no_go_reason_category
+  | (
+      if $combined_go then []
+      elif $no_go_reason_category == "missing_or_invalid_source_summary" then
         (
-          if $usable_no_go and ($fail_on_no_go == 1) then
-            [
-              $runtime.next_operator_action,
-              $multi_vm.next_operator_action,
-              "Promotion evidence indicates NO-GO. Resolve blockers and rerun promotion cycles."
-            ]
-          else
-            [
-              $runtime.next_operator_action,
-              $multi_vm.next_operator_action,
-              "Refresh promotion-cycle artifacts and rerun runtime_actuation_multi_vm_evidence_pack.sh."
-            ]
-          end
-          | map(select(type == "string" and length > 0))
-          | .[0]
+          prefixed("runtime_actuation_promotion_cycle"; missing_invalid_reasons($runtime))
+          + prefixed("multi_vm_stability_promotion_cycle"; missing_invalid_reasons($multi_vm))
+          | unique
+        )
+      elif $no_go_reason_category == "stale_or_unknown_freshness" then
+        (
+          prefixed("runtime_actuation_promotion_cycle"; freshness_reasons($runtime))
+          + prefixed("multi_vm_stability_promotion_cycle"; freshness_reasons($multi_vm))
+          | unique
+        )
+      elif $no_go_reason_category == "usable_no_go" then
+        (
+          (if $runtime_no_go then ["runtime_actuation_promotion_cycle:decision_no_go"] else [] end)
+          + (if $multi_vm_no_go then ["multi_vm_stability_promotion_cycle:decision_no_go"] else [] end)
         )
       else
         (
-          [
-            $runtime.next_operator_action,
-            $multi_vm.next_operator_action,
-            "Promotion evidence indicates NO-GO. Resolve blockers and rerun promotion cycles."
-          ]
-          | map(select(type == "string" and length > 0))
-          | .[0]
+          prefixed("runtime_actuation_promotion_cycle"; ($runtime.reasons // []))
+          + prefixed("multi_vm_stability_promotion_cycle"; ($multi_vm.reasons // []))
+          | unique
         )
+      end
+    ) as $no_go_reason_codes
+  | (
+      if $combined_go then null
+      elif ($runtime_missing_invalid or $runtime_freshness_issue or $runtime_no_go) and ($multi_vm_missing_invalid or $multi_vm_freshness_issue or $multi_vm_no_go) then $combined_cycle_rerun_command
+      elif ($runtime_missing_invalid or $runtime_freshness_issue or $runtime_no_go) then $runtime_cycle_rerun_command
+      elif ($multi_vm_missing_invalid or $multi_vm_freshness_issue or $multi_vm_no_go) then $multi_vm_cycle_rerun_command
+      else $evidence_pack_rerun_command
+      end
+    ) as $next_command
+  | (
+      if $combined_go then null
+      elif $no_go_reason_category == "missing_or_invalid_source_summary" then
+        "source summaries are missing or invalid; regenerate runtime-actuation and/or multi-VM promotion-cycle summaries before republishing the combined evidence pack"
+      elif $no_go_reason_category == "stale_or_unknown_freshness" then
+        "source summaries are stale or freshness is unknown; refresh promotion-cycle runs and then republish the combined evidence pack"
+      elif $no_go_reason_category == "usable_no_go" and ($fail_on_no_go == 1) then
+        "usable NO-GO decision blocks promotion; resolve blockers and rerun affected promotion cycle(s)"
+      elif $no_go_reason_category == "usable_no_go" and ($fail_on_no_go != 1) then
+        "usable NO-GO decision is in warn-only compatibility mode; hold promotion and rerun affected promotion cycle(s) after resolving blockers"
+      else
+        "promotion evidence is not GO/pass-ready; inspect gate decision/status/rc and rerun affected promotion cycle(s)"
+      end
+    ) as $next_command_reason
+  | (
+      [
+        $runtime.next_operator_action,
+        $runtime.failure_reason,
+        $multi_vm.next_operator_action,
+        $multi_vm.failure_reason
+      ]
+      | map(clean_text)
+      | map(select(. != null))
+      | .[0]
+    ) as $sanitized_source_action
+  | (
+      if $combined_go then
+        "Promotion evidence pack is healthy."
+      elif $sanitized_source_action != null then
+        $sanitized_source_action
+      elif $no_go_reason_category == "missing_or_invalid_source_summary" then
+        "Regenerate missing/invalid source summaries and rerun runtime_actuation_multi_vm_evidence_pack."
+      elif $no_go_reason_category == "stale_or_unknown_freshness" then
+        "Refresh stale/unknown-freshness source summaries and rerun runtime_actuation_multi_vm_evidence_pack."
+      elif $no_go_reason_category == "usable_no_go" then
+        "Promotion evidence indicates NO-GO. Resolve blockers and rerun promotion cycles."
+      else
+        "Refresh promotion-cycle artifacts and rerun runtime_actuation_multi_vm_evidence_pack."
       end
     ) as $next_operator_action
   | {
@@ -599,7 +751,12 @@ jq -n \
           "Evidence is usable but at least one gate remains NO-GO/warn."
         end
       ),
+      needs_attention: (if $combined_go then false else true end),
+      no_go_reason_category: $no_go_reason_category,
+      no_go_reason_codes: $no_go_reason_codes,
       next_operator_action: $next_operator_action,
+      next_command: $next_command,
+      next_command_reason: $next_command_reason,
       inputs: {
         reports_dir: $reports_dir,
         runtime_actuation_promotion_cycle_summary_json: (
@@ -626,7 +783,9 @@ jq -n \
           else "hold_promotion_warn_only"
           end
         ),
-        next_operator_action: $next_operator_action
+        next_operator_action: $next_operator_action,
+        next_command: $next_command,
+        next_command_reason: $next_command_reason
       },
       artifacts: {
         summary_json: $summary_json_path,
@@ -641,7 +800,11 @@ jq -n \
   printf -- '- Status: %s\n' "$(jq -r '.status' "$summary_json")"
   printf -- '- Decision: %s\n' "$(jq -r '.decision' "$summary_json")"
   printf -- '- Fail closed: %s\n' "$(jq -r '.fail_closed | tostring' "$summary_json")"
+  printf -- '- Needs attention: %s\n' "$(jq -r '.needs_attention | tostring' "$summary_json")"
+  printf -- '- NO-GO reason category: %s\n' "$(jq -r '.no_go_reason_category // "none"' "$summary_json")"
   printf -- '- Next operator action: %s\n' "$(jq -r '.next_operator_action // "none"' "$summary_json")"
+  printf -- '- Next command: %s\n' "$(jq -r '.next_command // "none"' "$summary_json")"
+  printf -- '- Next command reason: %s\n' "$(jq -r '.next_command_reason // "none"' "$summary_json")"
   printf '\n'
   printf '## Runtime Actuation Promotion Cycle\n\n'
   printf -- '- Source summary: %s\n' "$(jq -r '.gates.runtime_actuation_promotion_cycle.source_summary_json' "$summary_json")"

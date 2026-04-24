@@ -145,10 +145,23 @@ JSON
   "next_actions": [
     {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime evidence pack first","command":"bash \"$PASS_EVIDENCE_2\"","reason":"evidence-pack"},
     {"id":"profile_default_gate_evidence_pack","label":"Profile evidence pack second","command":"bash \"$PASS_EVIDENCE_1\"","reason":"evidence-pack"},
-    {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime duplicate must be deduped","command":"bash \"$NON_EVIDENCE_FAIL\"","reason":"duplicate-should-not-run"},
+    {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime duplicate must be deduped","command":"bash \"$PASS_EVIDENCE_2\"","reason":"duplicate-should-not-run"},
     {"id":"misc_evidence_pack","label":"Generic evidence pack third","command":"bash \"$PASS_EVIDENCE_GENERIC\"","reason":"evidence-pack"},
-    {"id":"profile_default_gate_evidence_pack","label":"Profile duplicate must be deduped","command":"bash \"$NON_EVIDENCE_FAIL\"","reason":"duplicate-should-not-run"},
+    {"id":"profile_default_gate_evidence_pack","label":"Profile duplicate must be deduped","command":"bash \"$PASS_EVIDENCE_1\"","reason":"duplicate-should-not-run"},
     {"id":"profile_compare_multi_vm_stability_promotion_evidence_pack","label":"Multi-vm evidence pack fourth","command":"bash \"$PASS_EVIDENCE_MULTI_VM\"","reason":"evidence-pack"}
+  ]
+}
+JSON
+    ;;
+  duplicates_conflicting)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime evidence pack first","command":"bash \"$PASS_EVIDENCE_2\"","reason":"evidence-pack"},
+    {"id":"profile_default_gate_evidence_pack","label":"Profile evidence pack second","command":"bash \"$PASS_EVIDENCE_1\"","reason":"evidence-pack"},
+    {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime conflicting duplicate must fail closed","command":"bash \"$NON_EVIDENCE_FAIL\"","reason":"duplicate-conflict"},
+    {"id":"profile_default_gate_evidence_pack","label":"Profile conflicting duplicate must fail closed","command":"bash \"$NON_EVIDENCE_FAIL\"","reason":"duplicate-conflict"},
+    {"id":"profile_compare_multi_vm_stability_promotion_evidence_pack","label":"Multi-vm evidence pack third","command":"bash \"$PASS_EVIDENCE_MULTI_VM\"","reason":"evidence-pack"}
   ]
 }
 JSON
@@ -527,6 +540,55 @@ fi
 mapfile -t deduped_evidence_ids <"$EXEC_LOG"
 if [[ "${deduped_evidence_ids[0]:-}" != "runtime_actuation_promotion_evidence_pack" || "${deduped_evidence_ids[1]:-}" != "profile_default_gate_evidence_pack" || "${deduped_evidence_ids[2]:-}" != "profile_compare_multi_vm_stability_promotion_evidence_pack" ]]; then
   echo "dedupe execution order mismatch"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-evidence-pack-actionable-run] conflicting duplicate ids fail closed via delegated runner"
+SUMMARY_DUPLICATE_CONFLICT="$TMP_DIR/summary_duplicate_conflict.json"
+REPORTS_DUPLICATE_CONFLICT="$TMP_DIR/reports_duplicate_conflict"
+: >"$EXEC_LOG"
+set +e
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_SCENARIO=duplicates_conflicting \
+PASS_EVIDENCE_1="$PASS_EVIDENCE_1" PASS_EVIDENCE_2="$PASS_EVIDENCE_2" PASS_EVIDENCE_MULTI_VM="$PASS_EVIDENCE_MULTI_VM" PASS_EVIDENCE_GENERIC="$PASS_EVIDENCE_GENERIC" FAIL_EVIDENCE="$FAIL_EVIDENCE" \
+NON_EVIDENCE_FAIL="$NON_EVIDENCE_FAIL" NON_EVIDENCE_PASS="$NON_EVIDENCE_PASS" \
+ROADMAP_EVIDENCE_PACK_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_evidence_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_DUPLICATE_CONFLICT" \
+  --summary-json "$SUMMARY_DUPLICATE_CONFLICT" \
+  --scope all \
+  --parallel 0 \
+  --print-summary-json 0
+duplicate_conflict_rc=$?
+set -e
+if [[ "$duplicate_conflict_rc" != "3" ]]; then
+  echo "expected conflicting duplicates rc=3, got rc=$duplicate_conflict_rc"
+  cat "$SUMMARY_DUPLICATE_CONFLICT"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 3
+  and .inputs.scope == "all"
+  and .roadmap.scope_match_count == 5
+  and .roadmap.scope_match_unique_count == 3
+  and .roadmap.scope_match_unique_action_ids == ["runtime_actuation_promotion_evidence_pack","profile_default_gate_evidence_pack","profile_compare_multi_vm_stability_promotion_evidence_pack"]
+  and .summary.selected_unique_count == 3
+  and .summary.actions_executed == 0
+  and .summary.pass == 0
+  and .summary.fail == 0
+  and (.delegated_runner.summary_valid == false)
+  and .delegated_runner.process_rc == 3
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_DUPLICATE_CONFLICT" >/dev/null; then
+  echo "conflicting-duplicate summary mismatch"
+  cat "$SUMMARY_DUPLICATE_CONFLICT"
+  exit 1
+fi
+
+if [[ -s "$EXEC_LOG" ]]; then
+  echo "expected no action executions when conflicting duplicate ids fail close"
   cat "$EXEC_LOG"
   exit 1
 fi

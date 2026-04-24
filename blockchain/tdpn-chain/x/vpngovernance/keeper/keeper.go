@@ -257,6 +257,13 @@ func (k *Keeper) upsertPolicyLocked(record types.GovernancePolicy) error {
 }
 
 func (k *Keeper) upsertDecisionLocked(record types.GovernanceDecision) error {
+	if err := record.ValidateBasic(); err != nil {
+		return fmt.Errorf("invalid decision %q: %w", record.DecisionID, err)
+	}
+	if err := k.ensurePolicyExistsAndValidLocked(record.PolicyID); err != nil {
+		return fmt.Errorf("decision %q policy reference invalid: %w", record.DecisionID, err)
+	}
+
 	if writeAwareStore, ok := k.store.(KeeperStoreWithWriteErrors); ok {
 		if err := writeAwareStore.UpsertDecisionWithError(record); err != nil {
 			return fmt.Errorf("persist decision %q: %w", record.DecisionID, err)
@@ -435,14 +442,20 @@ func (k *Keeper) getDecisionByIDCompatibleLocked(rawID, canonicalID string) (typ
 	if record, ok := k.store.GetDecision(canonicalID); ok {
 		normalized := normalizeDecision(record)
 		if normalized.DecisionID == canonicalID {
-			return normalized, true
+			if err := k.ensurePolicyExistsAndValidLocked(normalized.PolicyID); err == nil {
+				return normalized, true
+			}
+			return types.GovernanceDecision{}, false
 		}
 	}
 	if rawID != canonicalID {
 		if record, ok := k.store.GetDecision(rawID); ok {
 			normalized := normalizeDecision(record)
 			if normalized.DecisionID == canonicalID {
-				return normalized, true
+				if err := k.ensurePolicyExistsAndValidLocked(normalized.PolicyID); err == nil {
+					return normalized, true
+				}
+				return types.GovernanceDecision{}, false
 			}
 		}
 	}
@@ -450,7 +463,14 @@ func (k *Keeper) getDecisionByIDCompatibleLocked(rawID, canonicalID string) (typ
 	if err != nil {
 		return types.GovernanceDecision{}, false
 	}
-	return selectDecisionByCanonicalID(records, canonicalID)
+	record, ok := selectDecisionByCanonicalID(records, canonicalID)
+	if !ok {
+		return types.GovernanceDecision{}, false
+	}
+	if err := k.ensurePolicyExistsAndValidLocked(record.PolicyID); err != nil {
+		return types.GovernanceDecision{}, false
+	}
+	return record, true
 }
 
 func (k *Keeper) getAuditActionByIDCompatibleLocked(rawID, canonicalID string) (types.GovernanceAuditAction, bool) {
@@ -487,14 +507,24 @@ func (k *Keeper) listPoliciesLocked() ([]types.GovernancePolicy, error) {
 }
 
 func (k *Keeper) listDecisionsLocked() ([]types.GovernanceDecision, error) {
+	var (
+		records []types.GovernanceDecision
+		err     error
+	)
+
 	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
-		records, err := readAwareStore.ListDecisionsWithError()
+		records, err = readAwareStore.ListDecisionsWithError()
 		if err != nil {
 			return nil, fmt.Errorf("load decisions: %w", err)
 		}
-		return records, nil
+	} else {
+		records = k.store.ListDecisions()
 	}
-	return k.store.ListDecisions(), nil
+
+	if err := k.validateDecisionPolicyReferencesLocked(records); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
 func (k *Keeper) listAuditActionsLocked() ([]types.GovernanceAuditAction, error) {
@@ -506,6 +536,23 @@ func (k *Keeper) listAuditActionsLocked() ([]types.GovernanceAuditAction, error)
 		return records, nil
 	}
 	return k.store.ListAuditActions(), nil
+}
+
+func (k *Keeper) validateDecisionPolicyReferencesLocked(records []types.GovernanceDecision) error {
+	policyValidationResults := make(map[string]error, len(records))
+	for _, record := range records {
+		normalized := normalizeDecision(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return fmt.Errorf("decision %q is invalid: %w", normalized.DecisionID, err)
+		}
+		if _, seen := policyValidationResults[normalized.PolicyID]; !seen {
+			policyValidationResults[normalized.PolicyID] = k.ensurePolicyExistsAndValidLocked(normalized.PolicyID)
+		}
+		if err := policyValidationResults[normalized.PolicyID]; err != nil {
+			return fmt.Errorf("decision %q policy reference invalid: %w", normalized.DecisionID, err)
+		}
+	}
+	return nil
 }
 
 func dedupeAndSortPolicies(records []types.GovernancePolicy) []types.GovernancePolicy {

@@ -51,6 +51,12 @@ func TestKeeperDecisionUpsertAndGet(t *testing.T) {
 	t.Parallel()
 
 	k := NewKeeper()
+	k.UpsertPolicy(types.GovernancePolicy{
+		PolicyID:        "policy-1",
+		Title:           "Policy One",
+		Version:         1,
+		ActivatedAtUnix: 4102444800,
+	})
 
 	if _, ok := k.GetDecision("missing"); ok {
 		t.Fatal("expected missing decision lookup to return ok=false")
@@ -84,6 +90,64 @@ func TestKeeperDecisionUpsertAndGet(t *testing.T) {
 	}
 	if got.Outcome != updated.Outcome {
 		t.Fatalf("expected updated outcome %q, got %q", updated.Outcome, got.Outcome)
+	}
+}
+
+func TestKeeperUpsertDecisionWithErrorRejectsMissingPolicy(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	err := k.UpsertDecisionWithError(types.GovernanceDecision{
+		DecisionID:    "decision-orphan-upsert",
+		PolicyID:      "policy-missing",
+		ProposalID:    "proposal-orphan-upsert",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council",
+		DecidedAtUnix: 4102444800,
+	})
+	if err == nil {
+		t.Fatal("expected upsert decision to fail closed when policy is missing")
+	}
+	if !strings.Contains(err.Error(), "policy reference invalid") {
+		t.Fatalf("expected policy-reference validation error, got %v", err)
+	}
+
+	if _, ok := k.GetDecision("decision-orphan-upsert"); ok {
+		t.Fatal("expected rejected upsert decision to remain unreadable")
+	}
+}
+
+func TestKeeperDecisionReadsFailClosedOnOrphanPolicyReference(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	store.UpsertDecision(types.GovernanceDecision{
+		DecisionID:    "decision-orphan-read",
+		PolicyID:      "policy-missing",
+		ProposalID:    "proposal-orphan-read",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council",
+		DecidedAtUnix: 4102444800,
+	})
+
+	k := NewKeeperWithStore(store)
+	if _, ok := k.GetDecision("decision-orphan-read"); ok {
+		t.Fatal("expected orphan decision lookup to fail closed")
+	}
+
+	records, err := k.ListDecisionsWithError()
+	if err == nil {
+		t.Fatal("expected decision list to fail closed on orphan policy reference")
+	}
+	if !strings.Contains(err.Error(), "policy reference invalid") {
+		t.Fatalf("expected policy reference error context, got %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected zero records on fail-closed list, got %d", len(records))
+	}
+
+	if got := k.ListDecisions(); len(got) != 0 {
+		t.Fatalf("expected ListDecisions to fail closed and return zero records, got %d", len(got))
 	}
 }
 
@@ -358,6 +422,12 @@ func TestKeeperListDecisionsDeterministicByDecisionID(t *testing.T) {
 	t.Parallel()
 
 	k := NewKeeper()
+	k.UpsertPolicy(types.GovernancePolicy{
+		PolicyID:        "policy-1",
+		Title:           "Policy One",
+		Version:         1,
+		ActivatedAtUnix: 1,
+	})
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-3", PolicyID: "policy-1", ProposalID: "proposal-3", Outcome: types.DecisionOutcomeApprove, Decider: "d-1", DecidedAtUnix: 3})
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-1", PolicyID: "policy-1", ProposalID: "proposal-1", Outcome: types.DecisionOutcomeApprove, Decider: "d-1", DecidedAtUnix: 1})
 	k.UpsertDecision(types.GovernanceDecision{DecisionID: "decision-2", PolicyID: "policy-1", ProposalID: "proposal-2", Outcome: types.DecisionOutcomeReject, Decider: "d-2", DecidedAtUnix: 2})

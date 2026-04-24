@@ -172,6 +172,82 @@ func TestResolveExitRouteStrictCacheHitStillValidatesRoute(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteCacheBypassesExpiredDescriptor(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", Endpoint: "203.0.113.20:51821", ControlURL: "https://203.0.113.20:8084"},
+	})
+
+	calls := 0
+	origRelays := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		calls++
+		return origRelays(req)
+	}
+
+	s := &Service{
+		exitControlURL:      "http://127.0.0.1:8084",
+		exitDataAddr:        "127.0.0.1:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache: map[string]exitRoute{
+			"exit-a": {
+				controlURL: "https://198.51.100.10:8084",
+				dataAddr:   "198.51.100.10:51821",
+				operatorID: "op-stale",
+				fetchedAt:  time.Now(),
+				validUntil: time.Now().Add(-1 * time.Minute),
+			},
+		},
+	}
+
+	route, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err != nil {
+		t.Fatalf("resolve route failed: %v", err)
+	}
+	if route.controlURL != "https://203.0.113.20:8084" {
+		t.Fatalf("expected expired cache bypass, got control url: %s", route.controlURL)
+	}
+	if route.dataAddr != "203.0.113.20:51821" {
+		t.Fatalf("unexpected data addr: %s", route.dataAddr)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one relays fetch after expired cache bypass, got %d", calls)
+	}
+}
+
+func TestResolveExitRouteRejectsExpiredDirectoryDescriptor(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-a",
+			Role:       "exit",
+			Endpoint:   "203.0.113.20:51821",
+			ControlURL: "https://203.0.113.20:8084",
+			ValidUntil: time.Now().Add(-1 * time.Minute),
+		},
+	})
+
+	s := &Service{
+		exitControlURL:      "http://127.0.0.1:8084",
+		exitDataAddr:        "127.0.0.1:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	if _, err := s.resolveExitRoute(context.Background(), "exit-a"); err == nil {
+		t.Fatalf("expected expired directory descriptor to be rejected")
+	}
+}
+
 func TestFetchDirectoryPubKeysStrictRejectsLegacyFallback(t *testing.T) {
 	durl := "http://directory.local"
 	pub, _, err := nodecrypto.GenerateEd25519Keypair()

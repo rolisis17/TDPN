@@ -47,6 +47,7 @@ type exitRoute struct {
 	dataAddr   string
 	operatorID string
 	fetchedAt  time.Time
+	validUntil time.Time
 }
 
 type routeCandidate struct {
@@ -1158,12 +1159,14 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	cached, ok := s.exitRouteCache[exitID]
 	s.mu.RUnlock()
 	if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
-		if strictMode {
-			if err := validateStrictExitControlRoute(cached.controlURL, cached.dataAddr); err == nil {
+		if cached.validUntil.IsZero() || !now.After(cached.validUntil) {
+			if strictMode {
+				if err := validateStrictExitControlRoute(cached.controlURL, cached.dataAddr); err == nil {
+					return cached, nil
+				}
+			} else {
 				return cached, nil
 			}
-		} else {
-			return cached, nil
 		}
 	}
 
@@ -1193,6 +1196,9 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 			if desc.Role != "exit" || desc.RelayID != exitID {
 				continue
 			}
+			if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+				continue
+			}
 			descControlURL := normalizeHTTPURL(desc.ControlURL)
 			descDataAddr := strings.TrimSpace(desc.Endpoint)
 			if descControlURL == "" || descDataAddr == "" {
@@ -1208,6 +1214,7 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 				dataAddr:   descDataAddr,
 				operatorID: strings.TrimSpace(desc.OperatorID),
 				fetchedAt:  now,
+				validUntil: desc.ValidUntil,
 			}
 			if strictMode {
 				if err := validateStrictExitControlRoute(route.controlURL, route.dataAddr); err != nil {
@@ -1658,7 +1665,11 @@ func (s *Service) fetchRelaysVerified(ctx context.Context, directoryURL string, 
 	if err := decodeBoundedJSONResponse(resp.Body, &out, remoteResponseMaxBodyBytes); err != nil {
 		return nil, err
 	}
+	now := time.Now().UTC()
 	for _, desc := range out.Relays {
+		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+			continue
+		}
 		if err := verifyRelayDescriptorAny(desc, dirPubs); err != nil {
 			return nil, fmt.Errorf("descriptor verify failed relay=%s: %w", desc.RelayID, err)
 		}

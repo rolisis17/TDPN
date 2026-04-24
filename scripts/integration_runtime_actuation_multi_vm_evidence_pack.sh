@@ -120,6 +120,10 @@ if ! jq -e '
   and .rc == 0
   and .decision == "GO"
   and .fail_closed == false
+  and .needs_attention == false
+  and .no_go_reason_category == "none"
+  and .next_command == null
+  and .next_command_reason == null
   and .outcome.should_promote == true
   and .outcome.action == "promote_allowed"
   and .gates.runtime_actuation_promotion_cycle.usable == true
@@ -208,6 +212,10 @@ if ! jq -e '
   and .rc == 0
   and .decision == "NO-GO"
   and .fail_closed == false
+  and .needs_attention == true
+  and .no_go_reason_category == "usable_no_go"
+  and (.next_command != null and (.next_command | contains("roadmap-live-evidence-cycle-batch-run")))
+  and (.next_command_reason != null and (.next_command_reason | test("NO-GO"; "i")))
   and .outcome.action == "hold_promotion_warn_only"
 ' "$NOGO_SOFT_SUMMARY" >/dev/null 2>&1; then
   echo "usable NO-GO soft path summary mismatch"
@@ -237,6 +245,10 @@ if ! jq -e '
   and .rc != 0
   and .decision == "NO-GO"
   and .fail_closed == true
+  and .needs_attention == true
+  and .no_go_reason_category == "usable_no_go"
+  and (.next_command != null and (.next_command | contains("roadmap-live-evidence-cycle-batch-run")))
+  and (.next_command_reason != null and (.next_command_reason | test("resolve blockers"; "i")))
   and ((.reasons | index("usable_no_go_detected")) != null)
   and .outcome.action == "hold_evidence_pack_blocked"
 ' "$NOGO_HARD_SUMMARY" >/dev/null 2>&1; then
@@ -326,6 +338,11 @@ if ! jq -e '
   and .rc != 0
   and .decision == "NO-GO"
   and .fail_closed == true
+  and .needs_attention == true
+  and .no_go_reason_category == "stale_or_unknown_freshness"
+  and (.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle")))
+  and (.next_command_reason != null and (.next_command_reason | test("stale|freshness"; "i")))
+  and ((.next_command_reason | test("REPLACE_WITH_INVITE_SUBJECT|<SET-REAL-INVITE-KEY>|\\[redacted\\]|\\[REDACTED\\]")) | not)
   and .outcome.should_promote == false
   and .outcome.action == "hold_evidence_pack_blocked"
   and .gates.runtime_actuation_promotion_cycle.usable == false
@@ -339,6 +356,144 @@ fi
 if ! grep -F -- 'Fail closed: true' "$FAIL_REPORT" >/dev/null 2>&1; then
   echo "fail-closed report missing fail-closed marker"
   cat "$FAIL_REPORT"
+  exit 1
+fi
+
+MISSING_REPORTS="$TMP_DIR/missing_reports"
+MISSING_RUNTIME_SUMMARY="$MISSING_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
+MISSING_SUMMARY="$TMP_DIR/missing_evidence_pack_summary.json"
+
+mkdir -p "$MISSING_REPORTS"
+
+cat >"$MISSING_RUNTIME_SUMMARY" <<'EOF_MISSING_RUNTIME'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true
+    }
+  }
+}
+EOF_MISSING_RUNTIME
+
+echo "[runtime-actuation-multi-vm-evidence-pack] fail-closed path (missing multi-vm summary)"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$MISSING_REPORTS" \
+  --summary-json "$MISSING_SUMMARY" \
+  --report-md "$TMP_DIR/missing_report.md" \
+  --print-summary-json 0 \
+  --print-report 0 >/tmp/integration_runtime_actuation_multi_vm_evidence_pack_missing.log 2>&1
+missing_rc=$?
+set -e
+
+if [[ "$missing_rc" -eq 0 ]]; then
+  echo "expected missing summary path rc!=0"
+  cat /tmp/integration_runtime_actuation_multi_vm_evidence_pack_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .fail_closed == true
+  and .no_go_reason_category == "missing_or_invalid_source_summary"
+  and ((.no_go_reason_codes | index("multi_vm_stability_promotion_cycle:summary_missing")) != null)
+  and (.next_command != null and (.next_command | contains("profile-compare-multi-vm-stability-promotion-cycle")))
+  and (.next_command_reason != null and (.next_command_reason | test("source summaries are missing or invalid"; "i")))
+' "$MISSING_SUMMARY" >/dev/null 2>&1; then
+  echo "missing summary fail-closed path summary mismatch"
+  cat "$MISSING_SUMMARY"
+  exit 1
+fi
+
+SANITIZE_REPORTS="$TMP_DIR/sanitize_reports"
+SANITIZE_RUNTIME_SUMMARY="$SANITIZE_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
+SANITIZE_MULTI_VM_SUMMARY="$SANITIZE_REPORTS/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+SANITIZE_SUMMARY="$TMP_DIR/sanitize_evidence_pack_summary.json"
+
+mkdir -p "$SANITIZE_REPORTS"
+
+cat >"$SANITIZE_RUNTIME_SUMMARY" <<'EOF_SANITIZE_RUNTIME'
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "NO-GO",
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true
+    }
+  },
+  "promotion_check": {
+    "decision": "NO-GO",
+    "status": "pass",
+    "rc": 0,
+    "next_operator_action": "Use REPLACE_WITH_INVITE_SUBJECT and [redacted] to rerun."
+  },
+  "failure_reason": "CAMPAIGN_SUBJECT unresolved."
+}
+EOF_SANITIZE_RUNTIME
+
+cat >"$SANITIZE_MULTI_VM_SUMMARY" <<'EOF_SANITIZE_MULTI_VM'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "GO",
+    "status": "pass",
+    "rc": 0
+  }
+}
+EOF_SANITIZE_MULTI_VM
+
+echo "[runtime-actuation-multi-vm-evidence-pack] sanitized no-go guidance path"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$SANITIZE_REPORTS" \
+  --summary-json "$SANITIZE_SUMMARY" \
+  --report-md "$TMP_DIR/sanitize_report.md" \
+  --fail-on-no-go 1 \
+  --print-summary-json 0 \
+  --print-report 0 >/tmp/integration_runtime_actuation_multi_vm_evidence_pack_sanitize.log 2>&1
+sanitize_rc=$?
+set -e
+
+if [[ "$sanitize_rc" -eq 0 ]]; then
+  echo "expected sanitized no-go path rc!=0"
+  cat /tmp/integration_runtime_actuation_multi_vm_evidence_pack_sanitize.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .fail_closed == true
+  and .no_go_reason_category == "usable_no_go"
+  and (.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle")))
+  and (.next_command_reason != null and (.next_command_reason | test("resolve blockers|NO-GO"; "i")))
+  and ((.next_command_reason | test("REPLACE_WITH_INVITE_SUBJECT|<SET-REAL-INVITE-KEY>|\\[redacted\\]|\\[REDACTED\\]|CAMPAIGN_SUBJECT|INVITE_KEY")) | not)
+  and ((.next_operator_action | test("REPLACE_WITH_INVITE_SUBJECT|\\[redacted\\]|CAMPAIGN_SUBJECT|INVITE_KEY")) | not)
+' "$SANITIZE_SUMMARY" >/dev/null 2>&1; then
+  echo "sanitized no-go guidance summary mismatch"
+  cat "$SANITIZE_SUMMARY"
   exit 1
 fi
 

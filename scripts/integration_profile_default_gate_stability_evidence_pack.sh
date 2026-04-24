@@ -120,6 +120,11 @@ assert_jq "$PASS_SUMMARY" '.decision == "GO"'
 assert_jq "$PASS_SUMMARY" '(.generated_at_utc | type) == "string" and (.generated_at_utc | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))'
 assert_jq "$PASS_SUMMARY" '.evidence.run.usable == true and .evidence.check.usable == true and .evidence.cycle.usable == true'
 assert_jq "$PASS_SUMMARY" '(.operator_next_action_command | contains("profile-default-gate-stability-cycle")) and (.operator_next_action_command | contains("--campaign-subject INVITE_KEY"))'
+assert_jq "$PASS_SUMMARY" '.next_command_reason == "profile-default stability evidence pack is healthy; no action required; next command contains unresolved placeholders (host_a,host_b,campaign_subject); set A_HOST/B_HOST and PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT (or INVITE_KEY/CAMPAIGN_SUBJECT) before rerunning"'
+assert_jq "$PASS_SUMMARY" '.prerequisites.missing_required_count == 0 and (.prerequisites.missing_required_artifacts | length) == 0 and .prerequisites.failure_kind == "none"'
+assert_jq "$PASS_SUMMARY" '.operator_next_action_command_has_unresolved_placeholders == true'
+assert_jq "$PASS_SUMMARY" '.operator_next_action_command_unresolved_placeholder_keys == ["host_a","host_b","campaign_subject"]'
+assert_jq "$PASS_SUMMARY" '.operator_next_action_command_unresolved_placeholder_reason != null'
 assert_no_empty_emitted_strings "$PASS_SUMMARY"
 if [[ ! -f "$PASS_REPORT" ]]; then
   echo "expected report markdown missing: $PASS_REPORT"
@@ -354,8 +359,43 @@ fi
 assert_jq "$MISSING_SUMMARY" '.status == "fail"'
 assert_jq "$MISSING_SUMMARY" '.decision == "NO-GO"'
 assert_jq "$MISSING_SUMMARY" '.reasons | map(test("^cycle: missing required evidence file:")) | any'
+assert_jq "$MISSING_SUMMARY" '.prerequisites.missing_required_count == 1'
+assert_jq "$MISSING_SUMMARY" '.prerequisites.missing_required_artifacts == ["cycle"]'
+assert_jq "$MISSING_SUMMARY" '.prerequisites.failure_kind == "missing_required_artifacts"'
+assert_jq "$MISSING_SUMMARY" '.prerequisites.failure_code == "missing_required_artifacts:cycle"'
+assert_jq "$MISSING_SUMMARY" '.next_command_reason | contains("missing required stability artifacts: cycle")'
+assert_jq "$MISSING_SUMMARY" '.operator_next_action_command_has_unresolved_placeholders == true'
 assert_jq "$MISSING_SUMMARY" '(.operator_next_action_command | contains("profile-default-gate-stability-cycle")) and (.operator_next_action_command | contains("--campaign-subject INVITE_KEY"))'
 assert_no_empty_emitted_strings "$MISSING_SUMMARY"
+
+RESOLVED_GUIDANCE_DIR="$TMP_DIR/resolved_guidance"
+mkdir -p "$RESOLVED_GUIDANCE_DIR"
+RESOLVED_GUIDANCE_RUN="$RESOLVED_GUIDANCE_DIR/profile_default_gate_stability_summary.json"
+RESOLVED_GUIDANCE_CHECK="$RESOLVED_GUIDANCE_DIR/profile_default_gate_stability_check_summary.json"
+RESOLVED_GUIDANCE_CYCLE="$RESOLVED_GUIDANCE_DIR/profile_default_gate_stability_cycle_summary.json"
+RESOLVED_GUIDANCE_SUMMARY="$RESOLVED_GUIDANCE_DIR/evidence_pack_summary.json"
+RESOLVED_GUIDANCE_REPORT="$RESOLVED_GUIDANCE_DIR/evidence_pack_report.md"
+
+write_valid_run_summary "$RESOLVED_GUIDANCE_RUN" "$NOW_UTC"
+write_valid_check_summary "$RESOLVED_GUIDANCE_CHECK" "$NOW_UTC" "GO"
+write_valid_cycle_summary "$RESOLVED_GUIDANCE_CYCLE" "$NOW_UTC" "GO"
+
+A_HOST="100.64.0.10" \
+B_HOST="100.64.0.11" \
+INVITE_KEY="inv-real-subject-01" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$RESOLVED_GUIDANCE_DIR" \
+  --summary-json "$RESOLVED_GUIDANCE_SUMMARY" \
+  --report-md "$RESOLVED_GUIDANCE_REPORT" \
+  --max-age-sec 3600 \
+  --print-summary-json 0
+
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.status == "ok" and .decision == "GO" and .rc == 0'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '(.operator_next_action_command | contains("--host-a 100.64.0.10")) and (.operator_next_action_command | contains("--host-b 100.64.0.11")) and (.operator_next_action_command | contains("--campaign-subject inv-real-subject-01"))'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_has_unresolved_placeholders == false'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '(.operator_next_action_command_unresolved_placeholder_keys | length) == 0'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_unresolved_placeholder_reason == null'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.next_command_reason == "profile-default stability evidence pack is healthy; no action required"'
 
 INVALID_DIR="$TMP_DIR/invalid_freshness"
 mkdir -p "$INVALID_DIR"

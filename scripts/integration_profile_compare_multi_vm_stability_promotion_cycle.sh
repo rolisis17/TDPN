@@ -211,6 +211,10 @@ if [[ "$scenario" == "fail_no_write" ]]; then
   exit 37
 fi
 
+if [[ "$scenario" == "success_no_write" ]]; then
+  exit 0
+fi
+
 if [[ "$scenario" == "missing_decision" ]]; then
   jq -n '{
     version: 1,
@@ -510,6 +514,121 @@ if ! jq -e '
 ' "$MISSING_DECISION_SUMMARY" >/dev/null 2>&1; then
   echo "missing-decision fail-closed summary mismatch"
   cat "$MISSING_DECISION_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-promotion-cycle] promotion-check success without summary fails closed"
+MISSING_PROMOTION_SUMMARY="$TMP_DIR/promotion_cycle_missing_promotion_summary.json"
+MISSING_PROMOTION_CAPTURE="$TMP_DIR/promotion_cycle_missing_promotion_capture.log"
+MISSING_PROMOTION_COUNTER="$TMP_DIR/promotion_cycle_missing_promotion_counter.txt"
+MISSING_PROMOTION_STAGE_SUMMARY="$TMP_DIR/missing_promotion_stage_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_STAGE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_STAGE_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROFILE_COMPARE_PROMOTION_CAPTURE_FILE="$MISSING_PROMOTION_CAPTURE" \
+FAKE_PROFILE_COMPARE_PROMOTION_COUNTER_FILE="$MISSING_PROMOTION_COUNTER" \
+FAKE_PROFILE_COMPARE_PROMOTION_CYCLE_SCENARIOS="pass" \
+FAKE_PROFILE_COMPARE_PROMOTION_CHECK_SCENARIO="success_no_write" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_missing_promotion_summary" \
+  --cycles 1 \
+  --sleep-between-sec 0 \
+  --promotion-summary-json "$MISSING_PROMOTION_STAGE_SUMMARY" \
+  --summary-json "$MISSING_PROMOTION_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_missing_promotion_summary.log 2>&1
+missing_promotion_rc=$?
+set -e
+
+if [[ "$missing_promotion_rc" -eq 0 ]]; then
+  echo "expected promotion summary missing path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_missing_promotion_summary.log
+  exit 1
+fi
+if ! jq -e --arg missing_stage_summary "$MISSING_PROMOTION_STAGE_SUMMARY" '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .failure_reason_code == "promotion_check_summary_missing_or_invalid"
+  and .stages.promotion_check.attempted == true
+  and .stages.promotion_check.rc == 0
+  and .promotion.summary_exists == false
+  and .promotion.summary_valid_json == false
+  and .promotion.contract_ok == false
+  and ((.next_operator_action // "") | contains($missing_stage_summary))
+  and .outcome.should_promote == false
+' "$MISSING_PROMOTION_SUMMARY" >/dev/null 2>&1; then
+  echo "missing promotion-summary fail-closed mismatch"
+  cat "$MISSING_PROMOTION_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-promotion-cycle] stale preseeded promotion summary with success/no-write fails closed as stale"
+STALE_NO_WRITE_SUMMARY="$TMP_DIR/promotion_cycle_stale_no_write_summary.json"
+STALE_NO_WRITE_CAPTURE="$TMP_DIR/promotion_cycle_stale_no_write_capture.log"
+STALE_NO_WRITE_COUNTER="$TMP_DIR/promotion_cycle_stale_no_write_counter.txt"
+STALE_NO_WRITE_PROMOTION_SUMMARY="$TMP_DIR/stale_no_write_promotion_summary.json"
+cat >"$STALE_NO_WRITE_PROMOTION_SUMMARY" <<'EOF_STALE_NO_WRITE_PROMOTION_SUMMARY'
+{
+  "version": 1,
+  "schema": { "id": "profile_compare_multi_vm_stability_promotion_check_summary" },
+  "decision": "GO",
+  "status": "ok",
+  "rc": 0,
+  "notes": "stale preseeded go for no-write stale coverage",
+  "enforcement": {
+    "fail_on_no_go": true,
+    "no_go_detected": false,
+    "no_go_enforced": false
+  },
+  "outcome": {
+    "should_promote": true,
+    "action": "promote_allowed"
+  },
+  "violations": [],
+  "errors": []
+}
+EOF_STALE_NO_WRITE_PROMOTION_SUMMARY
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_STAGE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_STAGE_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROFILE_COMPARE_PROMOTION_CAPTURE_FILE="$STALE_NO_WRITE_CAPTURE" \
+FAKE_PROFILE_COMPARE_PROMOTION_COUNTER_FILE="$STALE_NO_WRITE_COUNTER" \
+FAKE_PROFILE_COMPARE_PROMOTION_CYCLE_SCENARIOS="pass" \
+FAKE_PROFILE_COMPARE_PROMOTION_CHECK_SCENARIO="success_no_write" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_stale_no_write" \
+  --cycles 1 \
+  --sleep-between-sec 0 \
+  --promotion-summary-json "$STALE_NO_WRITE_PROMOTION_SUMMARY" \
+  --summary-json "$STALE_NO_WRITE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_stale_no_write.log 2>&1
+stale_no_write_rc=$?
+set -e
+
+if [[ "$stale_no_write_rc" -eq 0 ]]; then
+  echo "expected stale no-write promotion summary path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_stale_no_write.log
+  exit 1
+fi
+if ! jq -e --arg stale_summary "$STALE_NO_WRITE_PROMOTION_SUMMARY" '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .failure_reason_code == "promotion_check_summary_stale"
+  and .stages.promotion_check.attempted == true
+  and .stages.promotion_check.rc == 0
+  and .promotion.summary_exists == true
+  and .promotion.summary_valid_json == true
+  and .promotion.summary_fresh == false
+  and .promotion.observed_decision == "GO"
+  and .promotion.observed_status == "pass"
+  and ((.next_operator_action // "") | contains($stale_summary))
+  and .outcome.should_promote == false
+' "$STALE_NO_WRITE_SUMMARY" >/dev/null 2>&1; then
+  echo "stale no-write fail-closed summary mismatch"
+  cat "$STALE_NO_WRITE_SUMMARY"
   exit 1
 fi
 

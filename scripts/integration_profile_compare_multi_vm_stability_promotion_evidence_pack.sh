@@ -110,6 +110,8 @@ assert_jq "$PASS_SUMMARY" '.evidence.promotion_cycle.usable == true'
 assert_jq "$PASS_SUMMARY" '.failure_reason_code == null'
 assert_jq "$PASS_SUMMARY" '(.reason_details | length) == 0'
 assert_jq "$PASS_SUMMARY" '(.next_operator_action | type) == "string" and (.next_operator_action | length) > 0'
+assert_jq "$PASS_SUMMARY" '(.inputs.rerun_guidance.refresh_promotion_cycle_command | type) == "string" and (.inputs.rerun_guidance.refresh_promotion_cycle_command | length) > 0'
+assert_jq "$PASS_SUMMARY" '(.inputs.rerun_guidance.rebuild_evidence_pack_command | type) == "string" and (.inputs.rerun_guidance.rebuild_evidence_pack_command | length) > 0'
 assert_no_blank_reason_error_entries "$PASS_SUMMARY"
 if [[ ! -f "$PASS_REPORT" ]]; then
   echo "expected report markdown missing: $PASS_REPORT"
@@ -361,6 +363,10 @@ assert_jq "$FAIL_SUMMARY" '.evidence.promotion_cycle.freshness.fresh == false'
 assert_jq "$FAIL_SUMMARY" '.reasons | map(test("^promotion_cycle: stale evidence \\(age_sec=")) | any'
 assert_jq "$FAIL_SUMMARY" '((.reason_details | map(.code) | index("promotion_cycle_evidence_stale")) != null)'
 assert_jq "$FAIL_SUMMARY" '(.operator_next_action_command | type) == "string" and (.operator_next_action_command | length) > 0'
+assert_jq "$FAIL_SUMMARY" '(.operator_next_action_command | contains("profile_compare_multi_vm_stability_promotion_cycle.sh"))'
+assert_jq "$FAIL_SUMMARY" '(.next_operator_action | contains("Rebuild evidence pack with"))'
+assert_jq "$FAIL_SUMMARY" '(.operator_next_action_commands.refresh_promotion_cycle_command | contains("profile_compare_multi_vm_stability_promotion_cycle.sh"))'
+assert_jq "$FAIL_SUMMARY" '(.operator_next_action_commands.rebuild_evidence_pack_command | contains("profile_compare_multi_vm_stability_promotion_evidence_pack.sh"))'
 assert_no_blank_reason_error_entries "$FAIL_SUMMARY"
 if [[ ! -f "$FAIL_REPORT" ]]; then
   echo "expected fail-closed report markdown missing: $FAIL_REPORT"
@@ -371,5 +377,42 @@ if ! grep -F -- "Refresh promotion-cycle summary artifact $FAIL_SUMMARY_SRC" "$F
   cat "$FAIL_REPORT"
   exit 1
 fi
+
+MISSING_DIR="$TMP_DIR/missing"
+mkdir -p "$MISSING_DIR"
+MISSING_SUMMARY_SRC="$MISSING_DIR/missing_profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+MISSING_SUMMARY="$MISSING_DIR/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json"
+MISSING_REPORT="$MISSING_DIR/profile_compare_multi_vm_stability_promotion_evidence_pack_report.md"
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$MISSING_DIR" \
+  --promotion-cycle-summary-json "$MISSING_SUMMARY_SRC" \
+  --summary-json "$MISSING_SUMMARY" \
+  --report-md "$MISSING_REPORT" \
+  --max-age-sec 3600 \
+  --print-summary-json 0
+MISSING_RC=$?
+set -e
+
+if [[ "$MISSING_RC" -eq 0 ]]; then
+  echo "expected non-zero exit code for missing explicit promotion-cycle summary"
+  exit 1
+fi
+assert_jq "$MISSING_SUMMARY" '.status == "fail" and .decision == "NO-GO" and .rc != 0'
+assert_jq "$MISSING_SUMMARY" '.failure_reason_code == "promotion_cycle_artifact_missing"'
+assert_jq "$MISSING_SUMMARY" '.reasons | map(test("^promotion_cycle: missing required evidence file:")) | any'
+if ! jq -e --arg missing_src "$MISSING_SUMMARY_SRC" '.next_operator_action | contains("Refresh promotion-cycle summary artifact " + $missing_src)' "$MISSING_SUMMARY" >/dev/null; then
+  echo "missing-summary next_operator_action mismatch"
+  cat "$MISSING_SUMMARY"
+  exit 1
+fi
+assert_jq "$MISSING_SUMMARY" '(.operator_next_action_command | contains("profile_compare_multi_vm_stability_promotion_cycle.sh"))'
+if ! jq -e --arg missing_src "$MISSING_SUMMARY_SRC" '.operator_next_action_commands.rebuild_evidence_pack_command | contains("--promotion-cycle-summary-json " + $missing_src)' "$MISSING_SUMMARY" >/dev/null; then
+  echo "missing-summary rebuild command guidance mismatch"
+  cat "$MISSING_SUMMARY"
+  exit 1
+fi
+assert_no_blank_reason_error_entries "$MISSING_SUMMARY"
 
 echo "integration_profile_compare_multi_vm_stability_promotion_evidence_pack: PASS"

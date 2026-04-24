@@ -145,6 +145,39 @@ quote_cmd() {
   printf '\n'
 }
 
+build_rerun_cycle_command() {
+  local -a cmd=(
+    bash
+    ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh
+    --reports-dir "$reports_dir"
+    --cycles "$cycles"
+    --sleep-between-sec "$sleep_between_sec"
+    --cycle-timeout-sec "$cycle_timeout_sec"
+    --require-min-cycles "$require_min_cycles"
+    --require-min-pass-cycles "$require_min_pass_cycles"
+    --require-max-fail-cycles "$require_max_fail_cycles"
+    --require-max-warn-cycles "$require_max_warn_cycles"
+    --require-min-pass-rate-pct "$require_min_pass_rate_pct"
+    --require-min-go-decision-rate-pct "$require_min_go_decision_rate_pct"
+    --require-cycle-schema-valid "$require_cycle_schema_valid"
+    --require-check-policy-modal-decision "$require_check_policy_modal_decision"
+    --fail-on-no-go "$fail_on_no_go"
+    --summary-json "$summary_json"
+    --print-summary-json 1
+  )
+  local cycle_arg=""
+  if [[ -n "$cycle_summary_list" ]]; then
+    cmd+=(--cycle-summary-list "$cycle_summary_list")
+  fi
+  if [[ -n "$promotion_summary_json" ]]; then
+    cmd+=(--promotion-summary-json "$promotion_summary_json")
+  fi
+  for cycle_arg in "${cycle_args[@]:-}"; do
+    cmd+=(--cycle-arg "$cycle_arg")
+  done
+  quote_cmd "${cmd[@]}"
+}
+
 json_file_valid_01() {
   local path="$1"
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -561,6 +594,9 @@ if [[ -z "$summary_json" ]]; then
 fi
 mkdir -p "$(dirname "$cycle_summary_list")" "$(dirname "$promotion_summary_json")" "$(dirname "$summary_json")"
 
+rerun_cycle_command_display="$(build_rerun_cycle_command)"
+rerun_cycle_command_display="$(trim "$rerun_cycle_command_display")"
+
 : >"$cycle_summary_list"
 
 cycle_counts_requested="$cycles"
@@ -897,7 +933,7 @@ if [[ "$promotion_stage_rc" -ne 0 ]]; then
     "promotion_check" \
     "promotion check command failed (rc=$promotion_stage_rc)" \
     "Inspect promotion-check logs and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
-    "$promotion_command_display" \
+    "$rerun_cycle_command_display" \
     "execution"
   final_decision="NO-GO"
   final_status="fail"
@@ -910,8 +946,8 @@ elif [[ "$promotion_summary_valid" != "true" ]]; then
     "promotion_check_summary_missing_or_invalid" \
     "promotion_check" \
     "promotion check summary is missing or invalid" \
-    "Regenerate promotion-check summary artifacts and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
-    "$promotion_command_display" \
+    "Regenerate promotion-check summary artifact $promotion_summary_json and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$rerun_cycle_command_display" \
     "artifact_contract"
   final_decision="NO-GO"
   final_status="fail"
@@ -921,8 +957,8 @@ elif [[ "$promotion_summary_fresh" != "true" ]]; then
     "promotion_check_summary_stale" \
     "promotion_check" \
     "promotion check summary is stale (not refreshed by current run)" \
-    "Refresh promotion-check evidence and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
-    "$promotion_command_display" \
+    "Refresh promotion-check summary artifact $promotion_summary_json and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$rerun_cycle_command_display" \
     "artifact_freshness"
   final_decision="NO-GO"
   final_status="fail"
@@ -932,8 +968,8 @@ elif [[ -n "$cycles_collection_failure_reason" ]]; then
     "cycles_collection_incomplete" \
     "cycles" \
     "$cycles_collection_failure_reason" \
-    "Inspect failed cycle logs/artifacts and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
-    "$cycle_summary_list" \
+    "Inspect failed cycle logs/artifacts under $archive_root, confirm cycle summaries were refreshed, and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$rerun_cycle_command_display" \
     "artifact_contract"
   final_decision="NO-GO"
   final_status="fail"
@@ -965,7 +1001,7 @@ elif [[ "$promotion_decision" == "NO-GO" ]]; then
       "promotion_check" \
       "$primary_message" \
       "$primary_action" \
-      "$promotion_command_display" \
+      "$rerun_cycle_command_display" \
       "policy"
     final_status="fail"
     final_rc=1
@@ -977,7 +1013,7 @@ elif [[ "$promotion_decision" == "NO-GO" ]]; then
       "" \
       "$primary_message" \
       "$primary_action" \
-      "$promotion_command_display" \
+      "$rerun_cycle_command_display" \
       "policy"
   fi
 else
@@ -986,7 +1022,7 @@ else
     "promotion_check" \
     "promotion check summary is missing a usable decision" \
     "Regenerate promotion-check summary with a GO/NO-GO decision and rerun promotion cycle." \
-    "$promotion_command_display" \
+    "$rerun_cycle_command_display" \
     "artifact_contract"
   final_decision="NO-GO"
   final_status="fail"
@@ -1013,13 +1049,16 @@ if [[ -z "$next_operator_action" ]]; then
   next_operator_action="Promotion may proceed."
 fi
 if [[ -z "$next_operator_action_command" ]]; then
-  next_operator_action_command="$(quote_cmd bash ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json --print-summary-json 1)"
-  next_operator_action_command="$(trim "$next_operator_action_command")"
+  next_operator_action_command="$rerun_cycle_command_display"
 fi
 
 cycle_summary_list_count="$(wc -l <"$cycle_summary_list" | tr -d '[:space:]')"
 if [[ -z "$cycle_summary_list_count" ]]; then
   cycle_summary_list_count="0"
+fi
+cycles_prereq_satisfied="true"
+if (( cycle_command_failures > 0 || cycle_summary_missing_count > 0 || cycle_summary_invalid_count > 0 || cycle_summary_stale_count > 0 )); then
+  cycles_prereq_satisfied="false"
 fi
 
 jq -n \
@@ -1055,6 +1094,7 @@ jq -n \
   --arg promotion_stage_started_at "$promotion_stage_started_at" \
   --arg promotion_stage_completed_at "$promotion_stage_completed_at" \
   --arg require_check_policy_modal_decision "$require_check_policy_modal_decision" \
+  --arg cycles_prereq_satisfied "$cycles_prereq_satisfied" \
   --argjson rc "$final_rc" \
   --argjson cycles_requested "$cycle_counts_requested" \
   --argjson cycles_completed "$cycle_counts_completed" \
@@ -1107,6 +1147,9 @@ jq -n \
         cycles: $cycles_requested,
         sleep_between_sec: $sleep_between_sec,
         cycle_timeout_sec: $cycle_timeout_sec
+      },
+      prerequisites: {
+        cycles_collection_complete: ($cycles_prereq_satisfied == "true")
       },
       promotion_policy: {
         require_min_cycles: $require_min_cycles,

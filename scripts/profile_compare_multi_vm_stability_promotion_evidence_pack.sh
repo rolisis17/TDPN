@@ -89,6 +89,14 @@ timestamp_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
+quote_cmd() {
+  local arg
+  for arg in "$@"; do
+    printf '%q ' "$arg"
+  done
+  printf '\n'
+}
+
 iso8601_to_epoch() {
   local ts="$1"
   if [[ -z "$ts" ]]; then
@@ -136,6 +144,29 @@ json_array_from_lines() {
   printf '%s\n' "$@" \
     | jq -R 'gsub("^\\s+|\\s+$"; "")' \
     | jq -s '[ .[] | select(type == "string" and length > 0) ]'
+}
+
+build_cycle_refresh_command() {
+  local canonical_promotion_cycle_summary_json="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+  quote_cmd \
+    bash \
+    ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh \
+    --reports-dir "$reports_dir" \
+    --summary-json "$canonical_promotion_cycle_summary_json" \
+    --print-summary-json 1
+}
+
+build_evidence_pack_rerun_command() {
+  quote_cmd \
+    bash \
+    ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh \
+    --reports-dir "$reports_dir" \
+    --promotion-cycle-summary-json "$promotion_cycle_summary_json" \
+    --summary-json "$summary_json" \
+    --report-md "$report_md" \
+    --max-age-sec "$max_age_sec" \
+    --fail-on-no-go "$fail_on_no_go_compat" \
+    --print-summary-json 1
 }
 
 map_promotion_cycle_reason_contract() {
@@ -798,7 +829,11 @@ if [[ "$promotion_cycle_usable" == "true" ]]; then
 fi
 
 input_next_operator_action="$(jq -r '.next_operator_action // ""' <<<"$promotion_cycle_evidence")"
-operator_next_action_command="./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json --print-summary-json 1"
+refresh_promotion_cycle_command="$(build_cycle_refresh_command)"
+refresh_promotion_cycle_command="$(trim "$refresh_promotion_cycle_command")"
+rerun_evidence_pack_command="$(build_evidence_pack_rerun_command)"
+rerun_evidence_pack_command="$(trim "$rerun_evidence_pack_command")"
+operator_next_action_command="$refresh_promotion_cycle_command"
 
 status="fail"
 decision="NO-GO"
@@ -812,6 +847,7 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
   if [[ "$decision" == "GO" ]]; then
     status="ok"
     rc=0
+    operator_next_action_command="$rerun_evidence_pack_command"
   elif [[ "$decision" == "NO-GO" ]]; then
     if [[ "$fail_on_no_go_compat" == "1" ]]; then
       status="fail"
@@ -819,9 +855,11 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
       failure_reason="promotion-cycle decision is NO-GO"
       failure_reason_code="promotion_cycle_decision_no_go"
       append_reason_detail "promotion_cycle_decision_no_go" "promotion-cycle decision is NO-GO" "hold promotion and resolve promotion-cycle NO-GO causes before rerun." "promotion_evidence_pack"
+      operator_next_action_command="$refresh_promotion_cycle_command"
     else
       status="warn"
       rc=0
+      operator_next_action_command="$refresh_promotion_cycle_command"
     fi
   else
     status="fail"
@@ -829,6 +867,7 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
     failure_reason="promotion-cycle decision is missing or invalid"
     failure_reason_code="promotion_cycle_decision_invalid"
     append_reason_detail "promotion_cycle_decision_invalid" "promotion-cycle decision is missing or invalid" "regenerate promotion-cycle summary with GO/NO-GO decision and rerun evidence pack." "promotion_evidence_pack"
+    operator_next_action_command="$refresh_promotion_cycle_command"
   fi
   if [[ -n "$input_next_operator_action" ]]; then
     next_operator_action="$input_next_operator_action"
@@ -843,7 +882,8 @@ else
   if [[ -z "$failure_reason_code" ]]; then
     failure_reason_code="promotion_cycle_evidence_invalid"
   fi
-  next_operator_action="Refresh promotion-cycle summary artifact ${promotion_cycle_summary_json} and rerun ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh."
+  next_operator_action="Refresh promotion-cycle summary artifact ${promotion_cycle_summary_json}. Rebuild evidence pack with ${rerun_evidence_pack_command}."
+  operator_next_action_command="$refresh_promotion_cycle_command"
 fi
 
 reasons_json="$(json_array_from_lines "${reasons[@]:-}")"
@@ -862,6 +902,8 @@ summary_payload="$(jq -n \
   --arg report_md "$report_md" \
   --arg next_operator_action "$next_operator_action" \
   --arg operator_next_action_command "$operator_next_action_command" \
+  --arg refresh_promotion_cycle_command "$refresh_promotion_cycle_command" \
+  --arg rerun_evidence_pack_command "$rerun_evidence_pack_command" \
   --argjson rc "$rc" \
   --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson promotion_cycle_selection_candidate_count "$promotion_cycle_selection_candidate_count" \
@@ -894,6 +936,10 @@ summary_payload="$(jq -n \
         ),
         fallback_used: ($promotion_cycle_selection_fallback_used == "true"),
         candidate_count: $promotion_cycle_selection_candidate_count
+      },
+      rerun_guidance: {
+        refresh_promotion_cycle_command: $refresh_promotion_cycle_command,
+        rebuild_evidence_pack_command: $rerun_evidence_pack_command
       }
     },
     evidence: {
@@ -910,6 +956,10 @@ summary_payload="$(jq -n \
     },
     next_operator_action: $next_operator_action,
     operator_next_action_command: $operator_next_action_command,
+    operator_next_action_commands: {
+      refresh_promotion_cycle_command: $refresh_promotion_cycle_command,
+      rebuild_evidence_pack_command: $rerun_evidence_pack_command
+    },
     outcome: {
       should_promote: ($status == "ok" and $decision == "GO" and $rc == 0),
       action: (

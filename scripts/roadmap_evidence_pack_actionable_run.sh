@@ -583,7 +583,10 @@ echo "[roadmap-evidence-pack-actionable-run] scope_match_unique_action_ids=$scop
 echo "[roadmap-evidence-pack-actionable-run] live_required_check enabled=$require_live_derived_evidence_pack_actions summary_path=${live_evidence_summary_json:-none} summary_valid=$live_evidence_summary_valid required_ids=$live_required_evidence_pack_ids_csv missing_in_scope=$live_required_missing_in_scope_ids_csv missing_in_snapshot=$live_required_missing_in_snapshot_ids_csv fail_closed=$live_requirement_fail_closed"
 
 filtered_roadmap_summary_json="$reports_dir/roadmap_progress_summary_evidence_pack_filtered.json"
-jq --argjson actions "$scope_match_unique_actions_json" '.next_actions = $actions' "$roadmap_summary_json" >"$filtered_roadmap_summary_json"
+# Preserve scoped duplicate actions for delegated conflict checks.
+# roadmap_next_actions_run fail-closes on duplicate ids with conflicting commands;
+# pre-collapsing here would hide that contract violation.
+jq --argjson actions "$scope_match_actions_json" '.next_actions = $actions' "$roadmap_summary_json" >"$filtered_roadmap_summary_json"
 
 next_actions_reports_dir="$reports_dir/next_actions_run"
 next_actions_summary_json="$reports_dir/roadmap_next_actions_run_summary.json"

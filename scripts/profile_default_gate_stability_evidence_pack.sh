@@ -168,6 +168,119 @@ normalize_status() {
   printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
 }
 
+strip_optional_wrapping_quotes_01() {
+  local value
+  local first_char=""
+  local last_char=""
+  value="$(trim "${1:-}")"
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+host_placeholder_token_any_01() {
+  local value=""
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$value" in
+    HOST_A|A_HOST|HOST_B|B_HOST|\
+    \$HOST_A|\$\{HOST_A\}|\$A_HOST|\$\{A_HOST\}|\
+    \$HOST_B|\$\{HOST_B\}|\$B_HOST|\$\{B_HOST\}|\
+    "<HOST_A>"|"<A_HOST>"|"<HOST_B>"|"<B_HOST>"|\
+    "{{HOST_A}}"|"{{A_HOST}}"|"{{HOST_B}}"|"{{B_HOST}}"|\
+    "%HOST_A%"|"%A_HOST%"|"%HOST_B%"|"%B_HOST%"|\
+    YOUR_HOST_A|YOUR_A_HOST|YOUR_HOST_B|YOUR_B_HOST|\
+    REPLACE_WITH_HOST_A|REPLACE_WITH_A_HOST|REPLACE_WITH_HOST_B|REPLACE_WITH_B_HOST|\
+    PROFILE_DEFAULT_GATE_STABILITY_HOST_A|PROFILE_DEFAULT_GATE_STABILITY_HOST_B|\
+    \$\{HOST_A:-*}|\$\{HOST_A-*}|\$\{A_HOST:-*}|\$\{A_HOST-*}|\$\{HOST_B:-*}|\$\{HOST_B-*}|\$\{B_HOST:-*}|\$\{B_HOST-*})
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+subject_placeholder_token_01() {
+  local value=""
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  value="$(trim "$value")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$value" in
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|\
+    YOUR_INVITE_KEY|YOUR_INVITE_SUBJECT|REPLACE_WITH_INVITE_KEY|REPLACE_WITH_INVITE_SUBJECT|\
+    "<SET-REAL-INVITE-KEY>"|SET-REAL-INVITE-KEY|%INVITE_KEY%|\$\{INVITE_KEY:-*}|\$\{INVITE_KEY-*}|\
+    CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|\
+    YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|%CAMPAIGN_SUBJECT%|\$\{CAMPAIGN_SUBJECT:-*}|\$\{CAMPAIGN_SUBJECT-*}|\
+    PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT|"\[REDACTED\]"|REDACTED)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+resolve_first_concrete_host_01() {
+  local env_name=""
+  local env_value=""
+  for env_name in "$@"; do
+    env_value="$(trim "${!env_name:-}")"
+    env_value="$(strip_optional_wrapping_quotes_01 "$env_value")"
+    env_value="$(trim "$env_value")"
+    if [[ -n "$env_value" ]] && ! host_placeholder_token_any_01 "$env_value"; then
+      printf '%s' "$env_value"
+      return
+    fi
+  done
+  printf '%s' ""
+}
+
+resolve_first_concrete_subject_01() {
+  local env_name=""
+  local env_value=""
+  for env_name in "$@"; do
+    env_value="$(trim "${!env_name:-}")"
+    env_value="$(strip_optional_wrapping_quotes_01 "$env_value")"
+    env_value="$(trim "$env_value")"
+    if [[ -n "$env_value" ]] && ! subject_placeholder_token_01 "$env_value"; then
+      printf '%s' "$env_value"
+      return
+    fi
+  done
+  printf '%s' ""
+}
+
+render_command() {
+  local rendered=""
+  local token=""
+  for token in "$@"; do
+    if [[ -n "$rendered" ]]; then
+      rendered+=" "
+    fi
+    rendered+="$(printf '%q' "$token")"
+  done
+  printf '%s' "$rendered"
+}
+
 json_array_from_lines() {
   local raw_line=""
   local normalized_line=""
@@ -632,12 +745,73 @@ if [[ "$cycle_decision" != "" && "$check_decision" != "" && "$cycle_decision" !=
   reasons+=("decision mismatch between cycle and check summaries (cycle=${cycle_decision} check=${check_decision})")
 fi
 
-operator_next_action_command="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST_A --host-b HOST_B --campaign-subject INVITE_KEY --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_default_gate_stability_cycle_summary.json --print-summary-json 1"
+declare -a missing_required_artifacts=()
+if [[ "$(jq -r '.exists' <<<"$run_evidence")" != "true" ]]; then
+  missing_required_artifacts+=("run")
+fi
+if [[ "$(jq -r '.exists' <<<"$check_evidence")" != "true" ]]; then
+  missing_required_artifacts+=("check")
+fi
+if [[ "$(jq -r '.exists' <<<"$cycle_evidence")" != "true" ]]; then
+  missing_required_artifacts+=("cycle")
+fi
+missing_required_artifacts_json="$(json_array_from_lines "${missing_required_artifacts[@]:-}")"
+missing_required_count="$(jq -r 'length' <<<"$missing_required_artifacts_json")"
+prereq_failure_kind="none"
+prereq_failure_code=""
+if (( missing_required_count > 0 )); then
+  prereq_failure_kind="missing_required_artifacts"
+  prereq_failure_code="$(jq -r '"missing_required_artifacts:" + (join("+"))' <<<"$missing_required_artifacts_json")"
+fi
+
+operator_host_a="$(resolve_first_concrete_host_01 "PROFILE_DEFAULT_GATE_STABILITY_HOST_A" "A_HOST" "HOST_A")"
+operator_host_b="$(resolve_first_concrete_host_01 "PROFILE_DEFAULT_GATE_STABILITY_HOST_B" "B_HOST" "HOST_B")"
+operator_campaign_subject="$(resolve_first_concrete_subject_01 "PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT" "CAMPAIGN_SUBJECT" "INVITE_KEY")"
+if [[ -z "$operator_host_a" ]]; then
+  operator_host_a="HOST_A"
+fi
+if [[ -z "$operator_host_b" ]]; then
+  operator_host_b="HOST_B"
+fi
+if [[ -z "$operator_campaign_subject" ]]; then
+  operator_campaign_subject="INVITE_KEY"
+fi
+
+operator_next_action_command="$(render_command \
+  "./scripts/easy_node.sh" \
+  "profile-default-gate-stability-cycle" \
+  "--host-a" "$operator_host_a" \
+  "--host-b" "$operator_host_b" \
+  "--campaign-subject" "$operator_campaign_subject" \
+  "--reports-dir" ".easy-node-logs" \
+  "--summary-json" ".easy-node-logs/profile_default_gate_stability_cycle_summary.json" \
+  "--print-summary-json" "1")"
+
+declare -a command_unresolved_placeholder_keys=()
+if host_placeholder_token_any_01 "$operator_host_a"; then
+  command_unresolved_placeholder_keys+=("host_a")
+fi
+if host_placeholder_token_any_01 "$operator_host_b"; then
+  command_unresolved_placeholder_keys+=("host_b")
+fi
+if subject_placeholder_token_01 "$operator_campaign_subject"; then
+  command_unresolved_placeholder_keys+=("campaign_subject")
+fi
+command_unresolved_placeholder_keys_json="$(json_array_from_lines "${command_unresolved_placeholder_keys[@]:-}")"
+command_unresolved_placeholder_count="$(jq -r 'length' <<<"$command_unresolved_placeholder_keys_json")"
+operator_next_action_command_has_unresolved_placeholders="false"
+operator_next_action_command_unresolved_placeholder_reason=""
+if (( command_unresolved_placeholder_count > 0 )); then
+  operator_next_action_command_has_unresolved_placeholders="true"
+  command_unresolved_placeholder_keys_csv="$(jq -r 'join(",")' <<<"$command_unresolved_placeholder_keys_json")"
+  operator_next_action_command_unresolved_placeholder_reason="next command contains unresolved placeholders (${command_unresolved_placeholder_keys_csv}); set A_HOST/B_HOST and PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT (or INVITE_KEY/CAMPAIGN_SUBJECT) before rerunning"
+fi
 
 decision="NO-GO"
 status="fail"
 final_rc=1
 failure_reason=""
+next_command_reason=""
 
 if [[ "${#reasons[@]}" -eq 0 ]]; then
   if [[ "$cycle_decision" == "GO" ]]; then
@@ -661,6 +835,25 @@ else
   failure_reason="${reasons[0]}"
 fi
 
+if (( missing_required_count > 0 )); then
+  missing_required_artifacts_csv="$(jq -r 'join(",")' <<<"$missing_required_artifacts_json")"
+  next_command_reason="missing required stability artifacts: ${missing_required_artifacts_csv}; rerun profile-default-gate-stability-cycle to regenerate run/check/cycle summaries"
+elif [[ "${#reasons[@]}" -gt 0 ]]; then
+  next_command_reason="${reasons[0]}"
+elif [[ "$decision" == "NO-GO" && "$status" != "ok" ]]; then
+  next_command_reason="stability cycle decision is NO-GO; review check summary diagnostics and rerun profile-default-gate-stability-cycle"
+else
+  next_command_reason="profile-default stability evidence pack is healthy; no action required"
+fi
+
+if [[ "$operator_next_action_command_has_unresolved_placeholders" == "true" ]]; then
+  if [[ -n "$next_command_reason" ]]; then
+    next_command_reason="${next_command_reason}; ${operator_next_action_command_unresolved_placeholder_reason}"
+  else
+    next_command_reason="$operator_next_action_command_unresolved_placeholder_reason"
+  fi
+fi
+
 reasons_json="$(json_array_from_lines "${reasons[@]:-}")"
 
 summary_payload="$(jq -n \
@@ -674,10 +867,19 @@ summary_payload="$(jq -n \
   --arg cycle_summary_json "$cycle_summary_json" \
   --arg summary_json "$summary_json" \
   --arg report_md "$report_md" \
+  --arg fail_on_no_go_compat "$fail_on_no_go_compat" \
   --arg operator_next_action_command "$operator_next_action_command" \
+  --arg next_command_reason "$next_command_reason" \
+  --arg operator_next_action_command_has_unresolved_placeholders "$operator_next_action_command_has_unresolved_placeholders" \
+  --arg operator_next_action_command_unresolved_placeholder_reason "$operator_next_action_command_unresolved_placeholder_reason" \
+  --arg prereq_failure_kind "$prereq_failure_kind" \
+  --arg prereq_failure_code "$prereq_failure_code" \
   --argjson rc "$final_rc" \
   --argjson max_age_sec "$max_age_sec" \
   --argjson reasons "$reasons_json" \
+  --argjson missing_required_artifacts "$missing_required_artifacts_json" \
+  --argjson missing_required_count "$missing_required_count" \
+  --argjson command_unresolved_placeholder_keys "$command_unresolved_placeholder_keys_json" \
   --argjson run_evidence "$run_evidence" \
   --argjson check_evidence "$check_evidence" \
   --argjson cycle_evidence "$cycle_evidence" \
@@ -696,14 +898,42 @@ summary_payload="$(jq -n \
     reasons: $reasons,
     inputs: {
       reports_dir: $reports_dir,
-      max_age_sec: $max_age_sec
+      max_age_sec: $max_age_sec,
+      fail_on_no_go: ($fail_on_no_go_compat == "1")
     },
     evidence: {
       run: $run_evidence,
       check: $check_evidence,
       cycle: $cycle_evidence
     },
+    prerequisites: {
+      run_summary: {
+        path: $run_summary_json,
+        exists: $run_evidence.exists
+      },
+      check_summary: {
+        path: $check_summary_json,
+        exists: $check_evidence.exists
+      },
+      cycle_summary: {
+        path: $cycle_summary_json,
+        exists: $cycle_evidence.exists
+      },
+      missing_required_artifacts: $missing_required_artifacts,
+      missing_required_count: $missing_required_count,
+      failure_kind: (if $prereq_failure_kind == "" then null else $prereq_failure_kind end),
+      failure_code: (if $prereq_failure_code == "" then null else $prereq_failure_code end)
+    },
     operator_next_action_command: $operator_next_action_command,
+    next_operator_action: (if $next_command_reason == "" then null else $next_command_reason end),
+    next_command_reason: (if $next_command_reason == "" then null else $next_command_reason end),
+    operator_next_action_command_has_unresolved_placeholders: ($operator_next_action_command_has_unresolved_placeholders == "true"),
+    operator_next_action_command_unresolved_placeholder_keys: $command_unresolved_placeholder_keys,
+    operator_next_action_command_unresolved_placeholder_reason: (
+      if $operator_next_action_command_unresolved_placeholder_reason == "" then null
+      else $operator_next_action_command_unresolved_placeholder_reason
+      end
+    ),
     artifacts: {
       summary_json: $summary_json,
       report_md: $report_md,
@@ -741,6 +971,13 @@ printf '%s\n' "$summary_payload" >"$summary_json"
   fi
   echo
   echo "## Next Action"
+  echo
+  echo "- Reason: $(jq -r '.next_command_reason // "none"' <<<"$summary_payload")"
+  echo "- Command unresolved placeholders: $(jq -r '.operator_next_action_command_has_unresolved_placeholders' <<<"$summary_payload")"
+  echo "- Command unresolved placeholder keys: $(jq -r '.operator_next_action_command_unresolved_placeholder_keys | if length == 0 then "none" else join(",") end' <<<"$summary_payload")"
+  if [[ "$(jq -r '.operator_next_action_command_unresolved_placeholder_reason // ""' <<<"$summary_payload")" != "" ]]; then
+    echo "- Command unresolved placeholder hint: $(jq -r '.operator_next_action_command_unresolved_placeholder_reason' <<<"$summary_payload")"
+  fi
   echo
   echo "\`$operator_next_action_command\`"
 } >"$report_md"
