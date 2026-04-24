@@ -81,6 +81,8 @@ assert_marker_present "developer.microsoft.com/windows/downloads/windows-sdk/" "
 assert_marker_present "developer.microsoft.com/microsoft-edge/webview2/" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Ensure-DesktopIconAsset" "$SCRIPT_UNDER_TEST"
 assert_marker_present "icon.ico" "$SCRIPT_UNDER_TEST"
+assert_marker_present "dry-run desktop source icon remediation: would create placeholder source icon at" "$SCRIPT_UNDER_TEST"
+assert_marker_present "desktop source icon remediation: created placeholder source icon at" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Resolve-ToolPath \"npm.cmd\"" "$SCRIPT_UNDER_TEST"
 assert_marker_present "npm resolver fallback: ignoring npm.ps1 shim" "$SCRIPT_UNDER_TEST"
 assert_marker_present "npm.ps1 shim detected but npm.cmd was not found" "$SCRIPT_UNDER_TEST"
@@ -91,6 +93,12 @@ assert_marker_present "rerun in this shell with process-scope bypass:" "$SCRIPT_
 assert_marker_present "Get-ProcessBypassRerunCommand" "$SCRIPT_UNDER_TEST"
 assert_marker_present "next_command" "$SCRIPT_UNDER_TEST"
 assert_marker_present "next command:" "$SCRIPT_UNDER_TEST"
+assert_marker_present "function Assert-WindowsNativeNonWsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "execution_model=windows-native-non-wsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "wsl_required=false" "$SCRIPT_UNDER_TEST"
+assert_marker_present "is Windows-native and must run outside WSL." "$SCRIPT_UNDER_TEST"
+assert_marker_present "scripts\\windows\\wsl2_easy.cmd bootstrap" "$SCRIPT_UNDER_TEST"
+assert_marker_present "wsl_detected" "$SCRIPT_UNDER_TEST"
 assert_marker_present "go version" "$SCRIPT_UNDER_TEST"
 assert_marker_present "node -v" "$SCRIPT_UNDER_TEST"
 assert_marker_present "npm.cmd -v" "$SCRIPT_UNDER_TEST"
@@ -194,7 +202,15 @@ detect_print_summary_flag() {
 }
 
 TMP_DIR="$(mktemp -d)"
+SOURCE_ICON_PATH="$ROOT_DIR/apps/desktop/src-tauri/icons/icon.svg"
+SOURCE_ICON_BACKUP_PATH="$TMP_DIR/source-icon.svg.backup"
+SOURCE_ICON_WAS_PRESENT="0"
+
 cleanup() {
+  if [[ "$SOURCE_ICON_WAS_PRESENT" == "1" && -f "$SOURCE_ICON_BACKUP_PATH" ]]; then
+    mkdir -p "$(dirname "$SOURCE_ICON_PATH")"
+    mv -f "$SOURCE_ICON_BACKUP_PATH" "$SOURCE_ICON_PATH"
+  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -246,6 +262,27 @@ run_expect_pass_or_fail_regex() {
   echo "expected regex when non-zero: $expected_pattern"
   cat "$log_path"
   exit 1
+}
+
+prepare_missing_source_icon_fixture() {
+  if [[ -f "$SOURCE_ICON_PATH" ]]; then
+    cp -f "$SOURCE_ICON_PATH" "$SOURCE_ICON_BACKUP_PATH"
+    SOURCE_ICON_WAS_PRESENT="1"
+    rm -f "$SOURCE_ICON_PATH"
+    return 0
+  fi
+
+  SOURCE_ICON_WAS_PRESENT="0"
+  rm -f "$SOURCE_ICON_BACKUP_PATH"
+  return 0
+}
+
+restore_source_icon_fixture() {
+  if [[ "$SOURCE_ICON_WAS_PRESENT" == "1" && -f "$SOURCE_ICON_BACKUP_PATH" ]]; then
+    mkdir -p "$(dirname "$SOURCE_ICON_PATH")"
+    mv -f "$SOURCE_ICON_BACKUP_PATH" "$SOURCE_ICON_PATH"
+  fi
+  SOURCE_ICON_WAS_PRESENT="0"
 }
 
 assert_json_file_is_object() {
@@ -535,6 +572,16 @@ run_expect_fail_regex \
       -Mode invalid-mode \
       -DryRun
 
+echo "[windows-desktop-native-bootstrap-guardrails] WSL sessions fail fast with actionable non-WSL guidance"
+run_expect_fail_regex \
+  "wsl_session_fail_fast" \
+  "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd bootstrap" \
+  env \
+    PATH="$(prepend_tool_path_for_powershell "$FAKE_TOOL_DIR")" \
+    LOCAL_CONTROL_API_GIT_BASH_PATH="$FAKE_GIT_BASH_PS" \
+    "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+      "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -SkipPathRefresh -Mode check -DesktopLaunchStrategy packaged -DesktopExecutableOverridePath $(ps_single_quote "$FAKE_DESKTOP_EXE_PS") -DryRun"
+
 SUMMARY_FLAG="$(detect_summary_flag "$SCRIPT_UNDER_TEST")"
 if [[ -z "$SUMMARY_FLAG" ]]; then
   echo "windows desktop native bootstrap guardrails failed: unable to detect summary-json parameter marker in $SCRIPT_UNDER_TEST"
@@ -561,6 +608,9 @@ DEV_STRATEGY_SUMMARY_JSON_PS="$(to_powershell_path "$DEV_STRATEGY_SUMMARY_JSON")
 
 RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_run_desktop_packaged_no_jq_summary.json"
 RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON_PS="$(to_powershell_path "$RUN_DESKTOP_PACKAGED_NO_JQ_SUMMARY_JSON")"
+
+RUN_DESKTOP_DEV_MISSING_SOURCE_ICON_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_run_desktop_dev_missing_source_icon_summary.json"
+RUN_DESKTOP_DEV_MISSING_SOURCE_ICON_SUMMARY_JSON_PS="$(to_powershell_path "$RUN_DESKTOP_DEV_MISSING_SOURCE_ICON_SUMMARY_JSON")"
 
 JQ_MISSING_SUMMARY_JSON="$TMP_DIR/desktop_native_bootstrap_jq_missing_summary.json"
 JQ_MISSING_SUMMARY_JSON_PS="$(to_powershell_path "$JQ_MISSING_SUMMARY_JSON")"
@@ -605,6 +655,19 @@ run_expect_pass \
 assert_json_file_is_object "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary"
 assert_summary_desktop_resolution "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary" "$FAKE_DESKTOP_EXE" "override"
 assert_summary_desktop_prerequisites "$EXPLICIT_BEATS_ENV_SUMMARY_JSON" "explicit_beats_env_summary" "packaged"
+
+echo "[windows-desktop-native-bootstrap-guardrails] run-desktop dev --dry-run handles missing source icon with scaffold guidance"
+prepare_missing_source_icon_fixture
+run_expect_pass \
+  "run_desktop_dev_missing_source_icon_dry_run_pass" \
+  run_ps_with_fake_prereqs \
+    -Mode run-desktop \
+    -DesktopLaunchStrategy dev \
+    -DryRun \
+    "$SUMMARY_FLAG" "$RUN_DESKTOP_DEV_MISSING_SOURCE_ICON_SUMMARY_JSON_PS"
+restore_source_icon_fixture
+assert_marker_present "dry-run desktop source icon remediation: would create placeholder source icon at" "$TMP_DIR/run_desktop_dev_missing_source_icon_dry_run_pass.log"
+assert_json_file_is_object "$RUN_DESKTOP_DEV_MISSING_SOURCE_ICON_SUMMARY_JSON" "run_desktop_dev_missing_source_icon_summary"
 
 echo "[windows-desktop-native-bootstrap-guardrails] dev strategy check summary carries desktop prerequisite diagnostics"
 run_expect_pass \

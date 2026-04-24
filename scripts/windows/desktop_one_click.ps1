@@ -11,6 +11,67 @@ function Write-Step {
   Write-Host "[desktop-one-click] $Message"
 }
 
+function Test-IsWslSession {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslDistro)) {
+    return $true
+  }
+
+  $wslInterop = [Environment]::GetEnvironmentVariable("WSL_INTEROP", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslInterop)) {
+    return $true
+  }
+
+  foreach ($probePath in @("/proc/sys/kernel/osrelease", "/proc/version")) {
+    if (-not (Test-Path -LiteralPath $probePath -PathType Leaf)) {
+      continue
+    }
+
+    $contents = ""
+    try {
+      $contents = [string](Get-Content -Raw -LiteralPath $probePath -ErrorAction Stop)
+    } catch {
+      $contents = ""
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($contents) -and $contents.ToLowerInvariant().Contains("microsoft")) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Get-WslDistroLabel {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if ([string]::IsNullOrWhiteSpace($wslDistro)) {
+    return "(unknown)"
+  }
+  return $wslDistro.Trim()
+}
+
+function Assert-WindowsNativeNonWsl {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptName
+  )
+
+  if (-not (Test-IsWslSession)) {
+    return
+  }
+
+  $wslDistro = Get-WslDistroLabel
+  throw @"
+$ScriptName is Windows-native and must run outside WSL.
+Detected WSL environment: distro=$wslDistro
+Run this script from Windows PowerShell or Windows Terminal (non-WSL).
+Windows-native command:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_one_click.ps1 -InstallMissing -EnablePolicyBypass
+If you intended the WSL path instead, use:
+  scripts\windows\wsl2_easy.cmd bootstrap
+"@
+}
+
 function Test-ArgNamePresent {
   param(
     [Parameter(Mandatory = $true)]
@@ -210,6 +271,10 @@ $scriptDir = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($scriptDir)) {
   $scriptDir = Split-Path -Parent $PSCommandPath
 }
+
+Assert-WindowsNativeNonWsl -ScriptName "desktop_one_click.ps1"
+Write-Step "execution_model=windows-native-non-wsl"
+Write-Step "wsl_required=false"
 
 $doctorScript = Join-Path $scriptDir "desktop_doctor.ps1"
 if (-not (Test-Path -LiteralPath $doctorScript -PathType Leaf)) {

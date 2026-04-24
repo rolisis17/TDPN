@@ -25,6 +25,67 @@ function Write-Step {
   Write-Host "[desktop-installer] $Message"
 }
 
+function Test-IsWslSession {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslDistro)) {
+    return $true
+  }
+
+  $wslInterop = [Environment]::GetEnvironmentVariable("WSL_INTEROP", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslInterop)) {
+    return $true
+  }
+
+  foreach ($probePath in @("/proc/sys/kernel/osrelease", "/proc/version")) {
+    if (-not (Test-Path -LiteralPath $probePath -PathType Leaf)) {
+      continue
+    }
+
+    $contents = ""
+    try {
+      $contents = [string](Get-Content -Raw -LiteralPath $probePath -ErrorAction Stop)
+    } catch {
+      $contents = ""
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($contents) -and $contents.ToLowerInvariant().Contains("microsoft")) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Get-WslDistroLabel {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if ([string]::IsNullOrWhiteSpace($wslDistro)) {
+    return "(unknown)"
+  }
+  return $wslDistro.Trim()
+}
+
+function Assert-WindowsNativeNonWsl {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptName
+  )
+
+  if (-not (Test-IsWslSession)) {
+    return
+  }
+
+  $wslDistro = Get-WslDistroLabel
+  throw @"
+$ScriptName is Windows-native and must run outside WSL.
+Detected WSL environment: distro=$wslDistro
+Run this script from Windows PowerShell or Windows Terminal (non-WSL).
+Windows-native command:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_installer.ps1 -Mode build -InstallMissing
+If you intended the WSL path instead, use:
+  scripts\windows\wsl2_easy.cmd bootstrap
+"@
+}
+
 function New-RemediationMessage {
   param(
     [string]$Headline,
@@ -565,6 +626,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
 $bundleRoot = Join-Path $repoRoot "apps\desktop\src-tauri\target\release\bundle"
 $releaseBundleScript = Join-Path $scriptDir "desktop_release_bundle.ps1"
+Assert-WindowsNativeNonWsl -ScriptName "desktop_installer.ps1"
+$wslDetected = [bool](Test-IsWslSession)
 
 if ([string]::IsNullOrWhiteSpace($SummaryJson)) {
   $SummaryJson = Join-Path $repoRoot ".easy-node-logs\desktop_installer_windows_summary.json"
@@ -576,10 +639,12 @@ $summary = [ordered]@{
   status = "fail"
   rc = 1
   platform = "windows"
+  execution_model = "windows-native-non-wsl"
   mode = if ($Mode -eq "build") { "desktop_installer_build_scaffold" } else { "desktop_installer_scaffold" }
   installer_mode = $Mode
   channel = $Channel
   wsl_required = $false
+  wsl_detected = [bool]$wslDetected
   installer_path = ""
   installer_type = ""
   installer_source = ""
@@ -611,8 +676,10 @@ $exitCode = 1
 
 try {
   Write-Step "mode=scaffold-non-production"
+  Write-Step "execution_model=windows-native-non-wsl"
   Write-Step "installer_mode=$Mode"
   Write-Step "wsl_required=false"
+  Write-Step ("wsl_detected={0}" -f $(if ($wslDetected) { "true" } else { "false" }))
   Write-Step "repo_root=$repoRoot"
   Write-Step "bundle_root=$bundleRoot"
   Write-Step "installer_type=$InstallerType"

@@ -23,6 +23,21 @@ if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
   exit 1
 fi
 
+assert_marker_present() {
+  local marker="$1"
+  local file_path="$2"
+  if ! grep -Fq -- "$marker" "$file_path"; then
+    echo "windows desktop dev guardrails failed: missing marker '$marker' in $file_path"
+    exit 1
+  fi
+}
+
+assert_marker_present "function Assert-WindowsNativeNonWsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "execution_model=windows-native-non-wsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "wsl_required=false" "$SCRIPT_UNDER_TEST"
+assert_marker_present "is Windows-native and must run outside WSL." "$SCRIPT_UNDER_TEST"
+assert_marker_present "scripts\\windows\\wsl2_easy.cmd bootstrap" "$SCRIPT_UNDER_TEST"
+
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
 elif command -v pwsh >/dev/null 2>&1; then
@@ -157,6 +172,13 @@ if ! grep -Eq -- "$PACKAGE_PRETAURI_REGEX" "$DESKTOP_PACKAGE_JSON"; then
   echo "windows desktop dev guardrails failed: package.json is missing the Windows icon prebuild hook"
   exit 1
 fi
+
+echo "[windows-desktop-dev-guardrails] WSL sessions fail fast with actionable non-WSL guidance"
+run_expect_fail_regex \
+  "wsl_session_fail_fast" \
+  "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd bootstrap" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & $SCRIPT_UNDER_TEST_PS_Q -DryRun"
 
 TMP_ICON_DIR="$TMP_DIR/windows-icon-test"
 mkdir -p "$TMP_ICON_DIR"

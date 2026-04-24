@@ -55,6 +55,11 @@ func (m sponsorMsgServer) CreateAuthorization(_ context.Context, req SponsorCrea
 }
 
 func (m sponsorMsgServer) DelegateCredit(ctx context.Context, req SponsorDelegateCreditRequest) (SponsorDelegateCreditResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return SponsorDelegateCreditResponse{}, err
+		}
+	}
 	currentTimeUnix := sponsormodule.CurrentTimeUnixFromContext(ctx)
 
 	resp, err := m.msgServer.DelegateCredit(sponsormodule.DelegateCreditRequest{

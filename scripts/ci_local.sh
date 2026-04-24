@@ -227,6 +227,9 @@ echo "[ci] windows desktop shell guardrails integration"
 echo "[ci] windows local api session guardrails integration"
 ./scripts/integration_windows_local_api_session_guardrails.sh
 
+echo "[ci] windows setup native guardrails integration"
+bash ./scripts/integration_windows_setup_windows_native_guardrails.sh
+
 echo "[ci] windows desktop dev guardrails integration"
 ./scripts/integration_windows_desktop_dev_guardrails.sh
 

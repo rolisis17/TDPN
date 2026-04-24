@@ -991,23 +991,70 @@ function refreshOperatorApprovalPolicyHint() {
     adminTokenEl.title = failClosedMutatingActionStatusDetail();
     operatorApprovalPolicyHintEl.classList.add("locked");
     operatorApprovalPolicyHintEl.textContent =
-      "Operator approval auth policy is unavailable because /v1/config could not be read. Approval/rejection mutations remain fail-closed until runtime config is reachable.";
+      "Operator approval auth policy is unavailable because /v1/config could not be read. Moderation readiness: locked. Approval/rejection mutations remain fail-closed until runtime config is reachable.";
     return;
   }
+
+  const role = (serverReadiness?.role || byId("role").value || "client").trim().toLowerCase();
+  const sessionToken = byId("session_token").value.trim();
+  const sessionFreshness = computeSessionFreshnessState();
+  const adminToken = adminTokenEl.value.trim();
+
+  let moderationReadinessLocked = true;
+  let moderationReadinessDetail = "Sign in with an admin session or provide admin token fallback.";
 
   if (strictSessionPolicy) {
     adminTokenEl.value = "";
     adminTokenEl.title = "Legacy admin token fallback is disabled by policy.";
-    operatorApprovalPolicyHintEl.classList.add("locked");
+    if (!sessionToken) {
+      moderationReadinessDetail = "Sign in with an admin session token to approve or reject operators.";
+    } else if (sessionFreshness.state === "expired") {
+      moderationReadinessDetail = sessionFreshness.detail;
+    } else if (sessionFreshness.state === "unknown") {
+      moderationReadinessDetail = `${sessionFreshness.detail} Refresh Session before moderation actions.`;
+    } else if (role !== "admin") {
+      moderationReadinessDetail = `Current session role is ${role || "client"}; admin role is required for approval actions.`;
+    } else if (sessionFreshness.state === "expiring_soon") {
+      moderationReadinessLocked = false;
+      moderationReadinessDetail = `Ready with caution: ${sessionFreshness.detail}`;
+    } else {
+      moderationReadinessLocked = false;
+      moderationReadinessDetail = "Ready: admin session is active for moderation actions.";
+    }
+    operatorApprovalPolicyHintEl.classList.toggle("locked", true);
     operatorApprovalPolicyHintEl.textContent =
-      `Operator approval auth policy: admin session token required (source: ${sourceLabel}); legacy admin token fallback is disabled.`;
+      `Operator approval auth policy: admin session token required (source: ${sourceLabel}); legacy admin token fallback is disabled. ` +
+      `Moderation readiness: ${moderationReadinessLocked ? "locked" : "ready"}. ${moderationReadinessDetail}`;
     return;
   }
 
   adminTokenEl.removeAttribute("title");
-  operatorApprovalPolicyHintEl.classList.remove("locked");
+  if (sessionToken && sessionFreshness.state !== "expired" && role === "admin") {
+    if (sessionFreshness.state === "expiring_soon") {
+      moderationReadinessLocked = false;
+      moderationReadinessDetail = `Ready with caution: ${sessionFreshness.detail}`;
+    } else if (sessionFreshness.state === "unknown") {
+      moderationReadinessLocked = true;
+      moderationReadinessDetail = `${sessionFreshness.detail} Refresh Session before moderation actions.`;
+    } else {
+      moderationReadinessLocked = false;
+      moderationReadinessDetail = "Ready via admin session token.";
+    }
+  } else if (adminToken) {
+    moderationReadinessLocked = false;
+    moderationReadinessDetail = "Ready via admin token fallback.";
+  } else if (sessionToken && sessionFreshness.state === "expired") {
+    moderationReadinessDetail = `${sessionFreshness.detail} Add admin token fallback or sign in with an admin session.`;
+  } else if (sessionToken && role !== "admin") {
+    moderationReadinessDetail =
+      `Current session role is ${role || "client"}; provide admin token fallback or sign in with an admin session.`;
+  } else if (!sessionToken) {
+    moderationReadinessDetail = "No session token loaded. Provide admin token fallback or sign in with an admin session.";
+  }
+  operatorApprovalPolicyHintEl.classList.toggle("locked", moderationReadinessLocked);
   operatorApprovalPolicyHintEl.textContent =
-    `Operator approval auth policy: session token preferred (source: ${sourceLabel}); legacy admin token fallback is available when needed.`;
+    `Operator approval auth policy: session token preferred (source: ${sourceLabel}); legacy admin token fallback is available when needed. ` +
+    `Moderation readiness: ${moderationReadinessLocked ? "locked" : "ready"}. ${moderationReadinessDetail}`;
 }
 
 function refreshConnectPolicyHint() {
@@ -3352,8 +3399,8 @@ function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
     return;
   }
   workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-    ? "Windows-native first run: verify local GPM/WireGuard readiness, then run Status before Connect or server lifecycle actions."
-    : "First run: verify local GPM readiness, then run Status before Connect or server lifecycle actions.";
+    ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions."
+    : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions.";
 }
 
 function inferWorkspaceTabActivationPathHint(tabName, reason) {

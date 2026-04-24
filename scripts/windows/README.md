@@ -1,5 +1,10 @@
 # Windows Native Script Notes
 
+All scripts in this directory are **Windows-native** and are intended to run from `powershell.exe`/Windows Terminal outside WSL.
+If WSL usage is intentional, use the dedicated WSL entrypoints:
+- `scripts\windows\wsl2_easy.cmd bootstrap`
+- `scripts\windows\wsl2_easy.cmd run`
+
 ## One-shot prerequisite setup/remediation
 
 Use `setup_windows_native.ps1` to verify and optionally remediate common Windows-native blockers for desktop and local API workflows.
@@ -29,6 +34,7 @@ What the script does:
 - resolves Node tooling to `npm.cmd`/`npx.cmd` (never `npm.ps1`/`npx.ps1`) for policy-safe invocation
 - routes child script launches through `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ...`
 - checks desktop icon/resources preflight (`icon.svg`, valid `icon.ico`, and `tauri.conf.json` bundle icon entry)
+- auto-remediates missing desktop source icon (`icon.svg`) by scaffolding a temporary placeholder when needed
 - in fix mode, auto-remediates common icon/resource drift (regenerates `icon.ico` and patches `bundle.icon` with `icons/icon.ico` when possible)
 - finishes with a verification block for `go version`, `node -v`, `npm -v`, `npx -v`, `rustc -V`, and `cargo -V`
 

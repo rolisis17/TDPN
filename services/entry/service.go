@@ -92,6 +92,7 @@ type Service struct {
 
 	mu                sync.RWMutex
 	sessions          map[string]sessionState
+	pendingSessions   int
 	exitRouteCache    map[string]exitRoute
 	relayDescCache    map[string]cachedRelayDescriptor
 	openRPS           int
@@ -179,8 +180,8 @@ func New() *Service {
 	directoryMinSources := envIntOr("ENTRY_DIRECTORY_MIN_SOURCES", "DIRECTORY_MIN_SOURCES", 1)
 	directoryMinOperators := envIntOr("ENTRY_DIRECTORY_MIN_OPERATORS", "DIRECTORY_MIN_OPERATORS", 1)
 	directoryMinVotes := envIntOr("ENTRY_DIRECTORY_MIN_RELAY_VOTES", "DIRECTORY_MIN_RELAY_VOTES", 1)
-	directoryTrustStrict, directoryTrustStrictErr := envStrictBoolOr("ENTRY_DIRECTORY_TRUST_STRICT", "DIRECTORY_TRUST_STRICT", true)
-	directoryTrustTOFU, directoryTrustTOFUErr := envStrictBoolOr("ENTRY_DIRECTORY_TRUST_TOFU", "DIRECTORY_TRUST_TOFU", false)
+	directoryTrustStrict, directoryTrustStrictErr := envStrictBoolPreferPrimary("ENTRY_DIRECTORY_TRUST_STRICT", "DIRECTORY_TRUST_STRICT", true)
+	directoryTrustTOFU, directoryTrustTOFUErr := envStrictBoolPreferPrimary("ENTRY_DIRECTORY_TRUST_TOFU", "DIRECTORY_TRUST_TOFU", false)
 	directoryTrustFile := os.Getenv("ENTRY_DIRECTORY_TRUSTED_KEYS_FILE")
 	if directoryTrustFile == "" {
 		directoryTrustFile = os.Getenv("DIRECTORY_TRUSTED_KEYS_FILE")
@@ -567,11 +568,17 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.allowNewSession(time.Now().Unix()) {
+	if !s.reserveNewSession(time.Now().Unix()) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "entry-capacity-exceeded"})
 		return
 	}
+	releaseReservation := true
+	defer func() {
+		if releaseReservation {
+			s.releaseSessionReservation()
+		}
+	}()
 	route, err := s.resolveExitRoute(r.Context(), req.ExitID)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -625,15 +632,14 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
-		s.mu.Lock()
-		s.sessions[sessionID] = sessionState{
+		s.commitReservedSession(sessionID, sessionState{
 			exitDataAddr:   route.dataAddr,
 			exitControlURL: route.controlURL,
 			sessionKeyID:   strings.TrimSpace(resp.SessionKeyID),
 			expiresUnix:    expires,
 			transport:      transport,
-		}
-		s.mu.Unlock()
+		})
+		releaseReservation = false
 		resp.SessionID = sessionID
 		resp.EntryDataAddr = s.dataAddr
 		resp.SessionExp = expires
@@ -745,7 +751,38 @@ func (s *Service) allowNewSession(nowSec int64) bool {
 	if s.sessionCapacity() <= 0 {
 		return true
 	}
-	return len(s.sessions) < s.sessionCapacity()
+	return len(s.sessions)+s.pendingSessions < s.sessionCapacity()
+}
+
+func (s *Service) reserveNewSession(nowSec int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneStateLocked(nowSec)
+	if s.sessionCapacity() <= 0 {
+		return true
+	}
+	if len(s.sessions)+s.pendingSessions >= s.sessionCapacity() {
+		return false
+	}
+	s.pendingSessions++
+	return true
+}
+
+func (s *Service) releaseSessionReservation() {
+	s.mu.Lock()
+	if s.pendingSessions > 0 {
+		s.pendingSessions--
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) commitReservedSession(sessionID string, state sessionState) {
+	s.mu.Lock()
+	if s.pendingSessions > 0 {
+		s.pendingSessions--
+	}
+	s.sessions[sessionID] = state
+	s.mu.Unlock()
 }
 
 func (s *Service) sessionCapacity() int {
@@ -2275,6 +2312,32 @@ func envStrictBoolOr(primary string, fallback string, def bool) (bool, error) {
 	}
 	if fallbackSet {
 		return fallbackValue, nil
+	}
+	return def, nil
+}
+
+func envStrictBoolPreferPrimary(primary string, fallback string, def bool) (bool, error) {
+	if raw, ok := os.LookupEnv(primary); ok {
+		if strings.TrimSpace(raw) == "" {
+			return false, fmt.Errorf("value must not be empty")
+		}
+		parsed, err := parseStrictBool(raw)
+		if err != nil {
+			return false, err
+		}
+		return parsed, nil
+	}
+	if fallback != "" {
+		if raw, ok := os.LookupEnv(fallback); ok {
+			if strings.TrimSpace(raw) == "" {
+				return false, fmt.Errorf("value must not be empty")
+			}
+			parsed, err := parseStrictBool(raw)
+			if err != nil {
+				return false, err
+			}
+			return parsed, nil
+		}
 	}
 	return def, nil
 }

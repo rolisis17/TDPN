@@ -23,8 +23,9 @@ What this scaffold includes:
   - `control_config`
 
 Desktop onboarding UX cues:
-- A persistent `Onboarding state` card now shows `Signed out`, `Session active`, `Operator pending`, `Operator approved`, or `Operator rejected`.
+- A persistent `Onboarding state` card now shows `Signed out`, `Session expiry unknown`, `Session expiring soon`, `Session expired`, `Session active`, `Operator pending`, `Operator approved`, or `Operator rejected`.
 - The card also shows one `Next recommended action` message that follows the flow `challenge -> verify -> register -> operator apply -> await approval`.
+- Step tracking now treats server-only client-lane locks as role-blocked (not registration-missing), so server workflow guidance can continue without a false Step-2 blocker.
 - Server-lane lock hints now include a direct action path and required conditions when server/operator actions are locked.
 - A compact `Bootstrap Trust` card now summarizes `GET /v1/gpm/bootstrap/manifest` posture (source `remote|cache`, signature verification status, expiry timing, and actionable guidance when trust is degraded or data is stale/missing).
 

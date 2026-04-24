@@ -189,6 +189,9 @@ func (s *MemoryService) RecordUsage(_ context.Context, usage UsageRecord) error 
 	if err := s.ensureSessionSubjectConsistencyLocked(usage.SessionID, usage.SubjectID); err != nil {
 		return err
 	}
+	if _, settled := s.settledBySession[usage.SessionID]; settled {
+		return sessionAlreadySettledError(usage.SessionID)
+	}
 	s.usageBySession[usage.SessionID] = append(s.usageBySession[usage.SessionID], usage)
 	return nil
 }
@@ -233,6 +236,9 @@ func (s *MemoryService) ReserveFunds(_ context.Context, reservation FundReservat
 	defer s.mu.Unlock()
 	if err := s.ensureSessionSubjectConsistencyLocked(reservation.SessionID, reservation.SubjectID); err != nil {
 		return FundReservation{}, err
+	}
+	if _, settled := s.settledBySession[reservation.SessionID]; settled {
+		return FundReservation{}, sessionAlreadySettledError(reservation.SessionID)
 	}
 	if existing, ok := s.reservationsBySession[reservation.SessionID]; ok {
 		return existing, nil
@@ -1402,6 +1408,10 @@ func ensureUsageRecordsSubject(sessionID string, subjectID string, records []Usa
 
 func sessionSubjectMismatchError(sessionID string) error {
 	return fmt.Errorf("session subject mismatch for session %s", sessionID)
+}
+
+func sessionAlreadySettledError(sessionID string) error {
+	return fmt.Errorf("session already settled for session %s", sessionID)
 }
 
 func normalizeCurrencyCode(raw string) string {

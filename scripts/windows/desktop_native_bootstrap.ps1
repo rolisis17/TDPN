@@ -26,6 +26,67 @@ function Write-Step {
   Write-Host "[desktop-native-bootstrap] $Message"
 }
 
+function Test-IsWslSession {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslDistro)) {
+    return $true
+  }
+
+  $wslInterop = [Environment]::GetEnvironmentVariable("WSL_INTEROP", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslInterop)) {
+    return $true
+  }
+
+  foreach ($probePath in @("/proc/sys/kernel/osrelease", "/proc/version")) {
+    if (-not (Test-Path -LiteralPath $probePath -PathType Leaf)) {
+      continue
+    }
+
+    $contents = ""
+    try {
+      $contents = [string](Get-Content -Raw -LiteralPath $probePath -ErrorAction Stop)
+    } catch {
+      $contents = ""
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($contents) -and $contents.ToLowerInvariant().Contains("microsoft")) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Get-WslDistroLabel {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if ([string]::IsNullOrWhiteSpace($wslDistro)) {
+    return "(unknown)"
+  }
+  return $wslDistro.Trim()
+}
+
+function Assert-WindowsNativeNonWsl {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptName
+  )
+
+  if (-not (Test-IsWslSession)) {
+    return
+  }
+
+  $wslDistro = Get-WslDistroLabel
+  throw @"
+$ScriptName is Windows-native and must run outside WSL.
+Detected WSL environment: distro=$wslDistro
+Run this script from Windows PowerShell or Windows Terminal (non-WSL).
+Windows-native command:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_native_bootstrap.ps1 -Mode $Mode
+If you intended the WSL path instead, use:
+  scripts\windows\wsl2_easy.cmd bootstrap
+"@
+}
+
 function Resolve-RepoRoot {
   $scriptDir = $PSScriptRoot
   if ([string]::IsNullOrWhiteSpace($scriptDir)) {
@@ -2210,8 +2271,42 @@ function Ensure-DesktopIconAsset {
     [string]$NpmCommandPath
   )
 
+  $sourceIconAvailable = Test-Path -LiteralPath $SourceIconPath -PathType Leaf
+  if (-not $sourceIconAvailable) {
+    $sourceIconDir = Split-Path -Parent $SourceIconPath
+    if ($DryRun) {
+      Write-Step ("dry-run desktop source icon remediation: would create placeholder source icon at {0}" -f $SourceIconPath)
+    } else {
+      if (-not (Test-Path -LiteralPath $sourceIconDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $sourceIconDir -Force | Out-Null
+        Write-Step ("desktop source icon remediation: created source icon directory {0}" -f $sourceIconDir)
+      }
+
+      $placeholderSourceSvg = @'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TDPN placeholder icon">
+  <defs>
+    <linearGradient id="tdpnBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#tdpnBg)" />
+  <circle cx="128" cy="128" r="66" fill="#ffffff" />
+  <path d="M96 128h64" stroke="#0f172a" stroke-width="20" stroke-linecap="round" />
+</svg>
+'@
+      Set-Content -LiteralPath $SourceIconPath -Value $placeholderSourceSvg -Encoding UTF8
+      Write-Step ("desktop source icon remediation: created placeholder source icon at {0}" -f $SourceIconPath)
+      Write-Step "desktop source icon remediation: placeholder icon is temporary; restore your project icon when available"
+    }
+  }
+
   if (-not (Test-Path -LiteralPath $SourceIconPath -PathType Leaf)) {
-    throw ("desktop icon source is missing: {0}`nmanual remediation:`n- git checkout -- apps/desktop/src-tauri/icons/icon.svg`n- scripts\windows\desktop_node.cmd npm run generate:windows-icon" -f $SourceIconPath)
+    if ($DryRun) {
+      Write-Step ("dry-run desktop source icon remediation pending: source icon remains missing at {0}" -f $SourceIconPath)
+    } else {
+      throw ("desktop icon source is missing: {0}`nmanual remediation:`n- git checkout -- apps/desktop/src-tauri/icons/icon.svg`n- scripts\windows\desktop_node.cmd npm run generate:windows-icon`n- rerun scripts\windows\desktop_native_bootstrap.ps1 -Mode run-desktop -DesktopLaunchStrategy dev -InstallMissing" -f $SourceIconPath)
+    }
   }
 
   $tauriBundleState = Test-TauriBundleIconConfigured -TauriConfigPath $TauriConfigPath -ExpectedIconRelativePath "icons/icon.ico"
@@ -2295,9 +2390,12 @@ function Ensure-DesktopIconAsset {
 }
 
 function Invoke-BootstrapMain {
+  Assert-WindowsNativeNonWsl -ScriptName "desktop_native_bootstrap.ps1"
   $repoRoot = Resolve-RepoRoot
 
   Write-Step "mode=$Mode"
+  Write-Step "execution_model=windows-native-non-wsl"
+  Write-Step "wsl_required=false"
   Write-Step "desktop_launch_strategy=$DesktopLaunchStrategy"
   if ($Mode -eq "run-full") {
     Write-Step ("keep_api_running={0}" -f $(if ($KeepApiRunning) { "true" } else { "false" }))
@@ -2467,6 +2565,9 @@ $script:BootstrapSummary = [ordered]@{
   status = ""
   mode = $Mode
   dry_run = [bool]$DryRun
+  execution_model = "windows-native-non-wsl"
+  wsl_required = $false
+  wsl_detected = [bool](Test-IsWslSession)
   desktop_launch_strategy = $DesktopLaunchStrategy
   desktop_launch_source = ""
   desktop_executable_path = ""

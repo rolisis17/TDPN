@@ -53,13 +53,53 @@ trim() {
   printf '%s' "$value"
 }
 
+path_is_cross_platform_absolute_01() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$path" == /* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" =~ ^\\\\.* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" == //* ]]; then
+    printf '1'
+    return
+  fi
+  printf '0'
+}
+
+normalize_cross_platform_path_separators() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$path" =~ ^[A-Za-z]:\\.* ]] || [[ "$path" =~ ^\\\\.* ]]; then
+    printf '%s' "${path//\\//}"
+    return
+  fi
+  printf '%s' "$path"
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
-  elif [[ "$path" == /* ]]; then
-    printf '%s' "$path"
+  elif [[ "$(path_is_cross_platform_absolute_01 "$path")" == "1" ]]; then
+    printf '%s' "$(normalize_cross_platform_path_separators "$path")"
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
@@ -75,15 +115,16 @@ resolve_path_with_base() {
     printf '%s' ""
     return
   fi
-  if [[ "$candidate" == /* ]]; then
-    printf '%s' "$candidate"
+  if [[ "$(path_is_cross_platform_absolute_01 "$candidate")" == "1" ]]; then
+    printf '%s' "$(normalize_cross_platform_path_separators "$candidate")"
     return
   fi
   if [[ -n "$base_file" ]]; then
-    base_dir="$(cd "$(dirname "$base_file")" && pwd)"
-    if [[ -f "$base_dir/$candidate" ]]; then
-      printf '%s' "$base_dir/$candidate"
-      return
+    if base_dir="$(cd "$(dirname "$base_file")" && pwd 2>/dev/null)"; then
+      if [[ -f "$base_dir/$candidate" ]]; then
+        printf '%s' "$base_dir/$candidate"
+        return
+      fi
     fi
   fi
   printf '%s' "$ROOT_DIR/$candidate"
@@ -1975,6 +2016,20 @@ profile_default_gate_command_supports_subject_placeholder_01() {
   fi
 }
 
+profile_default_gate_command_supports_host_placeholder_substitution_01() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$cmd" =~ ^(sudo[[:space:]]+)?\./scripts/easy_node\.sh[[:space:]]+(profile-default-gate-live|profile-default-gate-run|profile-compare-campaign-signoff|profile-default-gate-stability-run|profile-default-gate-stability-cycle)([[:space:]]|$) ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 profile_default_gate_command_has_credential_args_01() {
   local cmd
   cmd="$(trim "${1:-}")"
@@ -2564,11 +2619,51 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   printf '%s' "$rebuilt"
 }
 
+profile_default_gate_replace_host_placeholders_for_target() {
+  local value
+  local target
+  local host_a
+  local host_b
+  value="${1:-}"
+  target="$(trim "${2:-both}")"
+  host_a="$(trim "${3:-}")"
+  host_b="$(trim "${4:-}")"
+  case "$target" in
+    a)
+      if [[ -n "$host_a" ]]; then
+        value="${value//HOST_A/$host_a}"
+        value="${value//A_HOST/$host_a}"
+      fi
+      ;;
+    b)
+      if [[ -n "$host_b" ]]; then
+        value="${value//HOST_B/$host_b}"
+        value="${value//B_HOST/$host_b}"
+      fi
+      ;;
+    *)
+      if [[ -n "$host_a" ]]; then
+        value="${value//HOST_A/$host_a}"
+        value="${value//A_HOST/$host_a}"
+      fi
+      if [[ -n "$host_b" ]]; then
+        value="${value//HOST_B/$host_b}"
+        value="${value//B_HOST/$host_b}"
+      fi
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
 profile_default_gate_command_apply_env_host_placeholders() {
   local cmd
   local host_a
   local host_b
+  local next_token=""
+  local replacement_target=""
   local token=""
+  local value=""
+  local idx=0
   local -a rebuilt_argv=()
   cmd="$(trim "${1:-}")"
   host_a="$(trim "${2:-}")"
@@ -2581,32 +2676,77 @@ profile_default_gate_command_apply_env_host_placeholders() {
     printf '%s' "$cmd"
     return
   fi
-  if [[ "$(profile_default_gate_command_supports_subject_placeholder_01 "$cmd")" != "1" ]]; then
+  if [[ "$(profile_default_gate_command_supports_host_placeholder_substitution_01 "$cmd")" != "1" ]]; then
     printf '%s' "$cmd"
     return
   fi
   if ! command_string_to_argv "$cmd"; then
-    if [[ -n "$host_a" ]]; then
-      cmd="${cmd//HOST_A/$host_a}"
-      cmd="${cmd//A_HOST/$host_a}"
-    fi
-    if [[ -n "$host_b" ]]; then
-      cmd="${cmd//HOST_B/$host_b}"
-      cmd="${cmd//B_HOST/$host_b}"
-    fi
     printf '%s' "$cmd"
     return
   fi
-  for token in "${COMMAND_STRING_ARGV[@]}"; do
-    if [[ -n "$host_a" ]]; then
-      token="${token//HOST_A/$host_a}"
-      token="${token//A_HOST/$host_a}"
+  while (( idx < ${#COMMAND_STRING_ARGV[@]} )); do
+    token="${COMMAND_STRING_ARGV[$idx]}"
+    replacement_target=""
+    case "$token" in
+      --host-a|--directory-a|--bootstrap-directory|--campaign-bootstrap-directory|--issuer-url|--entry-url|--exit-url)
+        replacement_target="a"
+        ;;
+      --host-b|--directory-b)
+        replacement_target="b"
+        ;;
+      --campaign-directory-urls)
+        replacement_target="both"
+        ;;
+    esac
+    if [[ -n "$replacement_target" ]]; then
+      rebuilt_argv+=("$token")
+      if (( idx + 1 < ${#COMMAND_STRING_ARGV[@]} )); then
+        next_token="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+        if [[ "$next_token" != --* ]]; then
+          next_token="$(profile_default_gate_replace_host_placeholders_for_target "$next_token" "$replacement_target" "$host_a" "$host_b")"
+        fi
+        rebuilt_argv+=("$next_token")
+        idx=$((idx + 2))
+        continue
+      fi
+      idx=$((idx + 1))
+      continue
     fi
-    if [[ -n "$host_b" ]]; then
-      token="${token//HOST_B/$host_b}"
-      token="${token//B_HOST/$host_b}"
-    fi
+    case "$token" in
+      --host-a=*|--directory-a=*|--bootstrap-directory=*|--campaign-bootstrap-directory=*|--issuer-url=*|--entry-url=*|--exit-url=*)
+        value="${token#*=}"
+        value="$(profile_default_gate_replace_host_placeholders_for_target "$value" "a" "$host_a" "$host_b")"
+        rebuilt_argv+=("${token%%=*}=$value")
+        idx=$((idx + 1))
+        continue
+        ;;
+      --host-b=*|--directory-b=*)
+        value="${token#*=}"
+        value="$(profile_default_gate_replace_host_placeholders_for_target "$value" "b" "$host_a" "$host_b")"
+        rebuilt_argv+=("${token%%=*}=$value")
+        idx=$((idx + 1))
+        continue
+        ;;
+      --campaign-directory-urls=*)
+        value="${token#*=}"
+        value="$(profile_default_gate_replace_host_placeholders_for_target "$value" "both" "$host_a" "$host_b")"
+        rebuilt_argv+=("${token%%=*}=$value")
+        idx=$((idx + 1))
+        continue
+        ;;
+      HOST_A|A_HOST)
+        if [[ -n "$host_a" ]]; then
+          token="$host_a"
+        fi
+        ;;
+      HOST_B|B_HOST)
+        if [[ -n "$host_b" ]]; then
+          token="$host_b"
+        fi
+        ;;
+    esac
     rebuilt_argv+=("$token")
+    idx=$((idx + 1))
   done
   profile_default_gate_command_from_argv "${rebuilt_argv[@]}"
 }
@@ -2621,20 +2761,22 @@ resolve_dir_with_base() {
     printf '%s' ""
     return
   fi
-  if [[ "$candidate" == /* ]]; then
-    printf '%s' "$candidate"
+  if [[ "$(path_is_cross_platform_absolute_01 "$candidate")" == "1" ]]; then
+    printf '%s' "$(normalize_cross_platform_path_separators "$candidate")"
     return
   fi
   if [[ -n "$base_file" ]]; then
-    base_dir="$(cd "$(dirname "$base_file")" && pwd)"
-    printf '%s' "$base_dir/$candidate"
-    return
+    if base_dir="$(cd "$(dirname "$base_file")" && pwd 2>/dev/null)"; then
+      printf '%s' "$base_dir/$candidate"
+      return
+    fi
   fi
   printf '%s' "$ROOT_DIR/$candidate"
 }
 
 summary_reports_dir_from_path_or_fallback() {
   local summary_path
+  local summary_path_for_dirname
   local fallback_reports_dir
   local reports_dir=""
   summary_path="$(trim "${1:-}")"
@@ -2649,7 +2791,8 @@ summary_reports_dir_from_path_or_fallback() {
       reports_dir="$(resolve_dir_with_base "$reports_dir" "$summary_path")"
     fi
     if [[ -z "$reports_dir" ]]; then
-      reports_dir="$(dirname "$summary_path" 2>/dev/null || true)"
+      summary_path_for_dirname="$(normalize_cross_platform_path_separators "$summary_path")"
+      reports_dir="$(dirname "$summary_path_for_dirname" 2>/dev/null || true)"
       reports_dir="$(trim "$reports_dir")"
     fi
   fi
@@ -10294,6 +10437,12 @@ fi
 profile_default_gate_next_command="$(
   profile_default_gate_command_apply_env_host_placeholders \
     "$profile_default_gate_next_command" \
+    "$profile_default_gate_next_command_host_a_effective" \
+    "$profile_default_gate_next_command_host_b_effective"
+)"
+profile_default_gate_evidence_pack_next_command="$(
+  profile_default_gate_command_apply_env_host_placeholders \
+    "$profile_default_gate_evidence_pack_next_command" \
     "$profile_default_gate_next_command_host_a_effective" \
     "$profile_default_gate_next_command_host_b_effective"
 )"

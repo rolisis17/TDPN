@@ -8921,6 +8921,268 @@ if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_evidence_pack_st
   exit 1
 fi
 
+echo "[roadmap-progress-report] profile-default evidence-pack stability-cycle prereq resolves HOST placeholders from A_HOST/B_HOST when safe"
+if [[ "$PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON" == "true" ]]; then
+  if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+    run_roadmap_progress_report \
+      --refresh-manual-validation 0 \
+      --refresh-single-machine-readiness 0 \
+      --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+      --summary-json "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_stability_cycle_env_hosts_summary.json" \
+      --report-md "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_stability_cycle_env_hosts_report.md" \
+      --print-report 0 \
+      --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_evidence_pack_stability_cycle_env_hosts.log 2>&1; then
+    echo "expected success for profile-default evidence-pack stability-cycle env-host placeholder path"
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_evidence_pack_stability_cycle_env_hosts.log
+    exit 1
+  fi
+  if ! jq -e '
+    def has_resolved_hosts($cmd):
+      (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+      and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+    def has_host_placeholders($cmd):
+      (($cmd // "") | test("HOST_A|HOST_B|A_HOST|B_HOST"));
+    .vpn_track.profile_default_gate_evidence_pack.needs_attention == true
+    and .vpn_track.optional_gate_status.profile_default_gate_evidence_pack == "missing"
+    and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
+    and has_resolved_hosts(.vpn_track.profile_default_gate_evidence_pack.next_command)
+    and ((has_host_placeholders(.vpn_track.profile_default_gate_evidence_pack.next_command)) | not)
+    and ((.next_actions // []) | any(
+      .id == "profile_default_gate_evidence_pack"
+      and ((.command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
+      and has_resolved_hosts(.command)
+      and ((has_host_placeholders(.command)) | not)
+    ))
+  ' "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_stability_cycle_env_hosts_summary.json" >/dev/null; then
+    echo "profile-default evidence-pack stability-cycle env-host substitution summary mismatch"
+    cat "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_stability_cycle_env_hosts_summary.json"
+    exit 1
+  fi
+else
+  echo "[roadmap-progress-report] skipped stability-cycle env-host placeholder assertion because helper is unavailable in this checkout"
+fi
+
+echo "[roadmap-progress-report] profile-default evidence-pack stability-cycle env-host substitution preserves non-host path tokens"
+if [[ "$PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON" == "true" ]]; then
+  PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_REPORTS_DIR="$TMP_DIR/profile_default_A_HOST_token_reports"
+  PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_INPUT_SUMMARY_JSON="$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_REPORTS_DIR/profile_default_gate_evidence_pack_summary.json"
+  PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_CYCLE_SUMMARY_JSON="$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_REPORTS_DIR/profile_default_gate_stability_cycle_summary.json"
+  PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_default_evidence_pack_a_host_path_summary.json"
+  jq --arg summary_json_path "$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_INPUT_SUMMARY_JSON" '
+    .summary = (
+      (.summary // {})
+      + {
+          profile_default_gate_evidence_pack: {
+            summary_json: $summary_json_path
+          }
+        }
+    )
+  ' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_MANUAL_SUMMARY_JSON"
+  if ! A_HOST="100.113.245.61" B_HOST="100.64.244.24" \
+    run_roadmap_progress_report \
+      --refresh-manual-validation 0 \
+      --refresh-single-machine-readiness 0 \
+      --manual-validation-summary-json "$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_MANUAL_SUMMARY_JSON" \
+      --summary-json "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_a_host_path_summary.json" \
+      --report-md "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_a_host_path_report.md" \
+      --print-report 0 \
+      --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_evidence_pack_a_host_path.log 2>&1; then
+    echo "expected success for profile-default evidence-pack non-host path token preservation path"
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_evidence_pack_a_host_path.log
+    exit 1
+  fi
+  if ! jq -e \
+    --arg reports_dir "$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_REPORTS_DIR" \
+    --arg summary_json "$PROFILE_DEFAULT_EVIDENCE_PACK_A_HOST_PATH_CYCLE_SUMMARY_JSON" \
+    '
+    def has_resolved_hosts($cmd):
+      (($cmd // "") | test("(^| )--host-a 100\\.113\\.245\\.61( |$)"))
+      and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
+    def has_unresolved_host_arg_placeholders($cmd):
+      (($cmd // "") | test("(^| )--host-a(=| )(HOST_A|A_HOST)( |$)|(^| )--host-b(=| )(HOST_B|B_HOST)( |$)"));
+    .vpn_track.profile_default_gate_evidence_pack.needs_attention == true
+    and .vpn_track.optional_gate_status.profile_default_gate_evidence_pack == "missing"
+    and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
+    and has_resolved_hosts(.vpn_track.profile_default_gate_evidence_pack.next_command)
+    and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | contains("--reports-dir " + $reports_dir))
+    and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
+    and ((has_unresolved_host_arg_placeholders(.vpn_track.profile_default_gate_evidence_pack.next_command)) | not)
+    and ((.next_actions // []) | any(
+      .id == "profile_default_gate_evidence_pack"
+      and ((.command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
+      and has_resolved_hosts(.command)
+      and ((.command // "") | contains("--reports-dir " + $reports_dir))
+      and ((.command // "") | contains("--summary-json " + $summary_json))
+      and ((has_unresolved_host_arg_placeholders(.command)) | not)
+    ))
+    ' "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_a_host_path_summary.json" >/dev/null; then
+    echo "profile-default evidence-pack non-host path token preservation summary mismatch"
+    cat "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_a_host_path_summary.json"
+    exit 1
+  fi
+else
+  echo "[roadmap-progress-report] skipped non-host path token preservation assertion because stability-cycle helper is unavailable in this checkout"
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] runtime-actuation evidence-pack next command preserves Windows reports-dir without mixed path prefixes"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_REPORTS_DIR="C:/roadmap/runtime_actuation_promotion_windows_reports"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_SUMMARY_JSON="$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_REPORTS_DIR/runtime_actuation_promotion_evidence_pack_summary.json"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_REPORTS_DIR="$TMP_DIR/runtime_actuation_promotion_windows_hint_reports"
+mkdir -p "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_REPORTS_DIR"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY_JSON="$TMP_DIR/runtime_actuation_promotion_windows_hint_summary.json"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_GENERATED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY_JSON" <<EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "generated_at_utc": "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_GENERATED_AT_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "inputs": {
+    "reports_dir": "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_REPORTS_DIR",
+    "cycles": 4
+  },
+  "stages": {
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "promotion_check": {
+    "status": "fail",
+    "decision": "NO-GO",
+    "rc": 1
+  }
+}
+EOF_RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_evidence_pack_windows_path_summary.json"
+jq --arg summary_json_path "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_SUMMARY_JSON" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_evidence_pack: {
+        summary_json: $summary_json_path
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_path_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_path_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_windows_path.log 2>&1; then
+  echo "expected success for runtime-actuation evidence-pack Windows-path command normalization path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_windows_path.log
+  exit 1
+fi
+if ! jq -e \
+  --arg reports_dir "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_REPORTS_DIR" \
+  --arg summary_json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_SUMMARY_JSON" \
+  --argjson helper_available "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == true
+  and (if $helper_available then
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("^\\./scripts/easy_node\\.sh runtime-actuation-promotion-evidence-pack( |$)"))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--reports-dir " + $reports_dir))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
+         and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("/C:/")) | not)
+         and ((.next_actions // []) | any(
+           .id == "runtime_actuation_promotion_evidence_pack"
+           and ((.command // "") | contains("--reports-dir " + $reports_dir))
+           and ((.command // "") | contains("--summary-json " + $summary_json))
+           and (((.command // "") | test("/C:/")) | not)
+         ))
+       else
+         (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("helper is unavailable"; "i"))
+         and (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
+       end)
+  ' "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_path_summary.json" >/dev/null; then
+  echo "runtime-actuation evidence-pack Windows-path command normalization summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_path_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] runtime-actuation evidence-pack next command normalizes Windows backslash summary paths"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_REPORTS_DIR='C:\roadmap\runtime_actuation_promotion_windows_backslash_reports'
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_REPORTS_DIR_NORMALIZED="C:/roadmap/runtime_actuation_promotion_windows_backslash_reports"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_SUMMARY_JSON="${RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_REPORTS_DIR}\\runtime_actuation_promotion_evidence_pack_summary.json"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_SUMMARY_JSON_NORMALIZED="$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_REPORTS_DIR_NORMALIZED/runtime_actuation_promotion_evidence_pack_summary.json"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_evidence_pack_windows_backslash_summary.json"
+jq --arg summary_json_path "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_SUMMARY_JSON" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_evidence_pack: {
+        summary_json: $summary_json_path
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_backslash_path_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_backslash_path_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_windows_backslash_path.log 2>&1; then
+  echo "expected success for runtime-actuation evidence-pack Windows-backslash path normalization path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_windows_backslash_path.log
+  exit 1
+fi
+if ! jq -e \
+  --arg reports_dir "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_REPORTS_DIR_NORMALIZED" \
+  --arg summary_json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_BACKSLASH_SUMMARY_JSON_NORMALIZED" \
+  --argjson helper_available "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == true
+  and (if $helper_available then
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("^\\./scripts/easy_node\\.sh runtime-actuation-promotion-evidence-pack( |$)"))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--reports-dir " + $reports_dir))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
+         and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--reports-dir .")) | not)
+         and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("C:\\\\")) | not)
+         and ((.next_actions // []) | any(
+           .id == "runtime_actuation_promotion_evidence_pack"
+           and ((.command // "") | contains("--reports-dir " + $reports_dir))
+           and ((.command // "") | contains("--summary-json " + $summary_json))
+           and (((.command // "") | contains("--reports-dir .")) | not)
+           and (((.command // "") | contains("C:\\\\")) | not)
+         ))
+       else
+         (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("helper is unavailable"; "i"))
+         and (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
+       end)
+  ' "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_backslash_path_summary.json" >/dev/null; then
+  echo "runtime-actuation evidence-pack Windows-backslash path normalization summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_backslash_path_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] evidence-pack clean pass summaries suppress actionable convenience run"
 EVIDENCE_PACK_ALL_PASS_DIR="$TMP_DIR/evidence_pack_all_pass"
 mkdir -p "$EVIDENCE_PACK_ALL_PASS_DIR"

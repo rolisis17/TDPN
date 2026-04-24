@@ -55,6 +55,12 @@ to_powershell_path() {
   printf '%s' "$path"
 }
 
+ps_single_quote() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
 TMP_DIR="$(mktemp -d)"
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -126,10 +132,14 @@ done
 for marker in \
   'Invoke-DesktopBuildPreflight' \
   'Invoke-ReleaseBundleBuild' \
+  'function Assert-WindowsNativeNonWsl' \
   'preflight_status' \
   'preflight_summary_json' \
   'recommended_commands' \
+  'execution_model=windows-native-non-wsl' \
   'wsl_required=false' \
+  'is Windows-native and must run outside WSL.' \
+  'wsl2_easy.cmd bootstrap' \
   'desktop preflight reported blocking issues'
 do
   if ! grep -q -- "$marker" "$SCRIPT_UNDER_TEST"; then
@@ -168,6 +178,9 @@ if [[ ! -f "$EXE_SUMMARY_JSON" ]]; then
 fi
 assert_json_expr "$EXE_SUMMARY_JSON" '.status == "ok"' "explicit exe summary must have status=ok"
 assert_json_expr "$EXE_SUMMARY_JSON" '.platform == "windows"' "explicit exe summary must have platform=windows"
+assert_json_expr "$EXE_SUMMARY_JSON" '.execution_model == "windows-native-non-wsl"' "explicit exe summary must set execution_model=windows-native-non-wsl"
+assert_json_expr "$EXE_SUMMARY_JSON" '.wsl_required == false' "explicit exe summary must set wsl_required=false"
+assert_json_expr "$EXE_SUMMARY_JSON" '.wsl_detected == false' "explicit exe summary must set wsl_detected=false"
 assert_json_expr "$EXE_SUMMARY_JSON" '.installer_type == "nsis"' "explicit exe summary must infer installer_type=nsis"
 assert_json_expr "$EXE_SUMMARY_JSON" '.installer_source == "explicit"' "explicit exe summary must have installer_source=explicit"
 assert_json_expr "$EXE_SUMMARY_JSON" '.dry_run == true' "explicit exe summary must set dry_run=true"
@@ -204,6 +217,7 @@ if [[ ! -f "$MSI_SUMMARY_JSON" ]]; then
   exit 1
 fi
 assert_json_expr "$MSI_SUMMARY_JSON" '.status == "ok"' "explicit msi summary must have status=ok"
+assert_json_expr "$MSI_SUMMARY_JSON" '.execution_model == "windows-native-non-wsl"' "explicit msi summary must set execution_model=windows-native-non-wsl"
 assert_json_expr "$MSI_SUMMARY_JSON" '.installer_type == "msi"' "explicit msi summary must infer installer_type=msi"
 assert_json_expr "$MSI_SUMMARY_JSON" '.installer_source == "explicit"' "explicit msi summary must have installer_source=explicit"
 assert_json_expr "$MSI_SUMMARY_JSON" '.dry_run == true' "explicit msi summary must set dry_run=true"
@@ -270,7 +284,9 @@ fi
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.status == "dry-run"' "build mode dry-run summary must have status=dry-run"
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.installer_mode == "build"' "build mode dry-run summary must have installer_mode=build"
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.build_mode == true' "build mode dry-run summary must have build_mode=true"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.execution_model == "windows-native-non-wsl"' "build mode dry-run summary must set execution_model=windows-native-non-wsl"
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.wsl_required == false' "build mode dry-run summary must keep wsl_required=false"
+assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.wsl_detected == false' "build mode dry-run summary must keep wsl_detected=false"
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.build_triggered == true' "build mode dry-run summary must mark build_triggered=true"
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.preflight_status == "dry_run_skipped"' "build mode dry-run summary must set preflight_status=dry_run_skipped"
 assert_json_expr "$BUILD_MODE_DRY_RUN_SUMMARY" '.release_bundle_summary_json | strings | length > 0' "build mode dry-run summary must include release_bundle_summary_json"
@@ -286,6 +302,13 @@ if ! grep -Fq 'build command:' "$TMP_DIR/build_mode_dry_run.log"; then
   cat "$TMP_DIR/build_mode_dry_run.log"
   exit 1
 fi
+
+echo "[windows-desktop-installer-guardrails] WSL sessions fail fast with actionable non-WSL guidance"
+run_expect_fail_regex \
+  "wsl_session_fail_fast" \
+  "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd bootstrap" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & $(ps_single_quote "$SCRIPT_UNDER_TEST_PS") -Mode build -DryRun"
 
 echo "[windows-desktop-installer-guardrails] print-summary marker appears when enabled"
 PRINT_SUMMARY_JSON="$TMP_DIR/print_summary.json"

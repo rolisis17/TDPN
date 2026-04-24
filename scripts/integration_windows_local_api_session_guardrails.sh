@@ -60,6 +60,7 @@ assert_marker_present "-File \"%PS1%\"" "$LOCAL_API_SESSION_CMD"
 echo "[windows-local-api-session-guardrails] marker checks: powershell script go/runtime guidance"
 assert_marker_present "function Resolve-GoExecutable" "$LOCAL_API_SESSION_PS1"
 assert_marker_present "function Resolve-JqExecutable" "$LOCAL_API_SESSION_PS1"
+assert_marker_present "function Assert-WindowsNativeNonWsl" "$LOCAL_API_SESSION_PS1"
 assert_marker_present '[switch]$InstallMissing' "$LOCAL_API_SESSION_PS1"
 assert_marker_present "winget install --id GoLang.Go --exact" "$LOCAL_API_SESSION_PS1"
 assert_marker_present "winget install --id jqlang.jq --exact" "$LOCAL_API_SESSION_PS1"
@@ -68,6 +69,11 @@ assert_marker_present "Invoke-WingetInstallJq" "$LOCAL_API_SESSION_PS1"
 assert_marker_present "Refresh-ProcessPath" "$LOCAL_API_SESSION_PS1"
 assert_marker_present '$goArgs = @("run", "./cmd/node")' "$LOCAL_API_SESSION_PS1"
 assert_marker_present '$goArgs += @("--local-api")' "$LOCAL_API_SESSION_PS1"
+assert_marker_present "is Windows-native and must run outside WSL." "$LOCAL_API_SESSION_PS1"
+assert_marker_present "scripts\\windows\\wsl2_easy.cmd run" "$LOCAL_API_SESSION_PS1"
+assert_marker_present 'Write-Host "  execution_model: windows-native-non-wsl"' "$LOCAL_API_SESSION_PS1"
+assert_marker_present 'Write-Host "  wsl_required: false"' "$LOCAL_API_SESSION_PS1"
+assert_marker_present 'Write-Host ("  wsl_detected: {0}"' "$LOCAL_API_SESSION_PS1"
 assert_marker_present 'Write-Host "  command: go ' "$LOCAL_API_SESSION_PS1"
 assert_marker_present 'Write-Host "  install_missing: $installMissingEnabled"' "$LOCAL_API_SESSION_PS1"
 assert_marker_present 'Write-Host "  jq_preflight: enabled"' "$LOCAL_API_SESSION_PS1"
@@ -210,6 +216,31 @@ run_ps1_dry_run_check() {
       ;;
   esac
 }
+
+run_expect_fail_regex() {
+  local name="$1"
+  local expected_pattern="$2"
+  shift 2
+  local log_path="$TMP_DIR/${name}.log"
+  if "$@" >"$log_path" 2>&1; then
+    echo "windows local api session guardrails failed: expected failure for $name"
+    cat "$log_path"
+    exit 1
+  fi
+  if ! grep -Eiq -- "$expected_pattern" "$log_path"; then
+    echo "windows local api session guardrails failed: missing expected failure output for $name"
+    echo "expected regex: $expected_pattern"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
+echo "[windows-local-api-session-guardrails] runtime check: WSL sessions fail fast with actionable non-WSL guidance"
+run_expect_fail_regex \
+  "ps1_wsl_session_fail_fast" \
+  "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd run" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & '$(printf "%s" "$LOCAL_API_SESSION_PS1_PS")' -DryRun"
 
 echo "[windows-local-api-session-guardrails] runtime check: local_api_session.ps1 dry-run"
 run_ps1_dry_run_check "ps1_dry_run" "false" "default" -DryRun

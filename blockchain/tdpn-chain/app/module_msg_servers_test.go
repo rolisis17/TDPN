@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -239,5 +240,40 @@ func TestSponsorMsgServer_NilScaffold(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "vpnsponsor keeper is not wired") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSponsorMsgServer_DelegateCreditHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SponsorMsgServer()
+
+	auth := sponsortypes.SponsorAuthorization{
+		AuthorizationID: "auth-canceled-ctx-1",
+		SponsorID:       "sponsor-canceled-ctx-1",
+		AppID:           "app-canceled-ctx-1",
+		MaxCredits:      1000,
+	}
+	if _, err := server.CreateAuthorization(context.Background(), SponsorCreateAuthorizationRequest{Record: auth}); err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	delegation := sponsortypes.DelegatedSessionCredit{
+		ReservationID:   "res-canceled-ctx-1",
+		AuthorizationID: auth.AuthorizationID,
+		SponsorID:       auth.SponsorID,
+		AppID:           auth.AppID,
+		SessionID:       "sess-canceled-ctx-1",
+		Credits:         50,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.DelegateCredit(canceledCtx, SponsorDelegateCreditRequest{Record: delegation}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.SponsorModule.Keeper.GetDelegation(delegation.ReservationID); exists {
+		t.Fatalf("expected no delegation write on canceled context for reservation %s", delegation.ReservationID)
 	}
 }

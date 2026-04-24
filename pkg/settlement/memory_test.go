@@ -798,6 +798,55 @@ func TestMemoryServiceSessionSubjectConsistencyValidLifecycle(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceSessionSubjectConsistencyRejectsUsageAndReserveFundsAfterSettlement(t *testing.T) {
+	s := NewMemoryService(WithPricePerMiBMicros(1_000_000))
+	ctx := context.Background()
+	const (
+		sessionID = "sess-settled-write-reject-1"
+		subjectID = "client-settled-write-reject-1"
+	)
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: 2_000_000,
+		Currency:     "TDPNC",
+	}); err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		BytesIngress: 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	if _, err := s.SettleSession(ctx, sessionID); err != nil {
+		t.Fatalf("SettleSession: %v", err)
+	}
+
+	if err := s.RecordUsage(ctx, UsageRecord{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		BytesIngress: 1024,
+	}); err == nil {
+		t.Fatalf("expected RecordUsage on settled session to fail closed")
+	} else if !strings.Contains(err.Error(), "session already settled for session "+sessionID) {
+		t.Fatalf("unexpected RecordUsage error: %v", err)
+	}
+
+	if _, err := s.ReserveFunds(ctx, FundReservation{
+		SessionID:    sessionID,
+		SubjectID:    subjectID,
+		AmountMicros: 10_000,
+		Currency:     "TDPNC",
+	}); err == nil {
+		t.Fatalf("expected ReserveFunds on settled session to fail closed")
+	} else if !strings.Contains(err.Error(), "session already settled for session "+sessionID) {
+		t.Fatalf("unexpected ReserveFunds error: %v", err)
+	}
+}
+
 func TestMemoryServiceAdapterDeferredOnFailure(t *testing.T) {
 	s := NewMemoryService(WithChainAdapter(fakeAdapter{fail: true}))
 	ctx := context.Background()

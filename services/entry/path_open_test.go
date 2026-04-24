@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -615,6 +616,128 @@ func TestHandlePathOpenRejectsWhenSessionCapacityReached(t *testing.T) {
 	}
 	if exitCalls != 0 {
 		t.Fatalf("expected no exit call when at session capacity, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenConcurrentCapacityReservesSessionSlot(t *testing.T) {
+	var exitCallsMu sync.Mutex
+	exitCalls := 0
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		"http://exit.local/v1/path/open": func(req *http.Request) (*http.Response, error) {
+			exitCallsMu.Lock()
+			exitCalls++
+			exitCallsMu.Unlock()
+			entered <- struct{}{}
+			<-release
+			return jsonResp(proto.PathOpenResponse{
+				Accepted:   true,
+				SessionExp: time.Now().Add(5 * time.Minute).Unix(),
+				Transport:  "wireguard-udp",
+			})(req)
+		},
+	}
+	s := &Service{
+		dataAddr:              "127.0.0.1:51820",
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		maxSessions:           1,
+		sessions:              map[string]sessionState{},
+		exitRouteCache:        map[string]exitRoute{"exit-a": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-b", fetchedAt: time.Now()}},
+		buckets:               map[string]rateBucket{},
+		abuse:                 map[string]abuseState{},
+		openRPS:               100,
+		routeTTL:              time.Minute,
+		requireDistinctExitOp: false,
+	}
+
+	type openResult struct {
+		code int
+		resp proto.PathOpenResponse
+		err  error
+	}
+	openOnce := func(remoteAddr string) openResult {
+		reqBody, err := json.Marshal(proto.PathOpenRequest{
+			ExitID:     "exit-a",
+			Transport:  "wireguard-udp",
+			TokenProof: "proof",
+		})
+		if err != nil {
+			return openResult{err: err}
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+		req.RemoteAddr = remoteAddr
+		rr := httptest.NewRecorder()
+		s.handlePathOpen(rr, req)
+		var out proto.PathOpenResponse
+		if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+			return openResult{code: rr.Code, err: err}
+		}
+		return openResult{code: rr.Code, resp: out}
+	}
+
+	results := make([]openResult, 2)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	remotes := []string{"127.0.0.1:41101", "127.0.0.1:41102"}
+	for i := range remotes {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			results[idx] = openOnce(remotes[idx])
+		}(i)
+	}
+	close(start)
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first forwarded path open")
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	accepted := 0
+	capacityRejected := 0
+	for i, res := range results {
+		if res.err != nil {
+			t.Fatalf("result %d error: %v", i, res.err)
+		}
+		if res.code != http.StatusOK {
+			t.Fatalf("result %d expected status 200, got %d", i, res.code)
+		}
+		if res.resp.Accepted {
+			accepted++
+		}
+		if res.resp.Reason == "entry-capacity-exceeded" {
+			capacityRejected++
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("expected exactly one accepted open under maxSessions=1, got %d", accepted)
+	}
+	if capacityRejected != 1 {
+		t.Fatalf("expected exactly one entry-capacity-exceeded rejection, got %d", capacityRejected)
+	}
+
+	s.mu.RLock()
+	sessionCount := len(s.sessions)
+	pendingCount := s.pendingSessions
+	s.mu.RUnlock()
+	if sessionCount != 1 {
+		t.Fatalf("expected exactly one recorded session, got %d", sessionCount)
+	}
+	if pendingCount != 0 {
+		t.Fatalf("expected no pending session reservations after completion, got %d", pendingCount)
+	}
+
+	exitCallsMu.Lock()
+	recordedExitCalls := exitCalls
+	exitCallsMu.Unlock()
+	if recordedExitCalls != 1 {
+		t.Fatalf("expected exactly one forwarded exit open call, got %d", recordedExitCalls)
 	}
 }
 

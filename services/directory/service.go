@@ -5099,6 +5099,13 @@ func validateProviderControlURL(controlURL, endpoint string, strict bool) error 
 	if err != nil {
 		return fmt.Errorf("provider control_url invalid")
 	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("provider control_url invalid")
+	}
+	if strict && scheme != "https" {
+		return fmt.Errorf("provider control_url must use https in strict mode")
+	}
 	controlHost := normalizeHostForCompare(parsed.Hostname())
 	if controlHost == "" {
 		return fmt.Errorf("provider control_url host is required")

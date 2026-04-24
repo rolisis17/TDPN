@@ -17,6 +17,21 @@ if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
   exit 1
 fi
 
+assert_marker_present() {
+  local marker="$1"
+  local file_path="$2"
+  if ! grep -Fq -- "$marker" "$file_path"; then
+    echo "windows desktop one-click guardrails failed: missing marker '$marker' in $file_path"
+    exit 1
+  fi
+}
+
+assert_marker_present "function Assert-WindowsNativeNonWsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "execution_model=windows-native-non-wsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "wsl_required=false" "$SCRIPT_UNDER_TEST"
+assert_marker_present "is Windows-native and must run outside WSL." "$SCRIPT_UNDER_TEST"
+assert_marker_present "scripts\\windows\\wsl2_easy.cmd bootstrap" "$SCRIPT_UNDER_TEST"
+
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
 elif command -v pwsh >/dev/null 2>&1; then
@@ -102,8 +117,33 @@ run_expect_output_regex() {
   fi
 }
 
+run_expect_fail_regex() {
+  local name="$1"
+  local expected_pattern="$2"
+  shift 2
+  local log_path="$TMP_DIR/${name}.log"
+  if "$@" >"$log_path" 2>&1; then
+    echo "windows desktop one-click guardrails failed: expected failure for $name"
+    cat "$log_path"
+    exit 1
+  fi
+  if ! grep -Eiq -- "$expected_pattern" "$log_path"; then
+    echo "windows desktop one-click guardrails failed: missing expected failure output for $name"
+    echo "expected regex: $expected_pattern"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
 FIX_MODE_REGEX='\[desktop-doctor\] mode=fix'
 CHECK_MODE_REGEX='\[desktop-doctor\] mode=check'
+
+echo "[windows-desktop-one-click-guardrails] WSL sessions fail fast with actionable non-WSL guidance"
+run_expect_fail_regex \
+  "wsl_session_fail_fast" \
+  "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd bootstrap" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun'"
 
 echo "[windows-desktop-one-click-guardrails] default dry-run auto-enables install remediation"
 run_expect_output_regex \

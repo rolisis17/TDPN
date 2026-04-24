@@ -138,6 +138,45 @@ func TestValidateRuntimeConfigRejectsMalformedDirectoryTrustStrictEnv(t *testing
 	}
 }
 
+func TestNewDirectoryTrustStrictPrefersEntryEnvOverGlobalFallback(t *testing.T) {
+	t.Setenv("ENTRY_DIRECTORY_TRUST_STRICT", "0")
+	t.Setenv("DIRECTORY_TRUST_STRICT", "1")
+
+	s := New()
+	if s.directoryTrustStrict {
+		t.Fatalf("expected ENTRY_DIRECTORY_TRUST_STRICT to override DIRECTORY_TRUST_STRICT")
+	}
+	if s.strictModeParseErr != nil {
+		t.Fatalf("expected no parse error when primary strict env is valid: %v", s.strictModeParseErr)
+	}
+}
+
+func TestNewDirectoryTrustTOFUPrefersEntryEnvOverGlobalFallback(t *testing.T) {
+	t.Setenv("ENTRY_DIRECTORY_TRUST_TOFU", "1")
+	t.Setenv("DIRECTORY_TRUST_TOFU", "0")
+
+	s := New()
+	if !s.directoryTrustTOFU {
+		t.Fatalf("expected ENTRY_DIRECTORY_TRUST_TOFU to override DIRECTORY_TRUST_TOFU")
+	}
+	if s.strictModeParseErr != nil {
+		t.Fatalf("expected no parse error when primary TOFU env is valid: %v", s.strictModeParseErr)
+	}
+}
+
+func TestNewDirectoryTrustStrictIgnoresMalformedFallbackWhenPrimarySet(t *testing.T) {
+	t.Setenv("ENTRY_DIRECTORY_TRUST_STRICT", "1")
+	t.Setenv("DIRECTORY_TRUST_STRICT", "definitely")
+
+	s := New()
+	if !s.directoryTrustStrict {
+		t.Fatalf("expected strict trust enabled from primary env")
+	}
+	if s.strictModeParseErr != nil {
+		t.Fatalf("expected fallback parse error to be ignored when primary env is set: %v", s.strictModeParseErr)
+	}
+}
+
 func TestValidateRuntimeConfigRejectsEmptyDirectoryTrustStrictEnv(t *testing.T) {
 	t.Setenv("ENTRY_DIRECTORY_TRUST_STRICT", "   ")
 

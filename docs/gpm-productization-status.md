@@ -1,6 +1,6 @@
 # GPM Productization Status Tracker
 
-Last updated: 2026-04-23
+Last updated: 2026-04-24
 
 Scope:
 - Global Private Mesh (GPM) track only.
@@ -28,6 +28,8 @@ Compatibility note:
 - Live+pack actionable orchestration now enforces live-summary contract continuity in `scripts/roadmap_live_and_pack_actionable_run.sh`: the evidence-pack stage always receives `--live-evidence-summary-json` plus `--require-live-derived-evidence-pack-actions 1`, and archive-enabled execution remains fail-closed for non-pass archive outcomes, with expanded coverage in `scripts/integration_roadmap_live_and_pack_actionable_run.sh` and `scripts/integration_easy_node_roadmap_live_and_pack_actionable_run.sh`. Acceptance criterion: continue-on-live-fail cannot silently publish evidence packs detached from live evidence context.
 - Session-freshness gating now preserves fail-closed mutating protections while keeping policy-allowed moderation fallback usable: `apps/web/assets/portal.js` enables approve/reject with valid legacy `admin_token` when session is expired and policy allows fallback, and immediately re-evaluates lock state on `admin_token` input changes; desktop readiness heartbeat state handling in `apps/desktop/src/main.js` avoids stale-session freshness races and signed-out false-fresh status. Acceptance criterion: UI lock behavior matches backend policy contracts without stale state drift.
 - Single-window workspace tab lock UX is now aligned across portal and desktop surfaces: `apps/web/portal.html`, `apps/web/assets/portal.js`, and `apps/web/assets/gpm.css` now mirror desktop-style disabled-tab guidance with explicit lock reason + activation path messaging near the tab bar, while preserving visible `Client`/`Server` tabs and role-lock fail-closed behavior. Acceptance criterion: users can see why a tab is disabled and what action sequence unlocks it without leaving the current window context.
+- Desktop/web onboarding consistency for average-user VPN flow is tightened: `apps/desktop/src/main.js` now treats server-only client-lane locks as role-blocked (instead of forcing client registration), so Step 3 can progress without a false Step 2 blocker; desktop onboarding state now surfaces session freshness (`expired`, `expiring soon`, `expiry unknown`) from session telemetry; and first-run workspace hints in `apps/desktop/index.html`, `apps/desktop/src/main.js`, `apps/web/portal.html`, and `apps/web/assets/portal.js` now call out a shared sign-in -> Session -> Status path before connect/lifecycle actions. Acceptance criterion: users get consistent lock guidance, first-run sequencing, and session-state messaging across portal and desktop surfaces.
+- Operator moderation auth visibility is now explicit in both desktop and portal policy hints: `apps/desktop/src/main.js` and `apps/web/assets/portal.js` now append a live `Moderation readiness` state (ready vs locked with concrete unlock reason) to operator-approval policy copy, and desktop approve/reject buttons are pre-locked with matching tooltips when admin-session prerequisites are not met. Acceptance criterion: operators can see approval auth readiness before clicking approve/reject and get immediate actionable lock context.
 
 ## In-Progress
 

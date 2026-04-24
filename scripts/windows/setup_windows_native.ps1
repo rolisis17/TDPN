@@ -16,6 +16,67 @@ function Write-Step {
   Write-Host "[setup-windows-native] $Message"
 }
 
+function Test-IsWslSession {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslDistro)) {
+    return $true
+  }
+
+  $wslInterop = [Environment]::GetEnvironmentVariable("WSL_INTEROP", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($wslInterop)) {
+    return $true
+  }
+
+  foreach ($probePath in @("/proc/sys/kernel/osrelease", "/proc/version")) {
+    if (-not (Test-Path -LiteralPath $probePath -PathType Leaf)) {
+      continue
+    }
+
+    $contents = ""
+    try {
+      $contents = [string](Get-Content -Raw -LiteralPath $probePath -ErrorAction Stop)
+    } catch {
+      $contents = ""
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($contents) -and $contents.ToLowerInvariant().Contains("microsoft")) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Get-WslDistroLabel {
+  $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
+  if ([string]::IsNullOrWhiteSpace($wslDistro)) {
+    return "(unknown)"
+  }
+  return $wslDistro.Trim()
+}
+
+function Assert-WindowsNativeNonWsl {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptName
+  )
+
+  if (-not (Test-IsWslSession)) {
+    return
+  }
+
+  $wslDistro = Get-WslDistroLabel
+  throw @"
+$ScriptName is Windows-native and must run outside WSL.
+Detected WSL environment: distro=$wslDistro
+Run this script from Windows PowerShell or Windows Terminal (non-WSL).
+Windows-native command:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\setup_windows_native.ps1 -Workflow $Workflow -InstallMissing -EnablePolicyBypass
+If you intended the WSL path instead, use:
+  scripts\windows\wsl2_easy.cmd bootstrap
+"@
+}
+
 function Quote-PowerShellSingleQuotedString {
   param([Parameter(Mandatory = $true)][string]$Value)
   return "'" + ($Value -replace "'", "''") + "'"
@@ -854,7 +915,12 @@ function Resolve-NextCommand {
 }
 
 
+Assert-WindowsNativeNonWsl -ScriptName "setup_windows_native.ps1"
+$wslDetected = [bool](Test-IsWslSession)
 Write-Step ("workflow={0}" -f $Workflow)
+Write-Step "execution_model=windows-native-non-wsl"
+Write-Step "wsl_required=false"
+Write-Step ("wsl_detected={0}" -f $(if ($wslDetected) { "true" } else { "false" }))
 Write-Step ("install_missing={0}" -f ($(if ($InstallMissing) { "true" } else { "false" })))
 Write-Step ("non_interactive={0}" -f ($(if ($NonInteractive) { "true" } else { "false" })))
 Write-Step ("dry_run={0}" -f ($(if ($DryRun) { "true" } else { "false" })))

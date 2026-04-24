@@ -90,6 +90,8 @@ const desktopOnboardingStateEl = document.getElementById("desktop_onboarding_sta
 const desktopOnboardingDetailEl = document.getElementById("desktop_onboarding_detail");
 const desktopOnboardingNextActionEl = document.getElementById("desktop_onboarding_next_action");
 const operatorListNextBtnEl = byId("operator_list_next_btn");
+const approveOperatorBtnEl = byId("approve_operator_btn");
+const rejectOperatorBtnEl = byId("reject_operator_btn");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
@@ -101,6 +103,7 @@ const CONNECTION_DEFAULT_STATE = "Unknown";
 const CONNECTION_DEFAULT_DETAIL = "Not checked yet";
 const ROUTING_DEFAULT_MODE = "Unknown";
 const ROUTING_DEFAULT_DETAIL = "No routing telemetry yet";
+const SESSION_EXPIRING_SOON_MS = 10 * 60 * 1000;
 const READINESS_HEARTBEAT_INTERVAL_MS = 90 * 1000;
 const READINESS_HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 const READINESS_HEARTBEAT_ERROR_MAX_CHARS = 160;
@@ -173,6 +176,8 @@ const BOOTSTRAP_MANIFEST_TRUST_DEGRADED_STATUS_FRAGMENTS = Object.freeze([
 
 const state = {
   sessionToken: "",
+  sessionExpiryAtMs: undefined,
+  sessionExpiryToken: "",
   role: "client",
   operatorApplicationStatus: undefined,
   selectedApplicationUpdatedAtUtc: "",
@@ -991,6 +996,7 @@ async function resolveWalletAddressFromExtension(extension, chainId) {
 
 async function completeAuthVerifyFlow(result) {
   setSessionToken(result?.session_token || "");
+  refreshSessionFreshnessFromPayload(result, { tokenOverride: state.sessionToken, clearWhenMissing: true });
   setClientRegistrationStateFromPayload(result, { allowFallback: true });
   setRole(parseSessionRole(result));
   await refreshClientRegistrationStatus({ quiet: true });
@@ -3485,6 +3491,7 @@ function effectiveDesktopOperatorApplicationStatus() {
 }
 
 function computeDesktopNextRecommendedAction() {
+  const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
   if (!state.sessionToken) {
     const challengeId = challengeIdEl.value.trim();
     const signature = walletSignatureEl.value.trim();
@@ -3497,7 +3504,27 @@ function computeDesktopNextRecommendedAction() {
     return "Use Sign In to verify and create a session.";
   }
 
-  if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired || !state.clientRegistered) {
+  const sessionFreshness = computeSessionFreshnessState();
+  if (sessionFreshness.state === "expired") {
+    return "Use Wallet Sign-In (Recommended) or Sign In to re-authenticate.";
+  }
+  if (sessionFreshness.state === "expiring_soon") {
+    return "Rotate Session.";
+  }
+  if (sessionFreshness.state === "unknown") {
+    return "Run Session to validate session freshness.";
+  }
+
+  if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired) {
+    if (isClientLaneRoleLocked(role, state.serverReadiness)) {
+      return "Client lane is role-locked for this session. Continue in server/operator readiness checks.";
+    }
+    return "Register Client.";
+  }
+  if (!state.clientRegistered) {
+    if (isClientLaneRoleLocked(role, state.serverReadiness)) {
+      return "Client lane is role-locked for this session. Continue in server/operator readiness checks.";
+    }
     return "Register Client.";
   }
 
@@ -3508,7 +3535,6 @@ function computeDesktopNextRecommendedAction() {
   if (operatorStatus === "rejected") {
     return "Apply Operator Role again after updating operator details.";
   }
-  const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
   if (operatorStatus !== "approved" && role !== "admin" && role !== "server" && role !== "server_only") {
     return "Apply Operator Role.";
   }
@@ -3543,32 +3569,61 @@ function computeDesktopOnboardingBannerState() {
     };
   }
 
+  const sessionFreshness = computeSessionFreshnessState();
+  if (sessionFreshness.state === "expired") {
+    return {
+      state: "bad",
+      title: "Session expired",
+      detail: sessionFreshness.detail
+    };
+  }
+  if (sessionFreshness.state === "expiring_soon") {
+    return {
+      state: "warn",
+      title: "Session expiring soon",
+      detail: sessionFreshness.detail
+    };
+  }
+  if (sessionFreshness.state === "unknown") {
+    return {
+      state: "warn",
+      title: "Session expiry unknown",
+      detail: sessionFreshness.detail
+    };
+  }
+
+  const clientLaneRoleLocked = isClientLaneRoleLocked(
+    (state.serverReadiness?.role || state.role || "client").toLowerCase(),
+    state.serverReadiness
+  );
   const operatorStatus = effectiveDesktopOperatorApplicationStatus();
   if (operatorStatus === "pending") {
     return {
       state: "warn",
       title: "Operator pending",
-      detail: "Session is active and operator approval is pending."
+      detail: `${sessionFreshness.detail} Operator approval is pending.`
     };
   }
   if (operatorStatus === "approved") {
     return {
       state: "good",
       title: "Operator approved",
-      detail: "Session is active and operator approval is complete."
+      detail: `${sessionFreshness.detail} Operator approval is complete.`
     };
   }
   if (operatorStatus === "rejected") {
     return {
       state: "bad",
       title: "Operator rejected",
-      detail: "Session is active, but operator application was rejected."
+      detail: `${sessionFreshness.detail} Operator application was rejected.`
     };
   }
   return {
     state: "good",
     title: "Session active",
-    detail: "Session token is active. Continue with client registration and operator onboarding."
+    detail: clientLaneRoleLocked
+      ? `${sessionFreshness.detail} Continue with operator/server workflow for this role.`
+      : `${sessionFreshness.detail} Continue with client registration and operator onboarding.`
   };
 }
 
@@ -3868,9 +3923,11 @@ function clientRegistrationTrustHintText() {
 }
 
 function syncDesktopOnboardingSteps() {
-  const hasSession = !!state.sessionToken;
+  const sessionFreshness = computeSessionFreshnessState();
+  const hasSession = !!state.sessionToken && sessionFreshness.state !== "expired";
   const backendReadiness = state.serverReadiness;
   const role = (backendReadiness?.role || state.role || "client").toLowerCase();
+  const clientLaneRoleLocked = isClientLaneRoleLocked(role, backendReadiness);
   const operatorStatus = backendReadiness?.operatorApplicationStatus || state.operatorApplicationStatus;
   const operatorReady =
     typeof backendReadiness?.lifecycleActionsUnlocked === "boolean"
@@ -3885,13 +3942,15 @@ function syncDesktopOnboardingSteps() {
   }
 
   setDesktopStepState(desktopStepSessionEl, "done");
-  if (!state.clientRegistered) {
+  if (clientLaneRoleLocked) {
+    setDesktopStepState(desktopStepClientEl, "blocked");
+  } else if (!state.clientRegistered) {
     setDesktopStepState(desktopStepClientEl, "active");
     setDesktopStepState(desktopStepOperatorEl, "blocked");
     return;
+  } else {
+    setDesktopStepState(desktopStepClientEl, "done");
   }
-
-  setDesktopStepState(desktopStepClientEl, "done");
   if (operatorReady) {
     setDesktopStepState(desktopStepOperatorEl, "done");
     return;
@@ -4146,8 +4205,8 @@ function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
     return;
   }
   workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-    ? "Windows-native first run: verify local GPM/WireGuard readiness, then run Status and Service Status before Connect or service lifecycle actions."
-    : "First run: verify local GPM readiness, then run Status and Service Status before Connect or service lifecycle actions.";
+    ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions."
+    : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions.";
 }
 
 function inferTabActivationPathHint(tabName, reason) {
@@ -4254,6 +4313,7 @@ function syncServerRoleLockState() {
   syncConnectActionButtons();
   syncDesktopOnboardingSteps();
   syncDesktopOnboardingBanner();
+  updateOperatorApprovalPolicyHint();
 }
 
 function setRole(role, options = {}) {
@@ -4282,8 +4342,12 @@ function setSessionToken(value, options = {}) {
     state.readinessFreshnessLastAttemptMs = 0;
     state.readinessFreshnessLastUpdatedMs = 0;
     state.readinessFreshnessLastError = "";
+    markSessionFreshnessUnknownForToken(nextValue);
   }
   state.sessionToken = nextValue;
+  if (!state.sessionToken) {
+    clearSessionFreshnessTelemetry();
+  }
   sessionTokenEl.value = state.sessionToken;
   if (persist) {
     clearLegacySecretStorage();
@@ -4318,6 +4382,14 @@ function requireSessionToken(actionLabel) {
     return false;
   }
   return true;
+}
+
+function isClientLaneRoleLocked(role = state.role, readiness = state.serverReadiness) {
+  const normalized = (readiness?.role || role || "client").toLowerCase();
+  if (normalized === "server" || normalized === "server_only") {
+    return true;
+  }
+  return readiness?.clientTabVisible === false && normalized !== "operator" && normalized !== "admin";
 }
 
 function requireClientControlEligibility(actionLabel) {
@@ -4580,19 +4652,79 @@ function updateAuthVerifyPolicyHint() {
 }
 
 function updateOperatorApprovalPolicyHint() {
-  if (!operatorApprovalPolicyHintEl) {
+  if (!operatorApprovalPolicyHintEl || !approveOperatorBtnEl || !rejectOperatorBtnEl) {
     return;
   }
+  const computeModerationReadiness = () => {
+    if (!state.sessionToken) {
+      return {
+        locked: true,
+        detail: "Sign in with an admin session token to approve or reject operators."
+      };
+    }
+    const freshness = computeSessionFreshnessState();
+    if (freshness.state === "expired") {
+      return {
+        locked: true,
+        detail: freshness.detail
+      };
+    }
+    if (freshness.state === "unknown") {
+      return {
+        locked: true,
+        detail: `${freshness.detail} Run Session before moderation actions.`
+      };
+    }
+    const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
+    if (role !== "admin") {
+      return {
+        locked: true,
+        detail: `Current session role is ${role}; admin role is required for approve/reject actions.`
+      };
+    }
+    if (!walletAddressEl.value.trim()) {
+      return {
+        locked: true,
+        detail: "Set wallet_address before approving or rejecting an operator."
+      };
+    }
+    if (freshness.state === "expiring_soon") {
+      return {
+        locked: false,
+        detail: `Ready with caution: ${freshness.detail}`
+      };
+    }
+    return {
+      locked: false,
+      detail: "Ready: admin session is active for moderation actions."
+    };
+  };
   const sourceLabel = formatOperatorApprovalPolicyClientSourceLabel(state.operatorApprovalPolicySource);
-  if (state.operatorApprovalRequireSession) {
-    operatorApprovalPolicyHintEl.textContent =
-      `Operator approval policy: admin session token required from ${sourceLabel}; legacy admin_token fallback is disabled by policy.`;
-    operatorApprovalPolicyHintEl.classList.add("locked");
-    return;
+  const readiness = computeModerationReadiness();
+  const policyLine = state.operatorApprovalRequireSession
+    ? `Operator approval policy: admin session token required from ${sourceLabel}; legacy admin_token fallback is disabled by policy.`
+    : `Operator approval policy: session token preferred from ${sourceLabel}; legacy admin_token fallback may exist in backend policy, but desktop moderation actions remain session-token only.`;
+  const readinessLine = readiness.locked
+    ? `Moderation readiness: locked. ${readiness.detail}`
+    : `Moderation readiness: ready. ${readiness.detail}`;
+  operatorApprovalPolicyHintEl.textContent = `${policyLine} ${readinessLine}`;
+  operatorApprovalPolicyHintEl.classList.toggle("locked", state.operatorApprovalRequireSession || readiness.locked);
+
+  const isBusy = document.body.classList.contains("is-busy");
+  const disabled = isBusy || readiness.locked;
+  for (const button of [approveOperatorBtnEl, rejectOperatorBtnEl]) {
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", String(disabled));
+    if (isBusy && !readiness.locked) {
+      button.title = "Action in progress; wait for current request to finish.";
+      continue;
+    }
+    if (readiness.locked) {
+      button.title = readiness.detail;
+      continue;
+    }
+    button.removeAttribute("title");
   }
-  operatorApprovalPolicyHintEl.textContent =
-    `Operator approval policy: session token preferred from ${sourceLabel}; legacy admin_token fallback remains a backend compatibility path when policy allows it.`;
-  operatorApprovalPolicyHintEl.classList.remove("locked");
 }
 
 function applyConnectModePolicy(enabled) {
@@ -4647,6 +4779,7 @@ function applyOnboardingOverviewState(payload) {
   if (typeof payload?.session_token === "string" && payload.session_token.trim()) {
     setSessionToken(payload.session_token);
   }
+  refreshSessionFreshnessFromPayload(payload, { tokenOverride: state.sessionToken });
   setClientRegistrationStateFromPayload(payload, { allowFallback: true });
   setRole(parseSessionRole(payload));
   setServerReadiness(parseServerReadiness(payload));
@@ -4771,6 +4904,138 @@ function formatDurationCompact(seconds) {
     return `${Math.floor(abs / 3600)}h`;
   }
   return `${Math.floor(abs / 86400)}d`;
+}
+
+function sessionReauthGuidance() {
+  return "Rotate Session if still valid; otherwise use Wallet Sign-In (Recommended) or Sign In.";
+}
+
+function extractSessionExpiryMs(payload) {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const candidates = [
+    payload?.session?.expires_at_utc,
+    payload?.session?.expiresAtUtc,
+    payload?.session?.expires_at,
+    payload?.session?.expiresAt,
+    payload?.expires_at_utc,
+    payload?.expiresAtUtc,
+    payload?.expires_at,
+    payload?.expiresAt,
+    payload?.profile?.expires_at_utc,
+    payload?.profile?.expiresAtUtc
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseEpochMilliseconds(candidate);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+  const expiresInRaw = firstDefined(
+    payload?.session?.expires_in_sec,
+    payload?.session?.expiresInSec,
+    payload?.session?.expires_in,
+    payload?.session?.expiresIn,
+    payload?.expires_in_sec,
+    payload?.expiresInSec,
+    payload?.expires_in,
+    payload?.expiresIn
+  );
+  if (expiresInRaw === undefined || expiresInRaw === null || String(expiresInRaw).trim() === "") {
+    return undefined;
+  }
+  const expiresInSec = Number(expiresInRaw);
+  if (!Number.isFinite(expiresInSec)) {
+    return undefined;
+  }
+  return Date.now() + Math.trunc(expiresInSec * 1000);
+}
+
+function clearSessionFreshnessTelemetry() {
+  state.sessionExpiryAtMs = undefined;
+  state.sessionExpiryToken = "";
+}
+
+function refreshSessionFreshnessFromPayload(payload, options = {}) {
+  const { clearWhenMissing = false, tokenOverride } = options;
+  const token =
+    nonEmptyStringOrUndefined(
+      firstDefined(tokenOverride, payload?.session_token, payload?.session?.session_token, payload?.token)
+    ) || nonEmptyStringOrUndefined(state.sessionToken);
+  if (!token) {
+    clearSessionFreshnessTelemetry();
+    return;
+  }
+  state.sessionExpiryToken = token;
+  const expiresAtMs = extractSessionExpiryMs(payload);
+  if (expiresAtMs !== undefined) {
+    state.sessionExpiryAtMs = expiresAtMs;
+    return;
+  }
+  if (clearWhenMissing) {
+    state.sessionExpiryAtMs = undefined;
+  }
+}
+
+function markSessionFreshnessUnknownForToken(token = state.sessionToken) {
+  const normalizedToken = nonEmptyStringOrUndefined(token);
+  if (!normalizedToken) {
+    clearSessionFreshnessTelemetry();
+    return;
+  }
+  state.sessionExpiryToken = normalizedToken;
+  state.sessionExpiryAtMs = undefined;
+}
+
+function computeSessionFreshnessState() {
+  const token = nonEmptyStringOrUndefined(state.sessionToken);
+  if (!token) {
+    return {
+      state: "signed_out",
+      title: "Signed out",
+      detail: "No active session token is loaded."
+    };
+  }
+  if (state.sessionExpiryToken && state.sessionExpiryToken !== token) {
+    return {
+      state: "unknown",
+      title: "Session expiry unknown",
+      detail: "Session token changed. Run Session to validate expiry and avoid stale auth."
+    };
+  }
+  if (typeof state.sessionExpiryAtMs !== "number" || !Number.isFinite(state.sessionExpiryAtMs) || state.sessionExpiryAtMs <= 0) {
+    return {
+      state: "unknown",
+      title: "Session expiry unknown",
+      detail: "Session token is loaded, but expires_at_utc is unavailable. Run Session to validate freshness."
+    };
+  }
+  const deltaMs = state.sessionExpiryAtMs - Date.now();
+  const deltaSec = Math.floor(deltaMs / 1000);
+  const expiresAtIso = new Date(state.sessionExpiryAtMs).toISOString();
+  if (deltaMs <= 0) {
+    return {
+      state: "expired",
+      title: "Session expired",
+      detail: `Session expired ${formatDurationCompact(deltaSec)} ago (${expiresAtIso}). ${sessionReauthGuidance()}`,
+      expiresAtMs: state.sessionExpiryAtMs
+    };
+  }
+  if (deltaMs <= SESSION_EXPIRING_SOON_MS) {
+    return {
+      state: "expiring_soon",
+      title: "Session expiring soon",
+      detail: `Session expires in ${formatDurationCompact(deltaSec)} (${expiresAtIso}). Rotate Session now to avoid auth failures.`,
+      expiresAtMs: state.sessionExpiryAtMs
+    };
+  }
+  return {
+    state: "active",
+    title: "Session active",
+    detail: `Session expires in ${formatDurationCompact(deltaSec)} (${expiresAtIso}).`,
+    expiresAtMs: state.sessionExpiryAtMs
+  };
 }
 
 function normalizeBootstrapManifestSource(value) {
@@ -5257,6 +5522,7 @@ async function refreshClientRegistrationStatus(options = {}) {
 
 async function refreshSession(action = "status") {
   if (!state.sessionToken) {
+    clearSessionFreshnessTelemetry();
     setOperatorApplicationStatus(undefined);
     setServerReadiness(null);
     syncReadinessFreshnessIndicator();
@@ -5283,6 +5549,7 @@ async function refreshSession(action = "status") {
     syncReadinessFreshnessIndicator();
     return result;
   }
+  refreshSessionFreshnessFromPayload(result, { tokenOverride: state.sessionToken, clearWhenMissing: true });
   setClientRegistrationStateFromPayload(result, { allowFallback: true });
   setRole(parseSessionRole(result));
   const overview = await requestOnboardingOverview({ quiet: true });
@@ -5297,6 +5564,7 @@ async function refreshSession(action = "status") {
 
 async function refreshSessionOnInit() {
   if (!state.sessionToken) {
+    clearSessionFreshnessTelemetry();
     setServerReadiness(null);
     syncReadinessFreshnessIndicator();
     return;
@@ -5307,6 +5575,7 @@ async function refreshSessionOnInit() {
     const result = await invoke("control_gpm_session", {
       request: { session_token: state.sessionToken, action: "status" }
     });
+    refreshSessionFreshnessFromPayload(result, { tokenOverride: state.sessionToken, clearWhenMissing: true });
     setClientRegistrationStateFromPayload(result, { allowFallback: true });
     setRole(parseSessionRole(result));
     refreshed = true;
@@ -5366,6 +5635,10 @@ async function runReadinessHeartbeat(reason = "interval") {
           aborted = true;
           return;
         }
+        refreshSessionFreshnessFromPayload(sessionResult, {
+          tokenOverride: heartbeatSessionToken,
+          clearWhenMissing: true
+        });
         setClientRegistrationStateFromPayload(sessionResult, { allowFallback: true });
         setRole(parseSessionRole(sessionResult));
         refreshed = true;
@@ -5549,6 +5822,7 @@ walletAddressEl.addEventListener("input", () => {
   state.authChallengeMessage = "";
   setSelectedApplicationUpdatedAt("");
   syncDesktopOnboardingBanner();
+  updateOperatorApprovalPolicyHint();
 });
 challengeIdEl.addEventListener("input", () => {
   clearWalletSignatureContext();
