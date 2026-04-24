@@ -233,6 +233,37 @@ extract_run_stage_failure_hints_json() {
   array_to_json "${hints[@]}"
 }
 
+set_primary_failure() {
+  local code="$1"
+  local stage="$2"
+  local reason="$3"
+  local action="$4"
+  local action_command="$5"
+  local category="${6:-contract}"
+
+  failure_stage="$stage"
+  failure_reason="$reason"
+  failure_reason_code="$code"
+  failure_category="$category"
+  next_operator_action="$action"
+  next_operator_action_command="$(trim "$action_command")"
+  failure_reasons_json="$(jq -n \
+    --arg code "$code" \
+    --arg stage "$stage" \
+    --arg reason "$reason" \
+    --arg action "$action" \
+    --arg action_command "$next_operator_action_command" \
+    --arg category "$category" \
+    '[{
+      code: $code,
+      stage: (if $stage == "" then null else $stage end),
+      category: (if $category == "" then null else $category end),
+      reason: $reason,
+      action: $action,
+      action_command: (if $action_command == "" then null else $action_command end)
+    }]')"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
@@ -733,19 +764,38 @@ check_rc_json="null"
 check_modal_recommended_profile=""
 check_modal_support_rate_pct_json="null"
 check_errors_json="[]"
+check_primary_violation_code=""
+check_primary_violation_message=""
+check_primary_violation_action=""
 
 failure_stage=""
 failure_reason=""
+failure_reason_code=""
+failure_category=""
+next_operator_action=""
+next_operator_action_command=""
+failure_reasons_json="[]"
 decision=""
 status="fail"
 final_rc=1
 
 if [[ "$run_stage_rc" -ne 0 ]]; then
-  failure_stage="run"
   if [[ -n "$run_stage_failure_hint" ]]; then
-    failure_reason="$run_stage_failure_hint"
+    set_primary_failure \
+      "run_stage_command_failed" \
+      "run" \
+      "$run_stage_failure_hint" \
+      "Inspect run-stage diagnostics and rerun profile_compare_multi_vm_stability_cycle.sh." \
+      "$run_command_display" \
+      "execution"
   else
-    failure_reason="stability run failed (rc=$run_stage_rc)"
+    set_primary_failure \
+      "run_stage_command_failed" \
+      "run" \
+      "stability run failed (rc=$run_stage_rc)" \
+      "Inspect run-stage diagnostics and rerun profile_compare_multi_vm_stability_cycle.sh." \
+      "$run_command_display" \
+      "execution"
   fi
   decision="NO-GO"
   status="fail"
@@ -755,19 +805,35 @@ if [[ "$run_stage_rc" -ne 0 ]]; then
   fi
 elif [[ "$run_summary_valid" != "true" ]]; then
   run_stage_status="fail"
-  failure_stage="run"
   if [[ "$run_summary_exists" == "true" && -n "$run_summary_schema_id" && "$run_summary_schema_valid" != "true" ]]; then
-    failure_reason="stability run summary schema.id mismatch (expected profile_compare_multi_vm_stability_run_summary)"
+    set_primary_failure \
+      "run_summary_schema_invalid" \
+      "run" \
+      "stability run summary schema.id mismatch (expected profile_compare_multi_vm_stability_run_summary)" \
+      "Regenerate multi-VM run summary artifacts with profile_compare_multi_vm_stability_run.sh and rerun the cycle." \
+      "$run_command_display" \
+      "artifact_contract"
   else
-    failure_reason="stability run summary is missing or invalid"
+    set_primary_failure \
+      "run_summary_missing_or_invalid" \
+      "run" \
+      "stability run summary is missing or invalid" \
+      "Ensure run stage writes a valid summary JSON and rerun profile_compare_multi_vm_stability_cycle.sh." \
+      "$run_command_display" \
+      "artifact_contract"
   fi
   decision="NO-GO"
   status="fail"
   final_rc=1
 elif [[ "$run_summary_fresh" != "true" ]]; then
   run_stage_status="fail"
-  failure_stage="run"
-  failure_reason="stability run summary is stale (not refreshed by current run)"
+  set_primary_failure \
+    "run_summary_stale" \
+    "run" \
+    "stability run summary is stale (not refreshed by current run)" \
+    "Delete stale summary artifacts or force a fresh run-stage execution, then rerun the cycle." \
+    "$run_command_display" \
+    "artifact_freshness"
   decision="NO-GO"
   status="fail"
   final_rc=1
@@ -815,6 +881,30 @@ else
         end
       ' "$check_summary_json" 2>/dev/null || printf '%s' "null")"
       check_errors_json="$(jq -c 'if (.errors | type) == "array" then .errors else [] end' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
+      check_primary_violation_code="$(jq -r '
+        if (.violations | type) == "array"
+          and (.violations | length) > 0
+          and (.violations[0].code | type) == "string"
+        then .violations[0].code
+        else ""
+        end
+      ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+      check_primary_violation_message="$(jq -r '
+        if (.violations | type) == "array"
+          and (.violations | length) > 0
+          and (.violations[0].message | type) == "string"
+        then .violations[0].message
+        else ""
+        end
+      ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+      check_primary_violation_action="$(jq -r '
+        if (.violations | type) == "array"
+          and (.violations | length) > 0
+          and (.violations[0].action | type) == "string"
+        then .violations[0].action
+        else ""
+        end
+      ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
     else
       check_summary_valid="false"
       check_summary_schema_valid="false"
@@ -849,51 +939,116 @@ else
     if [[ "$final_rc" -eq 0 ]]; then
       final_rc=1
     fi
-    failure_stage="check"
     failure_reason="$(jq -r '
       if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string"
       then .[0]
       else ""
       end
     ' <<<"$check_errors_json" 2>/dev/null || printf '%s' "")"
+    primary_code="$check_primary_violation_code"
+    primary_action="$check_primary_violation_action"
+    if [[ -z "$failure_reason" && -n "$check_primary_violation_message" ]]; then
+      failure_reason="$check_primary_violation_message"
+    fi
     if [[ -z "$failure_reason" ]]; then
       failure_reason="stability check failed (rc=$check_stage_rc)"
     fi
+    if [[ -z "$primary_code" ]]; then
+      primary_code="check_stage_command_failed"
+    fi
+    if [[ -z "$primary_action" ]]; then
+      primary_action="Inspect check-stage diagnostics and rerun profile_compare_multi_vm_stability_cycle.sh."
+    fi
+    set_primary_failure \
+      "$primary_code" \
+      "check" \
+      "$failure_reason" \
+      "$primary_action" \
+      "$check_command_display" \
+      "execution"
   elif [[ "$check_summary_valid" != "true" ]]; then
     decision="NO-GO"
     status="fail"
     final_rc=1
-    failure_stage="check"
     if [[ "$check_summary_exists" == "true" && -n "$check_summary_schema_id" && "$check_summary_schema_valid" != "true" ]]; then
-      failure_reason="stability check summary schema.id mismatch (expected profile_compare_multi_vm_stability_check_summary)"
+      set_primary_failure \
+        "check_summary_schema_invalid" \
+        "check" \
+        "stability check summary schema.id mismatch (expected profile_compare_multi_vm_stability_check_summary)" \
+        "Regenerate stability check summary artifacts with profile_compare_multi_vm_stability_check.sh." \
+        "$check_command_display" \
+        "artifact_contract"
     else
-      failure_reason="stability check summary is missing or invalid"
+      set_primary_failure \
+        "check_summary_missing_or_invalid" \
+        "check" \
+        "stability check summary is missing or invalid" \
+        "Ensure check stage emits a valid check summary JSON and rerun profile_compare_multi_vm_stability_cycle.sh." \
+        "$check_command_display" \
+        "artifact_contract"
     fi
   elif [[ "$check_summary_fresh" != "true" ]]; then
     decision="NO-GO"
     status="fail"
     final_rc=1
-    failure_stage="check"
-    failure_reason="stability check summary is stale (not refreshed by current run)"
+    set_primary_failure \
+      "check_summary_stale" \
+      "check" \
+      "stability check summary is stale (not refreshed by current run)" \
+      "Refresh check-stage artifacts by rerunning profile_compare_multi_vm_stability_cycle.sh." \
+      "$check_command_display" \
+      "artifact_freshness"
   elif [[ "$check_decision" == "GO" ]]; then
     status="pass"
     final_rc=0
+    if [[ -z "$next_operator_action" ]]; then
+      next_operator_action="Stability cycle passes policy gates. Promotion checks may proceed."
+    fi
   elif [[ "$check_decision" == "NO-GO" ]]; then
+    primary_code="$check_primary_violation_code"
+    primary_message="$check_primary_violation_message"
+    primary_action="$check_primary_violation_action"
+    if [[ -z "$primary_code" ]]; then
+      primary_code="check_decision_no_go"
+    fi
+    if [[ -z "$primary_message" ]]; then
+      primary_message="stability check decision is NO-GO"
+    fi
+    if [[ -z "$primary_action" ]]; then
+      primary_action="Hold promotion, remediate policy violations, and rerun profile_compare_multi_vm_stability_cycle.sh."
+    fi
     if [[ "$fail_on_no_go" == "1" ]]; then
       status="fail"
       final_rc=1
-      failure_stage="check"
-      failure_reason="stability check decision is NO-GO"
+      set_primary_failure \
+        "$primary_code" \
+        "check" \
+        "$primary_message" \
+        "$primary_action" \
+        "$check_command_display" \
+        "policy"
     else
       status="warn"
       final_rc=0
+      set_primary_failure \
+        "$primary_code" \
+        "" \
+        "$primary_message" \
+        "$primary_action" \
+        "$check_command_display" \
+        "policy"
     fi
   else
     decision="NO-GO"
     status="fail"
     final_rc=1
-    failure_stage="check"
-    failure_reason="stability check summary is missing a usable decision"
+    set_primary_failure \
+      "check_decision_unusable" \
+      "check" \
+      "stability check summary is missing a usable decision" \
+      "Regenerate check summary with a GO/NO-GO decision and rerun profile_compare_multi_vm_stability_cycle.sh." \
+      "$check_command_display" \
+      "artifact_contract"
   fi
 fi
 
@@ -929,6 +1084,10 @@ jq -n \
   --arg check_stage_status "$check_stage_status" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
+  --arg failure_reason_code "$failure_reason_code" \
+  --arg failure_category "$failure_category" \
+  --arg next_operator_action "$next_operator_action" \
+  --arg next_operator_action_command "$next_operator_action_command" \
   --arg run_summary_exists "$run_summary_exists" \
   --arg run_summary_valid "$run_summary_valid" \
   --arg run_summary_schema_id "$run_summary_schema_id" \
@@ -942,12 +1101,16 @@ jq -n \
   --arg check_decision "$check_decision" \
   --arg check_status "$check_status" \
   --arg check_modal_recommended_profile "$check_modal_recommended_profile" \
+  --arg check_primary_violation_code "$check_primary_violation_code" \
+  --arg check_primary_violation_message "$check_primary_violation_message" \
+  --arg check_primary_violation_action "$check_primary_violation_action" \
   --argjson rc "$final_rc" \
   --argjson run_stage_rc "$run_stage_rc" \
   --argjson check_stage_rc "$check_stage_rc_json" \
   --argjson check_rc "$check_rc_json" \
   --argjson check_modal_support_rate_pct "$check_modal_support_rate_pct_json" \
   --argjson check_errors "$check_errors_json" \
+  --argjson failure_reasons "$failure_reasons_json" \
   --argjson runs "$runs_json" \
   --argjson sleep_between_sec "$sleep_between_sec_json" \
   --argjson allow_partial "$allow_partial_json" \
@@ -973,6 +1136,19 @@ jq -n \
     decision: (if $decision == "" then null else $decision end),
     failure_stage: (if $failure_stage == "" then null else $failure_stage end),
     failure_reason: (if $failure_reason == "" then null else $failure_reason end),
+    failure_reason_code: (if $failure_reason_code == "" then null else $failure_reason_code end),
+    failure_category: (if $failure_category == "" then null else $failure_category end),
+    failure_reasons: $failure_reasons,
+    operator_next_action: (
+      if $next_operator_action == "" then null
+      else $next_operator_action
+      end
+    ),
+    operator_next_action_command: (
+      if $next_operator_action_command == "" then null
+      else $next_operator_action_command
+      end
+    ),
     inputs: {
       reports_dir: $reports_dir,
       run: {
@@ -1060,6 +1236,30 @@ jq -n \
       ),
       modal_support_rate_pct: $check_modal_support_rate_pct,
       errors: $check_errors
+      ,
+      primary_violation: (
+        if $check_primary_violation_code == "" and $check_primary_violation_message == "" and $check_primary_violation_action == "" then null
+        else {
+          code: (if $check_primary_violation_code == "" then null else $check_primary_violation_code end),
+          message: (if $check_primary_violation_message == "" then null else $check_primary_violation_message end),
+          action: (if $check_primary_violation_action == "" then null else $check_primary_violation_action end)
+        }
+        end
+      )
+    },
+    outcome: {
+      gate_pass: ($status == "pass" and $decision == "GO" and $rc == 0),
+      action: (
+        if $status == "pass" and $decision == "GO" and $rc == 0 then "cycle_gate_pass"
+        elif $status == "warn" then "cycle_gate_warn_only"
+        else "cycle_gate_blocked"
+        end
+      ),
+      next_operator_action: (
+        if $next_operator_action == "" then null
+        else $next_operator_action
+        end
+      )
     },
     artifacts: {
       summary_json: $summary_json_path,

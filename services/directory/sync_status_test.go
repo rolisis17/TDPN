@@ -143,7 +143,11 @@ func TestSyncIssuerTrustUpdatesStatusSuccess(t *testing.T) {
 	if !issuer.Success || issuer.SuccessSources != 1 || !issuer.QuorumMet {
 		t.Fatalf("unexpected issuer sync status: %+v", issuer)
 	}
-	if len(issuer.SourceOperators) != 1 || issuer.SourceOperators[0] != "issuer-a" {
-		t.Fatalf("expected issuer source operator tracking, got %+v", issuer.SourceOperators)
+	if len(issuer.SourceOperators) != 1 {
+		t.Fatalf("expected exactly one issuer source operator, got %+v", issuer.SourceOperators)
+	}
+	gotSource := issuer.SourceOperators[0]
+	if gotSource != "issuer-a" && !strings.HasPrefix(gotSource, "key:") {
+		t.Fatalf("expected issuer source operator to be declared issuer or key-derived identity, got %q", gotSource)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	rewardstypes "github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
+	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
 )
 
@@ -223,6 +224,120 @@ func TestSponsorMsgServer_MissingAuthorization(t *testing.T) {
 	}
 }
 
+func TestSponsorMsgServer_DelegateCreditRequiresContextTimeForExpiringAuthorization(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SponsorMsgServer()
+
+	auth := sponsortypes.SponsorAuthorization{
+		AuthorizationID: "auth-expiring-no-time",
+		SponsorID:       "sponsor-expiring-no-time",
+		AppID:           "app-expiring-no-time",
+		MaxCredits:      1000,
+		ExpiresAtUnix:   4102444800,
+	}
+	if _, err := server.CreateAuthorization(context.Background(), SponsorCreateAuthorizationRequest{Record: auth}); err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	delegation := sponsortypes.DelegatedSessionCredit{
+		ReservationID:   "res-expiring-no-time",
+		AuthorizationID: auth.AuthorizationID,
+		SponsorID:       auth.SponsorID,
+		AppID:           auth.AppID,
+		SessionID:       "sess-expiring-no-time",
+		Credits:         10,
+	}
+
+	_, err := server.DelegateCredit(context.Background(), SponsorDelegateCreditRequest{Record: delegation})
+	if err == nil {
+		t.Fatal("expected missing context current time to fail for expiring authorization")
+	}
+	if !errors.Is(err, sponsormodule.ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "current unix time is required") {
+		t.Fatalf("expected current time requirement details in error, got %v", err)
+	}
+	if _, exists := scaffold.SponsorModule.Keeper.GetDelegation(delegation.ReservationID); exists {
+		t.Fatalf("expected no delegation write when current time is missing for reservation %s", delegation.ReservationID)
+	}
+}
+
+func TestSponsorMsgServer_DelegateCreditAcceptsContextTimeForExpiringAuthorization(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SponsorMsgServer()
+
+	auth := sponsortypes.SponsorAuthorization{
+		AuthorizationID: "auth-expiring-with-time",
+		SponsorID:       "sponsor-expiring-with-time",
+		AppID:           "app-expiring-with-time",
+		MaxCredits:      1000,
+		ExpiresAtUnix:   4102444800,
+	}
+	if _, err := server.CreateAuthorization(context.Background(), SponsorCreateAuthorizationRequest{Record: auth}); err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	delegation := sponsortypes.DelegatedSessionCredit{
+		ReservationID:   "res-expiring-with-time",
+		AuthorizationID: auth.AuthorizationID,
+		SponsorID:       auth.SponsorID,
+		AppID:           auth.AppID,
+		SessionID:       "sess-expiring-with-time",
+		Credits:         10,
+	}
+	ctx := sponsormodule.WithCurrentTimeUnix(context.Background(), auth.ExpiresAtUnix-1)
+
+	resp, err := server.DelegateCredit(ctx, SponsorDelegateCreditRequest{Record: delegation})
+	if err != nil {
+		t.Fatalf("expected delegation success with explicit context time, got %v", err)
+	}
+	if resp.Replay {
+		t.Fatal("expected first delegation with explicit context time to not be replay")
+	}
+	if _, exists := scaffold.SponsorModule.Keeper.GetDelegation(delegation.ReservationID); !exists {
+		t.Fatalf("expected delegation write with explicit context time for reservation %s", delegation.ReservationID)
+	}
+}
+
+func TestSponsorMsgServer_DelegateCreditRejectsNilContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SponsorMsgServer()
+
+	auth := sponsortypes.SponsorAuthorization{
+		AuthorizationID: "auth-nil-context",
+		SponsorID:       "sponsor-nil-context",
+		AppID:           "app-nil-context",
+		MaxCredits:      1000,
+	}
+	if _, err := server.CreateAuthorization(context.Background(), SponsorCreateAuthorizationRequest{Record: auth}); err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	delegation := sponsortypes.DelegatedSessionCredit{
+		ReservationID:   "res-nil-context",
+		AuthorizationID: auth.AuthorizationID,
+		SponsorID:       auth.SponsorID,
+		AppID:           auth.AppID,
+		SessionID:       "sess-nil-context",
+		Credits:         10,
+	}
+
+	_, err := server.DelegateCredit(nil, SponsorDelegateCreditRequest{Record: delegation})
+	if err == nil {
+		t.Fatal("expected nil context to fail delegate credit")
+	}
+	if !errors.Is(err, sponsormodule.ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation for nil context, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "context is required") {
+		t.Fatalf("expected context required details in error, got %v", err)
+	}
+	if _, exists := scaffold.SponsorModule.Keeper.GetDelegation(delegation.ReservationID); exists {
+		t.Fatalf("expected no delegation write on nil context for reservation %s", delegation.ReservationID)
+	}
+}
+
 func TestSponsorMsgServer_NilScaffold(t *testing.T) {
 	var scaffold *ChainScaffold
 	server := scaffold.SponsorMsgServer()
@@ -275,5 +390,140 @@ func TestSponsorMsgServer_DelegateCreditHonorsCanceledContext(t *testing.T) {
 
 	if _, exists := scaffold.SponsorModule.Keeper.GetDelegation(delegation.ReservationID); exists {
 		t.Fatalf("expected no delegation write on canceled context for reservation %s", delegation.ReservationID)
+	}
+}
+
+func TestSponsorMsgServer_CreateAuthorizationHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SponsorMsgServer()
+
+	authorization := sponsortypes.SponsorAuthorization{
+		AuthorizationID: "auth-canceled-ctx-2",
+		SponsorID:       "sponsor-canceled-ctx-2",
+		AppID:           "app-canceled-ctx-2",
+		MaxCredits:      125,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.CreateAuthorization(canceledCtx, SponsorCreateAuthorizationRequest{Record: authorization}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.SponsorModule.Keeper.GetAuthorization(authorization.AuthorizationID); exists {
+		t.Fatalf("expected no authorization write on canceled context for authorization %s", authorization.AuthorizationID)
+	}
+}
+
+func TestRewardsMsgServer_CreateAccrualHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.RewardsMsgServer()
+
+	accrual := rewardstypes.RewardAccrual{
+		AccrualID:  "acc-canceled-ctx-1",
+		SessionID:  "sess-canceled-ctx-1",
+		ProviderID: "provider-canceled-ctx-1",
+		AssetDenom: "utdpn",
+		Amount:     5,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.CreateAccrual(canceledCtx, RewardsCreateAccrualRequest{Record: accrual}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.RewardsModule.Keeper.GetAccrual(accrual.AccrualID); exists {
+		t.Fatalf("expected no accrual write on canceled context for accrual %s", accrual.AccrualID)
+	}
+}
+
+func TestRewardsMsgServer_RecordDistributionHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.RewardsMsgServer()
+
+	accrual := rewardstypes.RewardAccrual{
+		AccrualID:  "acc-canceled-ctx-2",
+		SessionID:  "sess-canceled-ctx-2",
+		ProviderID: "provider-canceled-ctx-2",
+		AssetDenom: "utdpn",
+		Amount:     11,
+	}
+	if _, err := server.CreateAccrual(context.Background(), RewardsCreateAccrualRequest{Record: accrual}); err != nil {
+		t.Fatalf("expected create accrual success, got %v", err)
+	}
+
+	distribution := rewardstypes.DistributionRecord{
+		DistributionID: "dist-canceled-ctx-2",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-canceled-ctx-2",
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.RecordDistribution(canceledCtx, RewardsRecordDistributionRequest{Record: distribution}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.RewardsModule.Keeper.GetDistribution(distribution.DistributionID); exists {
+		t.Fatalf("expected no distribution write on canceled context for distribution %s", distribution.DistributionID)
+	}
+}
+
+func TestSlashingMsgServer_SubmitEvidenceHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SlashingMsgServer()
+
+	evidence := slashingtypes.SlashEvidence{
+		EvidenceID:    "evidence-canceled-ctx-1",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     "sha256:991f4ec8f0f9dc31c0f8243e304fb5f87bc9ec89e7c0f9eb9cd0af2fbd2db10f",
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.SubmitEvidence(canceledCtx, SlashingSubmitEvidenceRequest{Record: evidence}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.SlashingModule.Keeper.GetEvidence(evidence.EvidenceID); exists {
+		t.Fatalf("expected no evidence write on canceled context for evidence %s", evidence.EvidenceID)
+	}
+}
+
+func TestSlashingMsgServer_ApplyPenaltyHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SlashingMsgServer()
+
+	evidence := slashingtypes.SlashEvidence{
+		EvidenceID:    "evidence-canceled-ctx-2",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     "sha256:77eca79149ed12a1d5f4191e4ea292072ee2d851bf9ce9ff7e4a0ab9ccb85fa8",
+	}
+	if _, err := server.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: evidence}); err != nil {
+		t.Fatalf("expected submit evidence success, got %v", err)
+	}
+
+	penalty := slashingtypes.PenaltyDecision{
+		PenaltyID:       "penalty-canceled-ctx-2",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 15,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.ApplyPenalty(canceledCtx, SlashingApplyPenaltyRequest{Record: penalty}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.SlashingModule.Keeper.GetPenalty(penalty.PenaltyID); exists {
+		t.Fatalf("expected no penalty write on canceled context for penalty %s", penalty.PenaltyID)
 	}
 }

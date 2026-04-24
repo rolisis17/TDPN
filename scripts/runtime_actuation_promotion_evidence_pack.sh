@@ -140,6 +140,51 @@ render_command() {
   printf '%s' "$rendered"
 }
 
+max_int_01() {
+  local a="$1"
+  local b="$2"
+  if (( a >= b )); then
+    printf '%s' "$a"
+  else
+    printf '%s' "$b"
+  fi
+}
+
+build_runtime_actuation_cycle_rerun_command_01() {
+  local reports_dir="$1"
+  local cycles_override="${2:-}"
+  local -a cmd=(
+    "./scripts/easy_node.sh"
+    "runtime-actuation-promotion-cycle"
+    "--reports-dir" "$reports_dir"
+    "--fail-on-no-go" "1"
+    "--print-summary-json" "1"
+  )
+  if [[ -n "$cycles_override" && "$cycles_override" =~ ^[0-9]+$ && "$cycles_override" -gt 0 ]]; then
+    cmd+=(--cycles "$cycles_override")
+  fi
+  render_command "${cmd[@]}"
+}
+
+build_runtime_actuation_evidence_pack_rerun_command_01() {
+  local reports_dir="$1"
+  local promotion_cycle_summary_json="$2"
+  local max_age_sec="$3"
+  local summary_json="$4"
+  local report_md="$5"
+  render_command \
+    "./scripts/easy_node.sh" \
+    "runtime-actuation-promotion-evidence-pack" \
+    "--reports-dir" "$reports_dir" \
+    "--promotion-cycle-summary-json" "$promotion_cycle_summary_json" \
+    "--fail-on-no-go" "1" \
+    "--max-age-sec" "$max_age_sec" \
+    "--summary-json" "$summary_json" \
+    "--report-md" "$report_md" \
+    "--print-summary-json" "1" \
+    "--print-report" "1"
+}
+
 discover_latest_promotion_cycle_summary_path() {
   local reports_dir="$1"
   local preferred="$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json"
@@ -211,6 +256,10 @@ evaluate_promotion_cycle_summary_json() {
       freshness_generated_at_utc: null,
       freshness_age_sec: null,
       freshness_max_age_sec: $max_age_sec,
+      promotion_violation_codes: [],
+      cycle_error_codes: [],
+      promotion_policy_require_min_samples: null,
+      promotion_policy_require_min_pass_samples: null,
       next_operator_action: null,
       failure_reason: null,
       reasons: ["summary_missing"],
@@ -237,6 +286,10 @@ evaluate_promotion_cycle_summary_json() {
       freshness_generated_at_utc: null,
       freshness_age_sec: null,
       freshness_max_age_sec: null,
+      promotion_violation_codes: [],
+      cycle_error_codes: [],
+      promotion_policy_require_min_samples: null,
+      promotion_policy_require_min_pass_samples: null,
       next_operator_action: null,
       failure_reason: null,
       reasons: ["summary_invalid_json"],
@@ -383,6 +436,41 @@ evaluate_promotion_cycle_summary_json() {
         freshness_generated_at_utc: $freshness.generated_at_utc,
         freshness_age_sec: $freshness.age_sec,
         freshness_max_age_sec: $max_age_sec,
+        promotion_violation_codes: (
+          [
+            (if (.promotion_check.violation_codes | type) == "array" then
+              (.promotion_check.violation_codes[] | select(type == "string"))
+            else
+              empty
+            end),
+            (if (.promotion_check.violations | type) == "array" then
+              (.promotion_check.violations[] | .code | select(type == "string"))
+            else
+              empty
+            end)
+          ]
+          | map(select(length > 0))
+          | unique
+        ),
+        cycle_error_codes: (
+          if (.stages.cycles.error_codes | type) == "array" then
+            [ .stages.cycles.error_codes[] | select(type == "string") | select(length > 0) ]
+          else
+            []
+          end
+        ),
+        promotion_policy_require_min_samples: (
+          if (.diagnostics.no_go.promotion_policy.require_min_samples | type) == "number" then .diagnostics.no_go.promotion_policy.require_min_samples
+          elif (.promotion_check.inputs.policy.require_min_samples | type) == "number" then .promotion_check.inputs.policy.require_min_samples
+          else null
+          end
+        ),
+        promotion_policy_require_min_pass_samples: (
+          if (.diagnostics.no_go.promotion_policy.require_min_pass_samples | type) == "number" then .diagnostics.no_go.promotion_policy.require_min_pass_samples
+          elif (.promotion_check.inputs.policy.require_min_pass_samples | type) == "number" then .promotion_check.inputs.policy.require_min_pass_samples
+          else null
+          end
+        ),
         next_operator_action: (
           if (.promotion_check.next_operator_action | type) == "string" and (.promotion_check.next_operator_action | length) > 0 then .promotion_check.next_operator_action
           elif (.outcome.next_operator_action | type) == "string" and (.outcome.next_operator_action | length) > 0 then .outcome.next_operator_action
@@ -566,6 +654,18 @@ source_freshness_ok="$(jq -r '.freshness_ok | tostring' <<<"$source_eval_json")"
 source_next_operator_action="$(jq -r '.next_operator_action // ""' <<<"$source_eval_json")"
 source_failure_reason="$(jq -r '.failure_reason // ""' <<<"$source_eval_json")"
 source_reasons_json="$(jq -c '.reasons // []' <<<"$source_eval_json")"
+source_promotion_violation_codes_json="$(jq -c '.promotion_violation_codes // []' <<<"$source_eval_json")"
+source_cycle_error_codes_json="$(jq -c '.cycle_error_codes // []' <<<"$source_eval_json")"
+source_policy_require_min_samples="$(jq -r '
+  if (.promotion_policy_require_min_samples | type) == "number" then (.promotion_policy_require_min_samples | floor | tostring)
+  else "0"
+  end
+' <<<"$source_eval_json")"
+source_policy_require_min_pass_samples="$(jq -r '
+  if (.promotion_policy_require_min_pass_samples | type) == "number" then (.promotion_policy_require_min_pass_samples | floor | tostring)
+  else "0"
+  end
+' <<<"$source_eval_json")"
 
 declare -a reasons=()
 if [[ "$source_usable" != "true" ]]; then
@@ -641,25 +741,130 @@ if [[ "$status" == "pass" && "$decision" == "GO" && "$final_rc" == "0" ]]; then
   needs_attention="false"
 fi
 
+stale_source_reason_count="$(jq -r '
+  [ (. // [])[] | select(type == "string") | select(. == "freshness_stale" or . == "freshness_unknown" or . == "freshness_invalid_generated_at_utc") ]
+  | length
+' <<<"$source_reasons_json" 2>/dev/null || printf '%s' "0")"
+threshold_violation_count="$(jq -r '
+  [ (. // [])[] | select(type == "string")
+    | select(
+        . == "min_samples_not_met"
+        or . == "min_pass_samples_not_met"
+        or . == "max_fail_samples_exceeded"
+        or . == "max_warn_samples_exceeded"
+        or . == "ready_rate_below_threshold"
+        or . == "modal_runtime_actuation_status_mismatch"
+      )
+  ] | length
+' <<<"$source_promotion_violation_codes_json" 2>/dev/null || printf '%s' "0")"
+signoff_context_violation_count="$(jq -r '
+  [ (. // [])[] | select(type == "string")
+    | select(
+        . == "signoff_context_missing"
+        or . == "runtime_actuation_diagnostics_missing"
+        or . == "runtime_actuation_status_missing"
+        or . == "runtime_actuation_ready_missing"
+      )
+  ] | length
+' <<<"$source_promotion_violation_codes_json" 2>/dev/null || printf '%s' "0")"
+signoff_context_cycle_error_count="$(jq -r '
+  [ (. // [])[] | select(type == "string")
+    | select(
+        . == "signoff_decision_missing"
+        or . == "signoff_summary_invalid_json"
+      )
+  ] | length
+' <<<"$source_cycle_error_codes_json" 2>/dev/null || printf '%s' "0")"
+
+no_go_reason_category="none"
+no_go_reason_codes_json='[]'
+if [[ "$needs_attention" == "true" ]]; then
+  if (( stale_source_reason_count > 0 )); then
+    no_go_reason_category="stale_evidence"
+    no_go_reason_codes_json="$(jq -c '
+      [ (. // [])[] | select(type == "string") | select(. == "freshness_stale" or . == "freshness_unknown" or . == "freshness_invalid_generated_at_utc") ]
+    ' <<<"$source_reasons_json" 2>/dev/null || printf '%s' '[]')"
+  elif [[ "$decision" == "NO-GO" && "$source_usable" == "true" && "$threshold_violation_count" -gt 0 ]]; then
+    no_go_reason_category="pass_sample_thresholds"
+    no_go_reason_codes_json="$(jq -c '
+      [ (. // [])[] | select(type == "string")
+        | select(
+            . == "min_samples_not_met"
+            or . == "min_pass_samples_not_met"
+            or . == "max_fail_samples_exceeded"
+            or . == "max_warn_samples_exceeded"
+            or . == "ready_rate_below_threshold"
+            or . == "modal_runtime_actuation_status_mismatch"
+          )
+      ]
+    ' <<<"$source_promotion_violation_codes_json" 2>/dev/null || printf '%s' '[]')"
+  elif [[ "$decision" == "NO-GO" && "$source_usable" == "true" && ( "$signoff_context_violation_count" -gt 0 || "$signoff_context_cycle_error_count" -gt 0 ) ]]; then
+    no_go_reason_category="missing_signoff_context"
+    no_go_reason_codes_json="$(jq -nc \
+      --argjson violations "$source_promotion_violation_codes_json" \
+      --argjson cycle_errors "$source_cycle_error_codes_json" \
+      '[
+        ($violations[]? | select(type == "string") | select(
+          . == "signoff_context_missing"
+          or . == "runtime_actuation_diagnostics_missing"
+          or . == "runtime_actuation_status_missing"
+          or . == "runtime_actuation_ready_missing"
+        )),
+        ($cycle_errors[]? | select(type == "string") | select(
+          . == "signoff_decision_missing"
+          or . == "signoff_summary_invalid_json"
+        ))
+      ] | unique' 2>/dev/null || printf '%s' '[]')"
+  elif [[ "$source_usable" == "false" && "$decision" == "NO-GO" ]]; then
+    no_go_reason_category="missing_or_invalid_evidence"
+    no_go_reason_codes_json="$source_reasons_json"
+  else
+    no_go_reason_category="policy_violation"
+    if [[ "$source_usable" == "true" ]]; then
+      no_go_reason_codes_json="$source_promotion_violation_codes_json"
+    else
+      no_go_reason_codes_json="$source_reasons_json"
+    fi
+  fi
+fi
+
+threshold_recommended_cycles=3
+if [[ "$source_policy_require_min_samples" =~ ^[0-9]+$ ]]; then
+  threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$source_policy_require_min_samples")"
+fi
+if [[ "$source_policy_require_min_pass_samples" =~ ^[0-9]+$ ]]; then
+  threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$source_policy_require_min_pass_samples")"
+fi
+
 next_command=""
 next_command_reason=""
 if [[ "$needs_attention" == "true" ]]; then
-  next_command="$(render_command \
-    "./scripts/easy_node.sh" \
-    "runtime-actuation-promotion-evidence-pack" \
-    "--reports-dir" "$reports_dir" \
-    "--promotion-cycle-summary-json" "$promotion_cycle_summary_json" \
-    "--fail-on-no-go" "1" \
-    "--max-age-sec" "$max_age_sec" \
-    "--summary-json" "$summary_json" \
-    "--report-md" "$report_md" \
-    "--print-summary-json" "1" \
-    "--print-report" "1")"
-  if [[ "${#reasons[@]}" -gt 0 ]]; then
-    next_command_reason="${reasons[0]}"
-  else
-    next_command_reason="$next_operator_action"
-  fi
+  case "$no_go_reason_category" in
+    pass_sample_thresholds)
+      next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "$threshold_recommended_cycles")"
+      next_command_reason="collect enough pass-ready samples to satisfy promotion thresholds"
+      ;;
+    stale_evidence)
+      next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
+      next_command_reason="refresh stale runtime-actuation promotion evidence"
+      ;;
+    missing_signoff_context)
+      next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
+      next_command_reason="regenerate signoff evidence with campaign-check context"
+      ;;
+    missing_or_invalid_evidence)
+      next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
+      next_command_reason="recreate missing or invalid promotion-cycle evidence"
+      ;;
+    *)
+      next_command="$(build_runtime_actuation_evidence_pack_rerun_command_01 "$reports_dir" "$promotion_cycle_summary_json" "$max_age_sec" "$summary_json" "$report_md")"
+      if [[ "${#reasons[@]}" -gt 0 ]]; then
+        next_command_reason="${reasons[0]}"
+      else
+        next_command_reason="$next_operator_action"
+      fi
+      ;;
+  esac
 fi
 
 reasons_json="$(printf '%s\n' "${reasons[@]:-}" | jq -R . | jq -s '.')"
@@ -674,6 +879,7 @@ jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
   --arg decision "$decision" \
+  --arg no_go_reason_category "$no_go_reason_category" \
   --arg notes "$notes" \
   --arg next_operator_action "$next_operator_action" \
   --arg next_command "$next_command" \
@@ -684,8 +890,19 @@ jq -n \
   --arg source_summary_json "$promotion_cycle_summary_json" \
   --argjson rc "$final_rc" \
   --argjson fail_closed "$fail_closed" \
+  --argjson needs_attention "$needs_attention" \
   --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson max_age_sec "$max_age_sec" \
+  --argjson threshold_recommended_cycles "$threshold_recommended_cycles" \
+  --argjson threshold_violation_count "$threshold_violation_count" \
+  --argjson stale_source_reason_count "$stale_source_reason_count" \
+  --argjson signoff_context_violation_count "$signoff_context_violation_count" \
+  --argjson signoff_context_cycle_error_count "$signoff_context_cycle_error_count" \
+  --argjson no_go_reason_codes "$no_go_reason_codes_json" \
+  --argjson source_promotion_violation_codes "$source_promotion_violation_codes_json" \
+  --argjson source_cycle_error_codes "$source_cycle_error_codes_json" \
+  --argjson source_policy_require_min_samples "$source_policy_require_min_samples" \
+  --argjson source_policy_require_min_pass_samples "$source_policy_require_min_pass_samples" \
   --argjson source_eval "$source_eval_output_json" \
   --argjson reasons "$reasons_json" \
   '{
@@ -730,6 +947,12 @@ jq -n \
       },
       next_operator_action: $source_eval.next_operator_action,
       failure_reason: $source_eval.failure_reason,
+      promotion_violation_codes: $source_eval.promotion_violation_codes,
+      cycle_error_codes: $source_eval.cycle_error_codes,
+      promotion_policy: {
+        require_min_samples: $source_eval.promotion_policy_require_min_samples,
+        require_min_pass_samples: $source_eval.promotion_policy_require_min_pass_samples
+      },
       reasons: $source_eval.reasons,
       usable: ($source_eval.usable == true)
     },
@@ -738,6 +961,27 @@ jq -n \
       fail_closed: $fail_closed,
       no_go_detected: ($decision == "NO-GO"),
       no_go_enforced: ($decision == "NO-GO" and ($fail_on_no_go == 1))
+    },
+    diagnostics: {
+      no_go: {
+        reason_category: (if $needs_attention then (if $no_go_reason_category == "" then null else $no_go_reason_category end) else null end),
+        reason_codes: (if $needs_attention then $no_go_reason_codes else [] end),
+        stale_source_reason_count: $stale_source_reason_count,
+        threshold_violation_count: $threshold_violation_count,
+        signoff_context_violation_count: $signoff_context_violation_count,
+        signoff_context_cycle_error_count: $signoff_context_cycle_error_count,
+        threshold_recommended_cycles: $threshold_recommended_cycles,
+        source_promotion_violation_codes: $source_promotion_violation_codes,
+        source_cycle_error_codes: $source_cycle_error_codes,
+        source_policy: {
+          require_min_samples: $source_policy_require_min_samples,
+          require_min_pass_samples: $source_policy_require_min_pass_samples
+        },
+        remediation: {
+          next_command: (if $next_command == "" then null else $next_command end),
+          next_command_reason: (if $next_command_reason == "" then null else $next_command_reason end)
+        }
+      }
     },
     outcome: {
       should_promote: ($status == "pass" and $decision == "GO" and $rc == 0),

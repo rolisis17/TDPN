@@ -107,6 +107,8 @@ assert_jq "$PASS_SUMMARY" '.status == "ok"'
 assert_jq "$PASS_SUMMARY" '.rc == 0'
 assert_jq "$PASS_SUMMARY" '.decision == "GO"'
 assert_jq "$PASS_SUMMARY" '.evidence.promotion_cycle.usable == true'
+assert_jq "$PASS_SUMMARY" '.failure_reason_code == null'
+assert_jq "$PASS_SUMMARY" '(.reason_details | length) == 0'
 assert_jq "$PASS_SUMMARY" '(.next_operator_action | type) == "string" and (.next_operator_action | length) > 0'
 assert_no_blank_reason_error_entries "$PASS_SUMMARY"
 if [[ ! -f "$PASS_REPORT" ]]; then
@@ -144,12 +146,14 @@ if [[ "$GO_WARN_RC" -eq 0 ]]; then
   exit 1
 fi
 assert_jq "$GO_WARN_SUMMARY" '.status == "fail" and .rc != 0 and .decision == "NO-GO"'
+assert_jq "$GO_WARN_SUMMARY" '.failure_reason_code == "promotion_cycle_go_requires_pass_status"'
 assert_jq "$GO_WARN_SUMMARY" '.evidence.promotion_cycle.usable == false'
 assert_jq "$GO_WARN_SUMMARY" '.evidence.promotion_cycle.decision.normalized == "GO"'
 assert_jq "$GO_WARN_SUMMARY" '.evidence.promotion_cycle.decision.status_rc_contract_valid == false'
 assert_jq "$GO_WARN_SUMMARY" '.evidence.promotion_cycle.status.normalized == "warn"'
 assert_jq "$GO_WARN_SUMMARY" '.evidence.promotion_cycle.rc.value == 0'
 assert_jq "$GO_WARN_SUMMARY" '.reasons | map(test("^promotion_cycle: GO decision requires pass/ok status")) | any'
+assert_jq "$GO_WARN_SUMMARY" '((.reason_details | map(.code) | index("promotion_cycle_go_requires_pass_status")) != null)'
 if ! jq -e --arg artifact "$GO_WARN_SUMMARY_SRC" '.next_operator_action | contains($artifact)' "$GO_WARN_SUMMARY" >/dev/null; then
   echo "GO warn fail-closed summary missing concrete artifact path in next_operator_action"
   cat "$GO_WARN_SUMMARY"
@@ -182,12 +186,14 @@ if [[ "$GO_RC_NONZERO_RC" -eq 0 ]]; then
   exit 1
 fi
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.status == "fail" and .rc != 0 and .decision == "NO-GO"'
+assert_jq "$GO_RC_NONZERO_SUMMARY" '.failure_reason_code == "promotion_cycle_go_requires_rc_zero"'
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.evidence.promotion_cycle.usable == false'
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.evidence.promotion_cycle.decision.normalized == "GO"'
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.evidence.promotion_cycle.decision.status_rc_contract_valid == false'
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.evidence.promotion_cycle.status.normalized == "pass"'
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.evidence.promotion_cycle.rc.value == 5'
 assert_jq "$GO_RC_NONZERO_SUMMARY" '.reasons | map(test("^promotion_cycle: GO decision requires rc=0")) | any'
+assert_jq "$GO_RC_NONZERO_SUMMARY" '((.reason_details | map(.code) | index("promotion_cycle_go_requires_rc_zero")) != null)'
 if ! jq -e --arg artifact "$GO_RC_NONZERO_SUMMARY_SRC" '.next_operator_action | contains($artifact)' "$GO_RC_NONZERO_SUMMARY" >/dev/null; then
   echo "GO non-zero rc fail-closed summary missing concrete artifact path in next_operator_action"
   cat "$GO_RC_NONZERO_SUMMARY"
@@ -215,6 +221,7 @@ bash "$SCRIPT_UNDER_TEST" \
 assert_jq "$NOGO_SOFT_SUMMARY" '.decision == "NO-GO"'
 assert_jq "$NOGO_SOFT_SUMMARY" '.status == "warn"'
 assert_jq "$NOGO_SOFT_SUMMARY" '.rc == 0'
+assert_jq "$NOGO_SOFT_SUMMARY" '.failure_reason_code == null'
 assert_jq "$NOGO_SOFT_SUMMARY" '.inputs.fail_on_no_go == false'
 assert_no_blank_reason_error_entries "$NOGO_SOFT_SUMMARY"
 
@@ -237,6 +244,7 @@ fi
 assert_jq "$NOGO_HARD_SUMMARY" '.decision == "NO-GO"'
 assert_jq "$NOGO_HARD_SUMMARY" '.status == "fail"'
 assert_jq "$NOGO_HARD_SUMMARY" '.rc != 0'
+assert_jq "$NOGO_HARD_SUMMARY" '.failure_reason_code == "promotion_cycle_decision_no_go"'
 assert_jq "$NOGO_HARD_SUMMARY" '.inputs.fail_on_no_go == true'
 assert_no_blank_reason_error_entries "$NOGO_HARD_SUMMARY"
 
@@ -348,8 +356,10 @@ fi
 assert_jq "$FAIL_SUMMARY" '.status == "fail"'
 assert_jq "$FAIL_SUMMARY" '.rc != 0'
 assert_jq "$FAIL_SUMMARY" '.decision == "NO-GO"'
+assert_jq "$FAIL_SUMMARY" '.failure_reason_code == "promotion_cycle_evidence_stale"'
 assert_jq "$FAIL_SUMMARY" '.evidence.promotion_cycle.freshness.fresh == false'
 assert_jq "$FAIL_SUMMARY" '.reasons | map(test("^promotion_cycle: stale evidence \\(age_sec=")) | any'
+assert_jq "$FAIL_SUMMARY" '((.reason_details | map(.code) | index("promotion_cycle_evidence_stale")) != null)'
 assert_jq "$FAIL_SUMMARY" '(.operator_next_action_command | type) == "string" and (.operator_next_action_command | length) > 0'
 assert_no_blank_reason_error_entries "$FAIL_SUMMARY"
 if [[ ! -f "$FAIL_REPORT" ]]; then

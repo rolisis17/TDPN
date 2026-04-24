@@ -147,6 +147,54 @@ json_file_valid_01() {
   fi
 }
 
+render_command_line_from_argv_01() {
+  local arg=""
+  local rendered=""
+  for arg in "$@"; do
+    rendered="${rendered}${rendered:+ }$(printf '%q' "$arg")"
+  done
+  printf '%s' "$rendered"
+}
+
+max_int_01() {
+  local a="$1"
+  local b="$2"
+  if (( a >= b )); then
+    printf '%s' "$a"
+  else
+    printf '%s' "$b"
+  fi
+}
+
+build_runtime_actuation_cycle_rerun_command_01() {
+  local cycles_override="${1:-}"
+  local -a cmd=(
+    "./scripts/easy_node.sh"
+    "runtime-actuation-promotion-cycle"
+    "--reports-dir" "$reports_dir"
+    "--fail-on-no-go" "1"
+    "--print-summary-json" "1"
+  )
+  if [[ -n "$cycles_override" && "$cycles_override" =~ ^[0-9]+$ && "$cycles_override" -gt 0 ]]; then
+    cmd+=(--cycles "$cycles_override")
+  fi
+  render_command_line_from_argv_01 "${cmd[@]}"
+}
+
+build_runtime_actuation_check_rerun_command_01() {
+  local -a cmd=(
+    "./scripts/easy_node.sh"
+    "runtime-actuation-promotion-check"
+    "--reports-dir" "$reports_dir"
+    "--fail-on-no-go" "1"
+    "--print-summary-json" "1"
+  )
+  if [[ -n "$summary_list" ]]; then
+    cmd+=(--summary-list "$summary_list")
+  fi
+  render_command_line_from_argv_01 "${cmd[@]}"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd sort
@@ -370,11 +418,21 @@ fi
 mkdir -p "$(dirname "$summary_json")"
 
 declare -a summary_paths_raw=()
+declare -A declared_campaign_input_paths=()
+declare -A declared_signoff_input_paths=()
 for path in "${campaign_check_summary_inputs[@]}"; do
   summary_paths_raw+=("$path")
+  canonical_input_path="$(canonicalize_existing_path "$path")"
+  if [[ -n "$canonical_input_path" ]]; then
+    declared_campaign_input_paths["$canonical_input_path"]="1"
+  fi
 done
 for path in "${signoff_summary_inputs[@]}"; do
   summary_paths_raw+=("$path")
+  canonical_input_path="$(canonicalize_existing_path "$path")"
+  if [[ -n "$canonical_input_path" ]]; then
+    declared_signoff_input_paths["$canonical_input_path"]="1"
+  fi
 done
 
 if [[ -n "$summary_list" ]]; then
@@ -428,12 +486,22 @@ samples_json='[]'
 diagnostics_missing_samples=0
 runtime_status_missing_samples=0
 runtime_ready_missing_samples=0
+signoff_context_missing_samples=0
 source_not_go_samples=0
 source_not_pass_samples=0
 
 for sample_path in "${sample_paths[@]}"; do
   sample_exists="0"
   sample_valid_json="0"
+  sample_input_kind="summary_list_or_discovered"
+  if [[ -n "${declared_campaign_input_paths[$sample_path]+x}" ]]; then
+    sample_input_kind="campaign_check_summary_input"
+  elif [[ -n "${declared_signoff_input_paths[$sample_path]+x}" ]]; then
+    sample_input_kind="signoff_summary_input"
+  fi
+  signoff_context_expected="0"
+  signoff_context_present="0"
+  signoff_context_missing="0"
   source_kind="unknown"
   source_status=""
   source_status_normalized="unknown"
@@ -563,6 +631,15 @@ for sample_path in "${sample_paths[@]}"; do
     ' "$sample_path" 2>/dev/null || printf '%s' '{}')"
 
     source_kind="$(jq -r '.source_kind // "unknown"' <<<"$extracted_json")"
+    if [[ "$source_kind" == "signoff_summary_with_campaign_check_context" ]]; then
+      signoff_context_present="1"
+    fi
+    if [[ "$sample_input_kind" == "signoff_summary_input" ]]; then
+      signoff_context_expected="1"
+      if [[ "$signoff_context_present" != "1" ]]; then
+        signoff_context_missing="1"
+      fi
+    fi
     source_status="$(jq -r '.source_status // ""' <<<"$extracted_json")"
     source_status_normalized="$(normalize_status "$source_status")"
     source_decision="$(normalize_decision "$(jq -r '.source_decision // ""' <<<"$extracted_json")")"
@@ -626,6 +703,14 @@ for sample_path in "${sample_paths[@]}"; do
         "rerun campaign-check/signoff with runtime actuation gate diagnostics enabled"
     fi
 
+    if [[ "$signoff_context_missing" == "1" ]]; then
+      signoff_context_missing_samples=$((signoff_context_missing_samples + 1))
+      append_sample_reason \
+        "signoff_context_missing" \
+        "signoff summary is missing campaign-check gate diagnostics context" \
+        "rerun runtime-actuation promotion cycle with refreshed signoff evidence to restore campaign-check context"
+    fi
+
     if [[ "$runtime_status" == "unknown" ]]; then
       runtime_status_missing_samples=$((runtime_status_missing_samples + 1))
       append_sample_reason \
@@ -684,6 +769,10 @@ for sample_path in "${sample_paths[@]}"; do
 
   sample_entry="$(jq -n \
     --arg path "$sample_path" \
+    --arg sample_input_kind "$sample_input_kind" \
+    --arg signoff_context_expected "$signoff_context_expected" \
+    --arg signoff_context_present "$signoff_context_present" \
+    --arg signoff_context_missing "$signoff_context_missing" \
     --arg source_kind "$source_kind" \
     --arg source_status "$source_status" \
     --arg source_status_normalized "$source_status_normalized" \
@@ -702,6 +791,10 @@ for sample_path in "${sample_paths[@]}"; do
     --argjson reasons "$sample_reasons_json" \
     '{
       path: $path,
+      input_kind: $sample_input_kind,
+      signoff_context_expected: ($signoff_context_expected == "1"),
+      signoff_context_present: ($signoff_context_present == "1"),
+      signoff_context_missing: ($signoff_context_missing == "1"),
       source_kind: $source_kind,
       source_status: (if $source_status == "" then null else $source_status end),
       source_status_normalized: (if $source_status_normalized == "" then null else $source_status_normalized end),
@@ -916,6 +1009,16 @@ if (( runtime_ready_missing_samples > 0 )); then
     "emit explicit runtime_actuation_ready/observed signal in diagnostics and rerun"
 fi
 
+if (( signoff_context_missing_samples > 0 )); then
+  append_violation \
+    "signoff_context_missing" \
+    "observed.signoff_context_missing_samples" \
+    "one or more signoff summaries are missing campaign-check gate diagnostics context" \
+    "0" \
+    "$signoff_context_missing_samples" \
+    "rerun runtime-actuation promotion cycle with refreshed signoff summaries before re-running promotion check"
+fi
+
 decision="GO"
 status="ok"
 notes="runtime-actuation promotion evidence satisfies configured policy thresholds"
@@ -947,6 +1050,82 @@ if [[ "$decision" == "NO-GO" ]]; then
   fi
 fi
 
+all_violation_codes_json="$(jq -c '[.[] | select((.code | type) == "string") | .code]' <<<"$violations_json")"
+threshold_violation_codes_json="$(jq -c '
+  [ .[] | select((.code | type) == "string")
+    | .code
+    | select(
+        . == "min_samples_not_met"
+        or . == "min_pass_samples_not_met"
+        or . == "max_fail_samples_exceeded"
+        or . == "max_warn_samples_exceeded"
+        or . == "ready_rate_below_threshold"
+        or . == "modal_runtime_actuation_status_mismatch"
+      )
+  ]
+' <<<"$violations_json")"
+signoff_context_violation_codes_json="$(jq -c '
+  [ .[] | select((.code | type) == "string")
+    | .code
+    | select(. == "signoff_context_missing")
+  ]
+' <<<"$violations_json")"
+runtime_diagnostics_violation_codes_json="$(jq -c '
+  [ .[] | select((.code | type) == "string")
+    | .code
+    | select(
+        . == "runtime_actuation_diagnostics_missing"
+        or . == "runtime_actuation_status_missing"
+        or . == "runtime_actuation_ready_missing"
+      )
+  ]
+' <<<"$violations_json")"
+
+threshold_violation_count="$(jq -r 'length' <<<"$threshold_violation_codes_json")"
+signoff_context_violation_count="$(jq -r 'length' <<<"$signoff_context_violation_codes_json")"
+runtime_diagnostics_violation_count="$(jq -r 'length' <<<"$runtime_diagnostics_violation_codes_json")"
+
+threshold_recommended_cycles="$require_min_samples"
+threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$require_min_pass_samples")"
+sample_growth_floor=$((samples_total + 1))
+threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$sample_growth_floor")"
+if (( threshold_recommended_cycles < 1 )); then
+  threshold_recommended_cycles=1
+fi
+
+no_go_primary_driver="none"
+no_go_driver_codes_json='[]'
+remediation_next_command=""
+remediation_next_command_reason=""
+
+if [[ "$decision" == "NO-GO" ]]; then
+  if (( signoff_context_violation_count > 0 || signoff_context_missing_samples > 0 )); then
+    no_go_primary_driver="missing_signoff_context"
+    no_go_driver_codes_json="$signoff_context_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "")"
+    remediation_next_command_reason="refresh signoff summaries with campaign-check context before promotion"
+  elif (( threshold_violation_count > 0 )); then
+    no_go_primary_driver="pass_sample_thresholds"
+    no_go_driver_codes_json="$threshold_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$threshold_recommended_cycles")"
+    remediation_next_command_reason="collect enough pass-ready samples to satisfy runtime-actuation thresholds"
+  elif (( runtime_diagnostics_violation_count > 0 )); then
+    no_go_primary_driver="runtime_diagnostics_missing"
+    no_go_driver_codes_json="$runtime_diagnostics_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "")"
+    remediation_next_command_reason="regenerate runtime-actuation diagnostics in signoff/campaign-check evidence"
+  else
+    no_go_primary_driver="policy_violations"
+    no_go_driver_codes_json="$all_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_check_rerun_command_01)"
+    remediation_next_command_reason="review promotion-check policy violations and rerun promotion check"
+  fi
+
+  if [[ -z "$next_operator_action" || "$next_operator_action" == "Address runtime-actuation diagnostics/threshold violations and rerun runtime_actuation_promotion_check" ]]; then
+    next_operator_action="$remediation_next_command_reason"
+  fi
+fi
+
 errors_json='[]'
 if ((${#errors[@]} > 0)); then
   errors_json="$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s '.')"
@@ -963,6 +1142,9 @@ jq -n \
   --arg status "$status" \
   --arg notes "$notes" \
   --arg next_operator_action "$next_operator_action" \
+  --arg no_go_primary_driver "$no_go_primary_driver" \
+  --arg remediation_next_command "$remediation_next_command" \
+  --arg remediation_next_command_reason "$remediation_next_command_reason" \
   --arg reports_dir "$reports_dir" \
   --arg summary_list "$summary_list" \
   --arg summary_json "$summary_json" \
@@ -987,8 +1169,14 @@ jq -n \
   --argjson diagnostics_missing_samples "$diagnostics_missing_samples" \
   --argjson runtime_status_missing_samples "$runtime_status_missing_samples" \
   --argjson runtime_ready_missing_samples "$runtime_ready_missing_samples" \
+  --argjson signoff_context_missing_samples "$signoff_context_missing_samples" \
   --argjson source_not_go_samples "$source_not_go_samples" \
   --argjson source_not_pass_samples "$source_not_pass_samples" \
+  --argjson threshold_recommended_cycles "$threshold_recommended_cycles" \
+  --argjson threshold_violation_count "$threshold_violation_count" \
+  --argjson signoff_context_violation_count "$signoff_context_violation_count" \
+  --argjson runtime_diagnostics_violation_count "$runtime_diagnostics_violation_count" \
+  --argjson no_go_driver_codes "$no_go_driver_codes_json" \
   --argjson violations "$violations_json" \
   --argjson errors "$errors_json" \
   --argjson samples "$samples_json" \
@@ -1039,6 +1227,7 @@ jq -n \
       diagnostics_missing_samples: $diagnostics_missing_samples,
       runtime_status_missing_samples: $runtime_status_missing_samples,
       runtime_ready_missing_samples: $runtime_ready_missing_samples,
+      signoff_context_missing_samples: $signoff_context_missing_samples,
       source_not_go_samples: $source_not_go_samples,
       source_not_pass_samples: $source_not_pass_samples
     },
@@ -1061,7 +1250,25 @@ jq -n \
         else "hold_promotion_warn_only"
         end
       ),
-      next_operator_action: $next_operator_action
+      next_operator_action: $next_operator_action,
+      remediation: {
+        next_command: (if $remediation_next_command == "" then null else $remediation_next_command end),
+        next_command_reason: (if $remediation_next_command_reason == "" then null else $remediation_next_command_reason end)
+      }
+    },
+    diagnostics: {
+      no_go: {
+        primary_driver: (if $decision == "NO-GO" then $no_go_primary_driver else null end),
+        driver_codes: (if $decision == "NO-GO" then $no_go_driver_codes else [] end),
+        threshold_violation_count: $threshold_violation_count,
+        signoff_context_violation_count: $signoff_context_violation_count,
+        runtime_diagnostics_violation_count: $runtime_diagnostics_violation_count,
+        threshold_recommended_cycles: $threshold_recommended_cycles,
+        remediation: {
+          next_command: (if $remediation_next_command == "" then null else $remediation_next_command end),
+          next_command_reason: (if $remediation_next_command_reason == "" then null else $remediation_next_command_reason end)
+        }
+      }
     },
     violations: $violations,
     errors: $errors,

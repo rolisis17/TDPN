@@ -565,6 +565,63 @@ else
   fi
 fi
 
+evidence_state="complete"
+if (( runs_completed == 0 )); then
+  evidence_state="missing"
+elif (( command_failures > 0 || summary_missing_count > 0 || summary_unreadable_count > 0 )); then
+  evidence_state="partial"
+fi
+
+selection_policy_state="consistent"
+if (( runs_completed == 0 )); then
+  selection_policy_state="unavailable"
+elif [[ "$selection_policy_present_all" != "true" ]]; then
+  selection_policy_state="missing"
+elif [[ "$consistent_selection_policy" != "true" ]]; then
+  selection_policy_state="inconsistent"
+fi
+
+declare -a diagnostics_issues=()
+if (( command_failures > 0 )); then
+  diagnostics_issues+=("run command failures observed across stability samples (count=$command_failures)")
+fi
+if (( summary_missing_count > 0 )); then
+  diagnostics_issues+=("one or more runs did not produce a signoff summary artifact (missing_count=$summary_missing_count)")
+fi
+if (( summary_unreadable_count > 0 )); then
+  diagnostics_issues+=("one or more run summaries were unreadable JSON (unreadable_count=$summary_unreadable_count)")
+fi
+if [[ "$selection_policy_state" == "missing" ]]; then
+  diagnostics_issues+=("selection-policy tuple is missing from one or more completed run campaign summaries")
+elif [[ "$selection_policy_state" == "inconsistent" ]]; then
+  diagnostics_issues+=("selection-policy tuple is inconsistent across completed runs")
+fi
+if [[ "$decision_consensus" != "true" ]]; then
+  diagnostics_issues+=("decision votes are mixed across completed runs")
+fi
+
+diagnostics_issues_json='[]'
+if ((${#diagnostics_issues[@]} > 0)); then
+  diagnostics_issues_json="$(printf '%s\n' "${diagnostics_issues[@]}" | jq -R . | jq -s '.')"
+fi
+
+next_operator_action="Evidence is stable; proceed to profile-default stability check/promotion gating."
+if [[ "$evidence_state" == "missing" ]]; then
+  next_operator_action="No usable stability evidence was produced; verify real hosts are online and rerun stability collection."
+elif [[ "$evidence_state" == "partial" ]]; then
+  next_operator_action="Stability evidence is partial; inspect failed run logs/artifacts and rerun collection before promotion."
+elif [[ "$selection_policy_state" == "missing" ]]; then
+  next_operator_action="Selection-policy tuple is missing in completed run artifacts; verify campaign summary emission and rerun."
+elif [[ "$selection_policy_state" == "inconsistent" ]]; then
+  next_operator_action="Selection-policy tuple changed across runs; stabilize runtime policy inputs and rerun evidence collection."
+elif [[ "$decision_consensus" != "true" ]]; then
+  next_operator_action="Run decisions are mixed; rerun with more samples or adjust thresholds before promotion."
+fi
+
+rerun_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST_A --host-b HOST_B --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --sleep-between-sec ${sleep_between_sec} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+inspect_failures_command_template="jq -r '.runs[] | select(.command_rc != 0 or .summary_exists != true or .completed != true) | .artifacts.run_log' ${summary_json}"
+next_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${summary_json} --print-summary-json 1"
+
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
@@ -593,6 +650,16 @@ jq -n \
   --argjson decision_consensus "$decision_consensus" \
   --argjson stability_ok "$stability_ok" \
   --argjson runs "$runs_json" \
+  --arg evidence_state "$evidence_state" \
+  --arg selection_policy_state "$selection_policy_state" \
+  --arg next_operator_action "$next_operator_action" \
+  --arg rerun_command_template "$rerun_command_template" \
+  --arg inspect_failures_command_template "$inspect_failures_command_template" \
+  --arg next_check_command_template "$next_check_command_template" \
+  --argjson command_failures "$command_failures" \
+  --argjson summary_missing_count "$summary_missing_count" \
+  --argjson summary_unreadable_count "$summary_unreadable_count" \
+  --argjson diagnostics_issues "$diagnostics_issues_json" \
   '{
     version: 1,
     schema: {
@@ -625,6 +692,30 @@ jq -n \
     modal_decision_support_rate_pct: $modal_decision_support_rate_pct,
     decision_consensus: $decision_consensus,
     stability_ok: $stability_ok,
+    diagnostics: {
+      evidence_state: $evidence_state,
+      selection_policy_state: $selection_policy_state,
+      command_failures: $command_failures,
+      summary_missing_count: $summary_missing_count,
+      summary_unreadable_count: $summary_unreadable_count,
+      issues: $diagnostics_issues,
+      next_operator_action: $next_operator_action,
+      rerun_command_template: $rerun_command_template,
+      inspect_failures_command_template: $inspect_failures_command_template,
+      next_check_command_template: $next_check_command_template
+    },
+    outcome: {
+      has_usable_evidence: ($runs_completed > 0),
+      evidence_complete: ($evidence_state == "complete"),
+      should_run_policy_check: ($runs_completed > 0),
+      action: (
+        if $runs_completed == 0 then "rerun_stability_collection"
+        elif $evidence_state != "complete" then "investigate_partial_stability_evidence"
+        elif $selection_policy_state != "consistent" then "investigate_selection_policy_drift"
+        else "proceed_to_stability_check"
+        end
+      )
+    },
     runs: $runs,
     artifacts: {
       summary_json: $summary_json_path

@@ -40,7 +40,13 @@ type rewardsMsgServer struct {
 	msgServer rewardsmodule.MsgServer
 }
 
-func (m rewardsMsgServer) CreateAccrual(_ context.Context, req RewardsCreateAccrualRequest) (RewardsCreateAccrualResponse, error) {
+func (m rewardsMsgServer) CreateAccrual(ctx context.Context, req RewardsCreateAccrualRequest) (RewardsCreateAccrualResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return RewardsCreateAccrualResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.AccrueReward(rewardsmodule.AccrueRewardRequest{Accrual: req.Record})
 	if err != nil {
 		if errors.Is(err, rewardsmodule.ErrNilKeeper) {
@@ -54,7 +60,13 @@ func (m rewardsMsgServer) CreateAccrual(_ context.Context, req RewardsCreateAccr
 	}, nil
 }
 
-func (m rewardsMsgServer) RecordDistribution(_ context.Context, req RewardsRecordDistributionRequest) (RewardsRecordDistributionResponse, error) {
+func (m rewardsMsgServer) RecordDistribution(ctx context.Context, req RewardsRecordDistributionRequest) (RewardsRecordDistributionResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return RewardsRecordDistributionResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.DistributeReward(rewardsmodule.DistributeRewardRequest{Distribution: req.Record})
 	if err != nil {
 		if errors.Is(err, rewardsmodule.ErrNilKeeper) {

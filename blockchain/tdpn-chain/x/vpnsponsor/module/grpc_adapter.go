@@ -40,10 +40,14 @@ func (a *GRPCMsgServerAdapter) CreateAuthorization(_ context.Context, req *spons
 }
 
 func (a *GRPCMsgServerAdapter) DelegateSessionCredit(ctx context.Context, req *sponsorpb.MsgDelegateSessionCreditRequest) (*sponsorpb.MsgDelegateSessionCreditResponse, error) {
-	currentTimeUnix := CurrentTimeUnixFromContext(ctx)
-	if currentTimeUnix <= 0 {
-		return nil, fmt.Errorf("%w: current_time_unix is required in context", ErrInvalidDelegation)
+	if ctx == nil {
+		return nil, fmt.Errorf("%w: context is required", ErrInvalidDelegation)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	currentTimeUnix := CurrentTimeUnixFromContext(ctx)
 
 	resp, err := a.server.DelegateCredit(DelegateCreditRequest{
 		Delegation:      fromProtoDelegation(req.GetDelegation()),

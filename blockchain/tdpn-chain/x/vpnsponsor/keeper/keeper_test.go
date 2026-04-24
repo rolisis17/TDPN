@@ -545,6 +545,59 @@ func TestKeeperDelegateSessionCreditExpiredAuthorization(t *testing.T) {
 	}
 }
 
+func TestKeeperDelegateSessionCreditReplaySucceedsAfterAuthorizationExpiry(t *testing.T) {
+	t.Parallel()
+
+	nowUnix := time.Now().Unix()
+	expiryUnix := nowUnix + 1
+	k := NewKeeper()
+	if _, err := k.CreateAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		MaxCredits:      100,
+		ExpiresAtUnix:   expiryUnix,
+	}); err != nil {
+		t.Fatalf("CreateAuthorization returned unexpected error: %v", err)
+	}
+
+	initial := types.DelegatedSessionCredit{
+		ReservationID:   "res-1",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-1",
+		Credits:         10,
+	}
+	created, err := k.DelegateSessionCreditAtUnix(initial, nowUnix)
+	if err != nil {
+		t.Fatalf("expected initial delegation before expiry to succeed, got %v", err)
+	}
+
+	replayed, err := k.DelegateSessionCreditAtUnix(initial, expiryUnix)
+	if err != nil {
+		t.Fatalf("expected idempotent replay at/after expiry to succeed, got %v", err)
+	}
+	if replayed != created {
+		t.Fatalf("expected replayed record to match created record, got %+v vs %+v", replayed, created)
+	}
+
+	_, err = k.DelegateSessionCreditAtUnix(types.DelegatedSessionCredit{
+		ReservationID:   "res-2",
+		AuthorizationID: "auth-1",
+		SponsorID:       "sponsor-1",
+		AppID:           "app-1",
+		SessionID:       "sess-2",
+		Credits:         10,
+	}, expiryUnix)
+	if err == nil {
+		t.Fatal("expected new delegation after expiry to fail closed")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired authorization error for new post-expiry delegation, got: %v", err)
+	}
+}
+
 func TestKeeperDelegateSessionCreditCurrentTimeRequiredForExpiringAuthorization(t *testing.T) {
 	t.Parallel()
 

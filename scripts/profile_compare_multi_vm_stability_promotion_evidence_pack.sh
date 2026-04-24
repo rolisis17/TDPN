@@ -138,6 +138,103 @@ json_array_from_lines() {
     | jq -s '[ .[] | select(type == "string" and length > 0) ]'
 }
 
+map_promotion_cycle_reason_contract() {
+  local message="$1"
+  local code="promotion_cycle_evidence_invalid"
+  local action="refresh promotion-cycle evidence and rerun profile_compare_multi_vm_stability_promotion_evidence_pack.sh."
+  case "$message" in
+    missing\ required\ evidence\ file:*)
+      code="promotion_cycle_artifact_missing"
+      action="generate profile_compare_multi_vm_stability_promotion_cycle_summary.json and rerun evidence pack."
+      ;;
+    invalid\ JSON\ object\ payload)
+      code="promotion_cycle_artifact_invalid_json"
+      action="regenerate promotion-cycle summary JSON and rerun evidence pack."
+      ;;
+    schema.id\ mismatch*)
+      code="promotion_cycle_schema_invalid"
+      action="regenerate promotion-cycle summary with schema.id=profile_compare_multi_vm_stability_promotion_cycle_summary."
+      ;;
+    status\ missing\ or\ invalid*)
+      code="promotion_cycle_status_invalid"
+      action="ensure promotion-cycle summary emits a valid status and rerun evidence pack."
+      ;;
+    rc\ missing\ or\ invalid*)
+      code="promotion_cycle_rc_invalid"
+      action="ensure promotion-cycle summary emits numeric rc/final_rc and rerun evidence pack."
+      ;;
+    decision\ missing\ or\ invalid*)
+      code="promotion_cycle_decision_invalid"
+      action="ensure promotion-cycle summary emits GO/NO-GO decision and rerun evidence pack."
+      ;;
+    generated_at_utc\ missing)
+      code="promotion_cycle_generated_at_missing"
+      action="ensure promotion-cycle summary includes generated_at_utc in ISO-8601 UTC format."
+      ;;
+    stale\ evidence\ *)
+      code="promotion_cycle_evidence_stale"
+      action="rerun profile_compare_multi_vm_stability_promotion_cycle.sh to refresh stale evidence."
+      ;;
+    generated_at_utc\ is\ in\ the\ future)
+      code="promotion_cycle_generated_at_future"
+      action="fix host/system time and regenerate promotion-cycle evidence."
+      ;;
+    generated_at_utc\ invalid\ ISO-8601\ UTC\ timestamp)
+      code="promotion_cycle_generated_at_invalid"
+      action="rewrite generated_at_utc as valid ISO-8601 UTC timestamp and rerun."
+      ;;
+    promotion.contract_ok\ is\ false)
+      code="promotion_cycle_contract_not_ok"
+      action="resolve promotion-cycle contract violations and regenerate evidence."
+      ;;
+    GO\ decision\ requires\ rc=0*)
+      code="promotion_cycle_go_requires_rc_zero"
+      action="fix GO contract (rc must be 0) and rerun promotion cycle."
+      ;;
+    GO\ decision\ requires\ pass/ok\ status*)
+      code="promotion_cycle_go_requires_pass_status"
+      action="fix GO contract (status must be pass/ok) and rerun promotion cycle."
+      ;;
+    NO-GO\ warn\ status\ requires\ rc=0*)
+      code="promotion_cycle_nogo_warn_requires_rc_zero"
+      action="fix NO-GO warn contract (rc must be 0) and rerun promotion cycle."
+      ;;
+    NO-GO\ fail\ status\ requires\ non-zero\ rc)
+      code="promotion_cycle_nogo_fail_requires_nonzero_rc"
+      action="fix NO-GO fail contract (rc must be non-zero) and rerun promotion cycle."
+      ;;
+    NO-GO\ decision\ requires\ warn/fail\ status*)
+      code="promotion_cycle_nogo_requires_warn_or_fail"
+      action="fix NO-GO contract (status must be warn/fail) and rerun promotion cycle."
+      ;;
+    evidence\ unusable)
+      code="promotion_cycle_evidence_unusable"
+      action="inspect promotion-cycle summary and regenerate complete evidence."
+      ;;
+  esac
+  printf '%s\t%s' "$code" "$action"
+}
+
+append_reason_detail() {
+  local code="$1"
+  local message="$2"
+  local action="$3"
+  local scope="${4:-promotion_cycle}"
+  local entry
+  entry="$(jq -n \
+    --arg code "$code" \
+    --arg message "$message" \
+    --arg action "$action" \
+    --arg scope "$scope" \
+    '{
+      code: $code,
+      scope: $scope,
+      message: $message,
+      action: $action
+    }')"
+  reason_details_json="$(jq -c --argjson entry "$entry" '. + [$entry]' <<<"$reason_details_json")"
+}
+
 list_matching_summary_json_candidates() {
   local reports_dir="$1"
   local prefix="$2"
@@ -653,14 +750,23 @@ promotion_cycle_selection_fallback_used="$RESOLVED_PROMOTION_CYCLE_SELECTION_FAL
 promotion_cycle_selection_candidate_count="$RESOLVED_PROMOTION_CYCLE_SELECTION_CANDIDATE_COUNT"
 
 declare -a reasons=()
+reason_details_json='[]'
 promotion_cycle_usable="$(jq -r '.usable' <<<"$promotion_cycle_evidence")"
 if [[ "$promotion_cycle_usable" != "true" ]]; then
   while IFS= read -r err_line; do
     [[ -n "$err_line" ]] || continue
     reasons+=("promotion_cycle: $err_line")
+    contract_line="$(map_promotion_cycle_reason_contract "$err_line")"
+    contract_code="${contract_line%%$'\t'*}"
+    contract_action="${contract_line#*$'\t'}"
+    append_reason_detail "$contract_code" "$err_line" "$contract_action" "promotion_cycle"
   done < <(jq -r '.errors[]?' <<<"$promotion_cycle_evidence")
   if [[ "$(jq -r '.errors | length' <<<"$promotion_cycle_evidence")" == "0" ]]; then
     reasons+=("promotion_cycle: evidence unusable")
+    contract_line="$(map_promotion_cycle_reason_contract "evidence unusable")"
+    contract_code="${contract_line%%$'\t'*}"
+    contract_action="${contract_line#*$'\t'}"
+    append_reason_detail "$contract_code" "evidence unusable" "$contract_action" "promotion_cycle"
   fi
 fi
 
@@ -670,12 +776,24 @@ promotion_cycle_rc="$(jq -r '.rc.value // ""' <<<"$promotion_cycle_evidence")"
 if [[ "$promotion_cycle_usable" == "true" ]]; then
   if [[ "$promotion_cycle_decision" != "GO" && "$promotion_cycle_decision" != "NO-GO" ]]; then
     reasons+=("promotion_cycle: decision missing/invalid")
+    contract_line="$(map_promotion_cycle_reason_contract "decision missing or invalid GO/NO-GO value")"
+    contract_code="${contract_line%%$'\t'*}"
+    contract_action="${contract_line#*$'\t'}"
+    append_reason_detail "$contract_code" "decision missing/invalid" "$contract_action" "promotion_cycle"
   fi
   if [[ "$promotion_cycle_status" != "pass" && "$promotion_cycle_status" != "warn" && "$promotion_cycle_status" != "fail" && "$promotion_cycle_status" != "ok" ]]; then
     reasons+=("promotion_cycle: status missing/invalid")
+    contract_line="$(map_promotion_cycle_reason_contract "status missing or invalid")"
+    contract_code="${contract_line%%$'\t'*}"
+    contract_action="${contract_line#*$'\t'}"
+    append_reason_detail "$contract_code" "status missing/invalid" "$contract_action" "promotion_cycle"
   fi
   if ! [[ "$promotion_cycle_rc" =~ ^-?[0-9]+$ ]]; then
     reasons+=("promotion_cycle: rc missing/invalid")
+    contract_line="$(map_promotion_cycle_reason_contract "rc missing or invalid")"
+    contract_code="${contract_line%%$'\t'*}"
+    contract_action="${contract_line#*$'\t'}"
+    append_reason_detail "$contract_code" "rc missing/invalid" "$contract_action" "promotion_cycle"
   fi
 fi
 
@@ -686,6 +804,7 @@ status="fail"
 decision="NO-GO"
 rc=1
 failure_reason=""
+failure_reason_code=""
 next_operator_action=""
 
 if [[ "${#reasons[@]}" -eq 0 ]]; then
@@ -698,6 +817,8 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
       status="fail"
       rc=1
       failure_reason="promotion-cycle decision is NO-GO"
+      failure_reason_code="promotion_cycle_decision_no_go"
+      append_reason_detail "promotion_cycle_decision_no_go" "promotion-cycle decision is NO-GO" "hold promotion and resolve promotion-cycle NO-GO causes before rerun." "promotion_evidence_pack"
     else
       status="warn"
       rc=0
@@ -706,6 +827,8 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
     status="fail"
     rc=1
     failure_reason="promotion-cycle decision is missing or invalid"
+    failure_reason_code="promotion_cycle_decision_invalid"
+    append_reason_detail "promotion_cycle_decision_invalid" "promotion-cycle decision is missing or invalid" "regenerate promotion-cycle summary with GO/NO-GO decision and rerun evidence pack." "promotion_evidence_pack"
   fi
   if [[ -n "$input_next_operator_action" ]]; then
     next_operator_action="$input_next_operator_action"
@@ -716,6 +839,10 @@ if [[ "${#reasons[@]}" -eq 0 ]]; then
   fi
 else
   failure_reason="${reasons[0]}"
+  failure_reason_code="$(jq -r 'if (type == "array") and (length > 0) and (.[0].code | type) == "string" then .[0].code else "" end' <<<"$reason_details_json" 2>/dev/null || printf '%s' "")"
+  if [[ -z "$failure_reason_code" ]]; then
+    failure_reason_code="promotion_cycle_evidence_invalid"
+  fi
   next_operator_action="Refresh promotion-cycle summary artifact ${promotion_cycle_summary_json} and rerun ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh."
 fi
 
@@ -726,6 +853,7 @@ summary_payload="$(jq -n \
   --arg status "$status" \
   --arg decision "$decision" \
   --arg failure_reason "$failure_reason" \
+  --arg failure_reason_code "$failure_reason_code" \
   --arg reports_dir "$reports_dir" \
   --arg promotion_cycle_summary_json "$promotion_cycle_summary_json" \
   --arg promotion_cycle_selection_source "$promotion_cycle_selection_source" \
@@ -738,6 +866,7 @@ summary_payload="$(jq -n \
   --argjson fail_on_no_go "$fail_on_no_go_compat" \
   --argjson promotion_cycle_selection_candidate_count "$promotion_cycle_selection_candidate_count" \
   --argjson reasons "$reasons_json" \
+  --argjson reason_details "$reason_details_json" \
   --argjson promotion_cycle_evidence "$promotion_cycle_evidence" \
   '{
     version: 1,
@@ -751,7 +880,9 @@ summary_payload="$(jq -n \
     rc: $rc,
     decision: $decision,
     failure_reason: (if $failure_reason == "" then null else $failure_reason end),
+    failure_reason_code: (if $failure_reason_code == "" then null else $failure_reason_code end),
     reasons: $reasons,
+    reason_details: $reason_details,
     inputs: {
       reports_dir: $reports_dir,
       fail_on_no_go: ($fail_on_no_go == 1),

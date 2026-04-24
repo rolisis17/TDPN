@@ -167,6 +167,49 @@ file_fingerprint_01() {
   cksum "$path" 2>/dev/null | awk '{print $1 ":" $2}' || true
 }
 
+append_failure_reason() {
+  local code="$1"
+  local stage="$2"
+  local reason="$3"
+  local action="$4"
+  local action_command="$5"
+  local category="${6:-contract}"
+  local entry
+  entry="$(jq -n \
+    --arg code "$code" \
+    --arg stage "$stage" \
+    --arg reason "$reason" \
+    --arg action "$action" \
+    --arg action_command "$action_command" \
+    --arg category "$category" \
+    '{
+      code: $code,
+      stage: (if $stage == "" then null else $stage end),
+      category: (if $category == "" then null else $category end),
+      reason: $reason,
+      action: $action,
+      action_command: (if $action_command == "" then null else $action_command end)
+    }')"
+  failure_reasons_json="$(jq -c --argjson entry "$entry" '. + [$entry]' <<<"$failure_reasons_json")"
+}
+
+set_promotion_failure() {
+  local code="$1"
+  local stage="$2"
+  local reason="$3"
+  local action="$4"
+  local action_command="$5"
+  local category="${6:-contract}"
+  failure_stage="$stage"
+  failure_reason="$reason"
+  failure_reason_code="$code"
+  failure_category="$category"
+  next_operator_action="$action"
+  next_operator_action_command="$(trim "$action_command")"
+  failure_reasons_json='[]'
+  append_failure_reason "$code" "$stage" "$reason" "$action" "$next_operator_action_command" "$category"
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
@@ -594,38 +637,62 @@ while (( cycle_index < cycles )); do
 
   cycle_result_status="fail"
   cycle_result_reason=""
+  cycle_result_reason_code=""
+  cycle_result_action=""
   if [[ "$cycle_command_rc" -ne 0 ]]; then
     cycle_result_status="fail"
     cycle_result_reason="cycle command failed (rc=$cycle_command_rc)"
+    cycle_result_reason_code="cycle_command_failed"
+    cycle_result_action="Inspect cycle command log and rerun the cycle."
     cycle_command_failures=$((cycle_command_failures + 1))
   elif [[ "$cycle_summary_exists" != "true" ]]; then
     cycle_result_status="fail"
     cycle_result_reason="cycle summary is missing"
+    cycle_result_reason_code="cycle_summary_missing"
+    cycle_result_action="Ensure cycle stage writes summary artifacts and rerun the cycle."
     cycle_summary_missing_count=$((cycle_summary_missing_count + 1))
   elif [[ "$cycle_summary_valid" != "true" ]]; then
     cycle_result_status="fail"
     cycle_result_reason="cycle summary is invalid JSON"
+    cycle_result_reason_code="cycle_summary_invalid_json"
+    cycle_result_action="Regenerate cycle summary JSON and rerun the cycle."
     cycle_summary_invalid_count=$((cycle_summary_invalid_count + 1))
   elif [[ "$cycle_summary_fresh" != "true" ]]; then
     cycle_result_status="fail"
     cycle_result_reason="cycle summary is stale"
+    cycle_result_reason_code="cycle_summary_stale"
+    cycle_result_action="Refresh stale cycle summary evidence and rerun the cycle."
     cycle_summary_stale_count=$((cycle_summary_stale_count + 1))
   else
     cycle_counts_completed=$((cycle_counts_completed + 1))
     if [[ "$cycle_summary_status" == "pass" && "$cycle_summary_decision" == "GO" && "$cycle_summary_rc_json" == "0" ]]; then
       cycle_result_status="pass"
+      cycle_result_reason_code="cycle_pass"
+      cycle_result_action="No action required."
     elif [[ "$cycle_summary_status" == "warn" && "$cycle_summary_rc_json" == "0" ]]; then
       cycle_result_status="warn"
+      cycle_result_reason_code="cycle_warn"
+      cycle_result_action="Review warning diagnostics before promotion."
     elif [[ "$cycle_summary_status" == "fail" ]]; then
       cycle_result_status="fail"
+      cycle_result_reason_code="cycle_policy_fail"
+      cycle_result_action="Inspect cycle summary failure details and remediate before rerun."
     else
       cycle_result_status="fail"
       cycle_result_reason="cycle summary status/decision contract is invalid"
+      cycle_result_reason_code="cycle_summary_contract_invalid"
+      cycle_result_action="Fix cycle summary contract fields (status/decision/rc) and rerun."
     fi
   fi
 
   if [[ -z "$cycle_result_reason" && -n "$cycle_summary_failure_reason" ]]; then
     cycle_result_reason="$cycle_summary_failure_reason"
+  fi
+  if [[ -z "$cycle_result_reason_code" && "$cycle_result_status" == "fail" ]]; then
+    cycle_result_reason_code="cycle_failed"
+  fi
+  if [[ -z "$cycle_result_action" ]]; then
+    cycle_result_action="Inspect cycle artifacts and rerun."
   fi
   if [[ -z "$cycle_result_reason" ]]; then
     case "$cycle_result_status" in
@@ -652,6 +719,8 @@ while (( cycle_index < cycles )); do
     --arg completed_at "$cycle_completed_at" \
     --arg status "$cycle_result_status" \
     --arg reason "$cycle_result_reason" \
+    --arg reason_code "$cycle_result_reason_code" \
+    --arg next_action "$cycle_result_action" \
     --arg summary_exists "$cycle_summary_exists" \
     --arg summary_valid_json "$cycle_summary_valid" \
     --arg summary_fresh "$cycle_summary_fresh" \
@@ -665,6 +734,8 @@ while (( cycle_index < cycles )); do
       cycle_id: $cycle_id,
       status: $status,
       reason: $reason,
+      reason_code: (if $reason_code == "" then null else $reason_code end),
+      next_operator_action: $next_action,
       command: $command,
       command_rc: $command_rc,
       started_at_utc: $started_at,
@@ -731,6 +802,9 @@ promotion_rc_json="null"
 promotion_violations_count=0
 promotion_operator_next_action=""
 promotion_contract_ok="false"
+promotion_primary_violation_code=""
+promotion_primary_violation_message=""
+promotion_primary_violation_action=""
 
 if [[ -f "$promotion_summary_json" ]]; then
   promotion_summary_exists="true"
@@ -752,6 +826,30 @@ if [[ "$(json_file_valid_01 "$promotion_summary_json")" == "1" ]]; then
   promotion_operator_next_action="$(jq -r '
     if (.operator_next_action | type) == "string" and (.operator_next_action | length) > 0 then .operator_next_action
     elif (.outcome.next_operator_action | type) == "string" and (.outcome.next_operator_action | length) > 0 then .outcome.next_operator_action
+    else ""
+    end
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  promotion_primary_violation_code="$(jq -r '
+    if (.violations | type) == "array"
+      and (.violations | length) > 0
+      and (.violations[0].code | type) == "string"
+    then .violations[0].code
+    else ""
+    end
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  promotion_primary_violation_message="$(jq -r '
+    if (.violations | type) == "array"
+      and (.violations | length) > 0
+      and (.violations[0].message | type) == "string"
+    then .violations[0].message
+    else ""
+    end
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
+  promotion_primary_violation_action="$(jq -r '
+    if (.violations | type) == "array"
+      and (.violations | length) > 0
+      and (.violations[0].action | type) == "string"
+    then .violations[0].action
     else ""
     end
   ' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
@@ -779,6 +877,11 @@ fi
 
 failure_stage=""
 failure_reason=""
+failure_reason_code=""
+failure_category=""
+failure_reasons_json="[]"
+next_operator_action=""
+next_operator_action_command=""
 final_decision="NO-GO"
 final_status="fail"
 final_rc=1
@@ -789,8 +892,13 @@ if (( cycle_command_failures > 0 || cycle_summary_missing_count > 0 || cycle_sum
 fi
 
 if [[ "$promotion_stage_rc" -ne 0 ]]; then
-  failure_stage="promotion_check"
-  failure_reason="promotion check command failed (rc=$promotion_stage_rc)"
+  set_promotion_failure \
+    "promotion_check_command_failed" \
+    "promotion_check" \
+    "promotion check command failed (rc=$promotion_stage_rc)" \
+    "Inspect promotion-check logs and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$promotion_command_display" \
+    "execution"
   final_decision="NO-GO"
   final_status="fail"
   final_rc="$promotion_stage_rc"
@@ -798,20 +906,35 @@ if [[ "$promotion_stage_rc" -ne 0 ]]; then
     final_rc=1
   fi
 elif [[ "$promotion_summary_valid" != "true" ]]; then
-  failure_stage="promotion_check"
-  failure_reason="promotion check summary is missing or invalid"
+  set_promotion_failure \
+    "promotion_check_summary_missing_or_invalid" \
+    "promotion_check" \
+    "promotion check summary is missing or invalid" \
+    "Regenerate promotion-check summary artifacts and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$promotion_command_display" \
+    "artifact_contract"
   final_decision="NO-GO"
   final_status="fail"
   final_rc=1
 elif [[ "$promotion_summary_fresh" != "true" ]]; then
-  failure_stage="promotion_check"
-  failure_reason="promotion check summary is stale (not refreshed by current run)"
+  set_promotion_failure \
+    "promotion_check_summary_stale" \
+    "promotion_check" \
+    "promotion check summary is stale (not refreshed by current run)" \
+    "Refresh promotion-check evidence and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$promotion_command_display" \
+    "artifact_freshness"
   final_decision="NO-GO"
   final_status="fail"
   final_rc=1
 elif [[ -n "$cycles_collection_failure_reason" ]]; then
-  failure_stage="cycles"
-  failure_reason="$cycles_collection_failure_reason"
+  set_promotion_failure \
+    "cycles_collection_incomplete" \
+    "cycles" \
+    "$cycles_collection_failure_reason" \
+    "Inspect failed cycle logs/artifacts and rerun profile_compare_multi_vm_stability_promotion_cycle.sh." \
+    "$cycle_summary_list" \
+    "artifact_contract"
   final_decision="NO-GO"
   final_status="fail"
   final_rc=1
@@ -819,20 +942,52 @@ elif [[ "$promotion_decision" == "GO" && "$promotion_status" == "pass" && "$prom
   final_decision="GO"
   final_status="pass"
   final_rc=0
+  if [[ -z "$next_operator_action" ]]; then
+    next_operator_action="Promotion may proceed."
+  fi
 elif [[ "$promotion_decision" == "NO-GO" ]]; then
   final_decision="NO-GO"
+  primary_code="$promotion_primary_violation_code"
+  primary_message="$promotion_primary_violation_message"
+  primary_action="$promotion_primary_violation_action"
+  if [[ -z "$primary_code" ]]; then
+    primary_code="promotion_decision_no_go"
+  fi
+  if [[ -z "$primary_message" ]]; then
+    primary_message="promotion decision is NO-GO"
+  fi
+  if [[ -z "$primary_action" ]]; then
+    primary_action="Hold promotion, resolve promotion-check violations, and rerun profile_compare_multi_vm_stability_promotion_cycle.sh."
+  fi
   if [[ "$fail_on_no_go" == "1" ]]; then
-    failure_stage="promotion_check"
-    failure_reason="promotion decision is NO-GO"
+    set_promotion_failure \
+      "$primary_code" \
+      "promotion_check" \
+      "$primary_message" \
+      "$primary_action" \
+      "$promotion_command_display" \
+      "policy"
     final_status="fail"
     final_rc=1
   else
     final_status="warn"
     final_rc=0
+    set_promotion_failure \
+      "$primary_code" \
+      "" \
+      "$primary_message" \
+      "$primary_action" \
+      "$promotion_command_display" \
+      "policy"
   fi
 else
-  failure_stage="promotion_check"
-  failure_reason="promotion check summary is missing a usable decision"
+  set_promotion_failure \
+    "promotion_decision_unusable" \
+    "promotion_check" \
+    "promotion check summary is missing a usable decision" \
+    "Regenerate promotion-check summary with a GO/NO-GO decision and rerun promotion cycle." \
+    "$promotion_command_display" \
+    "artifact_contract"
   final_decision="NO-GO"
   final_status="fail"
   final_rc=1
@@ -845,13 +1000,21 @@ if [[ "$promotion_contract_ok" != "true" ]]; then
   promotion_effective_status="fail"
 fi
 
-next_operator_action="$promotion_operator_next_action"
-if [[ "$failure_stage" == "cycles" ]]; then
-  next_operator_action="Inspect failed cycle logs/artifacts under $archive_root and rerun profile_compare_multi_vm_stability_promotion_cycle.sh"
-elif [[ -z "$next_operator_action" && "$final_decision" == "NO-GO" ]]; then
+if [[ -z "$next_operator_action" ]]; then
+  next_operator_action="$promotion_operator_next_action"
+fi
+if [[ -z "$next_operator_action" && "$failure_stage" == "cycles" ]]; then
+  next_operator_action="Inspect failed cycle logs/artifacts under $archive_root and rerun profile_compare_multi_vm_stability_promotion_cycle.sh."
+fi
+if [[ -z "$next_operator_action" && "$final_decision" == "NO-GO" ]]; then
   next_operator_action="Hold promotion. Resolve cycle/promotion violations, then rerun profile_compare_multi_vm_stability_promotion_cycle.sh."
-elif [[ -z "$next_operator_action" ]]; then
+fi
+if [[ -z "$next_operator_action" ]]; then
   next_operator_action="Promotion may proceed."
+fi
+if [[ -z "$next_operator_action_command" ]]; then
+  next_operator_action_command="$(quote_cmd bash ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir .easy-node-logs --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json --print-summary-json 1)"
+  next_operator_action_command="$(trim "$next_operator_action_command")"
 fi
 
 cycle_summary_list_count="$(wc -l <"$cycle_summary_list" | tr -d '[:space:]')"
@@ -865,12 +1028,15 @@ jq -n \
   --arg decision "$final_decision" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
+  --arg failure_reason_code "$failure_reason_code" \
+  --arg failure_category "$failure_category" \
   --arg reports_dir "$reports_dir" \
   --arg archive_root "$archive_root" \
   --arg cycle_summary_list "$cycle_summary_list" \
   --arg promotion_summary_json "$promotion_summary_json" \
   --arg summary_json_path "$summary_json" \
   --arg next_operator_action "$next_operator_action" \
+  --arg next_operator_action_command "$next_operator_action_command" \
   --arg promotion_stage_attempted "$promotion_stage_attempted" \
   --arg promotion_stage_status "$promotion_stage_status" \
   --arg promotion_decision "$promotion_decision" \
@@ -881,6 +1047,9 @@ jq -n \
   --arg promotion_summary_valid "$promotion_summary_valid" \
   --arg promotion_summary_fresh "$promotion_summary_fresh" \
   --arg promotion_contract_ok "$promotion_contract_ok" \
+  --arg promotion_primary_violation_code "$promotion_primary_violation_code" \
+  --arg promotion_primary_violation_message "$promotion_primary_violation_message" \
+  --arg promotion_primary_violation_action "$promotion_primary_violation_action" \
   --arg promotion_log "$promotion_log" \
   --arg promotion_command "$promotion_command_display" \
   --arg promotion_stage_started_at "$promotion_stage_started_at" \
@@ -900,6 +1069,7 @@ jq -n \
   --argjson promotion_stage_rc "$promotion_stage_rc" \
   --argjson promotion_rc "$promotion_rc_json" \
   --argjson promotion_violations_count "$promotion_violations_count" \
+  --argjson failure_reasons "$failure_reasons_json" \
   --argjson cycles "$cycles_json" \
   --argjson sleep_between_sec "$sleep_between_sec" \
   --argjson cycle_timeout_sec "$cycle_timeout_sec" \
@@ -922,7 +1092,15 @@ jq -n \
     decision: (if $decision == "" then null else $decision end),
     failure_stage: (if $failure_stage == "" then null else $failure_stage end),
     failure_reason: (if $failure_reason == "" then null else $failure_reason end),
+    failure_reason_code: (if $failure_reason_code == "" then null else $failure_reason_code end),
+    failure_category: (if $failure_category == "" then null else $failure_category end),
+    failure_reasons: $failure_reasons,
     next_operator_action: $next_operator_action,
+    operator_next_action_command: (
+      if $next_operator_action_command == "" then null
+      else $next_operator_action_command
+      end
+    ),
     inputs: {
       reports_dir: $reports_dir,
       cycle_orchestration: {
@@ -977,6 +1155,15 @@ jq -n \
       observed_status: (if $promotion_status == "" then null else $promotion_status end),
       rc: $promotion_rc,
       violations_count: $promotion_violations_count,
+      primary_violation: (
+        if $promotion_primary_violation_code == "" and $promotion_primary_violation_message == "" and $promotion_primary_violation_action == "" then null
+        else {
+          code: (if $promotion_primary_violation_code == "" then null else $promotion_primary_violation_code end),
+          message: (if $promotion_primary_violation_message == "" then null else $promotion_primary_violation_message end),
+          action: (if $promotion_primary_violation_action == "" then null else $promotion_primary_violation_action end)
+        }
+        end
+      ),
       operator_next_action: (
         if $next_operator_action == "" then null
         else $next_operator_action

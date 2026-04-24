@@ -326,6 +326,7 @@ if ! jq -e '
   and .rc == 0
   and .decision == "GO"
   and .failure_stage == null
+  and .failure_reason_code == null
   and .cycle_counts.requested == 3
   and .cycle_counts.completed == 3
   and .cycle_counts.pass == 3
@@ -336,6 +337,7 @@ if ! jq -e '
   and .promotion.decision == "GO"
   and .promotion.status == "pass"
   and .promotion.rc == 0
+  and .operator_next_action_command != null
   and .enforcement.no_go_enforced == false
   and .outcome.should_promote == true
   and .outcome.action == "promote_allowed"
@@ -412,6 +414,7 @@ if ! jq -e '
   and .rc == 0
   and .decision == "NO-GO"
   and .failure_stage == null
+  and .failure_reason_code == "simulated_no_go"
   and .promotion.contract_ok == true
   and .promotion.decision == "NO-GO"
   and .promotion.status == "fail"
@@ -456,6 +459,7 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .failure_stage == "cycles"
   and .failure_reason == "one or more cycle runs failed to execute or produce fresh valid summary artifacts"
+  and .failure_reason_code == "cycles_collection_incomplete"
   and .cycle_counts.command_failures >= 1
   and .stages.promotion_check.attempted == true
   and .promotion.contract_ok == true
@@ -498,6 +502,7 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .failure_stage == "promotion_check"
   and .failure_reason == "promotion check summary is missing a usable decision"
+  and .failure_reason_code == "promotion_decision_unusable"
   and .promotion.contract_ok == false
   and .promotion.decision == "NO-GO"
   and .promotion.observed_decision == null
@@ -562,6 +567,7 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .failure_stage == "promotion_check"
   and ((.failure_reason // "") | test("promotion check command failed"))
+  and .failure_reason_code == "promotion_check_command_failed"
   and .promotion.contract_ok == false
   and .promotion.decision == "NO-GO"
   and .promotion.status == "fail"

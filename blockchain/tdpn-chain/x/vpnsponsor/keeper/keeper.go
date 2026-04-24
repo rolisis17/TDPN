@@ -141,6 +141,28 @@ func (k *Keeper) DelegateSessionCreditAtUnix(record types.DelegatedSessionCredit
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
+	// Resolve idempotent replays before evaluating authorization expiry. A reservation replay
+	// should succeed deterministically even if the underlying authorization has since expired.
+	existing, ok := k.store.GetDelegation(normalized.ReservationID)
+	if !ok {
+		if compatibilityDelegation, found := k.delegationByCanonicalIDLocked(normalized.ReservationID); found {
+			if !delegationRecordsEqual(compatibilityDelegation, normalized) {
+				return types.DelegatedSessionCredit{}, conflictError("delegation", normalized.ReservationID)
+			}
+			return compatibilityDelegation, nil
+		}
+	} else {
+		normalizedExisting := normalizeDelegation(existing)
+		if !delegationRecordsEqual(normalizedExisting, normalized) {
+			return types.DelegatedSessionCredit{}, conflictError("delegation", normalized.ReservationID)
+		}
+		// Normalize legacy records persisted via compatibility upserts.
+		if err := k.upsertDelegationLocked(normalizedExisting); err != nil {
+			return types.DelegatedSessionCredit{}, err
+		}
+		return normalizedExisting, nil
+	}
+
 	authorization, ok := k.store.GetAuthorization(normalized.AuthorizationID)
 	if !ok {
 		if compatibilityAuthorization, found := k.authorizationByCanonicalIDLocked(normalized.AuthorizationID); found {
@@ -171,24 +193,6 @@ func (k *Keeper) DelegateSessionCreditAtUnix(record types.DelegatedSessionCredit
 		}
 	}
 
-	existing, ok := k.store.GetDelegation(normalized.ReservationID)
-	if ok {
-		normalizedExisting := normalizeDelegation(existing)
-		if !delegationRecordsEqual(normalizedExisting, normalized) {
-			return types.DelegatedSessionCredit{}, conflictError("delegation", normalized.ReservationID)
-		}
-		// Normalize legacy records persisted via compatibility upserts.
-		if err := k.upsertDelegationLocked(normalizedExisting); err != nil {
-			return types.DelegatedSessionCredit{}, err
-		}
-		return normalizedExisting, nil
-	}
-	if compatibilityDelegation, found := k.delegationByCanonicalIDLocked(normalized.ReservationID); found {
-		if !delegationRecordsEqual(compatibilityDelegation, normalized) {
-			return types.DelegatedSessionCredit{}, conflictError("delegation", normalized.ReservationID)
-		}
-		return compatibilityDelegation, nil
-	}
 	delegations, err := k.listDelegationsForAccountingLocked()
 	if err != nil {
 		return types.DelegatedSessionCredit{}, err

@@ -60,6 +60,14 @@ abs_path() {
   fi
 }
 
+quote_cmd() {
+  local arg
+  for arg in "$@"; do
+    printf '%q ' "$arg"
+  done
+  printf '\n'
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -112,6 +120,7 @@ need_cmd sort
 
 reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_REPORTS_DIR:-${REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}}"
 cycle_summary_list="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_CYCLE_SUMMARY_LIST:-}"
+cycle_summary_list_missing="0"
 
 require_min_cycles="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_REQUIRE_MIN_CYCLES:-${REQUIRE_MIN_CYCLES:-3}}"
 require_min_pass_cycles="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_REQUIRE_MIN_PASS_CYCLES:-${REQUIRE_MIN_PASS_CYCLES:-3}}"
@@ -364,16 +373,16 @@ done
 
 if [[ -n "$cycle_summary_list" ]]; then
   if [[ ! -f "$cycle_summary_list" ]]; then
-    echo "cycle summary list not found: $cycle_summary_list"
-    exit 2
+    cycle_summary_list_missing="1"
+  else
+    while IFS= read -r list_line || [[ -n "$list_line" ]]; do
+      list_line="$(trim "$list_line")"
+      if [[ -z "$list_line" || "${list_line:0:1}" == "#" ]]; then
+        continue
+      fi
+      cycle_summary_paths_raw+=("$list_line")
+    done <"$cycle_summary_list"
   fi
-  while IFS= read -r list_line || [[ -n "$list_line" ]]; do
-    list_line="$(trim "$list_line")"
-    if [[ -z "$list_line" || "${list_line:0:1}" == "#" ]]; then
-      continue
-    fi
-    cycle_summary_paths_raw+=("$list_line")
-  done <"$cycle_summary_list"
 fi
 
 if ((${#cycle_summary_paths_raw[@]} == 0)); then
@@ -615,6 +624,16 @@ append_violation() {
   errors+=("$message")
 }
 
+if [[ "$cycle_summary_list_missing" == "1" ]]; then
+  append_violation \
+    "cycle_summary_list_missing" \
+    "inputs.cycle_summary_list" \
+    "cycle summary list file is missing" \
+    "provide a valid --cycle-summary-list file or rerun promotion cycle to regenerate it" \
+    "existing file path" \
+    "$cycle_summary_list"
+fi
+
 if (( total_cycles < require_min_cycles )); then
   append_violation \
     "min_cycles_not_met" \
@@ -704,6 +723,13 @@ if [[ "$(jq -r 'length' <<<"$violations_json")" -gt 0 ]]; then
   notes="one or more multi-VM promotion policy thresholds are violated"
 fi
 
+failure_reason=""
+failure_reason_code=""
+if [[ "$decision" == "NO-GO" ]]; then
+  failure_reason="$(jq -r 'if (type == "array") and (length > 0) and (.[0].message | type) == "string" then .[0].message else "" end' <<<"$violations_json" 2>/dev/null || printf '%s' "")"
+  failure_reason_code="$(jq -r 'if (type == "array") and (length > 0) and (.[0].code | type) == "string" then .[0].code else "" end' <<<"$violations_json" 2>/dev/null || printf '%s' "")"
+fi
+
 operator_next_action="$(jq -r '
   if (length > 0) then
     "Hold promotion. " + .[0].action + ". Re-run profile_compare_multi_vm_stability_cycle.sh and this promotion check after remediation."
@@ -711,6 +737,8 @@ operator_next_action="$(jq -r '
     "Promotion may proceed. Continue collecting periodic multi-VM stability cycles."
   end
 ' <<<"$violations_json")"
+operator_next_action_command="$(quote_cmd bash ./scripts/profile_compare_multi_vm_stability_promotion_check.sh --reports-dir "$reports_dir" --summary-json "$summary_json" --print-summary-json 1)"
+operator_next_action_command="$(trim "$operator_next_action_command")"
 
 rc=0
 if [[ "$decision" == "NO-GO" && "$fail_on_no_go" == "1" ]]; then
@@ -732,9 +760,13 @@ jq -n \
   --arg decision "$decision" \
   --arg status "$status" \
   --arg notes "$notes" \
+  --arg failure_reason "$failure_reason" \
+  --arg failure_reason_code "$failure_reason_code" \
   --arg operator_next_action "$operator_next_action" \
+  --arg operator_next_action_command "$operator_next_action_command" \
   --arg reports_dir "$reports_dir" \
   --arg cycle_summary_list "$cycle_summary_list" \
+  --arg cycle_summary_list_missing "$cycle_summary_list_missing" \
   --arg summary_json "$summary_json" \
   --argjson rc "$rc" \
   --argjson cycle_summary_paths "$cycle_summary_paths_json" \
@@ -772,7 +804,14 @@ jq -n \
     status: $status,
     rc: $rc,
     notes: $notes,
+    failure_reason: (if $failure_reason == "" then null else $failure_reason end),
+    failure_reason_code: (if $failure_reason_code == "" then null else $failure_reason_code end),
     operator_next_action: $operator_next_action,
+    operator_next_action_command: (
+      if $operator_next_action_command == "" then null
+      else $operator_next_action_command
+      end
+    ),
     inputs: {
       reports_dir: $reports_dir,
       cycle_summary_list: (
@@ -780,6 +819,7 @@ jq -n \
         else $cycle_summary_list
         end
       ),
+      cycle_summary_list_missing: ($cycle_summary_list_missing == "1"),
       cycle_summary_paths: $cycle_summary_paths,
       policy: {
         require_min_cycles: $require_min_cycles,
@@ -809,7 +849,8 @@ jq -n \
       usable_decision_cycles: $usable_decision_cycles,
       go_decision_rate_pct: $go_decision_rate_pct,
       cycle_schema_invalid_cycles: $cycle_schema_invalid_cycles,
-      check_policy_modal_decision_mismatch_cycles: $check_policy_modal_decision_mismatch_cycles
+      check_policy_modal_decision_mismatch_cycles: $check_policy_modal_decision_mismatch_cycles,
+      cycle_summary_list_missing: ($cycle_summary_list_missing == "1")
     },
     enforcement: {
       fail_on_no_go: ($fail_on_no_go == 1),
@@ -829,7 +870,8 @@ jq -n \
         elif $fail_on_no_go == 1 then "hold_promotion_blocked"
         else "hold_promotion_warn_only"
         end
-      )
+      ),
+      next_operator_action: $operator_next_action
     },
     violations: $violations,
     errors: $errors,

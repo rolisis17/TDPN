@@ -46,7 +46,13 @@ type governanceMsgServer struct {
 	msgServer governancemodule.MsgServer
 }
 
-func (m governanceMsgServer) CreatePolicy(_ context.Context, req GovernanceCreatePolicyRequest) (GovernanceCreatePolicyResponse, error) {
+func (m governanceMsgServer) CreatePolicy(ctx context.Context, req GovernanceCreatePolicyRequest) (GovernanceCreatePolicyResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return GovernanceCreatePolicyResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.CreatePolicy(governancemodule.CreatePolicyRequest{Policy: req.Record})
 	if err != nil {
 		if errors.Is(err, governancemodule.ErrNilKeeper) {
@@ -61,7 +67,13 @@ func (m governanceMsgServer) CreatePolicy(_ context.Context, req GovernanceCreat
 	}, nil
 }
 
-func (m governanceMsgServer) RecordDecision(_ context.Context, req GovernanceRecordDecisionRequest) (GovernanceRecordDecisionResponse, error) {
+func (m governanceMsgServer) RecordDecision(ctx context.Context, req GovernanceRecordDecisionRequest) (GovernanceRecordDecisionResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return GovernanceRecordDecisionResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.RecordDecision(governancemodule.RecordDecisionRequest{Decision: req.Record})
 	if err != nil {
 		if errors.Is(err, governancemodule.ErrNilKeeper) {
@@ -76,7 +88,13 @@ func (m governanceMsgServer) RecordDecision(_ context.Context, req GovernanceRec
 	}, nil
 }
 
-func (m governanceMsgServer) RecordAuditAction(_ context.Context, req GovernanceRecordAuditActionRequest) (GovernanceRecordAuditActionResponse, error) {
+func (m governanceMsgServer) RecordAuditAction(ctx context.Context, req GovernanceRecordAuditActionRequest) (GovernanceRecordAuditActionResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return GovernanceRecordAuditActionResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.RecordAuditAction(governancemodule.RecordAuditActionRequest{Action: req.Record})
 	if err != nil {
 		if errors.Is(err, governancemodule.ErrNilKeeper) {

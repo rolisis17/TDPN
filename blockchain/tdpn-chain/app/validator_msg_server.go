@@ -36,7 +36,13 @@ type validatorMsgServer struct {
 	msgServer validatormodule.MsgServer
 }
 
-func (m validatorMsgServer) SetEligibility(_ context.Context, req ValidatorSetEligibilityRequest) (ValidatorSetEligibilityResponse, error) {
+func (m validatorMsgServer) SetEligibility(ctx context.Context, req ValidatorSetEligibilityRequest) (ValidatorSetEligibilityResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return ValidatorSetEligibilityResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.SetValidatorEligibility(validatormodule.SetValidatorEligibilityRequest{Eligibility: req.Record})
 	if err != nil {
 		if errors.Is(err, validatormodule.ErrNilKeeper) {
@@ -51,7 +57,13 @@ func (m validatorMsgServer) SetEligibility(_ context.Context, req ValidatorSetEl
 	}, nil
 }
 
-func (m validatorMsgServer) RecordStatus(_ context.Context, req ValidatorRecordStatusRequest) (ValidatorRecordStatusResponse, error) {
+func (m validatorMsgServer) RecordStatus(ctx context.Context, req ValidatorRecordStatusRequest) (ValidatorRecordStatusResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return ValidatorRecordStatusResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.RecordValidatorStatus(validatormodule.RecordValidatorStatusRequest{Record: req.Record})
 	if err != nil {
 		if errors.Is(err, validatormodule.ErrNilKeeper) {

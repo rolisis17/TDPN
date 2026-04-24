@@ -73,11 +73,51 @@ abs_path() {
   path="$(trim "${1:-}")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
-  elif [[ "$path" == /* ]]; then
-    printf '%s' "$path"
+  elif [[ "$(path_is_cross_platform_absolute_01 "$path")" == "1" ]]; then
+    printf '%s' "$(normalize_cross_platform_path_separators "$path")"
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
+}
+
+path_is_cross_platform_absolute_01() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$path" == /* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" =~ ^\\\\.* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" == //* ]]; then
+    printf '1'
+    return
+  fi
+  printf '0'
+}
+
+normalize_cross_platform_path_separators() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]] || [[ "$path" =~ ^\\\\.* ]] || [[ "$path" == //* ]]; then
+    printf '%s' "${path//\\//}"
+    return
+  fi
+  printf '%s' "$path"
 }
 
 bool_arg_or_die() {

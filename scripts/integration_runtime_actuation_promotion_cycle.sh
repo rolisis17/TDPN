@@ -616,8 +616,11 @@ if ! jq -e --arg reports_dir "$NO_PROMOTION_SUMMARY_REPORTS_DIR" '
   and .stages.promotion_check.summary_exists == false
   and .stages.promotion_check.summary_valid_json == false
   and .stages.promotion_check.summary_fresh == false
+  and .diagnostics.no_go.primary_reason_code == "promotion_summary_invalid_json"
+  and .diagnostics.no_go.primary_reason_category == "policy_violation"
   and .outcome.should_promote == false
   and .outcome.action == "hold_promotion_blocked"
+  and (.outcome.remediation.next_command | contains("runtime-actuation-promotion-cycle"))
   and .artifacts.latest_aliases.cycle_orchestrator_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_summary.json")
   and .artifacts.latest_aliases.promotion_check_summary_json == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json")
   and .artifacts.latest_aliases.signoff_summary_list == ($reports_dir + "/runtime_actuation_promotion_cycle_latest_signoff_summaries.list")
@@ -713,8 +716,11 @@ if ! jq -e '
   and .stages.promotion_check.status == "fail"
   and .promotion_check.decision == "NO-GO"
   and .promotion_check.rc == 0
+  and .diagnostics.no_go.primary_reason_code == "simulated_no_go"
+  and .diagnostics.no_go.primary_reason_category == "policy_violation"
   and .outcome.should_promote == false
   and .outcome.action == "hold_promotion_warn_only"
+  and (.outcome.remediation.next_command | contains("runtime-actuation-promotion-cycle"))
 ' "$NO_GO_SOFT_SUMMARY" >/dev/null 2>&1; then
   echo "NO-GO soft path summary mismatch"
   cat "$NO_GO_SOFT_SUMMARY"
@@ -753,6 +759,8 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .failure_stage == "cycles"
   and .stages.cycles.failed >= 1
+  and .diagnostics.no_go.primary_reason_code == "signoff_command_failed"
+  and .diagnostics.no_go.primary_reason_category == "cycle_signoff_failure"
   and .stages.promotion_check.attempted == true
   and .promotion_check.decision == "GO"
   and .outcome.should_promote == false
@@ -791,6 +799,8 @@ if ! jq -e '
   and .decision == "NO-GO"
   and .failure_stage == "cycles"
   and .stages.cycles.failed >= 1
+  and .diagnostics.no_go.primary_reason_code == "signoff_command_failed"
+  and .diagnostics.no_go.primary_reason_category == "cycle_signoff_failure"
   and .outcome.should_promote == false
   and .outcome.action == "hold_promotion_blocked"
 ' "$CYCLE_FAIL_SOFT_FLAG_SUMMARY" >/dev/null 2>&1; then
@@ -831,6 +841,9 @@ if ! jq -e '
   and (.cycles[0].summary.decision == "NO-GO")
   and (.cycles[0].summary.has_usable_decision == true)
   and (.cycles[0].summary.rc != 0)
+  and (.cycles[0].error_code == "signoff_summary_rc_nonzero")
+  and .diagnostics.no_go.primary_reason_code == "signoff_summary_rc_nonzero"
+  and .diagnostics.no_go.primary_reason_category == "cycle_signoff_failure"
   and (.promotion_check.decision == "GO")
   and .outcome.should_promote == false
   and .outcome.action == "hold_promotion_blocked"

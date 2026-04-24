@@ -212,6 +212,14 @@ if ! jq -e '
   and .modal_decision_count == 3
   and (.modal_decision_support_rate_pct >= 99.9)
   and .decision_consensus == true
+  and .diagnostics.evidence_state == "complete"
+  and .diagnostics.selection_policy_state == "consistent"
+  and .diagnostics.command_failures == 0
+  and .diagnostics.summary_missing_count == 0
+  and .diagnostics.summary_unreadable_count == 0
+  and .outcome.has_usable_evidence == true
+  and .outcome.evidence_complete == true
+  and .outcome.action == "proceed_to_stability_check"
   and (.runs | length) == 3
 ' "$STABLE_SUMMARY" >/dev/null 2>&1; then
   echo "stable summary JSON missing expected fields"
@@ -328,6 +336,9 @@ if ! jq -e '
   and .selection_policy_present_all == true
   and .consistent_selection_policy == false
   and .stability_ok == false
+  and .diagnostics.evidence_state == "complete"
+  and .diagnostics.selection_policy_state == "inconsistent"
+  and .outcome.action == "investigate_selection_policy_drift"
 ' "$MISMATCH_SUMMARY" >/dev/null 2>&1; then
   echo "mismatch summary JSON missing expected inconsistency markers"
   cat "$MISMATCH_SUMMARY"
@@ -378,6 +389,8 @@ if ! jq -e '
   and .modal_decision_count == 2
   and (.modal_decision_support_rate_pct > 66 and .modal_decision_support_rate_pct < 67)
   and .decision_consensus == false
+  and .diagnostics.evidence_state == "complete"
+  and .diagnostics.selection_policy_state == "consistent"
 ' "$MIXED_DECISION_SUMMARY" >/dev/null 2>&1; then
   echo "mixed-decision summary JSON missing expected decision evidence"
   cat "$MIXED_DECISION_SUMMARY"

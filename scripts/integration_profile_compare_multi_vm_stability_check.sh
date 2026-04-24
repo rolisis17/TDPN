@@ -244,6 +244,8 @@ if ! jq -e '
   and .decision == "GO"
   and .status == "ok"
   and .rc == 0
+  and (.violations | length) == 0
+  and .failure_reason_code == null
   and .inputs.policy.require_decision_consensus == true
   and .observed.modal_decision == "GO"
   and .observed.modal_recommended_profile == "balanced"
@@ -323,6 +325,10 @@ if ! jq -e '
   .decision == "NO-GO"
   and .status == "fail"
   and .rc == 0
+  and (.violations | length) > 0
+  and ((.failure_reason_code // "") | length) > 0
+  and ((.operator_next_action // "") | length) > 0
+  and ((.operator_next_action_command // "") | test("profile_compare_multi_vm_stability_check\\.sh"))
   and (.errors | length) > 0
 ' "$SOFT_SUMMARY" >/dev/null 2>&1; then
   echo "soft summary JSON mismatch"

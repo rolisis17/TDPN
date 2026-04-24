@@ -682,6 +682,14 @@ run_summary_schema_id=""
 run_summary_schema_valid="false"
 run_summary_status=""
 run_summary_rc_json="null"
+run_observed_runs_total_json="null"
+run_observed_runs_completed_json="null"
+run_observed_runs_fail_json="null"
+run_observed_evidence_state=""
+run_observed_selection_policy_state=""
+run_observed_command_failures_json="null"
+run_observed_summary_missing_count_json="null"
+run_observed_summary_unreadable_count_json="null"
 
 echo "[profile-default-gate-stability-cycle] $(timestamp_utc) run-stage start reports_dir=$reports_dir run_summary_json=$run_summary_json"
 pre_run_summary_fingerprint="$(file_fingerprint_01 "$run_summary_json")"
@@ -718,6 +726,62 @@ if [[ "$(json_file_valid_01 "$run_summary_json")" == "1" ]]; then
   run_summary_rc_json="$(jq -r '
     if (.rc | type) == "number" then .rc else "null" end
   ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_runs_total_json="$(jq -r '
+    if (.runs_total | type) == "number" then .runs_total
+    elif (.runs_total | type) == "string" and (.runs_total | test("^[0-9]+$")) then (.runs_total | tonumber)
+    elif (.runs | type) == "array" then (.runs | length)
+    else "null"
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_runs_completed_json="$(jq -r '
+    if (.runs_completed | type) == "number" then .runs_completed
+    elif (.runs_completed | type) == "string" and (.runs_completed | test("^[0-9]+$")) then (.runs_completed | tonumber)
+    elif (.runs | type) == "array" then ([.runs[] | select(.completed == true)] | length)
+    else "null"
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_runs_fail_json="$(jq -r '
+    if (.runs_fail | type) == "number" then .runs_fail
+    elif (.runs_fail | type) == "string" and (.runs_fail | test("^[0-9]+$")) then (.runs_fail | tonumber)
+    elif (.runs | type) == "array" then ([.runs[] | select(.command_rc != 0 or .summary_exists != true or .completed != true)] | length)
+    else "null"
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_command_failures_json="$(jq -r '
+    if (.diagnostics.command_failures | type) == "number" then .diagnostics.command_failures
+    elif (.diagnostics.command_failures | type) == "string" and (.diagnostics.command_failures | test("^[0-9]+$")) then (.diagnostics.command_failures | tonumber)
+    elif (.runs | type) == "array" then ([.runs[] | select(.command_rc != 0)] | length)
+    else "null"
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_summary_missing_count_json="$(jq -r '
+    if (.diagnostics.summary_missing_count | type) == "number" then .diagnostics.summary_missing_count
+    elif (.diagnostics.summary_missing_count | type) == "string" and (.diagnostics.summary_missing_count | test("^[0-9]+$")) then (.diagnostics.summary_missing_count | tonumber)
+    elif (.runs | type) == "array" then ([.runs[] | select(.summary_exists != true)] | length)
+    else "null"
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_summary_unreadable_count_json="$(jq -r '
+    if (.diagnostics.summary_unreadable_count | type) == "number" then .diagnostics.summary_unreadable_count
+    elif (.diagnostics.summary_unreadable_count | type) == "string" and (.diagnostics.summary_unreadable_count | test("^[0-9]+$")) then (.diagnostics.summary_unreadable_count | tonumber)
+    elif (.runs | type) == "array" then ([.runs[] | select(.summary_exists == true and .completed != true)] | length)
+    else "null"
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "null")"
+  run_observed_evidence_state="$(jq -r '
+    if (.diagnostics.evidence_state | type) == "string" and ((.diagnostics.evidence_state | length) > 0) then
+      .diagnostics.evidence_state
+    else
+      ""
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "")"
+  run_observed_selection_policy_state="$(jq -r '
+    if (.diagnostics.selection_policy_state | type) == "string" and ((.diagnostics.selection_policy_state | length) > 0) then
+      .diagnostics.selection_policy_state
+    else
+      ""
+    end
+  ' "$run_summary_json" 2>/dev/null || printf '%s' "")"
 fi
 
 check_stage_attempted="false"
@@ -739,6 +803,8 @@ check_modal_support_rate_pct_json="null"
 check_enforcement_no_go_enforced=""
 check_outcome_action=""
 check_errors_json="[]"
+check_error_count_json="0"
+check_next_operator_action=""
 
 failure_stage=""
 failure_reason=""
@@ -838,6 +904,9 @@ else
     check_errors_json="$(jq -c '
       if (.errors | type) == "array" then .errors else [] end
     ' "$check_summary_json" 2>/dev/null || printf '%s' "[]")"
+    check_error_count_json="$(jq -r '
+      if (.errors | type) == "array" then (.errors | length) else 0 end
+    ' "$check_summary_json" 2>/dev/null || printf '%s' "0")"
     check_enforcement_no_go_enforced="$(jq -r '
       if (.enforcement.no_go_enforced | type) == "boolean" then
         if .enforcement.no_go_enforced then "true" else "false" end
@@ -847,6 +916,9 @@ else
     ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
     check_outcome_action="$(jq -r '
       if (.outcome.action | type) == "string" then .outcome.action else "" end
+    ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
+    check_next_operator_action="$(jq -r '
+      if (.diagnostics.next_operator_action | type) == "string" then .diagnostics.next_operator_action else "" end
     ' "$check_summary_json" 2>/dev/null || printf '%s' "")"
   elif [[ -f "$check_summary_json" ]]; then
     check_summary_exists="true"
@@ -940,6 +1012,67 @@ else
   fi
 fi
 
+cycle_evidence_state="complete"
+if [[ "$run_summary_valid" != "true" || "$run_summary_fresh" != "true" || "$run_summary_schema_valid" != "true" ]]; then
+  cycle_evidence_state="missing"
+elif [[ "$check_stage_attempted" == "false" ]]; then
+  cycle_evidence_state="partial"
+elif [[ "$check_summary_valid" != "true" || "$check_summary_fresh" != "true" || "$check_summary_schema_valid" != "true" ]]; then
+  cycle_evidence_state="partial"
+elif [[ "$run_observed_evidence_state" == "partial" ]]; then
+  cycle_evidence_state="partial"
+elif [[ "$check_decision" == "NO-GO" ]]; then
+  cycle_evidence_state="partial"
+fi
+
+declare -a cycle_issues=()
+if [[ "$run_stage_status" != "pass" ]]; then
+  cycle_issues+=("run stage did not pass (rc=$run_stage_rc)")
+fi
+if [[ "$run_summary_valid" != "true" ]]; then
+  cycle_issues+=("run summary missing or unreadable")
+fi
+if [[ "$run_summary_fresh" != "true" ]]; then
+  cycle_issues+=("run summary is stale for this cycle")
+fi
+if [[ "$run_summary_schema_valid" != "true" ]]; then
+  cycle_issues+=("run summary schema mismatch")
+fi
+if [[ "$check_stage_attempted" == "true" && "$check_stage_status" != "pass" ]]; then
+  cycle_issues+=("check stage did not pass (rc=$check_stage_rc)")
+fi
+if [[ "$check_stage_attempted" == "true" && "$check_summary_valid" != "true" ]]; then
+  cycle_issues+=("check summary missing or unreadable")
+fi
+if [[ "$check_stage_attempted" == "true" && "$check_summary_fresh" != "true" ]]; then
+  cycle_issues+=("check summary is stale for this cycle")
+fi
+if [[ "$check_stage_attempted" == "true" && "$check_summary_schema_valid" != "true" ]]; then
+  cycle_issues+=("check summary schema mismatch")
+fi
+if [[ "$check_decision" == "NO-GO" ]]; then
+  cycle_issues+=("check summary decision is NO-GO")
+fi
+
+cycle_issues_json='[]'
+if ((${#cycle_issues[@]} > 0)); then
+  cycle_issues_json="$(printf '%s\n' "${cycle_issues[@]}" | jq -R . | jq -s '.')"
+fi
+
+next_operator_action="Cycle evidence is healthy; proceed with stability promotion."
+if [[ -n "$check_next_operator_action" ]]; then
+  next_operator_action="$check_next_operator_action"
+fi
+if [[ "$cycle_evidence_state" == "missing" ]]; then
+  next_operator_action="Required stability evidence is missing/stale; rerun cycle after verifying real-host availability."
+elif [[ "$cycle_evidence_state" == "partial" && "$check_decision" != "NO-GO" ]]; then
+  next_operator_action="Cycle evidence is partial; inspect stage logs and rerun cycle before promotion."
+fi
+
+rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
+rerun_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${run_summary_json} --summary-json ${check_summary_json} --print-summary-json 1"
+
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
@@ -962,6 +1095,8 @@ jq -n \
   --arg run_summary_schema_id "$run_summary_schema_id" \
   --arg run_summary_schema_valid "$run_summary_schema_valid" \
   --arg run_summary_status "$run_summary_status" \
+  --arg run_observed_evidence_state "$run_observed_evidence_state" \
+  --arg run_observed_selection_policy_state "$run_observed_selection_policy_state" \
   --arg check_stage_attempted "$check_stage_attempted" \
   --arg check_stage_status "$check_stage_status" \
   --arg failure_stage "$failure_stage" \
@@ -977,13 +1112,27 @@ jq -n \
   --arg check_modal_recommended_profile "$check_modal_recommended_profile" \
   --arg check_enforcement_no_go_enforced "$check_enforcement_no_go_enforced" \
   --arg check_outcome_action "$check_outcome_action" \
+  --arg check_next_operator_action "$check_next_operator_action" \
+  --arg cycle_evidence_state "$cycle_evidence_state" \
+  --arg next_operator_action "$next_operator_action" \
+  --arg rerun_cycle_command_template "$rerun_cycle_command_template" \
+  --arg rerun_run_command_template "$rerun_run_command_template" \
+  --arg rerun_check_command_template "$rerun_check_command_template" \
   --argjson rc "$final_rc" \
   --argjson run_stage_rc "$run_stage_rc" \
   --argjson run_summary_rc "$run_summary_rc_json" \
+  --argjson run_observed_runs_total "$run_observed_runs_total_json" \
+  --argjson run_observed_runs_completed "$run_observed_runs_completed_json" \
+  --argjson run_observed_runs_fail "$run_observed_runs_fail_json" \
+  --argjson run_observed_command_failures "$run_observed_command_failures_json" \
+  --argjson run_observed_summary_missing_count "$run_observed_summary_missing_count_json" \
+  --argjson run_observed_summary_unreadable_count "$run_observed_summary_unreadable_count_json" \
   --argjson check_stage_rc "$check_stage_rc_json" \
   --argjson check_rc "$check_rc_json" \
   --argjson check_modal_support_rate_pct "$check_modal_support_rate_pct_json" \
+  --argjson check_error_count "$check_error_count_json" \
   --argjson check_errors "$check_errors_json" \
+  --argjson cycle_issues "$cycle_issues_json" \
   --argjson runs "$runs" \
   --argjson campaign_timeout_sec "$campaign_timeout_sec" \
   --argjson sleep_between_sec "$sleep_between_sec" \
@@ -1077,7 +1226,23 @@ jq -n \
           else $run_summary_status
           end
         ),
-        observed_rc: $run_summary_rc
+        observed_rc: $run_summary_rc,
+        observed_runs_total: $run_observed_runs_total,
+        observed_runs_completed: $run_observed_runs_completed,
+        observed_runs_fail: $run_observed_runs_fail,
+        observed_command_failures: $run_observed_command_failures,
+        observed_summary_missing_count: $run_observed_summary_missing_count,
+        observed_summary_unreadable_count: $run_observed_summary_unreadable_count,
+        observed_evidence_state: (
+          if $run_observed_evidence_state == "" then null
+          else $run_observed_evidence_state
+          end
+        ),
+        observed_selection_policy_state: (
+          if $run_observed_selection_policy_state == "" then null
+          else $run_observed_selection_policy_state
+          end
+        )
       },
       check: {
         attempted: ($check_stage_attempted == "true"),
@@ -1119,6 +1284,12 @@ jq -n \
         else $check_outcome_action
         end
       ),
+      next_operator_action: (
+        if $check_next_operator_action == "" then null
+        else $check_next_operator_action
+        end
+      ),
+      error_count: $check_error_count,
       errors: $check_errors
     },
     enforcement: {
@@ -1140,6 +1311,15 @@ jq -n \
         else "investigate_artifacts"
         end
       )
+    },
+    diagnostics: {
+      evidence_state: $cycle_evidence_state,
+      issue_count: ($cycle_issues | length),
+      issues: $cycle_issues,
+      next_operator_action: $next_operator_action,
+      rerun_cycle_command_template: $rerun_cycle_command_template,
+      rerun_run_command_template: $rerun_run_command_template,
+      rerun_check_command_template: $rerun_check_command_template
     },
     artifacts: {
       summary_json: $summary_json_path,

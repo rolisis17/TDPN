@@ -285,6 +285,122 @@ assert_jq "$SOFT_NOGO_SUMMARY" '.outcome.should_promote == false and .outcome.ac
 assert_jq "$SOFT_NOGO_SUMMARY" '(.notes | test("NO-GO")) and (.notes | test("compatibility mode"))'
 assert_no_blank_reason_entries "$SOFT_NOGO_SUMMARY"
 
+THRESHOLD_NOGO_REPORTS="$TMP_DIR/threshold_nogo_reports"
+THRESHOLD_NOGO_SOURCE="$THRESHOLD_NOGO_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
+THRESHOLD_NOGO_SUMMARY="$TMP_DIR/threshold_nogo_summary.json"
+THRESHOLD_NOGO_REPORT="$TMP_DIR/threshold_nogo_report.md"
+mkdir -p "$THRESHOLD_NOGO_REPORTS"
+jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
+  '{
+    version: 1,
+    schema: { id: "runtime_actuation_promotion_cycle_summary" },
+    generated_at_utc: $generated_at_utc,
+    status: "fail",
+    rc: 1,
+    decision: "NO-GO",
+    promotion_check: {
+      decision: "NO-GO",
+      status: "fail",
+      rc: 1,
+      next_operator_action: "collect additional pass samples",
+      violation_codes: [
+        "min_pass_samples_not_met"
+      ],
+      violations: [
+        {
+          code: "min_pass_samples_not_met",
+          message: "runtime-actuation pass sample count is below threshold"
+        }
+      ],
+      inputs: {
+        policy: {
+          require_min_samples: 5,
+          require_min_pass_samples: 5
+        }
+      }
+    }
+  }' >"$THRESHOLD_NOGO_SOURCE"
+
+echo "[runtime-actuation-promotion-evidence-pack] NO-GO threshold violations expose threshold remediation"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$THRESHOLD_NOGO_REPORTS" \
+  --summary-json "$THRESHOLD_NOGO_SUMMARY" \
+  --report-md "$THRESHOLD_NOGO_REPORT" \
+  --fail-on-no-go 1 \
+  --max-age-sec 86400 \
+  --print-summary-json 0 \
+  --print-report 0 >/tmp/integration_runtime_actuation_promotion_evidence_pack_threshold_nogo.log 2>&1
+THRESHOLD_NOGO_RC=$?
+set -e
+
+if [[ "$THRESHOLD_NOGO_RC" -eq 0 ]]; then
+  echo "expected threshold NO-GO path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_evidence_pack_threshold_nogo.log
+  exit 1
+fi
+assert_jq "$THRESHOLD_NOGO_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc != 0'
+assert_jq "$THRESHOLD_NOGO_SUMMARY" '.diagnostics.no_go.reason_category == "pass_sample_thresholds"'
+assert_jq "$THRESHOLD_NOGO_SUMMARY" '((.diagnostics.no_go.reason_codes | index("min_pass_samples_not_met")) != null)'
+assert_jq "$THRESHOLD_NOGO_SUMMARY" '.diagnostics.no_go.threshold_recommended_cycles == 5'
+assert_jq "$THRESHOLD_NOGO_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle")) and (.next_command | contains("--cycles 5"))'
+assert_no_blank_reason_entries "$THRESHOLD_NOGO_SUMMARY"
+
+SIGNOFF_CONTEXT_NOGO_REPORTS="$TMP_DIR/signoff_context_nogo_reports"
+SIGNOFF_CONTEXT_NOGO_SOURCE="$SIGNOFF_CONTEXT_NOGO_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
+SIGNOFF_CONTEXT_NOGO_SUMMARY="$TMP_DIR/signoff_context_nogo_summary.json"
+SIGNOFF_CONTEXT_NOGO_REPORT="$TMP_DIR/signoff_context_nogo_report.md"
+mkdir -p "$SIGNOFF_CONTEXT_NOGO_REPORTS"
+jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
+  '{
+    version: 1,
+    schema: { id: "runtime_actuation_promotion_cycle_summary" },
+    generated_at_utc: $generated_at_utc,
+    status: "fail",
+    rc: 1,
+    decision: "NO-GO",
+    promotion_check: {
+      decision: "NO-GO",
+      status: "fail",
+      rc: 1,
+      violation_codes: [
+        "signoff_context_missing"
+      ],
+      violations: [
+        {
+          code: "signoff_context_missing",
+          message: "missing campaign-check gate diagnostics context"
+        }
+      ]
+    }
+  }' >"$SIGNOFF_CONTEXT_NOGO_SOURCE"
+
+echo "[runtime-actuation-promotion-evidence-pack] NO-GO signoff-context violations expose context remediation"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$SIGNOFF_CONTEXT_NOGO_REPORTS" \
+  --summary-json "$SIGNOFF_CONTEXT_NOGO_SUMMARY" \
+  --report-md "$SIGNOFF_CONTEXT_NOGO_REPORT" \
+  --fail-on-no-go 1 \
+  --max-age-sec 86400 \
+  --print-summary-json 0 \
+  --print-report 0 >/tmp/integration_runtime_actuation_promotion_evidence_pack_signoff_context_nogo.log 2>&1
+SIGNOFF_CONTEXT_NOGO_RC=$?
+set -e
+
+if [[ "$SIGNOFF_CONTEXT_NOGO_RC" -eq 0 ]]; then
+  echo "expected signoff-context NO-GO path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_evidence_pack_signoff_context_nogo.log
+  exit 1
+fi
+assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc != 0'
+assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.diagnostics.no_go.reason_category == "missing_signoff_context"'
+assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '((.diagnostics.no_go.reason_codes | index("signoff_context_missing")) != null)'
+assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
+assert_no_blank_reason_entries "$SIGNOFF_CONTEXT_NOGO_SUMMARY"
+
 GO_WARN_REPORTS="$TMP_DIR/go_warn_reports"
 GO_WARN_SOURCE="$GO_WARN_REPORTS/runtime_actuation_promotion_cycle_latest_summary.json"
 GO_WARN_SUMMARY="$TMP_DIR/go_warn_summary.json"
@@ -380,7 +496,8 @@ assert_jq "$MISSING_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc
 assert_jq "$MISSING_SUMMARY" '.available == false and .fail_closed == true and .needs_attention == true'
 assert_jq "$MISSING_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:summary_missing")) != null)'
 assert_jq "$MISSING_SUMMARY" '.source.freshness.known == false and .source.freshness.fresh == false'
-assert_jq "$MISSING_SUMMARY" '.next_command != null and (.next_command | contains("--promotion-cycle-summary-json")) and (.next_command | contains("--summary-json")) and (.next_command | contains("--report-md"))'
+assert_jq "$MISSING_SUMMARY" '.diagnostics.no_go.reason_category == "missing_or_invalid_evidence"'
+assert_jq "$MISSING_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
 assert_no_blank_reason_entries "$MISSING_SUMMARY"
 
 INVALID_REPORTS="$TMP_DIR/invalid_reports"
@@ -442,6 +559,8 @@ assert_jq "$STALE_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc !
 assert_jq "$STALE_SUMMARY" '.available == false and .fail_closed == true and .needs_attention == true'
 assert_jq "$STALE_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:freshness_stale")) != null)'
 assert_jq "$STALE_SUMMARY" '.source.freshness.known == true and .source.freshness.fresh == false'
+assert_jq "$STALE_SUMMARY" '.diagnostics.no_go.reason_category == "stale_evidence"'
+assert_jq "$STALE_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
 assert_no_blank_reason_entries "$STALE_SUMMARY"
 
 STALE_FLAGGED_REPORTS="$TMP_DIR/stale_flagged_reports"
@@ -474,6 +593,7 @@ assert_jq "$STALE_FLAGGED_SUMMARY" '.available == false and .fail_closed == true
 assert_jq "$STALE_FLAGGED_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:freshness_stale")) != null)'
 assert_jq "$STALE_FLAGGED_SUMMARY" '.source.freshness.known == true and .source.freshness.fresh == false'
 assert_jq "$STALE_FLAGGED_SUMMARY" '.source.freshness.source != null and (.source.freshness.source | contains("generated_at_utc"))'
+assert_jq "$STALE_FLAGGED_SUMMARY" '.diagnostics.no_go.reason_category == "stale_evidence"'
 assert_no_blank_reason_entries "$STALE_FLAGGED_SUMMARY"
 
 UNKNOWN_REPORTS="$TMP_DIR/unknown_reports"
@@ -505,6 +625,8 @@ assert_jq "$UNKNOWN_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc
 assert_jq "$UNKNOWN_SUMMARY" '.available == false and .fail_closed == true and .needs_attention == true'
 assert_jq "$UNKNOWN_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:freshness_unknown")) != null)'
 assert_jq "$UNKNOWN_SUMMARY" '.source.freshness.known == false and .source.freshness.fresh == false'
+assert_jq "$UNKNOWN_SUMMARY" '.diagnostics.no_go.reason_category == "stale_evidence"'
+assert_jq "$UNKNOWN_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
 assert_no_blank_reason_entries "$UNKNOWN_SUMMARY"
 
 echo "[runtime-actuation-promotion-evidence-pack] rc/decision/status consistency"

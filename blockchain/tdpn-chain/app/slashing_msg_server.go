@@ -40,7 +40,13 @@ type slashingMsgServer struct {
 	msgServer slashingmodule.MsgServer
 }
 
-func (m slashingMsgServer) SubmitEvidence(_ context.Context, req SlashingSubmitEvidenceRequest) (SlashingSubmitEvidenceResponse, error) {
+func (m slashingMsgServer) SubmitEvidence(ctx context.Context, req SlashingSubmitEvidenceRequest) (SlashingSubmitEvidenceResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return SlashingSubmitEvidenceResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.SubmitSlashEvidence(slashingmodule.SubmitSlashEvidenceRequest{Evidence: req.Record})
 	if err != nil {
 		if errors.Is(err, slashingmodule.ErrNilKeeper) {
@@ -54,7 +60,13 @@ func (m slashingMsgServer) SubmitEvidence(_ context.Context, req SlashingSubmitE
 	}, nil
 }
 
-func (m slashingMsgServer) ApplyPenalty(_ context.Context, req SlashingApplyPenaltyRequest) (SlashingApplyPenaltyResponse, error) {
+func (m slashingMsgServer) ApplyPenalty(ctx context.Context, req SlashingApplyPenaltyRequest) (SlashingApplyPenaltyResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return SlashingApplyPenaltyResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.ApplyPenalty(slashingmodule.ApplyPenaltyRequest{Penalty: req.Record})
 	if err != nil {
 		if errors.Is(err, slashingmodule.ErrNilKeeper) {

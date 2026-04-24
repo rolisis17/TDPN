@@ -84,6 +84,7 @@ type Service struct {
 	peerMinVotes                     int
 	peerScoreMinVotes                int
 	peerTrustMinVotes                int
+	peerSignalFreshnessMaxAge        time.Duration
 	peerDisputeMinVotes              int
 	peerAppealMinVotes               int
 	adjudicationMetaMin              int
@@ -95,6 +96,7 @@ type Service struct {
 	disputeMaxTTL                    time.Duration
 	appealMaxTTL                     time.Duration
 	issuerMinOperators               int
+	issuerSignalFreshnessMaxAge      time.Duration
 	peerMaxHops                      int
 	peerMu                           sync.RWMutex
 	peerRelays                       map[string]proto.RelayDescriptor
@@ -129,6 +131,9 @@ type Service struct {
 	peerTrustCache                   map[string]map[string]proto.RelayTrustAttestation
 	issuerTrustETags                 map[string]string
 	issuerTrustCache                 map[string]map[string]proto.RelayTrustAttestation
+	peerScoreLastFreshAt             time.Time
+	peerTrustLastFreshAt             time.Time
+	issuerTrustLastFreshAt           time.Time
 	providerIssuerPubCacheMu         sync.RWMutex
 	providerIssuerPubCache           map[string]providerIssuerPubCacheEntry
 	peerTrustStrict                  bool
@@ -202,6 +207,8 @@ const directoryProviderReplayStoreMaxBytes int64 = 4 * 1024 * 1024
 const defaultProviderIssuerPubCacheTTL = 30 * time.Second
 const peerGossipPubKeyCacheTTL = 5 * time.Minute
 const peerGossipPubKeyFetchMinInterval = 15 * time.Second
+const defaultSignalFreshnessFloor = 5 * time.Minute
+const defaultSignalFreshnessMultiplier = 6
 const microRelayMinReputationScore = 0.5
 const microRelayMinUptimeScore = 0.5
 const microRelayMinCapacityScore = 0.5
@@ -324,6 +331,14 @@ func New() *Service {
 	issuerSyncSec := 10
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_ISSUER_SYNC_SEC")); err == nil && v > 0 {
 		issuerSyncSec = v
+	}
+	peerSignalFreshnessMaxAge := defaultPeerSignalFreshnessMaxAge(peerSyncSec, selectionFeedTTL, trustFeedTTL)
+	if v, ok := envPositiveDurationSeconds("DIRECTORY_PEER_SIGNAL_MAX_AGE_SEC"); ok {
+		peerSignalFreshnessMaxAge = v
+	}
+	issuerSignalFreshnessMaxAge := defaultIssuerSignalFreshnessMaxAge(issuerSyncSec, trustFeedTTL)
+	if v, ok := envPositiveDurationSeconds("DIRECTORY_ISSUER_TRUST_MAX_AGE_SEC"); ok {
+		issuerSignalFreshnessMaxAge = v
 	}
 	directoryMinOperators := 1
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_MIN_OPERATORS")); err == nil && v > 0 {
@@ -538,6 +553,7 @@ func New() *Service {
 		issuerTrustMinVotes:              issuerTrustMinVotes,
 		issuerDisputeMinVotes:            issuerDisputeMinVotes,
 		issuerAppealMinVotes:             issuerAppealMinVotes,
+		issuerSignalFreshnessMaxAge:      issuerSignalFreshnessMaxAge,
 		peerURLs:                         peerURLs,
 		peerSyncSec:                      peerSyncSec,
 		gossipSec:                        gossipSec,
@@ -559,6 +575,7 @@ func New() *Service {
 		peerMinVotes:                     peerMinVotes,
 		peerScoreMinVotes:                peerScoreMinVotes,
 		peerTrustMinVotes:                peerTrustMinVotes,
+		peerSignalFreshnessMaxAge:        peerSignalFreshnessMaxAge,
 		peerDisputeMinVotes:              peerDisputeMinVotes,
 		peerAppealMinVotes:               peerAppealMinVotes,
 		adjudicationMetaMin:              adjudicationMetaMin,
@@ -1216,7 +1233,7 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			s.recordPeerSyncFailure(peerURL, peerNow, fmt.Errorf("fetch peer pubkeys: %w", err))
 			continue
 		}
-		sourceOperator := normalizeSourceOperator(declaredOperator, pubs, peerURL)
+		sourceOperator := s.resolveQuorumSourceOperator(peerURL, declaredOperator, pubs)
 		discoveredPeers, peersErr := s.fetchPeerDirectoryPeers(ctx, peerURL, pubs)
 		if peersErr != nil {
 			lastErr = peersErr
@@ -1413,42 +1430,121 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 		}
 		mergedTrust[key] = att
 	}
+	syncNow := time.Now().UTC()
+	peerSignalMaxAge := s.effectivePeerSignalFreshnessMaxAge()
+	peerSignalMaxAgeSec := int64(peerSignalMaxAge / time.Second)
+	var scoreCacheAgeSec int64
+	var trustCacheAgeSec int64
+	scoreCacheTimestampInitialized := false
+	trustCacheTimestampInitialized := false
+	staleCachedScoresDropped := false
+	staleCachedTrustDropped := false
 	s.peerMu.Lock()
 	s.peerRelays = merged
 	scoreSourcesInsufficient := scoreSignalSources < scoreMinVotes
 	scoreMergedEmptyWithCache := len(mergedScores) == 0 && len(s.peerScores) > 0
 	useCachedScores := scoreSourcesInsufficient || scoreMergedEmptyWithCache
 	if useCachedScores {
-		s.peerScores = cloneSelectionScores(s.peerScores)
+		if len(s.peerScores) > 0 {
+			stale, age, initialized := evaluateSignalCacheFreshness(&s.peerScoreLastFreshAt, syncNow, peerSignalMaxAge)
+			scoreCacheTimestampInitialized = initialized
+			scoreCacheAgeSec = int64(age / time.Second)
+			if stale {
+				s.peerScores = make(map[string]proto.RelaySelectionScore)
+				s.peerScoreLastFreshAt = time.Time{}
+				staleCachedScoresDropped = true
+			} else {
+				s.peerScores = cloneSelectionScores(s.peerScores)
+			}
+		} else {
+			s.peerScoreLastFreshAt = time.Time{}
+			s.peerScores = cloneSelectionScores(s.peerScores)
+		}
 	} else {
 		s.peerScores = mergedScores
+		s.peerScoreLastFreshAt = syncNow
 	}
 	trustSourcesInsufficient := trustSignalSources < trustMinVotes
 	trustMergedEmptyWithCache := len(mergedTrust) == 0 && len(s.peerTrust) > 0
 	useCachedTrust := trustSourcesInsufficient || trustMergedEmptyWithCache
 	if useCachedTrust {
-		s.peerTrust = cloneTrustAttestations(s.peerTrust)
+		if len(s.peerTrust) > 0 {
+			stale, age, initialized := evaluateSignalCacheFreshness(&s.peerTrustLastFreshAt, syncNow, peerSignalMaxAge)
+			trustCacheTimestampInitialized = initialized
+			trustCacheAgeSec = int64(age / time.Second)
+			if stale {
+				s.peerTrust = make(map[string]proto.RelayTrustAttestation)
+				s.peerTrustLastFreshAt = time.Time{}
+				staleCachedTrustDropped = true
+			} else {
+				s.peerTrust = cloneTrustAttestations(s.peerTrust)
+			}
+		} else {
+			s.peerTrustLastFreshAt = time.Time{}
+			s.peerTrust = cloneTrustAttestations(s.peerTrust)
+		}
 	} else {
 		s.peerTrust = mergedTrust
+		s.peerTrustLastFreshAt = syncNow
 	}
 	s.peerMu.Unlock()
 	if useCachedScores {
-		log.Printf(
-			"directory peer score sync: preserving cached scores (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d)",
-			scoreSourcesInsufficient,
-			scoreMergedEmptyWithCache,
-			scoreSignalSources,
-			scoreMinVotes,
-		)
+		if scoreCacheTimestampInitialized {
+			log.Printf(
+				"directory peer score sync: initialized cached score freshness timestamp (max_age_sec=%d)",
+				peerSignalMaxAgeSec,
+			)
+		}
+		if staleCachedScoresDropped {
+			log.Printf(
+				"directory peer score sync: dropping stale cached scores (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+				scoreSourcesInsufficient,
+				scoreMergedEmptyWithCache,
+				scoreSignalSources,
+				scoreMinVotes,
+				scoreCacheAgeSec,
+				peerSignalMaxAgeSec,
+			)
+		} else {
+			log.Printf(
+				"directory peer score sync: preserving cached scores (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+				scoreSourcesInsufficient,
+				scoreMergedEmptyWithCache,
+				scoreSignalSources,
+				scoreMinVotes,
+				scoreCacheAgeSec,
+				peerSignalMaxAgeSec,
+			)
+		}
 	}
 	if useCachedTrust {
-		log.Printf(
-			"directory peer trust sync: preserving cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d)",
-			trustSourcesInsufficient,
-			trustMergedEmptyWithCache,
-			trustSignalSources,
-			trustMinVotes,
-		)
+		if trustCacheTimestampInitialized {
+			log.Printf(
+				"directory peer trust sync: initialized cached trust freshness timestamp (max_age_sec=%d)",
+				peerSignalMaxAgeSec,
+			)
+		}
+		if staleCachedTrustDropped {
+			log.Printf(
+				"directory peer trust sync: dropping stale cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+				trustSourcesInsufficient,
+				trustMergedEmptyWithCache,
+				trustSignalSources,
+				trustMinVotes,
+				trustCacheAgeSec,
+				peerSignalMaxAgeSec,
+			)
+		} else {
+			log.Printf(
+				"directory peer trust sync: preserving cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+				trustSourcesInsufficient,
+				trustMergedEmptyWithCache,
+				trustSignalSources,
+				trustMinVotes,
+				trustCacheAgeSec,
+				peerSignalMaxAgeSec,
+			)
+		}
 	}
 	return nil
 }
@@ -1601,7 +1697,7 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 			lastErr = fmt.Errorf("issuer %s trust key validation failed: %w", issuerURL, err)
 			continue
 		}
-		sourceOperator := normalizeSourceOperator(declaredOperator, pubs, issuerURL)
+		sourceOperator := s.resolveQuorumSourceOperator(issuerURL, declaredOperator, verifyPubs)
 		attestations, err := s.fetchIssuerTrustAttestations(ctx, issuerURL, verifyPubs)
 		if err != nil {
 			lastErr = err
@@ -1695,24 +1791,65 @@ func (s *Service) syncIssuerTrust(ctx context.Context) (retErr error) {
 		}
 		merged[key] = att
 	}
+	syncNow := time.Now().UTC()
+	issuerSignalMaxAge := s.effectiveIssuerSignalFreshnessMaxAge()
+	issuerSignalMaxAgeSec := int64(issuerSignalMaxAge / time.Second)
+	var issuerCacheAgeSec int64
+	issuerCacheTimestampInitialized := false
+	staleIssuerCacheDropped := false
 	s.peerMu.Lock()
 	trustSourcesInsufficient := trustSignalSources < minVotes
 	trustMergedEmptyWithCache := len(merged) == 0 && len(s.issuerTrust) > 0
 	useCachedTrust := trustSourcesInsufficient || trustMergedEmptyWithCache
 	if useCachedTrust {
-		s.issuerTrust = cloneTrustAttestations(s.issuerTrust)
+		if len(s.issuerTrust) > 0 {
+			stale, age, initialized := evaluateSignalCacheFreshness(&s.issuerTrustLastFreshAt, syncNow, issuerSignalMaxAge)
+			issuerCacheTimestampInitialized = initialized
+			issuerCacheAgeSec = int64(age / time.Second)
+			if stale {
+				s.issuerTrust = make(map[string]proto.RelayTrustAttestation)
+				s.issuerTrustLastFreshAt = time.Time{}
+				staleIssuerCacheDropped = true
+			} else {
+				s.issuerTrust = cloneTrustAttestations(s.issuerTrust)
+			}
+		} else {
+			s.issuerTrustLastFreshAt = time.Time{}
+			s.issuerTrust = cloneTrustAttestations(s.issuerTrust)
+		}
 	} else {
 		s.issuerTrust = merged
+		s.issuerTrustLastFreshAt = syncNow
 	}
 	s.peerMu.Unlock()
 	if useCachedTrust {
-		log.Printf(
-			"directory issuer trust sync: preserving cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d)",
-			trustSourcesInsufficient,
-			trustMergedEmptyWithCache,
-			trustSignalSources,
-			minVotes,
-		)
+		if issuerCacheTimestampInitialized {
+			log.Printf(
+				"directory issuer trust sync: initialized cached trust freshness timestamp (max_age_sec=%d)",
+				issuerSignalMaxAgeSec,
+			)
+		}
+		if staleIssuerCacheDropped {
+			log.Printf(
+				"directory issuer trust sync: dropping stale cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+				trustSourcesInsufficient,
+				trustMergedEmptyWithCache,
+				trustSignalSources,
+				minVotes,
+				issuerCacheAgeSec,
+				issuerSignalMaxAgeSec,
+			)
+		} else {
+			log.Printf(
+				"directory issuer trust sync: preserving cached trust attestations (sources_insufficient=%t merged_empty_with_cache=%t sources=%d required=%d cache_age_sec=%d max_age_sec=%d)",
+				trustSourcesInsufficient,
+				trustMergedEmptyWithCache,
+				trustSignalSources,
+				minVotes,
+				issuerCacheAgeSec,
+				issuerSignalMaxAgeSec,
+			)
+		}
 	}
 	return nil
 }
@@ -2238,8 +2375,8 @@ func (s *Service) fetchPeerPubKeyLegacy(ctx context.Context, peerURL string) ([]
 		return nil, "", err
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(pubB64)
-	if err != nil {
-		return nil, "", err
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return nil, "", fmt.Errorf("invalid peer pubkey")
 	}
 	return []ed25519.PublicKey{ed25519.PublicKey(raw)}, s.peerHintOperator(peerURL), nil
 }
@@ -3198,6 +3335,9 @@ func (s *Service) selectTrustedPeerPubKeys(peerURL string, pubB64Set []string) (
 		return nil, fmt.Errorf("peer key mismatch for %s", peerURL)
 	}
 	if s.peerTrustTOFU {
+		if len(filtered) != 1 {
+			return nil, fmt.Errorf("peer returned %d candidate pubkeys for initial TOFU trust bootstrap for %s", len(filtered), peerURL)
+		}
 		if err := appendPeerTrustedKey(s.peerTrustFile, peerURL, filtered[0]); err != nil {
 			return nil, err
 		}
@@ -4893,6 +5033,78 @@ func valueWithDefault(key, fallback string) string {
 	return v
 }
 
+func envPositiveDurationSeconds(key string) (time.Duration, bool) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0, false
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
+}
+
+func defaultSignalFreshnessMaxAge(syncSec int, floor time.Duration, feedTTLs ...time.Duration) time.Duration {
+	base := time.Duration(syncSec) * time.Second
+	for _, ttl := range feedTTLs {
+		if ttl > base {
+			base = ttl
+		}
+	}
+	if base <= 0 {
+		base = time.Second
+	}
+	maxAge := time.Duration(defaultSignalFreshnessMultiplier) * base
+	if maxAge < floor {
+		maxAge = floor
+	}
+	return maxAge
+}
+
+func defaultPeerSignalFreshnessMaxAge(peerSyncSec int, selectionFeedTTL, trustFeedTTL time.Duration) time.Duration {
+	return defaultSignalFreshnessMaxAge(peerSyncSec, defaultSignalFreshnessFloor, selectionFeedTTL, trustFeedTTL)
+}
+
+func defaultIssuerSignalFreshnessMaxAge(issuerSyncSec int, trustFeedTTL time.Duration) time.Duration {
+	return defaultSignalFreshnessMaxAge(issuerSyncSec, defaultSignalFreshnessFloor, trustFeedTTL)
+}
+
+func (s *Service) effectivePeerSignalFreshnessMaxAge() time.Duration {
+	if s.peerSignalFreshnessMaxAge > 0 {
+		return s.peerSignalFreshnessMaxAge
+	}
+	return defaultPeerSignalFreshnessMaxAge(s.peerSyncSec, s.selectionFeedTTL, s.trustFeedTTL)
+}
+
+func (s *Service) effectiveIssuerSignalFreshnessMaxAge() time.Duration {
+	if s.issuerSignalFreshnessMaxAge > 0 {
+		return s.issuerSignalFreshnessMaxAge
+	}
+	return defaultIssuerSignalFreshnessMaxAge(s.issuerSyncSec, s.trustFeedTTL)
+}
+
+func evaluateSignalCacheFreshness(lastFreshAt *time.Time, now time.Time, maxAge time.Duration) (stale bool, age time.Duration, initialized bool) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if lastFreshAt == nil {
+		return false, 0, false
+	}
+	if lastFreshAt.IsZero() {
+		*lastFreshAt = now
+		return false, 0, true
+	}
+	age = now.Sub(*lastFreshAt)
+	if age < 0 {
+		age = 0
+	}
+	if maxAge > 0 && age > maxAge {
+		return true, age, false
+	}
+	return false, age, false
+}
+
 func splitCSV(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -5408,6 +5620,70 @@ func verifyDirectoryPeerListAny(feed proto.DirectoryPeerListResponse, pubs []ed2
 		lastErr = fmt.Errorf("peer list signature verification failed")
 	}
 	return lastErr
+}
+
+func keyDerivedSourceOperator(pubKeys []ed25519.PublicKey) string {
+	if len(pubKeys) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(pubKeys))
+	seen := make(map[string]struct{}, len(pubKeys))
+	for _, pub := range pubKeys {
+		if len(pub) != ed25519.PublicKeySize {
+			continue
+		}
+		key := base64.RawURLEncoding.EncodeToString(pub)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	return "key:" + keys[0]
+}
+
+func sourceOperatorHintAnchoredByPubKey(sourceURL string, pubKeys []ed25519.PublicKey, hintOperator string, hintPubKey string) bool {
+	sourceURL = normalizePeerURL(sourceURL)
+	hintOperator = normalizeOperatorID(hintOperator)
+	hintPubKey = normalizePeerPubKey(hintPubKey)
+	if sourceURL == "" || hintOperator == "" || hintPubKey == "" || len(pubKeys) == 0 {
+		return false
+	}
+	for _, pub := range pubKeys {
+		if len(pub) != ed25519.PublicKeySize {
+			continue
+		}
+		if base64.RawURLEncoding.EncodeToString(pub) == hintPubKey {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) resolveQuorumSourceOperator(sourceURL string, declaredOperator string, pubKeys []ed25519.PublicKey) string {
+	sourceURL = normalizePeerURL(sourceURL)
+	declaredOperator = normalizeOperatorID(declaredOperator)
+	hintOperator := s.peerHintOperator(sourceURL)
+	hintPubKey := s.peerHintPubKey(sourceURL)
+	if sourceOperatorHintAnchoredByPubKey(sourceURL, pubKeys, hintOperator, hintPubKey) {
+		return hintOperator
+	}
+	if declaredOperator != "" {
+		if hintOperator != "" || hintPubKey != "" {
+			log.Printf("directory ignored unverified declared source operator=%q for %s (signed hint not anchored)", declaredOperator, sourceURL)
+		}
+	}
+	if keySource := keyDerivedSourceOperator(pubKeys); keySource != "" {
+		return keySource
+	}
+	return normalizeSourceOperator("", pubKeys, sourceURL)
 }
 
 func normalizeSourceOperator(operator string, pubKeys []ed25519.PublicKey, sourceURL string) string {

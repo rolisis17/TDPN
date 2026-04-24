@@ -235,6 +235,28 @@ func TestFetchPeerPubKeysStrictRejectsLegacyFallback(t *testing.T) {
 	}
 }
 
+func TestFetchPeerPubKeysLegacyFallbackRejectsInvalidKeyLength(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	shortKey := base64.RawURLEncoding.EncodeToString([]byte{1, 2, 3, 4})
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkeys": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
+		},
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": shortKey}),
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if _, _, err := s.fetchPeerPubKeys(context.Background(), peerURL); err == nil {
+		t.Fatalf("expected legacy fallback to reject invalid peer pubkey length")
+	}
+}
+
 func TestFetchPeerPubKeyRejectsSignedHintMismatch(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	actualPub, _, err := crypto.GenerateEd25519Keypair()
@@ -604,23 +626,18 @@ func TestFetchPeerPubKeysStrictFiltersUntrustedKeyset(t *testing.T) {
 	}
 }
 
-func TestFetchPeerPubKeysTOFUPinsAndUsesSingleKey(t *testing.T) {
+func TestFetchPeerPubKeysTOFUPinsSingleCandidateKey(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pubA, _, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("keygenA: %v", err)
 	}
-	pubB, _, err := crypto.GenerateEd25519Keypair()
-	if err != nil {
-		t.Fatalf("keygenB: %v", err)
-	}
 	pubAB64 := base64.RawURLEncoding.EncodeToString(pubA)
-	pubBB64 := base64.RawURLEncoding.EncodeToString(pubB)
 	file := filepath.Join(t.TempDir(), "peer_trusted_keys.txt")
 
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		peerURL + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
-			PubKeys: []string{pubAB64, pubBB64},
+			PubKeys: []string{pubAB64},
 		}),
 	}
 	s := &Service{
@@ -646,6 +663,44 @@ func TestFetchPeerPubKeysTOFUPinsAndUsesSingleKey(t *testing.T) {
 	}
 	if got := loaded[normalizePeerURL(peerURL)]; got != pubAB64 {
 		t.Fatalf("expected TOFU pinned key %s, got %q", pubAB64, got)
+	}
+}
+
+func TestFetchPeerPubKeysTOFUFailsClosedOnInitialMultiKeySet(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pubA, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	pubAB64 := base64.RawURLEncoding.EncodeToString(pubA)
+	pubBB64 := base64.RawURLEncoding.EncodeToString(pubB)
+	file := filepath.Join(t.TempDir(), "peer_trusted_keys.txt")
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			PubKeys: []string{pubAB64, pubBB64},
+		}),
+	}
+	s := &Service{
+		peerTrustStrict: true,
+		peerTrustTOFU:   true,
+		peerTrustFile:   file,
+		httpClient:      &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if _, _, err := s.fetchPeerPubKeys(context.Background(), peerURL); err == nil {
+		t.Fatalf("expected initial multi-key TOFU bootstrap to fail closed")
+	}
+	loaded, err := loadPeerTrustedKeys(file)
+	if err != nil {
+		t.Fatalf("load peer trusted keys: %v", err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("expected no TOFU pin written on initial multi-key bootstrap, got %d entries", len(loaded))
 	}
 }
 
@@ -1083,24 +1138,27 @@ func TestSyncPeerRelaysPreservesCachedSignalsWhenSourcesInsufficient(t *testing.
 	}
 
 	s := &Service{
-		peerURLs:          []string{urlA},
-		peerMinVotes:      1,
-		peerScoreMinVotes: 2,
-		peerTrustMinVotes: 2,
-		peerRelays:        make(map[string]proto.RelayDescriptor),
+		peerURLs:                  []string{urlA},
+		peerMinVotes:              1,
+		peerScoreMinVotes:         2,
+		peerTrustMinVotes:         2,
+		peerSignalFreshnessMaxAge: 10 * time.Minute,
+		peerRelays:                make(map[string]proto.RelayDescriptor),
 		peerScores: map[string]proto.RelaySelectionScore{
 			relayKey("exit-cached", "exit"): cachedScore,
 		},
+		peerScoreLastFreshAt: now.Add(-30 * time.Second),
 		peerTrust: map[string]proto.RelayTrustAttestation{
 			relayKey("exit-cached", "exit"): cachedTrust,
 		},
-		peerRelayETags: make(map[string]string),
-		peerRelayCache: make(map[string][]proto.RelayDescriptor),
-		peerScoreETags: make(map[string]string),
-		peerScoreCache: make(map[string]map[string]proto.RelaySelectionScore),
-		peerTrustETags: make(map[string]string),
-		peerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
-		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerTrustLastFreshAt: now.Add(-30 * time.Second),
+		peerRelayETags:       make(map[string]string),
+		peerRelayCache:       make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:       make(map[string]string),
+		peerScoreCache:       make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:       make(map[string]string),
+		peerTrustCache:       make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 
 	if err := s.syncPeerRelays(context.Background()); err != nil {
@@ -1135,6 +1193,124 @@ func TestSyncPeerRelaysPreservesCachedSignalsWhenSourcesInsufficient(t *testing.
 	}
 	if _, exists := gotTrust[relayKey("exit-new", "exit")]; exists {
 		t.Fatalf("expected new trust entry dropped when signal sources are insufficient")
+	}
+}
+
+func TestSyncPeerRelaysRejectsStaleCachedSignalsWhenSourcesInsufficient(t *testing.T) {
+	urlA := "http://peer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-new",
+		Role:       "exit",
+		OperatorID: "op-new",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	selectionFeed := proto.RelaySelectionFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Scores: []proto.RelaySelectionScore{
+			{RelayID: "exit-new", Role: "exit", Reputation: 0.9, Uptime: 0.8, Capacity: 0.7, AbusePenalty: 0.1, BondScore: 0.6, StakeScore: 0.5},
+		},
+	}
+	selectionSig, err := crypto.SignRelaySelectionFeed(selectionFeed, privA)
+	if err != nil {
+		t.Fatalf("sign selection feed: %v", err)
+	}
+	selectionFeed.Signature = selectionSig
+	trustFeed := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-new",
+				Role:         "exit",
+				OperatorID:   "op-new",
+				Reputation:   0.85,
+				Uptime:       0.75,
+				Capacity:     0.65,
+				AbusePenalty: 0.15,
+				BondScore:    0.55,
+				StakeScore:   0.45,
+				Confidence:   0.9,
+			},
+		},
+	}
+	trustSig, err := crypto.SignRelayTrustAttestationFeed(trustFeed, privA)
+	if err != nil {
+		t.Fatalf("sign trust feed: %v", err)
+	}
+	trustFeed.Signature = trustSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlA + "/v1/selection-feed":     jsonResp(selectionFeed),
+		urlA + "/v1/trust-attestations": jsonResp(trustFeed),
+	}
+
+	cachedScore := proto.RelaySelectionScore{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		Reputation:   0.61,
+		Uptime:       0.62,
+		Capacity:     0.63,
+		AbusePenalty: 0.11,
+		BondScore:    0.41,
+		StakeScore:   0.31,
+	}
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.71,
+		Uptime:       0.72,
+		Capacity:     0.73,
+		AbusePenalty: 0.12,
+		BondScore:    0.42,
+		StakeScore:   0.32,
+		Confidence:   0.81,
+	}
+
+	s := &Service{
+		peerURLs:                  []string{urlA},
+		peerMinVotes:              1,
+		peerScoreMinVotes:         2,
+		peerTrustMinVotes:         2,
+		peerSignalFreshnessMaxAge: 2 * time.Minute,
+		peerRelays:                make(map[string]proto.RelayDescriptor),
+		peerScores: map[string]proto.RelaySelectionScore{
+			relayKey("exit-cached", "exit"): cachedScore,
+		},
+		peerScoreLastFreshAt: now.Add(-10 * time.Minute),
+		peerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		peerTrustLastFreshAt: now.Add(-10 * time.Minute),
+		peerRelayETags:       make(map[string]string),
+		peerRelayCache:       make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:       make(map[string]string),
+		peerScoreCache:       make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:       make(map[string]string),
+		peerTrustCache:       make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+
+	if got := s.snapshotPeerScores(); len(got) != 0 {
+		t.Fatalf("expected stale cached peer scores to be dropped, got %d entries", len(got))
+	}
+	if got := s.snapshotPeerTrust(); len(got) != 0 {
+		t.Fatalf("expected stale cached peer trust to be dropped, got %d entries", len(got))
 	}
 }
 
@@ -1294,21 +1470,27 @@ func TestSyncPeerRelaysOperatorQuorumFailure(t *testing.T) {
 		urlB + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
 	}
 	s := &Service{
-		peerURLs:          []string{urlA, urlB},
-		peerMinVotes:      1,
-		peerMinOperators:  2,
-		peerRelays:        make(map[string]proto.RelayDescriptor),
-		peerRelayETags:    make(map[string]string),
-		peerRelayCache:    make(map[string][]proto.RelayDescriptor),
-		peerScoreETags:    make(map[string]string),
-		peerScoreCache:    make(map[string]map[string]proto.RelaySelectionScore),
-		peerTrustETags:    make(map[string]string),
-		peerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
-		issuerTrustETags:  make(map[string]string),
-		issuerTrustCache:  make(map[string]map[string]proto.RelayTrustAttestation),
-		peerHintPubKeys:   make(map[string]string),
-		peerHintOperators: make(map[string]string),
-		httpClient:        &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerURLs:         []string{urlA, urlB},
+		peerMinVotes:     1,
+		peerMinOperators: 2,
+		peerRelays:       make(map[string]proto.RelayDescriptor),
+		peerRelayETags:   make(map[string]string),
+		peerRelayCache:   make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:   make(map[string]string),
+		peerScoreCache:   make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:   make(map[string]string),
+		peerTrustCache:   make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustETags: make(map[string]string),
+		issuerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
+		peerHintPubKeys: map[string]string{
+			urlA: base64.RawURLEncoding.EncodeToString(pubA),
+			urlB: base64.RawURLEncoding.EncodeToString(pubB),
+		},
+		peerHintOperators: map[string]string{
+			urlA: "operator-shared",
+			urlB: "operator-shared",
+		},
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 	err = s.syncPeerRelays(context.Background())
 	if err == nil {
@@ -1316,6 +1498,77 @@ func TestSyncPeerRelaysOperatorQuorumFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "peer operator quorum not met") {
 		t.Fatalf("expected peer operator quorum error, got %v", err)
+	}
+}
+
+func TestSyncPeerRelaysIgnoresUnverifiedDeclaredOperatorForQuorumIdentity(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	relayA := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		OperatorID: "op-a",
+		Endpoint:   "127.0.0.1:51821",
+		ValidUntil: now.Add(time.Minute),
+	}, privA)
+	relayB := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-b",
+		Role:       "exit",
+		OperatorID: "op-b",
+		Endpoint:   "127.0.0.1:52821",
+		ValidUntil: now.Add(time.Minute),
+	}, privB)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-shared",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubA)},
+		}),
+		urlA + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayA}}),
+		urlB + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-shared",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubB)},
+		}),
+		urlB + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relayB}}),
+	}
+	s := &Service{
+		peerURLs:         []string{urlA, urlB},
+		peerMinVotes:     1,
+		peerMinOperators: 2,
+		peerRelays:       make(map[string]proto.RelayDescriptor),
+		peerRelayETags:   make(map[string]string),
+		peerRelayCache:   make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:   make(map[string]string),
+		peerScoreCache:   make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:   make(map[string]string),
+		peerTrustCache:   make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustETags: make(map[string]string),
+		issuerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:       &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("expected key-anchored source identities to satisfy operator quorum, got %v", err)
+	}
+	relays := s.snapshotPeerRelays()
+	if len(relays) != 2 {
+		t.Fatalf("expected two peer relays, got %d", len(relays))
+	}
+	peerStatus, _ := s.snapshotSyncStatus()
+	if len(peerStatus.SourceOperators) != 2 {
+		t.Fatalf("expected two distinct source operators, got %v", peerStatus.SourceOperators)
+	}
+	for _, source := range peerStatus.SourceOperators {
+		if !strings.HasPrefix(source, "key:") {
+			t.Fatalf("expected key-derived source identity, got %q", source)
+		}
 	}
 }
 
@@ -1396,9 +1649,15 @@ func TestSyncPeerRelaysTrustVotesDedupByOperator(t *testing.T) {
 		peerRelayCache:    make(map[string][]proto.RelayDescriptor),
 		peerTrustETags:    make(map[string]string),
 		peerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
-		peerHintPubKeys:   make(map[string]string),
-		peerHintOperators: make(map[string]string),
-		httpClient:        &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerHintPubKeys: map[string]string{
+			urlA: base64.RawURLEncoding.EncodeToString(pubA),
+			urlB: base64.RawURLEncoding.EncodeToString(pubB),
+		},
+		peerHintOperators: map[string]string{
+			urlA: "operator-shared",
+			urlB: "operator-shared",
+		},
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 	if err := s.syncPeerRelays(context.Background()); err != nil {
 		t.Fatalf("syncPeerRelays: %v", err)
@@ -1548,14 +1807,16 @@ func TestSyncIssuerTrustPreservesCacheWhenSignalSourcesInsufficient(t *testing.T
 	}
 
 	s := &Service{
-		issuerTrustURLs:     []string{urlA},
-		issuerTrustMinVotes: 2,
+		issuerTrustURLs:             []string{urlA},
+		issuerTrustMinVotes:         2,
+		issuerSignalFreshnessMaxAge: 10 * time.Minute,
 		issuerTrust: map[string]proto.RelayTrustAttestation{
 			relayKey("exit-cached", "exit"): cachedTrust,
 		},
-		issuerTrustETags: make(map[string]string),
-		issuerTrustCache: make(map[string]map[string]proto.RelayTrustAttestation),
-		httpClient:       &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		issuerTrustLastFreshAt: now.Add(-30 * time.Second),
+		issuerTrustETags:       make(map[string]string),
+		issuerTrustCache:       make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:             &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 
 	if err := s.syncIssuerTrust(context.Background()); err != nil {
@@ -1575,6 +1836,78 @@ func TestSyncIssuerTrustPreservesCacheWhenSignalSourcesInsufficient(t *testing.T
 	}
 	if _, exists := got[relayKey("exit-new", "exit")]; exists {
 		t.Fatalf("expected new issuer trust entry dropped when signal sources are insufficient")
+	}
+}
+
+func TestSyncIssuerTrustRejectsStaleCacheWhenSignalSourcesInsufficient(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	now := time.Now()
+	trustFeed := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "exit-new",
+				Role:         "exit",
+				OperatorID:   "op-new",
+				Reputation:   0.84,
+				Uptime:       0.74,
+				Capacity:     0.64,
+				AbusePenalty: 0.16,
+				BondScore:    0.54,
+				StakeScore:   0.44,
+				Confidence:   0.91,
+			},
+		},
+	}
+	trustSig, err := crypto.SignRelayTrustAttestationFeed(trustFeed, privA)
+	if err != nil {
+		t.Fatalf("sign trust feed: %v", err)
+	}
+	trustFeed.Signature = trustSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-a", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustFeed),
+	}
+
+	cachedTrust := proto.RelayTrustAttestation{
+		RelayID:      "exit-cached",
+		Role:         "exit",
+		OperatorID:   "op-cached",
+		Reputation:   0.72,
+		Uptime:       0.73,
+		Capacity:     0.74,
+		AbusePenalty: 0.14,
+		BondScore:    0.43,
+		StakeScore:   0.33,
+		Confidence:   0.82,
+	}
+
+	s := &Service{
+		issuerTrustURLs:             []string{urlA},
+		issuerTrustMinVotes:         2,
+		issuerSignalFreshnessMaxAge: 2 * time.Minute,
+		issuerTrust: map[string]proto.RelayTrustAttestation{
+			relayKey("exit-cached", "exit"): cachedTrust,
+		},
+		issuerTrustLastFreshAt: now.Add(-10 * time.Minute),
+		issuerTrustETags:       make(map[string]string),
+		issuerTrustCache:       make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:             &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("syncIssuerTrust: %v", err)
+	}
+
+	if got := s.snapshotIssuerTrust(); len(got) != 0 {
+		t.Fatalf("expected stale cached issuer trust to be dropped, got %d entries", len(got))
 	}
 }
 
@@ -1694,7 +2027,15 @@ func TestSyncIssuerTrustOperatorQuorumFailure(t *testing.T) {
 		issuerTrust:         make(map[string]proto.RelayTrustAttestation),
 		issuerTrustETags:    make(map[string]string),
 		issuerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
-		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerHintPubKeys: map[string]string{
+			urlA: base64.RawURLEncoding.EncodeToString(pubA),
+			urlB: base64.RawURLEncoding.EncodeToString(pubB),
+		},
+		peerHintOperators: map[string]string{
+			urlA: "issuer-shared",
+			urlB: "issuer-shared",
+		},
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 	err = s.syncIssuerTrust(context.Background())
 	if err == nil {
@@ -1702,6 +2043,77 @@ func TestSyncIssuerTrustOperatorQuorumFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "issuer operator quorum not met") {
 		t.Fatalf("expected issuer operator quorum error, got %v", err)
+	}
+}
+
+func TestSyncIssuerTrustIgnoresUnverifiedDeclaredIssuerForQuorumIdentity(t *testing.T) {
+	urlA := "http://issuer-a.local"
+	urlB := "http://issuer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-a", Role: "exit", OperatorID: "op-a", Reputation: 0.8, Confidence: 0.9},
+		},
+	}
+	sigA, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = sigA
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "issuer-shared",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{RelayID: "exit-b", Role: "exit", OperatorID: "op-b", Reputation: 0.7, Confidence: 0.8},
+		},
+	}
+	sigB, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = sigB
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-shared", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubA)}}),
+		urlA + "/v1/trust/relays": jsonResp(trustA),
+		urlB + "/v1/pubkeys":      jsonResp(proto.IssuerPubKeysResponse{Issuer: "issuer-shared", PubKeys: []string{base64.RawURLEncoding.EncodeToString(pubB)}}),
+		urlB + "/v1/trust/relays": jsonResp(trustB),
+	}
+	s := &Service{
+		issuerTrustURLs:     []string{urlA, urlB},
+		issuerMinOperators:  2,
+		issuerTrustMinVotes: 1,
+		issuerTrust:         make(map[string]proto.RelayTrustAttestation),
+		issuerTrustETags:    make(map[string]string),
+		issuerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncIssuerTrust(context.Background()); err != nil {
+		t.Fatalf("expected key-anchored issuer source identities to satisfy operator quorum, got %v", err)
+	}
+	issuerTrust := s.snapshotIssuerTrust()
+	if len(issuerTrust) != 2 {
+		t.Fatalf("expected two issuer trust attestations, got %d", len(issuerTrust))
+	}
+	_, issuerStatus := s.snapshotSyncStatus()
+	if len(issuerStatus.SourceOperators) != 2 {
+		t.Fatalf("expected two distinct issuer source operators, got %v", issuerStatus.SourceOperators)
+	}
+	for _, source := range issuerStatus.SourceOperators {
+		if !strings.HasPrefix(source, "key:") {
+			t.Fatalf("expected key-derived issuer source identity, got %q", source)
+		}
 	}
 }
 
@@ -1756,7 +2168,15 @@ func TestSyncIssuerTrustVotesDedupByOperator(t *testing.T) {
 		issuerTrust:         make(map[string]proto.RelayTrustAttestation),
 		issuerTrustETags:    make(map[string]string),
 		issuerTrustCache:    make(map[string]map[string]proto.RelayTrustAttestation),
-		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerHintPubKeys: map[string]string{
+			urlA: base64.RawURLEncoding.EncodeToString(pubA),
+			urlB: base64.RawURLEncoding.EncodeToString(pubB),
+		},
+		peerHintOperators: map[string]string{
+			urlA: "issuer-shared",
+			urlB: "issuer-shared",
+		},
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 	if err := s.syncIssuerTrust(context.Background()); err != nil {
 		t.Fatalf("syncIssuerTrust: %v", err)

@@ -248,6 +248,53 @@ build_runtime_actuation_subject_env_operator_command_01() {
   printf 'CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT %s' "$(build_runtime_actuation_base_command_01)"
 }
 
+build_runtime_actuation_easy_node_command_01() {
+  local cycles_override="${1:-}"
+  local fail_on_no_go_override="${2:-1}"
+  local -a cmd=(
+    "./scripts/easy_node.sh"
+    "runtime-actuation-promotion-cycle"
+    "--reports-dir" "$reports_dir"
+    "--fail-on-no-go" "$fail_on_no_go_override"
+    "--print-summary-json" "1"
+  )
+  if [[ -n "$cycles_override" && "$cycles_override" =~ ^[0-9]+$ && "$cycles_override" -gt 0 ]]; then
+    cmd+=(--cycles "$cycles_override")
+  fi
+  render_command_line_from_argv_01 "${cmd[@]}"
+}
+
+max_int_01() {
+  local a="$1"
+  local b="$2"
+  if (( a >= b )); then
+    printf '%s' "$a"
+  else
+    printf '%s' "$b"
+  fi
+}
+
+reason_category_from_code_01() {
+  local code="${1:-}"
+  case "$code" in
+    min_samples_not_met|min_pass_samples_not_met|max_fail_samples_exceeded|max_warn_samples_exceeded|ready_rate_below_threshold|modal_runtime_actuation_status_mismatch)
+      printf '%s' "pass_sample_thresholds"
+      ;;
+    signoff_context_missing|runtime_actuation_diagnostics_missing|runtime_actuation_status_missing|runtime_actuation_ready_missing|signoff_summary_invalid_json|signoff_decision_missing)
+      printf '%s' "missing_signoff_context"
+      ;;
+    signoff_summary_stale|freshness_stale|freshness_unknown|freshness_invalid_generated_at_utc)
+      printf '%s' "stale_evidence"
+      ;;
+    signoff_command_failed|signoff_summary_rc_nonzero|signoff_decision_not_go|signoff_status_not_pass)
+      printf '%s' "cycle_signoff_failure"
+      ;;
+    *)
+      printf '%s' "policy_violation"
+      ;;
+  esac
+}
+
 write_alias_content_atomic() {
   local alias_path="$1"
   local label="$2"
@@ -688,6 +735,7 @@ fi
 declare -a signoff_summary_paths=()
 declare -a signoff_logs=()
 declare -a cycle_stage_errors=()
+declare -a cycle_error_codes=()
 cycles_entries_json='[]'
 cycles_completed=0
 cycles_passed=0
@@ -735,6 +783,8 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
   signoff_summary_rc_json="null"
   cycle_status="fail"
   cycle_error=""
+  cycle_error_code=""
+  cycle_next_operator_action=""
 
   if [[ -f "$signoff_summary_path" ]]; then
     signoff_summary_exists="true"
@@ -768,19 +818,33 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
   fi
 
   if [[ "$signoff_rc" -ne 0 ]]; then
+    cycle_error_code="signoff_command_failed"
     cycle_error="signoff command failed (rc=$signoff_rc)"
+    cycle_next_operator_action="inspect signoff log and rerun runtime-actuation promotion cycle"
   elif [[ "$signoff_summary_valid" != "true" ]]; then
+    cycle_error_code="signoff_summary_invalid_json"
     cycle_error="signoff summary is missing or invalid JSON"
+    cycle_next_operator_action="regenerate signoff summary JSON and rerun runtime-actuation promotion cycle"
   elif [[ "$signoff_summary_fresh" != "true" ]]; then
+    cycle_error_code="signoff_summary_stale"
     cycle_error="signoff summary is stale (not refreshed by current cycle)"
+    cycle_next_operator_action="refresh signoff evidence and rerun runtime-actuation promotion cycle"
   elif [[ "$signoff_decision_usable" != "true" ]]; then
+    cycle_error_code="signoff_decision_missing"
     cycle_error="signoff summary is missing a usable decision"
+    cycle_next_operator_action="rerun signoff so campaign-check decision context is present"
   elif [[ "$signoff_summary_rc_json" != "0" ]]; then
+    cycle_error_code="signoff_summary_rc_nonzero"
     cycle_error="signoff summary rc indicates failure"
+    cycle_next_operator_action="resolve signoff summary failure rc and rerun runtime-actuation promotion cycle"
   elif [[ "$signoff_decision" != "GO" ]]; then
+    cycle_error_code="signoff_decision_not_go"
     cycle_error="signoff decision is ${signoff_decision:-unrecognized}"
+    cycle_next_operator_action="address signoff NO-GO blockers before promotion"
   elif [[ "$signoff_status_normalized" != "pass" ]]; then
+    cycle_error_code="signoff_status_not_pass"
     cycle_error="signoff status is ${signoff_status_normalized:-unrecognized}"
+    cycle_next_operator_action="stabilize signoff status to pass and rerun runtime-actuation promotion cycle"
   else
     cycle_status="pass"
   fi
@@ -789,7 +853,11 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     cycles_passed=$((cycles_passed + 1))
   else
     cycles_failed=$((cycles_failed + 1))
-    cycle_stage_errors+=("cycle $cycle_idx: ${cycle_error:-unknown signoff cycle failure}")
+    if [[ -z "$cycle_error_code" ]]; then
+      cycle_error_code="signoff_cycle_failed_unknown"
+    fi
+    cycle_stage_errors+=("cycle $cycle_idx [$cycle_error_code]: ${cycle_error:-unknown signoff cycle failure}")
+    cycle_error_codes+=("$cycle_error_code")
   fi
 
   cycle_entry_json="$(jq -n \
@@ -797,6 +865,8 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     --arg status "$cycle_status" \
     --argjson rc "$signoff_rc" \
     --arg error "$cycle_error" \
+    --arg error_code "$cycle_error_code" \
+    --arg next_operator_action "$cycle_next_operator_action" \
     --arg command "$signoff_command_display" \
     --arg log "$signoff_log" \
     --arg signoff_summary_json "$signoff_summary_path" \
@@ -816,6 +886,8 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
       status: $status,
       rc: $rc,
       error: (if $error == "" then null else $error end),
+      error_code: (if $error_code == "" then null else $error_code end),
+      next_operator_action: (if $next_operator_action == "" then null else $next_operator_action end),
       command: $command,
       log: $log,
       summary: {
@@ -882,6 +954,9 @@ promotion_outcome_action=""
 promotion_next_operator_action=""
 promotion_violations_json='[]'
 promotion_errors_json='[]'
+promotion_violation_codes_json='[]'
+promotion_policy_require_min_samples="0"
+promotion_policy_require_min_pass_samples="0"
 
 if [[ -f "$promotion_summary_json" ]]; then
   promotion_summary_exists="true"
@@ -908,6 +983,22 @@ if [[ "$(json_file_valid_01 "$promotion_summary_json")" == "1" ]]; then
   ' "$promotion_summary_json" 2>/dev/null || printf '%s' "")"
   promotion_violations_json="$(jq -c 'if (.violations | type) == "array" then .violations else [] end' "$promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
   promotion_errors_json="$(jq -c 'if (.errors | type) == "array" then .errors else [] end' "$promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
+  promotion_violation_codes_json="$(jq -c '
+    [ (.violations // [])[]
+      | select((.code | type) == "string")
+      | .code
+    ]
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
+  promotion_policy_require_min_samples="$(jq -r '
+    if (.inputs.policy.require_min_samples | type) == "number" then (.inputs.policy.require_min_samples | floor | tostring)
+    else "0"
+    end
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' "0")"
+  promotion_policy_require_min_pass_samples="$(jq -r '
+    if (.inputs.policy.require_min_pass_samples | type) == "number" then (.inputs.policy.require_min_pass_samples | floor | tostring)
+    else "0"
+    end
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' "0")"
 fi
 
 promotion_has_usable_decision="false"
@@ -933,6 +1024,10 @@ first_cycle_error=""
 if ((${#cycle_stage_errors[@]} > 0)); then
   first_cycle_error="${cycle_stage_errors[0]}"
 fi
+first_cycle_error_code=""
+if ((${#cycle_error_codes[@]} > 0)); then
+  first_cycle_error_code="${cycle_error_codes[0]}"
+fi
 first_promotion_error="$(jq -r '
   if (. | type) == "array" and (. | length) > 0 then
     if (.[0].message | type) == "string" then .[0].message
@@ -948,6 +1043,11 @@ if [[ -z "$first_promotion_error" ]]; then
     if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string" then .[0] else "" end
   ' <<<"$promotion_errors_json" 2>/dev/null || printf '%s' "")"
 fi
+first_promotion_violation_code="$(jq -r '
+  if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string" then .[0]
+  else ""
+  end
+' <<<"$promotion_violation_codes_json" 2>/dev/null || printf '%s' "")"
 
 decision="$promotion_decision"
 status="fail"
@@ -1041,6 +1141,85 @@ if [[ "$decision" != "GO" && -z "$promotion_next_operator_action" ]]; then
   fi
 fi
 
+cycle_error_codes_json="$(array_to_json "${cycle_error_codes[@]}")"
+no_go_primary_reason_code=""
+no_go_primary_reason_category=""
+no_go_reason_codes_json='[]'
+remediation_next_command=""
+remediation_next_command_reason=""
+
+threshold_recommended_cycles="$cycles"
+if [[ "$promotion_policy_require_min_samples" =~ ^[0-9]+$ ]]; then
+  threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$promotion_policy_require_min_samples")"
+fi
+if [[ "$promotion_policy_require_min_pass_samples" =~ ^[0-9]+$ ]]; then
+  threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$promotion_policy_require_min_pass_samples")"
+fi
+threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$((cycles + 1))")"
+
+if [[ "$decision" == "NO-GO" ]]; then
+  if [[ "$failure_stage" == "cycles" ]]; then
+    if [[ -n "$first_cycle_error_code" ]]; then
+      no_go_primary_reason_code="$first_cycle_error_code"
+      no_go_primary_reason_category="$(reason_category_from_code_01 "$no_go_primary_reason_code")"
+      no_go_reason_codes_json="$cycle_error_codes_json"
+    else
+      no_go_primary_reason_code="cycle_signoff_failure"
+      no_go_primary_reason_category="cycle_signoff_failure"
+      no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
+    fi
+  else
+    if [[ -n "$first_promotion_violation_code" ]]; then
+      no_go_primary_reason_code="$first_promotion_violation_code"
+      no_go_primary_reason_category="$(reason_category_from_code_01 "$no_go_primary_reason_code")"
+      no_go_reason_codes_json="$promotion_violation_codes_json"
+    elif [[ "$promotion_summary_valid" != "true" ]]; then
+      no_go_primary_reason_code="promotion_summary_invalid_json"
+      no_go_primary_reason_category="policy_violation"
+      no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
+    elif [[ "$promotion_summary_fresh" != "true" ]]; then
+      no_go_primary_reason_code="freshness_stale"
+      no_go_primary_reason_category="stale_evidence"
+      no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
+    elif [[ "$promotion_has_usable_decision" != "true" ]]; then
+      no_go_primary_reason_code="promotion_decision_missing"
+      no_go_primary_reason_category="policy_violation"
+      no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
+    else
+      no_go_primary_reason_code="runtime_actuation_promotion_no_go"
+      no_go_primary_reason_category="policy_violation"
+      no_go_reason_codes_json="$(array_to_json "$no_go_primary_reason_code")"
+    fi
+  fi
+
+  case "$no_go_primary_reason_category" in
+    pass_sample_thresholds)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "$threshold_recommended_cycles" "1")"
+      remediation_next_command_reason="collect enough pass-ready samples to satisfy runtime-actuation promotion thresholds"
+      ;;
+    stale_evidence)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
+      remediation_next_command_reason="refresh stale runtime-actuation promotion evidence and rerun the cycle"
+      ;;
+    missing_signoff_context)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
+      remediation_next_command_reason="regenerate signoff evidence with campaign-check context before rerunning promotion"
+      ;;
+    cycle_signoff_failure)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
+      remediation_next_command_reason="resolve signoff-cycle failures and rerun runtime-actuation promotion cycle"
+      ;;
+    *)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
+      remediation_next_command_reason="resolve runtime-actuation promotion policy blockers and rerun promotion cycle"
+      ;;
+  esac
+
+  if [[ -z "$promotion_next_operator_action" || "$promotion_next_operator_action" == "$failure_reason" ]]; then
+    promotion_next_operator_action="$remediation_next_command_reason"
+  fi
+fi
+
 signoff_passthrough_args_json="$(array_to_json "${signoff_passthrough_args[@]}")"
 signoff_summary_paths_json="$(array_to_json "${signoff_summary_paths[@]}")"
 signoff_logs_json="$(array_to_json "${signoff_logs[@]}")"
@@ -1052,6 +1231,10 @@ jq -n \
   --arg decision "$decision" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
+  --arg no_go_primary_reason_code "$no_go_primary_reason_code" \
+  --arg no_go_primary_reason_category "$no_go_primary_reason_category" \
+  --arg remediation_next_command "$remediation_next_command" \
+  --arg remediation_next_command_reason "$remediation_next_command_reason" \
   --arg reports_dir "$reports_dir" \
   --arg signoff_script "$SIGNOFF_SCRIPT" \
   --arg promotion_check_script "$PROMOTION_CHECK_SCRIPT" \
@@ -1091,9 +1274,15 @@ jq -n \
   --argjson signoff_summary_paths "$signoff_summary_paths_json" \
   --argjson signoff_logs "$signoff_logs_json" \
   --argjson cycle_stage_errors "$cycle_stage_errors_json" \
+  --argjson cycle_error_codes "$cycle_error_codes_json" \
   --argjson cycles_entries "$cycles_entries_json" \
+  --argjson no_go_reason_codes "$no_go_reason_codes_json" \
   --argjson promotion_violations "$promotion_violations_json" \
+  --argjson promotion_violation_codes "$promotion_violation_codes_json" \
   --argjson promotion_errors "$promotion_errors_json" \
+  --argjson threshold_recommended_cycles "$threshold_recommended_cycles" \
+  --argjson promotion_policy_require_min_samples "$promotion_policy_require_min_samples" \
+  --argjson promotion_policy_require_min_pass_samples "$promotion_policy_require_min_pass_samples" \
   '{
     version: 1,
     schema: {
@@ -1132,6 +1321,7 @@ jq -n \
         failed: $cycles_failed,
         all_passed: ($cycles_failed == 0),
         errors: $cycle_stage_errors,
+        error_codes: $cycle_error_codes,
         signoff_summary_list: $signoff_summary_list
       },
       promotion_check: {
@@ -1156,6 +1346,7 @@ jq -n \
       outcome_action: (if $promotion_outcome_action == "" then null else $promotion_outcome_action end),
       next_operator_action: (if $promotion_next_operator_action == "" then null else $promotion_next_operator_action end),
       violations: $promotion_violations,
+      violation_codes: $promotion_violation_codes,
       errors: $promotion_errors
     },
     enforcement: {
@@ -1172,7 +1363,28 @@ jq -n \
         elif $decision == "NO-GO" then "hold_promotion_warn_only"
         else "investigate_artifacts"
         end
-      )
+      ),
+      next_operator_action: (if $promotion_next_operator_action == "" then null else $promotion_next_operator_action end),
+      remediation: {
+        next_command: (if $remediation_next_command == "" then null else $remediation_next_command end),
+        next_command_reason: (if $remediation_next_command_reason == "" then null else $remediation_next_command_reason end)
+      }
+    },
+    diagnostics: {
+      no_go: {
+        primary_reason_code: (if $decision == "NO-GO" then (if $no_go_primary_reason_code == "" then null else $no_go_primary_reason_code end) else null end),
+        primary_reason_category: (if $decision == "NO-GO" then (if $no_go_primary_reason_category == "" then null else $no_go_primary_reason_category end) else null end),
+        reason_codes: (if $decision == "NO-GO" then $no_go_reason_codes else [] end),
+        threshold_recommended_cycles: $threshold_recommended_cycles,
+        promotion_policy: {
+          require_min_samples: $promotion_policy_require_min_samples,
+          require_min_pass_samples: $promotion_policy_require_min_pass_samples
+        },
+        remediation: {
+          next_command: (if $remediation_next_command == "" then null else $remediation_next_command end),
+          next_command_reason: (if $remediation_next_command_reason == "" then null else $remediation_next_command_reason end)
+        }
+      }
     },
     artifacts: {
       summary_json: $summary_json_path,

@@ -64,10 +64,10 @@ Exit behavior:
     conflicting commands after dedupe/filtering, to avoid stale ambiguous runs.
   - With --profile-default-gate-subject, profile_default_gate actions append
     --campaign-subject when no subject/anon override flag is already present.
-  - profile_default_gate placeholder subject tokens in commands
+  - profile_default_gate* placeholder subject tokens in commands
     (INVITE_KEY/CAMPAIGN_SUBJECT forms) are normalized using first available:
     --profile-default-gate-subject, CAMPAIGN_SUBJECT, INVITE_KEY.
-  - profile_default_gate placeholder subject tokens fail closed (rc=2) when no
+  - profile_default_gate* placeholder subject tokens fail closed (rc=2) when no
     real subject value is available from the configured override/env fallback.
   - With global --action-timeout-sec=0, profile_default_gate gets a default
     per-action timeout from ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC.
@@ -293,6 +293,12 @@ command_has_profile_subject_or_anon_arg() {
   [[ "$command_text" =~ (^|[[:space:]])--campaign-anon-cred([[:space:]=]|$) ]] && return 0
   [[ "$command_text" =~ (^|[[:space:]])--anon-cred([[:space:]=]|$) ]] && return 0
   return 1
+}
+
+action_id_is_profile_default_family() {
+  local action_id
+  action_id="$(trim "${1:-}")"
+  [[ "$action_id" == profile_default_gate* ]]
 }
 
 strip_optional_wrapping_quotes() {
@@ -742,6 +748,111 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
   if [[ "$has_host_b" != "1" ]]; then
     out_argv+=("--host-b" "$host_b")
   fi
+  profile_default_gate_command_from_argv "${out_argv[@]}"
+}
+
+profile_default_gate_command_apply_env_host_placeholders() {
+  local cmd
+  local host_a
+  local host_b
+  local token=""
+  local idx=0
+  local token_count=0
+  local next_token=""
+  local key=""
+  local value=""
+  local -a in_argv=()
+  local -a out_argv=()
+
+  cmd="$(trim "${1:-}")"
+  host_a="$(trim "${2:-}")"
+  host_b="$(trim "${3:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ -z "$host_a" && -z "$host_b" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' "$cmd"
+    return
+  fi
+
+  in_argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#in_argv[@]}"
+  while (( idx < token_count )); do
+    token="${in_argv[$idx]}"
+    case "$token" in
+      --host-a|--directory-a|--host|--host-a-url|--directory-a-url|--bootstrap-directory|--issuer-url|--entry-url|--exit-url)
+        out_argv+=("$token")
+        if (( idx + 1 < token_count )); then
+          next_token="${in_argv[$((idx + 1))]}"
+          if [[ -n "$host_a" ]]; then
+            next_token="${next_token//HOST_A/$host_a}"
+            next_token="${next_token//A_HOST/$host_a}"
+          fi
+          out_argv+=("$next_token")
+          idx=$((idx + 2))
+          continue
+        fi
+        idx=$((idx + 1))
+        continue
+        ;;
+      --host-b|--directory-b|--host-b-url|--directory-b-url)
+        out_argv+=("$token")
+        if (( idx + 1 < token_count )); then
+          next_token="${in_argv[$((idx + 1))]}"
+          if [[ -n "$host_b" ]]; then
+            next_token="${next_token//HOST_B/$host_b}"
+            next_token="${next_token//B_HOST/$host_b}"
+          fi
+          out_argv+=("$next_token")
+          idx=$((idx + 2))
+          continue
+        fi
+        idx=$((idx + 1))
+        continue
+        ;;
+      --*=*)
+        key="${token%%=*}"
+        value="${token#*=}"
+        case "$key" in
+          --host-a|--directory-a|--host|--host-a-url|--directory-a-url|--bootstrap-directory|--issuer-url|--entry-url|--exit-url)
+            if [[ -n "$host_a" ]]; then
+              value="${value//HOST_A/$host_a}"
+              value="${value//A_HOST/$host_a}"
+            fi
+            out_argv+=("${key}=${value}")
+            idx=$((idx + 1))
+            continue
+            ;;
+          --host-b|--directory-b|--host-b-url|--directory-b-url)
+            if [[ -n "$host_b" ]]; then
+              value="${value//HOST_B/$host_b}"
+              value="${value//B_HOST/$host_b}"
+            fi
+            out_argv+=("${key}=${value}")
+            idx=$((idx + 1))
+            continue
+            ;;
+        esac
+        ;;
+    esac
+
+    if [[ -n "$host_a" ]]; then
+      token="${token//HOST_A/$host_a}"
+      token="${token//A_HOST/$host_a}"
+    fi
+    if [[ -n "$host_b" ]]; then
+      token="${token//HOST_B/$host_b}"
+      token="${token//B_HOST/$host_b}"
+    fi
+    out_argv+=("$token")
+    idx=$((idx + 1))
+  done
+
   profile_default_gate_command_from_argv "${out_argv[@]}"
 }
 
@@ -1541,6 +1652,14 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   if [[ "$action_id" == "profile_default_gate" && "$action_timeout_sec" == "0" ]]; then
     action_timeout_sec_effective="$profile_default_gate_default_timeout_sec"
   fi
+  if action_id_is_profile_default_family "$action_id"; then
+    action_command="$(
+      profile_default_gate_command_apply_env_host_placeholders \
+        "$action_command" \
+        "${A_HOST:-}" \
+        "${B_HOST:-}"
+    )"
+  fi
   if [[ "$action_id" == "profile_default_gate" ]]; then
     action_command="$(
       profile_default_gate_command_localhost_run_to_live_wrapper \
@@ -1549,7 +1668,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "${B_HOST:-}"
     )"
   fi
-  if [[ "$action_id" == "profile_default_gate" && -n "$action_command" ]]; then
+  if action_id_is_profile_default_family "$action_id" && [[ -n "$action_command" ]]; then
     if command_has_profile_subject_placeholder_invite_key "$action_command"; then
       action_has_subject_placeholder="1"
       if resolve_profile_default_gate_subject_value; then

@@ -71,3 +71,19 @@ func TestValidateStrictExitControlRouteRejectsZonedIPv6Host(t *testing.T) {
 		t.Fatal("expected zoned ipv6 host to be rejected")
 	}
 }
+
+func TestValidateStrictExitControlRouteRejectsInvalidEndpoint(t *testing.T) {
+	t.Parallel()
+
+	if err := validateStrictExitControlRoute("https://8.8.8.8:8084", "8.8.8.8"); err == nil {
+		t.Fatal("expected strict mode to reject endpoint missing host:port")
+	}
+}
+
+func TestValidateStrictExitControlRouteRejectsZonedIPv6Endpoint(t *testing.T) {
+	t.Parallel()
+
+	if err := validateStrictExitControlRoute("https://8.8.8.8:8084", "[fe80::1%25eth0]:51820"); err == nil {
+		t.Fatal("expected strict mode to reject zoned ipv6 endpoint")
+	}
+}

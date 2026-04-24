@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -94,6 +95,63 @@ func TestValidatorMsgServer_NilScaffold(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "vpnvalidator keeper is not wired") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidatorMsgServer_SetEligibilityHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.ValidatorMsgServer()
+
+	eligibility := validatortypes.ValidatorEligibility{
+		ValidatorID:     "val-msg-canceled-ctx-1",
+		OperatorAddress: "op-msg-canceled-ctx-1",
+		Eligible:        true,
+		PolicyReason:    "bootstrap policy",
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.SetEligibility(canceledCtx, ValidatorSetEligibilityRequest{Record: eligibility}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.ValidatorModule.Keeper.GetEligibility(eligibility.ValidatorID); exists {
+		t.Fatalf("expected no eligibility write on canceled context for validator %s", eligibility.ValidatorID)
+	}
+}
+
+func TestValidatorMsgServer_RecordStatusHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.ValidatorMsgServer()
+
+	eligibility := validatortypes.ValidatorEligibility{
+		ValidatorID:     "val-msg-canceled-ctx-2",
+		OperatorAddress: "op-msg-canceled-ctx-2",
+		Eligible:        true,
+		PolicyReason:    "bootstrap policy",
+	}
+	if _, err := server.SetEligibility(context.Background(), ValidatorSetEligibilityRequest{Record: eligibility}); err != nil {
+		t.Fatalf("expected set eligibility success, got %v", err)
+	}
+
+	status := validatortypes.ValidatorStatusRecord{
+		StatusID:        "status-msg-canceled-ctx-2",
+		ValidatorID:     eligibility.ValidatorID,
+		LifecycleStatus: validatortypes.ValidatorLifecycleActive,
+		EvidenceHeight:  10,
+		EvidenceRef:     "obj://validator/status-msg-canceled-ctx-2",
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.RecordStatus(canceledCtx, ValidatorRecordStatusRequest{Record: status}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.ValidatorModule.Keeper.GetStatusRecord(status.StatusID); exists {
+		t.Fatalf("expected no status write on canceled context for status %s", status.StatusID)
 	}
 }
 
@@ -204,5 +262,91 @@ func TestGovernanceMsgServer_NilScaffold(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "vpngovernance keeper is not wired") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGovernanceMsgServer_CreatePolicyHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.GovernanceMsgServer()
+
+	policy := governancetypes.GovernancePolicy{
+		PolicyID:        "policy-msg-canceled-ctx-1",
+		Title:           "bootstrap policy",
+		Description:     "phase 6 governance policy",
+		Version:         1,
+		ActivatedAtUnix: 1735689600,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.CreatePolicy(canceledCtx, GovernanceCreatePolicyRequest{Record: policy}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.GovernanceModule.Keeper.GetPolicy(policy.PolicyID); exists {
+		t.Fatalf("expected no policy write on canceled context for policy %s", policy.PolicyID)
+	}
+}
+
+func TestGovernanceMsgServer_RecordDecisionHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.GovernanceMsgServer()
+
+	policy := governancetypes.GovernancePolicy{
+		PolicyID:        "policy-msg-canceled-ctx-2",
+		Title:           "bootstrap policy",
+		Description:     "phase 6 governance policy",
+		Version:         1,
+		ActivatedAtUnix: 1735689600,
+	}
+	if _, err := server.CreatePolicy(context.Background(), GovernanceCreatePolicyRequest{Record: policy}); err != nil {
+		t.Fatalf("expected create policy success, got %v", err)
+	}
+
+	decision := governancetypes.GovernanceDecision{
+		DecisionID:    "decision-msg-canceled-ctx-2",
+		PolicyID:      policy.PolicyID,
+		ProposalID:    "proposal-msg-canceled-ctx-2",
+		Outcome:       governancetypes.DecisionOutcomeApprove,
+		Decider:       "governance-council",
+		Reason:        "objective threshold met",
+		DecidedAtUnix: 1735689700,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.RecordDecision(canceledCtx, GovernanceRecordDecisionRequest{Record: decision}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.GovernanceModule.Keeper.GetDecision(decision.DecisionID); exists {
+		t.Fatalf("expected no decision write on canceled context for decision %s", decision.DecisionID)
+	}
+}
+
+func TestGovernanceMsgServer_RecordAuditActionHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.GovernanceMsgServer()
+
+	action := governancetypes.GovernanceAuditAction{
+		ActionID:        "action-msg-canceled-ctx-3",
+		Action:          "admin_set_policy",
+		Actor:           "bootstrap-multisig",
+		Reason:          "emergency rollback",
+		EvidencePointer: "obj://audit/action-msg-canceled-ctx-3",
+		TimestampUnix:   1735689800,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.RecordAuditAction(canceledCtx, GovernanceRecordAuditActionRequest{Record: action}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.GovernanceModule.Keeper.GetAuditAction(action.ActionID); exists {
+		t.Fatalf("expected no audit action write on canceled context for action %s", action.ActionID)
 	}
 }

@@ -59,6 +59,14 @@ abs_path() {
   fi
 }
 
+quote_cmd() {
+  local arg
+  for arg in "$@"; do
+    printf '%q ' "$arg"
+  done
+  printf '\n'
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -118,6 +126,36 @@ csv_contains() {
     fi
   done
   return 1
+}
+
+append_violation() {
+  local code="$1"
+  local field="$2"
+  local message="$3"
+  local action="$4"
+  local required="$5"
+  local observed="$6"
+  local severity="${7:-error}"
+  local entry
+  entry="$(jq -n \
+    --arg code "$code" \
+    --arg field "$field" \
+    --arg message "$message" \
+    --arg action "$action" \
+    --arg required "$required" \
+    --arg observed "$observed" \
+    --arg severity "$severity" \
+    '{
+      code: $code,
+      field: $field,
+      severity: $severity,
+      message: $message,
+      action: $action,
+      required: (if $required == "" then null else $required end),
+      observed: (if $observed == "" then null else $observed end)
+    }')"
+  violations_json="$(jq -c --argjson entry "$entry" '. + [$entry]' <<<"$violations_json")"
+  errors+=("$message")
 }
 
 need_cmd jq
@@ -371,6 +409,7 @@ fi
 mkdir -p "$(dirname "$summary_json")"
 
 declare -a errors=()
+violations_json='[]'
 
 summary_exists="0"
 schema_valid="0"
@@ -386,10 +425,22 @@ if [[ -f "$stability_summary_json" ]]; then
   ' "$stability_summary_json" >/dev/null 2>&1; then
     schema_valid="1"
   else
-    errors+=("stability summary schema.id must be profile_compare_multi_vm_stability_summary or profile_compare_multi_vm_stability_run_summary (path=$stability_summary_json)")
+    append_violation \
+      "stability_summary_schema_invalid" \
+      "inputs.stability_summary_json" \
+      "stability summary schema.id must be profile_compare_multi_vm_stability_summary or profile_compare_multi_vm_stability_run_summary (path=$stability_summary_json)" \
+      "regenerate the stability summary artifact with profile_compare_multi_vm_stability_run.sh before running this check" \
+      "schema.id in {profile_compare_multi_vm_stability_summary, profile_compare_multi_vm_stability_run_summary}" \
+      "$stability_summary_json"
   fi
 else
-  errors+=("stability summary JSON not found ($stability_summary_json)")
+  append_violation \
+    "stability_summary_missing" \
+    "inputs.stability_summary_json" \
+    "stability summary JSON not found ($stability_summary_json)" \
+    "generate the multi-VM stability summary artifact and rerun this check" \
+    "existing JSON summary artifact" \
+    "$stability_summary_json"
 fi
 
 observed_status=""
@@ -671,64 +722,160 @@ fi
 
 if [[ "$schema_valid" == "1" ]]; then
   if [[ "$require_status_pass" == "1" ]] && [[ "$observed_status" != "pass" ]]; then
-    errors+=("stability status must be pass (actual=${observed_status:-unset})")
+    append_violation \
+      "status_not_pass" \
+      "observed.status" \
+      "stability status must be pass (actual=${observed_status:-unset})" \
+      "rerun multi-VM stability capture until status is pass" \
+      "pass" \
+      "${observed_status:-unset}"
   fi
 
   if [[ "$observed_runs_requested_json" == "null" ]]; then
-    errors+=("runs_requested is missing or invalid")
+    append_violation \
+      "runs_requested_missing_or_invalid" \
+      "observed.runs_requested" \
+      "runs_requested is missing or invalid" \
+      "regenerate the source summary so runs_requested is populated as a non-negative integer" \
+      "non-negative integer" \
+      "null"
   elif (( observed_runs_requested_json < require_min_runs_requested )); then
-    errors+=("runs_requested below required minimum (actual=$observed_runs_requested_json required=$require_min_runs_requested)")
+    append_violation \
+      "runs_requested_below_min" \
+      "observed.runs_requested" \
+      "runs_requested below required minimum (actual=$observed_runs_requested_json required=$require_min_runs_requested)" \
+      "collect additional stability runs and refresh the summary" \
+      ">=${require_min_runs_requested}" \
+      "$observed_runs_requested_json"
   fi
 
   if [[ "$observed_runs_completed_json" == "null" ]]; then
-    errors+=("runs_completed is missing or invalid")
+    append_violation \
+      "runs_completed_missing_or_invalid" \
+      "observed.runs_completed" \
+      "runs_completed is missing or invalid" \
+      "regenerate the source summary so runs_completed is populated as a non-negative integer" \
+      "non-negative integer" \
+      "null"
   elif (( observed_runs_completed_json < require_min_runs_completed )); then
-    errors+=("runs_completed below required minimum (actual=$observed_runs_completed_json required=$require_min_runs_completed)")
+    append_violation \
+      "runs_completed_below_min" \
+      "observed.runs_completed" \
+      "runs_completed below required minimum (actual=$observed_runs_completed_json required=$require_min_runs_completed)" \
+      "wait for more completed cycles and rerun the stability run/check chain" \
+      ">=${require_min_runs_completed}" \
+      "$observed_runs_completed_json"
   fi
 
   if [[ "$observed_runs_fail_json" == "null" ]]; then
-    errors+=("runs_fail is missing or invalid")
+    append_violation \
+      "runs_fail_missing_or_invalid" \
+      "observed.runs_fail" \
+      "runs_fail is missing or invalid" \
+      "regenerate the source summary so runs_fail is populated as a non-negative integer" \
+      "non-negative integer" \
+      "null"
   elif (( observed_runs_fail_json > require_max_runs_fail )); then
-    errors+=("runs_fail exceeds allowed maximum (actual=$observed_runs_fail_json max=$require_max_runs_fail)")
+    append_violation \
+      "runs_fail_exceeds_max" \
+      "observed.runs_fail" \
+      "runs_fail exceeds allowed maximum (actual=$observed_runs_fail_json max=$require_max_runs_fail)" \
+      "investigate failed cycles and recapture multi-VM stability evidence" \
+      "<=${require_max_runs_fail}" \
+      "$observed_runs_fail_json"
   fi
 
   if [[ -n "$observed_decision_consensus_reported" && -n "$observed_decision_consensus_computed" ]] \
     && [[ "$observed_decision_consensus_reported" != "$observed_decision_consensus_computed" ]]; then
-    errors+=("decision_consensus mismatch between reported and computed values (reported=$observed_decision_consensus_reported computed=$observed_decision_consensus_computed)")
+    append_violation \
+      "decision_consensus_reported_computed_mismatch" \
+      "observed.decision_consensus" \
+      "decision_consensus mismatch between reported and computed values (reported=$observed_decision_consensus_reported computed=$observed_decision_consensus_computed)" \
+      "normalize decision histogram/consensus fields in the source summary and rerun" \
+      "reported == computed" \
+      "reported=${observed_decision_consensus_reported} computed=${observed_decision_consensus_computed}"
   fi
 
   if [[ "$require_decision_consensus" == "1" && "$observed_decision_consensus" != "true" ]]; then
-    errors+=("decision_consensus must be true (actual=${observed_decision_consensus:-unset})")
+    append_violation \
+      "decision_consensus_not_true" \
+      "observed.decision_consensus" \
+      "decision_consensus must be true (actual=${observed_decision_consensus:-unset})" \
+      "capture additional runs until decision consensus is unanimous" \
+      "true" \
+      "${observed_decision_consensus:-unset}"
   fi
 
   if [[ -z "$observed_modal_recommended_profile" ]]; then
-    errors+=("modal recommended profile is empty")
+    append_violation \
+      "modal_recommended_profile_missing" \
+      "observed.modal_recommended_profile" \
+      "modal recommended profile is empty" \
+      "ensure run summaries emit recommended profile counts for completed runs" \
+      "non-empty profile id" \
+      "unset"
   fi
 
   if [[ -n "$require_recommended_profile" && "$observed_modal_recommended_profile" != "$require_recommended_profile" ]]; then
-    errors+=("recommended profile mismatch (actual=${observed_modal_recommended_profile:-unset} required=$require_recommended_profile)")
+    append_violation \
+      "recommended_profile_mismatch" \
+      "observed.modal_recommended_profile" \
+      "recommended profile mismatch (actual=${observed_modal_recommended_profile:-unset} required=$require_recommended_profile)" \
+      "adjust policy thresholds or collect evidence matching the required profile" \
+      "$require_recommended_profile" \
+      "${observed_modal_recommended_profile:-unset}"
   fi
 
   if [[ -n "$allow_recommended_profiles" && -n "$observed_modal_recommended_profile" ]]; then
     if ! csv_contains "$allow_recommended_profiles" "$observed_modal_recommended_profile"; then
-      errors+=("recommended profile is not in allowed set (actual=$observed_modal_recommended_profile allowed=$allow_recommended_profiles)")
+      append_violation \
+        "recommended_profile_not_allowed" \
+        "observed.modal_recommended_profile" \
+        "recommended profile is not in allowed set (actual=$observed_modal_recommended_profile allowed=$allow_recommended_profiles)" \
+        "update allow-list policy or recapture evidence with an allowed modal profile" \
+        "$allow_recommended_profiles" \
+        "$observed_modal_recommended_profile"
     fi
   fi
 
   if awk -v observed="$observed_modal_support_rate_pct_json" -v min_required="$require_modal_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
-    errors+=("modal support rate below threshold (actual=${observed_modal_support_rate_pct_json}% required=${require_modal_support_rate_pct}%)")
+    append_violation \
+      "modal_support_rate_below_threshold" \
+      "observed.modal_support_rate_pct" \
+      "modal support rate below threshold (actual=${observed_modal_support_rate_pct_json}% required=${require_modal_support_rate_pct}%)" \
+      "capture additional stable runs to increase modal profile support rate" \
+      ">=${require_modal_support_rate_pct}%" \
+      "${observed_modal_support_rate_pct_json}%"
   fi
 
   if [[ -n "$require_modal_decision" ]]; then
     if [[ -z "$observed_modal_decision" ]]; then
-      errors+=("modal decision is empty")
+      append_violation \
+        "modal_decision_missing" \
+        "observed.modal_decision" \
+        "modal decision is empty" \
+        "ensure source summary includes decision histogram entries" \
+        "GO or NO-GO" \
+        "unset"
     elif [[ "$observed_modal_decision" != "$require_modal_decision" ]]; then
-      errors+=("modal decision mismatch (actual=${observed_modal_decision:-unset} required=$require_modal_decision)")
+      append_violation \
+        "modal_decision_mismatch" \
+        "observed.modal_decision" \
+        "modal decision mismatch (actual=${observed_modal_decision:-unset} required=$require_modal_decision)" \
+        "resolve conflicting cycle decisions and rerun stability evidence capture" \
+        "$require_modal_decision" \
+        "${observed_modal_decision:-unset}"
     fi
   fi
 
   if awk -v observed="$observed_modal_decision_support_rate_pct_json" -v min_required="$require_modal_decision_support_rate_pct" 'BEGIN { exit !(observed < min_required) }'; then
-    errors+=("modal decision support rate below threshold (actual=${observed_modal_decision_support_rate_pct_json}% required=${require_modal_decision_support_rate_pct}%)")
+    append_violation \
+      "modal_decision_support_rate_below_threshold" \
+      "observed.modal_decision_support_rate_pct" \
+      "modal decision support rate below threshold (actual=${observed_modal_decision_support_rate_pct_json}% required=${require_modal_decision_support_rate_pct}%)" \
+      "collect additional consistent decisions before promotion gating" \
+      ">=${require_modal_decision_support_rate_pct}%" \
+      "${observed_modal_decision_support_rate_pct_json}%"
   fi
 fi
 
@@ -751,11 +898,30 @@ if ((${#errors[@]} > 0)); then
   errors_json="$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s '.')"
 fi
 
+failure_reason=""
+failure_reason_code=""
+operator_next_action=""
+operator_next_action_command=""
+if [[ "$decision" == "NO-GO" ]]; then
+  failure_reason="$(jq -r 'if (type == "array") and (length > 0) and (.[0].message | type) == "string" then .[0].message else "" end' <<<"$violations_json" 2>/dev/null || printf '%s' "")"
+  failure_reason_code="$(jq -r 'if (type == "array") and (length > 0) and (.[0].code | type) == "string" then .[0].code else "" end' <<<"$violations_json" 2>/dev/null || printf '%s' "")"
+  operator_next_action="$(jq -r 'if (type == "array") and (length > 0) and (.[0].action | type) == "string" then .[0].action else "" end' <<<"$violations_json" 2>/dev/null || printf '%s' "")"
+  operator_next_action_command="$(quote_cmd bash ./scripts/profile_compare_multi_vm_stability_check.sh --stability-summary-json "$stability_summary_json" --summary-json "$summary_json" --print-summary-json 1)"
+  operator_next_action_command="$(trim "$operator_next_action_command")"
+  if [[ -z "$operator_next_action" ]]; then
+    operator_next_action="Review failed policy checks, refresh stability summary evidence, and rerun profile_compare_multi_vm_stability_check.sh."
+  fi
+fi
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg decision "$decision" \
   --arg status "$status" \
   --arg notes "$notes" \
+  --arg failure_reason "$failure_reason" \
+  --arg failure_reason_code "$failure_reason_code" \
+  --arg operator_next_action "$operator_next_action" \
+  --arg operator_next_action_command "$operator_next_action_command" \
   --arg stability_summary_json "$stability_summary_json" \
   --argjson stability_summary_exists "$summary_exists" \
   --argjson stability_summary_schema_valid "$schema_valid" \
@@ -788,6 +954,7 @@ jq -n \
   --argjson require_modal_support_rate_pct "$require_modal_support_rate_pct" \
   --argjson fail_on_no_go "$fail_on_no_go" \
   --argjson rc "$rc" \
+  --argjson violations "$violations_json" \
   --argjson errors "$errors_json" \
   --arg summary_json "$summary_json" \
   '{
@@ -800,6 +967,14 @@ jq -n \
     status: $status,
     rc: $rc,
     notes: $notes,
+    failure_reason: (if $failure_reason == "" then null else $failure_reason end),
+    failure_reason_code: (if $failure_reason_code == "" then null else $failure_reason_code end),
+    operator_next_action: (if $operator_next_action == "" then null else $operator_next_action end),
+    operator_next_action_command: (
+      if $operator_next_action_command == "" then null
+      else $operator_next_action_command
+      end
+    ),
     inputs: {
       stability_summary_json: $stability_summary_json,
       policy: {
@@ -827,6 +1002,20 @@ jq -n \
         require_modal_support_rate_pct: $require_modal_support_rate_pct,
         fail_on_no_go: ($fail_on_no_go == 1)
       }
+    },
+    outcome: {
+      gate_pass: ($decision == "GO" and $status == "ok"),
+      action: (
+        if $decision == "GO" then "stability_gate_pass"
+        elif $fail_on_no_go == 1 then "hold_gate_blocked"
+        else "hold_gate_warn_only"
+        end
+      ),
+      next_operator_action: (
+        if $operator_next_action == "" then null
+        else $operator_next_action
+        end
+      )
     },
     observed: {
       stability_summary_exists: ($stability_summary_exists == 1),
@@ -872,6 +1061,7 @@ jq -n \
         end
       )
     },
+    violations: $violations,
     errors: $errors,
     artifacts: {
       summary_json: $summary_json

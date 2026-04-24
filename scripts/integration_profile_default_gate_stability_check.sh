@@ -103,16 +103,53 @@ if ! jq -e '
   and .outcome.should_promote == true
   and .outcome.action == "promote_allowed"
   and .observed.runs_requested == 3
+  and .observed.runs_total == 3
   and .observed.runs_completed == 3
+  and .observed.runs_pass == 3
   and .observed.runs_fail == 0
+  and .observed.command_failures == 0
+  and .observed.summary_missing_count == 0
+  and .observed.summary_unreadable_count == 0
+  and .observed.evidence_state == "complete"
   and .observed.modal_recommended_profile == "balanced"
   and (.observed.modal_support_rate_pct >= 99.9)
   and .observed.modal_decision == "GO"
   and .observed.decision_consensus == true
   and .observed.decision_counts.GO == 3
+  and .diagnostics.error_count == 0
+  and .diagnostics.missing_or_invalid_evidence == false
+  and .diagnostics.partial_evidence == false
+  and .diagnostics.next_operator_action == "Stability evidence satisfies configured policy; promotion can proceed."
 ' "$BASELINE_OUT" >/dev/null 2>&1; then
   echo "baseline summary missing expected fields"
   cat "$BASELINE_OUT"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-check] missing summary diagnostics"
+MISSING_SUMMARY_OUT="$TMP_DIR/stability_check_missing_summary.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --stability-summary-json "$TMP_DIR/does_not_exist.json" \
+  --summary-json "$MISSING_SUMMARY_OUT" >/tmp/integration_profile_default_gate_stability_check_missing_summary.log 2>&1
+missing_summary_rc=$?
+set -e
+
+if [[ "$missing_summary_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when stability summary is missing"
+  cat /tmp/integration_profile_default_gate_stability_check_missing_summary.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .diagnostics.missing_or_invalid_evidence == true
+  and .diagnostics.partial_evidence == false
+  and (.diagnostics.rerun_run_command_template | type == "string")
+  and (.diagnostics.rerun_cycle_command_template | type == "string")
+  and (.errors | length) > 0
+' "$MISSING_SUMMARY_OUT" >/dev/null 2>&1; then
+  echo "missing-summary diagnostics were not emitted as expected"
+  cat "$MISSING_SUMMARY_OUT"
   exit 1
 fi
 
@@ -392,6 +429,8 @@ if ! jq -e '
   .enforcement.no_go_enforced == false
   and .outcome.should_promote == false
   and .outcome.action == "hold_promotion_warn_only"
+  and .diagnostics.error_count > 0
+  and .diagnostics.missing_or_invalid_evidence == false
 ' "$FAIL_OPEN_OUT" >/dev/null 2>&1; then
   echo "expected machine-readable enforcement/outcome fields for fail-open NO-GO path"
   cat "$FAIL_OPEN_OUT"

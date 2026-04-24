@@ -474,6 +474,8 @@ if ! jq -e '
   and .rc == 0
   and .decision == "GO"
   and .failure_stage == null
+  and .failure_reason_code == null
+  and ((.operator_next_action // "") | length) > 0
   and .stages.run.attempted == true
   and .stages.run.status == "pass"
   and .stages.check.attempted == true
@@ -566,6 +568,9 @@ if ! jq -e '
   and .rc == 0
   and .decision == "NO-GO"
   and .failure_stage == null
+  and .failure_reason_code == "check_decision_no_go"
+  and ((.operator_next_action // "") | length) > 0
+  and ((.operator_next_action_command // "") | test("profile_compare_multi_vm_stability_check\\.sh"))
   and .stages.check.attempted == true
   and .stages.check.status == "fail"
   and .stages.check.rc == 0

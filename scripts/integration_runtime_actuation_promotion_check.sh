@@ -24,6 +24,7 @@ PASS_CAMPAIGN_A="$TMP_DIR/campaign_check_pass_a.json"
 PASS_CAMPAIGN_B="$TMP_DIR/campaign_check_pass_b.json"
 PASS_SIGNOFF="$TMP_DIR/signoff_pass.json"
 SIGNOFF_UNKNOWN_DUPLICATE="$TMP_DIR/signoff_unknown_duplicate.json"
+SIGNOFF_MISSING_CONTEXT="$TMP_DIR/signoff_missing_context.json"
 FAIL_CAMPAIGN_A="$TMP_DIR/campaign_check_fail_a.json"
 FAIL_CAMPAIGN_B="$TMP_DIR/campaign_check_fail_b.json"
 MISSING_DIAGNOSTICS="$TMP_DIR/campaign_check_missing_diagnostics.json"
@@ -117,6 +118,21 @@ cat >"$SIGNOFF_UNKNOWN_DUPLICATE" <<EOF_SIGNOFF_UNKNOWN_DUPLICATE
   }
 }
 EOF_SIGNOFF_UNKNOWN_DUPLICATE
+
+cat >"$SIGNOFF_MISSING_CONTEXT" <<'EOF_SIGNOFF_MISSING_CONTEXT'
+{
+  "version": 1,
+  "status": "ok",
+  "final_rc": 0,
+  "decision": {
+    "decision": "GO",
+    "next_operator_action": "refresh signoff context"
+  },
+  "artifacts": {
+    "campaign_check_summary_json": ".easy-node-logs/profile_compare_campaign_check_summary.json"
+  }
+}
+EOF_SIGNOFF_MISSING_CONTEXT
 
 cat >"$FAIL_CAMPAIGN_A" <<'EOF_FAIL_CAMPAIGN_A'
 {
@@ -285,6 +301,9 @@ if ! jq -e '
   and .status == "fail"
   and .rc == 0
   and .enforcement.no_go_enforced == false
+  and .diagnostics.no_go.primary_driver == "pass_sample_thresholds"
+  and (.diagnostics.no_go.driver_codes | length) > 0
+  and (.outcome.remediation.next_command | contains("runtime-actuation-promotion-cycle"))
   and .outcome.action == "hold_promotion_warn_only"
   and .observed.modal_runtime_actuation_status == "fail"
   and ((.violations | map(.code) | index("modal_runtime_actuation_status_mismatch")) != null)
@@ -320,12 +339,48 @@ if ! jq -e '
   and .status == "fail"
   and .rc != 0
   and .enforcement.no_go_enforced == true
+  and .diagnostics.no_go.primary_driver == "runtime_diagnostics_missing"
   and ((.violations | map(.code) | index("runtime_actuation_diagnostics_missing")) != null)
   and ((.violations | map(.code) | index("runtime_actuation_status_missing")) != null)
   and ((.violations | map(.code) | index("runtime_actuation_ready_missing")) != null)
 ' "$MISSING_DIAGNOSTICS_SUMMARY" >/dev/null 2>&1; then
   echo "missing diagnostics summary mismatch"
   cat "$MISSING_DIAGNOSTICS_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-check] signoff context missing fails closed with actionable remediation"
+MISSING_SIGNOFF_CONTEXT_SUMMARY="$TMP_DIR/runtime_actuation_promotion_missing_signoff_context.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --signoff-summary-json "$SIGNOFF_MISSING_CONTEXT" \
+  --require-min-samples 1 \
+  --require-min-pass-samples 0 \
+  --require-max-fail-samples 1 \
+  --require-max-warn-samples 1 \
+  --require-min-ready-rate-pct 0 \
+  --fail-on-no-go 1 \
+  --summary-json "$MISSING_SIGNOFF_CONTEXT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_check_missing_signoff_context.log 2>&1
+missing_signoff_context_rc=$?
+set -e
+
+if [[ "$missing_signoff_context_rc" -eq 0 ]]; then
+  echo "expected missing signoff context path to fail closed with rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_check_missing_signoff_context.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc != 0
+  and .observed.signoff_context_missing_samples == 1
+  and .diagnostics.no_go.primary_driver == "missing_signoff_context"
+  and ((.violations | map(.code) | index("signoff_context_missing")) != null)
+  and (.outcome.remediation.next_command | contains("runtime-actuation-promotion-cycle"))
+' "$MISSING_SIGNOFF_CONTEXT_SUMMARY" >/dev/null 2>&1; then
+  echo "missing signoff context summary mismatch"
+  cat "$MISSING_SIGNOFF_CONTEXT_SUMMARY"
   exit 1
 fi
 

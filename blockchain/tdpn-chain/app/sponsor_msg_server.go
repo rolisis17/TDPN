@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
@@ -40,7 +41,13 @@ type sponsorMsgServer struct {
 	msgServer sponsormodule.MsgServer
 }
 
-func (m sponsorMsgServer) CreateAuthorization(_ context.Context, req SponsorCreateAuthorizationRequest) (SponsorCreateAuthorizationResponse, error) {
+func (m sponsorMsgServer) CreateAuthorization(ctx context.Context, req SponsorCreateAuthorizationRequest) (SponsorCreateAuthorizationResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return SponsorCreateAuthorizationResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.AuthorizeSponsor(sponsormodule.AuthorizeSponsorRequest{Authorization: req.Record})
 	if err != nil {
 		if errors.Is(err, sponsormodule.ErrNilKeeper) {
@@ -55,10 +62,11 @@ func (m sponsorMsgServer) CreateAuthorization(_ context.Context, req SponsorCrea
 }
 
 func (m sponsorMsgServer) DelegateCredit(ctx context.Context, req SponsorDelegateCreditRequest) (SponsorDelegateCreditResponse, error) {
-	if ctx != nil {
-		if err := ctx.Err(); err != nil {
-			return SponsorDelegateCreditResponse{}, err
-		}
+	if ctx == nil {
+		return SponsorDelegateCreditResponse{}, fmt.Errorf("%w: context is required", sponsormodule.ErrInvalidDelegation)
+	}
+	if err := ctx.Err(); err != nil {
+		return SponsorDelegateCreditResponse{}, err
 	}
 	currentTimeUnix := sponsormodule.CurrentTimeUnixFromContext(ctx)
 

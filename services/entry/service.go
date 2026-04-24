@@ -1761,7 +1761,13 @@ func validateStrictExitControlRoute(controlURL, dataAddr string) error {
 		return fmt.Errorf("exit control url host not allowed")
 	}
 	dataHost := hostFromEndpoint(dataAddr)
-	if dataHost != "" && !strings.EqualFold(controlHost, dataHost) {
+	if dataHost == "" {
+		return fmt.Errorf("exit data endpoint host is invalid")
+	}
+	if isDisallowedStrictRouteHost(dataHost) {
+		return fmt.Errorf("exit data endpoint host not allowed")
+	}
+	if !strings.EqualFold(controlHost, dataHost) {
 		return fmt.Errorf("exit control url host must match exit data host")
 	}
 	return nil

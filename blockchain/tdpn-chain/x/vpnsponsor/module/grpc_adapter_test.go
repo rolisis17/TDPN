@@ -132,7 +132,7 @@ func TestGRPCMsgServerAdapterDelegateSessionCredit(t *testing.T) {
 	}
 }
 
-func TestGRPCMsgServerAdapterDelegateSessionCreditRequiresExplicitContextTime(t *testing.T) {
+func TestGRPCMsgServerAdapterDelegateSessionCreditAllowsMissingContextTimeWithoutExpiry(t *testing.T) {
 	t.Parallel()
 
 	k := keeper.NewKeeper()
@@ -140,9 +140,49 @@ func TestGRPCMsgServerAdapterDelegateSessionCreditRequiresExplicitContextTime(t 
 
 	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
 		Authorization: &sponsorpb.SponsorAuthorization{
-			AuthorizationId: "auth-fallback-1",
-			SponsorId:       "sponsor-fallback-1",
-			AppId:           "app-fallback-1",
+			AuthorizationId: "auth-no-expiry-no-time",
+			SponsorId:       "sponsor-no-expiry-no-time",
+			AppId:           "app-no-expiry-no-time",
+			MaxCredits:      100,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	resp, err := adapter.DelegateSessionCredit(context.Background(), &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "res-no-expiry-no-time",
+			AuthorizationId: "auth-no-expiry-no-time",
+			SponsorId:       "sponsor-no-expiry-no-time",
+			AppId:           "app-no-expiry-no-time",
+			EndUserId:       "user-no-expiry-no-time",
+			SessionId:       "sess-no-expiry-no-time",
+			Credits:         10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected delegation success without context time when authorization has no expiry, got %v", err)
+	}
+	if resp.GetDelegation() == nil {
+		t.Fatal("expected delegation in response")
+	}
+	if _, ok := k.GetDelegation("res-no-expiry-no-time"); !ok {
+		t.Fatal("expected delegation to be persisted")
+	}
+}
+
+func TestGRPCMsgServerAdapterDelegateSessionCreditRequiresContextTimeForExpiringAuthorization(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgServerAdapter(&k)
+
+	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-expiry-no-time",
+			SponsorId:       "sponsor-expiry-no-time",
+			AppId:           "app-expiry-no-time",
 			MaxCredits:      100,
 			ExpiresAtUnix:   4102444800,
 		},
@@ -153,22 +193,22 @@ func TestGRPCMsgServerAdapterDelegateSessionCreditRequiresExplicitContextTime(t 
 
 	_, err = adapter.DelegateSessionCredit(context.Background(), &sponsorpb.MsgDelegateSessionCreditRequest{
 		Delegation: &sponsorpb.DelegatedSessionCredit{
-			ReservationId:   "res-fallback-1",
-			AuthorizationId: "auth-fallback-1",
-			SponsorId:       "sponsor-fallback-1",
-			AppId:           "app-fallback-1",
-			EndUserId:       "user-fallback-1",
-			SessionId:       "sess-fallback-1",
+			ReservationId:   "res-expiry-no-time",
+			AuthorizationId: "auth-expiry-no-time",
+			SponsorId:       "sponsor-expiry-no-time",
+			AppId:           "app-expiry-no-time",
+			EndUserId:       "user-expiry-no-time",
+			SessionId:       "sess-expiry-no-time",
 			Credits:         10,
 		},
 	})
 	if err == nil {
-		t.Fatal("expected missing context time to fail delegation")
+		t.Fatal("expected missing context time to fail delegation for expiring authorization")
 	}
 	if !errors.Is(err, ErrInvalidDelegation) {
 		t.Fatalf("expected ErrInvalidDelegation, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "current_time_unix is required in context") {
+	if !strings.Contains(err.Error(), "current unix time is required") {
 		t.Fatalf("expected missing context time details, got %v", err)
 	}
 }
@@ -234,6 +274,89 @@ func TestGRPCMsgServerAdapterDelegateSessionCreditExpiryBoundaryUsesCurrentTimeF
 	}
 	if _, ok := k.GetDelegation("res-expiry-boundary-at"); ok {
 		t.Fatal("did not expect at-expiry delegation to be persisted")
+	}
+}
+
+func TestGRPCMsgServerAdapterDelegateSessionCreditHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgServerAdapter(&k)
+
+	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-canceled-context",
+			SponsorId:       "sponsor-canceled-context",
+			AppId:           "app-canceled-context",
+			MaxCredits:      100,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = adapter.DelegateSessionCredit(canceledCtx, &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "res-canceled-context",
+			AuthorizationId: "auth-canceled-context",
+			SponsorId:       "sponsor-canceled-context",
+			AppId:           "app-canceled-context",
+			EndUserId:       "user-canceled-context",
+			SessionId:       "sess-canceled-context",
+			Credits:         10,
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if _, ok := k.GetDelegation("res-canceled-context"); ok {
+		t.Fatal("did not expect delegation persistence on canceled context")
+	}
+}
+
+func TestGRPCMsgServerAdapterDelegateSessionCreditRejectsNilContext(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgServerAdapter(&k)
+
+	_, err := adapter.CreateAuthorization(context.Background(), &sponsorpb.MsgCreateAuthorizationRequest{
+		Authorization: &sponsorpb.SponsorAuthorization{
+			AuthorizationId: "auth-nil-context",
+			SponsorId:       "sponsor-nil-context",
+			AppId:           "app-nil-context",
+			MaxCredits:      100,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create authorization success, got %v", err)
+	}
+
+	_, err = adapter.DelegateSessionCredit(nil, &sponsorpb.MsgDelegateSessionCreditRequest{
+		Delegation: &sponsorpb.DelegatedSessionCredit{
+			ReservationId:   "res-nil-context",
+			AuthorizationId: "auth-nil-context",
+			SponsorId:       "sponsor-nil-context",
+			AppId:           "app-nil-context",
+			EndUserId:       "user-nil-context",
+			SessionId:       "sess-nil-context",
+			Credits:         10,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected nil context to fail delegation")
+	}
+	if !errors.Is(err, ErrInvalidDelegation) {
+		t.Fatalf("expected ErrInvalidDelegation for nil context, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "context is required") {
+		t.Fatalf("expected context required details in error, got %v", err)
+	}
+	if _, ok := k.GetDelegation("res-nil-context"); ok {
+		t.Fatal("did not expect delegation persistence on nil context")
 	}
 }
 

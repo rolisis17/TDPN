@@ -557,6 +557,15 @@ JSON
 }
 JSON
     ;;
+  profile_evidence_pack_placeholder_easy_node)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate_evidence_pack","label":"Profile default evidence-pack publish","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-stability-cycle --host-a HOST_A --host-b HOST_B --campaign-subject INVITE_KEY --reports-dir /tmp/fake_profile_reports --summary-json /tmp/fake_profile_summary.json --print-summary-json 1","reason":"test-profile-pack-placeholder-override"}
+  ]
+}
+JSON
+    ;;
   profile_existing_key_easy_node)
     cat >"$summary_json" <<JSON
 {
@@ -1387,6 +1396,57 @@ if grep -E -- '--campaign-subject' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
 fi
 if grep -E -- 'INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
   echo "profile placeholder key override command capture still contains INVITE_KEY"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] profile evidence-pack placeholders resolve host and subject from env/override"
+SUMMARY_PROFILE_EVIDENCE_PACK_PLACEHOLDER="$TMP_DIR/summary_profile_evidence_pack_placeholder.json"
+REPORTS_PROFILE_EVIDENCE_PACK_PLACEHOLDER="$TMP_DIR/reports_profile_evidence_pack_placeholder"
+: >"$FAKE_EASY_NODE_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=profile_evidence_pack_placeholder_easy_node \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" MISSING_SUBJECT_PROFILE="$MISSING_SUBJECT_PROFILE" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" A_HOST="100.64.0.10" B_HOST="100.64.0.20" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_PROFILE_EVIDENCE_PACK_PLACEHOLDER" \
+  --summary-json "$SUMMARY_PROFILE_EVIDENCE_PACK_PLACEHOLDER" \
+  --profile-default-gate-subject inv-pack-placeholder-replaced \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate_evidence_pack"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--host-a 100.64.0.10"))
+  and ((.actions[0].command // "") | contains("--host-b 100.64.0.20"))
+  and ((.actions[0].command // "") | contains("--campaign-subject [redacted]"))
+  and (((.actions[0].command // "") | contains("HOST_A")) | not)
+  and (((.actions[0].command // "") | contains("HOST_B")) | not)
+  and (((.actions[0].command // "") | contains("INVITE_KEY")) | not)
+' "$SUMMARY_PROFILE_EVIDENCE_PACK_PLACEHOLDER" >/dev/null; then
+  echo "profile evidence-pack placeholder summary mismatch"
+  cat "$SUMMARY_PROFILE_EVIDENCE_PACK_PLACEHOLDER"
+  exit 1
+fi
+if ! grep -E -- '--host-a[[:space:]]+100\.64\.0\.10([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile evidence-pack placeholder command capture missing replaced --host-a"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if ! grep -E -- '--host-b[[:space:]]+100\.64\.0\.20([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile evidence-pack placeholder command capture missing replaced --host-b"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if ! grep -E -- '--campaign-subject[[:space:]]+inv-pack-placeholder-replaced([[:space:]]|$)' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile evidence-pack placeholder command capture missing replaced subject"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+if grep -E -- 'HOST_A|HOST_B|INVITE_KEY' "$FAKE_EASY_NODE_CAPTURE" >/dev/null; then
+  echo "profile evidence-pack placeholder command capture still contains placeholders"
   cat "$FAKE_EASY_NODE_CAPTURE"
   exit 1
 fi

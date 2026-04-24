@@ -130,6 +130,8 @@ if ! jq -e '
   and .decision == "GO"
   and .status == "ok"
   and .rc == 0
+  and .failure_reason_code == null
+  and .operator_next_action_command != null
   and .observed.cycles_total == 3
   and .observed.cycles_promotion_pass == 3
   and (.violations | length) == 0
@@ -171,9 +173,18 @@ if ! jq -e '
   .decision == "NO-GO"
   and .status == "fail"
   and .rc == 0
+  and (
+    .failure_reason_code == "max_fail_cycles_exceeded"
+    or .failure_reason_code == "min_pass_cycles_not_met"
+    or .failure_reason_code == "pass_rate_below_threshold"
+    or .failure_reason_code == "go_decision_rate_below_threshold"
+  )
   and .enforcement.no_go_enforced == false
   and .outcome.action == "hold_promotion_warn_only"
+  and ((.violations | map(.code) | index("min_pass_cycles_not_met")) != null)
   and ((.violations | map(.code) | index("max_fail_cycles_exceeded")) != null)
+  and ((.violations | map(.code) | index("pass_rate_below_threshold")) != null)
+  and ((.violations | map(.code) | index("go_decision_rate_below_threshold")) != null)
 ' "$SOFT_SUMMARY" >/dev/null 2>&1; then
   echo "soft NO-GO summary mismatch"
   cat "$SOFT_SUMMARY"
@@ -208,9 +219,16 @@ if ! jq -e '
   .decision == "NO-GO"
   and .status == "fail"
   and .rc != 0
+  and (
+    .failure_reason_code == "check_policy_modal_decision_mismatch"
+    or .failure_reason_code == "min_pass_cycles_not_met"
+    or .failure_reason_code == "pass_rate_below_threshold"
+  )
   and .enforcement.no_go_enforced == true
   and .outcome.action == "hold_promotion_blocked"
   and ((.violations | map(.code) | index("check_policy_modal_decision_mismatch")) != null)
+  and ((.violations | map(.code) | index("min_pass_cycles_not_met")) != null)
+  and ((.violations | map(.code) | index("pass_rate_below_threshold")) != null)
   and ((.operator_next_action // "") | test("Hold promotion"))
 ' "$MISMATCH_SUMMARY" >/dev/null 2>&1; then
   echo "policy mismatch summary mismatch"
@@ -245,8 +263,15 @@ if ! jq -e '
   .decision == "NO-GO"
   and .status == "fail"
   and .rc != 0
+  and (
+    .failure_reason_code == "check_policy_modal_decision_mismatch"
+    or .failure_reason_code == "min_pass_cycles_not_met"
+    or .failure_reason_code == "pass_rate_below_threshold"
+  )
   and .inputs.policy.require_check_policy_modal_decision == "GO"
   and ((.violations | map(.code) | index("check_policy_modal_decision_mismatch")) != null)
+  and ((.violations | map(.code) | index("min_pass_cycles_not_met")) != null)
+  and ((.violations | map(.code) | index("pass_rate_below_threshold")) != null)
 ' "$DEFAULT_MISMATCH_SUMMARY" >/dev/null 2>&1; then
   echo "default policy mismatch summary mismatch"
   cat "$DEFAULT_MISMATCH_SUMMARY"
@@ -280,11 +305,60 @@ if ! jq -e '
   .decision == "NO-GO"
   and .status == "fail"
   and .rc != 0
+  and (
+    .failure_reason_code == "cycle_schema_invalid"
+    or .failure_reason_code == "min_pass_cycles_not_met"
+    or .failure_reason_code == "max_fail_cycles_exceeded"
+    or .failure_reason_code == "pass_rate_below_threshold"
+  )
   and .observed.cycle_schema_invalid_cycles == 1
   and ((.violations | map(.code) | index("cycle_schema_invalid")) != null)
+  and ((.violations | map(.code) | index("min_pass_cycles_not_met")) != null)
+  and ((.violations | map(.code) | index("max_fail_cycles_exceeded")) != null)
+  and ((.violations | map(.code) | index("pass_rate_below_threshold")) != null)
 ' "$SCHEMA_SUMMARY" >/dev/null 2>&1; then
   echo "cycle-schema summary mismatch"
   cat "$SCHEMA_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-promotion-check] missing cycle-summary list produces deterministic NO-GO contract"
+MISSING_LIST_SUMMARY="$TMP_DIR/promotion_check_missing_list_summary.json"
+MISSING_LIST_REPORTS="$TMP_DIR/missing_list_reports"
+mkdir -p "$MISSING_LIST_REPORTS"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --cycle-summary-list "$TMP_DIR/does_not_exist.list" \
+  --reports-dir "$MISSING_LIST_REPORTS" \
+  --require-min-cycles 1 \
+  --require-min-pass-cycles 1 \
+  --require-max-fail-cycles 0 \
+  --require-max-warn-cycles 0 \
+  --require-min-pass-rate-pct 100 \
+  --require-min-go-decision-rate-pct 100 \
+  --require-cycle-schema-valid 1 \
+  --fail-on-no-go 1 \
+  --summary-json "$MISSING_LIST_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_check_missing_list.log 2>&1
+missing_list_rc=$?
+set -e
+
+if [[ "$missing_list_rc" -eq 0 ]]; then
+  echo "expected missing-list path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_check_missing_list.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc != 0
+  and .inputs.cycle_summary_list_missing == true
+  and .observed.cycle_summary_list_missing == true
+  and .failure_reason_code == "cycle_summary_list_missing"
+  and ((.violations | map(.code) | index("cycle_summary_list_missing")) != null)
+' "$MISSING_LIST_SUMMARY" >/dev/null 2>&1; then
+  echo "missing-list summary mismatch"
+  cat "$MISSING_LIST_SUMMARY"
   exit 1
 fi
 
