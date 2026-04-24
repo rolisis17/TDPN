@@ -34,7 +34,10 @@ func NewGRPCQueryAdapter(query QueryServer) GRPCQueryAdapter {
 	return GRPCQueryAdapter{query: query}
 }
 
-func (a GRPCMsgAdapter) RecordAccrual(_ context.Context, req *pb.MsgRecordAccrualRequest) (*pb.MsgRecordAccrualResponse, error) {
+func (a GRPCMsgAdapter) RecordAccrual(ctx context.Context, req *pb.MsgRecordAccrualRequest) (*pb.MsgRecordAccrualResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var accrual *pb.RewardAccrual
 	if req != nil {
 		accrual = req.GetAccrual()
@@ -52,7 +55,10 @@ func (a GRPCMsgAdapter) RecordAccrual(_ context.Context, req *pb.MsgRecordAccrua
 	}, nil
 }
 
-func (a GRPCMsgAdapter) RecordDistribution(_ context.Context, req *pb.MsgRecordDistributionRequest) (*pb.MsgRecordDistributionResponse, error) {
+func (a GRPCMsgAdapter) RecordDistribution(ctx context.Context, req *pb.MsgRecordDistributionRequest) (*pb.MsgRecordDistributionResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var distribution *pb.DistributionRecord
 	if req != nil {
 		distribution = req.GetDistribution()
@@ -70,7 +76,10 @@ func (a GRPCMsgAdapter) RecordDistribution(_ context.Context, req *pb.MsgRecordD
 	}, nil
 }
 
-func (a GRPCQueryAdapter) RewardAccrual(_ context.Context, req *pb.QueryRewardAccrualRequest) (*pb.QueryRewardAccrualResponse, error) {
+func (a GRPCQueryAdapter) RewardAccrual(ctx context.Context, req *pb.QueryRewardAccrualRequest) (*pb.QueryRewardAccrualResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	accrualID := ""
 	if req != nil {
 		accrualID = req.GetAccrualId()
@@ -90,7 +99,10 @@ func (a GRPCQueryAdapter) RewardAccrual(_ context.Context, req *pb.QueryRewardAc
 	}, nil
 }
 
-func (a GRPCQueryAdapter) DistributionRecord(_ context.Context, req *pb.QueryDistributionRecordRequest) (*pb.QueryDistributionRecordResponse, error) {
+func (a GRPCQueryAdapter) DistributionRecord(ctx context.Context, req *pb.QueryDistributionRecordRequest) (*pb.QueryDistributionRecordResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	distributionID := ""
 	if req != nil {
 		distributionID = req.GetDistributionId()
@@ -110,7 +122,10 @@ func (a GRPCQueryAdapter) DistributionRecord(_ context.Context, req *pb.QueryDis
 	}, nil
 }
 
-func (a GRPCQueryAdapter) ListRewardAccruals(_ context.Context, _ *pb.QueryListRewardAccrualsRequest) (*pb.QueryListRewardAccrualsResponse, error) {
+func (a GRPCQueryAdapter) ListRewardAccruals(ctx context.Context, _ *pb.QueryListRewardAccrualsRequest) (*pb.QueryListRewardAccrualsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.query.ListAccruals(ListAccrualsRequest{})
 	if err != nil {
 		return nil, err
@@ -126,7 +141,10 @@ func (a GRPCQueryAdapter) ListRewardAccruals(_ context.Context, _ *pb.QueryListR
 	}, nil
 }
 
-func (a GRPCQueryAdapter) ListDistributionRecords(_ context.Context, _ *pb.QueryListDistributionRecordsRequest) (*pb.QueryListDistributionRecordsResponse, error) {
+func (a GRPCQueryAdapter) ListDistributionRecords(ctx context.Context, _ *pb.QueryListDistributionRecordsRequest) (*pb.QueryListDistributionRecordsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.query.ListDistributions(ListDistributionsRequest{})
 	if err != nil {
 		return nil, err

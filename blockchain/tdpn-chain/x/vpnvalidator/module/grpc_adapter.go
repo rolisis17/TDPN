@@ -31,7 +31,10 @@ func NewGRPCMsgServerAdapter(k *keeper.Keeper) *GRPCMsgServerAdapter {
 	}
 }
 
-func (a *GRPCMsgServerAdapter) SetValidatorEligibility(_ context.Context, req *validatorpb.MsgSetValidatorEligibilityRequest) (*validatorpb.MsgSetValidatorEligibilityResponse, error) {
+func (a *GRPCMsgServerAdapter) SetValidatorEligibility(ctx context.Context, req *validatorpb.MsgSetValidatorEligibilityRequest) (*validatorpb.MsgSetValidatorEligibilityResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.server.SetValidatorEligibility(SetValidatorEligibilityRequest{
 		Eligibility: fromProtoEligibility(req.GetEligibility()),
 	})
@@ -44,7 +47,10 @@ func (a *GRPCMsgServerAdapter) SetValidatorEligibility(_ context.Context, req *v
 	}, nil
 }
 
-func (a *GRPCMsgServerAdapter) RecordValidatorStatus(_ context.Context, req *validatorpb.MsgRecordValidatorStatusRequest) (*validatorpb.MsgRecordValidatorStatusResponse, error) {
+func (a *GRPCMsgServerAdapter) RecordValidatorStatus(ctx context.Context, req *validatorpb.MsgRecordValidatorStatusRequest) (*validatorpb.MsgRecordValidatorStatusResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.server.RecordValidatorStatus(RecordValidatorStatusRequest{
 		Record: fromProtoStatusRecord(req.GetRecord()),
 	})
@@ -69,7 +75,10 @@ func NewGRPCQueryServerAdapter(k *keeper.Keeper) *GRPCQueryServerAdapter {
 	}
 }
 
-func (a *GRPCQueryServerAdapter) ValidatorEligibility(_ context.Context, req *validatorpb.QueryValidatorEligibilityRequest) (*validatorpb.QueryValidatorEligibilityResponse, error) {
+func (a *GRPCQueryServerAdapter) ValidatorEligibility(ctx context.Context, req *validatorpb.QueryValidatorEligibilityRequest) (*validatorpb.QueryValidatorEligibilityResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.server.GetValidatorEligibility(GetValidatorEligibilityRequest{
 		ValidatorID: req.GetValidatorId(),
 	})
@@ -86,7 +95,10 @@ func (a *GRPCQueryServerAdapter) ValidatorEligibility(_ context.Context, req *va
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) ValidatorStatusRecord(_ context.Context, req *validatorpb.QueryValidatorStatusRecordRequest) (*validatorpb.QueryValidatorStatusRecordResponse, error) {
+func (a *GRPCQueryServerAdapter) ValidatorStatusRecord(ctx context.Context, req *validatorpb.QueryValidatorStatusRecordRequest) (*validatorpb.QueryValidatorStatusRecordResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.server.GetValidatorStatusRecord(GetValidatorStatusRecordRequest{
 		StatusID: req.GetStatusId(),
 	})
@@ -103,7 +115,10 @@ func (a *GRPCQueryServerAdapter) ValidatorStatusRecord(_ context.Context, req *v
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) ListValidatorEligibilities(_ context.Context, _ *validatorpb.QueryListValidatorEligibilitiesRequest) (*validatorpb.QueryListValidatorEligibilitiesResponse, error) {
+func (a *GRPCQueryServerAdapter) ListValidatorEligibilities(ctx context.Context, _ *validatorpb.QueryListValidatorEligibilitiesRequest) (*validatorpb.QueryListValidatorEligibilitiesResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.server.ListValidatorEligibilities(ListValidatorEligibilitiesRequest{})
 	if err != nil {
 		return nil, err
@@ -118,7 +133,10 @@ func (a *GRPCQueryServerAdapter) ListValidatorEligibilities(_ context.Context, _
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) ListValidatorStatusRecords(_ context.Context, _ *validatorpb.QueryListValidatorStatusRecordsRequest) (*validatorpb.QueryListValidatorStatusRecordsResponse, error) {
+func (a *GRPCQueryServerAdapter) ListValidatorStatusRecords(ctx context.Context, _ *validatorpb.QueryListValidatorStatusRecordsRequest) (*validatorpb.QueryListValidatorStatusRecordsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.server.ListValidatorStatusRecords(ListValidatorStatusRecordsRequest{})
 	if err != nil {
 		return nil, err
@@ -133,7 +151,10 @@ func (a *GRPCQueryServerAdapter) ListValidatorStatusRecords(_ context.Context, _
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) PreviewEpochSelection(_ context.Context, req *validatorpb.QueryPreviewEpochSelectionRequest) (*validatorpb.QueryPreviewEpochSelectionResponse, error) {
+func (a *GRPCQueryServerAdapter) PreviewEpochSelection(ctx context.Context, req *validatorpb.QueryPreviewEpochSelectionRequest) (*validatorpb.QueryPreviewEpochSelectionResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	policy, err := fromProtoEpochSelectionPolicy(req.GetPolicy())
 	if err != nil {
 		return nil, err

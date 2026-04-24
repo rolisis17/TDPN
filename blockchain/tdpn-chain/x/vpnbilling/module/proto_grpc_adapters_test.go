@@ -614,3 +614,42 @@ func TestProtoQueryServerAdapterNilRequestsUseDefaultLookupPath(t *testing.T) {
 		t.Fatal("expected found=false for nil settlement query request")
 	}
 }
+
+func TestProtoGrpcAdaptersCanceledContextFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewProtoMsgServerAdapter(&k)
+	queryAdapter := NewProtoQueryServerAdapter(&k)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := msgAdapter.ReserveCredits(ctx, &pb.MsgReserveCreditsRequest{
+		Reservation: &pb.CreditReservation{ReservationId: "res-canceled", SessionId: "sess-canceled", Amount: 1},
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ReserveCredits, got %v", err)
+	}
+
+	if _, err := msgAdapter.FinalizeUsage(ctx, &pb.MsgFinalizeUsageRequest{
+		Settlement: &pb.SettlementRecord{SettlementId: "set-canceled", ReservationId: "res-canceled", SessionId: "sess-canceled", BilledAmount: 1},
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from FinalizeUsage, got %v", err)
+	}
+
+	if _, err := queryAdapter.CreditReservation(ctx, &pb.QueryCreditReservationRequest{ReservationId: "res-canceled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from CreditReservation, got %v", err)
+	}
+
+	if _, err := queryAdapter.SettlementRecord(ctx, &pb.QuerySettlementRecordRequest{SettlementId: "set-canceled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from SettlementRecord, got %v", err)
+	}
+
+	if _, err := queryAdapter.ListCreditReservations(ctx, &pb.QueryListCreditReservationsRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListCreditReservations, got %v", err)
+	}
+
+	if _, err := queryAdapter.ListSettlementRecords(ctx, &pb.QueryListSettlementRecordsRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListSettlementRecords, got %v", err)
+	}
+}

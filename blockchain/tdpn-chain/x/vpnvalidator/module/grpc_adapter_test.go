@@ -470,6 +470,49 @@ func TestGRPCAdaptersNilRequestsAreFailSafe(t *testing.T) {
 	}
 }
 
+func TestGRPCAdaptersCanceledContextFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgServerAdapter(&k)
+	queryAdapter := NewGRPCQueryServerAdapter(&k)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := msgAdapter.SetValidatorEligibility(ctx, &validatorpb.MsgSetValidatorEligibilityRequest{
+		Eligibility: &validatorpb.ValidatorEligibility{ValidatorId: "val-canceled", OperatorAddress: "tdpnvaloper1canceled", Eligible: true},
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from SetValidatorEligibility, got %v", err)
+	}
+
+	if _, err := msgAdapter.RecordValidatorStatus(ctx, &validatorpb.MsgRecordValidatorStatusRequest{
+		Record: &validatorpb.ValidatorStatusRecord{StatusId: "status-canceled", ValidatorId: "val-canceled"},
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from RecordValidatorStatus, got %v", err)
+	}
+
+	if _, err := queryAdapter.ValidatorEligibility(ctx, &validatorpb.QueryValidatorEligibilityRequest{ValidatorId: "val-canceled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ValidatorEligibility, got %v", err)
+	}
+
+	if _, err := queryAdapter.ValidatorStatusRecord(ctx, &validatorpb.QueryValidatorStatusRecordRequest{StatusId: "status-canceled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ValidatorStatusRecord, got %v", err)
+	}
+
+	if _, err := queryAdapter.ListValidatorEligibilities(ctx, &validatorpb.QueryListValidatorEligibilitiesRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListValidatorEligibilities, got %v", err)
+	}
+
+	if _, err := queryAdapter.ListValidatorStatusRecords(ctx, &validatorpb.QueryListValidatorStatusRecordsRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListValidatorStatusRecords, got %v", err)
+	}
+
+	if _, err := queryAdapter.PreviewEpochSelection(ctx, &validatorpb.QueryPreviewEpochSelectionRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from PreviewEpochSelection, got %v", err)
+	}
+}
+
 func TestStatusMappingFromAndToProtoCoversExplicitAndDefaultBranches(t *testing.T) {
 	t.Parallel()
 

@@ -1139,6 +1139,7 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRoute, error) {
 	strictMode := s.betaStrict || s.prodStrict
+	enforcementSensitive := s.requireDistinctExitOp || strictMode
 	fallback := exitRoute{
 		controlURL: normalizeHTTPURL(s.exitControlURL),
 		dataAddr:   strings.TrimSpace(s.exitDataAddr),
@@ -1155,17 +1156,19 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	requiredSources := maxInt(1, s.directoryMinSources)
 	requiredOperators := maxInt(1, s.directoryMinOperators)
 	requiredVotes := maxInt(1, s.directoryMinVotes)
-	s.mu.RLock()
-	cached, ok := s.exitRouteCache[exitID]
-	s.mu.RUnlock()
-	if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
-		if cached.validUntil.IsZero() || !now.After(cached.validUntil) {
-			if strictMode {
-				if err := validateStrictExitControlRoute(cached.controlURL, cached.dataAddr); err == nil {
+	if !enforcementSensitive {
+		s.mu.RLock()
+		cached, ok := s.exitRouteCache[exitID]
+		s.mu.RUnlock()
+		if ok && now.Sub(cached.fetchedAt) <= s.routeTTL {
+			if cached.validUntil.IsZero() || !now.After(cached.validUntil) {
+				if strictMode {
+					if err := validateStrictExitControlRoute(cached.controlURL, cached.dataAddr); err == nil {
+						return cached, nil
+					}
+				} else {
 					return cached, nil
 				}
-			} else {
-				return cached, nil
 			}
 		}
 	}
@@ -1280,7 +1283,7 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req proto.Path
 	if exitID != "" && middleRelayID == exitID {
 		return "middle-relay-equals-exit"
 	}
-	useCache := !(s.betaStrict || s.prodStrict || s.requireMiddleRelay)
+	useCache := !(s.betaStrict || s.prodStrict || s.requireDistinctExitOp || s.requireMiddleRelay)
 	desc, err := s.resolveRelayDescriptorWithCachePolicy(ctx, middleRelayID, useCache)
 	if err != nil {
 		return "unknown-middle-relay"

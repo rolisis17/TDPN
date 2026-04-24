@@ -307,6 +307,45 @@ func TestGRPCAdaptersNilKeeperPropagation(t *testing.T) {
 	}
 }
 
+func TestGRPCAdaptersCanceledContextFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	msgAdapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+	queryAdapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := msgAdapter.RecordAccrual(ctx, &pb.MsgRecordAccrualRequest{
+		Accrual: &pb.RewardAccrual{AccrualId: "acc-canceled", ProviderId: "provider-canceled", Amount: 1},
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from RecordAccrual, got %v", err)
+	}
+
+	if _, err := msgAdapter.RecordDistribution(ctx, &pb.MsgRecordDistributionRequest{
+		Distribution: &pb.DistributionRecord{DistributionId: "dist-canceled", AccrualId: "acc-canceled"},
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from RecordDistribution, got %v", err)
+	}
+
+	if _, err := queryAdapter.RewardAccrual(ctx, &pb.QueryRewardAccrualRequest{AccrualId: "acc-canceled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from RewardAccrual, got %v", err)
+	}
+
+	if _, err := queryAdapter.DistributionRecord(ctx, &pb.QueryDistributionRecordRequest{DistributionId: "dist-canceled"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from DistributionRecord, got %v", err)
+	}
+
+	if _, err := queryAdapter.ListRewardAccruals(ctx, &pb.QueryListRewardAccrualsRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListRewardAccruals, got %v", err)
+	}
+
+	if _, err := queryAdapter.ListDistributionRecords(ctx, &pb.QueryListDistributionRecordsRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from ListDistributionRecords, got %v", err)
+	}
+}
+
 func TestStatusMappingFromAndToProtoCoversExplicitAndDefaultBranches(t *testing.T) {
 	t.Parallel()
 

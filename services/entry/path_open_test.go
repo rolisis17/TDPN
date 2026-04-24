@@ -188,20 +188,33 @@ func TestHandlePathOpenStrictRejectsEmptyExitIDBeforeForwarding(t *testing.T) {
 }
 
 func TestHandlePathOpenStrictRejectsMissingMiddleRelayBeforeForwarding(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "exit.example:51821",
+			ControlURL: "https://exit.example",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+	})
+
 	exitCalls := 0
-	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handlers["https://exit.example/v1/path/open"] = func(_ *http.Request) (*http.Response, error) {
 		exitCalls++
-		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: true})
-	}))
-	defer exitSrv.Close()
+		return jsonResp(proto.PathOpenResponse{Accepted: true, SessionExp: time.Now().Add(5 * time.Minute).Unix(), Transport: "wireguard-udp"})(nil)
+	}
 
 	s := &Service{
 		betaStrict:            true,
 		requireMiddleRelay:    true,
 		dataAddr:              "127.0.0.1:51820",
-		httpClient:            exitSrv.Client(),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:              map[string]sessionState{},
 		exitRouteCache:        map[string]exitRoute{"exit-b": strictExitRouteFixture()},
+		directoryURLs:         []string{durl},
 		buckets:               map[string]rateBucket{},
 		abuse:                 map[string]abuseState{},
 		openRPS:               100,
@@ -815,35 +828,48 @@ func TestHandlePathOpenChecksBanBeforeDirectoryFetch(t *testing.T) {
 }
 
 func TestHandlePathOpenRejectsSameOperatorWhenDistinctRequired(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-a",
+			Role:       "exit",
+			OperatorID: "op-a",
+			Endpoint:   "127.0.0.1:51821",
+			ControlURL: "http://exit.local",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+	})
+
 	exitCalls := 0
-	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handlers["http://exit.local/v1/path/open"] = func(_ *http.Request) (*http.Response, error) {
 		exitCalls++
-		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{
+		return jsonResp(proto.PathOpenResponse{
 			Accepted:   true,
 			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
 			Transport:  "wireguard-udp",
-		})
-	}))
-	defer exitSrv.Close()
+		})(nil)
+	}
 
 	s := &Service{
 		dataAddr:              "127.0.0.1:51820",
 		operatorID:            "op-a",
 		requireDistinctExitOp: true,
-		httpClient:            exitSrv.Client(),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:              map[string]sessionState{},
 		exitRouteCache: map[string]exitRoute{
 			"exit-a": {
-				controlURL: exitSrv.URL,
+				controlURL: "http://exit.local",
 				dataAddr:   "127.0.0.1:51821",
-				operatorID: "op-a",
+				operatorID: "op-b",
 				fetchedAt:  time.Now(),
 			},
 		},
-		buckets:  map[string]rateBucket{},
-		abuse:    map[string]abuseState{},
-		openRPS:  100,
-		routeTTL: time.Minute,
+		directoryURLs: []string{durl},
+		buckets:       map[string]rateBucket{},
+		abuse:         map[string]abuseState{},
+		openRPS:       100,
+		routeTTL:      time.Minute,
 	}
 
 	reqBody, err := json.Marshal(proto.PathOpenRequest{
@@ -878,35 +904,48 @@ func TestHandlePathOpenRejectsSameOperatorWhenDistinctRequired(t *testing.T) {
 }
 
 func TestHandlePathOpenAllowsDistinctOperatorWhenRequired(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-b",
+			Endpoint:   "127.0.0.1:51821",
+			ControlURL: "http://exit.local",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+	})
+
 	exitCalls := 0
-	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handlers["http://exit.local/v1/path/open"] = func(_ *http.Request) (*http.Response, error) {
 		exitCalls++
-		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{
+		return jsonResp(proto.PathOpenResponse{
 			Accepted:   true,
 			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
 			Transport:  "wireguard-udp",
-		})
-	}))
-	defer exitSrv.Close()
+		})(nil)
+	}
 
 	s := &Service{
 		dataAddr:              "127.0.0.1:51820",
 		operatorID:            "op-a",
 		requireDistinctExitOp: true,
-		httpClient:            exitSrv.Client(),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:              map[string]sessionState{},
 		exitRouteCache: map[string]exitRoute{
 			"exit-b": {
-				controlURL: exitSrv.URL,
+				controlURL: "http://exit.local",
 				dataAddr:   "127.0.0.1:51821",
-				operatorID: "op-b",
+				operatorID: "op-a",
 				fetchedAt:  time.Now(),
 			},
 		},
-		buckets:  map[string]rateBucket{},
-		abuse:    map[string]abuseState{},
-		openRPS:  100,
-		routeTTL: time.Minute,
+		directoryURLs: []string{durl},
+		buckets:       map[string]rateBucket{},
+		abuse:         map[string]abuseState{},
+		openRPS:       100,
+		routeTTL:      time.Minute,
 	}
 
 	reqBody, err := json.Marshal(proto.PathOpenRequest{
@@ -996,6 +1035,14 @@ func TestHandlePathOpenStrictModeBypassesStaleMiddleRelayCache(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "exit.example:51821",
+			ControlURL: "https://exit.example",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
 		{RelayID: "middle-stale", Role: "exit", OperatorID: "op-middle", Endpoint: "127.0.0.1:51822", ValidUntil: time.Now().Add(time.Minute)},
 	})
 	relayCalls := 0
@@ -1593,6 +1640,14 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithConflictingRoleMetadata(t *te
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "exit.example:51821",
+			ControlURL: "https://exit.example",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+		{
 			RelayID:    "middle-conflict-strict",
 			Role:       "exit",
 			HopRoles:   []string{"middle"},
@@ -1808,7 +1863,17 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithInvalidRuntimeAdmissionMetada
 		t.Run(tc.name, func(t *testing.T) {
 			durl := "http://directory.local"
 			handlers := make(map[string]func(*http.Request) (*http.Response, error))
-			addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{tc.desc})
+			addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+				{
+					RelayID:    "exit-b",
+					Role:       "exit",
+					OperatorID: "op-exit",
+					Endpoint:   "exit.example:51821",
+					ControlURL: "https://exit.example",
+					ValidUntil: time.Now().Add(time.Minute),
+				},
+				tc.desc,
+			})
 
 			exitCalls := 0
 			handlers["http://exit.local/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
@@ -1872,6 +1937,14 @@ func TestHandlePathOpenStrictAllowsCanonicalMiddleRelayRole(t *testing.T) {
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "exit.example:51821",
+			ControlURL: "https://exit.example",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+		{
 			RelayID:      "middle-canonical-strict",
 			Role:         "micro-relay",
 			OperatorID:   "op-middle",
@@ -1907,7 +1980,7 @@ func TestHandlePathOpenStrictAllowsCanonicalMiddleRelayRole(t *testing.T) {
 		betaStrict:     true,
 		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:       map[string]sessionState{},
-		exitRouteCache: map[string]exitRoute{"exit-b": strictExitRouteFixture()},
+		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "https://exit.example", dataAddr: "exit.example:51821", operatorID: "op-middle", fetchedAt: time.Now(), validUntil: time.Now().Add(time.Minute)}},
 		directoryURLs:  []string{durl},
 		routeTTL:       time.Minute,
 		buckets:        map[string]rateBucket{},
@@ -2018,6 +2091,14 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithoutOperatorID(t *testing.T) {
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "exit.example:51821",
+			ControlURL: "https://exit.example",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+		{
 			RelayID:      "middle-no-operator",
 			Role:         "micro-relay",
 			OperatorID:   "",
@@ -2090,6 +2171,14 @@ func TestHandlePathOpenDistinctModeRejectsMiddleRelayWithoutOperatorID(t *testin
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
 		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "127.0.0.1:51821",
+			ControlURL: "http://exit.local",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+		{
 			RelayID:    "middle-no-operator-distinct",
 			Role:       "middle",
 			OperatorID: "",
@@ -2114,7 +2203,7 @@ func TestHandlePathOpenDistinctModeRejectsMiddleRelayWithoutOperatorID(t *testin
 		requireDistinctExitOp: true,
 		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:              map[string]sessionState{},
-		exitRouteCache:        map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		exitRouteCache:        map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-entry", fetchedAt: time.Now()}},
 		directoryURLs:         []string{durl},
 		routeTTL:              time.Minute,
 		buckets:               map[string]rateBucket{},

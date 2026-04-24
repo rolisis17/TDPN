@@ -26,7 +26,10 @@ func NewProtoMsgServerAdapter(k *keeper.Keeper) *ProtoMsgServerAdapter {
 	}
 }
 
-func (a *ProtoMsgServerAdapter) ReserveCredits(_ context.Context, req *pb.MsgReserveCreditsRequest) (*pb.MsgReserveCreditsResponse, error) {
+func (a *ProtoMsgServerAdapter) ReserveCredits(ctx context.Context, req *pb.MsgReserveCreditsRequest) (*pb.MsgReserveCreditsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	record := billingtypes.CreditReservation{}
 	if req != nil && req.GetReservation() != nil {
 		record = fromProtoCreditReservation(req.GetReservation())
@@ -44,7 +47,10 @@ func (a *ProtoMsgServerAdapter) ReserveCredits(_ context.Context, req *pb.MsgRes
 	return out, nil
 }
 
-func (a *ProtoMsgServerAdapter) FinalizeUsage(_ context.Context, req *pb.MsgFinalizeUsageRequest) (*pb.MsgFinalizeUsageResponse, error) {
+func (a *ProtoMsgServerAdapter) FinalizeUsage(ctx context.Context, req *pb.MsgFinalizeUsageRequest) (*pb.MsgFinalizeUsageResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	record := billingtypes.SettlementRecord{}
 	if req != nil && req.GetSettlement() != nil {
 		record = fromProtoSettlementRecord(req.GetSettlement())
@@ -75,7 +81,10 @@ func NewProtoQueryServerAdapter(k *keeper.Keeper) *ProtoQueryServerAdapter {
 	}
 }
 
-func (a *ProtoQueryServerAdapter) CreditReservation(_ context.Context, req *pb.QueryCreditReservationRequest) (*pb.QueryCreditReservationResponse, error) {
+func (a *ProtoQueryServerAdapter) CreditReservation(ctx context.Context, req *pb.QueryCreditReservationRequest) (*pb.QueryCreditReservationResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	reservationID := ""
 	if req != nil {
 		reservationID = req.GetReservationId()
@@ -95,7 +104,10 @@ func (a *ProtoQueryServerAdapter) CreditReservation(_ context.Context, req *pb.Q
 	}, nil
 }
 
-func (a *ProtoQueryServerAdapter) SettlementRecord(_ context.Context, req *pb.QuerySettlementRecordRequest) (*pb.QuerySettlementRecordResponse, error) {
+func (a *ProtoQueryServerAdapter) SettlementRecord(ctx context.Context, req *pb.QuerySettlementRecordRequest) (*pb.QuerySettlementRecordResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	settlementID := ""
 	if req != nil {
 		settlementID = req.GetSettlementId()
@@ -115,7 +127,10 @@ func (a *ProtoQueryServerAdapter) SettlementRecord(_ context.Context, req *pb.Qu
 	}, nil
 }
 
-func (a *ProtoQueryServerAdapter) ListCreditReservations(_ context.Context, _ *pb.QueryListCreditReservationsRequest) (*pb.QueryListCreditReservationsResponse, error) {
+func (a *ProtoQueryServerAdapter) ListCreditReservations(ctx context.Context, _ *pb.QueryListCreditReservationsRequest) (*pb.QueryListCreditReservationsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.query.ListReservations(ListReservationsRequest{})
 	if err != nil {
 		return nil, err
@@ -128,7 +143,10 @@ func (a *ProtoQueryServerAdapter) ListCreditReservations(_ context.Context, _ *p
 	return &pb.QueryListCreditReservationsResponse{Reservations: out}, nil
 }
 
-func (a *ProtoQueryServerAdapter) ListSettlementRecords(_ context.Context, _ *pb.QueryListSettlementRecordsRequest) (*pb.QueryListSettlementRecordsResponse, error) {
+func (a *ProtoQueryServerAdapter) ListSettlementRecords(ctx context.Context, _ *pb.QueryListSettlementRecordsRequest) (*pb.QueryListSettlementRecordsResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp, err := a.query.ListSettlements(ListSettlementsRequest{})
 	if err != nil {
 		return nil, err

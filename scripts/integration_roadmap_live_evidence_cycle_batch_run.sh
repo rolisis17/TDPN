@@ -21,6 +21,12 @@ TRACK_A="$SCRIPT_TMP_DIR/profile_default_gate_stability_cycle.sh"
 TRACK_B="$SCRIPT_TMP_DIR/runtime_actuation_promotion_cycle.sh"
 TRACK_C="$SCRIPT_TMP_DIR/profile_compare_multi_vm_stability_promotion_cycle.sh"
 VM_COMMAND_FILE="$TMP_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+DEFAULT_ROADMAP_PROGRESS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary_default.json"
+FALLBACK_HOSTS_ROADMAP_PROGRESS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary_fallback_hosts.json"
+FALLBACK_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary_fallback_env_assignments.json"
+FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary_fallback_placeholder_env_assignments.json"
+FALLBACK_PLACEHOLDER_SUBJECT_ROADMAP_PROGRESS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary_fallback_placeholder_subject.json"
+FALLBACK_CONCRETE_SUBJECT_ROADMAP_PROGRESS_SUMMARY_JSON="$TMP_DIR/roadmap_progress_summary_fallback_concrete_subject.json"
 
 cat >"$TRACK_A" <<'EOF_TRACK_A'
 #!/usr/bin/env bash
@@ -70,6 +76,77 @@ chmod +x "$TRACK_C"
 cat >"$VM_COMMAND_FILE" <<'EOF_VM_COMMAND_FILE'
 vm_a::ssh vm-a.example
 EOF_VM_COMMAND_FILE
+
+cat >"$DEFAULT_ROADMAP_PROGRESS_SUMMARY_JSON" <<'EOF_DEFAULT_ROADMAP_SUMMARY'
+{
+  "next_actions": []
+}
+EOF_DEFAULT_ROADMAP_SUMMARY
+
+cat >"$FALLBACK_HOSTS_ROADMAP_PROGRESS_SUMMARY_JSON" <<'EOF_FALLBACK_HOSTS_ROADMAP_SUMMARY'
+{
+  "next_actions": [
+    {
+      "id": "profile_default_gate_stability_cycle",
+      "command": "./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a 198.51.100.41 --host-b=198.51.100.42 --campaign-subject INVITE_KEY --reports-dir .easy-node-logs --print-summary-json 1"
+    }
+  ]
+}
+EOF_FALLBACK_HOSTS_ROADMAP_SUMMARY
+
+cat >"$FALLBACK_PLACEHOLDER_SUBJECT_ROADMAP_PROGRESS_SUMMARY_JSON" <<'EOF_FALLBACK_PLACEHOLDER_SUBJECT_ROADMAP_SUMMARY'
+{
+  "next_actions": [
+    {
+      "id": "runtime_actuation_promotion_cycle",
+      "command": "./scripts/easy_node.sh runtime-actuation-promotion-cycle --subject CAMPAIGN_SUBJECT --reports-dir .easy-node-logs --print-summary-json 1"
+    }
+  ]
+}
+EOF_FALLBACK_PLACEHOLDER_SUBJECT_ROADMAP_SUMMARY
+
+cat >"$FALLBACK_CONCRETE_SUBJECT_ROADMAP_PROGRESS_SUMMARY_JSON" <<'EOF_FALLBACK_CONCRETE_SUBJECT_ROADMAP_SUMMARY'
+{
+  "next_actions": [
+    {
+      "id": "runtime_actuation_promotion_cycle",
+      "command": "./scripts/easy_node.sh runtime-actuation-promotion-cycle --invite-key=inv-real-010 --reports-dir .easy-node-logs --print-summary-json 1"
+    }
+  ]
+}
+EOF_FALLBACK_CONCRETE_SUBJECT_ROADMAP_SUMMARY
+
+cat >"$FALLBACK_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON" <<'EOF_FALLBACK_ENV_ASSIGNMENTS_ROADMAP_SUMMARY'
+{
+  "next_actions": [
+    {
+      "id": "profile_default_gate_stability_cycle",
+      "command": "A_HOST=198.51.100.61 B_HOST=198.51.100.62 PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT=inv-real-011 ./scripts/easy_node.sh profile-default-gate-stability-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+    },
+    {
+      "id": "runtime_actuation_promotion_cycle",
+      "command": "CAMPAIGN_SUBJECT=inv-real-012 ./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+    }
+  ]
+}
+EOF_FALLBACK_ENV_ASSIGNMENTS_ROADMAP_SUMMARY
+
+cat >"$FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON" <<'EOF_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_ROADMAP_SUMMARY'
+{
+  "next_actions": [
+    {
+      "id": "profile_default_gate_stability_cycle",
+      "command": "A_HOST=HOST_A B_HOST=HOST_B PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT=INVITE_KEY ./scripts/easy_node.sh profile-default-gate-stability-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+    },
+    {
+      "id": "runtime_actuation_promotion_cycle",
+      "command": "CAMPAIGN_SUBJECT=CAMPAIGN_SUBJECT ./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+    }
+  ]
+}
+EOF_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_ROADMAP_SUMMARY
+
+export ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$DEFAULT_ROADMAP_PROGRESS_SUMMARY_JSON"
 
 echo "[roadmap-live-evidence-cycle-batch-run] help contract"
 if ! bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh --help | grep -F -- "--reports-dir DIR" >/dev/null; then
@@ -390,6 +467,446 @@ if grep -F "A:" "$EXEC_LOG" >/dev/null || grep -F "B:" "$EXEC_LOG" >/dev/null; t
 fi
 if ! grep -F "C:pass" "$EXEC_LOG" >/dev/null; then
   echo "track C should run in placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary host fallback path"
+ROADMAP_FALLBACK_HOSTS_SUMMARY="$TMP_DIR/roadmap_fallback_hosts_summary.json"
+: >"$EXEC_LOG"
+A_HOST= B_HOST= PROFILE_DEFAULT_GATE_STABILITY_HOST_A= PROFILE_DEFAULT_GATE_STABILITY_HOST_B= \
+PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT= INVITE_KEY=inv-real-009 CAMPAIGN_SUBJECT= \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_HOSTS_ROADMAP_PROGRESS_SUMMARY_JSON" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/roadmap_fallback_hosts_reports" \
+  --summary-json "$ROADMAP_FALLBACK_HOSTS_SUMMARY" \
+  --iterations 1 \
+  --include-track-id profile_default_gate_stability_cycle \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 0
+  and .inputs.selected_track_ids == ["profile_default_gate_stability_cycle"]
+  and .selection_accounting.unresolved_required_track_count == 0
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_a")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_a")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_b")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_b")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (.iterations | length == 1)
+  and (.iterations[0].tracks | length == 1)
+  and .iterations[0].tracks[0].track_id == "profile_default_gate_stability_cycle"
+  and .iterations[0].tracks[0].status == "pass"
+' "$ROADMAP_FALLBACK_HOSTS_SUMMARY" >/dev/null; then
+  echo "roadmap-summary host fallback summary mismatch"
+  cat "$ROADMAP_FALLBACK_HOSTS_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected 1 execution in roadmap-summary host fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "A:pass" "$EXEC_LOG" >/dev/null; then
+  echo "track A should run in roadmap-summary host fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "B:" "$EXEC_LOG" >/dev/null || grep -F "C:" "$EXEC_LOG" >/dev/null; then
+  echo "tracks B/C should not run in roadmap-summary host fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary env-assignment fallback path"
+ROADMAP_FALLBACK_ENV_ASSIGNMENTS_SUMMARY="$TMP_DIR/roadmap_fallback_env_assignments_summary.json"
+: >"$EXEC_LOG"
+A_HOST= B_HOST= PROFILE_DEFAULT_GATE_STABILITY_HOST_A= PROFILE_DEFAULT_GATE_STABILITY_HOST_B= \
+PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT= CAMPAIGN_SUBJECT= INVITE_KEY= \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/roadmap_fallback_env_assignments_reports" \
+  --summary-json "$ROADMAP_FALLBACK_ENV_ASSIGNMENTS_SUMMARY" \
+  --iterations 1 \
+  --include-track-id profile_default_gate_stability_cycle \
+  --include-track-id runtime_actuation_promotion_cycle \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .summary.executed_tracks == 2
+  and .summary.skipped_tracks == 0
+  and .inputs.selected_track_ids == [
+    "profile_default_gate_stability_cycle",
+    "runtime_actuation_promotion_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_count == 0
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_a")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_a")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_b")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_b")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (.iterations | length == 1)
+  and ([.iterations[0].tracks[].status] == ["pass","pass"])
+' "$ROADMAP_FALLBACK_ENV_ASSIGNMENTS_SUMMARY" >/dev/null; then
+  echo "roadmap-summary env-assignment fallback summary mismatch"
+  cat "$ROADMAP_FALLBACK_ENV_ASSIGNMENTS_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "2" ]]; then
+  echo "expected 2 executions in roadmap-summary env-assignment fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "A:pass" "$EXEC_LOG" >/dev/null || ! grep -F "B:pass" "$EXEC_LOG" >/dev/null; then
+  echo "tracks A/B should run in roadmap-summary env-assignment fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "C:" "$EXEC_LOG" >/dev/null; then
+  echo "track C should not run in roadmap-summary env-assignment fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary placeholder env-assignment fail-closed path"
+ROADMAP_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_SUMMARY="$TMP_DIR/roadmap_fallback_placeholder_env_assignments_summary.json"
+: >"$EXEC_LOG"
+set +e
+A_HOST= B_HOST= PROFILE_DEFAULT_GATE_STABILITY_HOST_A= PROFILE_DEFAULT_GATE_STABILITY_HOST_B= \
+PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT= CAMPAIGN_SUBJECT= INVITE_KEY= \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/roadmap_fallback_placeholder_env_assignments_reports" \
+  --summary-json "$ROADMAP_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_SUMMARY" \
+  --iterations 1 \
+  --include-track-id profile_default_gate_stability_cycle \
+  --include-track-id runtime_actuation_promotion_cycle \
+  --print-summary-json 0
+roadmap_fallback_placeholder_env_assignments_rc=$?
+set -e
+
+if [[ "$roadmap_fallback_placeholder_env_assignments_rc" != "1" ]]; then
+  echo "expected roadmap-summary placeholder env-assignment fail-closed rc=1, got rc=$roadmap_fallback_placeholder_env_assignments_rc"
+  cat "$ROADMAP_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_SUMMARY"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "execution:no_tracks_executed"
+  and .failure_reason == "no selected tracks executed; required runtime inputs unresolved across all selected tracks"
+  and .summary.executed_tracks == 0
+  and .summary.skipped_tracks == 2
+  and .summary.skipped_unresolved_runtime_input_tracks == 2
+  and .selection_accounting.unresolved_required_track_ids == [
+    "profile_default_gate_stability_cycle",
+    "runtime_actuation_promotion_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_count == 2
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_a")
+    | .state
+  ) == "placeholder_unresolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_a")
+    | .resolution_source
+  ) == null
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_b")
+    | .state
+  ) == "placeholder_unresolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "host_b")
+    | .resolution_source
+  ) == null
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_default_gate_stability_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .state
+  ) == "placeholder_unresolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .state
+  ) == "placeholder_unresolved"
+  and (.iterations | length == 1)
+  and ([.iterations[0].tracks[].status] == ["skipped","skipped"])
+  and .iterations[0].tracks[0].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[0].failure_diagnostics.unresolved_required_inputs == ["host_a","host_b","campaign_subject"]
+  and .iterations[0].tracks[1].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[1].failure_diagnostics.unresolved_required_inputs == ["campaign_subject"]
+' "$ROADMAP_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_SUMMARY" >/dev/null; then
+  echo "roadmap-summary placeholder env-assignment fail-closed summary mismatch"
+  cat "$ROADMAP_FALLBACK_PLACEHOLDER_ENV_ASSIGNMENTS_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "0" ]]; then
+  echo "expected 0 executions in roadmap-summary placeholder env-assignment fail-closed path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary placeholder subject ignore path"
+ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY="$TMP_DIR/roadmap_fallback_placeholder_subject_summary.json"
+: >"$EXEC_LOG"
+CAMPAIGN_SUBJECT= INVITE_KEY= \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_PLACEHOLDER_SUBJECT_ROADMAP_PROGRESS_SUMMARY_JSON" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/roadmap_fallback_placeholder_subject_reports" \
+  --summary-json "$ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY" \
+  --iterations 1 \
+  --include-track-id runtime_actuation_promotion_cycle \
+  --include-track-id profile_compare_multi_vm_stability_promotion_cycle \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 1
+  and .summary.skipped_unresolved_runtime_input_tracks == 1
+  and .inputs.selected_track_ids == [
+    "runtime_actuation_promotion_cycle",
+    "profile_compare_multi_vm_stability_promotion_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_ids == [
+    "runtime_actuation_promotion_cycle"
+  ]
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .unresolved_required_count
+  ) == 1
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .state
+  ) != "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .resolution_source
+  ) == null
+  and (.iterations | length == 1)
+  and ([.iterations[0].tracks[].status] == ["skipped","pass"])
+  and .iterations[0].tracks[0].track_id == "runtime_actuation_promotion_cycle"
+  and .iterations[0].tracks[0].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[1].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .iterations[0].tracks[1].status == "pass"
+' "$ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY" >/dev/null; then
+  echo "roadmap-summary placeholder subject ignore summary mismatch"
+  cat "$ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected 1 execution in roadmap-summary placeholder subject ignore path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "C:pass" "$EXEC_LOG" >/dev/null; then
+  echo "track C should run in roadmap-summary placeholder subject ignore path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "B:" "$EXEC_LOG" >/dev/null || grep -F "A:" "$EXEC_LOG" >/dev/null; then
+  echo "tracks A/B should not run in roadmap-summary placeholder subject ignore path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary concrete subject fallback path"
+ROADMAP_FALLBACK_CONCRETE_SUBJECT_SUMMARY="$TMP_DIR/roadmap_fallback_concrete_subject_summary.json"
+: >"$EXEC_LOG"
+CAMPAIGN_SUBJECT= INVITE_KEY= \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_CONCRETE_SUBJECT_ROADMAP_PROGRESS_SUMMARY_JSON" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/roadmap_fallback_concrete_subject_reports" \
+  --summary-json "$ROADMAP_FALLBACK_CONCRETE_SUBJECT_SUMMARY" \
+  --iterations 1 \
+  --include-track-id runtime_actuation_promotion_cycle \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 0
+  and .selection_accounting.unresolved_required_track_count == 0
+  and .inputs.selected_track_ids == ["runtime_actuation_promotion_cycle"]
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .state
+  ) == "resolved"
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "runtime_actuation_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "campaign_subject")
+    | .resolution_source
+    | test("^roadmap_summary:")
+  )
+  and (.iterations | length == 1)
+  and (.iterations[0].tracks | length == 1)
+  and .iterations[0].tracks[0].track_id == "runtime_actuation_promotion_cycle"
+  and .iterations[0].tracks[0].status == "pass"
+' "$ROADMAP_FALLBACK_CONCRETE_SUBJECT_SUMMARY" >/dev/null; then
+  echo "roadmap-summary concrete subject fallback summary mismatch"
+  cat "$ROADMAP_FALLBACK_CONCRETE_SUBJECT_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected 1 execution in roadmap-summary concrete subject fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "B:pass" "$EXEC_LOG" >/dev/null; then
+  echo "track B should run in roadmap-summary concrete subject fallback path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "A:" "$EXEC_LOG" >/dev/null || grep -F "C:" "$EXEC_LOG" >/dev/null; then
+  echo "tracks A/C should not run in roadmap-summary concrete subject fallback path"
   cat "$EXEC_LOG"
   exit 1
 fi

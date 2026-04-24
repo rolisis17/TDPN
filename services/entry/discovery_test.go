@@ -172,6 +172,110 @@ func TestResolveExitRouteStrictCacheHitStillValidatesRoute(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteStrictBypassesCachedOperatorMetadata(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-a",
+			Role:       "exit",
+			Endpoint:   "198.51.100.20:51821",
+			ControlURL: "https://198.51.100.20:8084",
+			OperatorID: "op-fresh",
+		},
+	})
+
+	calls := 0
+	origRelays := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		calls++
+		return origRelays(req)
+	}
+
+	s := &Service{
+		betaStrict:          true,
+		exitControlURL:      "http://127.0.0.1:8084",
+		exitDataAddr:        "127.0.0.1:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache: map[string]exitRoute{
+			"exit-a": {
+				controlURL: "https://198.51.100.20:8084",
+				dataAddr:   "198.51.100.20:51821",
+				operatorID: "op-stale",
+				fetchedAt:  time.Now(),
+				validUntil: time.Now().Add(time.Minute),
+			},
+		},
+	}
+
+	route, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err != nil {
+		t.Fatalf("resolve route failed: %v", err)
+	}
+	if route.operatorID != "op-fresh" {
+		t.Fatalf("expected strict mode to bypass stale cached operator metadata, got %q", route.operatorID)
+	}
+	if calls != 1 {
+		t.Fatalf("expected strict mode to bypass cache read and fetch relays, got %d relays calls", calls)
+	}
+}
+
+func TestResolveExitRouteDistinctModeBypassesCachedOperatorMetadata(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-a",
+			Role:       "exit",
+			Endpoint:   "198.51.100.21:51821",
+			ControlURL: "https://198.51.100.21:8084",
+			OperatorID: "op-fresh",
+		},
+	})
+
+	calls := 0
+	origRelays := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		calls++
+		return origRelays(req)
+	}
+
+	s := &Service{
+		requireDistinctExitOp: true,
+		exitControlURL:        "http://127.0.0.1:8084",
+		exitDataAddr:          "127.0.0.1:51821",
+		directoryURLs:         []string{durl},
+		directoryMinSources:   1,
+		directoryMinVotes:     1,
+		routeTTL:              time.Minute,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache: map[string]exitRoute{
+			"exit-a": {
+				controlURL: "https://198.51.100.21:8084",
+				dataAddr:   "198.51.100.21:51821",
+				operatorID: "op-stale",
+				fetchedAt:  time.Now(),
+				validUntil: time.Now().Add(time.Minute),
+			},
+		},
+	}
+
+	route, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err != nil {
+		t.Fatalf("resolve route failed: %v", err)
+	}
+	if route.operatorID != "op-fresh" {
+		t.Fatalf("expected distinct mode to bypass stale cached operator metadata, got %q", route.operatorID)
+	}
+	if calls != 1 {
+		t.Fatalf("expected distinct mode to bypass cache read and fetch relays, got %d relays calls", calls)
+	}
+}
+
 func TestResolveExitRouteCacheBypassesExpiredDescriptor(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))

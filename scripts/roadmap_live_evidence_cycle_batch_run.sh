@@ -38,6 +38,9 @@ Track path overrides:
 Failure diagnostics:
   ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_FAILURE_LOG_TAIL_LINES (default: 20)
 
+Runtime input fallback summary override:
+  ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON (default: .easy-node-logs/roadmap_progress_summary.json)
+
 Exit behavior:
   - With --continue-on-fail=0, stop after first failed track result.
   - With --continue-on-fail=1, execute all selected tracks for all iterations.
@@ -234,6 +237,7 @@ continue_on_fail="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_CONTINUE_ON_FAIL:-0}"
 parallel="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_PARALLEL:-0}"
 print_summary_json="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_PRINT_SUMMARY_JSON:-1}"
 failure_log_tail_lines="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_FAILURE_LOG_TAIL_LINES:-20}"
+roadmap_progress_summary_json="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON:-.easy-node-logs/roadmap_progress_summary.json}"
 
 declare -a include_track_ids=()
 declare -a exclude_track_ids=()
@@ -329,6 +333,7 @@ if [[ -z "$summary_json" ]]; then
 fi
 summary_json="$(abs_path "$summary_json")"
 mkdir -p "$(dirname "$summary_json")"
+roadmap_progress_summary_json="$(abs_path "$roadmap_progress_summary_json")"
 
 default_track_ids_json='[
   "profile_default_gate_stability_cycle",
@@ -398,18 +403,200 @@ json_array_from_ref() {
   printf '%s' "$out"
 }
 
+roadmap_summary_next_action_commands_cache_ready="0"
+roadmap_summary_next_action_commands_json_cache='[]'
+roadmap_runtime_input_fallback_last_value=""
+roadmap_runtime_input_fallback_last_source=""
+roadmap_runtime_input_fallback_last_placeholder_detected="0"
+
+load_roadmap_summary_next_action_commands_cache_01() {
+  local extracted_json="[]"
+  if [[ "$roadmap_summary_next_action_commands_cache_ready" == "1" ]]; then
+    return
+  fi
+  roadmap_summary_next_action_commands_cache_ready="1"
+  roadmap_summary_next_action_commands_json_cache='[]'
+
+  if [[ -z "$roadmap_progress_summary_json" ]]; then
+    return
+  fi
+  if [[ ! -f "$roadmap_progress_summary_json" || ! -r "$roadmap_progress_summary_json" ]]; then
+    return
+  fi
+  if ! extracted_json="$(jq -c '
+    if type == "object" then
+      [(.next_actions // [])[] | (.command? // empty) | strings]
+    else
+      []
+    end
+  ' "$roadmap_progress_summary_json" 2>/dev/null)"; then
+    return
+  fi
+  if jq -e 'type == "array"' <<<"$extracted_json" >/dev/null 2>&1; then
+    roadmap_summary_next_action_commands_json_cache="$extracted_json"
+  fi
+}
+
+extract_flag_value_from_command_01() {
+  local cmd="$1"
+  local flag="$2"
+  local value=""
+  if [[ -z "$cmd" || -z "$flag" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${flag}=([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    value="$(strip_optional_wrapping_quotes_01 "$value")"
+    printf '%s' "$(trim "$value")"
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${flag}[[:space:]]+([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    value="$(strip_optional_wrapping_quotes_01 "$value")"
+    printf '%s' "$(trim "$value")"
+    return
+  fi
+  printf '%s' ""
+}
+
+extract_env_assignment_value_from_command_01() {
+  local cmd="$1"
+  local env_name="$2"
+  local value=""
+  if [[ -z "$cmd" || -z "$env_name" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$cmd" =~ (^|[[:space:]])${env_name}=([^[:space:]]+) ]]; then
+    value="${BASH_REMATCH[2]}"
+    value="$(strip_optional_wrapping_quotes_01 "$value")"
+    printf '%s' "$(trim "$value")"
+    return
+  fi
+  printf '%s' ""
+}
+
+roadmap_summary_command_matches_track_scope_01() {
+  local track_id="$1"
+  local cmd="$2"
+  case "$track_id" in
+    profile_default_gate_stability_cycle)
+      if [[ "$cmd" == *"profile-default-gate-stability-cycle"* ]] \
+         || [[ "$cmd" == *"profile-default-gate-stability-run"* ]] \
+         || [[ "$cmd" == *"profile_default_gate_stability_cycle.sh"* ]] \
+         || [[ "$cmd" == *"profile_default_gate_stability_run.sh"* ]]; then
+        return 0
+      fi
+      ;;
+    runtime_actuation_promotion_cycle)
+      if [[ "$cmd" == *"runtime-actuation-promotion-cycle"* ]] \
+         || [[ "$cmd" == *"runtime_actuation_promotion_cycle.sh"* ]]; then
+        return 0
+      fi
+      ;;
+    *)
+      ;;
+  esac
+  return 1
+}
+
+resolve_runtime_input_from_roadmap_summary_01() {
+  local track_id="$1"
+  local input_id="$2"
+  local cmd=""
+  local value=""
+  roadmap_runtime_input_fallback_last_value=""
+  roadmap_runtime_input_fallback_last_source=""
+  roadmap_runtime_input_fallback_last_placeholder_detected="0"
+
+  load_roadmap_summary_next_action_commands_cache_01
+  while IFS= read -r cmd || [[ -n "$cmd" ]]; do
+    cmd="$(trim "$cmd")"
+    if [[ -z "$cmd" ]]; then
+      continue
+    fi
+    if ! roadmap_summary_command_matches_track_scope_01 "$track_id" "$cmd"; then
+      continue
+    fi
+
+    value=""
+    case "$input_id" in
+      host_a)
+        value="$(extract_flag_value_from_command_01 "$cmd" "--host-a")"
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "PROFILE_DEFAULT_GATE_STABILITY_HOST_A")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "A_HOST")"
+        fi
+        ;;
+      host_b)
+        value="$(extract_flag_value_from_command_01 "$cmd" "--host-b")"
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "PROFILE_DEFAULT_GATE_STABILITY_HOST_B")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "B_HOST")"
+        fi
+        ;;
+      campaign_subject)
+        value="$(extract_flag_value_from_command_01 "$cmd" "--campaign-subject")"
+        if [[ -z "$value" ]]; then
+          value="$(extract_flag_value_from_command_01 "$cmd" "--subject")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_flag_value_from_command_01 "$cmd" "--key")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_flag_value_from_command_01 "$cmd" "--invite-key")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "CAMPAIGN_SUBJECT")"
+        fi
+        if [[ -z "$value" ]]; then
+          value="$(extract_env_assignment_value_from_command_01 "$cmd" "INVITE_KEY")"
+        fi
+        ;;
+      *)
+        value=""
+        ;;
+    esac
+
+    value="$(trim "$value")"
+    if [[ -z "$value" ]]; then
+      continue
+    fi
+    if is_runtime_placeholder_token_01 "$value"; then
+      roadmap_runtime_input_fallback_last_placeholder_detected="1"
+      continue
+    fi
+    roadmap_runtime_input_fallback_last_value="$value"
+    roadmap_runtime_input_fallback_last_source="roadmap_summary:next_actions"
+    return 0
+  done < <(jq -r '.[]' <<<"$roadmap_summary_next_action_commands_json_cache" 2>/dev/null || true)
+  return 1
+}
+
 resolve_runtime_input_state_json() {
-  local input_id="$1"
-  local required_flag="$2"
-  local description="$3"
-  local operator_hint="$4"
-  shift 4
+  local track_id="$1"
+  local input_id="$2"
+  local required_flag="$3"
+  local description="$4"
+  local operator_hint="$5"
+  shift 5
   local -a env_candidates=("$@")
   local -a placeholder_envs=()
   local env_name=""
   local env_value=""
   local resolved_env=""
+  local resolved_fallback_value=""
+  local fallback_placeholder_detected="0"
   local state="missing"
+  local resolution_source=""
 
   for env_name in "${env_candidates[@]}"; do
     env_value="$(trim "${!env_name:-}")"
@@ -426,21 +613,26 @@ resolve_runtime_input_state_json() {
 
   if [[ -n "$resolved_env" ]]; then
     state="resolved"
-  elif (( ${#placeholder_envs[@]} > 0 )); then
-    state="placeholder_unresolved"
+    resolution_source="env:${resolved_env}"
+  else
+    resolve_runtime_input_from_roadmap_summary_01 "$track_id" "$input_id"
+    resolved_fallback_value="$roadmap_runtime_input_fallback_last_value"
+    fallback_placeholder_detected="$roadmap_runtime_input_fallback_last_placeholder_detected"
+    if [[ -n "$resolved_fallback_value" ]]; then
+      state="resolved"
+      resolution_source="$roadmap_runtime_input_fallback_last_source"
+    elif (( ${#placeholder_envs[@]} > 0 )) || [[ "$fallback_placeholder_detected" == "1" ]]; then
+      state="placeholder_unresolved"
+    fi
   fi
 
   local env_candidates_json
   local placeholder_envs_json
   local value_present_json="false"
-  local resolution_source=""
   env_candidates_json="$(json_array_from_ref env_candidates)"
   placeholder_envs_json="$(json_array_from_ref placeholder_envs)"
   if [[ "$state" != "missing" ]]; then
     value_present_json="true"
-  fi
-  if [[ -n "$resolved_env" ]]; then
-    resolution_source="env:${resolved_env}"
   fi
 
   jq -cn \
@@ -718,18 +910,21 @@ build_track_runtime_requirements_json() {
     profile_default_gate_stability_cycle)
       track_group="m2_profile_default_gate_stability"
       row_json="$(resolve_runtime_input_state_json \
+        "profile_default_gate_stability_cycle" \
         "host_a" "true" \
         "Real host/IP for lane A." \
         "Set PROFILE_DEFAULT_GATE_STABILITY_HOST_A or A_HOST to a concrete host." \
         "PROFILE_DEFAULT_GATE_STABILITY_HOST_A" "A_HOST")"
       requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
       row_json="$(resolve_runtime_input_state_json \
+        "profile_default_gate_stability_cycle" \
         "host_b" "true" \
         "Real host/IP for lane B." \
         "Set PROFILE_DEFAULT_GATE_STABILITY_HOST_B or B_HOST to a concrete host." \
         "PROFILE_DEFAULT_GATE_STABILITY_HOST_B" "B_HOST")"
       requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
       row_json="$(resolve_runtime_input_state_json \
+        "profile_default_gate_stability_cycle" \
         "campaign_subject" "true" \
         "Concrete invite/campaign subject for profile-default gate checks." \
         "Set PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT or INVITE_KEY to a real invite subject." \
@@ -739,6 +934,7 @@ build_track_runtime_requirements_json() {
     runtime_actuation_promotion_cycle)
       track_group="m4_runtime_actuation_promotion"
       row_json="$(resolve_runtime_input_state_json \
+        "runtime_actuation_promotion_cycle" \
         "campaign_subject" "true" \
         "Concrete invite/campaign subject (required when signoff args do not provide a usable subject)." \
         "Set CAMPAIGN_SUBJECT or INVITE_KEY to a real invite subject." \
