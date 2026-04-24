@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -159,5 +160,73 @@ func TestBillingMsgServer_NilScaffoldReturnsUnwiredServer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "vpnbilling keeper is not wired") {
 		t.Fatalf("expected unwired keeper error, got: %v", err)
+	}
+}
+
+func TestBillingMsgServer_CreateReservationHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.BillingMsgServer()
+
+	reservation := billingtypes.CreditReservation{
+		ReservationID: "res-canceled-ctx-1",
+		SponsorID:     "sponsor-canceled-ctx-1",
+		SessionID:     "session-canceled-ctx-1",
+		AssetDenom:    "utdpn",
+		Amount:        10,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.CreateReservation(canceledCtx, BillingCreateReservationRequest{Record: reservation}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, ok := scaffold.BillingModule.Keeper.GetReservation(reservation.ReservationID); ok {
+		t.Fatalf("expected no reservation write on canceled context for reservation %s", reservation.ReservationID)
+	}
+}
+
+func TestBillingMsgServer_FinalizeSettlementHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.BillingMsgServer()
+
+	reservation := billingtypes.CreditReservation{
+		ReservationID: "res-canceled-ctx-2",
+		SponsorID:     "sponsor-canceled-ctx-2",
+		SessionID:     "session-canceled-ctx-2",
+		AssetDenom:    "utdpn",
+		Amount:        10,
+	}
+	if _, err := server.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation}); err != nil {
+		t.Fatalf("expected reservation create to succeed, got error: %v", err)
+	}
+
+	settlement := billingtypes.SettlementRecord{
+		SettlementID:  "set-canceled-ctx-2",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  5,
+		UsageBytes:    256,
+		AssetDenom:    reservation.AssetDenom,
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.FinalizeSettlement(canceledCtx, BillingFinalizeSettlementRequest{Record: settlement}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, ok := scaffold.BillingModule.Keeper.GetSettlement(settlement.SettlementID); ok {
+		t.Fatalf("expected no settlement write on canceled context for settlement %s", settlement.SettlementID)
+	}
+
+	storedReservation, ok := scaffold.BillingModule.Keeper.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatalf("expected reservation %s to remain present", reservation.ReservationID)
+	}
+	if storedReservation.Status != chaintypes.ReconciliationPending {
+		t.Fatalf("expected reservation status %q to remain unchanged, got %q", chaintypes.ReconciliationPending, storedReservation.Status)
 	}
 }

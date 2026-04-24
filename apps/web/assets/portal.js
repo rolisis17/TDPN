@@ -108,6 +108,7 @@ const serverLockHintEl = byId("server_lock_hint");
 const tabLockHintEl = document.getElementById("tab_lock_hint");
 const workspaceFirstRunHintEl = document.getElementById("workspace_first_run_hint");
 const workspacePlatformHintEl = document.getElementById("workspace_platform_hint");
+const workspaceNextActionHintEl = document.getElementById("workspace_next_action_hint");
 const serverLifecycleHintEl = byId("server_lifecycle_hint");
 const serverStartBtnEl = byId("server_start_btn");
 const serverStopBtnEl = byId("server_stop_btn");
@@ -3389,18 +3390,31 @@ function formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible) 
   return "Server tab is disabled for this session. Use the lock message activation path to finish Step 3 and unlock server actions.";
 }
 
+function syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible) {
+  if (!workspaceNextActionHintEl) {
+    return;
+  }
+  const nextAction = ensureSentence(computePortalNextRecommendedAction());
+  const lockContext =
+    !clientTabVisible || !serverTabVisible
+      ? ` ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`
+      : "";
+  workspaceNextActionHintEl.textContent = `Workspace next action: ${nextAction}${lockContext}`;
+  workspaceNextActionHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
+}
+
 function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
   if (workspaceFirstRunHintEl) {
     workspaceFirstRunHintEl.textContent =
       `Single-window tabs keep both lanes visible. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
     workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
   }
-  if (!workspacePlatformHintEl) {
-    return;
+  if (workspacePlatformHintEl) {
+    workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
+      ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions."
+      : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions.";
   }
-  workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-    ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions."
-    : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions.";
+  syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible);
 }
 
 function inferWorkspaceTabActivationPathHint(tabName, reason) {
@@ -3828,6 +3842,7 @@ function syncPortalOnboardingStateBanner() {
   onboardingStateTitleEl.textContent = onboardingState.title;
   onboardingStateDetailEl.textContent = onboardingState.detail;
   onboardingNextActionEl.textContent = `Next recommended action: ${computePortalNextRecommendedAction()}`;
+  syncWorkspaceNextActionHint(isClientTabVisibleRole(), isServerTabVisibleRole());
   syncSessionFreshnessBanner();
 }
 

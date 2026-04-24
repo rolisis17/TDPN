@@ -9183,6 +9183,69 @@ fi
 
 : >"$CAPTURE"
 
+echo "[roadmap-progress-report] runtime-actuation evidence-pack next command normalizes mixed Windows separators"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_REPORTS_DIR='C:/roadmap\runtime_actuation_promotion_windows_mixed_reports'
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_REPORTS_DIR_NORMALIZED="C:/roadmap/runtime_actuation_promotion_windows_mixed_reports"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_SUMMARY_JSON="${RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_REPORTS_DIR}\\runtime_actuation_promotion_evidence_pack_summary.json"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_SUMMARY_JSON_NORMALIZED="$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_REPORTS_DIR_NORMALIZED/runtime_actuation_promotion_evidence_pack_summary.json"
+RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_runtime_actuation_evidence_pack_windows_mixed_summary.json"
+jq --arg summary_json_path "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_SUMMARY_JSON" '
+  .summary = (
+    (.summary // {})
+    + {
+      runtime_actuation_promotion_evidence_pack: {
+        summary_json: $summary_json_path
+      }
+    }
+  )
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_MANUAL_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_PROMOTION_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_mixed_path_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_mixed_path_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_windows_mixed_path.log 2>&1; then
+  echo "expected success for runtime-actuation evidence-pack mixed Windows separator normalization path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_evidence_pack_windows_mixed_path.log
+  exit 1
+fi
+if ! jq -e \
+  --arg reports_dir "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_REPORTS_DIR_NORMALIZED" \
+  --arg summary_json "$RUNTIME_ACTUATION_EVIDENCE_PACK_WINDOWS_MIXED_SUMMARY_JSON_NORMALIZED" \
+  --argjson helper_available "$RUNTIME_ACTUATION_EVIDENCE_PACK_HELPER_AVAILABLE_JSON" \
+  '
+  .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and .vpn_track.runtime_actuation_promotion_evidence_pack.needs_attention == true
+  and (if $helper_available then
+         ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("^\\./scripts/easy_node\\.sh runtime-actuation-promotion-evidence-pack( |$)"))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--reports-dir " + $reports_dir))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
+         and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--reports-dir C:( |$)")) | not)
+         and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("C:\\\\")) | not)
+         and ((.next_actions // []) | any(
+           .id == "runtime_actuation_promotion_evidence_pack"
+           and ((.command // "") | contains("--reports-dir " + $reports_dir))
+           and ((.command // "") | contains("--summary-json " + $summary_json))
+           and (((.command // "") | test("(^| )--reports-dir C:( |$)")) | not)
+           and (((.command // "") | contains("C:\\\\")) | not)
+         ))
+       else
+         (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("helper is unavailable"; "i"))
+         and (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
+       end)
+  ' "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_mixed_path_summary.json" >/dev/null; then
+  echo "runtime-actuation evidence-pack mixed Windows separator normalization summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_evidence_pack_windows_mixed_path_summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
 echo "[roadmap-progress-report] evidence-pack clean pass summaries suppress actionable convenience run"
 EVIDENCE_PACK_ALL_PASS_DIR="$TMP_DIR/evidence_pack_all_pass"
 mkdir -p "$EVIDENCE_PACK_ALL_PASS_DIR"

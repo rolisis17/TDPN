@@ -40,7 +40,13 @@ type billingMsgServer struct {
 	msgServer billingmodule.MsgServer
 }
 
-func (m billingMsgServer) CreateReservation(_ context.Context, req BillingCreateReservationRequest) (BillingCreateReservationResponse, error) {
+func (m billingMsgServer) CreateReservation(ctx context.Context, req BillingCreateReservationRequest) (BillingCreateReservationResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return BillingCreateReservationResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.ReserveCredits(billingmodule.ReserveCreditsRequest{Reservation: req.Record})
 	if err != nil {
 		if errors.Is(err, billingmodule.ErrNilKeeper) {
@@ -54,7 +60,13 @@ func (m billingMsgServer) CreateReservation(_ context.Context, req BillingCreate
 	}, nil
 }
 
-func (m billingMsgServer) FinalizeSettlement(_ context.Context, req BillingFinalizeSettlementRequest) (BillingFinalizeSettlementResponse, error) {
+func (m billingMsgServer) FinalizeSettlement(ctx context.Context, req BillingFinalizeSettlementRequest) (BillingFinalizeSettlementResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return BillingFinalizeSettlementResponse{}, err
+		}
+	}
+
 	resp, err := m.msgServer.FinalizeUsage(billingmodule.FinalizeUsageRequest{Settlement: req.Record})
 	if err != nil {
 		if errors.Is(err, billingmodule.ErrNilKeeper) {

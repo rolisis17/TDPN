@@ -310,6 +310,327 @@ function Test-ExecutionPolicyRisk {
     $policy.Equals("AllSigned", [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function ConvertTo-NullableBoolean {
+  param(
+    [AllowNull()]
+    [string]$Value
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $null
+  }
+
+  $normalized = $Value.Trim()
+  if ($normalized.StartsWith("$")) {
+    $normalized = $normalized.Substring(1)
+  }
+  $normalized = $normalized.ToLowerInvariant()
+
+  if ($normalized -in @("1", "true", "yes", "on")) {
+    return $true
+  }
+  if ($normalized -in @("0", "false", "no", "off")) {
+    return $false
+  }
+
+  return $null
+}
+
+function Get-NodeCmdProfileShimProfilePath {
+  $overridePath = [Environment]::GetEnvironmentVariable("GPM_DESKTOP_DOCTOR_PROFILE_PATH", "Process")
+  if (-not [string]::IsNullOrWhiteSpace($overridePath)) {
+    return [pscustomobject]@{
+      path = [Environment]::ExpandEnvironmentVariables($overridePath.Trim())
+      source = "env:GPM_DESKTOP_DOCTOR_PROFILE_PATH"
+    }
+  }
+
+  try {
+    return [pscustomobject]@{
+      path = [string]$PROFILE.CurrentUserCurrentHost
+      source = "profile.current_user_current_host"
+    }
+  } catch {
+    return [pscustomobject]@{
+      path = ""
+      source = "unavailable"
+    }
+  }
+}
+
+function Get-NodeCmdProfileShimBlock {
+  $newline = [Environment]::NewLine
+  $lines = @(
+    "# >>> GPM node cmd shim >>>",
+    "if (Get-Command npm.cmd -ErrorAction SilentlyContinue) { Set-Alias -Name npm -Value npm.cmd -Scope Global -Force }",
+    "if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { Set-Alias -Name npx -Value npx.cmd -Scope Global -Force }",
+    "# <<< GPM node cmd shim <<<"
+  )
+  return ($lines -join $newline)
+}
+
+function Test-NodeCmdProfileShimPresent {
+  param(
+    [AllowEmptyString()]
+    [string]$ProfilePath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
+    return $false
+  }
+
+  if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) {
+    return $false
+  }
+
+  $content = ""
+  try {
+    $content = [string](Get-Content -Raw -LiteralPath $ProfilePath -ErrorAction Stop)
+  } catch {
+    return $false
+  }
+
+  if ([string]::IsNullOrWhiteSpace($content)) {
+    return $false
+  }
+
+  return $content.Contains("# >>> GPM node cmd shim >>>") -and $content.Contains("# <<< GPM node cmd shim <<<")
+}
+
+function Get-NodeCmdProfileShimReport {
+  param(
+    [AllowEmptyString()]
+    [string]$EffectivePolicy
+  )
+
+  $policyRisk = Test-ExecutionPolicyRisk -EffectivePolicy $EffectivePolicy
+  $forcedPolicyRisk = ConvertTo-NullableBoolean -Value ([Environment]::GetEnvironmentVariable("DESKTOP_DOCTOR_FORCE_EXECUTION_POLICY_RISK", "Process"))
+  if ($null -ne $forcedPolicyRisk) {
+    $policyRisk = [bool]$forcedPolicyRisk
+  }
+
+  $npmRawPath = [string](Get-CommandPath "npm")
+  $npxRawPath = [string](Get-CommandPath "npx")
+
+  $npmResolvesToPs1 = $false
+  $npxResolvesToPs1 = $false
+  $npmCmdSiblingPath = ""
+  $npxCmdSiblingPath = ""
+
+  if (-not [string]::IsNullOrWhiteSpace($npmRawPath)) {
+    $npmLeaf = [System.IO.Path]::GetFileName($npmRawPath)
+    $npmResolvesToPs1 = $npmLeaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)
+    if ($npmResolvesToPs1) {
+      $candidateSibling = [System.IO.Path]::ChangeExtension($npmRawPath, ".cmd")
+      if (Test-Path -LiteralPath $candidateSibling -PathType Leaf) {
+        $npmCmdSiblingPath = $candidateSibling
+      }
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($npxRawPath)) {
+    $npxLeaf = [System.IO.Path]::GetFileName($npxRawPath)
+    $npxResolvesToPs1 = $npxLeaf.Equals("npx.ps1", [System.StringComparison]::OrdinalIgnoreCase)
+    if ($npxResolvesToPs1) {
+      $candidateSibling = [System.IO.Path]::ChangeExtension($npxRawPath, ".cmd")
+      if (Test-Path -LiteralPath $candidateSibling -PathType Leaf) {
+        $npxCmdSiblingPath = $candidateSibling
+      }
+    }
+  }
+
+  $forcedShimRequired = ConvertTo-NullableBoolean -Value ([Environment]::GetEnvironmentVariable("DESKTOP_DOCTOR_FORCE_NODE_CMD_PROFILE_SHIM_REQUIRED", "Process"))
+  $shimRequired = $policyRisk -and (
+    ($npmResolvesToPs1 -and -not [string]::IsNullOrWhiteSpace($npmCmdSiblingPath)) -or
+    ($npxResolvesToPs1 -and -not [string]::IsNullOrWhiteSpace($npxCmdSiblingPath))
+  )
+  if ($null -ne $forcedShimRequired) {
+    $shimRequired = [bool]$forcedShimRequired
+  }
+
+  $profileTarget = Get-NodeCmdProfileShimProfilePath
+  $profilePath = [string]$profileTarget.path
+  $profilePathSource = [string]$profileTarget.source
+  $profileShimPresent = Test-NodeCmdProfileShimPresent -ProfilePath $profilePath
+
+  return [pscustomobject]@{
+    policy_risk = [bool]$policyRisk
+    npm_resolves_to_ps1 = [bool]$npmResolvesToPs1
+    npm_command_path = $npmRawPath
+    npm_cmd_sibling_path = $npmCmdSiblingPath
+    npm_cmd_sibling_available = (-not [string]::IsNullOrWhiteSpace($npmCmdSiblingPath))
+    npx_resolves_to_ps1 = [bool]$npxResolvesToPs1
+    npx_command_path = $npxRawPath
+    npx_cmd_sibling_path = $npxCmdSiblingPath
+    npx_cmd_sibling_available = (-not [string]::IsNullOrWhiteSpace($npxCmdSiblingPath))
+    profile_path = $profilePath
+    profile_path_source = $profilePathSource
+    profile_shim_required = [bool]$shimRequired
+    profile_shim_present = [bool]$profileShimPresent
+    remediation_attempted = $false
+    remediation_applied = $false
+    remediation_skipped_reason = ""
+  }
+}
+
+function Ensure-NodeCmdProfileShim {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Report
+  )
+
+  if ($null -eq $Report) {
+    throw "node cmd profile shim report is required"
+  }
+
+  $result = [ordered]@{
+    policy_risk = [bool]$Report.policy_risk
+    npm_resolves_to_ps1 = [bool]$Report.npm_resolves_to_ps1
+    npm_command_path = [string]$Report.npm_command_path
+    npm_cmd_sibling_path = [string]$Report.npm_cmd_sibling_path
+    npm_cmd_sibling_available = [bool]$Report.npm_cmd_sibling_available
+    npx_resolves_to_ps1 = [bool]$Report.npx_resolves_to_ps1
+    npx_command_path = [string]$Report.npx_command_path
+    npx_cmd_sibling_path = [string]$Report.npx_cmd_sibling_path
+    npx_cmd_sibling_available = [bool]$Report.npx_cmd_sibling_available
+    profile_path = [string]$Report.profile_path
+    profile_path_source = [string]$Report.profile_path_source
+    profile_shim_required = [bool]$Report.profile_shim_required
+    profile_shim_present = [bool]$Report.profile_shim_present
+    remediation_attempted = $false
+    remediation_applied = $false
+    remediation_skipped_reason = ""
+  }
+
+  if (-not [bool]$result.profile_shim_required) {
+    $result.remediation_skipped_reason = "not_required"
+    return [pscustomobject]$result
+  }
+
+  if ([string]::IsNullOrWhiteSpace([string]$result.profile_path)) {
+    $result.remediation_skipped_reason = "profile_path_unavailable"
+    return [pscustomobject]$result
+  }
+
+  $result.remediation_attempted = $true
+  if ($DryRun) {
+    $result.remediation_skipped_reason = "dry_run"
+    return [pscustomobject]$result
+  }
+
+  $profilePath = [string]$result.profile_path
+  $parentDir = Split-Path -Parent $profilePath
+  if (-not [string]::IsNullOrWhiteSpace($parentDir) -and -not (Test-Path -LiteralPath $parentDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+  }
+
+  $currentContent = ""
+  if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+    try {
+      $currentContent = [string](Get-Content -Raw -LiteralPath $profilePath -ErrorAction Stop)
+    } catch {
+      $currentContent = ""
+    }
+  }
+
+  if (($currentContent.Contains("# >>> GPM node cmd shim >>>")) -and ($currentContent.Contains("# <<< GPM node cmd shim <<<"))) {
+    $result.profile_shim_present = $true
+    $result.remediation_skipped_reason = "already_present"
+    return [pscustomobject]$result
+  }
+
+  $shimBlock = Get-NodeCmdProfileShimBlock
+  $newContent = ""
+  if ([string]::IsNullOrWhiteSpace($currentContent)) {
+    $newContent = $shimBlock + [Environment]::NewLine
+  } else {
+    $separator = [Environment]::NewLine
+    if ($currentContent.EndsWith("`r`n") -or $currentContent.EndsWith("`n")) {
+      $separator = ""
+    }
+    $newContent = $currentContent + $separator + $shimBlock + [Environment]::NewLine
+  }
+
+  Set-Content -LiteralPath $profilePath -Value $newContent -Encoding UTF8
+  $result.profile_shim_present = $true
+  $result.remediation_applied = $true
+
+  return [pscustomobject]$result
+}
+
+function Get-DefaultNodeCmdProfileShimSummary {
+  return [ordered]@{
+    policy_risk = $false
+    npm_resolves_to_ps1 = $false
+    npm_command_path = ""
+    npm_cmd_sibling_path = ""
+    npm_cmd_sibling_available = $false
+    npx_resolves_to_ps1 = $false
+    npx_command_path = ""
+    npx_cmd_sibling_path = ""
+    npx_cmd_sibling_available = $false
+    profile_path = ""
+    profile_path_source = ""
+    profile_shim_required = $false
+    profile_shim_present = $false
+    remediation_attempted = $false
+    remediation_applied = $false
+    remediation_skipped_reason = ""
+  }
+}
+
+function Convert-NodeCmdProfileShimReport {
+  param(
+    [pscustomobject]$Report
+  )
+
+  if ($null -eq $Report) {
+    return (Get-DefaultNodeCmdProfileShimSummary)
+  }
+
+  return [ordered]@{
+    policy_risk = [bool]$Report.policy_risk
+    npm_resolves_to_ps1 = [bool]$Report.npm_resolves_to_ps1
+    npm_command_path = [string]$Report.npm_command_path
+    npm_cmd_sibling_path = [string]$Report.npm_cmd_sibling_path
+    npm_cmd_sibling_available = [bool]$Report.npm_cmd_sibling_available
+    npx_resolves_to_ps1 = [bool]$Report.npx_resolves_to_ps1
+    npx_command_path = [string]$Report.npx_command_path
+    npx_cmd_sibling_path = [string]$Report.npx_cmd_sibling_path
+    npx_cmd_sibling_available = [bool]$Report.npx_cmd_sibling_available
+    profile_path = [string]$Report.profile_path
+    profile_path_source = [string]$Report.profile_path_source
+    profile_shim_required = [bool]$Report.profile_shim_required
+    profile_shim_present = [bool]$Report.profile_shim_present
+    remediation_attempted = [bool]$Report.remediation_attempted
+    remediation_applied = [bool]$Report.remediation_applied
+    remediation_skipped_reason = [string]$Report.remediation_skipped_reason
+  }
+}
+
+function Show-NodeCmdProfileShimReport {
+  param(
+    [pscustomobject]$Report
+  )
+
+  if ($null -eq $Report) {
+    return
+  }
+
+  Write-Host "node cmd profile shim:"
+  Write-Host ("  - policy_risk: " + $(if ([bool]$Report.policy_risk) { "true" } else { "false" }))
+  Write-Host ("  - profile_shim_required: " + $(if ([bool]$Report.profile_shim_required) { "true" } else { "false" }))
+  Write-Host ("  - profile_shim_present: " + $(if ([bool]$Report.profile_shim_present) { "true" } else { "false" }))
+  Write-Host ("  - remediation_attempted: " + $(if ([bool]$Report.remediation_attempted) { "true" } else { "false" }))
+  Write-Host ("  - remediation_applied: " + $(if ([bool]$Report.remediation_applied) { "true" } else { "false" }))
+  if (-not [string]::IsNullOrWhiteSpace([string]$Report.profile_path)) {
+    Write-Host ("  - profile_path: {0} ({1})" -f [string]$Report.profile_path, [string]$Report.profile_path_source)
+  }
+  if (-not [string]::IsNullOrWhiteSpace([string]$Report.remediation_skipped_reason)) {
+    Write-Host ("  - remediation_skipped_reason: {0}" -f [string]$Report.remediation_skipped_reason)
+  }
+}
+
 function Show-ExecutionPolicyStatus {
   $snapshot = Get-ExecutionPolicySnapshot
   Write-Step ("execution policy: effective={0}; process={1}; current_user={2}; local_machine={3}" -f $snapshot.effective, $snapshot.scopes.Process, $snapshot.scopes.CurrentUser, $snapshot.scopes.LocalMachine)
@@ -1344,7 +1665,8 @@ function Get-RecommendedCommands {
     [AllowEmptyCollection()]
     [string[]]$MissingPackageIds = @(),
     [AllowEmptyCollection()]
-    [string[]]$DesktopAssetIssueIds = @()
+    [string[]]$DesktopAssetIssueIds = @(),
+    [pscustomobject]$NodeCmdProfileShimReport = $null
   )
 
   $commands = New-Object System.Collections.ArrayList
@@ -1364,11 +1686,16 @@ function Get-RecommendedCommands {
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_shell.cmd npm run tauri -- dev"
   Add-UniqueValue -List $commands -Value "npm.cmd install"
   Add-UniqueValue -List $commands -Value "npm.cmd run tauri -- dev"
+  Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -Command `"if (Get-Command npm.cmd -ErrorAction SilentlyContinue) { Set-Alias -Name npm -Value npm.cmd -Scope Global -Force }; if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { Set-Alias -Name npx -Value npx.cmd -Scope Global -Force }`""
   Add-UniqueValue -List $commands -Value "scripts\windows\desktop_node.cmd npm run generate:windows-icon"
   Add-UniqueValue -List $commands -Value "powershell -NoProfile -File .\scripts\windows\desktop_one_click.ps1 -EnablePolicyBypass"
 
   foreach ($assetCommand in @(Get-DesktopAssetRecommendedCommands -IssueIds $DesktopAssetIssueIds)) {
     Add-UniqueValue -List $commands -Value $assetCommand
+  }
+
+  if ($null -ne $NodeCmdProfileShimReport -and [bool]$NodeCmdProfileShimReport.profile_shim_required -and -not [bool]$NodeCmdProfileShimReport.profile_shim_present) {
+    Add-UniqueValue -List $commands -Value "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\desktop_doctor.ps1 -Mode fix -InstallMissing -EnablePolicyBypass"
   }
 
   return @($commands.ToArray())
@@ -1575,6 +1902,7 @@ $summary = [ordered]@{
   status = "unknown"
   mode = $Mode
   tool_report = [ordered]@{}
+  node_cmd_profile_shim = (Get-DefaultNodeCmdProfileShimSummary)
   desktop_prerequisites = (Get-DefaultDesktopPrerequisiteSummary)
   desktop_assets = (Get-DefaultDesktopAssetSummary)
   missing_package_ids = @()
@@ -1597,6 +1925,7 @@ $exitCode = 0
 try {
   Write-Step "mode=$Mode"
 
+  $initialExecutionPolicySnapshot = Get-ExecutionPolicySnapshot
   Ensure-PolicyBypassProcess
 
   Refresh-SessionPath
@@ -1692,6 +2021,13 @@ try {
     }
   }
 
+  $nodeCmdProfileShimReport = Get-NodeCmdProfileShimReport -EffectivePolicy ([string]$initialExecutionPolicySnapshot.effective)
+  if ($Mode -eq "fix" -and $InstallMissing) {
+    $nodeCmdProfileShimReport = Ensure-NodeCmdProfileShim -Report $nodeCmdProfileShimReport
+  }
+  $summary.node_cmd_profile_shim = Convert-NodeCmdProfileShimReport -Report $nodeCmdProfileShimReport
+  Show-NodeCmdProfileShimReport -Report $nodeCmdProfileShimReport
+
   $hasBlockingIssues = @($summary.missing_package_ids).Count -gt 0 -or @($summary.desktop_asset_issue_ids).Count -gt 0
   if (-not $hasBlockingIssues) {
     if ($Mode -eq "fix" -and $summary.install_attempted) {
@@ -1707,7 +2043,7 @@ try {
     }
   }
 
-  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($summary.missing_package_ids) -DesktopAssetIssueIds @($summary.desktop_asset_issue_ids))
+  $recommendedCommands = @(Get-RecommendedCommands -MissingPackageIds @($summary.missing_package_ids) -DesktopAssetIssueIds @($summary.desktop_asset_issue_ids) -NodeCmdProfileShimReport $nodeCmdProfileShimReport)
   $summary.recommended_commands = @($recommendedCommands)
 
   Write-Step "status=$($summary.status)"

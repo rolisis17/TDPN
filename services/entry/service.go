@@ -1188,18 +1188,20 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 			}
 			descControlURL := normalizeHTTPURL(desc.ControlURL)
 			descDataAddr := strings.TrimSpace(desc.Endpoint)
-			if s.betaStrict || s.prodStrict {
-				if descControlURL == "" || descDataAddr == "" {
+			if descControlURL == "" || descDataAddr == "" {
+				if s.betaStrict || s.prodStrict {
 					lastErr = fmt.Errorf("strict mode requires directory route control_url and endpoint")
-					continue
+				} else {
+					lastErr = fmt.Errorf("directory route missing control_url or endpoint")
 				}
+				continue
 			}
-			route := normalizeRoute(exitRoute{
+			route := exitRoute{
 				controlURL: descControlURL,
 				dataAddr:   descDataAddr,
 				operatorID: strings.TrimSpace(desc.OperatorID),
 				fetchedAt:  now,
-			}, fallback)
+			}
 			if s.betaStrict || s.prodStrict {
 				if err := validateStrictExitControlRoute(route.controlURL, route.dataAddr); err != nil {
 					lastErr = err
@@ -1240,6 +1242,10 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 
 	best, ok := pickBestRoute(candidates, requiredVotes)
 	if !ok {
+		if lastErr != nil {
+			return exitRoute{}, fmt.Errorf("no exit route met vote threshold for %s: required_votes=%d: %w",
+				exitID, requiredVotes, lastErr)
+		}
 		return exitRoute{}, fmt.Errorf("no exit route met vote threshold for %s: required_votes=%d", exitID, requiredVotes)
 	}
 	s.mu.Lock()

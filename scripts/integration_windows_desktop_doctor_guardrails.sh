@@ -186,6 +186,22 @@ if ! grep -qF 'desktop_one_click.ps1' "$SCRIPT_UNDER_TEST"; then
   echo "windows desktop doctor guardrails failed: missing one-click rerun remediation marker in $SCRIPT_UNDER_TEST"
   exit 1
 fi
+if ! grep -qF 'function Get-NodeCmdProfileShimReport' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing node cmd profile shim report helper marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'function Ensure-NodeCmdProfileShim' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing node cmd profile shim remediation helper marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Set-Alias -Name npm -Value npm.cmd -Scope Global -Force' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing npm cmd profile alias remediation marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
+if ! grep -qF 'Set-Alias -Name npx -Value npx.cmd -Scope Global -Force' "$SCRIPT_UNDER_TEST"; then
+  echo "windows desktop doctor guardrails failed: missing npx cmd profile alias remediation marker in $SCRIPT_UNDER_TEST"
+  exit 1
+fi
 
 echo "[windows-desktop-doctor-guardrails] desktop prerequisite markers are present"
 if ! grep -qF 'Microsoft.VisualStudio.2022.BuildTools' "$SCRIPT_UNDER_TEST"; then
@@ -269,6 +285,41 @@ if ! jq -e '.tool_report | type == "object" and has("jq")' "$SUMMARY_JSON" >/dev
   cat "$SUMMARY_JSON"
   exit 1
 fi
+if ! jq -e '.node_cmd_profile_shim | type == "object"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim object"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.node_cmd_profile_shim.policy_risk | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim.policy_risk boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.node_cmd_profile_shim.profile_shim_required | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim.profile_shim_required boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.node_cmd_profile_shim.profile_shim_present | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim.profile_shim_present boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.node_cmd_profile_shim.remediation_attempted | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim.remediation_attempted boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.node_cmd_profile_shim.remediation_applied | type == "boolean"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim.remediation_applied boolean"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.node_cmd_profile_shim.remediation_skipped_reason | type == "string"' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing node_cmd_profile_shim.remediation_skipped_reason string"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
 if ! jq -e '.recommended_commands | type == "array" and length >= 2' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing recommended_commands guidance array"
   cat "$SUMMARY_JSON"
@@ -291,6 +342,11 @@ if ! jq -e '.recommended_commands | any(type == "string" and contains("desktop_s
 fi
 if ! jq -e '.recommended_commands | any(type == "string" and contains("npm.cmd run tauri -- dev"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "windows desktop doctor guardrails failed: summary json missing tauri dev remediation command"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '.recommended_commands | any(type == "string" and contains("Set-Alias -Name npm -Value npm.cmd"))' "$SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "windows desktop doctor guardrails failed: summary json missing npm cmd alias remediation command"
   cat "$SUMMARY_JSON"
   exit 1
 fi

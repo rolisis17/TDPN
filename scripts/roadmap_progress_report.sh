@@ -86,7 +86,7 @@ normalize_cross_platform_path_separators() {
     printf '%s' ""
     return
   fi
-  if [[ "$path" =~ ^[A-Za-z]:\\.* ]] || [[ "$path" =~ ^\\\\.* ]]; then
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]] || [[ "$path" =~ ^\\\\.* ]] || [[ "$path" == //* ]]; then
     printf '%s' "${path//\\//}"
     return
   fi

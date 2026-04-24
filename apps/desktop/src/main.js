@@ -74,6 +74,7 @@ const panelServerEl = byId("panel_server");
 const tabLockHintEl = document.getElementById("tab_lock_hint");
 const workspaceFirstRunHintEl = document.getElementById("workspace_first_run_hint");
 const workspacePlatformHintEl = document.getElementById("workspace_platform_hint");
+const workspaceNextActionHintEl = document.getElementById("workspace_next_action_hint");
 const compatAdvancedSectionEl = document.getElementById("legacy_compat_section");
 const compatEnableEl = byId("compat_enable");
 const bootstrapDirectoryEl = byId("bootstrap_directory");
@@ -3641,6 +3642,7 @@ function syncDesktopOnboardingBanner() {
   desktopOnboardingStateEl.textContent = onboardingState.title;
   desktopOnboardingDetailEl.textContent = onboardingState.detail;
   desktopOnboardingNextActionEl.textContent = `Next recommended action: ${computeDesktopNextRecommendedAction()}`;
+  syncWorkspaceNextActionHint(isClientTabVisibleRole(), isServerTabVisibleRole());
 }
 
 function inferClientRegistrationFromPayload(payload) {
@@ -4195,18 +4197,31 @@ function formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible) 
   return "Server tab is disabled for this session. Use the lock message activation path to finish Step 3 and unlock server actions.";
 }
 
+function syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible) {
+  if (!workspaceNextActionHintEl) {
+    return;
+  }
+  const nextAction = ensureSentence(computeDesktopNextRecommendedAction());
+  const lockContext =
+    !clientTabVisible || !serverTabVisible
+      ? ` ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`
+      : "";
+  workspaceNextActionHintEl.textContent = `Workspace next action: ${nextAction}${lockContext}`;
+  workspaceNextActionHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
+}
+
 function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
   if (workspaceFirstRunHintEl) {
     workspaceFirstRunHintEl.textContent =
       `Single-window tabs keep both lanes visible. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
     workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
   }
-  if (!workspacePlatformHintEl) {
-    return;
+  if (workspacePlatformHintEl) {
+    workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
+      ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions."
+      : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions.";
   }
-  workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-    ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions."
-    : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions.";
+  syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible);
 }
 
 function inferTabActivationPathHint(tabName, reason) {

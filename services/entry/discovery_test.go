@@ -455,6 +455,32 @@ func TestResolveExitRouteStrictRejectsMissingDescriptorRouteFields(t *testing.T)
 	}
 }
 
+func TestResolveExitRouteRejectsMissingDescriptorRouteFieldsNonStrict(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", Endpoint: "", ControlURL: ""},
+	})
+
+	s := &Service{
+		exitControlURL:      "https://198.51.100.10:8084",
+		exitDataAddr:        "198.51.100.10:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	_, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err == nil {
+		t.Fatalf("expected non-strict mode to reject descriptors missing control_url/endpoint")
+	}
+	if !strings.Contains(err.Error(), "missing control_url or endpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEnforceDirectoryTrustSetRejectsAdditionalUntrustedKeys(t *testing.T) {
 	keyA, _, err := nodecrypto.GenerateEd25519Keypair()
 	if err != nil {
