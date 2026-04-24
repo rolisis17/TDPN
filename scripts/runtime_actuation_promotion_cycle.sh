@@ -77,12 +77,13 @@ is_invite_subject_placeholder() {
   local normalized=""
   value="$(trim "${1:-}")"
   value="$(strip_optional_wrapping_quotes_01 "$value")"
+  value="$(trim "$value")"
   if [[ -z "$value" ]]; then
     return 1
   fi
   normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
   case "$normalized" in
-    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|REPLACE_WITH_INVITE_KEY|%INVITE_KEY%|\$\{INVITE_KEY:-*}|\$\{INVITE_KEY-*}|CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|%CAMPAIGN_SUBJECT%|\$\{CAMPAIGN_SUBJECT:-*}|\$\{CAMPAIGN_SUBJECT-*})
+    INVITE_KEY|\$\{INVITE_KEY\}|\$INVITE_KEY|"<INVITE_KEY>"|"{{INVITE_KEY}}"|YOUR_INVITE_KEY|YOUR_INVITE_SUBJECT|REPLACE_WITH_INVITE_KEY|REPLACE_WITH_INVITE_SUBJECT|"<SET-REAL-INVITE-KEY>"|SET-REAL-INVITE-KEY|%INVITE_KEY%|\$\{INVITE_KEY:-*}|\$\{INVITE_KEY-*}|CAMPAIGN_SUBJECT|\$\{CAMPAIGN_SUBJECT\}|\$CAMPAIGN_SUBJECT|"<CAMPAIGN_SUBJECT>"|"{{CAMPAIGN_SUBJECT}}"|YOUR_CAMPAIGN_SUBJECT|REPLACE_WITH_CAMPAIGN_SUBJECT|%CAMPAIGN_SUBJECT%|\$\{CAMPAIGN_SUBJECT:-*}|\$\{CAMPAIGN_SUBJECT-*})
       return 0
       ;;
     *)
@@ -239,13 +240,13 @@ build_runtime_actuation_subject_operator_command_01() {
   cmd+=(--fail-on-no-go "$fail_on_no_go")
   cmd+=(--show-json "$show_json")
   cmd+=(--print-summary-json "$print_summary_json")
-  cmd+=(--subject "REPLACE_WITH_INVITE_SUBJECT")
+  cmd+=(--subject "<set-real-invite-key>")
 
   render_command_line_from_argv_01 "${cmd[@]}"
 }
 
 build_runtime_actuation_subject_env_operator_command_01() {
-  printf 'CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT %s' "$(build_runtime_actuation_base_command_01)"
+  printf 'CAMPAIGN_SUBJECT='\''<set-real-invite-key>'\'' %s' "$(build_runtime_actuation_base_command_01)"
 }
 
 build_runtime_actuation_easy_node_command_01() {

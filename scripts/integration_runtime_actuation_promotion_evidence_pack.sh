@@ -55,6 +55,14 @@ assert_summary_written() {
   fi
 }
 
+assert_cycle_rerun_next_command_hardened() {
+  local file="$1"
+  assert_jq "$file" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
+  assert_jq "$file" '.next_command != null and (.next_command | contains("--summary-json")) and (.next_command | contains("runtime_actuation_promotion_cycle_latest_summary.json"))'
+  assert_jq "$file" '.next_command != null and (.next_command | contains("--promotion-summary-json")) and (.next_command | contains("runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"))'
+  assert_jq "$file" '.next_command_reason != null and (.next_command_reason | contains("--subject")) and (.next_command_reason | contains("CAMPAIGN_SUBJECT/INVITE_KEY"))'
+}
+
 write_cycle_summary() {
   local path="$1"
   local generated_at="$2"
@@ -345,6 +353,7 @@ assert_jq "$THRESHOLD_NOGO_SUMMARY" '.diagnostics.no_go.reason_category == "pass
 assert_jq "$THRESHOLD_NOGO_SUMMARY" '((.diagnostics.no_go.reason_codes | index("min_pass_samples_not_met")) != null)'
 assert_jq "$THRESHOLD_NOGO_SUMMARY" '.diagnostics.no_go.threshold_recommended_cycles == 5'
 assert_jq "$THRESHOLD_NOGO_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle")) and (.next_command | contains("--cycles 5"))'
+assert_cycle_rerun_next_command_hardened "$THRESHOLD_NOGO_SUMMARY"
 assert_no_blank_reason_entries "$THRESHOLD_NOGO_SUMMARY"
 
 SIGNOFF_CONTEXT_NOGO_REPORTS="$TMP_DIR/signoff_context_nogo_reports"
@@ -398,7 +407,7 @@ fi
 assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.decision == "NO-GO" and .status == "fail" and .rc != 0'
 assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.diagnostics.no_go.reason_category == "missing_signoff_context"'
 assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '((.diagnostics.no_go.reason_codes | index("signoff_context_missing")) != null)'
-assert_jq "$SIGNOFF_CONTEXT_NOGO_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
+assert_cycle_rerun_next_command_hardened "$SIGNOFF_CONTEXT_NOGO_SUMMARY"
 assert_no_blank_reason_entries "$SIGNOFF_CONTEXT_NOGO_SUMMARY"
 
 GO_WARN_REPORTS="$TMP_DIR/go_warn_reports"
@@ -433,6 +442,7 @@ assert_jq "$GO_WARN_SUMMARY" '.source.usable == true and .source.decision == "GO
 assert_jq "$GO_WARN_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:go_status_not_pass")) != null)'
 assert_jq "$GO_WARN_SUMMARY" '.outcome.should_promote == false and .outcome.action == "hold_evidence_pack_blocked"'
 assert_jq "$GO_WARN_SUMMARY" '.notes | test("Fail-closed")'
+assert_cycle_rerun_next_command_hardened "$GO_WARN_SUMMARY"
 assert_no_blank_reason_entries "$GO_WARN_SUMMARY"
 
 GO_NONZERO_REPORTS="$TMP_DIR/go_nonzero_reports"
@@ -467,6 +477,7 @@ assert_jq "$GO_NONZERO_SUMMARY" '.source.usable == true and .source.decision == 
 assert_jq "$GO_NONZERO_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:go_rc_non_zero")) != null)'
 assert_jq "$GO_NONZERO_SUMMARY" '.outcome.should_promote == false and .outcome.action == "hold_evidence_pack_blocked"'
 assert_jq "$GO_NONZERO_SUMMARY" '.notes | test("Fail-closed")'
+assert_cycle_rerun_next_command_hardened "$GO_NONZERO_SUMMARY"
 assert_no_blank_reason_entries "$GO_NONZERO_SUMMARY"
 
 MISSING_REPORTS="$TMP_DIR/missing_reports"
@@ -497,7 +508,7 @@ assert_jq "$MISSING_SUMMARY" '.available == false and .fail_closed == true and .
 assert_jq "$MISSING_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:summary_missing")) != null)'
 assert_jq "$MISSING_SUMMARY" '.source.freshness.known == false and .source.freshness.fresh == false'
 assert_jq "$MISSING_SUMMARY" '.diagnostics.no_go.reason_category == "missing_or_invalid_evidence"'
-assert_jq "$MISSING_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
+assert_cycle_rerun_next_command_hardened "$MISSING_SUMMARY"
 assert_no_blank_reason_entries "$MISSING_SUMMARY"
 
 INVALID_REPORTS="$TMP_DIR/invalid_reports"
@@ -560,7 +571,7 @@ assert_jq "$STALE_SUMMARY" '.available == false and .fail_closed == true and .ne
 assert_jq "$STALE_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:freshness_stale")) != null)'
 assert_jq "$STALE_SUMMARY" '.source.freshness.known == true and .source.freshness.fresh == false'
 assert_jq "$STALE_SUMMARY" '.diagnostics.no_go.reason_category == "stale_evidence"'
-assert_jq "$STALE_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
+assert_cycle_rerun_next_command_hardened "$STALE_SUMMARY"
 assert_no_blank_reason_entries "$STALE_SUMMARY"
 
 STALE_FLAGGED_REPORTS="$TMP_DIR/stale_flagged_reports"
@@ -626,7 +637,7 @@ assert_jq "$UNKNOWN_SUMMARY" '.available == false and .fail_closed == true and .
 assert_jq "$UNKNOWN_SUMMARY" '((.reasons | index("runtime_actuation_promotion_cycle:freshness_unknown")) != null)'
 assert_jq "$UNKNOWN_SUMMARY" '.source.freshness.known == false and .source.freshness.fresh == false'
 assert_jq "$UNKNOWN_SUMMARY" '.diagnostics.no_go.reason_category == "stale_evidence"'
-assert_jq "$UNKNOWN_SUMMARY" '.next_command != null and (.next_command | contains("runtime-actuation-promotion-cycle"))'
+assert_cycle_rerun_next_command_hardened "$UNKNOWN_SUMMARY"
 assert_no_blank_reason_entries "$UNKNOWN_SUMMARY"
 
 echo "[runtime-actuation-promotion-evidence-pack] rc/decision/status consistency"

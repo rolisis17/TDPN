@@ -138,14 +138,8 @@ func (k *Keeper) RecordDecision(record types.GovernanceDecision) (types.Governan
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	if _, ok := k.store.GetPolicy(normalized.PolicyID); !ok {
-		policies, err := k.findPoliciesByCanonicalIDLocked(normalized.PolicyID)
-		if err != nil {
-			return types.GovernanceDecision{}, err
-		}
-		if len(policies) == 0 {
-			return types.GovernanceDecision{}, policyNotFoundError(normalized.PolicyID)
-		}
+	if err := k.ensurePolicyExistsAndValidLocked(normalized.PolicyID); err != nil {
+		return types.GovernanceDecision{}, err
 	}
 
 	_, hasCanonicalKey := k.store.GetDecision(normalized.DecisionID)
@@ -367,6 +361,33 @@ func (k *Keeper) decisionByPolicyProposalLocked(policyID, proposalID string) (ty
 		return normalized, true, nil
 	}
 	return types.GovernanceDecision{}, false, nil
+}
+
+func (k *Keeper) ensurePolicyExistsAndValidLocked(policyID string) error {
+	if policy, ok := k.store.GetPolicy(policyID); ok {
+		normalizedPolicy := normalizePolicy(policy)
+		if normalizedPolicy.PolicyID == policyID {
+			if err := normalizedPolicy.ValidateBasic(); err != nil {
+				return policyInvalidError(policyID, err)
+			}
+			return nil
+		}
+	}
+
+	policies, err := k.findPoliciesByCanonicalIDLocked(policyID)
+	if err != nil {
+		return err
+	}
+	if len(policies) == 0 {
+		return policyNotFoundError(policyID)
+	}
+	for _, policy := range policies {
+		if err := normalizePolicy(policy).ValidateBasic(); err != nil {
+			return policyInvalidError(policyID, err)
+		}
+	}
+
+	return nil
 }
 
 func (k *Keeper) findAuditActionsByCanonicalIDLocked(actionID string) ([]types.GovernanceAuditAction, error) {
@@ -750,4 +771,8 @@ func decisionBusinessKeyID(policyID, proposalID string) string {
 
 func policyNotFoundError(policyID string) error {
 	return fmt.Errorf("policy %q not found", policyID)
+}
+
+func policyInvalidError(policyID string, err error) error {
+	return fmt.Errorf("policy %q is invalid: %w", policyID, err)
 }

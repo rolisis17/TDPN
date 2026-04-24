@@ -347,6 +347,7 @@ if ! jq -e '
   and .summary.pass == 2
   and .summary.fail == 0
   and .delegated_runner.summary_valid == true
+  and .delegated_runner.invoked == true
   and .delegated_runner.contract_valid == true
   and .delegated_runner.contract_failure_reason == null
   and .delegated_runner.failure_substep == null
@@ -440,6 +441,7 @@ if ! jq -e '
   and .summary.pass == 1
   and .summary.fail == 1
   and .delegated_runner.summary_valid == true
+  and .delegated_runner.invoked == true
   and .delegated_runner.contract_valid == true
   and .delegated_runner.contract_failure_reason == null
   and .delegated_runner.failure_substep == "delegated_runner_action_failure"
@@ -698,11 +700,12 @@ if ! jq -e '
   and .summary.fail == 0
   and ((.actions // []) | length == 0)
   and .delegated_runner.summary_valid == false
+  and .delegated_runner.invoked == false
   and .delegated_runner.contract_valid == false
   and .delegated_runner.failure_substep == "deterministic_command_conflict"
   and .delegated_runner.status == "skipped_deterministic_command_conflict"
   and .delegated_runner.rc == 4
-  and .delegated_runner.process_rc == 4
+  and .delegated_runner.process_rc == null
 ' "$SUMMARY_CONFLICT" >/dev/null; then
   echo "deterministic command conflict summary mismatch"
   cat "$SUMMARY_CONFLICT"
@@ -758,6 +761,7 @@ if ! jq -e '
   and .actions[0].id == "runtime_actuation_promotion"
   and .actions[0].status == "pass"
   and .delegated_runner.summary_valid == true
+  and .delegated_runner.invoked == true
   and .delegated_runner.contract_valid == true
   and .delegated_runner.status == "pass"
   and .delegated_runner.rc == 0
@@ -848,9 +852,10 @@ if ! jq -e '
   and .summary.fail == 0
   and ((.actions // []) | length == 0)
   and .delegated_runner.summary_valid == false
+  and .delegated_runner.invoked == false
   and .delegated_runner.status == "skipped_print_derived_evidence_pack_ids"
   and .delegated_runner.rc == 0
-  and .delegated_runner.process_rc == 0
+  and .delegated_runner.process_rc == null
 ' "$SUMMARY_DERIVED_PRINT_ONLY" >/dev/null; then
   echo "print-only summary mismatch"
   cat "$SUMMARY_DERIVED_PRINT_ONLY"
@@ -876,6 +881,7 @@ bash ./scripts/roadmap_live_evidence_actionable_run.sh \
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and .inputs.no_selected_actions_fast_path == true
   and .roadmap.target_match_count == 0
   and .roadmap.target_match_action_ids == []
   and .roadmap.target_match_unique_count == 0
@@ -894,10 +900,14 @@ if ! jq -e '
   and .summary.actions_executed == 0
   and .summary.pass == 0
   and .summary.fail == 0
-  and .delegated_runner.summary_valid == true
-  and .delegated_runner.status == "pass"
+  and .delegated_runner.summary_valid == false
+  and .delegated_runner.invoked == false
+  and .delegated_runner.contract_valid == true
+  and .delegated_runner.contract_failure_reason == null
+  and .delegated_runner.failure_substep == null
+  and .delegated_runner.status == "skipped_no_selected_actions"
   and .delegated_runner.rc == 0
-  and .delegated_runner.process_rc == 0
+  and .delegated_runner.process_rc == null
   and ((.actions // []) | length == 0)
 ' "$SUMMARY_EMPTY" >/dev/null; then
   echo "no-targets summary mismatch"

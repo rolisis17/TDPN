@@ -118,6 +118,130 @@ normalize_decision() {
   esac
 }
 
+host_placeholder_token_any_01() {
+  local value
+  value="$(trim "${1:-}")"
+  value="${value^^}"
+  case "$value" in
+    HOST_A|A_HOST|HOST_B|B_HOST)
+      printf '1'
+      ;;
+    *)
+      printf '0'
+      ;;
+  esac
+}
+
+host_placeholder_token_for_lane_01() {
+  local lane
+  local value
+  lane="$(trim "${1:-}")"
+  value="$(trim "${2:-}")"
+  value="${value^^}"
+  case "$lane" in
+    a)
+      if [[ "$value" == "HOST_A" || "$value" == "A_HOST" ]]; then
+        printf '1'
+      else
+        printf '0'
+      fi
+      ;;
+    b)
+      if [[ "$value" == "HOST_B" || "$value" == "B_HOST" ]]; then
+        printf '1'
+      else
+        printf '0'
+      fi
+      ;;
+    *)
+      printf '0'
+      ;;
+  esac
+}
+
+subject_placeholder_token_01() {
+  local value
+  value="$(trim "${1:-}")"
+  value="${value^^}"
+  if [[ "$value" == "INVITE_KEY" ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
+resolve_host_placeholder_or_die() {
+  local lane
+  local flag
+  local value
+  local lane_env_host=""
+  local lane_profile_host=""
+  local env_hint=""
+  lane="$(trim "${1:-}")"
+  flag="$(trim "${2:-}")"
+  value="$(trim "${3:-}")"
+  if [[ "$(host_placeholder_token_for_lane_01 "$lane" "$value")" != "1" ]]; then
+    printf '%s' "$value"
+    return
+  fi
+
+  case "$lane" in
+    a)
+      lane_env_host="$(trim "${A_HOST:-}")"
+      lane_profile_host="$(trim "${PROFILE_DEFAULT_GATE_STABILITY_HOST_A:-}")"
+      env_hint="A_HOST/PROFILE_DEFAULT_GATE_STABILITY_HOST_A"
+      ;;
+    b)
+      lane_env_host="$(trim "${B_HOST:-}")"
+      lane_profile_host="$(trim "${PROFILE_DEFAULT_GATE_STABILITY_HOST_B:-}")"
+      env_hint="B_HOST/PROFILE_DEFAULT_GATE_STABILITY_HOST_B"
+      ;;
+    *)
+      lane_env_host=""
+      lane_profile_host=""
+      env_hint=""
+      ;;
+  esac
+
+  if [[ -n "$lane_env_host" ]] && [[ "$(host_placeholder_token_any_01 "$lane_env_host")" != "1" ]]; then
+    printf '%s' "$lane_env_host"
+    return
+  fi
+  if [[ -n "$lane_profile_host" ]] && [[ "$(host_placeholder_token_any_01 "$lane_profile_host")" != "1" ]]; then
+    printf '%s' "$lane_profile_host"
+    return
+  fi
+
+  echo "$flag uses placeholder token '$value'; set $env_hint or pass a concrete host" >&2
+  exit 2
+}
+
+resolve_campaign_subject_placeholder_or_die() {
+  local value
+  local env_subject=""
+  local env_invite_key=""
+  value="$(trim "${1:-}")"
+  if [[ "$(subject_placeholder_token_01 "$value")" != "1" ]]; then
+    printf '%s' "$value"
+    return
+  fi
+
+  env_subject="$(trim "${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT:-}")"
+  if [[ -n "$env_subject" ]] && [[ "$(subject_placeholder_token_01 "$env_subject")" != "1" ]]; then
+    printf '%s' "$env_subject"
+    return
+  fi
+
+  env_invite_key="$(trim "${INVITE_KEY:-}")"
+  if [[ -n "$env_invite_key" ]] && [[ "$(subject_placeholder_token_01 "$env_invite_key")" != "1" ]]; then
+    printf '%s' "$env_invite_key"
+    return
+  fi
+
+  echo "--campaign-subject/--subject uses placeholder token '$value'; set PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT (or INVITE_KEY) or pass a concrete subject" >&2
+  exit 2
+}
+
 timestamp_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -546,6 +670,10 @@ show_json="$(trim "$show_json")"
 print_summary_json="$(trim "$print_summary_json")"
 RUN_SCRIPT="$(abs_path "$RUN_SCRIPT")"
 CHECK_SCRIPT="$(abs_path "$CHECK_SCRIPT")"
+
+host_a="$(resolve_host_placeholder_or_die "a" "--host-a" "$host_a")"
+host_b="$(resolve_host_placeholder_or_die "b" "--host-b" "$host_b")"
+campaign_subject="$(resolve_campaign_subject_placeholder_or_die "$campaign_subject")"
 
 if [[ -z "$host_a" ]]; then
   echo "--host-a is required"

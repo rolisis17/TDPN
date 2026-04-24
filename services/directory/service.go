@@ -2106,7 +2106,7 @@ func (s *Service) fetchPeerRelaysWithPubs(ctx context.Context, peerURL string, p
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
 		if cached, ok := s.cachedPeerRelays(peerURL); ok {
-			return cached, nil
+			return filterUnexpiredRelayDescriptors(cached, time.Now().UTC()), nil
 		}
 		return nil, fmt.Errorf("peer relays 304 without cache")
 	}
@@ -2144,6 +2144,20 @@ func (s *Service) fetchPeerRelaysWithPubs(ctx context.Context, peerURL string, p
 	}
 	s.setPeerRelayCache(peerURL, resp.Header.Get("ETag"), verified)
 	return verified, nil
+}
+
+func filterUnexpiredRelayDescriptors(relays []proto.RelayDescriptor, now time.Time) []proto.RelayDescriptor {
+	if len(relays) == 0 {
+		return nil
+	}
+	out := make([]proto.RelayDescriptor, 0, len(relays))
+	for _, desc := range relays {
+		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+			continue
+		}
+		out = append(out, desc)
+	}
+	return out
 }
 
 func (s *Service) fetchPeerSelectionScores(ctx context.Context, peerURL string, pubs []ed25519.PublicKey) (map[string]proto.RelaySelectionScore, error) {

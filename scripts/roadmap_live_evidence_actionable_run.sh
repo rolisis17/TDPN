@@ -614,9 +614,12 @@ next_actions_cmd=(
 
 print_only_mode="0"
 deterministic_conflict_mode="0"
+no_selected_actions_mode="0"
+delegated_runner_invoked="1"
 next_actions_rc=0
 if [[ "$print_derived_evidence_pack_ids" == "1" ]]; then
   print_only_mode="1"
+  delegated_runner_invoked="0"
   if [[ "$derived_evidence_pack_count" -eq 0 ]]; then
     echo "none"
   else
@@ -625,8 +628,13 @@ if [[ "$print_derived_evidence_pack_ids" == "1" ]]; then
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=print-derived-evidence-pack-ids"
 elif [[ "$target_match_command_selection_valid" != "1" ]]; then
   deterministic_conflict_mode="1"
+  delegated_runner_invoked="0"
   next_actions_rc=4
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=deterministic-command-conflict conflict_count=$target_match_command_conflict_count"
+elif (( scope_match_unique_count == 0 )); then
+  no_selected_actions_mode="1"
+  delegated_runner_invoked="0"
+  echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=no-selected-actions"
 else
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=running"
   set +e
@@ -661,9 +669,14 @@ elif [[ "$deterministic_conflict_mode" == "1" ]]; then
   delegated_runner_contract_failure_reason="deterministic command selection conflict across duplicate target action ids: $target_match_command_selection_reason"
   delegated_runner_failure_substep="deterministic_command_conflict"
   final_rc=4
+elif [[ "$no_selected_actions_mode" == "1" ]]; then
+  nested_runner_status="skipped_no_selected_actions"
+  nested_runner_rc=0
+  delegated_runner_contract_valid="1"
+  final_rc=0
 fi
 
-if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then
+if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$no_selected_actions_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then
   next_actions_summary_valid="1"
   nested_runner_status="$(jq -r '.status // ""' "$next_actions_summary_json")"
   nested_runner_rc_raw="$(jq -r '.rc // 125' "$next_actions_summary_json")"
@@ -702,7 +715,7 @@ if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" ]] && [
   if (( next_actions_rc != 0 && final_rc == 0 )); then
     final_rc="$next_actions_rc"
   fi
-elif [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" ]]; then
+elif [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$no_selected_actions_mode" != "1" ]]; then
   delegated_runner_contract_failure_reason="delegated summary missing or invalid; refusing stale/invalid summary reuse"
   delegated_runner_failure_substep="delegated_summary_missing_or_invalid"
   if (( next_actions_rc != 0 )); then
@@ -766,6 +779,8 @@ jq -n \
   --argjson print_derived_evidence_pack_ids "$print_derived_evidence_pack_ids" \
   --argjson print_only_mode "$print_only_mode" \
   --argjson deterministic_conflict_mode "$deterministic_conflict_mode" \
+  --argjson no_selected_actions_mode "$no_selected_actions_mode" \
+  --argjson delegated_runner_invoked "$delegated_runner_invoked" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
   --argjson source_actions_with_command_count "$source_actions_with_command_count" \
@@ -811,6 +826,8 @@ jq -n \
       print_derived_evidence_pack_ids: ($print_derived_evidence_pack_ids == 1),
       print_only_mode: ($print_only_mode == 1),
       deterministic_conflict_mode: ($deterministic_conflict_mode == 1),
+      no_selected_actions_fast_path: ($no_selected_actions_mode == 1),
+      delegated_runner_invoked: ($delegated_runner_invoked == 1),
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1),
       scope: $scope,
@@ -864,13 +881,14 @@ jq -n \
     },
     actions: $actions,
     delegated_runner: {
+      invoked: ($delegated_runner_invoked == 1),
       summary_valid: ($next_actions_summary_valid == 1),
       contract_valid: ($delegated_runner_contract_valid == 1),
       contract_failure_reason: (if $delegated_runner_contract_failure_reason == "" then null else $delegated_runner_contract_failure_reason end),
       failure_substep: (if $delegated_runner_failure_substep == "" then null else $delegated_runner_failure_substep end),
       status: (if $nested_runner_status == "" then null else $nested_runner_status end),
       rc: $nested_runner_rc,
-      process_rc: $next_actions_rc
+      process_rc: (if ($delegated_runner_invoked == 1) then $next_actions_rc else null end)
     },
     artifacts: {
       reports_dir: $reports_dir,

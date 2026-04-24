@@ -341,6 +341,54 @@ if ! grep -q 'vm_cmd=1 vm_cmd_file=1 sweep_timeout=55' "$HAPPY_CAPTURE"; then
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-stability-run] duplicate --vm-command-file paths are collapsed before cycle handoff"
+DUPLICATE_FILE_REPORTS_DIR="$TMP_DIR/reports_duplicate_file"
+DUPLICATE_FILE_SUMMARY="$TMP_DIR/duplicate_file_summary.json"
+DUPLICATE_FILE_COUNTER="$TMP_DIR/duplicate_file_counter.txt"
+DUPLICATE_FILE_CAPTURE="$TMP_DIR/duplicate_file_capture.log"
+DUPLICATE_FILE_PATH="$TMP_DIR/vm_commands_duplicate_file.txt"
+printf 'vm_dup_path::echo vm-dup-path\n' >"$DUPLICATE_FILE_PATH"
+
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$DUPLICATE_FILE_COUNTER" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$DUPLICATE_FILE_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$DUPLICATE_FILE_REPORTS_DIR" \
+  --summary-json "$DUPLICATE_FILE_SUMMARY" \
+  --vm-command-file "$DUPLICATE_FILE_PATH" \
+  --vm-command-file "$DUPLICATE_FILE_PATH" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_duplicate_file.log 2>&1
+duplicate_file_rc=$?
+set -e
+
+if [[ "$duplicate_file_rc" -ne 0 ]]; then
+  echo "expected duplicate vm-command-file path to remain runnable, got rc=$duplicate_file_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_duplicate_file.log
+  exit 1
+fi
+if ! grep -q 'vm_cmd=0 vm_cmd_file=1' "$DUPLICATE_FILE_CAPTURE"; then
+  echo "expected duplicate vm-command-file path to be collapsed before cycle"
+  cat "$DUPLICATE_FILE_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.vm_command_count == 0
+  and .inputs.vm_command_file_count == 1
+  and .inputs.vm_command_fallback_used == false
+  and (.inputs.vm_command_preflight_diagnostics | type) == "array"
+  and (.inputs.vm_command_preflight_diagnostics | map(test("duplicate_path_skipped")) | any)
+' "$DUPLICATE_FILE_SUMMARY" >/dev/null 2>&1; then
+  echo "duplicate vm-command-file summary missing dedupe metadata"
+  cat "$DUPLICATE_FILE_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-stability-run] fallback command-file discovery from reports-dir artifact"
 FALLBACK_REPORTS_DIR="$TMP_DIR/reports_fallback"
 FALLBACK_SUMMARY="$TMP_DIR/fallback_summary.json"

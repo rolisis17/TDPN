@@ -853,6 +853,57 @@ if ! grep -q $'^real_run_cycle\tvm_cmd=0\tvm_cmd_file=1\t' "$REAL_FALLBACK_CAPTU
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-stability-cycle] real run duplicate --vm-command-file paths are collapsed before cycle handoff"
+REAL_DUPLICATE_FILE_REPORTS="$TMP_DIR/real_run_duplicate_file_reports"
+REAL_DUPLICATE_FILE_SUMMARY="$TMP_DIR/cycle_real_run_duplicate_file_summary.json"
+REAL_DUPLICATE_FILE_CAPTURE="$TMP_DIR/cycle_real_run_duplicate_file_capture.log"
+REAL_DUPLICATE_FILE_PATH="$TMP_DIR/real_run_duplicate_file_vm_commands.txt"
+mkdir -p "$REAL_DUPLICATE_FILE_REPORTS"
+printf 'vm_real_dup_file::echo vm-real-dup-file\n' >"$REAL_DUPLICATE_FILE_PATH"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT="$ROOT_DIR/scripts/profile_compare_multi_vm_stability_run.sh" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$REAL_RUN_FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_MULTI_VM_STABILITY_CAPTURE_FILE="$REAL_DUPLICATE_FILE_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_REAL_RUN_CAPTURE_FILE="$REAL_DUPLICATE_FILE_CAPTURE" \
+FAKE_MULTI_VM_STABILITY_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$REAL_DUPLICATE_FILE_REPORTS" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --vm-command-file "$REAL_DUPLICATE_FILE_PATH" \
+  --vm-command-file "$REAL_DUPLICATE_FILE_PATH" \
+  --require-min-runs-requested 1 \
+  --require-min-runs-completed 1 \
+  --require-max-runs-fail 0 \
+  --require-modal-decision-support-rate-pct 0 \
+  --require-modal-support-rate-pct 0 \
+  --summary-json "$REAL_DUPLICATE_FILE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_duplicate_file.log 2>&1
+real_duplicate_file_rc=$?
+set -e
+
+if [[ "$real_duplicate_file_rc" -ne 0 ]]; then
+  echo "expected real-run duplicate vm-command-file path rc=0, got rc=$real_duplicate_file_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_cycle_real_run_duplicate_file.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .decision == "GO"
+  and .failure_stage == null
+' "$REAL_DUPLICATE_FILE_SUMMARY" >/dev/null 2>&1; then
+  echo "real-run duplicate vm-command-file summary mismatch"
+  cat "$REAL_DUPLICATE_FILE_SUMMARY"
+  exit 1
+fi
+if ! grep -q $'^real_run_cycle\tvm_cmd=0\tvm_cmd_file=1\t' "$REAL_DUPLICATE_FILE_CAPTURE"; then
+  echo "expected duplicate vm-command-file collapse capture not found"
+  cat "$REAL_DUPLICATE_FILE_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-stability-cycle] real run fallback missing remains fail-closed with operator diagnostics"
 REAL_MISSING_REPORTS="$TMP_DIR/real_run_missing_fallback_reports"
 REAL_MISSING_SUMMARY="$TMP_DIR/cycle_real_run_missing_fallback_summary.json"

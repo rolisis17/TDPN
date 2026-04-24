@@ -309,6 +309,34 @@ func TestKeeperRecordDecisionMissingPolicy(t *testing.T) {
 	}
 }
 
+func TestKeeperRecordDecisionFailsClosedOnInvalidReferencedPolicy(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	// Simulate legacy/corrupt state injected outside CreatePolicy validation.
+	k.UpsertPolicy(types.GovernancePolicy{
+		PolicyID: "policy-invalid-reference",
+	})
+
+	_, err := k.RecordDecision(types.GovernanceDecision{
+		DecisionID:    "decision-invalid-reference",
+		PolicyID:      "policy-invalid-reference",
+		ProposalID:    "proposal-1",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council-1",
+		DecidedAtUnix: 4102444800,
+	})
+	if err == nil {
+		t.Fatal("expected invalid referenced policy to be rejected")
+	}
+	if !strings.Contains(err.Error(), "is invalid") {
+		t.Fatalf("expected invalid policy details, got %v", err)
+	}
+	if _, ok := k.GetDecision("decision-invalid-reference"); ok {
+		t.Fatal("expected decision not to persist when referenced policy is invalid")
+	}
+}
+
 func TestKeeperListPoliciesDeterministicByPolicyID(t *testing.T) {
 	t.Parallel()
 

@@ -455,11 +455,16 @@ preflight_validate_vm_command_files_or_die() {
   local resolved_path=""
   local vm_command_file_reason=""
   local -a resolved_files=()
+  declare -A seen_vm_command_files=()
   for raw_path in "${vm_command_files[@]}"; do
     resolved_path="$(abs_path "$raw_path")"
     if [[ -z "$resolved_path" ]]; then
       record_vm_command_preflight_diag "source=vm-command-file path=<empty> reason=empty_path"
       fail_vm_command_file_preflight "empty_path" "$raw_path"
+    fi
+    if [[ -n "${seen_vm_command_files["$resolved_path"]+present}" ]]; then
+      record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path result=duplicate_path_skipped"
+      continue
     fi
     if [[ ! -f "$resolved_path" ]]; then
       record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path reason=not_found"
@@ -469,6 +474,7 @@ preflight_validate_vm_command_files_or_die() {
       record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path reason=$vm_command_file_reason"
       fail_vm_command_file_preflight "$vm_command_file_reason" "$resolved_path"
     fi
+    seen_vm_command_files["$resolved_path"]=1
     record_vm_command_preflight_diag "source=vm-command-file path=$resolved_path result=ready"
     resolved_files+=("$resolved_path")
   done

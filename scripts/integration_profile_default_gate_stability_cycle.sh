@@ -32,8 +32,35 @@ capture_file="${FAKE_CYCLE_CAPTURE_FILE:-}"
 summary_json=""
 reports_dir=""
 runs=""
+host_a=""
+host_b=""
+campaign_subject=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --host-a)
+      host_a="${2:-}"
+      shift 2
+      ;;
+    --host-a=*)
+      host_a="${1#*=}"
+      shift
+      ;;
+    --host-b)
+      host_b="${2:-}"
+      shift 2
+      ;;
+    --host-b=*)
+      host_b="${1#*=}"
+      shift
+      ;;
+    --campaign-subject)
+      campaign_subject="${2:-}"
+      shift 2
+      ;;
+    --campaign-subject=*)
+      campaign_subject="${1#*=}"
+      shift
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -70,8 +97,8 @@ if [[ -z "$summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'run\tscenario=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
-    "$scenario" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
+  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
+    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -369,6 +396,113 @@ if ! jq -e '
 ' "$DEFAULT_POLICY_SUMMARY" >/dev/null 2>&1; then
   echo "expected default policy summary fields missing"
   cat "$DEFAULT_POLICY_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] HOST_A/HOST_B/INVITE_KEY placeholders resolve from env when provided"
+PLACEHOLDER_RESOLVED_SUMMARY="$TMP_DIR/cycle_placeholder_resolved_summary.json"
+PLACEHOLDER_RESOLVED_CAPTURE="$TMP_DIR/capture_placeholder_resolved.log"
+set +e
+A_HOST="198.51.100.10" \
+B_HOST="198.51.100.20" \
+PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT="inv-placeholder-env" \
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$PLACEHOLDER_RESOLVED_CAPTURE" \
+FAKE_CYCLE_RUN_SCENARIO="pass" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "HOST_A" \
+  --host-b "HOST_B" \
+  --campaign-subject "INVITE_KEY" \
+  --reports-dir "$TMP_DIR/placeholder_resolved_reports" \
+  --summary-json "$PLACEHOLDER_RESOLVED_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_placeholder_resolved.log 2>&1
+placeholder_resolved_rc=$?
+set -e
+
+if [[ "$placeholder_resolved_rc" -ne 0 ]]; then
+  echo "expected placeholder env-resolution path rc=0, got rc=$placeholder_resolved_rc"
+  cat /tmp/integration_profile_default_gate_stability_cycle_placeholder_resolved.log
+  exit 1
+fi
+if ! grep -q $'run\t.*\thost_a=198.51.100.10\thost_b=198.51.100.20\tcampaign_subject=inv-placeholder-env\t' "$PLACEHOLDER_RESOLVED_CAPTURE"; then
+  echo "expected run-stage placeholder substitutions were not forwarded"
+  cat "$PLACEHOLDER_RESOLVED_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .inputs.host_a == "198.51.100.10"
+  and .inputs.host_b == "198.51.100.20"
+  and .inputs.campaign_subject == "inv-placeholder-env"
+' "$PLACEHOLDER_RESOLVED_SUMMARY" >/dev/null 2>&1; then
+  echo "placeholder env-resolution summary mismatch"
+  cat "$PLACEHOLDER_RESOLVED_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] unresolved host placeholders fail closed before stages run"
+HOST_PLACEHOLDER_FAIL_CAPTURE="$TMP_DIR/capture_host_placeholder_fail.log"
+set +e
+A_HOST="" \
+B_HOST="" \
+PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT="" \
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$HOST_PLACEHOLDER_FAIL_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "HOST_A" \
+  --host-b "HOST_B" \
+  --campaign-subject "INVITE_KEY" \
+  --reports-dir "$TMP_DIR/host_placeholder_fail_reports" \
+  --summary-json "$TMP_DIR/cycle_host_placeholder_fail_summary.json" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_host_placeholder_fail.log 2>&1
+host_placeholder_fail_rc=$?
+set -e
+
+if [[ "$host_placeholder_fail_rc" -ne 2 ]]; then
+  echo "expected unresolved host placeholder path to return rc=2, got rc=$host_placeholder_fail_rc"
+  cat /tmp/integration_profile_default_gate_stability_cycle_host_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q -- "--host-a uses placeholder token 'HOST_A'" /tmp/integration_profile_default_gate_stability_cycle_host_placeholder_fail.log; then
+  echo "expected unresolved host placeholder error message not found"
+  cat /tmp/integration_profile_default_gate_stability_cycle_host_placeholder_fail.log
+  exit 1
+fi
+if [[ -s "$HOST_PLACEHOLDER_FAIL_CAPTURE" ]]; then
+  echo "run/check stages should not execute when host placeholders are unresolved"
+  cat "$HOST_PLACEHOLDER_FAIL_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] unresolved INVITE_KEY subject placeholder fails closed"
+set +e
+A_HOST="" \
+B_HOST="" \
+PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT="" \
+INVITE_KEY="" \
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$TMP_DIR/capture_subject_placeholder_fail.log" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --campaign-subject "INVITE_KEY" \
+  --reports-dir "$TMP_DIR/subject_placeholder_fail_reports" \
+  --summary-json "$TMP_DIR/cycle_subject_placeholder_fail_summary.json" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_subject_placeholder_fail.log 2>&1
+subject_placeholder_fail_rc=$?
+set -e
+
+if [[ "$subject_placeholder_fail_rc" -ne 2 ]]; then
+  echo "expected unresolved subject placeholder path to return rc=2, got rc=$subject_placeholder_fail_rc"
+  cat /tmp/integration_profile_default_gate_stability_cycle_subject_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q -- "--campaign-subject/--subject uses placeholder token 'INVITE_KEY'" /tmp/integration_profile_default_gate_stability_cycle_subject_placeholder_fail.log; then
+  echo "expected unresolved subject placeholder error message not found"
+  cat /tmp/integration_profile_default_gate_stability_cycle_subject_placeholder_fail.log
   exit 1
 fi
 

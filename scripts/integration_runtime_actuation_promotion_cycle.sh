@@ -985,6 +985,55 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[runtime-actuation-promotion-cycle] rerun placeholder subject literal fails closed before cycles"
+RERUN_PLACEHOLDER_FAIL_SUMMARY="$TMP_DIR/rerun_placeholder_fail_summary.json"
+RERUN_PLACEHOLDER_FAIL_CAPTURE="$TMP_DIR/rerun_placeholder_fail_capture.log"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$RERUN_PLACEHOLDER_FAIL_CAPTURE" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 1 \
+  --reports-dir "$TMP_DIR/rerun_placeholder_fail_reports" \
+  --subject REPLACE_WITH_INVITE_SUBJECT \
+  --summary-json "$RERUN_PLACEHOLDER_FAIL_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log 2>&1
+rerun_placeholder_fail_rc=$?
+set -e
+
+if [[ "$rerun_placeholder_fail_rc" != "2" ]]; then
+  echo "expected rerun placeholder subject literal path rc=2, got rc=$rerun_placeholder_fail_rc"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log
+  exit 1
+fi
+if [[ -s "$RERUN_PLACEHOLDER_FAIL_CAPTURE" ]]; then
+  echo "expected no signoff invocations when rerun placeholder subject literal is unresolved"
+  cat "$RERUN_PLACEHOLDER_FAIL_CAPTURE"
+  exit 1
+fi
+if ! grep -q 'placeholder invite subject' /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log; then
+  echo "expected rerun placeholder literal diagnostic in fail-closed path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: ./scripts/runtime_actuation_promotion_cycle.sh' /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log; then
+  echo "expected exact rerun command operator guidance in rerun-placeholder-literal path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log
+  exit 1
+fi
+if ! grep -Fq -- '--subject \<set-real-invite-key\>' /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log; then
+  echo "expected explicit non-runnable subject template guidance in rerun-placeholder-literal path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log
+  exit 1
+fi
+if ! grep -q "operator_next_action: CAMPAIGN_SUBJECT='<set-real-invite-key>' ./scripts/runtime_actuation_promotion_cycle.sh" /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log; then
+  echo "expected quoted CAMPAIGN_SUBJECT template guidance in rerun-placeholder-literal path"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_rerun_placeholder_fail.log
+  exit 1
+fi
+
 echo "[runtime-actuation-promotion-cycle] unresolved placeholder subject fails closed before cycles"
 PLACEHOLDER_FAIL_SUMMARY="$TMP_DIR/placeholder_fail_summary.json"
 PLACEHOLDER_FAIL_CAPTURE="$TMP_DIR/placeholder_fail_capture.log"
@@ -1023,13 +1072,13 @@ if ! grep -q 'operator_next_action: ./scripts/runtime_actuation_promotion_cycle.
   cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
   exit 1
 fi
-if ! grep -q -- '--subject REPLACE_WITH_INVITE_SUBJECT' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
-  echo "expected placeholder subject rerun guidance in unresolved placeholder path"
+if ! grep -Fq -- '--subject \<set-real-invite-key\>' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
+  echo "expected explicit non-runnable subject template guidance in unresolved placeholder path"
   cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
   exit 1
 fi
-if ! grep -q 'operator_next_action: CAMPAIGN_SUBJECT=REPLACE_WITH_INVITE_SUBJECT ./scripts/runtime_actuation_promotion_cycle.sh' /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
-  echo "expected CAMPAIGN_SUBJECT rerun guidance in unresolved placeholder path"
+if ! grep -q "operator_next_action: CAMPAIGN_SUBJECT='<set-real-invite-key>' ./scripts/runtime_actuation_promotion_cycle.sh" /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log; then
+  echo "expected quoted CAMPAIGN_SUBJECT template guidance in unresolved placeholder path"
   cat /tmp/integration_runtime_actuation_promotion_cycle_placeholder_fail.log
   exit 1
 fi
@@ -1072,8 +1121,8 @@ if ! grep -q 'operator_next_action: ./scripts/runtime_actuation_promotion_cycle.
   cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
   exit 1
 fi
-if ! grep -q -- '--subject REPLACE_WITH_INVITE_SUBJECT' /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log; then
-  echo "expected placeholder subject rerun guidance in missing-subject-value path"
+if ! grep -Fq -- '--subject \<set-real-invite-key\>' /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log; then
+  echo "expected explicit non-runnable subject template guidance in missing-subject-value path"
   cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
   exit 1
 fi

@@ -153,10 +153,14 @@ max_int_01() {
 build_runtime_actuation_cycle_rerun_command_01() {
   local reports_dir="$1"
   local cycles_override="${2:-}"
+  local cycle_summary_json="$reports_dir/runtime_actuation_promotion_cycle_latest_summary.json"
+  local promotion_summary_json="$reports_dir/runtime_actuation_promotion_cycle_latest_promotion_check_summary.json"
   local -a cmd=(
     "./scripts/easy_node.sh"
     "runtime-actuation-promotion-cycle"
     "--reports-dir" "$reports_dir"
+    "--promotion-summary-json" "$promotion_summary_json"
+    "--summary-json" "$cycle_summary_json"
     "--fail-on-no-go" "1"
     "--print-summary-json" "1"
   )
@@ -164,6 +168,18 @@ build_runtime_actuation_cycle_rerun_command_01() {
     cmd+=(--cycles "$cycles_override")
   fi
   render_command "${cmd[@]}"
+}
+
+append_runtime_actuation_subject_guidance_reason_01() {
+  local base_reason
+  local invite_subject_guidance=""
+  base_reason="$(trim "${1:-}")"
+  invite_subject_guidance="if invite-subject auth is required, pass --subject <invite-key> (or --campaign-subject <invite-key>) or set CAMPAIGN_SUBJECT/INVITE_KEY to a real non-placeholder value"
+  if [[ -n "$base_reason" ]]; then
+    printf '%s; %s' "$base_reason" "$invite_subject_guidance"
+  else
+    printf '%s' "$invite_subject_guidance"
+  fi
 }
 
 build_runtime_actuation_evidence_pack_rerun_command_01() {
@@ -842,26 +858,26 @@ if [[ "$needs_attention" == "true" ]]; then
   case "$no_go_reason_category" in
     pass_sample_thresholds)
       next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "$threshold_recommended_cycles")"
-      next_command_reason="collect enough pass-ready samples to satisfy promotion thresholds"
+      next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "collect enough pass-ready samples to satisfy promotion thresholds")"
       ;;
     stale_evidence)
       next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
-      next_command_reason="refresh stale runtime-actuation promotion evidence"
+      next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "refresh stale runtime-actuation promotion evidence")"
       ;;
     missing_signoff_context)
       next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
-      next_command_reason="regenerate signoff evidence with campaign-check context"
+      next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "regenerate signoff evidence with campaign-check context")"
       ;;
     missing_or_invalid_evidence)
       next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
-      next_command_reason="recreate missing or invalid promotion-cycle evidence"
+      next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "recreate missing or invalid promotion-cycle evidence")"
       ;;
     *)
-      next_command="$(build_runtime_actuation_evidence_pack_rerun_command_01 "$reports_dir" "$promotion_cycle_summary_json" "$max_age_sec" "$summary_json" "$report_md")"
+      next_command="$(build_runtime_actuation_cycle_rerun_command_01 "$reports_dir" "")"
       if [[ "${#reasons[@]}" -gt 0 ]]; then
-        next_command_reason="${reasons[0]}"
+        next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "${reasons[0]}")"
       else
-        next_command_reason="$next_operator_action"
+        next_command_reason="$(append_runtime_actuation_subject_guidance_reason_01 "$next_operator_action")"
       fi
       ;;
   esac

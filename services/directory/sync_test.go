@@ -142,6 +142,52 @@ func TestFetchPeerRelaysSkipsInvalidDescriptorWhenOtherDescriptorsVerify(t *test
 	}
 }
 
+func TestFetchPeerRelaysWithPubsNotModifiedDropsExpiredCachedDescriptors(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/relays": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotModified,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		},
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerRelayETags: map[string]string{
+			normalizePeerURL(peerURL): "\"etag-1\"",
+		},
+		peerRelayCache: map[string][]proto.RelayDescriptor{
+			normalizePeerURL(peerURL): {
+				{
+					RelayID:    "exit-expired",
+					Role:       "exit",
+					Endpoint:   "127.0.0.1:51821",
+					ValidUntil: time.Now().Add(-1 * time.Minute),
+				},
+				{
+					RelayID:    "exit-live",
+					Role:       "exit",
+					Endpoint:   "127.0.0.1:52821",
+					ValidUntil: time.Now().Add(1 * time.Minute),
+				},
+			},
+		},
+	}
+
+	got, err := s.fetchPeerRelaysWithPubs(context.Background(), peerURL, nil)
+	if err != nil {
+		t.Fatalf("fetchPeerRelaysWithPubs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 unexpired cached relay, got %d", len(got))
+	}
+	if got[0].RelayID != "exit-live" {
+		t.Fatalf("expected live cached relay, got %q", got[0].RelayID)
+	}
+}
+
 func TestFetchPeerRelaysErrorsWhenAllDescriptorsFailVerification(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pub, _, err := crypto.GenerateEd25519Keypair()
