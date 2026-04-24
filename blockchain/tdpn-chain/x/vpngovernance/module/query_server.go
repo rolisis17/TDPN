@@ -84,6 +84,9 @@ func (s QueryServer) GetPolicy(req GetPolicyRequest) (GetPolicyResponse, error) 
 
 	record, ok := s.keeper.GetPolicy(req.PolicyID)
 	if !ok {
+		if err := s.ensurePoliciesReadable(); err != nil {
+			return GetPolicyResponse{}, err
+		}
 		return GetPolicyResponse{}, ErrPolicyNotFound
 	}
 	return GetPolicyResponse{Policy: record}, nil
@@ -96,6 +99,9 @@ func (s QueryServer) GetDecision(req GetDecisionRequest) (GetDecisionResponse, e
 
 	record, ok := s.keeper.GetDecision(req.DecisionID)
 	if !ok {
+		if err := s.ensureDecisionsReadable(); err != nil {
+			return GetDecisionResponse{}, err
+		}
 		return GetDecisionResponse{}, ErrDecisionNotFound
 	}
 	return GetDecisionResponse{Decision: record}, nil
@@ -108,6 +114,9 @@ func (s QueryServer) GetAuditAction(req GetAuditActionRequest) (GetAuditActionRe
 
 	record, ok := s.keeper.GetAuditAction(req.ActionID)
 	if !ok {
+		if err := s.ensureAuditActionsReadable(); err != nil {
+			return GetAuditActionResponse{}, err
+		}
 		return GetAuditActionResponse{}, ErrAuditActionNotFound
 	}
 	return GetAuditActionResponse{Action: record}, nil
@@ -168,4 +177,19 @@ func clampAuditActions(records []types.GovernanceAuditAction) []types.Governance
 		return records
 	}
 	return records[:maxQueryListResults]
+}
+
+func (s QueryServer) ensurePoliciesReadable() error {
+	_, err := s.keeper.ListPoliciesWithError()
+	return err
+}
+
+func (s QueryServer) ensureDecisionsReadable() error {
+	_, err := s.keeper.ListDecisionsWithError()
+	return err
+}
+
+func (s QueryServer) ensureAuditActionsReadable() error {
+	_, err := s.keeper.ListAuditActionsWithError()
+	return err
 }

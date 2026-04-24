@@ -25,6 +25,27 @@ func TestGovernancePolicyValidateBasic(t *testing.T) {
 	}{
 		{name: "valid", record: base},
 		{
+			name: "canonicalizable status",
+			record: GovernancePolicy{
+				PolicyID:        base.PolicyID,
+				Title:           base.Title,
+				Version:         base.Version,
+				ActivatedAtUnix: base.ActivatedAtUnix,
+				Status:          " SuBmItTeD ",
+			},
+		},
+		{
+			name: "invalid status",
+			record: GovernancePolicy{
+				PolicyID:        base.PolicyID,
+				Title:           base.Title,
+				Version:         base.Version,
+				ActivatedAtUnix: base.ActivatedAtUnix,
+				Status:          "stalled",
+			},
+			wantErr: "policy status must be pending, submitted, confirmed, or failed when set",
+		},
+		{
 			name:    "missing policy id",
 			record:  GovernancePolicy{Title: base.Title, Version: base.Version, ActivatedAtUnix: base.ActivatedAtUnix},
 			wantErr: "policy id is required",
@@ -85,6 +106,33 @@ func TestGovernanceDecisionValidateBasic(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid", record: base},
+		{
+			name: "canonicalizable status",
+			record: GovernanceDecision{
+				DecisionID:    base.DecisionID,
+				PolicyID:      base.PolicyID,
+				ProposalID:    base.ProposalID,
+				Outcome:       base.Outcome,
+				Decider:       base.Decider,
+				Reason:        base.Reason,
+				DecidedAtUnix: base.DecidedAtUnix,
+				Status:        " CoNfIrMeD ",
+			},
+		},
+		{
+			name: "invalid status",
+			record: GovernanceDecision{
+				DecisionID:    base.DecisionID,
+				PolicyID:      base.PolicyID,
+				ProposalID:    base.ProposalID,
+				Outcome:       base.Outcome,
+				Decider:       base.Decider,
+				Reason:        base.Reason,
+				DecidedAtUnix: base.DecidedAtUnix,
+				Status:        "unknown",
+			},
+			wantErr: "decision status must be pending, submitted, confirmed, or failed when set",
+		},
 		{
 			name:    "missing decision id",
 			record:  GovernanceDecision{PolicyID: base.PolicyID, ProposalID: base.ProposalID, Outcome: base.Outcome, Decider: base.Decider, DecidedAtUnix: base.DecidedAtUnix},

@@ -328,6 +328,9 @@ Usage:
   ./scripts/easy_node.sh roadmap-evidence-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--scope all|profile-default|runtime-actuation|multi-vm] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-default-gate-live-evidence-publish-bundle [profile_default_gate_live_evidence_publish_bundle args...]
+  ./scripts/easy_node.sh runtime-actuation-live-evidence-publish-bundle [runtime_actuation_live_evidence_publish_bundle args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-live-evidence-publish-bundle [profile_compare_multi_vm_live_evidence_publish_bundle args...]
   ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-archive-run [roadmap_live_evidence_archive_run args...]
   ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID]... [--exclude-id ID]... [--print-summary-json [0|1]]
@@ -541,6 +544,9 @@ Usage:
   ./scripts/easy_node.sh roadmap-evidence-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--scope all|profile-default|runtime-actuation|multi-vm] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-and-pack-actionable-run [--reports-dir DIR] [--summary-json PATH] [--roadmap-summary-json PATH] [--roadmap-report-md PATH] [--action-timeout-sec N] [--allow-unsafe-shell-commands [0|1]] [--refresh-manual-validation [0|1]] [--refresh-single-machine-readiness [0|1]] [--parallel [0|1]] [--max-actions N] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-default-gate-live-evidence-publish-bundle [profile_default_gate_live_evidence_publish_bundle args...]
+  ./scripts/easy_node.sh runtime-actuation-live-evidence-publish-bundle [runtime_actuation_live_evidence_publish_bundle args...]
+  ./scripts/easy_node.sh profile-compare-multi-vm-live-evidence-publish-bundle [profile_compare_multi_vm_live_evidence_publish_bundle args...]
   ./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run [--reports-dir DIR] [--summary-json PATH] [--iterations N] [--continue-on-fail [0|1]] [--parallel [0|1]] [--include-track-id ID] [--exclude-track-id ID] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh roadmap-live-evidence-archive-run [roadmap_live_evidence_archive_run args...]
   ./scripts/easy_node.sh roadmap-validation-debt-actionable-run [--reports-dir DIR] [--summary-json PATH] [--parallel [0|1]] [--max-actions N] [--include-id ID]... [--exclude-id ID]... [--print-summary-json [0|1]]
@@ -733,6 +739,9 @@ Notes:
   - roadmap-evidence-pack-actionable-run wraps the roadmap evidence-pack actionable helper path, supports `--scope all|profile-default|runtime-actuation|multi-vm`, and emits `roadmap_evidence_pack_actionable_run_summary` output.
   - roadmap-live-evidence-actionable-run wraps the roadmap live-evidence actionable helper path, targets live-cycle ids, and emits `roadmap_live_evidence_actionable_run_summary` output.
   - roadmap-live-and-pack-actionable-run wraps the roadmap live+pack actionable helper path, chains live-cycle and pack actions, and emits `roadmap_live_and_pack_actionable_run_summary` output.
+  - profile-default-gate-live-evidence-publish-bundle wraps the profile-default live+publish bundle helper path and emits `profile_default_gate_live_evidence_publish_bundle_summary` output.
+  - runtime-actuation-live-evidence-publish-bundle wraps the runtime-actuation live+publish bundle helper path and emits `runtime_actuation_live_evidence_publish_bundle_summary` output.
+  - profile-compare-multi-vm-live-evidence-publish-bundle wraps the multi-VM live+publish bundle helper path and emits `profile_compare_multi_vm_live_evidence_publish_bundle_summary` output.
   - roadmap-live-evidence-cycle-batch-run wraps the roadmap live-evidence cycle-batch helper path (override with `ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT`), preserves pass-through args, and emits `roadmap_live_evidence_cycle_batch_run_summary` output with deterministic `selection_accounting` plus per-iteration track results.
   - roadmap-live-evidence-archive-run wraps the roadmap live-evidence archive helper path (override with `ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCRIPT`) and preserves pass-through args.
   - roadmap-validation-debt-actionable-run wraps the roadmap validation-debt actionable helper path (override with `ROADMAP_VALIDATION_DEBT_ACTIONABLE_RUN_SCRIPT`), preserves pass-through args, and emits `roadmap_validation_debt_actionable_run_summary` output with `selection_accounting`, `checks_catalog`, and per-check execution results.
@@ -9489,6 +9498,21 @@ roadmap_live_and_pack_actionable_run() {
   "$script" "$@"
 }
 
+profile_default_gate_live_evidence_publish_bundle() {
+  local script="${PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_PUBLISH_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/profile_default_gate_live_evidence_publish_bundle.sh}"
+  "$script" "$@"
+}
+
+runtime_actuation_live_evidence_publish_bundle() {
+  local script="${RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/runtime_actuation_live_evidence_publish_bundle.sh}"
+  "$script" "$@"
+}
+
+profile_compare_multi_vm_live_evidence_publish_bundle() {
+  local script="${PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/profile_compare_multi_vm_live_evidence_publish_bundle.sh}"
+  "$script" "$@"
+}
+
 roadmap_live_evidence_cycle_batch_run() {
   local script="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_SCRIPT:-$ROOT_DIR/scripts/roadmap_live_evidence_cycle_batch_run.sh}"
   if [[ ! -x "$script" ]]; then
@@ -17276,6 +17300,18 @@ main() {
     roadmap-live-and-pack-actionable-run)
       shift
       roadmap_live_and_pack_actionable_run "$@"
+      ;;
+    profile-default-gate-live-evidence-publish-bundle)
+      shift
+      profile_default_gate_live_evidence_publish_bundle "$@"
+      ;;
+    runtime-actuation-live-evidence-publish-bundle)
+      shift
+      runtime_actuation_live_evidence_publish_bundle "$@"
+      ;;
+    profile-compare-multi-vm-live-evidence-publish-bundle)
+      shift
+      profile_compare_multi_vm_live_evidence_publish_bundle "$@"
       ;;
     roadmap-live-evidence-cycle-batch-run)
       shift

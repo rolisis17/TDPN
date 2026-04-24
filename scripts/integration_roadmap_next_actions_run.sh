@@ -465,6 +465,46 @@ JSON
 }
 JSON
     ;;
+  live_evidence_publish_bundle_actions)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate_live_evidence_publish_bundle","label":"Profile-default live-evidence publish bundle","command":"bash \"$PASS1\"","reason":"test-bundle-profile-default"},
+    {"id":"runtime_actuation_live_evidence_publish_bundle","label":"Runtime-actuation live-evidence publish bundle","command":"bash \"$PASS2\"","reason":"test-bundle-runtime-actuation"},
+    {"id":"profile_compare_multi_vm_live_evidence_publish_bundle","label":"Profile-compare multi-VM live-evidence publish bundle","command":"bash \"$PASS1\"","reason":"test-bundle-multi-vm"}
+  ]
+}
+JSON
+    ;;
+  live_evidence_publish_bundle_runtime_overlap)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"runtime_actuation_promotion","label":"Runtime-actuation promotion cycle","command":"bash \"$PASS2\"","reason":"test-runtime-cycle"},
+    {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime-actuation promotion evidence-pack publish","command":"bash \"$PASS2\"","reason":"test-runtime-pack"},
+    {"id":"runtime_actuation_live_evidence_publish_bundle","label":"Runtime-actuation live-evidence publish bundle","command":"bash \"$PASS1\"","reason":"test-runtime-bundle"}
+  ]
+}
+JSON
+    ;;
+  live_evidence_publish_bundle_profile_placeholder_subject)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate_live_evidence_publish_bundle","label":"Profile-default live-evidence publish bundle","command":"bash \"$FAKE_EASY_NODE\" profile-default-gate-live-evidence-publish-bundle --reports-dir /tmp/fake_profile_reports --campaign-subject INVITE_KEY --summary-json /tmp/fake_profile_bundle_summary.json --print-summary-json 1","reason":"test-bundle-profile-placeholder"}
+  ]
+}
+JSON
+    ;;
+  live_evidence_publish_bundle_runtime_unsafe_shell)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"runtime_actuation_live_evidence_publish_bundle","label":"Runtime-actuation live-evidence publish bundle","command":"BASH_ENV=$UNSAFE_BUNDLE_PAYLOAD bash \"$PASS1\"","reason":"test-bundle-runtime-unsafe-shell"}
+  ]
+}
+JSON
+    ;;
   no_actions)
     cat >"$summary_json" <<JSON
 {
@@ -952,6 +992,171 @@ if ! jq -e '
 ' "$SUMMARY_LIVE_CYCLE_BATCH_HELPER_CONFLICT" >/dev/null; then
   echo "live-evidence cycle-batch helper deconflict summary mismatch"
   cat "$SUMMARY_LIVE_CYCLE_BATCH_HELPER_CONFLICT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] executes per-track live-evidence publish bundle action ids"
+SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_ACTIONS="$TMP_DIR/summary_live_evidence_publish_bundle_actions.json"
+REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_ACTIONS="$TMP_DIR/reports_live_evidence_publish_bundle_actions"
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_evidence_publish_bundle_actions \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_ACTIONS" \
+  --summary-json "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_ACTIONS" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 3
+  and .roadmap.selected_action_ids == [
+    "profile_default_gate_live_evidence_publish_bundle",
+    "runtime_actuation_live_evidence_publish_bundle",
+    "profile_compare_multi_vm_live_evidence_publish_bundle"
+  ]
+  and .summary.actions_executed == 3
+  and .summary.pass == 3
+  and .summary.fail == 0
+  and ((.actions // []) | length == 3)
+  and ((.actions // []) | all(.status == "pass"))
+' "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_ACTIONS" >/dev/null; then
+  echo "live-evidence publish bundle actions summary mismatch"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_ACTIONS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] deterministic overlap filtering selects runtime bundle without redundant cycle/evidence actions"
+SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_FILTER="$TMP_DIR/summary_live_evidence_publish_bundle_runtime_filter.json"
+REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_FILTER="$TMP_DIR/reports_live_evidence_publish_bundle_runtime_filter"
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_evidence_publish_bundle_runtime_overlap \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_FILTER" \
+  --summary-json "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_FILTER" \
+  --include-id runtime_actuation_live_evidence_publish_bundle \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.include_ids == ["runtime_actuation_live_evidence_publish_bundle"]
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["runtime_actuation_live_evidence_publish_bundle"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "runtime_actuation_live_evidence_publish_bundle"
+  and .actions[0].status == "pass"
+' "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_FILTER" >/dev/null; then
+  echo "runtime bundle deterministic overlap filtering summary mismatch"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_FILTER"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] unresolved bundle placeholder subject fails closed before command execution"
+SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER="$TMP_DIR/summary_live_evidence_publish_bundle_profile_placeholder.json"
+REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER="$TMP_DIR/reports_live_evidence_publish_bundle_profile_placeholder"
+: >"$FAKE_EASY_NODE_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_evidence_publish_bundle_profile_placeholder_subject \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" FAKE_EASY_NODE="$FAKE_EASY_NODE" FAKE_EASY_NODE_CAPTURE="$FAKE_EASY_NODE_CAPTURE" CAMPAIGN_SUBJECT="" INVITE_KEY="" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER" \
+  --summary-json "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER" \
+  --print-summary-json 0
+live_evidence_publish_bundle_profile_placeholder_rc=$?
+set -e
+if [[ "$live_evidence_publish_bundle_profile_placeholder_rc" != "2" ]]; then
+  echo "expected unresolved bundle placeholder hard-fail rc=2, got rc=$live_evidence_publish_bundle_profile_placeholder_rc"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .summary.actions_executed == 1
+  and .summary.pass == 0
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "profile_default_gate_live_evidence_publish_bundle"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 2
+  and .actions[0].command_rc == 2
+  and .actions[0].failure_kind == "missing_invite_subject_precondition"
+  and ((.actions[0].next_operator_action // "") | contains("--profile-default-gate-subject REPLACE_WITH_INVITE_SUBJECT"))
+' "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER" >/dev/null; then
+  echo "unresolved bundle placeholder hard-fail summary mismatch"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROFILE_PLACEHOLDER"
+  exit 1
+fi
+if [[ -s "$FAKE_EASY_NODE_CAPTURE" ]]; then
+  echo "unresolved bundle placeholder should fail before fake easy_node execution"
+  cat "$FAKE_EASY_NODE_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] runtime bundle unsafe shell requirement fails closed in safe mode"
+SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE="$TMP_DIR/summary_live_evidence_publish_bundle_runtime_unsafe.json"
+REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE="$TMP_DIR/reports_live_evidence_publish_bundle_runtime_unsafe"
+UNSAFE_BUNDLE_PAYLOAD_SCRIPT="$TMP_DIR/runtime_bundle_unsafe_payload.sh"
+UNSAFE_BUNDLE_MARKER="$TMP_DIR/runtime_bundle_unsafe_marker.txt"
+cat >"$UNSAFE_BUNDLE_PAYLOAD_SCRIPT" <<EOF_UNSAFE_BUNDLE
+#!/usr/bin/env bash
+set -euo pipefail
+echo "runtime-bundle-unsafe-executed" >"$UNSAFE_BUNDLE_MARKER"
+EOF_UNSAFE_BUNDLE
+chmod +x "$UNSAFE_BUNDLE_PAYLOAD_SCRIPT"
+rm -f "$UNSAFE_BUNDLE_MARKER"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=live_evidence_publish_bundle_runtime_unsafe_shell \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" UNSAFE_BUNDLE_PAYLOAD="$UNSAFE_BUNDLE_PAYLOAD_SCRIPT" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE" \
+  --summary-json "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE" \
+  --print-summary-json 0
+live_evidence_publish_bundle_runtime_unsafe_rc=$?
+set -e
+if [[ "$live_evidence_publish_bundle_runtime_unsafe_rc" != "5" ]]; then
+  echo "expected runtime bundle unsafe-shell rejection rc=5, got rc=$live_evidence_publish_bundle_runtime_unsafe_rc"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE"
+  exit 1
+fi
+if [[ -f "$UNSAFE_BUNDLE_MARKER" ]]; then
+  echo "runtime bundle unsafe-shell payload unexpectedly executed in safe mode"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 5
+  and .summary.actions_executed == 1
+  and .summary.pass == 0
+  and .summary.fail == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "runtime_actuation_live_evidence_publish_bundle"
+  and .actions[0].status == "fail"
+  and .actions[0].rc == 5
+  and .actions[0].command_rc == 5
+  and .actions[0].failure_kind == "command_failed"
+' "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE" >/dev/null; then
+  echo "runtime bundle unsafe-shell rejection summary mismatch"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE"
+  exit 1
+fi
+runtime_bundle_unsafe_log="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE")"
+if [[ -z "$runtime_bundle_unsafe_log" || ! -f "$runtime_bundle_unsafe_log" ]]; then
+  echo "missing runtime bundle unsafe-shell action log artifact"
+  cat "$SUMMARY_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_UNSAFE"
+  exit 1
+fi
+if ! grep -F -- "refusing env-prefixed action command" "$runtime_bundle_unsafe_log" >/dev/null; then
+  echo "runtime bundle unsafe-shell action log missing safe-mode rejection marker"
+  cat "$runtime_bundle_unsafe_log"
   exit 1
 fi
 

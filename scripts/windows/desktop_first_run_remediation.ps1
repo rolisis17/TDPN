@@ -41,6 +41,87 @@ function Get-CommandPath {
   return ""
 }
 
+function Get-CommandPs1CmdSiblingStatus {
+  param(
+    [Parameter(Mandatory = $true)][string]$CommandName,
+    [Parameter(Mandatory = $true)][string]$ResolvedPath
+  )
+
+  $available = -not [string]::IsNullOrWhiteSpace($ResolvedPath)
+  $resolvesToPs1 = $false
+  $cmdSiblingPath = ""
+  $cmdSiblingAvailable = $false
+  if ($available) {
+    $leaf = [System.IO.Path]::GetFileName($ResolvedPath)
+    $resolvesToPs1 = $leaf.Equals(("{0}.ps1" -f $CommandName), [System.StringComparison]::OrdinalIgnoreCase)
+    if ($resolvesToPs1) {
+      $candidateCmdSiblingPath = [System.IO.Path]::ChangeExtension($ResolvedPath, ".cmd")
+      if (Test-Path -LiteralPath $candidateCmdSiblingPath -PathType Leaf) {
+        $cmdSiblingPath = $candidateCmdSiblingPath
+        $cmdSiblingAvailable = $true
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    command_name = $CommandName
+    available = [bool]$available
+    resolved_path = $ResolvedPath
+    resolves_to_ps1 = [bool]$resolvesToPs1
+    cmd_sibling_available = [bool]$cmdSiblingAvailable
+    cmd_sibling_path = $cmdSiblingPath
+  }
+}
+
+function Invoke-SessionCmdAliasRemediation {
+  param(
+    [Parameter(Mandatory = $true)][string]$CommandName,
+    [Parameter(Mandatory = $true)][bool]$ApplyRequested,
+    [Parameter(Mandatory = $true)][bool]$ExecutionPolicyRisk,
+    [Parameter(Mandatory = $true)][bool]$ResolvesToPs1,
+    [Parameter(Mandatory = $false)][string]$CmdSiblingPath = ""
+  )
+
+  $result = [ordered]@{
+    command = $CommandName
+    eligible = [bool]($ExecutionPolicyRisk -and $ResolvesToPs1)
+    attempted = $false
+    applied = $false
+    reason = ""
+    alias_definition = ""
+    error = ""
+  }
+
+  if (-not $result.eligible) {
+    $result.reason = "not_needed"
+    return [pscustomobject]$result
+  }
+  if (-not $ApplyRequested) {
+    $result.reason = "apply_not_requested"
+    return [pscustomobject]$result
+  }
+  if ([string]::IsNullOrWhiteSpace($CmdSiblingPath)) {
+    $result.reason = "cmd_sibling_missing"
+    return [pscustomobject]$result
+  }
+
+  $result.attempted = $true
+  try {
+    Set-Alias -Name $CommandName -Value $CmdSiblingPath -Scope Global -Force
+    $aliasInfo = Get-Alias -Name $CommandName -ErrorAction SilentlyContinue
+    if ($null -ne $aliasInfo) {
+      $result.alias_definition = [string]$aliasInfo.Definition
+    }
+    $result.applied = $true
+    $result.reason = "applied"
+    return [pscustomobject]$result
+  } catch {
+    $result.reason = "set_alias_failed"
+    $result.error = $_.Exception.Message
+    return [pscustomobject]$result
+  }
+}
+
 function Get-ExecutionPolicySnapshot {
   $scopes = @("Process", "CurrentUser", "LocalMachine")
   $snapshot = [ordered]@{}
@@ -318,6 +399,7 @@ $executionPolicyRisk = $executionPolicySnapshot.effective -notin @("Bypass", "Un
 $goPath = Get-CommandPath "go"
 $nodePath = Get-CommandPath "node"
 $npmPath = Get-CommandPath "npm"
+$npxPath = Get-CommandPath "npx"
 $rustcPath = Get-CommandPath "rustc"
 $cargoPath = Get-CommandPath "cargo"
 $gitBashSnapshot = Get-GitBashSnapshot
@@ -325,28 +407,53 @@ $gitBashSnapshot = Get-GitBashSnapshot
 $goAvailable = -not [string]::IsNullOrWhiteSpace($goPath)
 $nodeAvailable = -not [string]::IsNullOrWhiteSpace($nodePath)
 $npmAvailable = -not [string]::IsNullOrWhiteSpace($npmPath)
+$npxAvailable = -not [string]::IsNullOrWhiteSpace($npxPath)
 $rustcAvailable = -not [string]::IsNullOrWhiteSpace($rustcPath)
 $cargoAvailable = -not [string]::IsNullOrWhiteSpace($cargoPath)
 $rustAvailable = $rustcAvailable -and $cargoAvailable
 $gitBashAvailable = [bool]$gitBashSnapshot.available
 
-$npmResolvesToPs1 = $false
-$npmCmdSiblingPath = ""
-$npmCmdSiblingAvailable = $false
-if ($npmAvailable) {
-  $npmLeaf = [System.IO.Path]::GetFileName($npmPath)
-  $npmResolvesToPs1 = $npmLeaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)
-  if ($npmResolvesToPs1) {
-    $candidateCmdSiblingPath = [System.IO.Path]::ChangeExtension($npmPath, ".cmd")
-    if (Test-Path -LiteralPath $candidateCmdSiblingPath -PathType Leaf) {
-      $npmCmdSiblingPath = $candidateCmdSiblingPath
-      $npmCmdSiblingAvailable = $true
-    }
-  }
+$npmResolverStatus = Get-CommandPs1CmdSiblingStatus -CommandName "npm" -ResolvedPath $npmPath
+$npxResolverStatus = Get-CommandPs1CmdSiblingStatus -CommandName "npx" -ResolvedPath $npxPath
+
+$npmResolvesToPs1 = [bool]$npmResolverStatus.resolves_to_ps1
+$npmCmdSiblingPath = [string]$npmResolverStatus.cmd_sibling_path
+$npmCmdSiblingAvailable = [bool]$npmResolverStatus.cmd_sibling_available
+$npxResolvesToPs1 = [bool]$npxResolverStatus.resolves_to_ps1
+$npxCmdSiblingPath = [string]$npxResolverStatus.cmd_sibling_path
+$npxCmdSiblingAvailable = [bool]$npxResolverStatus.cmd_sibling_available
+
+$npmAliasRemediation = Invoke-SessionCmdAliasRemediation `
+  -CommandName "npm" `
+  -ApplyRequested ([bool]$Apply) `
+  -ExecutionPolicyRisk ([bool]$executionPolicyRisk) `
+  -ResolvesToPs1 ([bool]$npmResolvesToPs1) `
+  -CmdSiblingPath $npmCmdSiblingPath
+
+$npxAliasRemediation = Invoke-SessionCmdAliasRemediation `
+  -CommandName "npx" `
+  -ApplyRequested ([bool]$Apply) `
+  -ExecutionPolicyRisk ([bool]$executionPolicyRisk) `
+  -ResolvesToPs1 ([bool]$npxResolvesToPs1) `
+  -CmdSiblingPath $npxCmdSiblingPath
+
+if ([bool]$npmAliasRemediation.applied) {
+  $appliedActions.Add(("Set-Alias -Name npm -Value `"{0}`" -Scope Global -Force" -f $npmCmdSiblingPath)) | Out-Null
+}
+if ([bool]$npxAliasRemediation.applied) {
+  $appliedActions.Add(("Set-Alias -Name npx -Value `"{0}`" -Scope Global -Force" -f $npxCmdSiblingPath)) | Out-Null
+}
+if ([bool]$npmAliasRemediation.attempted -and -not [bool]$npmAliasRemediation.applied) {
+  $applyFailedActions.Add(("Set-Alias -Name npm failed :: {0}" -f $npmAliasRemediation.error)) | Out-Null
+}
+if ([bool]$npxAliasRemediation.attempted -and -not [bool]$npxAliasRemediation.applied) {
+  $applyFailedActions.Add(("Set-Alias -Name npx failed :: {0}" -f $npxAliasRemediation.error)) | Out-Null
 }
 
-$npmPs1PolicyIssue = $npmResolvesToPs1 -and $executionPolicyRisk
+$npmPs1PolicyIssue = $npmResolvesToPs1 -and $executionPolicyRisk -and -not [bool]$npmAliasRemediation.applied
 $npmPs1ShimIssue = $npmResolvesToPs1 -and -not $npmCmdSiblingAvailable
+$npxPs1PolicyIssue = $npxResolvesToPs1 -and $executionPolicyRisk -and -not [bool]$npxAliasRemediation.applied
+$npxPs1ShimIssue = $npxResolvesToPs1 -and -not $npxCmdSiblingAvailable
 $desktopAssets = Get-DesktopAssetSnapshot
 $sourceIconAvailable = [bool]$desktopAssets.source_icon.available
 $generatedIconValid = [bool]$desktopAssets.generated_icon.valid
@@ -357,15 +464,20 @@ if ($executionPolicyRisk) { $issues.Add("execution_policy_risk") | Out-Null }
 if (-not $goAvailable) { $issues.Add("go_missing") | Out-Null }
 if (-not $nodeAvailable) { $issues.Add("node_missing") | Out-Null }
 if (-not $npmAvailable) { $issues.Add("npm_missing") | Out-Null }
+if (-not $npxAvailable) { $issues.Add("npx_missing") | Out-Null }
 if (-not $rustcAvailable) { $issues.Add("rustc_missing") | Out-Null }
 if (-not $cargoAvailable) { $issues.Add("cargo_missing") | Out-Null }
 if (-not $rustAvailable) { $issues.Add("rust_toolchain_missing") | Out-Null }
 if (-not $gitBashAvailable) { $issues.Add("git_bash_missing") | Out-Null }
 if ($npmPs1PolicyIssue) { $issues.Add("npm_ps1_policy_issue") | Out-Null }
 if ($npmPs1ShimIssue) { $issues.Add("npm_ps1_without_npm_cmd") | Out-Null }
+if ($npxPs1PolicyIssue) { $issues.Add("npx_ps1_policy_issue") | Out-Null }
+if ($npxPs1ShimIssue) { $issues.Add("npx_ps1_without_npx_cmd") | Out-Null }
 if (-not $sourceIconAvailable) { $issues.Add("desktop_icon_source_missing") | Out-Null }
 if (-not $generatedIconValid) { $issues.Add("desktop_icon_missing_or_invalid") | Out-Null }
 if (-not $tauriBundleIconConfigured) { $issues.Add("desktop_tauri_bundle_icon_resource_missing") | Out-Null }
+if ([bool]$Apply -and [bool]$npmAliasRemediation.eligible -and -not [bool]$npmAliasRemediation.applied) { $issues.Add("npm_session_alias_apply_failed") | Out-Null }
+if ([bool]$Apply -and [bool]$npxAliasRemediation.eligible -and -not [bool]$npxAliasRemediation.applied) { $issues.Add("npx_session_alias_apply_failed") | Out-Null }
 if ($applyFailedActions.Count -gt 0) { $issues.Add("execution_policy_apply_failed") | Out-Null }
 
 $safeHints = New-Object System.Collections.Generic.List[string]
@@ -387,6 +499,12 @@ if (-not $gitBashAvailable) {
 if ($npmPs1PolicyIssue) {
   Add-UniqueHint -Hints ([ref]$safeHints) -Command ".\scripts\windows\desktop_node.cmd npm -v"
 }
+if ($npxPs1PolicyIssue) {
+  Add-UniqueHint -Hints ([ref]$safeHints) -Command ".\scripts\windows\desktop_node.cmd npx -v"
+}
+if ($npmPs1PolicyIssue -or $npxPs1PolicyIssue) {
+  Add-UniqueHint -Hints ([ref]$safeHints) -Command "powershell -NoProfile -ExecutionPolicy Bypass -Command `"if (Get-Command npm.cmd -ErrorAction SilentlyContinue) { Set-Alias -Name npm -Value npm.cmd -Scope Global -Force }; if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { Set-Alias -Name npx -Value npx.cmd -Scope Global -Force }`""
+}
 if (-not $sourceIconAvailable) {
   Add-UniqueHint -Hints ([ref]$safeHints) -Command "git checkout -- apps/desktop/src-tauri/icons/icon.svg"
 }
@@ -406,11 +524,16 @@ $checkResults = [ordered]@{
   go_available = [bool]$goAvailable
   node_available = [bool]$nodeAvailable
   npm_available = [bool]$npmAvailable
+  npx_available = [bool]$npxAvailable
   rustc_available = [bool]$rustcAvailable
   cargo_available = [bool]$cargoAvailable
   git_bash_available = [bool]$gitBashAvailable
   npm_ps1_policy_safe = [bool](-not $npmPs1PolicyIssue)
   npm_ps1_cmd_shim_safe = [bool](-not $npmPs1ShimIssue)
+  npx_ps1_policy_safe = [bool](-not $npxPs1PolicyIssue)
+  npx_ps1_cmd_shim_safe = [bool](-not $npxPs1ShimIssue)
+  npm_session_alias_remediation_safe = [bool](-not ([bool]$npmAliasRemediation.eligible -and -not [bool]$npmAliasRemediation.applied))
+  npx_session_alias_remediation_safe = [bool](-not ([bool]$npxAliasRemediation.eligible -and -not [bool]$npxAliasRemediation.applied))
   desktop_icon_source_available = [bool]$sourceIconAvailable
   desktop_generated_icon_valid = [bool]$generatedIconValid
   desktop_tauri_bundle_icon_configured = [bool]$tauriBundleIconConfigured
@@ -446,6 +569,7 @@ if ($Compact) {
   Write-Step ("go: {0}" -f $(if ($goAvailable) { $goPath } else { "missing" }))
   Write-Step ("node: {0}" -f $(if ($nodeAvailable) { $nodePath } else { "missing" }))
   Write-Step ("npm: {0}" -f $(if ($npmAvailable) { $npmPath } else { "missing" }))
+  Write-Step ("npx: {0}" -f $(if ($npxAvailable) { $npxPath } else { "missing" }))
   Write-Step ("rustc: {0}" -f $(if ($rustcAvailable) { $rustcPath } else { "missing" }))
   Write-Step ("cargo: {0}" -f $(if ($cargoAvailable) { $cargoPath } else { "missing" }))
   Write-Step ("git-bash: {0}" -f $(if ($gitBashAvailable) { "$($gitBashSnapshot.path) [$($gitBashSnapshot.source)]" } else { "missing" }))
@@ -454,6 +578,19 @@ if ($Compact) {
   Write-Step ("desktop tauri bundle icon resource: {0} ({1})" -f $desktopAssets.tauri_bundle_icon.path, $(if ($tauriBundleIconConfigured) { "configured" } else { $desktopAssets.tauri_bundle_icon.status }))
   if ($npmResolvesToPs1) {
     Write-Step ("npm.ps1 resolver detected; sibling npm.cmd={0}" -f $(if ($npmCmdSiblingAvailable) { $npmCmdSiblingPath } else { "missing" }))
+  }
+  if ($npxResolvesToPs1) {
+    Write-Step ("npx.ps1 resolver detected; sibling npx.cmd={0}" -f $(if ($npxCmdSiblingAvailable) { $npxCmdSiblingPath } else { "missing" }))
+  }
+  if ([bool]$npmAliasRemediation.applied) {
+    Write-Step ("session alias remediation applied: npm -> {0}" -f $npmAliasRemediation.alias_definition)
+  } elseif ([bool]$npmAliasRemediation.eligible -and -not [bool]$Apply) {
+    Write-Step "session alias remediation available for npm; rerun with -Apply to force npm.cmd for this shell only"
+  }
+  if ([bool]$npxAliasRemediation.applied) {
+    Write-Step ("session alias remediation applied: npx -> {0}" -f $npxAliasRemediation.alias_definition)
+  } elseif ([bool]$npxAliasRemediation.eligible -and -not [bool]$Apply) {
+    Write-Step "session alias remediation available for npx; rerun with -Apply to force npx.cmd for this shell only"
   }
   if ($Apply) {
     Write-Step ("apply requested=true applied={0} failed={1}" -f $appliedActions.Count, $applyFailedActions.Count)
@@ -500,12 +637,14 @@ $summary = [ordered]@{
       go_available = [bool]$goAvailable
       node_available = [bool]$nodeAvailable
       npm_available = [bool]$npmAvailable
+      npx_available = [bool]$npxAvailable
       rustc_available = [bool]$rustcAvailable
       cargo_available = [bool]$cargoAvailable
       rust_available = [bool]$rustAvailable
       go_path = $goPath
       node_path = $nodePath
       npm_path = $npmPath
+      npx_path = $npxPath
       rustc_path = $rustcPath
       cargo_path = $cargoPath
     }
@@ -516,6 +655,30 @@ $summary = [ordered]@{
       npm_cmd_sibling_path = $npmCmdSiblingPath
       npm_ps1_policy_issue = [bool]$npmPs1PolicyIssue
       npm_ps1_without_npm_cmd = [bool]$npmPs1ShimIssue
+      npx_resolver_path = $npxPath
+      resolves_to_npx_ps1 = [bool]$npxResolvesToPs1
+      npx_cmd_sibling_available = [bool]$npxCmdSiblingAvailable
+      npx_cmd_sibling_path = $npxCmdSiblingPath
+      npx_ps1_policy_issue = [bool]$npxPs1PolicyIssue
+      npx_ps1_without_npx_cmd = [bool]$npxPs1ShimIssue
+      session_alias_remediation = [ordered]@{
+        npm = [ordered]@{
+          eligible = [bool]$npmAliasRemediation.eligible
+          attempted = [bool]$npmAliasRemediation.attempted
+          applied = [bool]$npmAliasRemediation.applied
+          reason = [string]$npmAliasRemediation.reason
+          alias_definition = [string]$npmAliasRemediation.alias_definition
+          error = [string]$npmAliasRemediation.error
+        }
+        npx = [ordered]@{
+          eligible = [bool]$npxAliasRemediation.eligible
+          attempted = [bool]$npxAliasRemediation.attempted
+          applied = [bool]$npxAliasRemediation.applied
+          reason = [string]$npxAliasRemediation.reason
+          alias_definition = [string]$npxAliasRemediation.alias_definition
+          error = [string]$npxAliasRemediation.error
+        }
+      }
     }
     git_bash = [ordered]@{
       available = [bool]$gitBashAvailable

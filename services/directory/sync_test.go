@@ -188,6 +188,203 @@ func TestFetchPeerRelaysWithPubsNotModifiedDropsExpiredCachedDescriptors(t *test
 	}
 }
 
+func TestFetchPeerRelaysWithPubsNotModifiedDropsCachedDescriptorsWithoutValidUntil(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/relays": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotModified,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		},
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerRelayETags: map[string]string{
+			normalizePeerURL(peerURL): "\"etag-1\"",
+		},
+		peerRelayCache: map[string][]proto.RelayDescriptor{
+			normalizePeerURL(peerURL): {
+				{
+					RelayID:  "exit-missing-valid-until",
+					Role:     "exit",
+					Endpoint: "127.0.0.1:51821",
+				},
+				{
+					RelayID:    "exit-live",
+					Role:       "exit",
+					Endpoint:   "127.0.0.1:52821",
+					ValidUntil: time.Now().Add(1 * time.Minute),
+				},
+			},
+		},
+	}
+
+	got, err := s.fetchPeerRelaysWithPubs(context.Background(), peerURL, nil)
+	if err != nil {
+		t.Fatalf("fetchPeerRelaysWithPubs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 cached relay with valid_until, got %d", len(got))
+	}
+	if got[0].RelayID != "exit-live" {
+		t.Fatalf("expected live cached relay, got %q", got[0].RelayID)
+	}
+}
+
+func TestFetchPeerRelaysWithPubsRejectsDescriptorsWithoutValidUntil(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	missingValidUntil := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:  "exit-missing-valid-until",
+		Role:     "exit",
+		Endpoint: "127.0.0.1:51821",
+	}, priv)
+	live := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-live",
+		Role:       "exit",
+		Endpoint:   "127.0.0.1:52821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{missingValidUntil, live}}),
+	}
+
+	s := &Service{httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}}}
+	got, err := s.fetchPeerRelaysWithPubs(context.Background(), peerURL, []ed25519.PublicKey{pub})
+	if err != nil {
+		t.Fatalf("fetchPeerRelaysWithPubs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected only descriptor with valid_until, got %d", len(got))
+	}
+	if got[0].RelayID != "exit-live" {
+		t.Fatalf("expected exit-live descriptor, got %q", got[0].RelayID)
+	}
+}
+
+func TestFetchPeerSelectionScoresNotModifiedRejectsExpiredCache(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/selection-feed": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotModified,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		},
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerScoreETags: map[string]string{
+			normalizePeerURL(peerURL): "\"etag-score-1\"",
+		},
+		peerScoreCache: map[string]map[string]proto.RelaySelectionScore{
+			normalizePeerURL(peerURL): {
+				relayKey("exit-expired", "exit"): {
+					RelayID:      "exit-expired",
+					Role:         "exit",
+					Reputation:   0.7,
+					Uptime:       0.8,
+					Capacity:     0.9,
+					AbusePenalty: 0.1,
+				},
+			},
+		},
+		peerScoreCacheExpiresAt: map[string]int64{
+			normalizePeerURL(peerURL): time.Now().Add(-1 * time.Minute).Unix(),
+		},
+	}
+
+	if _, err := s.fetchPeerSelectionScores(context.Background(), peerURL, nil); err == nil {
+		t.Fatalf("expected expired cached selection feed to be rejected on 304")
+	}
+}
+
+func TestFetchPeerTrustAttestationsNotModifiedRejectsExpiredCache(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/trust-attestations": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotModified,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		},
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		peerTrustETags: map[string]string{
+			normalizePeerURL(peerURL): "\"etag-trust-1\"",
+		},
+		peerTrustCache: map[string]map[string]proto.RelayTrustAttestation{
+			normalizePeerURL(peerURL): {
+				relayKey("exit-expired", "exit"): {
+					RelayID:      "exit-expired",
+					Role:         "exit",
+					OperatorID:   "op-a",
+					Reputation:   0.7,
+					Uptime:       0.8,
+					Capacity:     0.9,
+					AbusePenalty: 0.1,
+					Confidence:   0.9,
+				},
+			},
+		},
+		peerTrustCacheExpiresAt: map[string]int64{
+			normalizePeerURL(peerURL): time.Now().Add(-1 * time.Minute).Unix(),
+		},
+	}
+
+	if _, err := s.fetchPeerTrustAttestations(context.Background(), peerURL, nil); err == nil {
+		t.Fatalf("expected expired cached peer trust feed to be rejected on 304")
+	}
+}
+
+func TestFetchIssuerTrustAttestationsNotModifiedRejectsExpiredCache(t *testing.T) {
+	issuerURL := "http://issuer-a.local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/trust/relays": func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotModified,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		},
+	}
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		issuerTrustETags: map[string]string{
+			normalizePeerURL(issuerURL): "\"etag-issuer-trust-1\"",
+		},
+		issuerTrustCache: map[string]map[string]proto.RelayTrustAttestation{
+			normalizePeerURL(issuerURL): {
+				relayKey("exit-expired", "exit"): {
+					RelayID:      "exit-expired",
+					Role:         "exit",
+					OperatorID:   "op-issuer",
+					Reputation:   0.7,
+					Uptime:       0.8,
+					Capacity:     0.9,
+					AbusePenalty: 0.1,
+					Confidence:   0.9,
+				},
+			},
+		},
+		issuerTrustCacheExpiresAt: map[string]int64{
+			normalizePeerURL(issuerURL): time.Now().Add(-1 * time.Minute).Unix(),
+		},
+	}
+
+	if _, err := s.fetchIssuerTrustAttestations(context.Background(), issuerURL, nil); err == nil {
+		t.Fatalf("expected expired cached issuer trust feed to be rejected on 304")
+	}
+}
+
 func TestFetchPeerRelaysErrorsWhenAllDescriptorsFailVerification(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pub, _, err := crypto.GenerateEd25519Keypair()

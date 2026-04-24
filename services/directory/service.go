@@ -127,10 +127,13 @@ type Service struct {
 	peerRelayCache                   map[string][]proto.RelayDescriptor
 	peerScoreETags                   map[string]string
 	peerScoreCache                   map[string]map[string]proto.RelaySelectionScore
+	peerScoreCacheExpiresAt          map[string]int64
 	peerTrustETags                   map[string]string
 	peerTrustCache                   map[string]map[string]proto.RelayTrustAttestation
+	peerTrustCacheExpiresAt          map[string]int64
 	issuerTrustETags                 map[string]string
 	issuerTrustCache                 map[string]map[string]proto.RelayTrustAttestation
+	issuerTrustCacheExpiresAt        map[string]int64
 	peerScoreLastFreshAt             time.Time
 	peerTrustLastFreshAt             time.Time
 	issuerTrustLastFreshAt           time.Time
@@ -615,10 +618,13 @@ func New() *Service {
 		peerRelayCache:                   make(map[string][]proto.RelayDescriptor),
 		peerScoreETags:                   make(map[string]string),
 		peerScoreCache:                   make(map[string]map[string]proto.RelaySelectionScore),
+		peerScoreCacheExpiresAt:          make(map[string]int64),
 		peerTrustETags:                   make(map[string]string),
 		peerTrustCache:                   make(map[string]map[string]proto.RelayTrustAttestation),
+		peerTrustCacheExpiresAt:          make(map[string]int64),
 		issuerTrustETags:                 make(map[string]string),
 		issuerTrustCache:                 make(map[string]map[string]proto.RelayTrustAttestation),
+		issuerTrustCacheExpiresAt:        make(map[string]int64),
 		providerIssuerPubCache:           make(map[string]providerIssuerPubCacheEntry),
 		peerTrustStrict:                  peerTrustStrict,
 		peerTrustTOFU:                    peerTrustTOFU,
@@ -1953,10 +1959,10 @@ func (s *Service) fetchIssuerTrustAttestations(ctx context.Context, issuerURL st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
-		if cached, ok := s.cachedIssuerTrust(issuerURL); ok {
+		if cached, ok := s.cachedIssuerTrust(issuerURL, time.Now().UTC()); ok {
 			return cached, nil
 		}
-		return nil, fmt.Errorf("issuer trust feed 304 without cache")
+		return nil, fmt.Errorf("issuer trust feed 304 without valid cache")
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil
@@ -1994,7 +2000,7 @@ func (s *Service) fetchIssuerTrustAttestations(ctx context.Context, issuerURL st
 		att.AppealRef = normalizeEvidenceRef(att.AppealRef)
 		out[key] = att
 	}
-	s.setIssuerTrustCache(issuerURL, resp.Header.Get("ETag"), out)
+	s.setIssuerTrustCache(issuerURL, resp.Header.Get("ETag"), out, time.Unix(feed.ExpiresAt, 0).UTC())
 	return out, nil
 }
 
@@ -2136,7 +2142,7 @@ func (s *Service) fetchPeerRelaysWithPubs(ctx context.Context, peerURL string, p
 			}
 			continue
 		}
-		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+		if desc.ValidUntil.IsZero() || now.After(desc.ValidUntil) {
 			continue
 		}
 		desc.Role = role
@@ -2156,7 +2162,7 @@ func filterUnexpiredRelayDescriptors(relays []proto.RelayDescriptor, now time.Ti
 	}
 	out := make([]proto.RelayDescriptor, 0, len(relays))
 	for _, desc := range relays {
-		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+		if desc.ValidUntil.IsZero() || now.After(desc.ValidUntil) {
 			continue
 		}
 		out = append(out, desc)
@@ -2178,10 +2184,10 @@ func (s *Service) fetchPeerSelectionScores(ctx context.Context, peerURL string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
-		if cached, ok := s.cachedPeerScores(peerURL); ok {
+		if cached, ok := s.cachedPeerScores(peerURL, time.Now().UTC()); ok {
 			return cached, nil
 		}
-		return nil, fmt.Errorf("peer selection feed 304 without cache")
+		return nil, fmt.Errorf("peer selection feed 304 without valid cache")
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil
@@ -2212,7 +2218,7 @@ func (s *Service) fetchPeerSelectionScores(ctx context.Context, peerURL string, 
 		score.StakeScore = clampScore(score.StakeScore)
 		out[key] = score
 	}
-	s.setPeerScoreCache(peerURL, resp.Header.Get("ETag"), out)
+	s.setPeerScoreCache(peerURL, resp.Header.Get("ETag"), out, time.Unix(feed.ExpiresAt, 0).UTC())
 	return out, nil
 }
 
@@ -2230,10 +2236,10 @@ func (s *Service) fetchPeerTrustAttestations(ctx context.Context, peerURL string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
-		if cached, ok := s.cachedPeerTrust(peerURL); ok {
+		if cached, ok := s.cachedPeerTrust(peerURL, time.Now().UTC()); ok {
 			return cached, nil
 		}
-		return nil, fmt.Errorf("peer trust feed 304 without cache")
+		return nil, fmt.Errorf("peer trust feed 304 without valid cache")
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil
@@ -2271,7 +2277,7 @@ func (s *Service) fetchPeerTrustAttestations(ctx context.Context, peerURL string
 		att.AppealRef = normalizeEvidenceRef(att.AppealRef)
 		out[key] = att
 	}
-	s.setPeerTrustCache(peerURL, resp.Header.Get("ETag"), out)
+	s.setPeerTrustCache(peerURL, resp.Header.Get("ETag"), out, time.Unix(feed.ExpiresAt, 0).UTC())
 	return out, nil
 }
 
@@ -3125,27 +3131,39 @@ func (s *Service) cachedPeerScoreETag(peerURL string) string {
 	return s.peerScoreETags[normalizePeerURL(peerURL)]
 }
 
-func (s *Service) cachedPeerScores(peerURL string) (map[string]proto.RelaySelectionScore, bool) {
+func (s *Service) cachedPeerScores(peerURL string, now time.Time) (map[string]proto.RelaySelectionScore, bool) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	s.peerMu.RLock()
 	defer s.peerMu.RUnlock()
-	scores, ok := s.peerScoreCache[normalizePeerURL(peerURL)]
+	peerURL = normalizePeerURL(peerURL)
+	scores, ok := s.peerScoreCache[peerURL]
 	if !ok {
+		return nil, false
+	}
+	expiresAtUnix, ok := s.peerScoreCacheExpiresAt[peerURL]
+	if !ok || expiresAtUnix <= 0 || now.Unix() >= expiresAtUnix {
 		return nil, false
 	}
 	return cloneSelectionScores(scores), true
 }
 
-func (s *Service) setPeerScoreCache(peerURL string, etag string, scores map[string]proto.RelaySelectionScore) {
+func (s *Service) setPeerScoreCache(peerURL string, etag string, scores map[string]proto.RelaySelectionScore, expiresAt time.Time) {
 	peerURL = normalizePeerURL(peerURL)
 	s.peerMu.Lock()
 	defer s.peerMu.Unlock()
 	if s.peerScoreCache == nil {
 		s.peerScoreCache = make(map[string]map[string]proto.RelaySelectionScore)
 	}
+	if s.peerScoreCacheExpiresAt == nil {
+		s.peerScoreCacheExpiresAt = make(map[string]int64)
+	}
 	if s.peerScoreETags == nil {
 		s.peerScoreETags = make(map[string]string)
 	}
 	s.peerScoreCache[peerURL] = cloneSelectionScores(scores)
+	s.peerScoreCacheExpiresAt[peerURL] = expiresAt.Unix()
 	if strings.TrimSpace(etag) != "" {
 		s.peerScoreETags[peerURL] = strings.TrimSpace(etag)
 	}
@@ -3157,27 +3175,39 @@ func (s *Service) cachedPeerTrustETag(peerURL string) string {
 	return s.peerTrustETags[normalizePeerURL(peerURL)]
 }
 
-func (s *Service) cachedPeerTrust(peerURL string) (map[string]proto.RelayTrustAttestation, bool) {
+func (s *Service) cachedPeerTrust(peerURL string, now time.Time) (map[string]proto.RelayTrustAttestation, bool) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	s.peerMu.RLock()
 	defer s.peerMu.RUnlock()
-	attestations, ok := s.peerTrustCache[normalizePeerURL(peerURL)]
+	peerURL = normalizePeerURL(peerURL)
+	attestations, ok := s.peerTrustCache[peerURL]
 	if !ok {
+		return nil, false
+	}
+	expiresAtUnix, ok := s.peerTrustCacheExpiresAt[peerURL]
+	if !ok || expiresAtUnix <= 0 || now.Unix() >= expiresAtUnix {
 		return nil, false
 	}
 	return cloneTrustAttestations(attestations), true
 }
 
-func (s *Service) setPeerTrustCache(peerURL string, etag string, attestations map[string]proto.RelayTrustAttestation) {
+func (s *Service) setPeerTrustCache(peerURL string, etag string, attestations map[string]proto.RelayTrustAttestation, expiresAt time.Time) {
 	peerURL = normalizePeerURL(peerURL)
 	s.peerMu.Lock()
 	defer s.peerMu.Unlock()
 	if s.peerTrustCache == nil {
 		s.peerTrustCache = make(map[string]map[string]proto.RelayTrustAttestation)
 	}
+	if s.peerTrustCacheExpiresAt == nil {
+		s.peerTrustCacheExpiresAt = make(map[string]int64)
+	}
 	if s.peerTrustETags == nil {
 		s.peerTrustETags = make(map[string]string)
 	}
 	s.peerTrustCache[peerURL] = cloneTrustAttestations(attestations)
+	s.peerTrustCacheExpiresAt[peerURL] = expiresAt.Unix()
 	if strings.TrimSpace(etag) != "" {
 		s.peerTrustETags[peerURL] = strings.TrimSpace(etag)
 	}
@@ -3189,27 +3219,39 @@ func (s *Service) cachedIssuerTrustETag(issuerURL string) string {
 	return s.issuerTrustETags[normalizePeerURL(issuerURL)]
 }
 
-func (s *Service) cachedIssuerTrust(issuerURL string) (map[string]proto.RelayTrustAttestation, bool) {
+func (s *Service) cachedIssuerTrust(issuerURL string, now time.Time) (map[string]proto.RelayTrustAttestation, bool) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	s.peerMu.RLock()
 	defer s.peerMu.RUnlock()
-	attestations, ok := s.issuerTrustCache[normalizePeerURL(issuerURL)]
+	issuerURL = normalizePeerURL(issuerURL)
+	attestations, ok := s.issuerTrustCache[issuerURL]
 	if !ok {
+		return nil, false
+	}
+	expiresAtUnix, ok := s.issuerTrustCacheExpiresAt[issuerURL]
+	if !ok || expiresAtUnix <= 0 || now.Unix() >= expiresAtUnix {
 		return nil, false
 	}
 	return cloneTrustAttestations(attestations), true
 }
 
-func (s *Service) setIssuerTrustCache(issuerURL string, etag string, attestations map[string]proto.RelayTrustAttestation) {
+func (s *Service) setIssuerTrustCache(issuerURL string, etag string, attestations map[string]proto.RelayTrustAttestation, expiresAt time.Time) {
 	issuerURL = normalizePeerURL(issuerURL)
 	s.peerMu.Lock()
 	defer s.peerMu.Unlock()
 	if s.issuerTrustCache == nil {
 		s.issuerTrustCache = make(map[string]map[string]proto.RelayTrustAttestation)
 	}
+	if s.issuerTrustCacheExpiresAt == nil {
+		s.issuerTrustCacheExpiresAt = make(map[string]int64)
+	}
 	if s.issuerTrustETags == nil {
 		s.issuerTrustETags = make(map[string]string)
 	}
 	s.issuerTrustCache[issuerURL] = cloneTrustAttestations(attestations)
+	s.issuerTrustCacheExpiresAt[issuerURL] = expiresAt.Unix()
 	if strings.TrimSpace(etag) != "" {
 		s.issuerTrustETags[issuerURL] = strings.TrimSpace(etag)
 	}

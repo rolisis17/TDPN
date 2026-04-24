@@ -1358,6 +1358,9 @@ func (s *Service) resolveRelayDescriptorWithCachePolicy(ctx context.Context, rel
 			if strings.TrimSpace(desc.RelayID) != relayID {
 				continue
 			}
+			if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+				continue
+			}
 			key := relayDescriptorVoteKey(desc)
 			if _, alreadySeen := seenFromSource[key]; alreadySeen {
 				continue
@@ -1666,15 +1669,20 @@ func (s *Service) fetchRelaysVerified(ctx context.Context, directoryURL string, 
 		return nil, err
 	}
 	now := time.Now().UTC()
+	verified := make([]proto.RelayDescriptor, 0, len(out.Relays))
 	for _, desc := range out.Relays {
-		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+		if desc.ValidUntil.IsZero() {
+			continue
+		}
+		if now.After(desc.ValidUntil) {
 			continue
 		}
 		if err := verifyRelayDescriptorAny(desc, dirPubs); err != nil {
 			return nil, fmt.Errorf("descriptor verify failed relay=%s: %w", desc.RelayID, err)
 		}
+		verified = append(verified, desc)
 	}
-	return out.Relays, nil
+	return verified, nil
 }
 
 func normalizeHTTPURL(raw string) string {

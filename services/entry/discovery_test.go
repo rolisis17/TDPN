@@ -498,6 +498,145 @@ func TestResolveRelayDescriptorMergesMiddleAliasVotesForQuorum(t *testing.T) {
 	}
 }
 
+func TestResolveRelayDescriptorRejectsExpiredDirectoryDescriptor(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:      "relay-expired",
+			Role:         "micro-relay",
+			Endpoint:     "203.0.113.21:51822",
+			ControlURL:   "https://203.0.113.21:8084",
+			OperatorID:   "op-middle",
+			HopRoles:     []string{"middle"},
+			Capabilities: []string{"relay"},
+			ValidUntil:   time.Now().Add(-1 * time.Minute),
+		},
+	})
+
+	s := &Service{
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		relayDescCache:      map[string]cachedRelayDescriptor{},
+	}
+
+	if _, err := s.resolveRelayDescriptor(context.Background(), "relay-expired"); err == nil {
+		t.Fatalf("expected expired relay descriptor to be rejected")
+	}
+}
+
+func TestFetchRelaysVerifiedFiltersExpiredDescriptors(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:      "relay-valid",
+			Role:         "micro-relay",
+			Endpoint:     "203.0.113.22:51822",
+			ControlURL:   "https://203.0.113.22:8084",
+			OperatorID:   "op-middle",
+			HopRoles:     []string{"middle"},
+			Capabilities: []string{"relay"},
+			ValidUntil:   time.Now().Add(1 * time.Minute),
+		},
+		{
+			RelayID:      "relay-expired",
+			Role:         "micro-relay",
+			Endpoint:     "203.0.113.23:51822",
+			ControlURL:   "https://203.0.113.23:8084",
+			OperatorID:   "op-middle",
+			HopRoles:     []string{"middle"},
+			Capabilities: []string{"relay"},
+			ValidUntil:   time.Now().Add(-1 * time.Minute),
+		},
+	})
+
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	pubs, _, err := s.fetchDirectoryPubKeys(context.Background(), durl)
+	if err != nil {
+		t.Fatalf("fetchDirectoryPubKeys: %v", err)
+	}
+	relays, err := s.fetchRelaysVerified(context.Background(), durl, pubs)
+	if err != nil {
+		t.Fatalf("fetchRelaysVerified: %v", err)
+	}
+	if len(relays) != 1 {
+		t.Fatalf("expected only unexpired relays, got %d", len(relays))
+	}
+	if relays[0].RelayID != "relay-valid" {
+		t.Fatalf("expected relay-valid, got %q", relays[0].RelayID)
+	}
+}
+
+func TestFetchRelaysVerifiedRejectsDescriptorsWithoutValidUntil(t *testing.T) {
+	durl := "http://directory.local"
+	pub, priv, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	signRaw := func(desc proto.RelayDescriptor) proto.RelayDescriptor {
+		desc.Signature = ""
+		payload, err := json.Marshal(desc)
+		if err != nil {
+			t.Fatalf("marshal descriptor: %v", err)
+		}
+		desc.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload))
+		return desc
+	}
+	missingValidUntil := signRaw(proto.RelayDescriptor{
+		RelayID:      "relay-missing-valid-until",
+		Role:         "micro-relay",
+		Endpoint:     "203.0.113.24:51822",
+		ControlURL:   "https://203.0.113.24:8084",
+		OperatorID:   "op-middle",
+		HopRoles:     []string{"middle"},
+		Capabilities: []string{"relay"},
+	})
+	live := signRaw(proto.RelayDescriptor{
+		RelayID:      "relay-live",
+		Role:         "micro-relay",
+		Endpoint:     "203.0.113.25:51822",
+		ControlURL:   "https://203.0.113.25:8084",
+		OperatorID:   "op-middle",
+		HopRoles:     []string{"middle"},
+		Capabilities: []string{"relay"},
+		ValidUntil:   time.Now().Add(1 * time.Minute),
+	})
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		durl + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		durl + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(pub)},
+		}),
+		durl + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{missingValidUntil, live}}),
+	}
+
+	s := &Service{
+		httpClient: &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	pubs, _, err := s.fetchDirectoryPubKeys(context.Background(), durl)
+	if err != nil {
+		t.Fatalf("fetchDirectoryPubKeys: %v", err)
+	}
+	relays, err := s.fetchRelaysVerified(context.Background(), durl, pubs)
+	if err != nil {
+		t.Fatalf("fetchRelaysVerified: %v", err)
+	}
+	if len(relays) != 1 {
+		t.Fatalf("expected only descriptors with non-zero valid_until, got %d", len(relays))
+	}
+	if relays[0].RelayID != "relay-live" {
+		t.Fatalf("expected relay-live, got %q", relays[0].RelayID)
+	}
+}
+
 func TestResolveExitRouteStrictTrustRejectsUnknownKey(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))

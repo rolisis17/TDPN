@@ -4245,7 +4245,7 @@ function inferTabActivationPathHint(tabName, reason) {
 function formatLockedTabMessage(tabName, reason) {
   const normalizedReason = ensureSentence(reason) || `${tabName} tab is currently locked by role policy.`;
   const activationPath = ensureSentence(inferTabActivationPathHint(tabName.toLowerCase(), normalizedReason));
-  return `${tabName} tab is disabled for this session. ${normalizedReason} Next step: ${activationPath}`;
+  return `${tabName} tab is disabled for this session. Lock reason: ${normalizedReason} Activation path: ${activationPath}`;
 }
 
 function syncTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason) {

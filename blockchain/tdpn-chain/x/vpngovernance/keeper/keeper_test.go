@@ -47,6 +47,53 @@ func TestKeeperPolicyUpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestKeeperUpsertPolicyWithErrorRejectsInvalidPolicy(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	err := k.UpsertPolicyWithError(types.GovernancePolicy{
+		PolicyID:        "policy-invalid-upsert",
+		Version:         1,
+		ActivatedAtUnix: 1,
+	})
+	if err == nil {
+		t.Fatal("expected upsert policy to fail closed on invalid payload")
+	}
+	if !strings.Contains(err.Error(), "invalid policy") {
+		t.Fatalf("expected invalid policy error context, got %v", err)
+	}
+	if _, ok := k.GetPolicy("policy-invalid-upsert"); ok {
+		t.Fatal("expected invalid upserted policy not to be readable")
+	}
+}
+
+func TestKeeperPolicyReadsFailClosedOnInvalidPolicyRecord(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	store.UpsertPolicy(types.GovernancePolicy{PolicyID: "policy-invalid-read"})
+
+	k := NewKeeperWithStore(store)
+	if _, ok := k.GetPolicy("policy-invalid-read"); ok {
+		t.Fatal("expected invalid policy lookup to fail closed")
+	}
+
+	records, err := k.ListPoliciesWithError()
+	if err == nil {
+		t.Fatal("expected policy list to fail closed on invalid policy record")
+	}
+	if !strings.Contains(err.Error(), "is invalid") {
+		t.Fatalf("expected invalid policy error context, got %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected zero policies on fail-closed list, got %d", len(records))
+	}
+
+	if got := k.ListPolicies(); len(got) != 0 {
+		t.Fatalf("expected ListPolicies to fail closed and return zero records, got %d", len(got))
+	}
+}
+
 func TestKeeperDecisionUpsertAndGet(t *testing.T) {
 	t.Parallel()
 
@@ -376,11 +423,12 @@ func TestKeeperRecordDecisionMissingPolicy(t *testing.T) {
 func TestKeeperRecordDecisionFailsClosedOnInvalidReferencedPolicy(t *testing.T) {
 	t.Parallel()
 
-	k := NewKeeper()
+	store := NewInMemoryStore()
 	// Simulate legacy/corrupt state injected outside CreatePolicy validation.
-	k.UpsertPolicy(types.GovernancePolicy{
+	store.UpsertPolicy(types.GovernancePolicy{
 		PolicyID: "policy-invalid-reference",
 	})
+	k := NewKeeperWithStore(store)
 
 	_, err := k.RecordDecision(types.GovernanceDecision{
 		DecisionID:    "decision-invalid-reference",
@@ -438,6 +486,33 @@ func TestKeeperListDecisionsDeterministicByDecisionID(t *testing.T) {
 	}
 	if list[0].DecisionID != "decision-1" || list[1].DecisionID != "decision-2" || list[2].DecisionID != "decision-3" {
 		t.Fatalf("expected sorted decision ids [decision-1 decision-2 decision-3], got [%s %s %s]", list[0].DecisionID, list[1].DecisionID, list[2].DecisionID)
+	}
+}
+
+func TestKeeperAuditActionReadsFailClosedOnInvalidRecord(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryStore()
+	store.PutAuditAction(types.GovernanceAuditAction{ActionID: "audit-invalid-read"})
+
+	k := NewKeeperWithStore(store)
+	if _, ok := k.GetAuditAction("audit-invalid-read"); ok {
+		t.Fatal("expected invalid audit action lookup to fail closed")
+	}
+
+	records, err := k.ListAuditActionsWithError()
+	if err == nil {
+		t.Fatal("expected audit-action list to fail closed on invalid record")
+	}
+	if !strings.Contains(err.Error(), "is invalid") {
+		t.Fatalf("expected invalid audit-action error context, got %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected zero records on fail-closed list, got %d", len(records))
+	}
+
+	if got := k.ListAuditActions(); len(got) != 0 {
+		t.Fatalf("expected ListAuditActions to fail closed and return zero records, got %d", len(got))
 	}
 }
 

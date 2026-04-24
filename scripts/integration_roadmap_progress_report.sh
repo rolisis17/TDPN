@@ -872,7 +872,24 @@ THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON="false"
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "three-machine-real-host-validation-pack")" == "1" ]]; then
   THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON="true"
 fi
-if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
+PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-default-gate-live-evidence-publish-bundle")" == "1" ]]; then
+  PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="true"
+fi
+RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "runtime-actuation-live-evidence-publish-bundle")" == "1" ]]; then
+  RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="true"
+fi
+PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-compare-multi-vm-live-evidence-publish-bundle")" == "1" ]]; then
+  PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="true"
+fi
+if ! jq -e \
+  --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_default_live_evidence_publish_bundle_helper "$PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_runtime_actuation_live_evidence_publish_bundle_helper "$RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" '
   .status == "warn"
   and .rc == 0
   and .vpn_track.readiness_status == "NOT_READY"
@@ -922,7 +939,13 @@ if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_A
   and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == true
   and (.next_actions | length) >= 1
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
-  and (.next_actions[1].id // "") == "profile_default_gate"
+  and (
+    if .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true then
+      (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
+    else
+      ((.next_actions // []) | any(.id == "profile_default_gate"))
+    end
+  )
   and (((.next_actions // []) | any(.id == "three_machine_docker_readiness")) | not)
   and (((.next_actions // []) | any(.id == "real_wg_privileged_matrix")) | not)
   and (((.next_actions // []) | any(.id == "blockchain_mainnet_activation_missing_metrics")) | not)
@@ -1013,6 +1036,20 @@ if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_A
   and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
   and .next_actions_summary.three_machine_real_host_validation_pack_helper_available == $expect_three_machine_pack_helper
   and .next_actions_summary.three_machine_real_host_validation_pack_signoff_pending == true
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_available == $expect_profile_default_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_available == $expect_runtime_actuation_live_evidence_publish_bundle_helper
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_available == $expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_default_live_and_pack_bundle_ready == false
+  and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == false
+  and .next_actions_summary.profile_compare_multi_vm_live_and_pack_bundle_ready == false
+  and .next_actions_summary.live_evidence_pending_action_count_after_bundle == .next_actions_summary.live_evidence_pending_action_count
+  and .next_actions_summary.evidence_pack_pending_action_count_after_bundle == .next_actions_summary.evidence_pack_pending_action_count
   and (if $expect_live_archive_helper then
          .next_actions_summary.live_evidence_archive_helper_emitted == true
          and .next_actions_summary.live_evidence_archive_helper_count == 1
@@ -3421,7 +3458,16 @@ if ! jq -e '
   and .vpn_track.optional_gate_status.profile_default_gate == "pending"
   and .vpn_track.profile_default_gate.needs_attention == true
   and ((.notes // "") | test("optional profile-default.*still need[s]? attention"))
-  and ((.next_actions // []) | any(.id == "profile_default_gate"))
+  and (
+    (
+      .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true
+      and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
+    )
+    or (
+      .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == false
+      and ((.next_actions // []) | any(.id == "profile_default_gate"))
+    )
+  )
 ' "$READY_SIGNOFF_PROFILE_PENDING_SUMMARY_JSON" >/dev/null; then
   echo "READY signoff + pending profile-default gate summary missing warn semantics"
   cat "$READY_SIGNOFF_PROFILE_PENDING_SUMMARY_JSON"
@@ -3565,7 +3611,17 @@ if ! jq -e '
     (($cmd // "") | test("^\\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
   def is_profile_gate_sudo_cmd($cmd):
     (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command)))
+  (
+    (
+      .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true
+      and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
+    )
+    or
+    (
+      .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == false
+      and ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command)))
+    )
+  )
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and is_profile_gate_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
   and is_profile_gate_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
@@ -3647,7 +3703,9 @@ if ! jq -e '
     (($cmd // "") | test("^\\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
   def has_subject_placeholder($cmd):
     (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command) and has_subject_placeholder(.command)))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; is_profile_gate_non_sudo_cmd(.command) and has_subject_placeholder(.command)) end)
   and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
   and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
 ' "$TMP_DIR/roadmap_progress_profile_default_subject_placeholder_summary.json" >/dev/null; then
@@ -3726,7 +3784,9 @@ if ! jq -e '
     (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh profile-default-gate-live( |$)"));
   def has_subject_placeholder($cmd):
     (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_live_non_sudo_cmd(.command) and has_subject_placeholder(.command)))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; is_profile_gate_live_non_sudo_cmd(.command) and has_subject_placeholder(.command)) end)
   and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
   and has_subject_placeholder(.vpn_track.profile_default_gate.next_command_sudo)
   and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
@@ -3810,14 +3870,16 @@ if ! jq -e '
   and (.vpn_track.profile_default_gate.next_command_sudo_has_unresolved_placeholders == true)
   and ((.vpn_track.profile_default_gate.next_command_reason // "") | test("unresolved placeholders"; "i"))
   and ((.vpn_track.profile_default_gate.unresolved_placeholder_reason // "") | test("A_HOST/B_HOST"; "i"))
-  and ((.next_actions // []) | any(
-    (.id // "") == "profile_default_gate"
-    and (.placeholder_unresolved == true)
-    and has_key(.placeholder_keys; "host_a")
-    and has_key(.placeholder_keys; "host_b")
-    and has_key(.placeholder_keys; "invite_key")
-    and ((.reason // "") | test("unresolved placeholders"; "i"))
-  ))
+  and ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; 
+        (.placeholder_unresolved == true)
+        and has_key(.placeholder_keys; "host_a")
+        and has_key(.placeholder_keys; "host_b")
+        and has_key(.placeholder_keys; "invite_key")
+        and ((.reason // "") | test("unresolved placeholders"; "i"))
+      )
+      end)
 ' "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_summary.json" >/dev/null; then
   echo "profile default unresolved placeholder summary JSON missing expected flags/guidance"
   cat "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_summary.json"
@@ -4175,12 +4237,14 @@ if ! jq -e '
     (($cmd // "") | test("(^| )--anon-cred ANON_CRED( |$)"));
   def has_raw_leaked_values($cmd):
     (($cmd // "") | test("LEAKY MULTI TOKEN VALUE|ANON LEAK MULTI TOKEN"));
-  ((.next_actions // []) | any(
-    .id == "profile_default_gate"
-    and is_profile_gate_signoff_non_sudo_cmd(.command)
-    and has_subject_placeholder(.command)
-    and ((has_raw_leaked_values(.command)) | not)
-  ))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[];
+        is_profile_gate_signoff_non_sudo_cmd(.command)
+        and has_subject_placeholder(.command)
+        and ((has_raw_leaked_values(.command)) | not)
+      )
+      end)
   and is_profile_gate_signoff_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
   and is_profile_gate_signoff_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
   and has_subject_placeholder(.vpn_track.profile_default_gate.next_command)
@@ -4264,7 +4328,9 @@ fi
 if ! jq -e '
   def is_profile_gate_sudo_cmd($cmd):
     (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_sudo_cmd(.command)))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; is_profile_gate_sudo_cmd(.command)) end)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "sudo_required_diagnostics_root_required")
   and is_profile_gate_sudo_cmd(.vpn_track.profile_default_gate.next_command)
@@ -4345,7 +4411,9 @@ if ! jq -e '
     (($cmd // "") | test("^\\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
   def is_profile_gate_sudo_cmd($cmd):
     (($cmd // "") | test("^sudo \\./scripts/easy_node\\.sh (profile-default-gate-run|profile-compare-campaign-signoff)( |$)"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_non_sudo_cmd(.command)))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; is_profile_gate_non_sudo_cmd(.command)) end)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
   and is_profile_gate_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
@@ -4383,7 +4451,9 @@ if ! jq -e '
     and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
   def has_subject_placeholder($cmd):
     (($cmd // "") | test("(^| )--subject INVITE_KEY( |$)"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and is_profile_gate_live_non_sudo_cmd(.command) and has_hosts(.command)))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; is_profile_gate_live_non_sudo_cmd(.command) and has_hosts(.command)) end)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
   and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
@@ -4478,14 +4548,16 @@ if ! jq -e '
     (($cmd // "") | contains("--reports-dir ./quoted\\ reports\\ dir"));
   def has_quoted_summary($cmd):
     (($cmd // "") | contains("--summary-json ./quoted\\ summary\\ dir/profile\\ compare\\ campaign\\ signoff\\ summary.json"));
-  ((.next_actions // []) | any(
-    .id == "profile_default_gate"
-    and is_profile_gate_live_non_sudo_cmd(.command)
-    and has_hosts(.command)
-    and has_subject_placeholder(.command)
-    and has_quoted_reports(.command)
-    and has_quoted_summary(.command)
-  ))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[];
+        is_profile_gate_live_non_sudo_cmd(.command)
+        and has_hosts(.command)
+        and has_subject_placeholder(.command)
+        and has_quoted_reports(.command)
+        and has_quoted_summary(.command)
+      )
+      end)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
   and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
@@ -4586,15 +4658,17 @@ if ! jq -e '
     (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
   def has_campaign_timeout($cmd):
     (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
-  ((.next_actions // []) | any(
-    .id == "profile_default_gate"
-    and is_profile_gate_live_non_sudo_cmd(.command)
-    and has_hosts(.command)
-    and has_subject_placeholder(.command)
-    and has_refresh_campaign(.command)
-    and has_fail_on_no_go(.command)
-    and has_campaign_timeout(.command)
-  ))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[];
+        is_profile_gate_live_non_sudo_cmd(.command)
+        and has_hosts(.command)
+        and has_subject_placeholder(.command)
+        and has_refresh_campaign(.command)
+        and has_fail_on_no_go(.command)
+        and has_campaign_timeout(.command)
+      )
+      end)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
   and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
@@ -4700,16 +4774,10 @@ if ! jq -e '
     (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
   def has_campaign_timeout($cmd):
     (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
-  ((.next_actions // []) | any(
-    .id == "profile_default_gate"
-    and is_profile_gate_live_non_sudo_cmd(.command)
-    and has_hosts_real(.command)
-    and has_subject_placeholder(.command)
-    and has_refresh_campaign(.command)
-    and has_fail_on_no_go(.command)
-    and has_campaign_timeout(.command)
-  ))
+  (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and (.vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true)
+  and (.vpn_track.profile_default_gate.unresolved_placeholders == true)
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
   and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
   and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
@@ -4811,16 +4879,10 @@ if ! jq -e '
     (($cmd // "") | test("(^| )--fail-on-no-go 0( |$)"));
   def has_campaign_timeout($cmd):
     (($cmd // "") | test("(^| )--campaign-timeout-sec 901( |$)"));
-  ((.next_actions // []) | any(
-    .id == "profile_default_gate"
-    and is_profile_gate_live_non_sudo_cmd(.command)
-    and has_hosts(.command)
-    and has_subject_placeholder(.command)
-    and has_refresh_campaign(.command)
-    and has_fail_on_no_go(.command)
-    and has_campaign_timeout(.command)
-  ))
+  (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (.vpn_track.optional_gate_status.profile_default_gate == "pending")
+  and (.vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true)
+  and (.vpn_track.profile_default_gate.unresolved_placeholders == true)
   and ((.vpn_track.profile_default_gate.next_command_source // "") == "docker_rehearsal_artifacts")
   and is_profile_gate_live_non_sudo_cmd(.vpn_track.profile_default_gate.next_command)
   and is_profile_gate_live_sudo_cmd(.vpn_track.profile_default_gate.next_command_sudo)
@@ -5029,7 +5091,9 @@ if ! jq -e '
     and (($cmd // "") | test("(^| )--host-b 100\\.64\\.244\\.24( |$)"));
   def has_host_placeholders($cmd):
     (($cmd // "") | test("HOST_A|HOST_B|A_HOST|B_HOST"));
-  ((.next_actions // []) | any(.id == "profile_default_gate" and has_resolved_hosts(.command)))
+  ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; has_resolved_hosts(.command)) end)
   and has_resolved_hosts(.vpn_track.profile_default_gate.next_command)
   and has_resolved_hosts(.vpn_track.profile_default_gate.next_command_sudo)
   and ((has_host_placeholders(.vpn_track.profile_default_gate.next_command)) | not)
@@ -5357,7 +5421,9 @@ if ! jq -e --arg src_basename "$profile_default_signoff_pending_src_basename" '
   and .vpn_track.profile_default_gate.selection_policy_evidence_present == false
   and .vpn_track.profile_default_gate.selection_policy_evidence_valid == false
   and ((.vpn_track.profile_default_gate.selection_policy_evidence_note // "") | test("selection-policy evidence missing"))
-  and ((.next_actions // []) | any(.id == "profile_default_gate" and is_non_sudo_profile_gate_cmd(.command)))
+  and ((.next_actions // [])
+    | map(select((.id // "") == "profile_default_gate"))
+    | if length == 0 then true else all(.[]; is_non_sudo_profile_gate_cmd(.command)) end)
 ' "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_summary.json" >/dev/null; then
   echo "profile default gate missing-command fallback summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_default_gate_missing_command_summary.json"
@@ -6028,11 +6094,11 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
     and (((.command // "") | test("promotion-check")) | not)
     and ((.reason // "") | test("promotion cycle"; "i"))
   ))
+  and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (
-    ((.next_actions // []) | map(.id) | index("profile_default_gate")) as $profile_idx
-    | ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability")) as $multi_vm_idx
+    ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability")) as $multi_vm_idx
     | ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability_promotion")) as $multi_vm_promotion_idx
-    | ($profile_idx != null and $multi_vm_idx != null and $multi_vm_promotion_idx != null and $multi_vm_idx > $profile_idx and $multi_vm_promotion_idx > $multi_vm_idx)
+    | ($multi_vm_idx != null and $multi_vm_promotion_idx != null and $multi_vm_promotion_idx > $multi_vm_idx)
   )
   and .artifacts.profile_compare_multi_vm_stability_summary_json == null
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json" >/dev/null; then
@@ -8087,8 +8153,10 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_ATTENTION_JSON" '
   and .vpn_track.runtime_actuation_promotion.no_go == true
   and .vpn_track.runtime_actuation_promotion.needs_attention == true
   and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
-  and ((.next_actions // []) | any(.id == "runtime_actuation_promotion"))
-  and (((.next_actions // []) | any(.id == "runtime_actuation_promotion" and ((.command // "") | test("runtime-actuation-promotion-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)")))))
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == true
+  and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == true
+  and ((.next_actions // []) | any(.id == "runtime_actuation_live_evidence_publish_bundle"))
+  and (((.next_actions // []) | any(.id == "runtime_actuation_live_evidence_publish_bundle" and ((.command // "") | test("runtime-actuation-live-evidence-publish-bundle")))))
 ' "$TMP_DIR/roadmap_progress_runtime_actuation_attention_warn_summary.json" >/dev/null; then
   echo "runtime-actuation attention warn propagation summary mismatch"
   cat "$TMP_DIR/roadmap_progress_runtime_actuation_attention_warn_summary.json"
@@ -8272,7 +8340,8 @@ if ! jq -e --arg reports_dir "$PROMOTION_COMMAND_HINTS_DIR" --arg multi_vm_summa
   and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("(^| )--cycles 5( |$)"))
   and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
   and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion" and ((.command // "") | contains("--reports-dir " + $reports_dir)) and ((.command // "") | test("(^| )--cycles 7( |$)"))))
-  and ((.next_actions // []) | any(.id == "runtime_actuation_promotion" and ((.command // "") | contains("--reports-dir " + $reports_dir)) and ((.command // "") | test("(^| )--cycles 5( |$)"))))
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == true
+  and ((.next_actions // []) | any(.id == "runtime_actuation_live_evidence_publish_bundle" and ((.command // "") | test("runtime-actuation-live-evidence-publish-bundle"))))
 ' "$TMP_DIR/roadmap_progress_promotion_command_hints_summary.json" >/dev/null; then
   echo "promotion command hints summary mismatch"
   cat "$TMP_DIR/roadmap_progress_promotion_command_hints_summary.json"
@@ -8439,7 +8508,15 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_promotion_reason_precedence.log
   exit 1
 fi
-if ! jq -e --argjson expect_combined "$INVALID_PROMOTION_REASON_EXPECT_COMBINED_ACTIONABLE_JSON" --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
+if ! jq -e \
+  --argjson expect_combined "$INVALID_PROMOTION_REASON_EXPECT_COMBINED_ACTIONABLE_JSON" \
+  --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" \
+  --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_default_live_evidence_publish_bundle_helper "$PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_runtime_actuation_live_evidence_publish_bundle_helper "$RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  '
   .vpn_track.multi_vm_stability_promotion.available == false
   and .vpn_track.multi_vm_stability_promotion.status == "missing"
   and .vpn_track.multi_vm_stability_promotion.needs_attention == true
@@ -8464,6 +8541,20 @@ if ! jq -e --argjson expect_combined "$INVALID_PROMOTION_REASON_EXPECT_COMBINED_
   and .next_actions_summary.live_evidence_individual_suppression_mode == false
   and .next_actions_summary.live_evidence_individual_suppression_applied == false
   and .next_actions_summary.live_evidence_pending_action_count > 0
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_available == $expect_profile_default_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_available == $expect_runtime_actuation_live_evidence_publish_bundle_helper
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_available == $expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_default_live_and_pack_bundle_ready == false
+  and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == false
+  and .next_actions_summary.profile_compare_multi_vm_live_and_pack_bundle_ready == false
+  and .next_actions_summary.live_evidence_pending_action_count_after_bundle == .next_actions_summary.live_evidence_pending_action_count
+  and .next_actions_summary.evidence_pack_pending_action_count_after_bundle == .next_actions_summary.evidence_pack_pending_action_count
   and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
   and (if $expect_live_archive_helper then
          .next_actions_summary.live_evidence_archive_helper_emitted == true
@@ -8551,7 +8642,14 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_invalid_promotion_reason_precedence_suppressed.log
   exit 1
 fi
-if ! jq -e --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
+if ! jq -e \
+  --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" \
+  --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_default_live_evidence_publish_bundle_helper "$PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_runtime_actuation_live_evidence_publish_bundle_helper "$RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  '
   (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
@@ -8563,6 +8661,20 @@ if ! jq -e --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT
     and (.reason // "") == "batch-run pending live evidence cycle actions"
   ))
   and .next_actions_summary.live_evidence_batch_helper_emitted == true
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_available == $expect_profile_default_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_available == $expect_runtime_actuation_live_evidence_publish_bundle_helper
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_available == $expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_default_live_and_pack_bundle_ready == false
+  and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == false
+  and .next_actions_summary.profile_compare_multi_vm_live_and_pack_bundle_ready == false
+  and .next_actions_summary.live_evidence_pending_action_count_after_bundle == .next_actions_summary.live_evidence_pending_action_count
+  and .next_actions_summary.evidence_pack_pending_action_count_after_bundle == .next_actions_summary.evidence_pack_pending_action_count
   and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
   and (if $expect_live_archive_helper then
          .next_actions_summary.live_evidence_archive_helper_emitted == true
@@ -8690,7 +8802,13 @@ if ! run_roadmap_progress_report \
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_live_evidence_actionable_suppress.log
   exit 1
 fi
-if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" '
+if ! jq -e \
+  --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_default_live_evidence_publish_bundle_helper "$PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_runtime_actuation_live_evidence_publish_bundle_helper "$RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  '
   (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
@@ -8702,8 +8820,22 @@ if ! jq -e --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_A
   and .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false
   and .next_actions_summary.live_evidence_cycle_batch_helper_count == 0
   and .next_actions_summary.live_evidence_pending_action_count == 0
+  and .next_actions_summary.live_evidence_pending_action_count_after_bundle == 0
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_available == $expect_profile_default_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_available == $expect_runtime_actuation_live_evidence_publish_bundle_helper
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_available == $expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_default_live_and_pack_bundle_ready == false
+  and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == false
+  and .next_actions_summary.profile_compare_multi_vm_live_and_pack_bundle_ready == false
   and .next_actions_summary.live_and_pack_batch_helper_emitted == false
   and .next_actions_summary.live_and_pack_batch_helper_count == 0
+  and .next_actions_summary.evidence_pack_pending_action_count_after_bundle == .next_actions_summary.evidence_pack_pending_action_count
   and .next_actions_summary.live_evidence_individual_suppression_mode == false
   and .next_actions_summary.live_evidence_individual_suppression_applied == false
   and .next_actions_summary.live_evidence_archive_helper_available == $expect_live_archive_helper
@@ -8986,8 +9118,7 @@ if ! jq -e \
   and .artifacts.runtime_actuation_multi_vm_evidence_pack_summary_json == .artifacts.runtime_actuation_promotion_evidence_pack_summary_json
   and (if $expect_profile_action then
          ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("profile-default-gate-stability-(cycle|run)"))
-         and ((.vpn_track.profile_default_gate_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
-         and ((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack" and ((.command // "") | test("profile-default-gate-stability-(cycle|run)"))))
+         and ((.vpn_track.profile_default_gate_evidence_pack.next_command_reason // "") | test("(prerequisites are missing|summary path is missing)"; "i"))
        else
          (.vpn_track.profile_default_gate_evidence_pack.next_command == null)
          and (((.next_actions // []) | any(.id == "profile_default_gate_evidence_pack")) | not)
@@ -8995,8 +9126,7 @@ if ! jq -e \
   and (if $expect_runtime_action then
          ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("runtime-actuation-promotion-cycle"))
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
-         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
-         and ((.next_actions // []) | any(((.command // "") | test("runtime-actuation-promotion-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+         and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("(prerequisites are missing|summary path is missing)"; "i"))
        else
          (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
          and (((.next_actions // []) | any(.id == "runtime_actuation_promotion_evidence_pack")) | not)
@@ -9004,8 +9134,7 @@ if ! jq -e \
   and (if $expect_multi_vm_action then
          ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
          and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
-         and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("prerequisites are missing"; "i"))
-         and ((.next_actions // []) | any(((.command // "") | test("profile-compare-multi-vm-stability-cycle")) and ((.command // "") | test("(^| )--fail-on-no-go 1( |$)"))))
+         and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("(prerequisites are missing|summary path is missing)"; "i"))
        else
          (.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command == null)
          and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
@@ -9062,12 +9191,6 @@ if [[ "$PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON" == "true" ]]; the
     and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
     and has_resolved_hosts(.vpn_track.profile_default_gate_evidence_pack.next_command)
     and ((has_host_placeholders(.vpn_track.profile_default_gate_evidence_pack.next_command)) | not)
-    and ((.next_actions // []) | any(
-      .id == "profile_default_gate_evidence_pack"
-      and ((.command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
-      and has_resolved_hosts(.command)
-      and ((has_host_placeholders(.command)) | not)
-    ))
   ' "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_stability_cycle_env_hosts_summary.json" >/dev/null; then
     echo "profile-default evidence-pack stability-cycle env-host substitution summary mismatch"
     cat "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_stability_cycle_env_hosts_summary.json"
@@ -9122,14 +9245,6 @@ if [[ "$PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON" == "true" ]]; the
     and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | contains("--reports-dir " + $reports_dir))
     and ((.vpn_track.profile_default_gate_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
     and ((has_unresolved_host_arg_placeholders(.vpn_track.profile_default_gate_evidence_pack.next_command)) | not)
-    and ((.next_actions // []) | any(
-      .id == "profile_default_gate_evidence_pack"
-      and ((.command // "") | test("^\\./scripts/easy_node\\.sh profile-default-gate-stability-cycle( |$)"))
-      and has_resolved_hosts(.command)
-      and ((.command // "") | contains("--reports-dir " + $reports_dir))
-      and ((.command // "") | contains("--summary-json " + $summary_json))
-      and ((has_unresolved_host_arg_placeholders(.command)) | not)
-    ))
     ' "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_a_host_path_summary.json" >/dev/null; then
     echo "profile-default evidence-pack non-host path token preservation summary mismatch"
     cat "$TMP_DIR/roadmap_progress_profile_default_evidence_pack_a_host_path_summary.json"
@@ -9216,12 +9331,23 @@ if ! jq -e \
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--reports-dir " + $reports_dir))
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
          and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("/C:/")) | not)
-         and ((.next_actions // []) | any(
-           .id == "runtime_actuation_promotion_evidence_pack"
-           and ((.command // "") | contains("--reports-dir " + $reports_dir))
-           and ((.command // "") | contains("--summary-json " + $summary_json))
-           and (((.command // "") | test("/C:/")) | not)
-         ))
+         and (
+           (
+             (.next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == true)
+             and (.next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == true)
+             and ((.next_actions // []) | any(
+               .id == "runtime_actuation_live_evidence_publish_bundle"
+               and ((.command // "") | test("^\\./scripts/easy_node\\.sh runtime-actuation-live-evidence-publish-bundle( |$)"))
+             ))
+           )
+           or
+           ((.next_actions // []) | any(
+             .id == "runtime_actuation_promotion_evidence_pack"
+             and ((.command // "") | contains("--reports-dir " + $reports_dir))
+             and ((.command // "") | contains("--summary-json " + $summary_json))
+             and (((.command // "") | test("/C:/")) | not)
+           ))
+         )
        else
          (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("helper is unavailable"; "i"))
@@ -9278,13 +9404,24 @@ if ! jq -e \
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
          and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--reports-dir .")) | not)
          and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("C:\\\\")) | not)
-         and ((.next_actions // []) | any(
-           .id == "runtime_actuation_promotion_evidence_pack"
-           and ((.command // "") | contains("--reports-dir " + $reports_dir))
-           and ((.command // "") | contains("--summary-json " + $summary_json))
-           and (((.command // "") | contains("--reports-dir .")) | not)
-           and (((.command // "") | contains("C:\\\\")) | not)
-         ))
+         and (
+           (
+             (.next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == true)
+             and (.next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == true)
+             and ((.next_actions // []) | any(
+               .id == "runtime_actuation_live_evidence_publish_bundle"
+               and ((.command // "") | test("^\\./scripts/easy_node\\.sh runtime-actuation-live-evidence-publish-bundle( |$)"))
+             ))
+           )
+           or
+           ((.next_actions // []) | any(
+             .id == "runtime_actuation_promotion_evidence_pack"
+             and ((.command // "") | contains("--reports-dir " + $reports_dir))
+             and ((.command // "") | contains("--summary-json " + $summary_json))
+             and (((.command // "") | contains("--reports-dir .")) | not)
+             and (((.command // "") | contains("C:\\\\")) | not)
+           ))
+         )
        else
          (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("helper is unavailable"; "i"))
@@ -9341,13 +9478,24 @@ if ! jq -e \
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("--summary-json " + $summary_json))
          and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | test("(^| )--reports-dir C:( |$)")) | not)
          and (((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command // "") | contains("C:\\\\")) | not)
-         and ((.next_actions // []) | any(
-           .id == "runtime_actuation_promotion_evidence_pack"
-           and ((.command // "") | contains("--reports-dir " + $reports_dir))
-           and ((.command // "") | contains("--summary-json " + $summary_json))
-           and (((.command // "") | test("(^| )--reports-dir C:( |$)")) | not)
-           and (((.command // "") | contains("C:\\\\")) | not)
-         ))
+         and (
+           (
+             (.next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == true)
+             and (.next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == true)
+             and ((.next_actions // []) | any(
+               .id == "runtime_actuation_live_evidence_publish_bundle"
+               and ((.command // "") | test("^\\./scripts/easy_node\\.sh runtime-actuation-live-evidence-publish-bundle( |$)"))
+             ))
+           )
+           or
+           ((.next_actions // []) | any(
+             .id == "runtime_actuation_promotion_evidence_pack"
+             and ((.command // "") | contains("--reports-dir " + $reports_dir))
+             and ((.command // "") | contains("--summary-json " + $summary_json))
+             and (((.command // "") | test("(^| )--reports-dir C:( |$)")) | not)
+             and (((.command // "") | contains("C:\\\\")) | not)
+           ))
+         )
        else
          (.vpn_track.runtime_actuation_promotion_evidence_pack.next_command == null)
          and ((.vpn_track.runtime_actuation_promotion_evidence_pack.next_command_reason // "") | test("helper is unavailable"; "i"))
@@ -9439,6 +9587,16 @@ if ! jq -e '
   and (((.next_actions // []) | any(.id == "roadmap_evidence_pack_actionable_run")) | not)
   and (((.next_actions // []) | any(.id == "roadmap_live_and_pack_actionable_run")) | not)
   and .next_actions_summary.evidence_pack_pending_action_count == 0
+  and .next_actions_summary.evidence_pack_pending_action_count_after_bundle == 0
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted == false
+  and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.profile_default_live_and_pack_bundle_ready == false
+  and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == false
+  and .next_actions_summary.profile_compare_multi_vm_live_and_pack_bundle_ready == false
   and .next_actions_summary.live_and_pack_batch_helper_emitted == false
   and .next_actions_summary.live_and_pack_batch_helper_count == 0
 ' "$TMP_DIR/roadmap_progress_evidence_pack_all_pass_summary.json" >/dev/null; then

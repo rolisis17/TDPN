@@ -103,6 +103,9 @@ func (p GovernancePolicy) ValidateBasic() error {
 	if p.ActivatedAtUnix < 0 {
 		return errors.New("activated_at_unix cannot be negative")
 	}
+	if !isValidReconciliationStatus(p.Status) {
+		return errors.New("policy status must be pending, submitted, confirmed, or failed when set")
+	}
 	return nil
 }
 
@@ -124,6 +127,9 @@ func (d GovernanceDecision) ValidateBasic() error {
 	}
 	if !isValidDecisionOutcome(d.Outcome) {
 		return errors.New("decision outcome must be approve, reject, or abstain")
+	}
+	if !isValidReconciliationStatus(d.Status) {
+		return errors.New("decision status must be pending, submitted, confirmed, or failed when set")
 	}
 	return nil
 }
@@ -167,6 +173,15 @@ func (a GovernanceAuditAction) ValidateBasic() error {
 func isValidDecisionOutcome(outcome string) bool {
 	switch strings.ToLower(strings.TrimSpace(outcome)) {
 	case DecisionOutcomeApprove, DecisionOutcomeReject, DecisionOutcomeAbstain:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidReconciliationStatus(status chaintypes.ReconciliationStatus) bool {
+	switch canonicalStatus(status) {
+	case "", chaintypes.ReconciliationPending, chaintypes.ReconciliationSubmitted, chaintypes.ReconciliationConfirmed, chaintypes.ReconciliationFailed:
 		return true
 	default:
 		return false

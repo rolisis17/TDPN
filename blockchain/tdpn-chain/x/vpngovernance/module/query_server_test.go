@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
 	"github.com/tdpn/tdpn-chain/x/vpngovernance/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 )
@@ -64,6 +65,132 @@ func TestQueryServerNotFound(t *testing.T) {
 	_, auditErr := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-missing"})
 	if !errors.Is(auditErr, ErrAuditActionNotFound) {
 		t.Fatalf("expected ErrAuditActionNotFound, got %v", auditErr)
+	}
+}
+
+func TestQueryServerGetPolicyFailsClosedOnCorruptReadModel(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := keeper.NewKVStore(backend)
+	k := keeper.NewKeeperWithStore(store)
+	backend.Set([]byte("policy/policy-corrupt"), []byte("{"))
+
+	server := NewQueryServer(&k)
+	_, err := server.GetPolicy(GetPolicyRequest{PolicyID: "policy-corrupt"})
+	if err == nil {
+		t.Fatal("expected policy lookup to fail closed on corrupt read model")
+	}
+	if errors.Is(err, ErrPolicyNotFound) {
+		t.Fatalf("expected corruption error, got not-found sentinel: %v", err)
+	}
+}
+
+func TestQueryServerGetDecisionFailsClosedOnCorruptReadModel(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := keeper.NewKVStore(backend)
+	k := keeper.NewKeeperWithStore(store)
+	backend.Set([]byte("decision/decision-corrupt"), []byte("{"))
+
+	server := NewQueryServer(&k)
+	_, err := server.GetDecision(GetDecisionRequest{DecisionID: "decision-corrupt"})
+	if err == nil {
+		t.Fatal("expected decision lookup to fail closed on corrupt read model")
+	}
+	if errors.Is(err, ErrDecisionNotFound) {
+		t.Fatalf("expected corruption error, got not-found sentinel: %v", err)
+	}
+}
+
+func TestQueryServerGetAuditActionFailsClosedOnCorruptReadModel(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := keeper.NewKVStore(backend)
+	k := keeper.NewKeeperWithStore(store)
+	backend.Set([]byte("audit_action/audit-corrupt"), []byte("{"))
+
+	server := NewQueryServer(&k)
+	_, err := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-corrupt"})
+	if err == nil {
+		t.Fatal("expected audit-action lookup to fail closed on corrupt read model")
+	}
+	if errors.Is(err, ErrAuditActionNotFound) {
+		t.Fatalf("expected corruption error, got not-found sentinel: %v", err)
+	}
+}
+
+func TestQueryServerGetAuditActionFailsClosedOnInvalidReadModel(t *testing.T) {
+	t.Parallel()
+
+	store := keeper.NewInMemoryStore()
+	store.PutAuditAction(types.GovernanceAuditAction{ActionID: "audit-invalid-read"})
+	k := keeper.NewKeeperWithStore(store)
+
+	server := NewQueryServer(&k)
+	_, err := server.GetAuditAction(GetAuditActionRequest{ActionID: "audit-invalid-read"})
+	if err == nil {
+		t.Fatal("expected audit-action lookup to fail closed on invalid read model")
+	}
+	if errors.Is(err, ErrAuditActionNotFound) {
+		t.Fatalf("expected validation error, got not-found sentinel: %v", err)
+	}
+}
+
+func TestQueryServerGetPolicyFailsClosedOnInvalidStatusReadModel(t *testing.T) {
+	t.Parallel()
+
+	store := keeper.NewInMemoryStore()
+	store.UpsertPolicy(types.GovernancePolicy{
+		PolicyID:        "policy-invalid-status-read",
+		Title:           "Policy Invalid Status Read",
+		Version:         1,
+		ActivatedAtUnix: 4102444800,
+		Status:          "stalled",
+	})
+	k := keeper.NewKeeperWithStore(store)
+
+	server := NewQueryServer(&k)
+	_, err := server.GetPolicy(GetPolicyRequest{PolicyID: "policy-invalid-status-read"})
+	if err == nil {
+		t.Fatal("expected policy lookup to fail closed on invalid status")
+	}
+	if errors.Is(err, ErrPolicyNotFound) {
+		t.Fatalf("expected validation error, got not-found sentinel: %v", err)
+	}
+}
+
+func TestQueryServerGetDecisionFailsClosedOnInvalidStatusReadModel(t *testing.T) {
+	t.Parallel()
+
+	store := keeper.NewInMemoryStore()
+	store.UpsertPolicy(types.GovernancePolicy{
+		PolicyID:        "policy-decision-invalid-status-read",
+		Title:           "Policy Decision Invalid Status Read",
+		Version:         1,
+		ActivatedAtUnix: 4102444800,
+	})
+	store.UpsertDecision(types.GovernanceDecision{
+		DecisionID:    "decision-invalid-status-read",
+		PolicyID:      "policy-decision-invalid-status-read",
+		ProposalID:    "proposal-invalid-status-read",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council-invalid-status-read",
+		Reason:        "seed invalid decision status",
+		DecidedAtUnix: 4102444800,
+		Status:        "stalled",
+	})
+	k := keeper.NewKeeperWithStore(store)
+
+	server := NewQueryServer(&k)
+	_, err := server.GetDecision(GetDecisionRequest{DecisionID: "decision-invalid-status-read"})
+	if err == nil {
+		t.Fatal("expected decision lookup to fail closed on invalid status")
+	}
+	if errors.Is(err, ErrDecisionNotFound) {
+		t.Fatalf("expected validation error, got not-found sentinel: %v", err)
 	}
 }
 

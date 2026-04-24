@@ -3529,6 +3529,15 @@ function computeServerLifecycleControlState() {
     };
   }
 
+  if (!serverReadiness || typeof serverReadiness.lifecycleActionsUnlocked !== "boolean") {
+    return {
+      disabled: true,
+      locked: true,
+      hint:
+        "Server readiness is not loaded yet. Run Check Operator Status or Refresh Session to verify approval and strict chain binding before lifecycle commands."
+    };
+  }
+
   if (!isServerRoleUnlocked(role)) {
     return {
       disabled: true,

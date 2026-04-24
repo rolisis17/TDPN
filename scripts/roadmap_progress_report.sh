@@ -10937,33 +10937,65 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
-next_actions_live_evidence_pending_action_count=0
-if [[ "$profile_default_gate_needs_attention_json" == "true" ]] && [[ -n "$profile_default_gate_next_command" ]]; then
-  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+profile_default_gate_live_action_ready_json="false"
+if [[ "$profile_default_gate_needs_attention_json" == "true" ]] \
+   && [[ -n "$profile_default_gate_next_command" ]] \
+   && [[ "$profile_default_gate_next_command_has_unresolved_placeholders_json" != "true" ]]; then
+  profile_default_gate_live_action_ready_json="true"
 fi
+multi_vm_stability_live_action_ready_json="false"
 if [[ "$multi_vm_stability_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_next_command" ]]; then
-  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+  multi_vm_stability_live_action_ready_json="true"
 fi
+multi_vm_stability_promotion_live_action_ready_json="false"
 if [[ "$multi_vm_stability_promotion_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_promotion_next_command" ]]; then
-  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+  multi_vm_stability_promotion_live_action_ready_json="true"
 fi
+runtime_actuation_promotion_live_action_ready_json="false"
 if [[ "$runtime_actuation_promotion_needs_attention_json" == "true" ]] && [[ -n "$runtime_actuation_promotion_next_command" ]]; then
-  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+  runtime_actuation_promotion_live_action_ready_json="true"
 fi
-next_actions_evidence_pack_pending_action_count=0
+
+profile_default_gate_evidence_pack_action_ready_json="false"
 if [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] \
    && [[ -n "$profile_default_gate_evidence_pack_next_command" ]] \
    && [[ "$profile_default_gate_evidence_pack_next_command" == *"evidence-pack"* ]]; then
-  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+  profile_default_gate_evidence_pack_action_ready_json="true"
 fi
+runtime_actuation_promotion_evidence_pack_action_ready_json="false"
 if [[ "$runtime_actuation_promotion_evidence_pack_needs_attention_json" == "true" ]] \
    && [[ -n "$runtime_actuation_promotion_evidence_pack_next_command" ]] \
    && [[ "$runtime_actuation_promotion_evidence_pack_next_command" == *"evidence-pack"* ]]; then
-  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+  runtime_actuation_promotion_evidence_pack_action_ready_json="true"
 fi
+multi_vm_stability_promotion_evidence_pack_action_ready_json="false"
 if [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]] \
    && [[ -n "$multi_vm_stability_promotion_evidence_pack_next_command" ]] \
    && [[ "$multi_vm_stability_promotion_evidence_pack_next_command" == *"evidence-pack"* ]]; then
+  multi_vm_stability_promotion_evidence_pack_action_ready_json="true"
+fi
+
+next_actions_live_evidence_pending_action_count=0
+if [[ "$profile_default_gate_live_action_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+if [[ "$multi_vm_stability_live_action_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+if [[ "$multi_vm_stability_promotion_live_action_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+if [[ "$runtime_actuation_promotion_live_action_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count=$((next_actions_live_evidence_pending_action_count + 1))
+fi
+next_actions_evidence_pack_pending_action_count=0
+if [[ "$profile_default_gate_evidence_pack_action_ready_json" == "true" ]]; then
+  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+fi
+if [[ "$runtime_actuation_promotion_evidence_pack_action_ready_json" == "true" ]]; then
+  next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
+fi
+if [[ "$multi_vm_stability_promotion_evidence_pack_action_ready_json" == "true" ]]; then
   next_actions_evidence_pack_pending_action_count=$((next_actions_evidence_pack_pending_action_count + 1))
 fi
 
@@ -10982,9 +11014,115 @@ three_machine_real_host_validation_pack_helper_available_json="false"
 if [[ "$(easy_node_supports_subcommand_01 "$three_machine_real_host_validation_pack_helper_subcommand")" == "1" ]]; then
   three_machine_real_host_validation_pack_helper_available_json="true"
 fi
+profile_default_gate_live_evidence_publish_bundle_helper_subcommand="profile-default-gate-live-evidence-publish-bundle"
+profile_default_gate_live_evidence_publish_bundle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$profile_default_gate_live_evidence_publish_bundle_helper_subcommand")" == "1" ]]; then
+  profile_default_gate_live_evidence_publish_bundle_helper_available_json="true"
+fi
+runtime_actuation_live_evidence_publish_bundle_helper_subcommand="runtime-actuation-live-evidence-publish-bundle"
+runtime_actuation_live_evidence_publish_bundle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$runtime_actuation_live_evidence_publish_bundle_helper_subcommand")" == "1" ]]; then
+  runtime_actuation_live_evidence_publish_bundle_helper_available_json="true"
+fi
+profile_compare_multi_vm_live_evidence_publish_bundle_helper_subcommand="profile-compare-multi-vm-live-evidence-publish-bundle"
+profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_subcommand")" == "1" ]]; then
+  profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json="true"
+fi
 three_machine_real_host_validation_pack_signoff_pending_json="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r 'any(.[]?; (.check_id // "") == "three_machine_prod_signoff")')"
 
-next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_check_id" --arg next_action_label "$next_action_label" --arg next_action_command "$next_action_command" --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" --arg profile_default_gate_next_command "$profile_default_gate_next_command" --arg profile_default_gate_next_command_reason "$profile_default_gate_next_command_reason" --argjson profile_default_gate_next_command_has_unresolved_placeholders "$profile_default_gate_next_command_has_unresolved_placeholders_json" --argjson profile_default_gate_unresolved_placeholder_keys "$profile_default_gate_unresolved_placeholder_keys_json" --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" --argjson live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" --argjson three_machine_real_host_validation_pack_helper_available "$three_machine_real_host_validation_pack_helper_available_json" --argjson three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" '
+profile_default_gate_live_and_pack_bundle_ready_json="false"
+if [[ "$profile_default_gate_live_action_ready_json" == "true" ]] \
+   && [[ "$profile_default_gate_evidence_pack_action_ready_json" == "true" ]] \
+   && [[ "$profile_default_gate_live_evidence_publish_bundle_helper_available_json" == "true" ]]; then
+  profile_default_gate_live_and_pack_bundle_ready_json="true"
+fi
+runtime_actuation_live_and_pack_bundle_ready_json="false"
+if [[ "$runtime_actuation_promotion_live_action_ready_json" == "true" ]] \
+   && [[ "$runtime_actuation_promotion_evidence_pack_action_ready_json" == "true" ]] \
+   && [[ "$runtime_actuation_live_evidence_publish_bundle_helper_available_json" == "true" ]]; then
+  runtime_actuation_live_and_pack_bundle_ready_json="true"
+fi
+profile_compare_multi_vm_live_and_pack_bundle_ready_json="false"
+if [[ "$multi_vm_stability_promotion_live_action_ready_json" == "true" ]] \
+   && [[ "$multi_vm_stability_promotion_evidence_pack_action_ready_json" == "true" ]] \
+   && [[ "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" == "true" ]]; then
+  profile_compare_multi_vm_live_and_pack_bundle_ready_json="true"
+fi
+
+next_actions_live_evidence_pending_action_count_after_bundle=$next_actions_live_evidence_pending_action_count
+next_actions_evidence_pack_pending_action_count_after_bundle=$next_actions_evidence_pack_pending_action_count
+if [[ "$profile_default_gate_live_and_pack_bundle_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count_after_bundle=$((next_actions_live_evidence_pending_action_count_after_bundle - 1))
+  next_actions_evidence_pack_pending_action_count_after_bundle=$((next_actions_evidence_pack_pending_action_count_after_bundle - 1))
+fi
+if [[ "$runtime_actuation_live_and_pack_bundle_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count_after_bundle=$((next_actions_live_evidence_pending_action_count_after_bundle - 1))
+  next_actions_evidence_pack_pending_action_count_after_bundle=$((next_actions_evidence_pack_pending_action_count_after_bundle - 1))
+fi
+if [[ "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" == "true" ]]; then
+  next_actions_live_evidence_pending_action_count_after_bundle=$((next_actions_live_evidence_pending_action_count_after_bundle - 1))
+  next_actions_evidence_pack_pending_action_count_after_bundle=$((next_actions_evidence_pack_pending_action_count_after_bundle - 1))
+fi
+
+next_actions_candidate_json="$(
+  jq -c \
+    --arg next_action_check_id "$next_action_check_id" \
+    --arg next_action_label "$next_action_label" \
+    --arg next_action_command "$next_action_command" \
+    --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" \
+    --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
+    --arg profile_default_gate_next_command_reason "$profile_default_gate_next_command_reason" \
+    --argjson profile_default_gate_next_command_has_unresolved_placeholders "$profile_default_gate_next_command_has_unresolved_placeholders_json" \
+    --argjson profile_default_gate_unresolved_placeholder_keys "$profile_default_gate_unresolved_placeholder_keys_json" \
+    --argjson profile_default_gate_live_action_ready "$profile_default_gate_live_action_ready_json" \
+    --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" \
+    --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" \
+    --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" \
+    --argjson multi_vm_stability_live_action_ready "$multi_vm_stability_live_action_ready_json" \
+    --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" \
+    --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" \
+    --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" \
+    --argjson multi_vm_stability_promotion_live_action_ready "$multi_vm_stability_promotion_live_action_ready_json" \
+    --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" \
+    --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" \
+    --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" \
+    --argjson runtime_actuation_promotion_live_action_ready "$runtime_actuation_promotion_live_action_ready_json" \
+    --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" \
+    --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" \
+    --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" \
+    --argjson profile_default_gate_evidence_pack_action_ready "$profile_default_gate_evidence_pack_action_ready_json" \
+    --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" \
+    --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" \
+    --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" \
+    --argjson runtime_actuation_promotion_evidence_pack_action_ready "$runtime_actuation_promotion_evidence_pack_action_ready_json" \
+    --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" \
+    --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" \
+    --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" \
+    --argjson multi_vm_stability_promotion_evidence_pack_action_ready "$multi_vm_stability_promotion_evidence_pack_action_ready_json" \
+    --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" \
+    --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" \
+    --argjson next_actions_live_evidence_pending_action_count_after_bundle "$next_actions_live_evidence_pending_action_count_after_bundle" \
+    --argjson next_actions_evidence_pack_pending_action_count_after_bundle "$next_actions_evidence_pack_pending_action_count_after_bundle" \
+    --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" \
+    --argjson live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" \
+    --argjson three_machine_real_host_validation_pack_helper_available "$three_machine_real_host_validation_pack_helper_available_json" \
+    --argjson three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" \
+    --argjson profile_default_gate_live_evidence_publish_bundle_helper_available "$profile_default_gate_live_evidence_publish_bundle_helper_available_json" \
+    --argjson runtime_actuation_live_evidence_publish_bundle_helper_available "$runtime_actuation_live_evidence_publish_bundle_helper_available_json" \
+    --argjson profile_compare_multi_vm_live_evidence_publish_bundle_helper_available "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" \
+    --argjson profile_default_gate_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
+    --argjson runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
+    --argjson profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
+    --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" \
+    --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" \
+    --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" \
+    --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" \
+    '
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -11003,7 +11141,7 @@ next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_ch
       command: $next_action_command,
       reason: "primary roadmap gate"
     } else empty end),
-    (if ($profile_default_gate_needs_attention == true and ($profile_default_gate_next_command // "") != "") then {
+    (if ($profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_next_command // "") != "") then {
       id: "profile_default_gate",
       label: "Profile default decision gate",
       command: $profile_default_gate_next_command,
@@ -11011,42 +11149,55 @@ next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_ch
       placeholder_unresolved: $profile_default_gate_next_command_has_unresolved_placeholders,
       placeholder_keys: $profile_default_gate_unresolved_placeholder_keys
     } else empty end),
-    (if ($multi_vm_stability_needs_attention == true and ($multi_vm_stability_next_command // "") != "") then {
+    (if ($multi_vm_stability_live_action_ready == true and ($multi_vm_stability_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability",
       label: "Profile compare multi-VM stability cycle",
       command: $multi_vm_stability_next_command,
       reason: (if ($multi_vm_stability_next_command_reason // "") != "" then $multi_vm_stability_next_command_reason else "multi-VM stability evidence requires refresh; rerun stability cycle and review check summary" end)
     } else empty end),
-    (if ($multi_vm_stability_promotion_needs_attention == true and ($multi_vm_stability_promotion_next_command // "") != "") then {
+    (if ($multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true and ($multi_vm_stability_promotion_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability_promotion",
       label: "Profile compare multi-VM stability promotion cycle",
       command: $multi_vm_stability_promotion_next_command,
       reason: (if ($multi_vm_stability_promotion_next_command_reason // "") != "" then $multi_vm_stability_promotion_next_command_reason else "multi-VM stability promotion evidence requires refresh; rerun promotion cycle" end)
     } else empty end),
-    (if ($runtime_actuation_promotion_needs_attention == true and ($runtime_actuation_promotion_next_command // "") != "") then {
+    (if ($runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true and ($runtime_actuation_promotion_next_command // "") != "") then {
       id: "runtime_actuation_promotion",
       label: "Runtime-actuation promotion cycle",
       command: $runtime_actuation_promotion_next_command,
       reason: (if ($runtime_actuation_promotion_next_command_reason // "") != "" then $runtime_actuation_promotion_next_command_reason else "runtime-actuation promotion evidence requires refresh; rerun promotion cycle" end)
     } else empty end),
-    (if (
-      ($profile_default_gate_needs_attention == true and ($profile_default_gate_next_command // "") != "")
-      or ($runtime_actuation_promotion_needs_attention == true and ($runtime_actuation_promotion_next_command // "") != "")
-      or ($multi_vm_stability_needs_attention == true and ($multi_vm_stability_next_command // "") != "")
-      or ($multi_vm_stability_promotion_needs_attention == true and ($multi_vm_stability_promotion_next_command // "") != "")
-    ) then {
+    (if ($profile_default_gate_live_and_pack_bundle_ready == true) then {
+      id: "profile_default_gate_live_evidence_publish_bundle",
+      label: "Profile default live+publish bundle",
+      command: "./scripts/easy_node.sh profile-default-gate-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "profile-default live gate and evidence-pack publish are both pending; run the bundled orchestrator"
+    } else empty end),
+    (if ($runtime_actuation_live_and_pack_bundle_ready == true) then {
+      id: "runtime_actuation_live_evidence_publish_bundle",
+      label: "Runtime-actuation live+publish bundle",
+      command: "./scripts/easy_node.sh runtime-actuation-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "runtime-actuation live gate and evidence-pack publish are both pending; run the bundled orchestrator"
+    } else empty end),
+    (if ($profile_compare_multi_vm_live_and_pack_bundle_ready == true) then {
+      id: "profile_compare_multi_vm_live_evidence_publish_bundle",
+      label: "Multi-VM live+publish bundle",
+      command: "./scripts/easy_node.sh profile-compare-multi-vm-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
+      reason: "multi-VM live gate and evidence-pack publish are both pending; run the bundled orchestrator"
+    } else empty end),
+    (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0) then {
       id: "roadmap_live_evidence_actionable_run",
       label: "Roadmap live-evidence actionable run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending live evidence cycle actions"
     } else empty end),
-    (if ($next_actions_live_evidence_pending_action_count > 0 and $live_evidence_cycle_batch_helper_available == true) then {
+    (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_cycle_batch_helper_available == true) then {
       id: "roadmap_live_evidence_cycle_batch_run",
       label: "Roadmap live-evidence cycle-batch run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "repeat pending live evidence cycles across tracks in one helper run"
     } else empty end),
-    (if ($next_actions_live_evidence_pending_action_count > 0 and $live_evidence_archive_helper_available == true) then {
+    (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_archive_helper_available == true) then {
       id: "roadmap_live_evidence_archive_run",
       label: "Roadmap live-evidence archive run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1",
@@ -11058,31 +11209,31 @@ next_actions_candidate_json="$(jq -c --arg next_action_check_id "$next_action_ch
       command: "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1",
       reason: "package current three-machine validation evidence while real-host signoff is still pending"
     } else empty end),
-    (if ($profile_default_gate_evidence_pack_needs_attention == true and ($profile_default_gate_evidence_pack_next_command // "") != "") then {
+    (if ($profile_default_gate_evidence_pack_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_evidence_pack_next_command // "") != "") then {
       id: "profile_default_gate_evidence_pack",
       label: "Profile default evidence-pack publish",
       command: $profile_default_gate_evidence_pack_next_command,
       reason: (if ($profile_default_gate_evidence_pack_next_command_reason // "") != "" then $profile_default_gate_evidence_pack_next_command_reason else "profile-default evidence-pack requires refresh/publish" end)
     } else empty end),
-    (if ($runtime_actuation_promotion_evidence_pack_needs_attention == true and ($runtime_actuation_promotion_evidence_pack_next_command // "") != "") then {
+    (if ($runtime_actuation_promotion_evidence_pack_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true and ($runtime_actuation_promotion_evidence_pack_next_command // "") != "") then {
       id: "runtime_actuation_promotion_evidence_pack",
       label: "Runtime-actuation evidence-pack publish",
       command: $runtime_actuation_promotion_evidence_pack_next_command,
       reason: (if ($runtime_actuation_promotion_evidence_pack_next_command_reason // "") != "" then $runtime_actuation_promotion_evidence_pack_next_command_reason else "runtime-actuation evidence-pack requires refresh/publish" end)
     } else empty end),
-    (if ($multi_vm_stability_promotion_evidence_pack_needs_attention == true and ($multi_vm_stability_promotion_evidence_pack_next_command // "") != "") then {
+    (if ($multi_vm_stability_promotion_evidence_pack_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true and ($multi_vm_stability_promotion_evidence_pack_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability_promotion_evidence_pack",
       label: "Multi-VM promotion evidence-pack publish",
       command: $multi_vm_stability_promotion_evidence_pack_next_command,
       reason: (if ($multi_vm_stability_promotion_evidence_pack_next_command_reason // "") != "" then $multi_vm_stability_promotion_evidence_pack_next_command_reason else "multi-VM promotion evidence-pack requires refresh/publish" end)
     } else empty end),
-    (if ($next_actions_evidence_pack_pending_action_count > 0) then {
+    (if ($next_actions_evidence_pack_pending_action_count_after_bundle > 0) then {
       id: "roadmap_evidence_pack_actionable_run",
       label: "Roadmap evidence-pack actionable run",
       command: "./scripts/easy_node.sh roadmap-evidence-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending evidence-pack publish actions"
     } else empty end),
-    (if ($next_actions_live_evidence_pending_action_count > 0 and $next_actions_evidence_pack_pending_action_count > 0) then {
+    (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $next_actions_evidence_pack_pending_action_count_after_bundle > 0) then {
       id: "roadmap_live_and_pack_actionable_run",
       label: "Roadmap live+pack actionable run",
       command: "./scripts/easy_node.sh roadmap-live-and-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
@@ -11145,6 +11296,12 @@ next_actions_live_evidence_archive_helper_emitted_json="$(printf '%s\n' "$next_a
 next_actions_live_evidence_archive_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_evidence_archive_run")] | length')"
 next_actions_three_machine_real_host_validation_pack_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "three_machine_real_host_validation_pack")')"
 next_actions_three_machine_real_host_validation_pack_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "three_machine_real_host_validation_pack")] | length')"
+next_actions_profile_default_live_evidence_publish_bundle_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_default_gate_live_evidence_publish_bundle")')"
+next_actions_profile_default_live_evidence_publish_bundle_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "profile_default_gate_live_evidence_publish_bundle")] | length')"
+next_actions_runtime_actuation_live_evidence_publish_bundle_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "runtime_actuation_live_evidence_publish_bundle")')"
+next_actions_runtime_actuation_live_evidence_publish_bundle_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "runtime_actuation_live_evidence_publish_bundle")] | length')"
+next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_compare_multi_vm_live_evidence_publish_bundle")')"
+next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "profile_compare_multi_vm_live_evidence_publish_bundle")] | length')"
 next_actions_live_and_pack_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_and_pack_actionable_run")')"
 next_actions_live_and_pack_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_and_pack_actionable_run")] | length')"
 next_actions_live_evidence_individual_suppression_applied_json="$(jq -n \
@@ -11753,8 +11910,22 @@ summary_payload_jq_args=(
   --argjson next_actions_three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" \
   --argjson next_actions_three_machine_real_host_validation_pack_helper_emitted "$next_actions_three_machine_real_host_validation_pack_helper_emitted_json" \
   --argjson next_actions_three_machine_real_host_validation_pack_helper_count "$next_actions_three_machine_real_host_validation_pack_helper_count_json" \
+  --argjson next_actions_profile_default_live_evidence_publish_bundle_helper_available "$profile_default_gate_live_evidence_publish_bundle_helper_available_json" \
+  --argjson next_actions_profile_default_live_evidence_publish_bundle_helper_emitted "$next_actions_profile_default_live_evidence_publish_bundle_helper_emitted_json" \
+  --argjson next_actions_profile_default_live_evidence_publish_bundle_helper_count "$next_actions_profile_default_live_evidence_publish_bundle_helper_count_json" \
+  --argjson next_actions_runtime_actuation_live_evidence_publish_bundle_helper_available "$runtime_actuation_live_evidence_publish_bundle_helper_available_json" \
+  --argjson next_actions_runtime_actuation_live_evidence_publish_bundle_helper_emitted "$next_actions_runtime_actuation_live_evidence_publish_bundle_helper_emitted_json" \
+  --argjson next_actions_runtime_actuation_live_evidence_publish_bundle_helper_count "$next_actions_runtime_actuation_live_evidence_publish_bundle_helper_count_json" \
+  --argjson next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_available "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" \
+  --argjson next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted "$next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted_json" \
+  --argjson next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count "$next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count_json" \
+  --argjson next_actions_profile_default_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
+  --argjson next_actions_runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
+  --argjson next_actions_profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
   --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" \
+  --argjson next_actions_live_evidence_pending_action_count_after_bundle "$next_actions_live_evidence_pending_action_count_after_bundle" \
   --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" \
+  --argjson next_actions_evidence_pack_pending_action_count_after_bundle "$next_actions_evidence_pack_pending_action_count_after_bundle" \
   --argjson next_actions_live_and_pack_batch_helper_emitted "$next_actions_live_and_pack_batch_helper_emitted_json" \
   --argjson next_actions_live_and_pack_batch_helper_count "$next_actions_live_and_pack_batch_helper_count_json" \
   --argjson next_actions_live_evidence_individual_suppression_mode "$suppress_live_evidence_next_actions_when_batch_helper_json" \
@@ -12325,8 +12496,22 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       three_machine_real_host_validation_pack_signoff_pending: $next_actions_three_machine_real_host_validation_pack_signoff_pending,
       three_machine_real_host_validation_pack_helper_emitted: $next_actions_three_machine_real_host_validation_pack_helper_emitted,
       three_machine_real_host_validation_pack_helper_count: $next_actions_three_machine_real_host_validation_pack_helper_count,
+      profile_default_live_evidence_publish_bundle_helper_available: $next_actions_profile_default_live_evidence_publish_bundle_helper_available,
+      profile_default_live_evidence_publish_bundle_helper_emitted: $next_actions_profile_default_live_evidence_publish_bundle_helper_emitted,
+      profile_default_live_evidence_publish_bundle_helper_count: $next_actions_profile_default_live_evidence_publish_bundle_helper_count,
+      runtime_actuation_live_evidence_publish_bundle_helper_available: $next_actions_runtime_actuation_live_evidence_publish_bundle_helper_available,
+      runtime_actuation_live_evidence_publish_bundle_helper_emitted: $next_actions_runtime_actuation_live_evidence_publish_bundle_helper_emitted,
+      runtime_actuation_live_evidence_publish_bundle_helper_count: $next_actions_runtime_actuation_live_evidence_publish_bundle_helper_count,
+      profile_compare_multi_vm_live_evidence_publish_bundle_helper_available: $next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_available,
+      profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted: $next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted,
+      profile_compare_multi_vm_live_evidence_publish_bundle_helper_count: $next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count,
+      profile_default_live_and_pack_bundle_ready: $next_actions_profile_default_live_and_pack_bundle_ready,
+      runtime_actuation_live_and_pack_bundle_ready: $next_actions_runtime_actuation_live_and_pack_bundle_ready,
+      profile_compare_multi_vm_live_and_pack_bundle_ready: $next_actions_profile_compare_multi_vm_live_and_pack_bundle_ready,
       live_evidence_pending_action_count: $next_actions_live_evidence_pending_action_count,
+      live_evidence_pending_action_count_after_bundle: $next_actions_live_evidence_pending_action_count_after_bundle,
       evidence_pack_pending_action_count: $next_actions_evidence_pack_pending_action_count,
+      evidence_pack_pending_action_count_after_bundle: $next_actions_evidence_pack_pending_action_count_after_bundle,
       live_and_pack_batch_helper_emitted: $next_actions_live_and_pack_batch_helper_emitted,
       live_and_pack_batch_helper_count: $next_actions_live_and_pack_batch_helper_count,
       live_evidence_individual_suppression_mode: $next_actions_live_evidence_individual_suppression_mode,
