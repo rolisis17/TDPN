@@ -263,6 +263,8 @@ assert_jq "$PASS_SUMMARY" '
   .schema.id == "profile_default_gate_live_evidence_publish_bundle_summary"
   and .status == "ok"
   and .rc == 0
+  and .inputs.subject_source == "explicit:--campaign-subject"
+  and .inputs.subject_configured == true
   and .failure_stage == null
   and .failure_substep == null
   and .preflight.ok == true
@@ -328,6 +330,8 @@ fi
 assert_jq "$MISS_SUMMARY" '
   .status == "fail"
   and .rc == 2
+  and .inputs.subject_source == null
+  and .inputs.subject_configured == false
   and .failure_stage == "preflight"
   and .failure_substep == "preflight_validation_failed"
   and .preflight.ok == false

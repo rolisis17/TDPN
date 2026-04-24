@@ -64,7 +64,9 @@ func (k *Keeper) SubmitEvidence(record types.SlashEvidence) (types.SlashEvidence
 		return normalizedExisting, nil
 	}
 
-	if duplicateEvidence, ok := k.findEquivalentEvidenceLocked(normalized); ok {
+	if duplicateEvidence, ok, err := k.findEquivalentEvidenceLocked(normalized); err != nil {
+		return types.SlashEvidence{}, err
+	} else if ok {
 		return types.SlashEvidence{}, evidenceReplayConflictError(normalized.EvidenceID, duplicateEvidence.EvidenceID)
 	}
 
@@ -84,7 +86,10 @@ func (k *Keeper) ListEvidence() []types.SlashEvidence {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	evidence := k.store.ListEvidence()
+	evidence, err := k.listEvidenceLocked()
+	if err != nil {
+		return nil
+	}
 	sort.Slice(evidence, func(i, j int) bool {
 		return evidence[i].EvidenceID < evidence[j].EvidenceID
 	})
@@ -130,7 +135,9 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		return normalizedExisting, nil
 	}
 
-	if conflictingPenalty, ok := k.findPenaltyForEvidenceLocked(normalized.EvidenceID); ok {
+	if conflictingPenalty, ok, err := k.findPenaltyForEvidenceLocked(normalized.EvidenceID); err != nil {
+		return types.PenaltyDecision{}, err
+	} else if ok {
 		return types.PenaltyDecision{}, penaltyEvidenceConflictError(normalized.EvidenceID, conflictingPenalty.PenaltyID)
 	}
 
@@ -150,7 +157,10 @@ func (k *Keeper) ListPenalties() []types.PenaltyDecision {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
-	penalties := k.store.ListPenalties()
+	penalties, err := k.listPenaltiesLocked()
+	if err != nil {
+		return nil
+	}
 	sort.Slice(penalties, func(i, j int) bool {
 		return penalties[i].PenaltyID < penalties[j].PenaltyID
 	})
@@ -189,27 +199,57 @@ func advanceEvidenceStatusForPenalty(record types.SlashEvidence) types.SlashEvid
 	return normalized
 }
 
-func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyDecision, bool) {
-	for _, penalty := range k.store.ListPenalties() {
+func (k *Keeper) findPenaltyForEvidenceLocked(evidenceID string) (types.PenaltyDecision, bool, error) {
+	penalties, err := k.listPenaltiesLocked()
+	if err != nil {
+		return types.PenaltyDecision{}, false, err
+	}
+	for _, penalty := range penalties {
 		normalized := normalizePenalty(penalty)
 		if normalized.EvidenceID == evidenceID {
-			return normalized, true
+			return normalized, true, nil
 		}
 	}
-	return types.PenaltyDecision{}, false
+	return types.PenaltyDecision{}, false, nil
 }
 
-func (k *Keeper) findEquivalentEvidenceLocked(candidate types.SlashEvidence) (types.SlashEvidence, bool) {
-	for _, evidence := range k.store.ListEvidence() {
+func (k *Keeper) findEquivalentEvidenceLocked(candidate types.SlashEvidence) (types.SlashEvidence, bool, error) {
+	evidenceRecords, err := k.listEvidenceLocked()
+	if err != nil {
+		return types.SlashEvidence{}, false, err
+	}
+	for _, evidence := range evidenceRecords {
 		normalized := normalizeEvidence(evidence)
 		if normalized.EvidenceID == candidate.EvidenceID {
 			continue
 		}
 		if evidenceIncidentEqual(normalized, candidate) {
-			return normalized, true
+			return normalized, true, nil
 		}
 	}
-	return types.SlashEvidence{}, false
+	return types.SlashEvidence{}, false, nil
+}
+
+func (k *Keeper) listEvidenceLocked() ([]types.SlashEvidence, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListEvidenceWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load evidence: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListEvidence(), nil
+}
+
+func (k *Keeper) listPenaltiesLocked() ([]types.PenaltyDecision, error) {
+	if readAwareStore, ok := k.store.(KeeperStoreWithReadErrors); ok {
+		records, err := readAwareStore.ListPenaltiesWithError()
+		if err != nil {
+			return nil, fmt.Errorf("load penalties: %w", err)
+		}
+		return records, nil
+	}
+	return k.store.ListPenalties(), nil
 }
 
 func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {

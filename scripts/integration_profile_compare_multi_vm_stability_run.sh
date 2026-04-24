@@ -439,6 +439,53 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-stability-run] deterministic reports-dir candidate discovery uses known archive-parent canonical artifact"
+PARENT_CANDIDATE_ROOT="$TMP_DIR/reports_parent_candidate"
+PARENT_CANDIDATE_REPORTS_DIR="$PARENT_CANDIDATE_ROOT/profile_compare_multi_vm_stability_promotion_cycle_20260424_000000/cycle_001"
+PARENT_CANDIDATE_SUMMARY="$TMP_DIR/parent_candidate_summary.json"
+PARENT_CANDIDATE_COUNTER="$TMP_DIR/parent_candidate_counter.txt"
+PARENT_CANDIDATE_CAPTURE="$TMP_DIR/parent_candidate_capture.log"
+mkdir -p "$PARENT_CANDIDATE_REPORTS_DIR"
+printf 'vm_parent_fb::echo vm-parent-fallback\n' >"$PARENT_CANDIDATE_ROOT/profile_compare_multi_vm_stability_vm_commands.txt"
+
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$PARENT_CANDIDATE_COUNTER" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$PARENT_CANDIDATE_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$PARENT_CANDIDATE_REPORTS_DIR" \
+  --summary-json "$PARENT_CANDIDATE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_parent_candidate.log 2>&1
+parent_candidate_rc=$?
+set -e
+
+if [[ "$parent_candidate_rc" -ne 0 ]]; then
+  echo "expected parent-candidate fallback path rc=0, got rc=$parent_candidate_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_parent_candidate.log
+  exit 1
+fi
+if ! grep -q 'vm_cmd=0 vm_cmd_file=1' "$PARENT_CANDIDATE_CAPTURE"; then
+  echo "expected parent-candidate fallback to forward one vm-command-file"
+  cat "$PARENT_CANDIDATE_CAPTURE"
+  exit 1
+fi
+if ! jq -e --arg canonical "$PARENT_CANDIDATE_ROOT/profile_compare_multi_vm_stability_vm_commands.txt" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.vm_command_fallback_used == true
+  and .inputs.vm_command_fallback_source == "reports-dir-canonical-candidate"
+  and .inputs.vm_command_fallback_file == $canonical
+  and (.inputs.vm_command_fallback_diagnostics | type) == "array"
+  and (.inputs.vm_command_fallback_diagnostics | map(test("source=reports-dir-canonical-candidate")) | any)
+' "$PARENT_CANDIDATE_SUMMARY" >/dev/null 2>&1; then
+  echo "parent-candidate fallback summary missing candidate discovery metadata"
+  cat "$PARENT_CANDIDATE_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-stability-run] invalid env fallback does not block reports-dir fallback"
 ENV_INVALID_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_env_invalid_fallback"
 ENV_INVALID_FALLBACK_SUMMARY="$TMP_DIR/env_invalid_fallback_summary.json"

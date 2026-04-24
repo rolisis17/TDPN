@@ -323,12 +323,27 @@ func TestResolveExitRouteOperatorQuorumFailure(t *testing.T) {
 	d1 := "http://d1.local"
 	d2 := "http://d2.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
-	addDirectoryFixtureWithOperator(t, handlers, d1, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
+	pub, priv, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	relay := signDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		Endpoint:   "10.0.0.20:51821",
+		ControlURL: "https://10.0.0.20:8084",
+	}, priv)
+	handlers[d1+"/v1/pubkeys"] = jsonResp(proto.DirectoryPubKeysResponse{
+		Operator: "operator-a",
+		PubKeys:  []string{pubB64},
 	})
-	addDirectoryFixtureWithOperator(t, handlers, d2, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
+	handlers[d2+"/v1/pubkeys"] = jsonResp(proto.DirectoryPubKeysResponse{
+		Operator: "operator-a",
+		PubKeys:  []string{pubB64},
 	})
+	handlers[d1+"/v1/relays"] = jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relay}})
+	handlers[d2+"/v1/relays"] = jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relay}})
 
 	s := &Service{
 		exitControlURL:        "http://127.0.0.1:8084",
@@ -343,6 +358,52 @@ func TestResolveExitRouteOperatorQuorumFailure(t *testing.T) {
 	}
 	if _, err := s.resolveExitRoute(context.Background(), "exit-a"); err == nil {
 		t.Fatalf("expected operator quorum failure")
+	}
+}
+
+func TestResolveExitRouteOperatorQuorumRejectsDeclaredOperatorAliasSpoofing(t *testing.T) {
+	d1 := "http://d1.local"
+	d2 := "http://d2.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+
+	pub, priv, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	relay := signDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		Endpoint:   "198.51.100.20:51821",
+		ControlURL: "https://198.51.100.20:8084",
+		OperatorID: "exit-op",
+	}, priv)
+
+	handlers[d1+"/v1/pubkeys"] = jsonResp(proto.DirectoryPubKeysResponse{
+		Operator: "spoofed-operator-a",
+		PubKeys:  []string{pubB64},
+	})
+	handlers[d2+"/v1/pubkeys"] = jsonResp(proto.DirectoryPubKeysResponse{
+		Operator: "spoofed-operator-b",
+		PubKeys:  []string{pubB64},
+	})
+	handlers[d1+"/v1/relays"] = jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relay}})
+	handlers[d2+"/v1/relays"] = jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relay}})
+
+	s := &Service{
+		exitControlURL:        "http://127.0.0.1:8084",
+		exitDataAddr:          "127.0.0.1:51821",
+		directoryURLs:         []string{d1, d2},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     1,
+		routeTTL:              time.Minute,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:        map[string]exitRoute{},
+	}
+
+	if _, err := s.resolveExitRoute(context.Background(), "exit-a"); err == nil {
+		t.Fatalf("expected operator quorum failure when multiple sources share one signing key")
 	}
 }
 
@@ -376,12 +437,27 @@ func TestResolveExitRouteVoteThresholdDedupByOperator(t *testing.T) {
 	d1 := "http://d1.local"
 	d2 := "http://d2.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
-	addDirectoryFixtureWithOperator(t, handlers, d1, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
+	pub, priv, err := nodecrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	relay := signDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		Endpoint:   "10.0.0.20:51821",
+		ControlURL: "https://10.0.0.20:8084",
+	}, priv)
+	handlers[d1+"/v1/pubkeys"] = jsonResp(proto.DirectoryPubKeysResponse{
+		Operator: "operator-a",
+		PubKeys:  []string{pubB64},
 	})
-	addDirectoryFixtureWithOperator(t, handlers, d2, "operator-a", []proto.RelayDescriptor{
-		{RelayID: "exit-a", Role: "exit", Endpoint: "10.0.0.20:51821", ControlURL: "https://10.0.0.20:8084"},
+	handlers[d2+"/v1/pubkeys"] = jsonResp(proto.DirectoryPubKeysResponse{
+		Operator: "operator-a",
+		PubKeys:  []string{pubB64},
 	})
+	handlers[d1+"/v1/relays"] = jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relay}})
+	handlers[d2+"/v1/relays"] = jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{relay}})
 
 	s := &Service{
 		exitControlURL:        "http://127.0.0.1:8084",

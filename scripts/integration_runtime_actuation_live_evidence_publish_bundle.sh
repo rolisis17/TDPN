@@ -106,6 +106,18 @@ EOF_INVALID
 EOF_FAIL
     exit_code=9
     ;;
+  no_go_fail_rc1)
+    cat >"$summary_json" <<'EOF_FAIL_RC1'
+{
+  "version": 1,
+  "schema": { "id": "runtime_actuation_promotion_cycle_summary" },
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO"
+}
+EOF_FAIL_RC1
+    exit_code=1
+    ;;
   *)
     echo "fake cycle: unknown mode=$mode" >&2
     exit 2
@@ -422,6 +434,47 @@ if ! jq -e '
 ' "$STALE_SUMMARY" >/dev/null 2>&1; then
   echo "stale summary reuse fail-closed mismatch"
   cat "$STALE_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-live-evidence-publish-bundle] cycle NO-GO still runs evidence-pack diagnostics"
+CYCLE_NOGO_REPORTS="$TMP_DIR/cycle_nogo_reports"
+CYCLE_NOGO_SUMMARY="$TMP_DIR/cycle_nogo_bundle_summary.json"
+set +e
+RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_ACTUATION_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_EVIDENCE_SCRIPT" \
+FAKE_CYCLE_MODE="no_go_fail_rc1" \
+FAKE_EVIDENCE_MODE="no_go_fail" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$CYCLE_NOGO_REPORTS" \
+  --cycles 3 \
+  --fail-on-no-go 1 \
+  --summary-json "$CYCLE_NOGO_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_live_evidence_publish_bundle_cycle_nogo.log 2>&1
+CYCLE_NOGO_RC=$?
+set -e
+if [[ "$CYCLE_NOGO_RC" -eq 0 ]]; then
+  echo "expected cycle NO-GO path rc!=0"
+  cat /tmp/integration_runtime_actuation_live_evidence_publish_bundle_cycle_nogo.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .failure_substep == "runtime_actuation_publish_blocked_cycle_not_publish_ready"
+  and .stages.runtime_actuation_promotion_cycle.status == "fail"
+  and .stages.runtime_actuation_promotion_cycle.summary_decision_normalized == "NO-GO"
+  and .stages.runtime_actuation_promotion_evidence_pack.status == "fail"
+  and .outcome.action == "publish_blocked"
+  and .outcome.publish_blocked.blocked == true
+  and .outcome.publish_blocked.cycle_publish_blocked == true
+  and .outcome.publish_blocked.cycle_summary_usable_for_evidence_pack == true
+  and .outcome.publish_blocked.evidence_pack_diagnostic_substep == "runtime_actuation_promotion_evidence_pack_runner_nonzero"
+  and (.next_command != null and (.next_command | test("runtime-actuation-promotion-cycle")))
+  and (.next_command_source != null)
+  and (.outcome.publish_blocked.deterministic_next_command_source != null)
+' "$CYCLE_NOGO_SUMMARY" >/dev/null 2>&1; then
+  echo "cycle NO-GO diagnostics path mismatch"
+  cat "$CYCLE_NOGO_SUMMARY"
   exit 1
 fi
 

@@ -13,6 +13,7 @@ Usage:
     [--roadmap-summary-json PATH] \
     [--archive-root DIR] \
     [--scope auto|all|profile-default|runtime-actuation|multi-vm] \
+    [--missing-source-policy warn|fail] \
     [--summary-json PATH] \
     [--print-summary-json [0|1]]
 
@@ -33,6 +34,7 @@ Defaults:
   --roadmap-summary-json <reports-dir>/roadmap_progress_summary.json
   --archive-root <reports-dir>/roadmap_live_evidence_archive
   --scope auto
+  --missing-source-policy warn
   --summary-json <reports-dir>/roadmap_live_evidence_archive_run_summary.json
   --print-summary-json 1
 USAGE
@@ -250,6 +252,17 @@ scope_arg_or_die() {
   esac
 }
 
+missing_source_policy_arg_or_die() {
+  local value="$1"
+  case "$value" in
+    warn|fail) ;;
+    *)
+      echo "--missing-source-policy must be one of: warn, fail"
+      exit 2
+      ;;
+  esac
+}
+
 require_value_or_die() {
   local flag="$1"
   if [[ $# -lt 2 || -z "${2:-}" ]]; then
@@ -278,6 +291,7 @@ reports_dir="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_REPORTS_DIR:-.easy-node-logs}"
 roadmap_summary_json="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_ROADMAP_SUMMARY_JSON:-}"
 archive_root="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_ARCHIVE_ROOT:-}"
 scope="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCOPE:-auto}"
+missing_source_policy="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_MISSING_SOURCE_POLICY:-warn}"
 summary_json="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SUMMARY_JSON:-}"
 print_summary_json="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_PRINT_SUMMARY_JSON:-1}"
 
@@ -301,6 +315,11 @@ while [[ $# -gt 0 ]]; do
     --scope)
       require_value_or_die "$1" "${2:-}"
       scope="${2:-}"
+      shift 2
+      ;;
+    --missing-source-policy)
+      require_value_or_die "$1" "${2:-}"
+      missing_source_policy="${2:-}"
       shift 2
       ;;
     --summary-json)
@@ -331,6 +350,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 scope_arg_or_die "$scope"
+missing_source_policy_arg_or_die "$missing_source_policy"
 
 reports_dir="$(abs_path "$reports_dir")"
 mkdir -p "$reports_dir"
@@ -803,13 +823,17 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
   fi
 
   family_hints_json='[]'
-  if [[ "$included_flag" == "1" && "$family_copied_count" -eq 0 ]]; then
-    missing_family_count=$((missing_family_count + 1))
-    family_hints_json="$(build_next_action_hints_json "$family")"
-    if [[ "$(printf '%s\n' "$family_hints_json" | jq -r 'length')" != "0" ]]; then
-      while IFS= read -r hint_line; do
-        printf '%s\n' "$hint_line" >>"$next_action_hints_jsonl"
-      done < <(printf '%s\n' "$family_hints_json" | jq -c '.[]')
+  if [[ "$included_flag" == "1" ]]; then
+    if (( family_copied_count == 0 )); then
+      missing_family_count=$((missing_family_count + 1))
+    fi
+    if (( family_copied_count == 0 || family_missing_count > 0 || family_copy_error_count > 0 )); then
+      family_hints_json="$(build_next_action_hints_json "$family")"
+      if [[ "$(printf '%s\n' "$family_hints_json" | jq -r 'length')" != "0" ]]; then
+        while IFS= read -r hint_line; do
+          printf '%s\n' "$hint_line" >>"$next_action_hints_jsonl"
+        done < <(printf '%s\n' "$family_hints_json" | jq -c '.[]')
+      fi
     fi
   fi
 
@@ -817,8 +841,14 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
   if [[ "$included_flag" == "1" ]]; then
     if (( family_copied_count == 0 )); then
       family_status="fail"
-    elif (( family_missing_count > 0 || family_copy_error_count > 0 )); then
+    elif (( family_copy_error_count > 0 )); then
       family_status="fail"
+    elif (( family_missing_count > 0 )); then
+      if [[ "$missing_source_policy" == "fail" ]]; then
+        family_status="fail"
+      else
+        family_status="warn"
+      fi
     else
       family_status="pass"
     fi
@@ -880,11 +910,22 @@ elif (( copied_total == 0 )); then
   final_rc=1
   final_reason="no artifacts were copied for selected families"
   failure_substep="selected_families_no_artifacts_copied"
-elif (( missing_total > 0 || copy_error_total > 0 || missing_family_count > 0 )); then
+elif (( copy_error_total > 0 || missing_family_count > 0 )); then
   final_status="fail"
   final_rc=1
-  final_reason="archive completed with missing artifacts or copy errors"
+  final_reason="archive completed with copy errors or one or more families had zero copied artifacts"
   failure_substep="archive_copy_incomplete"
+elif (( missing_total > 0 )); then
+  if [[ "$missing_source_policy" == "fail" ]]; then
+    final_status="fail"
+    final_rc=1
+    final_reason="archive completed with missing artifacts"
+    failure_substep="archive_copy_incomplete"
+  else
+    final_status="warn"
+    final_rc=0
+    final_reason="archive completed with missing artifacts; copied artifacts were preserved"
+  fi
 fi
 
 included_families_csv="$(printf '%s\n' "$included_families_json" | jq -r 'join(",")')"
@@ -892,9 +933,11 @@ if [[ -z "$included_families_csv" ]]; then
   included_families_csv="none"
 fi
 
-echo "[roadmap-live-evidence-archive-run] scope=$requested_scope resolved_scope=$resolved_scope included_families=$included_families_csv candidate_total=$candidate_total copied_total=$copied_total missing_total=$missing_total copy_error_total=$copy_error_total source_path_reject_total=$source_path_reject_total missing_family_count=$missing_family_count status=$final_status failure_substep=${failure_substep:-none}"
+echo "[roadmap-live-evidence-archive-run] scope=$requested_scope resolved_scope=$resolved_scope included_families=$included_families_csv missing_source_policy=$missing_source_policy candidate_total=$candidate_total copied_total=$copied_total missing_total=$missing_total copy_error_total=$copy_error_total source_path_reject_total=$source_path_reject_total missing_family_count=$missing_family_count status=$final_status failure_substep=${failure_substep:-none}"
 if [[ "$final_status" == "fail" && -n "$failure_substep" ]]; then
   echo "[roadmap-live-evidence-archive-run] fail_substep=$failure_substep reason=$final_reason"
+elif [[ "$final_status" == "warn" ]]; then
+  echo "[roadmap-live-evidence-archive-run] warn_reason=$final_reason"
 fi
 
 command_display="$(render_invocation_command "./scripts/roadmap_live_evidence_archive_run.sh" "${original_args[@]}")"
@@ -914,6 +957,7 @@ jq -n \
   --arg requested_scope "$requested_scope" \
   --arg resolved_scope "$resolved_scope" \
   --arg scope_inference_reason "$scope_inference_reason" \
+  --arg missing_source_policy "$missing_source_policy" \
   --argjson roadmap_summary_exists "$roadmap_summary_exists" \
   --argjson roadmap_summary_valid "$roadmap_summary_valid" \
   --arg roadmap_summary_contract_state "$roadmap_summary_contract_state" \
@@ -941,7 +985,8 @@ jq -n \
     inputs: {
       requested_scope: $requested_scope,
       resolved_scope: $resolved_scope,
-      scope_inference_reason: $scope_inference_reason
+      scope_inference_reason: $scope_inference_reason,
+      missing_source_policy: $missing_source_policy
     },
     roadmap: {
       summary_json: $roadmap_summary_json,

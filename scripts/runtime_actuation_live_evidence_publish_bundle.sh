@@ -385,6 +385,9 @@ runtime_cycle_publish_ready="false"
 runtime_cycle_summary_pre_fingerprint=""
 runtime_cycle_summary_post_fingerprint=""
 runtime_cycle_summary_fresh="false"
+runtime_cycle_summary_usable_for_evidence="false"
+cycle_publish_blocked="false"
+cycle_publish_blocked_reason=""
 
 runtime_evidence_pack_stage_status="skipped"
 runtime_evidence_pack_runner_rc=0
@@ -404,6 +407,8 @@ runtime_evidence_pack_source_next_operator_action=""
 runtime_evidence_pack_summary_pre_fingerprint=""
 runtime_evidence_pack_summary_post_fingerprint=""
 runtime_evidence_pack_summary_fresh="false"
+evidence_diagnostic_substep=""
+evidence_diagnostic_reason=""
 
 failure_substep=""
 failure_reason=""
@@ -464,10 +469,14 @@ if [[ "$runtime_cycle_summary_contract_valid" == "true" \
   runtime_cycle_publish_ready="true"
 fi
 
-if [[ "$runtime_cycle_runner_rc" -ne 0 ]]; then
-  failure_substep="runtime_actuation_promotion_cycle_runner_nonzero"
-  failure_reason="runtime-actuation promotion cycle command failed (rc=$runtime_cycle_runner_rc)"
-elif [[ "$runtime_cycle_summary_exists" != "true" || "$runtime_cycle_summary_valid_json" != "true" ]]; then
+if [[ "$runtime_cycle_summary_exists" == "true" \
+   && "$runtime_cycle_summary_valid_json" == "true" \
+   && "$runtime_cycle_summary_fresh" == "true" \
+   && "$runtime_cycle_summary_contract_valid" == "true" ]]; then
+  runtime_cycle_summary_usable_for_evidence="true"
+fi
+
+if [[ "$runtime_cycle_summary_exists" != "true" || "$runtime_cycle_summary_valid_json" != "true" ]]; then
   runtime_cycle_stage_status="fail"
   failure_substep="runtime_actuation_promotion_cycle_summary_missing_or_invalid"
   failure_reason="runtime-actuation promotion cycle summary is missing or invalid JSON"
@@ -481,13 +490,16 @@ elif [[ "$runtime_cycle_summary_contract_valid" != "true" ]]; then
   failure_reason="runtime-actuation promotion cycle summary contract is invalid"
 elif [[ "$runtime_cycle_publish_ready" != "true" ]]; then
   runtime_cycle_stage_status="fail"
-  failure_substep="runtime_actuation_promotion_cycle_not_publish_ready"
-  failure_reason="runtime-actuation promotion cycle summary is not publish-ready (requires status=pass rc=0 decision=GO)"
+  cycle_publish_blocked="true"
+  cycle_publish_blocked_reason="runtime-actuation promotion cycle summary is not publish-ready (requires status=pass rc=0 decision=GO)"
+elif [[ "$runtime_cycle_runner_rc" -ne 0 ]]; then
+  failure_substep="runtime_actuation_promotion_cycle_runner_nonzero"
+  failure_reason="runtime-actuation promotion cycle command failed (rc=$runtime_cycle_runner_rc)"
 fi
 
-echo "[runtime-actuation-live-evidence-publish-bundle] stage=runtime_actuation_promotion_cycle status=$runtime_cycle_stage_status rc=$runtime_cycle_runner_rc summary_json=$runtime_cycle_summary_json contract_valid=$runtime_cycle_summary_contract_valid publish_ready=$runtime_cycle_publish_ready"
+echo "[runtime-actuation-live-evidence-publish-bundle] stage=runtime_actuation_promotion_cycle status=$runtime_cycle_stage_status rc=$runtime_cycle_runner_rc summary_json=$runtime_cycle_summary_json contract_valid=$runtime_cycle_summary_contract_valid publish_ready=$runtime_cycle_publish_ready summary_usable_for_evidence=$runtime_cycle_summary_usable_for_evidence cycle_publish_blocked=$cycle_publish_blocked"
 
-if [[ -z "$failure_substep" ]]; then
+if [[ "$runtime_cycle_summary_usable_for_evidence" == "true" ]]; then
   echo "[runtime-actuation-live-evidence-publish-bundle] stage=runtime_actuation_promotion_evidence_pack status=running fail_on_no_go=$fail_on_no_go log=$runtime_evidence_pack_log"
   runtime_evidence_pack_summary_pre_fingerprint="$(file_fingerprint_01 "$runtime_evidence_pack_summary_json")"
   set +e
@@ -547,36 +559,49 @@ if [[ -z "$failure_substep" ]]; then
     runtime_evidence_pack_publish_ready="true"
   fi
 
+  evidence_failure_substep=""
+  evidence_failure_reason=""
   if [[ "$runtime_evidence_pack_runner_rc" -ne 0 ]]; then
-    failure_substep="runtime_actuation_promotion_evidence_pack_runner_nonzero"
-    failure_reason="runtime-actuation promotion evidence-pack publish command failed (rc=$runtime_evidence_pack_runner_rc)"
+    evidence_failure_substep="runtime_actuation_promotion_evidence_pack_runner_nonzero"
+    evidence_failure_reason="runtime-actuation promotion evidence-pack publish command failed (rc=$runtime_evidence_pack_runner_rc)"
   elif [[ "$runtime_evidence_pack_summary_exists" != "true" || "$runtime_evidence_pack_summary_valid_json" != "true" ]]; then
     runtime_evidence_pack_stage_status="fail"
-    failure_substep="runtime_actuation_promotion_evidence_pack_summary_missing_or_invalid"
-    failure_reason="runtime-actuation promotion evidence-pack summary is missing or invalid JSON"
+    evidence_failure_substep="runtime_actuation_promotion_evidence_pack_summary_missing_or_invalid"
+    evidence_failure_reason="runtime-actuation promotion evidence-pack summary is missing or invalid JSON"
   elif [[ "$runtime_evidence_pack_summary_fresh" != "true" ]]; then
     runtime_evidence_pack_stage_status="fail"
-    failure_substep="runtime_actuation_promotion_evidence_pack_summary_stale_reused"
-    failure_reason="runtime-actuation promotion evidence-pack summary was reused from a previous run (missing fresh write)"
+    evidence_failure_substep="runtime_actuation_promotion_evidence_pack_summary_stale_reused"
+    evidence_failure_reason="runtime-actuation promotion evidence-pack summary was reused from a previous run (missing fresh write)"
   elif [[ "$runtime_evidence_pack_summary_contract_valid" != "true" ]]; then
     runtime_evidence_pack_stage_status="fail"
-    failure_substep="runtime_actuation_promotion_evidence_pack_summary_contract_invalid"
-    failure_reason="runtime-actuation promotion evidence-pack summary contract is invalid"
+    evidence_failure_substep="runtime_actuation_promotion_evidence_pack_summary_contract_invalid"
+    evidence_failure_reason="runtime-actuation promotion evidence-pack summary contract is invalid"
   elif [[ "$runtime_evidence_pack_publish_ready" != "true" ]]; then
     runtime_evidence_pack_stage_status="fail"
-    failure_substep="runtime_actuation_promotion_evidence_pack_not_publish_ready"
-    failure_reason="runtime-actuation promotion evidence-pack summary is not publish-ready (requires status=pass rc=0 decision=GO)"
+    evidence_failure_substep="runtime_actuation_promotion_evidence_pack_not_publish_ready"
+    evidence_failure_reason="runtime-actuation promotion evidence-pack summary is not publish-ready (requires status=pass rc=0 decision=GO)"
+  fi
+
+  if [[ -n "$evidence_failure_substep" ]]; then
+    if [[ "$cycle_publish_blocked" == "true" ]]; then
+      evidence_diagnostic_substep="$evidence_failure_substep"
+      evidence_diagnostic_reason="$evidence_failure_reason"
+    else
+      failure_substep="$evidence_failure_substep"
+      failure_reason="$evidence_failure_reason"
+    fi
   fi
 
   echo "[runtime-actuation-live-evidence-publish-bundle] stage=runtime_actuation_promotion_evidence_pack status=$runtime_evidence_pack_stage_status rc=$runtime_evidence_pack_runner_rc summary_json=$runtime_evidence_pack_summary_json contract_valid=$runtime_evidence_pack_summary_contract_valid publish_ready=$runtime_evidence_pack_publish_ready"
 else
   runtime_evidence_pack_stage_status="skipped"
-  echo "[runtime-actuation-live-evidence-publish-bundle] stage=runtime_actuation_promotion_evidence_pack status=skipped reason=cycle_stage_not_publish_ready"
+  echo "[runtime-actuation-live-evidence-publish-bundle] stage=runtime_actuation_promotion_evidence_pack status=skipped reason=cycle_summary_unusable_for_evidence_pack"
 fi
 
 next_command=""
 next_command_reason=""
 next_operator_action=""
+next_command_source=""
 
 sanitized_source_next_command="$(sanitize_action_command_01 "$runtime_evidence_pack_source_next_command")"
 sanitized_source_next_command_reason="$(sanitize_guidance_text_01 "$runtime_evidence_pack_source_next_command_reason")"
@@ -592,6 +617,15 @@ cycle_rerun_command="$(render_command \
   "--print-summary-json" "1"
 )"
 
+if [[ -z "$failure_substep" && "$cycle_publish_blocked" == "true" ]]; then
+  failure_substep="runtime_actuation_publish_blocked_cycle_not_publish_ready"
+  if [[ -n "$cycle_publish_blocked_reason" ]]; then
+    failure_reason="$cycle_publish_blocked_reason"
+  else
+    failure_reason="runtime-actuation publish flow is blocked because cycle output is not publish-ready"
+  fi
+fi
+
 if [[ -z "$failure_substep" ]]; then
   final_status="pass"
   final_rc=0
@@ -606,11 +640,28 @@ else
       fi
       next_command="$cycle_rerun_command"
       next_command_reason="runtime-actuation promotion cycle command failed; inspect cycle log and rerun cycle"
+      next_command_source="cycle_rerun_recovery"
       ;;
     runtime_actuation_promotion_cycle_summary_missing_or_invalid|runtime_actuation_promotion_cycle_summary_stale_reused|runtime_actuation_promotion_cycle_summary_contract_invalid|runtime_actuation_promotion_cycle_not_publish_ready)
       final_rc=3
       next_command="$cycle_rerun_command"
       next_command_reason="runtime-actuation promotion cycle summary is not publish-ready; regenerate cycle evidence and rerun publish bundle"
+      next_command_source="cycle_rerun_recovery"
+      ;;
+    runtime_actuation_publish_blocked_cycle_not_publish_ready)
+      final_rc=3
+      if [[ -n "$sanitized_source_next_command" ]]; then
+        next_command="$sanitized_source_next_command"
+        next_command_source="runtime_evidence_pack_summary_next_command"
+      else
+        next_command="$cycle_rerun_command"
+        next_command_source="cycle_rerun_recovery"
+      fi
+      if [[ -n "$sanitized_source_next_command_reason" ]]; then
+        next_command_reason="$sanitized_source_next_command_reason"
+      else
+        next_command_reason="runtime-actuation publish flow is blocked by cycle NO-GO; inspect publish_blocked diagnostics, resolve blockers, and rerun cycle"
+      fi
       ;;
     runtime_actuation_promotion_evidence_pack_runner_nonzero)
       if [[ "$runtime_evidence_pack_runner_rc" -gt 0 ]]; then
@@ -620,8 +671,10 @@ else
       fi
       if [[ -n "$sanitized_source_next_command" ]]; then
         next_command="$sanitized_source_next_command"
+        next_command_source="runtime_evidence_pack_summary_next_command"
       else
         next_command="$bundle_rerun_command"
+        next_command_source="bundle_rerun_recovery"
       fi
       if [[ -n "$sanitized_source_next_command_reason" ]]; then
         next_command_reason="$sanitized_source_next_command_reason"
@@ -633,8 +686,10 @@ else
       final_rc=4
       if [[ -n "$sanitized_source_next_command" ]]; then
         next_command="$sanitized_source_next_command"
+        next_command_source="runtime_evidence_pack_summary_next_command"
       else
         next_command="$cycle_rerun_command"
+        next_command_source="cycle_rerun_recovery"
       fi
       if [[ -n "$sanitized_source_next_command_reason" ]]; then
         next_command_reason="$sanitized_source_next_command_reason"
@@ -646,6 +701,7 @@ else
       final_rc=1
       next_command="$bundle_rerun_command"
       next_command_reason="unknown publish-bundle failure; rerun bundle and inspect stage logs"
+      next_command_source="bundle_rerun_recovery"
       ;;
   esac
 fi
@@ -667,6 +723,7 @@ if text_has_placeholder_or_redacted_01 "$next_command_reason"; then
 fi
 if [[ -n "$next_command" ]] && ! action_command_is_safe_01 "$next_command"; then
   next_command="$bundle_rerun_command"
+  next_command_source="bundle_rerun_recovery"
 fi
 
 jq -n \
@@ -678,6 +735,7 @@ jq -n \
   --arg next_operator_action "$next_operator_action" \
   --arg next_command "$next_command" \
   --arg next_command_reason "$next_command_reason" \
+  --arg next_command_source "$next_command_source" \
   --arg reports_dir "$reports_dir" \
   --argjson cycles "$cycles" \
   --argjson fail_on_no_go "$fail_on_no_go" \
@@ -700,6 +758,9 @@ jq -n \
   --arg cycle_summary_decision_normalized "$runtime_cycle_summary_decision_normalized" \
   --argjson cycle_summary_contract_valid "$runtime_cycle_summary_contract_valid" \
   --argjson cycle_publish_ready "$runtime_cycle_publish_ready" \
+  --argjson cycle_summary_usable_for_evidence "$runtime_cycle_summary_usable_for_evidence" \
+  --argjson cycle_publish_blocked "$cycle_publish_blocked" \
+  --arg cycle_publish_blocked_reason "$cycle_publish_blocked_reason" \
   --arg evidence_script "$runtime_evidence_pack_script" \
   --arg evidence_command "$runtime_evidence_pack_command_rendered" \
   --arg evidence_log "$runtime_evidence_pack_log" \
@@ -718,6 +779,8 @@ jq -n \
   --arg evidence_summary_decision_normalized "$runtime_evidence_pack_summary_decision_normalized" \
   --argjson evidence_summary_contract_valid "$runtime_evidence_pack_summary_contract_valid" \
   --argjson evidence_publish_ready "$runtime_evidence_pack_publish_ready" \
+  --arg evidence_diagnostic_substep "$evidence_diagnostic_substep" \
+  --arg evidence_diagnostic_reason "$evidence_diagnostic_reason" \
   '{
     version: 1,
     schema: {
@@ -731,6 +794,7 @@ jq -n \
     next_operator_action: (if $next_operator_action == "" then null else $next_operator_action end),
     next_command: (if $next_command == "" then null else $next_command end),
     next_command_reason: (if $next_command_reason == "" then null else $next_command_reason end),
+    next_command_source: (if $next_command_source == "" then null else $next_command_source end),
     inputs: {
       reports_dir: $reports_dir,
       cycles: $cycles,
@@ -779,7 +843,26 @@ jq -n \
     },
     outcome: {
       publish_ready: ($status == "pass" and $rc == 0),
-      action: (if $status == "pass" and $rc == 0 then "publish_complete" else "publish_blocked" end)
+      action: (if $status == "pass" and $rc == 0 then "publish_complete" else "publish_blocked" end),
+      publish_blocked: (
+        if $status == "pass" and $rc == 0 then
+          null
+        else
+          {
+            blocked: true,
+            primary_substep: (if $failure_substep == "" then "unknown" else $failure_substep end),
+            primary_reason: (if $failure_reason == "" then "publish flow blocked" else $failure_reason end),
+            cycle_summary_usable_for_evidence_pack: $cycle_summary_usable_for_evidence,
+            cycle_publish_blocked: $cycle_publish_blocked,
+            cycle_publish_blocked_reason: (if $cycle_publish_blocked_reason == "" then null else $cycle_publish_blocked_reason end),
+            evidence_pack_diagnostic_substep: (if $evidence_diagnostic_substep == "" then null else $evidence_diagnostic_substep end),
+            evidence_pack_diagnostic_reason: (if $evidence_diagnostic_reason == "" then null else $evidence_diagnostic_reason end),
+            deterministic_next_command: (if $next_command == "" then null else $next_command end),
+            deterministic_next_command_reason: (if $next_command_reason == "" then null else $next_command_reason end),
+            deterministic_next_command_source: (if $next_command_source == "" then null else $next_command_source end)
+          }
+        end
+      )
     },
     artifacts: {
       summary_json: $summary_json_path,
@@ -802,6 +885,10 @@ jq -n \
   printf -- '- Next operator action: %s\n' "$(jq -r '.next_operator_action // "none"' "$summary_json")"
   printf -- '- Next command: %s\n' "$(jq -r '.next_command // "none"' "$summary_json")"
   printf -- '- Next command reason: %s\n' "$(jq -r '.next_command_reason // "none"' "$summary_json")"
+  printf -- '- Next command source: %s\n' "$(jq -r '.next_command_source // "none"' "$summary_json")"
+  printf -- '- Outcome action: %s\n' "$(jq -r '.outcome.action' "$summary_json")"
+  printf -- '- Publish blocked primary substep: %s\n' "$(jq -r '.outcome.publish_blocked.primary_substep // "none"' "$summary_json")"
+  printf -- '- Publish blocked evidence diagnostic substep: %s\n' "$(jq -r '.outcome.publish_blocked.evidence_pack_diagnostic_substep // "none"' "$summary_json")"
   printf '\n'
   printf '## Stage: Runtime Actuation Promotion Cycle\n\n'
   printf -- '- Status: %s\n' "$(jq -r '.stages.runtime_actuation_promotion_cycle.status' "$summary_json")"

@@ -20,6 +20,7 @@ EXEC_LOG="$TMP_DIR/exec.log"
 TRACK_A="$SCRIPT_TMP_DIR/profile_default_gate_stability_cycle.sh"
 TRACK_B="$SCRIPT_TMP_DIR/runtime_actuation_promotion_cycle.sh"
 TRACK_C="$SCRIPT_TMP_DIR/profile_compare_multi_vm_stability_promotion_cycle.sh"
+VM_COMMAND_FILE="$TMP_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
 
 cat >"$TRACK_A" <<'EOF_TRACK_A'
 #!/usr/bin/env bash
@@ -66,6 +67,10 @@ exit 0
 EOF_TRACK_C
 chmod +x "$TRACK_C"
 
+cat >"$VM_COMMAND_FILE" <<'EOF_VM_COMMAND_FILE'
+vm_a::ssh vm-a.example
+EOF_VM_COMMAND_FILE
+
 echo "[roadmap-live-evidence-cycle-batch-run] help contract"
 if ! bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh --help | grep -F -- "--reports-dir DIR" >/dev/null; then
   echo "help output missing --reports-dir DIR"
@@ -103,6 +108,8 @@ fi
 echo "[roadmap-live-evidence-cycle-batch-run] success path"
 SUCCESS_SUMMARY="$TMP_DIR/success_summary.json"
 : >"$EXEC_LOG"
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-001 CAMPAIGN_SUBJECT=inv-real-001 \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
@@ -220,6 +227,8 @@ echo "[roadmap-live-evidence-cycle-batch-run] fail-closed path"
 FAIL_CLOSED_SUMMARY="$TMP_DIR/fail_closed_summary.json"
 : >"$EXEC_LOG"
 set +e
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-002 CAMPAIGN_SUBJECT=inv-real-002 \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=fail TRACK_B_RC=23 TRACK_C_BEHAVIOR=pass \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
@@ -304,6 +313,7 @@ PLACEHOLDER_SUMMARY="$TMP_DIR/placeholder_summary.json"
 : >"$EXEC_LOG"
 set +e
 A_HOST=A_HOST B_HOST=B_HOST CAMPAIGN_SUBJECT=CAMPAIGN_SUBJECT INVITE_KEY=INVITE_KEY \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=placeholder_fail TRACK_B_RC=2 TRACK_C_BEHAVIOR=pass \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
@@ -319,52 +329,214 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
 placeholder_rc=$?
 set -e
 
-if [[ "$placeholder_rc" != "2" ]]; then
-  echo "expected placeholder diagnostics path rc=2, got rc=$placeholder_rc"
+if [[ "$placeholder_rc" != "0" ]]; then
+  echo "expected placeholder diagnostics path rc=0, got rc=$placeholder_rc"
   cat "$PLACEHOLDER_SUMMARY"
   exit 1
 fi
 
 if ! jq -e '
-  .status == "fail"
-  and .rc == 2
-  and .failure_substep == "execution:iteration_1:track_runtime_actuation_promotion_cycle"
+  .status == "pass"
+  and .rc == 0
+  and .failure_substep == null
+  and .failure_reason == null
+  and .stages.execution.status == "pass"
+  and .stages.execution.partial_progress_runtime_input_skips == true
   and .summary.iterations_completed == 1
-  and .summary.executed_tracks == 2
-  and .summary.skipped_tracks == 1
+  and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 2
+  and .summary.skipped_unresolved_runtime_input_tracks == 2
   and (.inputs.track_runtime_requirements | length == 3)
   and .selection_accounting.unresolved_required_track_ids == [
     "profile_default_gate_stability_cycle",
     "runtime_actuation_promotion_cycle"
   ]
   and .selection_accounting.unresolved_required_track_count == 2
+  and .iterations[0].status == "pass"
+  and .iterations[0].rc == 0
+  and .iterations[0].failure_substep == null
+  and (.iterations[0].tracks | length == 3)
+  and ([.iterations[0].tracks[].status] == ["skipped","skipped","pass"])
+  and .iterations[0].tracks[0].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[0].failure_diagnostics.track_group == "m2_profile_default_gate_stability"
+  and .iterations[0].tracks[0].failure_diagnostics.failure_kind == "required_runtime_input_unresolved"
+  and .iterations[0].tracks[0].failure_diagnostics.unresolved_required_inputs == ["host_a","host_b","campaign_subject"]
+  and .iterations[0].tracks[0].failure_diagnostics.unresolved_required_inputs_count == 3
+  and .iterations[0].tracks[0].failure_diagnostics.partial_progress_skip == true
+  and .iterations[0].tracks[1].failure_kind == "skipped_unresolved_runtime_inputs"
   and .iterations[0].tracks[1].failure_diagnostics.track_group == "m4_runtime_actuation_promotion"
   and .iterations[0].tracks[1].failure_diagnostics.failure_kind == "required_runtime_input_unresolved"
-  and .iterations[0].tracks[1].failure_diagnostics.failure_code == "m4_required_runtime_input_unresolved"
   and .iterations[0].tracks[1].failure_diagnostics.unresolved_required_inputs == ["campaign_subject"]
   and .iterations[0].tracks[1].failure_diagnostics.unresolved_required_inputs_count == 1
-  and .iterations[0].tracks[1].failure_diagnostics.log_hint_line
-      == "runtime-actuation-promotion-cycle: placeholder invite subject in signoff passthrough (--subject) cannot be resolved"
-  and .iterations[0].tracks[1].failure_diagnostics.operator_next_command
-      == "CAMPAIGN_SUBJECT='\''<set-real-invite-key>'\'' ./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --print-summary-json 1"
-  and .iterations[0].tracks[1].failure_diagnostics.log_tail_line_count == 2
-  and .iterations[0].tracks[1].failure_diagnostics.log_total_line_count == 2
-  and .iterations[0].tracks[1].failure_diagnostics.log_tail_truncated == false
-  and .iterations[0].tracks[2].status == "skipped"
-  and .iterations[0].tracks[2].failure_kind == "skipped_due_to_fail_closed"
+  and .iterations[0].tracks[1].failure_diagnostics.partial_progress_skip == true
+  and .iterations[0].tracks[2].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .iterations[0].tracks[2].status == "pass"
+  and .iterations[0].tracks[2].rc == 0
 ' "$PLACEHOLDER_SUMMARY" >/dev/null; then
   echo "placeholder unresolved-input diagnostics summary mismatch"
   cat "$PLACEHOLDER_SUMMARY"
   exit 1
 fi
 
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected 1 execution in placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "A:" "$EXEC_LOG" >/dev/null || grep -F "B:" "$EXEC_LOG" >/dev/null; then
+  echo "tracks A/B should not run in placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "C:pass" "$EXEC_LOG" >/dev/null; then
+  echo "track C should run in placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] m5 unresolved runtime-input partial-progress path"
+M5_UNRESOLVED_SUMMARY="$TMP_DIR/m5_unresolved_summary.json"
+: >"$EXEC_LOG"
+set +e
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-005 CAMPAIGN_SUBJECT=inv-real-005 \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE= \
+PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE= \
+PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE= \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/m5_unresolved_reports" \
+  --summary-json "$M5_UNRESOLVED_SUMMARY" \
+  --iterations 1 \
+  --continue-on-fail 0 \
+  --parallel 0 \
+  --print-summary-json 0
+m5_unresolved_rc=$?
+set -e
+
+if [[ "$m5_unresolved_rc" != "0" ]]; then
+  echo "expected m5 unresolved partial-progress path rc=0, got rc=$m5_unresolved_rc"
+  cat "$M5_UNRESOLVED_SUMMARY"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .failure_substep == null
+  and .stages.execution.status == "pass"
+  and .stages.execution.partial_progress_runtime_input_skips == true
+  and .summary.iterations_completed == 1
+  and .summary.executed_tracks == 2
+  and .summary.skipped_tracks == 1
+  and .summary.skipped_unresolved_runtime_input_tracks == 1
+  and .selection_accounting.unresolved_required_track_ids == [
+    "profile_compare_multi_vm_stability_promotion_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_count == 1
+  and (.iterations | length == 1)
+  and .iterations[0].status == "pass"
+  and .iterations[0].rc == 0
+  and ([.iterations[0].tracks[].status] == ["pass","pass","skipped"])
+  and .iterations[0].tracks[2].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .iterations[0].tracks[2].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[2].failure_diagnostics.track_group == "m5_multi_vm_stability_promotion"
+  and .iterations[0].tracks[2].failure_diagnostics.failure_kind == "required_runtime_input_unresolved"
+  and .iterations[0].tracks[2].failure_diagnostics.unresolved_required_inputs == ["vm_command_source"]
+  and .iterations[0].tracks[2].failure_diagnostics.unresolved_required_inputs_count == 1
+  and .iterations[0].tracks[2].failure_diagnostics.partial_progress_skip == true
+' "$M5_UNRESOLVED_SUMMARY" >/dev/null; then
+  echo "m5 unresolved partial-progress summary mismatch"
+  cat "$M5_UNRESOLVED_SUMMARY"
+  exit 1
+fi
+
 if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "2" ]]; then
-  echo "expected 2 executions in placeholder diagnostics path"
+  echo "expected 2 executions in m5 unresolved partial-progress path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "A:pass" "$EXEC_LOG" >/dev/null || ! grep -F "B:pass" "$EXEC_LOG" >/dev/null; then
+  echo "tracks A/B should run in m5 unresolved partial-progress path"
   cat "$EXEC_LOG"
   exit 1
 fi
 if grep -F "C:" "$EXEC_LOG" >/dev/null; then
-  echo "track C should not run in placeholder diagnostics path"
+  echo "track C should not run in m5 unresolved partial-progress path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] all-selected-unresolved fail-closed path"
+ALL_UNRESOLVED_SUMMARY="$TMP_DIR/all_unresolved_summary.json"
+: >"$EXEC_LOG"
+set +e
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-006 CAMPAIGN_SUBJECT=inv-real-006 \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE= \
+PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE= \
+PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE= \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/all_unresolved_reports" \
+  --summary-json "$ALL_UNRESOLVED_SUMMARY" \
+  --iterations 1 \
+  --continue-on-fail 0 \
+  --parallel 0 \
+  --include-track-id profile_compare_multi_vm_stability_promotion_cycle \
+  --print-summary-json 0
+all_unresolved_rc=$?
+set -e
+
+if [[ "$all_unresolved_rc" != "1" ]]; then
+  echo "expected all-selected-unresolved fail-closed rc=1, got rc=$all_unresolved_rc"
+  cat "$ALL_UNRESOLVED_SUMMARY"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "execution:no_tracks_executed"
+  and .failure_reason == "no selected tracks executed; required runtime inputs unresolved across all selected tracks"
+  and .summary.iterations_requested == 1
+  and .summary.iterations_completed == 1
+  and .summary.executed_tracks == 0
+  and .summary.skipped_tracks == 1
+  and .summary.skipped_unresolved_runtime_input_tracks == 1
+  and .summary.selected_track_count == 1
+  and .selection_accounting.unresolved_required_track_ids == [
+    "profile_compare_multi_vm_stability_promotion_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_count == 1
+  and (.per_track | length == 1)
+  and .per_track[0].id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .per_track[0].total_runs == 0
+  and .per_track[0].pass == 0
+  and .per_track[0].fail == 0
+  and .per_track[0].skipped == 1
+  and (.iterations | length == 1)
+  and .iterations[0].status == "pass"
+  and .iterations[0].rc == 0
+  and (.iterations[0].tracks | length == 1)
+  and .iterations[0].tracks[0].status == "skipped"
+  and .iterations[0].tracks[0].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[0].failure_diagnostics.failure_kind == "required_runtime_input_unresolved"
+  and .iterations[0].tracks[0].failure_diagnostics.unresolved_required_inputs == ["vm_command_source"]
+' "$ALL_UNRESOLVED_SUMMARY" >/dev/null; then
+  echo "all-selected-unresolved fail-closed summary mismatch"
+  cat "$ALL_UNRESOLVED_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "0" ]]; then
+  echo "expected 0 executions in all-selected-unresolved fail-closed path"
   cat "$EXEC_LOG"
   exit 1
 fi
@@ -373,6 +545,8 @@ echo "[roadmap-live-evidence-cycle-batch-run] continue-on-fail path"
 CONTINUE_SUMMARY="$TMP_DIR/continue_summary.json"
 : >"$EXEC_LOG"
 set +e
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-003 CAMPAIGN_SUBJECT=inv-real-003 \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=fail TRACK_B_RC=23 TRACK_C_BEHAVIOR=pass \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
@@ -441,6 +615,8 @@ fi
 echo "[roadmap-live-evidence-cycle-batch-run] filtering path"
 FILTER_SUMMARY="$TMP_DIR/filter_summary.json"
 : >"$EXEC_LOG"
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-004 CAMPAIGN_SUBJECT=inv-real-004 \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \

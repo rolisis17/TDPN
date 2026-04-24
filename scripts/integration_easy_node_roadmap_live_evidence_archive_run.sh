@@ -128,6 +128,7 @@ run_easy_node_bounded "$STDOUT_OUT" "$STDERR_OUT" roadmap-live-evidence-archive-
   --roadmap-summary-json .easy-node-logs/roadmap_live_evidence_archive_contract_roadmap.json \
   --archive-root .easy-node-logs/roadmap_live_evidence_archive_contract_archive \
   --scope runtime-actuation \
+  --missing-source-policy fail \
   --summary-json .easy-node-logs/roadmap_live_evidence_archive_contract_summary.json \
   --print-summary-json 1; then
   echo "easy_node roadmap-live-evidence-archive-run contract invocation failed unexpectedly"
@@ -146,6 +147,7 @@ assert_token "$line" $'\t--reports-dir\t.easy-node-logs/roadmap_live_evidence_ar
 assert_token "$line" $'\t--roadmap-summary-json\t.easy-node-logs/roadmap_live_evidence_archive_contract_roadmap.json' "missing --roadmap-summary-json forwarding"
 assert_token "$line" $'\t--archive-root\t.easy-node-logs/roadmap_live_evidence_archive_contract_archive' "missing --archive-root forwarding"
 assert_token "$line" $'\t--scope\truntime-actuation' "missing --scope forwarding"
+assert_token "$line" $'\t--missing-source-policy\tfail' "missing --missing-source-policy forwarding"
 assert_token "$line" $'\t--summary-json\t.easy-node-logs/roadmap_live_evidence_archive_contract_summary.json' "missing --summary-json forwarding"
 assert_token "$line" $'\t--print-summary-json\t1' "missing --print-summary-json forwarding"
 if ! grep -F -- 'fake roadmap live-evidence archive run:' "$STDOUT_OUT" >/dev/null 2>&1; then

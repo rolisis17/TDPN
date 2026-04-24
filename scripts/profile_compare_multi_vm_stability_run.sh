@@ -37,16 +37,22 @@ Notes:
     only when configured thresholds are satisfied.
   - vm-command-file preflight rejects conflicting duplicate VM_ID entries to
     keep command routing deterministic.
+  - When no VM command input is provided, reports-dir fallback discovery checks
+    deterministic known candidates in this order: current reports-dir, then
+    archive parent candidates (when reports-dir points to run/cycle archives),
+    then configured env fallbacks, then legacy artifact names.
   - Cycle script path can be overridden by:
     PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT
   - If no --vm-command/--vm-command-file values are provided, fail-closed
     fallback discovery checks, in order:
-    <reports-dir>/profile_compare_multi_vm_stability_vm_commands.txt (canonical)
+    known reports-dir candidates for:
+      profile_compare_multi_vm_stability_vm_commands.txt (canonical)
     PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE
     PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE
     PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE
-    <reports-dir>/profile_compare_multi_vm_vm_commands.txt (legacy)
-    <reports-dir>/vm_commands.txt (legacy)
+    known reports-dir candidates for:
+      profile_compare_multi_vm_vm_commands.txt (legacy)
+      vm_commands.txt (legacy)
 USAGE
 }
 
@@ -279,6 +285,7 @@ declare -a vm_command_files=()
 declare -a cycle_args=()
 declare -a vm_command_fallback_diagnostics=()
 declare -a vm_command_preflight_diagnostics=()
+declare -a vm_command_fallback_artifact_candidates=()
 vm_command_fallback_used="0"
 vm_command_fallback_source=""
 vm_command_fallback_file=""
@@ -336,6 +343,21 @@ record_vm_command_preflight_diag() {
   vm_command_preflight_diagnostics+=("$1")
 }
 
+record_vm_command_fallback_artifact_candidate() {
+  local candidate_path=""
+  local existing_path=""
+  candidate_path="$(abs_path "${1:-}")"
+  if [[ -z "$candidate_path" ]]; then
+    return
+  fi
+  for existing_path in "${vm_command_fallback_artifact_candidates[@]}"; do
+    if [[ "$existing_path" == "$candidate_path" ]]; then
+      return
+    fi
+  done
+  vm_command_fallback_artifact_candidates+=("$candidate_path")
+}
+
 print_vm_command_preflight_diagnostics() {
   local diag=""
   if (( ${#vm_command_fallback_diagnostics[@]} > 0 )); then
@@ -360,31 +382,69 @@ discover_vm_command_file_fallback() {
   local explicit_value=""
   local explicit_path=""
   local env_var=""
+  local candidate_dir=""
+  local candidate_source=""
+  local vm_command_file_reason=""
+  local reports_dir_basename=""
+  local parent_dir=""
+  local grandparent_dir=""
+  local artifact_name=""
   local -a env_fallback_vars=(
     "PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE"
     "PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE"
     "PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE"
   )
-  local candidate=""
-  local vm_command_file_reason=""
-  local -a legacy_artifact_candidates=(
-    "$reports_dir/profile_compare_multi_vm_vm_commands.txt"
-    "$reports_dir/vm_commands.txt"
+  local -a legacy_artifact_names=(
+    "profile_compare_multi_vm_vm_commands.txt"
+    "vm_commands.txt"
   )
+  local -a reports_dir_candidate_dirs=()
+  declare -A seen_candidate_dirs=()
 
-  canonical_candidate="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_vm_commands.txt")"
-  if [[ ! -f "$canonical_candidate" ]]; then
-    record_vm_command_fallback_diag "source=reports-dir-canonical path=$canonical_candidate reason=not_found"
-  elif ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$canonical_candidate")"; then
-    record_vm_command_fallback_diag "source=reports-dir-canonical path=$canonical_candidate reason=$vm_command_file_reason"
-  else
-    vm_command_files+=("$canonical_candidate")
-    vm_command_fallback_used="1"
-    vm_command_fallback_source="reports-dir-canonical"
-    vm_command_fallback_file="$canonical_candidate"
-    record_vm_command_fallback_diag "source=reports-dir-canonical path=$canonical_candidate result=selected"
-    return
+  candidate_dir="$(abs_path "$reports_dir")"
+  if [[ -n "$candidate_dir" && -z "${seen_candidate_dirs["$candidate_dir"]+present}" ]]; then
+    reports_dir_candidate_dirs+=("$candidate_dir")
+    seen_candidate_dirs["$candidate_dir"]=1
   fi
+
+  reports_dir_basename="$(basename "$reports_dir")"
+  if [[ "$reports_dir_basename" == cycle_* || "$reports_dir_basename" == run_* ||
+        "$reports_dir" == *"/profile_compare_multi_vm_stability_run_"*"/"* ||
+        "$reports_dir" == *"/profile_compare_multi_vm_stability_promotion_cycle_"*"/"* ]]; then
+    parent_dir="$(abs_path "$(dirname "$reports_dir")")"
+    if [[ -n "$parent_dir" && "$parent_dir" != "/" && -z "${seen_candidate_dirs["$parent_dir"]+present}" ]]; then
+      reports_dir_candidate_dirs+=("$parent_dir")
+      seen_candidate_dirs["$parent_dir"]=1
+    fi
+    if [[ -n "$parent_dir" && "$parent_dir" != "/" ]]; then
+      grandparent_dir="$(abs_path "$(dirname "$parent_dir")")"
+      if [[ -n "$grandparent_dir" && "$grandparent_dir" != "/" && -z "${seen_candidate_dirs["$grandparent_dir"]+present}" ]]; then
+        reports_dir_candidate_dirs+=("$grandparent_dir")
+        seen_candidate_dirs["$grandparent_dir"]=1
+      fi
+    fi
+  fi
+
+  for candidate_dir in "${reports_dir_candidate_dirs[@]}"; do
+    canonical_candidate="$(abs_path "$candidate_dir/profile_compare_multi_vm_stability_vm_commands.txt")"
+    record_vm_command_fallback_artifact_candidate "$canonical_candidate"
+    candidate_source="reports-dir-canonical"
+    if [[ "$candidate_dir" != "$reports_dir" ]]; then
+      candidate_source="reports-dir-canonical-candidate"
+    fi
+    if [[ ! -f "$canonical_candidate" ]]; then
+      record_vm_command_fallback_diag "source=$candidate_source path=$canonical_candidate reason=not_found candidate_dir=$candidate_dir"
+    elif ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$canonical_candidate")"; then
+      record_vm_command_fallback_diag "source=$candidate_source path=$canonical_candidate reason=$vm_command_file_reason candidate_dir=$candidate_dir"
+    else
+      vm_command_files+=("$canonical_candidate")
+      vm_command_fallback_used="1"
+      vm_command_fallback_source="$candidate_source"
+      vm_command_fallback_file="$canonical_candidate"
+      record_vm_command_fallback_diag "source=$candidate_source path=$canonical_candidate result=selected candidate_dir=$candidate_dir"
+      return
+    fi
+  done
 
   for env_var in "${env_fallback_vars[@]}"; do
     explicit_source="$env_var"
@@ -409,22 +469,29 @@ discover_vm_command_file_fallback() {
     fi
   done
 
-  for candidate in "${legacy_artifact_candidates[@]}"; do
-    candidate="$(abs_path "$candidate")"
-    if [[ ! -f "$candidate" ]]; then
-      record_vm_command_fallback_diag "source=reports-dir-legacy path=$candidate reason=not_found"
-      continue
-    fi
-    if ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$candidate")"; then
-      record_vm_command_fallback_diag "source=reports-dir-legacy path=$candidate reason=$vm_command_file_reason"
-      continue
-    fi
-    vm_command_files+=("$candidate")
-    vm_command_fallback_used="1"
-    vm_command_fallback_source="reports-dir-legacy"
-    vm_command_fallback_file="$candidate"
-    record_vm_command_fallback_diag "source=reports-dir-legacy path=$candidate result=selected"
-    return
+  for candidate_dir in "${reports_dir_candidate_dirs[@]}"; do
+    for artifact_name in "${legacy_artifact_names[@]}"; do
+      candidate_source="reports-dir-legacy"
+      if [[ "$candidate_dir" != "$reports_dir" ]]; then
+        candidate_source="reports-dir-legacy-candidate"
+      fi
+      canonical_candidate="$(abs_path "$candidate_dir/$artifact_name")"
+      record_vm_command_fallback_artifact_candidate "$canonical_candidate"
+      if [[ ! -f "$canonical_candidate" ]]; then
+        record_vm_command_fallback_diag "source=$candidate_source path=$canonical_candidate reason=not_found candidate_dir=$candidate_dir"
+        continue
+      fi
+      if ! vm_command_file_reason="$(validate_vm_command_file_or_reason "$canonical_candidate")"; then
+        record_vm_command_fallback_diag "source=$candidate_source path=$canonical_candidate reason=$vm_command_file_reason candidate_dir=$candidate_dir"
+        continue
+      fi
+      vm_command_files+=("$canonical_candidate")
+      vm_command_fallback_used="1"
+      vm_command_fallback_source="$candidate_source"
+      vm_command_fallback_file="$canonical_candidate"
+      record_vm_command_fallback_diag "source=$candidate_source path=$canonical_candidate result=selected candidate_dir=$candidate_dir"
+      return
+    done
   done
 }
 
@@ -486,6 +553,7 @@ fail_vm_command_inputs_missing() {
   local rerun_with_file_command=""
   local canonical_write_target="$reports_dir/profile_compare_multi_vm_stability_vm_commands.txt"
   local canonical_write_command=""
+  local artifact_candidate=""
   echo "at least one --vm-command or --vm-command-file is required"
   echo "no usable VM command fallback was discovered (fail-closed)."
   print_vm_command_preflight_diagnostics
@@ -494,7 +562,14 @@ fail_vm_command_inputs_missing() {
   canonical_write_command="$(render_command_line_from_argv_01 bash -lc "printf 'vm_a::ssh vm-a.example\n' > $(printf '%q' "$canonical_write_target")")"
   echo "operator_next_action: $rerun_with_inline_command"
   echo "operator_next_action: $rerun_with_file_command"
+  echo "operator_next_action: unresolved_placeholder REPLACE_WITH_VM_COMMAND_FILE must be replaced with a readable vm-command file path."
   echo "operator_next_action: $canonical_write_command"
+  if (( ${#vm_command_fallback_artifact_candidates[@]} > 0 )); then
+    echo "operator_next_action: create one recognized reports-dir artifact with VM_ID::COMMAND lines:"
+    for artifact_candidate in "${vm_command_fallback_artifact_candidates[@]}"; do
+      echo "  $artifact_candidate"
+    done
+  fi
   exit 2
 }
 

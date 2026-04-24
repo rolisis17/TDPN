@@ -6067,8 +6067,14 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
   and .vpn_track.multi_vm_stability.reasons == []
   and .vpn_track.multi_vm_stability.notes == null
   and .vpn_track.multi_vm_stability.needs_attention == true
-  and ((.vpn_track.multi_vm_stability.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
-  and ((.vpn_track.multi_vm_stability.next_command_reason // "") | test("missing"; "i"))
+  and .vpn_track.multi_vm_stability.next_command == null
+  and .vpn_track.multi_vm_stability.next_command_actionable == false
+  and ((.vpn_track.multi_vm_stability.next_command_reason // "") | test("vm command source is unresolved"; "i"))
+  and .vpn_track.multi_vm_stability.vm_command_source == "unresolved"
+  and .vpn_track.multi_vm_stability.vm_command_source_ready == false
+  and .vpn_track.multi_vm_stability.vm_command_file_fallback == null
+  and .vpn_track.multi_vm_stability.vm_command_file_fallback_usable == false
+  and .vpn_track.multi_vm_stability.vm_command_file_fallback_used == false
   and .vpn_track.multi_vm_stability_promotion.available == false
   and .vpn_track.multi_vm_stability_promotion.input_summary_json == $promotion_src
   and .vpn_track.multi_vm_stability_promotion.source_summary_json == null
@@ -6083,11 +6089,7 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
   and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
   and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("promotion-check")) | not)
   and ((.vpn_track.multi_vm_stability_promotion.next_command_reason // "") | test("promotion cycle"; "i"))
-  and ((.next_actions // []) | any(
-    .id == "profile_compare_multi_vm_stability"
-    and ((.command // "") | test("profile-compare-multi-vm-stability-cycle"))
-    and ((.reason // "") | test("missing"; "i"))
-  ))
+  and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and ((.next_actions // []) | any(
     .id == "profile_compare_multi_vm_stability_promotion"
     and ((.command // "") | test("profile-compare-multi-vm-stability-promotion-cycle"))
@@ -6095,11 +6097,7 @@ if ! jq -e --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_MISSING_DEFAULT_JSON" 
     and ((.reason // "") | test("promotion cycle"; "i"))
   ))
   and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
-  and (
-    ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability")) as $multi_vm_idx
-    | ((.next_actions // []) | map(.id) | index("profile_compare_multi_vm_stability_promotion")) as $multi_vm_promotion_idx
-    | ($multi_vm_idx != null and $multi_vm_promotion_idx != null and $multi_vm_promotion_idx > $multi_vm_idx)
-  )
+  and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion"))
   and .artifacts.profile_compare_multi_vm_stability_summary_json == null
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_missing_summary.json" >/dev/null; then
   echo "multi-VM stability missing-default summary mismatch"
@@ -6109,6 +6107,60 @@ fi
 if ! grep -Eq '\[roadmap-progress-report\] profile_compare_multi_vm_stability_available=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log; then
   echo "expected multi-VM stability availability log line in missing-default scenario"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_missing.log
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[roadmap-progress-report] multi-VM stability missing summary emits actionable command when runnable vm-command fallback exists"
+PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR="$TMP_DIR/profile_compare_multi_vm_stability_fallback_reports"
+rm -rf "$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR"
+mkdir -p "$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR"
+PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_CHECK_JSON="$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR/profile_compare_multi_vm_stability_check_summary.json"
+PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_VM_COMMAND_FILE="$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_VM_COMMAND_FILE" <<'EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_VM_COMMAND_FILE'
+vm-a::echo vm-a
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_VM_COMMAND_FILE
+if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_DEFAULT_GATE_STABILITY_CYCLE_DEFAULT_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_fallback_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_fallback_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_fallback.log 2>&1; then
+  echo "expected success when multi-VM fallback vm-command artifact exists"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_fallback.log
+  exit 1
+fi
+if ! jq -e \
+  --arg src "$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_CHECK_JSON" \
+  --arg vm_file "$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_VM_COMMAND_FILE" '
+  .vpn_track.multi_vm_stability.available == false
+  and .vpn_track.multi_vm_stability.input_summary_json == $src
+  and .vpn_track.multi_vm_stability.needs_attention == true
+  and .vpn_track.multi_vm_stability.next_command_actionable == true
+  and ((.vpn_track.multi_vm_stability.next_command // "") | test("profile-compare-multi-vm-stability-cycle"))
+  and ((.vpn_track.multi_vm_stability.next_command // "") | test("--vm-command-file"))
+  and (
+    .vpn_track.multi_vm_stability.vm_command_source == "explicit_vm_command_file"
+    or .vpn_track.multi_vm_stability.vm_command_source == "discovered_vm_command_file"
+  )
+  and .vpn_track.multi_vm_stability.vm_command_source_ready == true
+  and .vpn_track.multi_vm_stability.vm_command_file_fallback == $vm_file
+  and .vpn_track.multi_vm_stability.vm_command_file_fallback_usable == true
+  and ((.next_actions // []) | any(
+    .id == "profile_compare_multi_vm_stability"
+    and ((.command // "") | test("--vm-command-file"))
+  ))
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_fallback_summary.json" >/dev/null; then
+  echo "multi-VM stability fallback vm-command summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_fallback_summary.json"
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] profile_compare_multi_vm_stability_status=.*vm_command_source=(explicit_vm_command_file|discovered_vm_command_file) .*vm_command_source_ready=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_fallback.log; then
+  echo "expected multi-VM vm-command fallback diagnostics in log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_fallback.log
   exit 1
 fi
 
@@ -9084,7 +9136,9 @@ if [[ "$PROFILE_DEFAULT_STABILITY_CYCLE_HELPER_AVAILABLE_JSON" == "true" ]] \
   PROFILE_DEFAULT_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="true"
 fi
 RUNTIME_ACTUATION_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="$RUNTIME_ACTUATION_PROMOTION_CYCLE_HELPER_AVAILABLE_JSON"
-MULTI_VM_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="$MULTI_VM_STABILITY_CYCLE_HELPER_AVAILABLE_JSON"
+# Multi-VM evidence-pack prerequisites now require a concrete VM command source;
+# helper availability alone is not sufficient for action emission in minimal paths.
+MULTI_VM_EVIDENCE_PACK_PREREQ_ACTION_EXPECTED_JSON="false"
 
 echo "[roadmap-progress-report] evidence-pack summaries missing -> surfaced prerequisite-aware next commands"
 if ! run_roadmap_progress_report \
@@ -9136,8 +9190,7 @@ if ! jq -e \
          and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "") | test("(^| )--fail-on-no-go 1( |$)"))
          and ((.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "") | test("(prerequisites are missing|summary path is missing)"; "i"))
        else
-         (.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command == null)
-         and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
+         (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion_evidence_pack")) | not)
        end)
   and (if $expect_actionable_run then
          ((.next_actions // []) | any(

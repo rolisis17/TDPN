@@ -2880,6 +2880,28 @@ multi_vm_vm_command_file_has_runnable_specs_01() {
   printf '0'
 }
 
+multi_vm_vm_command_value_usable_01() {
+  local value
+  local value_norm
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    printf '0'
+    return
+  fi
+  value_norm="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value_norm" in
+    vm_command|"<vm-command>"|"[redacted]"|redacted|placeholder|todo|tbd)
+      printf '0'
+      return
+      ;;
+  esac
+  if [[ "$value" == *"VM_COMMAND"* || "$value" == *"<vm-command>"* ]]; then
+    printf '0'
+    return
+  fi
+  printf '1'
+}
+
 resolve_multi_vm_stability_vm_command_file_path() {
   local check_summary_path
   local run_summary_path=""
@@ -9238,6 +9260,12 @@ multi_vm_stability_command_reports_dir="$(
 multi_vm_stability_vm_command_file="$(
   resolve_multi_vm_stability_vm_command_file_path "$profile_compare_multi_vm_stability_check_summary_json"
 )"
+multi_vm_stability_vm_command_file_usable_json="false"
+if [[ "$(multi_vm_vm_command_file_has_runnable_specs_01 "$multi_vm_stability_vm_command_file")" == "1" ]]; then
+  multi_vm_stability_vm_command_file_usable_json="true"
+else
+  multi_vm_stability_vm_command_file=""
+fi
 multi_vm_stability_legacy_default_next_command="./scripts/easy_node.sh profile-compare-multi-vm-stability-cycle --reports-dir .easy-node-logs --fail-on-no-go 1 --summary-json .easy-node-logs/profile_compare_multi_vm_stability_cycle_summary.json --print-summary-json 1"
 multi_vm_stability_next_command="$(jq -r '
   .summary.profile_compare_multi_vm_stability.next_command
@@ -9345,6 +9373,45 @@ if [[ -n "$profile_compare_multi_vm_stability_check_summary_json" ]] \
       multi_vm_stability_next_command_reason="multi-VM stability evidence requires refresh; rerun stability cycle and review check summary"
     fi
   fi
+fi
+multi_vm_stability_next_command_vm_command_value="$(
+  profile_default_gate_extract_arg_value_from_cmd "$multi_vm_stability_next_command" "--vm-command"
+)"
+multi_vm_stability_next_command_vm_command_file="$(
+  profile_default_gate_extract_arg_value_from_cmd "$multi_vm_stability_next_command" "--vm-command-file"
+)"
+multi_vm_stability_next_command_vm_command_file="$(
+  resolve_path_with_base "$multi_vm_stability_next_command_vm_command_file" "$multi_vm_stability_input_summary_json"
+)"
+multi_vm_stability_next_command_vm_command_usable_json="false"
+if [[ "$(multi_vm_vm_command_value_usable_01 "$multi_vm_stability_next_command_vm_command_value")" == "1" ]]; then
+  multi_vm_stability_next_command_vm_command_usable_json="true"
+fi
+multi_vm_stability_next_command_vm_command_file_usable_json="false"
+if [[ "$(multi_vm_vm_command_file_has_runnable_specs_01 "$multi_vm_stability_next_command_vm_command_file")" == "1" ]]; then
+  multi_vm_stability_next_command_vm_command_file_usable_json="true"
+fi
+multi_vm_stability_vm_command_source_json="unresolved"
+multi_vm_stability_vm_command_source_ready_json="false"
+if [[ "$multi_vm_stability_next_command_vm_command_usable_json" == "true" ]]; then
+  multi_vm_stability_vm_command_source_json="explicit_vm_command"
+  multi_vm_stability_vm_command_source_ready_json="true"
+elif [[ "$multi_vm_stability_next_command_vm_command_file_usable_json" == "true" ]]; then
+  multi_vm_stability_vm_command_source_json="explicit_vm_command_file"
+  multi_vm_stability_vm_command_source_ready_json="true"
+elif [[ "$multi_vm_stability_vm_command_file_usable_json" == "true" ]]; then
+  multi_vm_stability_next_command="$(build_multi_vm_stability_cycle_next_command "$multi_vm_stability_command_reports_dir" "$multi_vm_stability_vm_command_file")"
+  multi_vm_stability_vm_command_source_json="discovered_vm_command_file"
+  multi_vm_stability_vm_command_source_ready_json="true"
+fi
+multi_vm_stability_next_command_actionable_json="false"
+if [[ -n "$multi_vm_stability_next_command" && "$multi_vm_stability_vm_command_source_ready_json" == "true" ]]; then
+  multi_vm_stability_next_command_actionable_json="true"
+fi
+if [[ "$multi_vm_stability_needs_attention_json" == "true" ]] \
+   && [[ "$multi_vm_stability_next_command_actionable_json" != "true" ]]; then
+  multi_vm_stability_next_command=""
+  multi_vm_stability_next_command_reason="multi-VM stability evidence needs refresh but VM command source is unresolved; provide --vm-command or --vm-command-file with runnable specs, or generate a runnable vm-command fallback artifact in reports-dir"
 fi
 if [[ -z "$profile_compare_multi_vm_stability_promotion_summary_json" ]]; then
   profile_compare_multi_vm_stability_promotion_summary_json="$(
@@ -10944,7 +11011,9 @@ if [[ "$profile_default_gate_needs_attention_json" == "true" ]] \
   profile_default_gate_live_action_ready_json="true"
 fi
 multi_vm_stability_live_action_ready_json="false"
-if [[ "$multi_vm_stability_needs_attention_json" == "true" ]] && [[ -n "$multi_vm_stability_next_command" ]]; then
+if [[ "$multi_vm_stability_needs_attention_json" == "true" ]] \
+   && [[ -n "$multi_vm_stability_next_command" ]] \
+   && [[ "$multi_vm_stability_vm_command_source_ready_json" == "true" ]]; then
   multi_vm_stability_live_action_ready_json="true"
 fi
 multi_vm_stability_promotion_live_action_ready_json="false"
@@ -11820,6 +11889,11 @@ summary_payload_jq_args=(
   --argjson profile_compare_multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" \
   --arg profile_compare_multi_vm_stability_next_command "$multi_vm_stability_next_command" \
   --arg profile_compare_multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" \
+  --arg profile_compare_multi_vm_stability_vm_command_source "$multi_vm_stability_vm_command_source_json" \
+  --argjson profile_compare_multi_vm_stability_vm_command_source_ready "$multi_vm_stability_vm_command_source_ready_json" \
+  --arg profile_compare_multi_vm_stability_vm_command_file_fallback "$multi_vm_stability_vm_command_file" \
+  --argjson profile_compare_multi_vm_stability_vm_command_file_fallback_usable "$multi_vm_stability_vm_command_file_usable_json" \
+  --argjson profile_compare_multi_vm_stability_next_command_actionable "$multi_vm_stability_next_command_actionable_json" \
   --arg profile_compare_multi_vm_stability_promotion_input_summary_json "$multi_vm_stability_promotion_input_summary_json" \
   --argjson profile_compare_multi_vm_stability_promotion_available "$multi_vm_stability_promotion_available_json" \
   --arg profile_compare_multi_vm_stability_promotion_source_summary_json "$multi_vm_stability_promotion_source_summary_json" \
@@ -12226,11 +12300,25 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
         notes: (if $profile_compare_multi_vm_stability_notes == "" then null else $profile_compare_multi_vm_stability_notes end),
         needs_attention: $profile_compare_multi_vm_stability_needs_attention,
         next_command: (if $profile_compare_multi_vm_stability_next_command == "" then null else $profile_compare_multi_vm_stability_next_command end),
+        next_command_actionable: $profile_compare_multi_vm_stability_next_command_actionable,
         next_command_reason: (
           if $profile_compare_multi_vm_stability_next_command_reason == "" then null
           else $profile_compare_multi_vm_stability_next_command_reason
           end
-        )
+        ),
+        vm_command_source: (
+          if $profile_compare_multi_vm_stability_vm_command_source == "" then null
+          else $profile_compare_multi_vm_stability_vm_command_source
+          end
+        ),
+        vm_command_source_ready: $profile_compare_multi_vm_stability_vm_command_source_ready,
+        vm_command_file_fallback: (
+          if $profile_compare_multi_vm_stability_vm_command_file_fallback == "" then null
+          else $profile_compare_multi_vm_stability_vm_command_file_fallback
+          end
+        ),
+        vm_command_file_fallback_usable: $profile_compare_multi_vm_stability_vm_command_file_fallback_usable,
+        vm_command_file_fallback_used: ($profile_compare_multi_vm_stability_vm_command_source == "discovered_vm_command_file")
       },
       multi_vm_stability_promotion: {
         available: $profile_compare_multi_vm_stability_promotion_available,
@@ -12979,7 +13067,7 @@ echo "[roadmap-progress-report] profile_default_gate_stability_selection_policy_
 echo "[roadmap-progress-report] profile_default_gate_stability_check_summary_json=${profile_default_gate_stability_check_summary_json:-} stability_check_summary_available=$profile_default_gate_stability_check_summary_available_json stability_check_decision=${profile_default_gate_stability_check_decision_json:-} stability_check_status=${profile_default_gate_stability_check_status_json:-} stability_check_rc=$profile_default_gate_stability_check_rc_json stability_check_modal_recommended_profile=${profile_default_gate_stability_check_modal_recommended_profile_json:-} stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_cycle_summary_json=${profile_default_gate_stability_cycle_summary_json:-} cycle_summary_available=$profile_default_gate_stability_cycle_summary_available_json cycle_decision=${profile_default_gate_stability_cycle_decision_json:-} cycle_status=${profile_default_gate_stability_cycle_status_json:-} cycle_rc=$profile_default_gate_stability_cycle_rc_json cycle_failure_stage=${profile_default_gate_stability_cycle_failure_stage_json:-} cycle_failure_reason=${profile_default_gate_stability_cycle_failure_reason_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_available=$multi_vm_stability_available_json input_summary_json=${multi_vm_stability_input_summary_json:-} source_summary_json=${multi_vm_stability_source_summary_json:-} source_kind=${multi_vm_stability_source_summary_kind:-}"
-echo "[roadmap-progress-report] profile_compare_multi_vm_stability_status=${multi_vm_stability_status_json:-} rc=$multi_vm_stability_rc_json decision=${multi_vm_stability_decision_json:-} go=$multi_vm_stability_go_json no_go=$multi_vm_stability_no_go_json recommended_profile=${multi_vm_stability_recommended_profile_json:-} support_rate_pct=$multi_vm_stability_support_rate_pct_json runs_requested=$multi_vm_stability_runs_requested_json runs_completed=$multi_vm_stability_runs_completed_json runs_fail=$multi_vm_stability_runs_fail_json needs_attention=$multi_vm_stability_needs_attention_json next_command=${multi_vm_stability_next_command:-} next_command_reason=${multi_vm_stability_next_command_reason:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_status=${multi_vm_stability_status_json:-} rc=$multi_vm_stability_rc_json decision=${multi_vm_stability_decision_json:-} go=$multi_vm_stability_go_json no_go=$multi_vm_stability_no_go_json recommended_profile=${multi_vm_stability_recommended_profile_json:-} support_rate_pct=$multi_vm_stability_support_rate_pct_json runs_requested=$multi_vm_stability_runs_requested_json runs_completed=$multi_vm_stability_runs_completed_json runs_fail=$multi_vm_stability_runs_fail_json needs_attention=$multi_vm_stability_needs_attention_json next_command=${multi_vm_stability_next_command:-} next_command_reason=${multi_vm_stability_next_command_reason:-} next_command_actionable=$multi_vm_stability_next_command_actionable_json vm_command_source=${multi_vm_stability_vm_command_source_json:-} vm_command_source_ready=$multi_vm_stability_vm_command_source_ready_json vm_command_file_fallback=${multi_vm_stability_vm_command_file:-} vm_command_file_fallback_usable=$multi_vm_stability_vm_command_file_usable_json"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_decision_counts=$multi_vm_stability_decision_counts_json recommended_profile_counts=$multi_vm_stability_recommended_profile_counts_json reasons=$multi_vm_stability_reasons_json notes=${multi_vm_stability_notes_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_available=$multi_vm_stability_promotion_available_json input_summary_json=${multi_vm_stability_promotion_input_summary_json:-} source_summary_json=${multi_vm_stability_promotion_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_status=${multi_vm_stability_promotion_status_json:-} rc=$multi_vm_stability_promotion_rc_json decision=${multi_vm_stability_promotion_decision_json:-} go=$multi_vm_stability_promotion_go_json no_go=$multi_vm_stability_promotion_no_go_json needs_attention=$multi_vm_stability_promotion_needs_attention_json next_command=${multi_vm_stability_promotion_next_command:-} next_command_reason=${multi_vm_stability_promotion_next_command_reason:-}"

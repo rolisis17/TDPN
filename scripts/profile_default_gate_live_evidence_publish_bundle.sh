@@ -630,10 +630,16 @@ if [[ -n "$campaign_subject_cli" && -n "$subject_alias_cli" && "$campaign_subjec
   exit 2
 fi
 campaign_subject_effective="$campaign_subject_cli"
-subject_source="explicit:--campaign-subject"
+subject_source=""
+subject_configured="0"
+if [[ -n "$campaign_subject_effective" ]]; then
+  subject_source="explicit:--campaign-subject"
+  subject_configured="1"
+fi
 if [[ -z "$campaign_subject_effective" && -n "$subject_alias_cli" ]]; then
   campaign_subject_effective="$subject_alias_cli"
   subject_source="explicit:--subject"
+  subject_configured="1"
 fi
 
 if [[ -z "$live_summary_json" ]]; then
@@ -838,6 +844,7 @@ summary_payload="$(jq -n \
   --arg host_a "$host_a" \
   --arg host_b "$host_b" \
   --arg subject_source "$subject_source" \
+  --arg subject_configured "$subject_configured" \
   --arg reports_dir "$reports_dir" \
   --arg fail_on_no_go "$fail_on_no_go" \
   --arg next_command "$next_command" \
@@ -874,7 +881,7 @@ summary_payload="$(jq -n \
       host_a: $host_a,
       host_b: $host_b,
       subject_source: (if $subject_source == "" then null else $subject_source end),
-      subject_configured: (($subject_source // "") != ""),
+      subject_configured: ($subject_configured == "1"),
       reports_dir: $reports_dir,
       fail_on_no_go: ($fail_on_no_go == "1")
     },

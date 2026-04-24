@@ -77,6 +77,32 @@ func (s *failSafePenaltyStore) ListPenalties() []types.PenaltyDecision {
 	return out
 }
 
+type readErrorPenaltyStore struct {
+	*failSafePenaltyStore
+	evidenceListErr error
+	penaltyListErr  error
+}
+
+func newReadErrorPenaltyStore() *readErrorPenaltyStore {
+	return &readErrorPenaltyStore{
+		failSafePenaltyStore: newFailSafePenaltyStore(),
+	}
+}
+
+func (s *readErrorPenaltyStore) ListEvidenceWithError() ([]types.SlashEvidence, error) {
+	if s.evidenceListErr != nil {
+		return nil, s.evidenceListErr
+	}
+	return s.failSafePenaltyStore.ListEvidence(), nil
+}
+
+func (s *readErrorPenaltyStore) ListPenaltiesWithError() ([]types.PenaltyDecision, error) {
+	if s.penaltyListErr != nil {
+		return nil, s.penaltyListErr
+	}
+	return s.failSafePenaltyStore.ListPenalties(), nil
+}
+
 func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	t.Parallel()
 
@@ -426,6 +452,31 @@ func TestSubmitEvidenceInvalid(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid evidence to fail")
+	}
+}
+
+func TestSubmitEvidenceFailsClosedWhenEvidenceListReadFails(t *testing.T) {
+	t.Parallel()
+
+	store := newReadErrorPenaltyStore()
+	store.evidenceListErr = errors.New("evidence index decode failure")
+	k := NewKeeperWithStore(store)
+
+	evidenceID := "evidence-read-fail-closed"
+	_, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    evidenceID,
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-read-fail-closed"),
+		ViolationType: "double-sign",
+	})
+	if err == nil {
+		t.Fatal("expected submit evidence to fail closed when listing evidence fails")
+	}
+	if !strings.Contains(err.Error(), "load evidence") {
+		t.Fatalf("expected load evidence failure, got %v", err)
+	}
+	if _, ok := k.GetEvidence(evidenceID); ok {
+		t.Fatal("expected no evidence write on fail-closed listing error")
 	}
 }
 
@@ -802,5 +853,44 @@ func TestApplyPenaltyMissingEvidence(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected missing evidence error, got %v", err)
+	}
+}
+
+func TestApplyPenaltyFailsClosedWhenPenaltyListReadFails(t *testing.T) {
+	t.Parallel()
+
+	store := newReadErrorPenaltyStore()
+	evidenceID := "evidence-penalty-read-fail-closed"
+	store.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    evidenceID,
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-read-fail-closed"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationPending,
+	})
+	store.penaltyListErr = errors.New("penalty index decode failure")
+	k := NewKeeperWithStore(store)
+
+	_, err := k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:       "penalty-read-fail-closed",
+		EvidenceID:      evidenceID,
+		SlashBasisPoint: 10,
+	})
+	if err == nil {
+		t.Fatal("expected apply penalty to fail closed when listing penalties fails")
+	}
+	if !strings.Contains(err.Error(), "load penalties") {
+		t.Fatalf("expected load penalties failure, got %v", err)
+	}
+	if _, ok := k.GetPenalty("penalty-read-fail-closed"); ok {
+		t.Fatal("expected no penalty write on fail-closed listing error")
+	}
+
+	evidence, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to remain available", evidenceID)
+	}
+	if evidence.Status != chaintypes.ReconciliationPending {
+		t.Fatalf("expected evidence status to remain %q, got %q", chaintypes.ReconciliationPending, evidence.Status)
 	}
 }

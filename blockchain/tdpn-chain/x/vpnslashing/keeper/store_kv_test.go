@@ -89,8 +89,11 @@ func TestKVStoreRejectsKeyIDMismatchAndOrphanPenalties(t *testing.T) {
 	if _, ok := store.GetEvidence("evidence-key"); ok {
 		t.Fatal("expected evidence key/id mismatch to be rejected")
 	}
+	if _, err := store.ListEvidenceWithError(); err == nil {
+		t.Fatal("expected strict evidence listing to fail on key/id mismatch")
+	}
 	if got := len(store.ListEvidence()); got != 0 {
-		t.Fatalf("expected mismatched evidence to be excluded from list, got %d", got)
+		t.Fatalf("expected fail-closed evidence list to return 0 records, got %d", got)
 	}
 
 	goodEvidence := types.SlashEvidence{
@@ -143,12 +146,12 @@ func TestKVStoreRejectsKeyIDMismatchAndOrphanPenalties(t *testing.T) {
 		t.Fatal("expected orphan penalty to be rejected")
 	}
 
-	penaltyList := store.ListPenalties()
-	if len(penaltyList) != 1 {
-		t.Fatalf("expected only one valid penalty, got %d", len(penaltyList))
+	if _, err := store.ListPenaltiesWithError(); err == nil {
+		t.Fatal("expected strict penalty listing to fail on malformed/orphan penalties")
 	}
-	if penaltyList[0].PenaltyID != goodPenalty.PenaltyID {
-		t.Fatalf("expected listed penalty id %q, got %q", goodPenalty.PenaltyID, penaltyList[0].PenaltyID)
+	penaltyList := store.ListPenalties()
+	if len(penaltyList) != 0 {
+		t.Fatalf("expected fail-closed penalty list to return 0 records, got %d", len(penaltyList))
 	}
 }
 
@@ -186,20 +189,20 @@ func TestKVStoreInvalidPayloadsAreSafeOnGetAndList(t *testing.T) {
 	store.UpsertEvidence(goodEvidence)
 	store.UpsertPenalty(goodPenalty)
 
-	evidenceList := store.ListEvidence()
-	if len(evidenceList) != 1 {
-		t.Fatalf("expected only valid evidence entry to be listed, got %d", len(evidenceList))
+	if _, err := store.ListEvidenceWithError(); err == nil {
+		t.Fatal("expected strict evidence listing to fail on invalid payload")
 	}
-	if evidenceList[0].EvidenceID != goodEvidence.EvidenceID {
-		t.Fatalf("expected listed evidence id %q, got %q", goodEvidence.EvidenceID, evidenceList[0].EvidenceID)
+	evidenceList := store.ListEvidence()
+	if len(evidenceList) != 0 {
+		t.Fatalf("expected fail-closed evidence list to return 0 records, got %d", len(evidenceList))
 	}
 
-	penaltyList := store.ListPenalties()
-	if len(penaltyList) != 1 {
-		t.Fatalf("expected only valid penalty entry to be listed, got %d", len(penaltyList))
+	if _, err := store.ListPenaltiesWithError(); err == nil {
+		t.Fatal("expected strict penalty listing to fail on invalid payload")
 	}
-	if penaltyList[0].PenaltyID != goodPenalty.PenaltyID {
-		t.Fatalf("expected listed penalty id %q, got %q", goodPenalty.PenaltyID, penaltyList[0].PenaltyID)
+	penaltyList := store.ListPenalties()
+	if len(penaltyList) != 0 {
+		t.Fatalf("expected fail-closed penalty list to return 0 records, got %d", len(penaltyList))
 	}
 }
 

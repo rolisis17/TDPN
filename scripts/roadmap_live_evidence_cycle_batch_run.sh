@@ -466,6 +466,244 @@ resolve_runtime_input_state_json() {
     }'
 }
 
+m5_validate_vm_command_source_file_or_reason_01() {
+  local path=""
+  local line=""
+  local line_number=0
+  local vm_id=""
+  local vm_command=""
+  local vm_id_key=""
+  local vm_command_existing=""
+  local runnable_specs=0
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s\n' "empty_path"
+    return 1
+  fi
+  if is_runtime_placeholder_token_01 "$path"; then
+    printf '%s\n' "placeholder_path"
+    return 1
+  fi
+  if [[ ! -f "$path" ]]; then
+    printf '%s\n' "not_found"
+    return 1
+  fi
+  if [[ ! -r "$path" ]]; then
+    printf '%s\n' "not_readable"
+    return 1
+  fi
+
+  declare -A vm_command_by_id=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_number=$((line_number + 1))
+    line="$(trim "$line")"
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    if [[ "$line" != *"::"* ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_missing_delimiter"
+      return 1
+    fi
+    vm_id="$(trim "${line%%::*}")"
+    vm_command="$(trim "${line#*::}")"
+    if [[ -z "$vm_id" || -z "$vm_command" ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_empty_vm_or_command"
+      return 1
+    fi
+    if [[ "$vm_id" =~ [[:space:]] ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_vm_id_contains_whitespace"
+      return 1
+    fi
+    vm_id_key="$vm_id"
+    if [[ -n "${vm_command_by_id["$vm_id_key"]+present}" ]]; then
+      vm_command_existing="${vm_command_by_id["$vm_id_key"]}"
+      if [[ "$vm_command_existing" != "$vm_command" ]]; then
+        printf '%s\n' "invalid_vm_command_spec_line_${line_number}_duplicate_vm_id_conflict"
+        return 1
+      fi
+      continue
+    fi
+    vm_command_by_id["$vm_id_key"]="$vm_command"
+    runnable_specs=$((runnable_specs + 1))
+  done <"$path"
+  if (( runnable_specs < 1 )); then
+    printf '%s\n' "no_runnable_specs"
+    return 1
+  fi
+  printf '%s\n' "ready"
+  return 0
+}
+
+collect_m5_vm_command_candidate_dirs_01() {
+  local reports_dir_abs=""
+  local reports_dir_basename=""
+  local parent_dir=""
+  local grandparent_dir=""
+  declare -A seen_dirs=()
+  declare -a candidate_dirs=()
+
+  reports_dir_abs="$(abs_path "$reports_dir")"
+  if [[ -n "$reports_dir_abs" && -z "${seen_dirs["$reports_dir_abs"]+present}" ]]; then
+    candidate_dirs+=("$reports_dir_abs")
+    seen_dirs["$reports_dir_abs"]=1
+  fi
+
+  reports_dir_basename="$(basename "$reports_dir_abs")"
+  if [[ "$reports_dir_basename" == cycle_* || "$reports_dir_basename" == run_* ||
+        "$reports_dir_abs" == *"/profile_compare_multi_vm_stability_run_"*"/"* ||
+        "$reports_dir_abs" == *"/profile_compare_multi_vm_stability_promotion_cycle_"*"/"* ]]; then
+    parent_dir="$(abs_path "$(dirname "$reports_dir_abs")")"
+    if [[ -n "$parent_dir" && "$parent_dir" != "/" && -z "${seen_dirs["$parent_dir"]+present}" ]]; then
+      candidate_dirs+=("$parent_dir")
+      seen_dirs["$parent_dir"]=1
+    fi
+    if [[ -n "$parent_dir" && "$parent_dir" != "/" ]]; then
+      grandparent_dir="$(abs_path "$(dirname "$parent_dir")")"
+      if [[ -n "$grandparent_dir" && "$grandparent_dir" != "/" && -z "${seen_dirs["$grandparent_dir"]+present}" ]]; then
+        candidate_dirs+=("$grandparent_dir")
+        seen_dirs["$grandparent_dir"]=1
+      fi
+    fi
+  fi
+
+  printf '%s\n' "${candidate_dirs[@]}"
+}
+
+resolve_m5_vm_command_source_runtime_input_state_json() {
+  local input_id="vm_command_source"
+  local required_flag="true"
+  local description="Concrete VM command source for multi-VM stability cycle (--vm-command/--vm-command-file fallback)."
+  local operator_hint="Provide a readable VM command source via PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE (or related envs) or recognized reports-dir artifacts, then rerun."
+  local -a env_candidates=(
+    "PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE"
+    "PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE"
+    "PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE"
+  )
+  local -a legacy_artifact_names=(
+    "profile_compare_multi_vm_vm_commands.txt"
+    "vm_commands.txt"
+  )
+  local -a candidate_dirs=()
+  local -a placeholder_envs=()
+  local -a artifact_candidates=()
+  local env_name=""
+  local env_value=""
+  local candidate_dir=""
+  local candidate_path=""
+  local artifact_name=""
+  local validation_reason=""
+  local resolution_source=""
+  local resolution_path=""
+  local state="missing"
+  local line=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    if [[ -n "$line" ]]; then
+      candidate_dirs+=("$line")
+    fi
+  done < <(collect_m5_vm_command_candidate_dirs_01)
+
+  for candidate_dir in "${candidate_dirs[@]}"; do
+    candidate_path="$(abs_path "$candidate_dir/profile_compare_multi_vm_stability_vm_commands.txt")"
+    append_unique_id "$candidate_path" artifact_candidates
+    if validation_reason="$(m5_validate_vm_command_source_file_or_reason_01 "$candidate_path")"; then
+      resolution_source="reports-dir-canonical"
+      if [[ "$candidate_dir" != "$(abs_path "$reports_dir")" ]]; then
+        resolution_source="reports-dir-canonical-candidate"
+      fi
+      resolution_path="$candidate_path"
+      break
+    fi
+  done
+
+  if [[ -z "$resolution_path" ]]; then
+    for env_name in "${env_candidates[@]}"; do
+      env_value="$(trim "${!env_name:-}")"
+      if [[ -z "$env_value" ]]; then
+        continue
+      fi
+      if is_runtime_placeholder_token_01 "$env_value"; then
+        placeholder_envs+=("$env_name")
+        continue
+      fi
+      candidate_path="$(abs_path "$env_value")"
+      append_unique_id "$candidate_path" artifact_candidates
+      if validation_reason="$(m5_validate_vm_command_source_file_or_reason_01 "$candidate_path")"; then
+        resolution_source="env:${env_name}"
+        resolution_path="$candidate_path"
+        break
+      fi
+      if [[ "$validation_reason" == "placeholder_path" ]]; then
+        placeholder_envs+=("$env_name")
+      fi
+    done
+  fi
+
+  if [[ -z "$resolution_path" ]]; then
+    for candidate_dir in "${candidate_dirs[@]}"; do
+      for artifact_name in "${legacy_artifact_names[@]}"; do
+        candidate_path="$(abs_path "$candidate_dir/$artifact_name")"
+        append_unique_id "$candidate_path" artifact_candidates
+        if validation_reason="$(m5_validate_vm_command_source_file_or_reason_01 "$candidate_path")"; then
+          resolution_source="reports-dir-legacy"
+          if [[ "$candidate_dir" != "$(abs_path "$reports_dir")" ]]; then
+            resolution_source="reports-dir-legacy-candidate"
+          fi
+          resolution_path="$candidate_path"
+          break
+        fi
+      done
+      if [[ -n "$resolution_path" ]]; then
+        break
+      fi
+    done
+  fi
+
+  if [[ -n "$resolution_path" ]]; then
+    state="resolved"
+  elif (( ${#placeholder_envs[@]} > 0 )); then
+    state="placeholder_unresolved"
+  fi
+
+  local env_candidates_json
+  local placeholder_envs_json
+  local artifact_candidates_json
+  local value_present_json="false"
+  env_candidates_json="$(json_array_from_ref env_candidates)"
+  placeholder_envs_json="$(json_array_from_ref placeholder_envs)"
+  artifact_candidates_json="$(json_array_from_ref artifact_candidates)"
+  if [[ "$state" != "missing" ]]; then
+    value_present_json="true"
+  fi
+
+  jq -cn \
+    --arg id "$input_id" \
+    --argjson required "$required_flag" \
+    --arg description "$description" \
+    --arg operator_hint "$operator_hint" \
+    --arg state "$state" \
+    --arg resolution_source "$resolution_source" \
+    --arg resolution_path "$resolution_path" \
+    --argjson env_candidates "$env_candidates_json" \
+    --argjson placeholder_envs "$placeholder_envs_json" \
+    --argjson artifact_candidates "$artifact_candidates_json" \
+    --argjson value_present "$value_present_json" \
+    '{
+      id: $id,
+      required: $required,
+      description: $description,
+      state: $state,
+      resolution_source: (if $resolution_source == "" then null else $resolution_source end),
+      resolution_path: (if $resolution_path == "" then null else $resolution_path end),
+      value_present: $value_present,
+      env_candidates: $env_candidates,
+      placeholder_envs: $placeholder_envs,
+      artifact_candidates: $artifact_candidates,
+      operator_hint: $operator_hint
+    }'
+}
+
 build_track_runtime_requirements_json() {
   local track_id="$1"
   local track_group="$track_id"
@@ -509,14 +747,8 @@ build_track_runtime_requirements_json() {
       ;;
     profile_compare_multi_vm_stability_promotion_cycle)
       track_group="m5_multi_vm_stability_promotion"
-      track_note="VM command source may be discovered dynamically via cycle script fallback; env checks are advisory."
-      row_json="$(resolve_runtime_input_state_json \
-        "vm_command_file_fallback" "false" \
-        "Fallback VM command file envs used when cycle args do not provide commands." \
-        "Set PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE (or related VM command file envs) when dynamic fallback is unavailable." \
-        "PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE" \
-        "PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE" \
-        "PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE")"
+      track_note="M5 requires a concrete VM command source (env/file fallback or recognized reports-dir artifacts); unresolved inputs are skipped in partial-progress mode."
+      row_json="$(resolve_m5_vm_command_source_runtime_input_state_json)"
       requirements_json="$(jq -c --argjson row "$row_json" '. + [$row]' <<<"$requirements_json")"
       ;;
     *)
@@ -669,6 +901,57 @@ classify_track_failure_json() {
     }'
 }
 
+build_runtime_preflight_skip_result_json() {
+  local iter_idx="$1"
+  local track_id="$2"
+  local script_path="$3"
+  local log_path="$4"
+  local runtime_requirements_json="$5"
+  local started_at ended_at diagnostics_json notes next_command_reason
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  ended_at="$started_at"
+  notes="required runtime inputs unresolved during preflight; track execution skipped in partial-progress mode"
+  next_command_reason="resolve required runtime inputs and rerun this track"
+
+  diagnostics_json="$(classify_track_failure_json "$track_id" "2" "/dev/null")"
+  diagnostics_json="$(jq -c \
+    --arg notes "$notes" \
+    --arg next_command_reason "$next_command_reason" \
+    --argjson runtime_requirements "$runtime_requirements_json" \
+    '
+      .failure_rc = null
+      | .runtime_requirements_snapshot = $runtime_requirements
+      | .partial_progress_skip = true
+      | .skip_reason = $notes
+      | .next_command_reason = $next_command_reason
+      | .deterministic_failure_key = (.track_group + ":" + .failure_code + ":preflight_skip")
+    ' <<<"$diagnostics_json")"
+
+  jq -cn \
+    --argjson iteration "$iter_idx" \
+    --arg track_id "$track_id" \
+    --arg script_path "$script_path" \
+    --arg log "$log_path" \
+    --arg started_at_utc "$started_at" \
+    --arg ended_at_utc "$ended_at" \
+    --argjson failure_diagnostics "$diagnostics_json" \
+    --arg notes "$notes" \
+    '{
+      iteration: $iteration,
+      track_id: $track_id,
+      script_path: $script_path,
+      log: $log,
+      started_at_utc: $started_at_utc,
+      ended_at_utc: $ended_at_utc,
+      status: "skipped",
+      rc: null,
+      duration_sec: 0,
+      failure_kind: "skipped_unresolved_runtime_inputs",
+      notes: $notes,
+      failure_diagnostics: $failure_diagnostics
+    }'
+}
+
 for id in "${include_track_ids[@]}"; do
   if ! track_id_exists "$id"; then
     echo "unknown --include-track-id: $id"
@@ -774,9 +1057,13 @@ if [[ -z "$selection_error" ]]; then
 fi
 
 selected_track_runtime_requirements_json='[]'
+declare -A selected_track_runtime_requirements_by_id=()
+declare -A selected_track_unresolved_required_count_by_id=()
 if [[ -z "$selection_error" ]]; then
   for id in "${selected_track_ids[@]}"; do
     track_runtime_json="$(build_track_runtime_requirements_json "$id")"
+    selected_track_runtime_requirements_by_id["$id"]="$track_runtime_json"
+    selected_track_unresolved_required_count_by_id["$id"]="$(jq -r '.unresolved_required_count // 0' <<<"$track_runtime_json")"
     selected_track_runtime_requirements_json="$(jq -c --argjson row "$track_runtime_json" '. + [$row]' <<<"$selected_track_runtime_requirements_json")"
   done
 fi
@@ -784,7 +1071,7 @@ unresolved_required_track_ids_json="$(jq -c '[.[] | select(.unresolved_required_
 unresolved_required_track_count="$(jq -r 'length' <<<"$unresolved_required_track_ids_json")"
 if [[ -z "$selection_error" ]] && (( unresolved_required_track_count > 0 )); then
   unresolved_required_track_ids_csv="$(jq -r 'join(",")' <<<"$unresolved_required_track_ids_json")"
-  echo "[roadmap-live-evidence-cycle-batch-run] stage=runtime-input-preflight status=warn unresolved_required_track_count=$unresolved_required_track_count ids=${unresolved_required_track_ids_csv:-none}"
+  echo "[roadmap-live-evidence-cycle-batch-run] stage=runtime-input-preflight status=warn unresolved_required_track_count=$unresolved_required_track_count ids=${unresolved_required_track_ids_csv:-none} mode=partial_progress_skip_unresolved_tracks"
 fi
 
 declare -A pass_count_by_track=()
@@ -802,6 +1089,7 @@ iteration_results_json='[]'
 executed_iterations=0
 executed_tracks=0
 skipped_tracks=0
+skipped_unresolved_runtime_input_tracks=0
 final_rc=0
 first_failure_iteration=0
 first_failure_track_id=""
@@ -878,6 +1166,16 @@ if [[ -z "$selection_error" ]]; then
         script_path="${selected_track_scripts[$idx]}"
         log_path="$iter_dir/${track_id}.log"
         result_path="$iter_tmp_dir/${idx}_${track_id}.json"
+        track_unresolved_required_count="${selected_track_unresolved_required_count_by_id[$track_id]:-0}"
+        track_runtime_requirements_json="${selected_track_runtime_requirements_by_id[$track_id]:-}"
+        if [[ -z "$track_runtime_requirements_json" ]]; then
+          track_runtime_requirements_json="$(jq -cn --arg track_id "$track_id" '{track_id: $track_id, required_runtime_inputs: [], unresolved_required_inputs: [], unresolved_required_count: 0}')"
+        fi
+        if [[ "$track_unresolved_required_count" =~ ^[0-9]+$ ]] && (( track_unresolved_required_count > 0 )); then
+          echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=skipped iteration=$iter track_id=$track_id reason=unresolved_runtime_inputs mode=parallel"
+          build_runtime_preflight_skip_result_json "$iter" "$track_id" "$script_path" "$log_path" "$track_runtime_requirements_json" >"$result_path"
+          continue
+        fi
         echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=running iteration=$iter track_id=$track_id mode=parallel"
         execute_track_to_result_file "$iter" "$track_id" "$script_path" "$log_path" "$result_path" &
         pids+=("$!")
@@ -931,6 +1229,18 @@ if [[ -z "$selection_error" ]]; then
         script_path="${selected_track_scripts[$idx]}"
         log_path="$iter_dir/${track_id}.log"
         result_path="$iter_tmp_dir/${idx}_${track_id}.json"
+        track_unresolved_required_count="${selected_track_unresolved_required_count_by_id[$track_id]:-0}"
+        track_runtime_requirements_json="${selected_track_runtime_requirements_by_id[$track_id]:-}"
+        if [[ -z "$track_runtime_requirements_json" ]]; then
+          track_runtime_requirements_json="$(jq -cn --arg track_id "$track_id" '{track_id: $track_id, required_runtime_inputs: [], unresolved_required_inputs: [], unresolved_required_count: 0}')"
+        fi
+        if [[ "$track_unresolved_required_count" =~ ^[0-9]+$ ]] && (( track_unresolved_required_count > 0 )); then
+          echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=skipped iteration=$iter track_id=$track_id reason=unresolved_runtime_inputs mode=sequential"
+          result_json="$(build_runtime_preflight_skip_result_json "$iter" "$track_id" "$script_path" "$log_path" "$track_runtime_requirements_json")"
+          printf '%s\n' "$result_json" >"$result_path"
+          iter_track_results_json="$(jq -c --argjson row "$result_json" '. + [$row]' <<<"$iter_track_results_json")"
+          continue
+        fi
         echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=running iteration=$iter track_id=$track_id mode=sequential"
         execute_track_to_result_file "$iter" "$track_id" "$script_path" "$log_path" "$result_path"
         if [[ ! -s "$result_path" ]] || ! jq -e . "$result_path" >/dev/null 2>&1; then
@@ -961,6 +1271,10 @@ if [[ -z "$selection_error" ]]; then
         fi
         result_json="$(cat "$result_path")"
         iter_track_results_json="$(jq -c --argjson row "$result_json" '. + [$row]' <<<"$iter_track_results_json")"
+        row_status="$(jq -r '.status // ""' <<<"$result_json")"
+        if [[ "$row_status" == "skipped" ]]; then
+          continue
+        fi
         row_rc="$(jq -r '.rc' <<<"$result_json")"
         if (( row_rc != 0 )) && [[ "$continue_on_fail" == "0" ]]; then
           if (( idx + 1 < ${#selected_track_ids[@]} )); then
@@ -1015,7 +1329,11 @@ if [[ -z "$selection_error" ]]; then
         if [[ "$row_status" == "skipped" ]]; then
           skipped_count_by_track["$row_id"]=$((skipped_count_by_track["$row_id"] + 1))
           skipped_tracks=$((skipped_tracks + 1))
-          echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=skipped iteration=$iter track_id=$row_id reason=fail_closed_previous_failure"
+          row_failure_kind="$(jq -r '.failure_kind // "skipped"' <<<"$row_json")"
+          if [[ "$row_failure_kind" == "skipped_unresolved_runtime_inputs" ]]; then
+            skipped_unresolved_runtime_input_tracks=$((skipped_unresolved_runtime_input_tracks + 1))
+          fi
+          echo "[roadmap-live-evidence-cycle-batch-run] stage=track status=skipped iteration=$iter track_id=$row_id reason=$row_failure_kind"
           continue
         fi
         if ! [[ "$row_rc_raw" =~ ^-?[0-9]+$ ]]; then
@@ -1083,6 +1401,9 @@ fi
 if [[ -n "$selection_error" ]]; then
   final_status="fail"
   final_rc="$selection_error_rc"
+elif (( final_rc == 0 )) && (( executed_tracks == 0 )) && (( ${#selected_track_ids[@]} > 0 )); then
+  final_status="fail"
+  final_rc=1
 elif (( final_rc == 0 )); then
   final_status="pass"
 else
@@ -1094,6 +1415,9 @@ failure_reason=""
 if [[ -n "$selection_error" ]]; then
   failure_substep="selection:$selection_error"
   failure_reason="selection failed before execution"
+elif [[ "$final_status" == "fail" ]] && (( executed_tracks == 0 )) && (( ${#selected_track_ids[@]} > 0 )); then
+  failure_substep="execution:no_tracks_executed"
+  failure_reason="no selected tracks executed; required runtime inputs unresolved across all selected tracks"
 elif [[ "$final_status" == "fail" ]]; then
   if (( first_failure_iteration > 0 )) && [[ -n "$first_failure_track_id" ]]; then
     failure_substep="execution:iteration_${first_failure_iteration}:track_${first_failure_track_id}"
@@ -1163,6 +1487,7 @@ jq -n \
   --argjson iterations_results "$iteration_results_json" \
   --argjson executed_tracks "$executed_tracks" \
   --argjson skipped_tracks "$skipped_tracks" \
+  --argjson skipped_unresolved_runtime_input_tracks "$skipped_unresolved_runtime_input_tracks" \
   --argjson halt_after_iteration "$halt_after_iteration" \
   --argjson first_failure_iteration "$first_failure_iteration" \
   --arg first_failure_track_id "$first_failure_track_id" \
@@ -1206,7 +1531,8 @@ jq -n \
       },
       execution: {
         status: (if $selection_error == "" then $status else "skip_due_to_selection_error" end),
-        halted_early: ($halt_after_iteration == 1)
+        halted_early: ($halt_after_iteration == 1),
+        partial_progress_runtime_input_skips: ($skipped_unresolved_runtime_input_tracks > 0)
       }
     },
     summary: {
@@ -1215,6 +1541,7 @@ jq -n \
       selected_track_count: ($selected_track_ids | length),
       executed_tracks: $executed_tracks,
       skipped_tracks: $skipped_tracks,
+      skipped_unresolved_runtime_input_tracks: $skipped_unresolved_runtime_input_tracks,
       halt_after_iteration: ($halt_after_iteration == 1),
       first_failure_iteration: (if $first_failure_iteration == 0 then null else $first_failure_iteration end),
       first_failure_track_id: (if $first_failure_track_id == "" then null else $first_failure_track_id end)

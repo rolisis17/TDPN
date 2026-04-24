@@ -2000,17 +2000,38 @@ func isDisallowedOutboundDialIP(ip net.IP) bool {
 }
 
 func normalizeDirectoryOperator(operator string, pubKeys []string, directoryURL string) string {
+	if keySource := keyDerivedDirectorySourceOperator(pubKeys); keySource != "" {
+		return keySource
+	}
 	operator = strings.TrimSpace(operator)
 	if operator != "" {
 		return operator
 	}
+	return "url:" + strings.TrimSpace(directoryURL)
+}
+
+func keyDerivedDirectorySourceOperator(pubKeys []string) string {
+	if len(pubKeys) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(pubKeys))
+	seen := make(map[string]struct{}, len(pubKeys))
 	for _, key := range pubKeys {
 		key = strings.TrimSpace(key)
-		if key != "" {
-			return "key:" + key
+		if key == "" {
+			continue
 		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
 	}
-	return "url:" + strings.TrimSpace(directoryURL)
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	return "key:" + keys[0]
 }
 
 func markRouteVoter(voters map[string]map[string]struct{}, routeKey string, operator string) bool {

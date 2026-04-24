@@ -65,6 +65,10 @@ if ! bash ./scripts/roadmap_live_evidence_archive_run.sh --help | grep -F -- "--
   echo "help output missing --scope auto|all|profile-default|runtime-actuation|multi-vm"
   exit 1
 fi
+if ! bash ./scripts/roadmap_live_evidence_archive_run.sh --help | grep -F -- "--missing-source-policy warn|fail" >/dev/null; then
+  echo "help output missing --missing-source-policy warn|fail"
+  exit 1
+fi
 if ! bash ./scripts/roadmap_live_evidence_archive_run.sh --help | grep -F -- "--summary-json PATH" >/dev/null; then
   echo "help output missing --summary-json PATH"
   exit 1
@@ -178,7 +182,7 @@ if ! jq -e --arg summary1 "$SUMMARY1" --arg reports1 "$REPORTS1" --arg archive_r
   exit 1
 fi
 
-echo "[roadmap-live-evidence-archive-run] case: partial missing with hints"
+echo "[roadmap-live-evidence-archive-run] case: partial missing sources default to warn while preserving copied artifacts"
 CASE2_DIR="$TMP_DIR/case_partial_missing"
 REPORTS2="$CASE2_DIR/reports"
 ARCHIVE_ROOT2="$CASE2_DIR/archive_root"
@@ -188,15 +192,16 @@ mkdir -p "$REPORTS2" "$ARCHIVE_ROOT2"
 
 P2_SIGNOFF="$CASE2_DIR/artifacts/profile_compare_campaign_signoff_summary.json"
 M2_PACK="$CASE2_DIR/artifacts/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json"
-R2_PROMO_MISSING="$CASE2_DIR/artifacts/runtime_actuation_promotion_summary.json"
+R2_PROMO_PRESENT="$CASE2_DIR/artifacts/runtime_actuation_promotion_summary.json"
 R2_PACK_MISSING="$CASE2_DIR/artifacts/runtime_actuation_promotion_evidence_pack_summary.json"
 
 touch_json "$P2_SIGNOFF"
 touch_json "$M2_PACK"
+touch_json "$R2_PROMO_PRESENT"
 
 jq -n \
   --arg p_signoff "$P2_SIGNOFF" \
-  --arg r_promo "$R2_PROMO_MISSING" \
+  --arg r_promo "$R2_PROMO_PRESENT" \
   --arg r_pack "$R2_PACK_MISSING" \
   --arg m_pack "$M2_PACK" \
   '{
@@ -234,28 +239,67 @@ bash ./scripts/roadmap_live_evidence_archive_run.sh \
   --print-summary-json 0
 case2_rc=$?
 set -e
-if [[ "$case2_rc" != "1" ]]; then
-  echo "case partial missing expected rc=1, got rc=$case2_rc"
+if [[ "$case2_rc" != "0" ]]; then
+  echo "case partial missing (default warn policy) expected rc=0, got rc=$case2_rc"
   cat "$SUMMARY2"
   exit 1
 fi
 
 if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .failure_substep == null
+  and .inputs.missing_source_policy == "warn"
+  and (.reason | contains("missing artifacts"))
+  and .roadmap.summary_contract_state == "valid"
+  and .summary.copied_total >= 3
+  and .summary.missing_total >= 1
+  and .summary.copy_error_total == 0
+  and .summary.missing_family_count == 0
+  and ((.next_action_hints | map(select(.family == "runtime-actuation")) | length) >= 1)
+  and (
+    [.family_results[] | select(.family == "runtime-actuation")][0].status == "warn"
+  )
+' "$SUMMARY2" >/dev/null; then
+  echo "case partial missing (default warn policy) assertions failed"
+  cat "$SUMMARY2"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: partial missing sources fail with explicit policy"
+SUMMARY2_FAIL="$CASE2_DIR/archive_summary_fail_policy.json"
+set +e
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS2" \
+  --roadmap-summary-json "$ROADMAP2" \
+  --archive-root "$ARCHIVE_ROOT2" \
+  --scope all \
+  --missing-source-policy fail \
+  --summary-json "$SUMMARY2_FAIL" \
+  --print-summary-json 0
+case2_fail_rc=$?
+set -e
+if [[ "$case2_fail_rc" != "1" ]]; then
+  echo "case partial missing (fail policy) expected rc=1, got rc=$case2_fail_rc"
+  cat "$SUMMARY2_FAIL"
+  exit 1
+fi
+if ! jq -e '
   .status == "fail"
   and .rc == 1
   and .failure_substep == "archive_copy_incomplete"
-  and (.reason | contains("missing artifacts or copy errors"))
-  and .roadmap.summary_contract_state == "valid"
-  and .summary.copied_total >= 2
-  and .summary.missing_total >= 2
-  and .summary.missing_family_count >= 1
-  and ((.next_action_hints | map(select(.family == "runtime-actuation")) | length) >= 1)
+  and .inputs.missing_source_policy == "fail"
+  and (.reason | contains("missing artifacts"))
+  and .summary.copied_total >= 3
+  and .summary.missing_total >= 1
+  and .summary.copy_error_total == 0
+  and .summary.missing_family_count == 0
   and (
     [.family_results[] | select(.family == "runtime-actuation")][0].status == "fail"
   )
-' "$SUMMARY2" >/dev/null; then
-  echo "case partial missing assertions failed"
-  cat "$SUMMARY2"
+' "$SUMMARY2_FAIL" >/dev/null; then
+  echo "case partial missing (fail policy) assertions failed"
+  cat "$SUMMARY2_FAIL"
   exit 1
 fi
 
