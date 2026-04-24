@@ -11,6 +11,7 @@ DESKTOP_EXECUTABLE_OVERRIDE_PATH=""
 INSTALL_MISSING="0"
 DRY_RUN="0"
 API_ADDR="127.0.0.1:8095"
+API_HEALTH_TIMEOUT_SEC="25"
 FORCE_NPM_INSTALL="0"
 SUMMARY_JSON_PATH=""
 PRINT_SUMMARY_JSON="0"
@@ -94,6 +95,7 @@ Options:
   --install-missing                           Ask desktop_doctor to attempt remediation (fix mode)
   --dry-run                                   Print actions without executing
   --api-addr HOST:PORT                        Local API bind/health address (default: 127.0.0.1:8095)
+  --api-health-timeout-sec N                  Local API health wait timeout in seconds for run-full (default: 25)
   --force-npm-install                         Force npm install before desktop dev launch
   --summary-json PATH                         Write run summary JSON to PATH
   --print-summary-json 0|1                    Print summary JSON to stdout (default: 0)
@@ -407,6 +409,7 @@ emit_summary_payload() {
   "resolved_desktop_executable_path": "$(json_escape "$RESOLVED_DESKTOP_EXECUTABLE_PATH")",
   "resolved_desktop_executable_source": "$(json_escape "$RESOLVED_DESKTOP_EXECUTABLE_SOURCE")",
   "api_addr": "$(json_escape "$API_ADDR")",
+  "api_health_timeout_sec": $API_HEALTH_TIMEOUT_SEC,
   "error": "$(json_escape "$SUMMARY_ERROR")",
   "notes": "Linux desktop native bootstrap scaffold helper.",
   "recommended_commands": $recommended_commands_json
@@ -767,6 +770,13 @@ while [[ $# -gt 0 ]]; do
       API_ADDR="$2"
       shift 2
       ;;
+    --api-health-timeout-sec)
+      if [[ $# -lt 2 ]]; then
+        die "--api-health-timeout-sec requires a value"
+      fi
+      API_HEALTH_TIMEOUT_SEC="$2"
+      shift 2
+      ;;
     --force-npm-install)
       FORCE_NPM_INSTALL="1"
       shift
@@ -816,12 +826,20 @@ case "$PRINT_SUMMARY_JSON" in
     ;;
 esac
 
+if ! [[ "$API_HEALTH_TIMEOUT_SEC" =~ ^[0-9]+$ ]]; then
+  die "invalid --api-health-timeout-sec value: $API_HEALTH_TIMEOUT_SEC (expected positive integer seconds)"
+fi
+if ((10#$API_HEALTH_TIMEOUT_SEC < 1 || 10#$API_HEALTH_TIMEOUT_SEC > 600)); then
+  die "invalid --api-health-timeout-sec value: $API_HEALTH_TIMEOUT_SEC (allowed range: 1..600)"
+fi
+
 log "mode=$MODE"
 log "desktop_launch_strategy=$DESKTOP_LAUNCH_STRATEGY"
 if [[ -n "$DESKTOP_EXECUTABLE_OVERRIDE_PATH" ]]; then
   log "desktop_executable_override_path=$DESKTOP_EXECUTABLE_OVERRIDE_PATH"
 fi
 log "api_addr=$API_ADDR"
+log "api_health_timeout_sec=$API_HEALTH_TIMEOUT_SEC"
 log "repo_root=$ROOT_DIR"
 
 if [[ "$MODE" == "check" || "$MODE" == "bootstrap" ]]; then
@@ -860,7 +878,7 @@ fi
 
     if [[ "$DRY_RUN" == "1" ]]; then
       log "dry-run: would start local API in background from repo root: go run ./cmd/node --local-api"
-      log "dry-run: would wait for health endpoint: $API_HEALTH_ENDPOINT"
+      log "dry-run: would wait for health endpoint: $API_HEALTH_ENDPOINT (timeout=${API_HEALTH_TIMEOUT_SEC}s)"
       run_desktop_by_plan
       exit 0
     fi
@@ -875,10 +893,11 @@ fi
   API_BG_PID="$!"
   log "started local API background process pid=$API_BG_PID"
 
-  if ! wait_for_local_api_health 25; then
+  if ! wait_for_local_api_health "$API_HEALTH_TIMEOUT_SEC"; then
     die "local API health check timed out: $API_HEALTH_ENDPOINT
 - verify go run ./cmd/node --local-api starts cleanly
-- verify port and loopback bind in --api-addr"
+- verify port and loopback bind in --api-addr
+- rerun with a longer health timeout, e.g. --api-health-timeout-sec 60 (current=${API_HEALTH_TIMEOUT_SEC})"
   fi
 
   run_desktop_by_plan

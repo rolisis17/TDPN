@@ -119,12 +119,20 @@ func (s MsgServer) RecordDecision(req RecordDecisionRequest) (RecordDecisionResp
 		if strings.Contains(err.Error(), "conflicting fields") {
 			return resp, fmt.Errorf("%w: %v", ErrDecisionConflict, err)
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if isPolicyReferenceNotFoundError(err) {
 			return resp, fmt.Errorf("%w: %v", ErrPolicyNotFound, err)
 		}
 		return resp, fmt.Errorf("%w: %v", ErrInvalidDecision, err)
 	}
 	return resp, nil
+}
+
+func isPolicyReferenceNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "policy \"") && strings.Contains(message, "\" not found")
 }
 
 func (s MsgServer) RecordAuditAction(req RecordAuditActionRequest) (RecordAuditActionResponse, error) {

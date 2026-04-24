@@ -3548,7 +3548,7 @@ func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 		if _, err := canonicalizePeerRelayRole(desc.Role); err != nil {
 			continue
 		}
-		if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
+		if desc.ValidUntil.IsZero() || now.After(desc.ValidUntil) {
 			continue
 		}
 		candidates = append(candidates, desc)

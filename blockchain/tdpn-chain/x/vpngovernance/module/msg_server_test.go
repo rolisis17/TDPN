@@ -210,6 +210,41 @@ func TestMsgServerRecordDecisionInvalidPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerRecordDecisionReadErrorWithNotFoundTextIsNotPolicyNotFound(t *testing.T) {
+	t.Parallel()
+
+	store := &decisionListReadErrorStore{
+		policy: types.GovernancePolicy{
+			PolicyID:        "policy-read-error",
+			Title:           "Policy Read Error",
+			Version:         1,
+			ActivatedAtUnix: 4102444800,
+		},
+	}
+	k := keeper.NewKeeperWithStore(store)
+	server := NewMsgServer(&k)
+
+	_, err := server.RecordDecision(RecordDecisionRequest{
+		Decision: types.GovernanceDecision{
+			DecisionID:    "decision-read-error",
+			PolicyID:      "policy-read-error",
+			ProposalID:    "proposal-read-error",
+			Outcome:       types.DecisionOutcomeApprove,
+			Decider:       "council-read-error",
+			DecidedAtUnix: 4102444800,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected record decision to fail on decision read-model load error")
+	}
+	if errors.Is(err, ErrPolicyNotFound) {
+		t.Fatalf("expected non-policy classification for backend read error, got %v", err)
+	}
+	if !errors.Is(err, ErrInvalidDecision) {
+		t.Fatalf("expected ErrInvalidDecision classification, got %v", err)
+	}
+}
+
 func TestMsgServerRecordAuditActionHappyPath(t *testing.T) {
 	t.Parallel()
 
@@ -352,4 +387,58 @@ func TestMsgServerNilKeeper(t *testing.T) {
 	if !errors.Is(recordAuditErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper on record audit action, got %v", recordAuditErr)
 	}
+}
+
+type decisionListReadErrorStore struct {
+	policy types.GovernancePolicy
+}
+
+func (s *decisionListReadErrorStore) UpsertPolicy(record types.GovernancePolicy) {
+	s.policy = record
+}
+
+func (s *decisionListReadErrorStore) GetPolicy(policyID string) (types.GovernancePolicy, bool) {
+	if (types.GovernancePolicy{PolicyID: policyID}).Canonicalize().PolicyID != s.policy.PolicyID {
+		return types.GovernancePolicy{}, false
+	}
+	return s.policy, true
+}
+
+func (s *decisionListReadErrorStore) ListPolicies() []types.GovernancePolicy {
+	if s.policy.PolicyID == "" {
+		return nil
+	}
+	return []types.GovernancePolicy{s.policy}
+}
+
+func (s *decisionListReadErrorStore) UpsertDecision(types.GovernanceDecision) {}
+
+func (s *decisionListReadErrorStore) GetDecision(string) (types.GovernanceDecision, bool) {
+	return types.GovernanceDecision{}, false
+}
+
+func (s *decisionListReadErrorStore) ListDecisions() []types.GovernanceDecision {
+	return nil
+}
+
+func (s *decisionListReadErrorStore) PutAuditAction(types.GovernanceAuditAction) {}
+
+func (s *decisionListReadErrorStore) GetAuditAction(string) (types.GovernanceAuditAction, bool) {
+	return types.GovernanceAuditAction{}, false
+}
+
+func (s *decisionListReadErrorStore) ListAuditActions() []types.GovernanceAuditAction {
+	return nil
+}
+
+func (s *decisionListReadErrorStore) ListPoliciesWithError() ([]types.GovernancePolicy, error) {
+	return s.ListPolicies(), nil
+}
+
+func (s *decisionListReadErrorStore) ListDecisionsWithError() ([]types.GovernanceDecision, error) {
+	return nil, errors.New("decision backend index not found")
+}
+
+func (s *decisionListReadErrorStore) ListAuditActionsWithError() ([]types.GovernanceAuditAction, error) {
+	return nil, nil
 }

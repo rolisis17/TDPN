@@ -16,6 +16,16 @@ import (
 	"privacynode/pkg/proto"
 )
 
+func strictExitRouteFixture() exitRoute {
+	return exitRoute{
+		controlURL: "https://exit.example",
+		dataAddr:   "exit.example:51821",
+		operatorID: "op-exit",
+		fetchedAt:  time.Now(),
+		validUntil: time.Now().Add(time.Minute),
+	}
+}
+
 func TestHandlePathOpenLiveModeRejectsNonWireGuardTransport(t *testing.T) {
 	exitCalls := 0
 	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +201,7 @@ func TestHandlePathOpenStrictRejectsMissingMiddleRelayBeforeForwarding(t *testin
 		dataAddr:              "127.0.0.1:51820",
 		httpClient:            exitSrv.Client(),
 		sessions:              map[string]sessionState{},
-		exitRouteCache:        map[string]exitRoute{"exit-b": {controlURL: exitSrv.URL, dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		exitRouteCache:        map[string]exitRoute{"exit-b": strictExitRouteFixture()},
 		buckets:               map[string]rateBucket{},
 		abuse:                 map[string]abuseState{},
 		openRPS:               100,
@@ -1007,7 +1017,7 @@ func TestHandlePathOpenStrictModeBypassesStaleMiddleRelayCache(t *testing.T) {
 		betaStrict:     true,
 		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:       map[string]sessionState{},
-		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		exitRouteCache: map[string]exitRoute{"exit-b": strictExitRouteFixture()},
 		relayDescCache: map[string]cachedRelayDescriptor{
 			"middle-stale": {
 				desc: proto.RelayDescriptor{
@@ -1579,7 +1589,7 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithConflictingRoleMetadata(t *te
 		betaStrict:     true,
 		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:       map[string]sessionState{},
-		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		exitRouteCache: map[string]exitRoute{"exit-b": strictExitRouteFixture()},
 		directoryURLs:  []string{durl},
 		routeTTL:       time.Minute,
 		buckets:        map[string]rateBucket{},
@@ -1787,7 +1797,7 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithInvalidRuntimeAdmissionMetada
 				betaStrict:     true,
 				httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 				sessions:       map[string]sessionState{},
-				exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+				exitRouteCache: map[string]exitRoute{"exit-b": strictExitRouteFixture()},
 				directoryURLs:  []string{durl},
 				routeTTL:       time.Minute,
 				buckets:        map[string]rateBucket{},
@@ -1846,7 +1856,7 @@ func TestHandlePathOpenStrictAllowsCanonicalMiddleRelayRole(t *testing.T) {
 	})
 
 	exitCalls := 0
-	handlers["http://exit.local/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
+	handlers["https://exit.example/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
 		exitCalls++
 		var in proto.PathOpenRequest
 		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
@@ -1868,7 +1878,7 @@ func TestHandlePathOpenStrictAllowsCanonicalMiddleRelayRole(t *testing.T) {
 		betaStrict:     true,
 		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:       map[string]sessionState{},
-		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		exitRouteCache: map[string]exitRoute{"exit-b": strictExitRouteFixture()},
 		directoryURLs:  []string{durl},
 		routeTTL:       time.Minute,
 		buckets:        map[string]rateBucket{},
@@ -2007,7 +2017,7 @@ func TestHandlePathOpenStrictRejectsMiddleRelayWithoutOperatorID(t *testing.T) {
 		betaStrict:     true,
 		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 		sessions:       map[string]sessionState{},
-		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		exitRouteCache: map[string]exitRoute{"exit-b": strictExitRouteFixture()},
 		directoryURLs:  []string{durl},
 		routeTTL:       time.Minute,
 		buckets:        map[string]rateBucket{},

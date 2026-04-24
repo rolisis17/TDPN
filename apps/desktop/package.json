@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check:role-lock": "node scripts/verify-role-lock-contract.mjs",
+    "check:connect-guardrail": "node scripts/verify-connect-command-guardrails.mjs",
     "generate:windows-icon": "node scripts/ensure-windows-icon.mjs",
     "pretauri": "npm run generate:windows-icon",
     "tauri": "tauri"

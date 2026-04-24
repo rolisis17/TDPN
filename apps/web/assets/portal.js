@@ -4506,6 +4506,7 @@ function syncFailClosedMutatingActionState() {
   const lockByFailClosed = configEndpointUnavailableFailClosedMode();
   const sessionFreshness = computeSessionFreshnessState();
   const lockBySessionExpired = sessionFreshness.state === "expired";
+  const hasChainOperatorID = byId("chain_operator_id").value.trim().length > 0;
 
   const adminToken = adminTokenEl ? adminTokenEl.value.trim() : "";
   const moderationCanUseAdminFallback =
@@ -4517,7 +4518,8 @@ function syncFailClosedMutatingActionState() {
   for (const button of [connectBtnEl, applyOperatorBtnEl, approveOperatorBtnEl, rejectOperatorBtnEl]) {
     const isModerationAction = button === approveOperatorBtnEl || button === rejectOperatorBtnEl;
     const lockByExpiredSessionForButton = lockBySessionExpired && !(isModerationAction && moderationCanUseAdminFallback);
-    const disabled = isBusy || lockByFailClosed || lockByExpiredSessionForButton;
+    const lockByMissingChainOperatorID = button === applyOperatorBtnEl && !hasChainOperatorID;
+    const disabled = isBusy || lockByFailClosed || lockByExpiredSessionForButton || lockByMissingChainOperatorID;
     button.disabled = disabled;
     button.setAttribute("aria-disabled", String(disabled));
     if (lockByFailClosed) {
@@ -4526,6 +4528,10 @@ function syncFailClosedMutatingActionState() {
     }
     if (lockByExpiredSessionForButton) {
       button.title = sessionFreshness.detail;
+      continue;
+    }
+    if (lockByMissingChainOperatorID) {
+      button.title = "Chain operator ID is required for operator apply (strict chain binding).";
       continue;
     }
     if (isModerationAction && moderationCanUseAdminFallback) {
@@ -4866,6 +4872,7 @@ function bindReadinessListeners() {
   });
   byId("chain_operator_id").addEventListener("input", () => {
     setSelectedApplicationUpdatedAt("");
+    syncFailClosedMutatingActionState();
   });
   byId("challenge_id").addEventListener("input", () => {
     clearWalletSignatureContext();
@@ -5640,6 +5647,16 @@ function assertOperatorMutationActionAllowed(actionLabel) {
   }
 }
 
+function requiredChainOperatorIDForApply() {
+  const chainOperatorID = byId("chain_operator_id").value.trim();
+  if (!chainOperatorID) {
+    throw new Error(
+      "Operator apply is unavailable: chain_operator_id is required for strict chain binding. Set Chain operator ID and retry."
+    );
+  }
+  return chainOperatorID;
+}
+
 function buildOperatorModerationAuthRequest(actionLabel) {
   const sessionToken = byId("session_token").value.trim();
   const adminToken = adminTokenEl.value.trim();
@@ -6128,9 +6145,10 @@ byId("apply_operator_btn").addEventListener("click", () =>
   run("operator_apply", async () => {
     assertOperatorMutationActionAllowed("Operator apply");
     assertSessionFreshForAction("Operator apply", { requireToken: true });
+    const chainOperatorID = requiredChainOperatorIDForApply();
     const request = {
       session_token: byId("session_token").value.trim(),
-      chain_operator_id: byId("chain_operator_id").value.trim(),
+      chain_operator_id: chainOperatorID,
       server_label: byId("server_label").value.trim() || undefined
     };
     const result = await post("/v1/gpm/onboarding/operator/apply", request);

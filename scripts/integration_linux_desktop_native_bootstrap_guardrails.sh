@@ -109,9 +109,11 @@ run_expect_fail_regex() {
 echo "[linux-desktop-native-bootstrap-guardrails] summary markers present"
 assert_script_marker "--summary-json"
 assert_script_marker "--print-summary-json"
+assert_script_marker "--api-health-timeout-sec"
 assert_script_marker "recommended_commands"
 assert_script_marker "emit_summary_payload"
 assert_script_marker "write_summary_json_file"
+assert_script_marker "api_health_timeout_sec"
 assert_script_marker "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
 assert_script_marker "GPM_DESKTOP_PACKAGED_EXE"
 assert_script_marker "TDPN_DESKTOP_PACKAGED_EXE"
@@ -153,6 +155,8 @@ run_expect_pass \
     --mode run-full \
     --desktop-launch-strategy auto \
     --dry-run
+
+SUMMARY_RUN_FULL_TIMEOUT_PATH="$TMP_DIR/run_full_timeout_summary.json"
 
 FAKE_RUNTIME_BIN_DIR="$TMP_DIR/fake-runtime-bin"
 mkdir -p "$FAKE_RUNTIME_BIN_DIR"
@@ -230,13 +234,23 @@ run_expect_fail_regex \
     --dry-run \
     --print-summary-json 2
 
+echo "[linux-desktop-native-bootstrap-guardrails] invalid api health timeout fails"
+run_expect_fail_regex \
+  "invalid_api_health_timeout_fail" \
+  "api-health-timeout-sec|positive integer|1\\.\\.600|invalid" \
+  bash "$SCRIPT_UNDER_TEST" \
+    --mode run-full \
+    --desktop-launch-strategy auto \
+    --dry-run \
+    --api-health-timeout-sec 0
+
 assert_summary_json_field_equals() {
   local summary_path="$1"
   local key="$2"
   local expected_value="$3"
   local escaped_expected
   escaped_expected="$(printf '%s' "$expected_value" | sed -e 's/[.[\*^$()+?{|]/\\&/g')"
-  if grep -Eiq "\"$key\"[[:space:]]*:[[:space:]]*\"$escaped_expected\"" "$summary_path"; then
+  if grep -Eiq "\"$key\"[[:space:]]*:[[:space:]]*(\"$escaped_expected\"|$escaped_expected)([[:space:]]*[,}])" "$summary_path"; then
     return 0
   fi
   echo "linux desktop native bootstrap guardrails failed: summary file missing expected $key=$expected_value"
@@ -274,6 +288,17 @@ SUMMARY_GLOBAL_ONLY_PATH="$TMP_DIR/run_desktop_env_global_summary.json"
 SUMMARY_TDPN_ONLY_PATH="$TMP_DIR/run_desktop_env_tdpn_summary.json"
 SUMMARY_OVERRIDE_PATH="$TMP_DIR/run_desktop_override_summary.json"
 SUMMARY_PACKAGED_DEFAULT_PATH="$TMP_DIR/run_desktop_packaged_default_summary.json"
+
+echo "[linux-desktop-native-bootstrap-guardrails] run-full --dry-run accepts configurable api health timeout"
+run_expect_pass \
+  "run_full_dry_run_custom_timeout_pass" \
+  bash "$SCRIPT_UNDER_TEST" \
+    --mode run-full \
+    --desktop-launch-strategy auto \
+    --dry-run \
+    --api-health-timeout-sec 60 \
+    --summary-json "$SUMMARY_RUN_FULL_TIMEOUT_PATH"
+assert_summary_json_field_equals "$SUMMARY_RUN_FULL_TIMEOUT_PATH" "api_health_timeout_sec" "60"
 
 echo "[linux-desktop-native-bootstrap-guardrails] env override priority prefers GPM_DESKTOP_PACKAGED_EXE under --dry-run"
 run_expect_pass \

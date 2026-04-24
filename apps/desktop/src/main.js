@@ -215,6 +215,7 @@ const state = {
   manifest: null,
   connectionState: CONNECTION_DEFAULT_STATE,
   connectionDetail: CONNECTION_DEFAULT_DETAIL,
+  connectionMutationInFlight: "",
   routingMode: ROUTING_DEFAULT_MODE,
   routingDetail: ROUTING_DEFAULT_DETAIL,
   readinessHeartbeatInFlight: false,
@@ -1662,11 +1663,69 @@ function applyConnectionSnapshot(snapshot) {
   syncConnectActionButtons();
 }
 
+function normalizeConnectionMutationKind(value) {
+  if (value === "connect" || value === "disconnect") {
+    return value;
+  }
+  return "";
+}
+
+function describeConnectionMutationInFlight(value) {
+  const normalized = normalizeConnectionMutationKind(value);
+  if (normalized === "connect") {
+    return "Connect request in progress; wait for completion before issuing another tunnel command.";
+  }
+  if (normalized === "disconnect") {
+    return "Disconnect request in progress; wait for completion before issuing another tunnel command.";
+  }
+  return "";
+}
+
+function beginConnectionMutation(kind) {
+  const normalized = normalizeConnectionMutationKind(kind);
+  if (!normalized) {
+    return false;
+  }
+  if (state.connectionMutationInFlight) {
+    return false;
+  }
+  state.connectionMutationInFlight = normalized;
+  if (normalized === "connect") {
+    applyConnectionSnapshot({
+      state: formatConnectionStateLabel("connecting"),
+      detail: "Connect request in progress. Avoid repeated connect/disconnect actions until state settles.",
+      routingMode: state.routingMode || ROUTING_DEFAULT_MODE,
+      routingDetail: state.routingDetail || ROUTING_DEFAULT_DETAIL
+    });
+  } else {
+    applyConnectionSnapshot({
+      state: formatConnectionStateLabel("disconnecting"),
+      detail: "Disconnect request in progress. Avoid repeated connect/disconnect actions until state settles.",
+      routingMode: state.routingMode || ROUTING_DEFAULT_MODE,
+      routingDetail: state.routingDetail || ROUTING_DEFAULT_DETAIL
+    });
+  }
+  return true;
+}
+
+function endConnectionMutation(kind) {
+  const normalized = normalizeConnectionMutationKind(kind);
+  if (!normalized) {
+    return;
+  }
+  if (state.connectionMutationInFlight !== normalized) {
+    return;
+  }
+  state.connectionMutationInFlight = "";
+  syncConnectActionButtons();
+}
+
 function syncConnectActionButtons() {
   if (!connectBtnEl || !disconnectBtnEl) {
     return;
   }
   const stateKey = normalizeConnectionState(state.connectionState) || "unknown";
+  const mutationInFlight = normalizeConnectionMutationKind(state.connectionMutationInFlight);
   const clientControlsUnlocked = isClientTabVisibleRole();
   const clientLockReason = computeClientLockHintText();
   let connectLabel = "Connect";
@@ -1677,7 +1736,19 @@ function syncConnectActionButtons() {
   let disconnectDisabled = false;
   let disconnectTitle = "Disconnect GPM tunnel connection.";
 
-  if (stateKey === "connected" || stateKey === "healthy") {
+  if (mutationInFlight === "connect") {
+    connectLabel = "Connecting...";
+    connectDisabled = true;
+    connectTitle = "Connect request in progress.";
+    disconnectDisabled = true;
+    disconnectTitle = "Wait for connect request to complete.";
+  } else if (mutationInFlight === "disconnect") {
+    connectLabel = "Connect";
+    connectDisabled = true;
+    connectTitle = "Wait for disconnect request to complete.";
+    disconnectDisabled = true;
+    disconnectTitle = "Disconnect request in progress.";
+  } else if (stateKey === "connected" || stateKey === "healthy") {
     connectLabel = "Connected";
     connectDisabled = true;
     connectTitle = "GPM tunnel connection is active.";
@@ -1710,11 +1781,11 @@ function syncConnectActionButtons() {
   connectBtnEl.title = connectTitle;
   connectBtnEl.setAttribute("aria-pressed", stateKey === "connected" || stateKey === "healthy" ? "true" : "false");
   connectBtnEl.classList.toggle("vpn-connected", stateKey === "connected" || stateKey === "healthy");
-  connectBtnEl.classList.toggle("vpn-transition", stateKey === "connecting");
+  connectBtnEl.classList.toggle("vpn-transition", stateKey === "connecting" || mutationInFlight === "connect");
 
   disconnectBtnEl.disabled = disconnectDisabled;
   disconnectBtnEl.title = disconnectTitle;
-  disconnectBtnEl.classList.toggle("vpn-transition", stateKey === "disconnecting");
+  disconnectBtnEl.classList.toggle("vpn-transition", stateKey === "disconnecting" || mutationInFlight === "disconnect");
 }
 
 function updateConnectionDashboard(source, payload) {
@@ -6102,8 +6173,14 @@ byId("connect_btn").addEventListener("click", async () => {
   if (!requireClientControlEligibility("Connect")) {
     return;
   }
+  if (!beginConnectionMutation("connect")) {
+    const activeMutation = describeConnectionMutationInFlight(state.connectionMutationInFlight);
+    print("validation", activeMutation || "A connection command is already in progress; wait for it to finish.");
+    return;
+  }
   const request = connectPayload();
   if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
+    endConnectionMutation("connect");
     const hint = state.connectRequireSession
       ? "session_token is required in session-required connect mode; sign in first"
       : state.allowLegacyConnectOverride && !state.productionMode
@@ -6113,8 +6190,19 @@ byId("connect_btn").addEventListener("click", async () => {
     return;
   }
   inviteKeyEl.value = "";
-  const result = await call("connect", "control_connect", { request });
-  updateConnectionDashboard("connect", result);
+  try {
+    const result = await call("connect", "control_connect", { request });
+    updateConnectionDashboard("connect", result);
+  } catch {
+    applyConnectionSnapshot({
+      state: formatConnectionStateLabel("disconnected"),
+      detail: "Connect request failed. Review output diagnostics and retry.",
+      routingMode: state.routingMode || ROUTING_DEFAULT_MODE,
+      routingDetail: state.routingDetail || ROUTING_DEFAULT_DETAIL
+    });
+  } finally {
+    endConnectionMutation("connect");
+  }
 });
 
 compatEnableEl.addEventListener("change", () => {
@@ -6126,8 +6214,24 @@ compatEnableEl.addEventListener("change", () => {
 });
 
 disconnectBtnEl.addEventListener("click", async () => {
-  const result = await call("disconnect", "control_disconnect");
-  updateConnectionDashboard("disconnect", result);
+  if (!beginConnectionMutation("disconnect")) {
+    const activeMutation = describeConnectionMutationInFlight(state.connectionMutationInFlight);
+    print("validation", activeMutation || "A connection command is already in progress; wait for it to finish.");
+    return;
+  }
+  try {
+    const result = await call("disconnect", "control_disconnect");
+    updateConnectionDashboard("disconnect", result);
+  } catch {
+    applyConnectionSnapshot({
+      state: formatConnectionStateLabel("degraded"),
+      detail: "Disconnect request failed. Verify tunnel status with Status/Health before retrying.",
+      routingMode: state.routingMode || ROUTING_DEFAULT_MODE,
+      routingDetail: state.routingDetail || ROUTING_DEFAULT_DETAIL
+    });
+  } finally {
+    endConnectionMutation("disconnect");
+  }
 });
 
 byId("status_btn").addEventListener("click", async () => {

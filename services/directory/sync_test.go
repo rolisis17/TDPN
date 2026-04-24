@@ -3904,6 +3904,50 @@ func TestHandleGossipRelaysImportsVerifiedDescriptors(t *testing.T) {
 	}
 }
 
+func TestHandleGossipRelaysRejectsDescriptorsWithoutValidUntil(t *testing.T) {
+	peerURL := "http://peer-a.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	desc := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:    "exit-peer-gossip-missing-valid-until",
+		Role:       "exit",
+		OperatorID: "op-peer",
+		Endpoint:   "127.0.0.1:51821",
+	}, priv)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		peerURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+	}
+	s := &Service{
+		operatorID:  "op-local",
+		peerURLs:    []string{peerURL},
+		peerRelays:  make(map[string]proto.RelayDescriptor),
+		peerMaxHops: 3,
+		httpClient:  &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	body, _ := json.Marshal(proto.RelayGossipPushRequest{
+		PeerURL: peerURL,
+		Relays:  []proto.RelayDescriptor{desc},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleGossipRelays(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var out proto.RelayGossipPushResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode gossip response: %v", err)
+	}
+	if out.Imported != 0 {
+		t.Fatalf("expected zero imported relays when valid_until missing, got %d", out.Imported)
+	}
+	if relays := s.snapshotPeerRelays(); len(relays) != 0 {
+		t.Fatalf("expected no relay persisted when valid_until missing, got %d", len(relays))
+	}
+}
+
 func TestHandleGossipRelaysImportsMicroRelayAliasDescriptors(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pub, priv, err := crypto.GenerateEd25519Keypair()
