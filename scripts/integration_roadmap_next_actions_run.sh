@@ -4,9 +4,35 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Keep this integration hermetic: ambient subject overrides can bypass
-# placeholder-precondition fail-closed paths and make assertions flaky.
+# Keep this integration hermetic: ambient ROADMAP_NEXT_ACTIONS_RUN_* overrides
+# can relax fail-closed behavior or mutate selection/routing inputs.
+unset ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC
+unset ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE
+unset ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS
+unset ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT
+unset ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_IDS
+unset ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX
+unset ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_SUFFIXES
+unset ROADMAP_NEXT_ACTIONS_RUN_HOST_A
+unset ROADMAP_NEXT_ACTIONS_RUN_HOST_B
+unset ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS
+unset ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX
+unset ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_SUFFIXES
+unset ROADMAP_NEXT_ACTIONS_RUN_MAX_ACTIONS
+unset ROADMAP_NEXT_ACTIONS_RUN_PARALLEL
+unset ROADMAP_NEXT_ACTIONS_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC
+unset ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON
+unset ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC
 unset ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT
+unset ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION
+unset ROADMAP_NEXT_ACTIONS_RUN_REFRESH_SINGLE_MACHINE_READINESS
+unset ROADMAP_NEXT_ACTIONS_RUN_REPORTS_DIR
+unset ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_REPORT_MD
+unset ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT
+unset ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SUMMARY_JSON
+unset ROADMAP_NEXT_ACTIONS_RUN_SUMMARY_JSON
+unset ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE
+# Keep placeholder-subject precondition checks deterministic.
 unset CAMPAIGN_SUBJECT
 unset INVITE_KEY
 
@@ -2428,6 +2454,9 @@ TOCTOU_REJECT_SUMMARY="$TMP_DIR/summary_toctou_reject.json"
 TOCTOU_REJECT_REPORT="$TMP_DIR/report_toctou_reject.md"
 TOCTOU_REJECT_LOG_DIR="$TMP_DIR/reports_toctou_reject"
 rm -f "$TOCTOU_ESCAPE_MARKER"
+if [[ ! -L "$SYMLINK_ESCAPE_LINK" ]]; then
+  echo "[roadmap-next-actions-run] TOCTOU revalidation skipped (symlink unsupported in current environment)"
+else
 cat >"$TOCTOU_REJECT_SUMMARY_INPUT" <<JSON_TOCTOU_REJECT
 {
   "next_actions": [
@@ -2491,6 +2520,7 @@ if ! grep -R -F "pre-exec validation mismatch" "$TOCTOU_REJECT_LOG_DIR" >/dev/nu
   echo "TOCTOU revalidation mismatch log marker missing"
   cat "$TOCTOU_REJECT_SUMMARY"
   exit 1
+fi
 fi
 
 echo "[roadmap-next-actions-run] rejects env-prefixed action in safe mode"

@@ -289,6 +289,8 @@ func TestSubmitEvidenceDefaultsAndGet(t *testing.T) {
 
 	record, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-submit-1",
+		ProviderID:    "provider-submit-1",
+		SessionID:     "session-submit-1",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-submit-1"),
 		ViolationType: "double-sign",
@@ -315,6 +317,8 @@ func TestSubmitEvidenceIdempotentReplay(t *testing.T) {
 	k := NewKeeper()
 	base := types.SlashEvidence{
 		EvidenceID:    "evidence-submit-2",
+		ProviderID:    "provider-submit-2",
+		SessionID:     "session-submit-2",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-submit-2"),
 		ViolationType: "double-sign",
@@ -340,6 +344,8 @@ func TestSubmitEvidenceAndApplyPenaltyCanonicalizeIDsForIdempotencyAndLookup(t *
 
 	firstEvidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    " \nEVIDENCE-SUBMIT-CANON-1\t ",
+		ProviderID:    "provider-submit-canon-1",
+		SessionID:     "session-submit-canon-1",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-submit-canon-1"),
 		ViolationType: "double-sign",
@@ -353,6 +359,8 @@ func TestSubmitEvidenceAndApplyPenaltyCanonicalizeIDsForIdempotencyAndLookup(t *
 
 	replayedEvidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    " \tEVIDENCE-SUBMIT-CANON-1\n ",
+		ProviderID:    "provider-submit-canon-1",
+		SessionID:     "session-submit-canon-1",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-submit-canon-1"),
 		ViolationType: "double-sign",
@@ -414,6 +422,8 @@ func TestSubmitEvidenceConflict(t *testing.T) {
 	k := NewKeeper()
 	base := types.SlashEvidence{
 		EvidenceID:    "evidence-submit-3",
+		ProviderID:    "provider-submit-3",
+		SessionID:     "session-submit-3",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-a"),
 		ViolationType: "double-sign",
@@ -497,6 +507,8 @@ func TestSubmitEvidenceConflictOnViolationTypeChange(t *testing.T) {
 	k := NewKeeper()
 	base := types.SlashEvidence{
 		EvidenceID:    "evidence-submit-violation-type-conflict",
+		ProviderID:    "provider-submit-violation-type-conflict",
+		SessionID:     "session-submit-violation-type-conflict",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-violation-type-a"),
 		ViolationType: "double-sign",
@@ -522,6 +534,8 @@ func TestSubmitEvidenceCanonicalizesViolationTypeAndEquivalentReplay(t *testing.
 	k := NewKeeper()
 	base := types.SlashEvidence{
 		EvidenceID:    "evidence-submit-violation-type-canonical",
+		ProviderID:    "provider-submit-violation-type-canonical",
+		SessionID:     "session-submit-violation-type-canonical",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-violation-type-canonical"),
 		ViolationType: "  SESSION-REPLAY-PROOF \n",
@@ -568,6 +582,60 @@ func TestSubmitEvidenceInvalid(t *testing.T) {
 	}
 }
 
+func TestSubmitEvidenceMissingObjectiveIdentityFailsClosedWithoutPersisting(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	tests := []struct {
+		name      string
+		evidence  types.SlashEvidence
+		wantError string
+	}{
+		{
+			name: "missing provider id",
+			evidence: types.SlashEvidence{
+				EvidenceID:    "evidence-missing-provider-id",
+				ProviderID:    " \t ",
+				SessionID:     "session-missing-provider-id",
+				Kind:          types.EvidenceKindObjective,
+				ProofHash:     testSHAProof("proof-missing-provider-id"),
+				ViolationType: "double-sign",
+			},
+			wantError: "provider id is required",
+		},
+		{
+			name: "missing session id",
+			evidence: types.SlashEvidence{
+				EvidenceID:    "evidence-missing-session-id",
+				ProviderID:    "provider-missing-session-id",
+				SessionID:     " \n ",
+				Kind:          types.EvidenceKindObjective,
+				ProofHash:     testSHAProof("proof-missing-session-id"),
+				ViolationType: "double-sign",
+			},
+			wantError: "session id is required",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := k.SubmitEvidence(tc.evidence)
+			if err == nil {
+				t.Fatalf("expected invalid evidence error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+			}
+			if _, ok := k.GetEvidence(tc.evidence.EvidenceID); ok {
+				t.Fatalf("expected invalid evidence %q to not be stored", tc.evidence.EvidenceID)
+			}
+		})
+	}
+}
+
 func TestSubmitEvidenceFailsClosedWhenEvidenceListReadFails(t *testing.T) {
 	t.Parallel()
 
@@ -578,6 +646,8 @@ func TestSubmitEvidenceFailsClosedWhenEvidenceListReadFails(t *testing.T) {
 	evidenceID := "evidence-read-fail-closed"
 	_, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    evidenceID,
+		ProviderID:    "provider-read-fail-closed",
+		SessionID:     "session-read-fail-closed",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-read-fail-closed"),
 		ViolationType: "double-sign",
@@ -600,6 +670,8 @@ func TestSubmitEvidenceInvalidViolationType(t *testing.T) {
 	evidenceID := "evidence-invalid-violation-type"
 	_, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    evidenceID,
+		ProviderID:    "provider-invalid-violation-type",
+		SessionID:     "session-invalid-violation-type",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-invalid-violation-type"),
 		ViolationType: "manual-review-only",
@@ -621,6 +693,8 @@ func TestSubmitEvidenceInvalidProofFormat(t *testing.T) {
 	k := NewKeeper()
 	_, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-invalid-proof-format",
+		ProviderID:    "provider-invalid-proof-format",
+		SessionID:     "session-invalid-proof-format",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     "legacy-proof-format",
 		ViolationType: "double-sign",
@@ -647,6 +721,8 @@ func TestSubmitEvidenceInvalidProofFormats(t *testing.T) {
 		evidenceID := fmt.Sprintf("evidence-invalid-proof-%d", idx)
 		_, err := k.SubmitEvidence(types.SlashEvidence{
 			EvidenceID:    evidenceID,
+			ProviderID:    "provider-invalid-proof",
+			SessionID:     "session-invalid-proof",
 			Kind:          types.EvidenceKindObjective,
 			ProofHash:     proof,
 			ViolationType: "double-sign",
@@ -669,6 +745,8 @@ func TestSubmitEvidenceReplayThenConflictOnProofHashChange(t *testing.T) {
 	k := NewKeeper()
 	base := types.SlashEvidence{
 		EvidenceID:    "evidence-replay-conflict",
+		ProviderID:    "provider-replay-conflict",
+		SessionID:     "session-replay-conflict",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     "obj://bucket/path/replay-conflict",
 		ViolationType: "double-sign",
@@ -703,6 +781,8 @@ func TestApplyPenaltyDefaultsAndEvidenceAdvance(t *testing.T) {
 	k := NewKeeper()
 	seed, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-penalty-1",
+		ProviderID:    "provider-penalty-1",
+		SessionID:     "session-penalty-1",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-1"),
 		ViolationType: "double-sign",
@@ -832,6 +912,8 @@ func TestApplyPenaltyIdempotentReplay(t *testing.T) {
 	k := NewKeeper()
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-penalty-2",
+		ProviderID:    "provider-penalty-2",
+		SessionID:     "session-penalty-2",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-2"),
 		ViolationType: "double-sign",
@@ -865,6 +947,8 @@ func TestApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) {
 	k := NewKeeper()
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-penalty-2b",
+		ProviderID:    "provider-penalty-2b",
+		SessionID:     "session-penalty-2b",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-2b"),
 		ViolationType: "double-sign",
@@ -910,6 +994,8 @@ func TestApplyPenaltyConflict(t *testing.T) {
 	k := NewKeeper()
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-penalty-3",
+		ProviderID:    "provider-penalty-3",
+		SessionID:     "session-penalty-3",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-3"),
 		ViolationType: "double-sign",
@@ -958,6 +1044,8 @@ func TestApplyPenaltyRejectsNoOpPenaltyWithoutAdvancingEvidence(t *testing.T) {
 	k := NewKeeper()
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-penalty-noop",
+		ProviderID:    "provider-penalty-noop",
+		SessionID:     "session-penalty-noop",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-noop"),
 		ViolationType: "double-sign",
@@ -992,6 +1080,38 @@ func TestApplyPenaltyRejectsNoOpPenaltyWithoutAdvancingEvidence(t *testing.T) {
 			chaintypes.ReconciliationPending,
 			evidenceAfter.Status,
 		)
+	}
+}
+
+func TestUpsertPenaltyWithErrorRejectsNoOpPenalty(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	err := k.UpsertPenaltyWithError(types.PenaltyDecision{
+		PenaltyID:  "penalty-upsert-noop",
+		EvidenceID: "evidence-upsert-noop",
+	})
+	if err == nil {
+		t.Fatal("expected no-op upsert penalty to fail")
+	}
+	if !strings.Contains(err.Error(), "must slash or jail") {
+		t.Fatalf("expected no-op validation error, got %v", err)
+	}
+	if _, ok := k.GetPenalty("penalty-upsert-noop"); ok {
+		t.Fatal("expected no penalty persisted after no-op upsert rejection")
+	}
+}
+
+func TestUpsertPenaltyRejectsNoOpPenaltyWithoutPersisting(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	k.UpsertPenalty(types.PenaltyDecision{
+		PenaltyID:  "penalty-upsert-noop-noerr",
+		EvidenceID: "evidence-upsert-noop-noerr",
+	})
+	if _, ok := k.GetPenalty("penalty-upsert-noop-noerr"); ok {
+		t.Fatal("expected no penalty persisted for no-op upsert")
 	}
 }
 

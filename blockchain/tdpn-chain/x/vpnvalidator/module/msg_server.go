@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	ErrNilKeeper           = errors.New("vpnvalidator: keeper is nil")
-	ErrInvalidEligibility  = errors.New("vpnvalidator: invalid validator eligibility")
-	ErrEligibilityConflict = errors.New("vpnvalidator: validator eligibility conflict")
-	ErrInvalidStatusRecord = errors.New("vpnvalidator: invalid validator status record")
-	ErrStatusConflict      = errors.New("vpnvalidator: validator status conflict")
-	ErrEligibilityNotFound = errors.New("vpnvalidator: validator eligibility not found")
+	ErrNilKeeper                = errors.New("vpnvalidator: keeper is nil")
+	ErrInvalidEligibility       = errors.New("vpnvalidator: invalid validator eligibility")
+	ErrEligibilityConflict      = errors.New("vpnvalidator: validator eligibility conflict")
+	ErrInvalidStatusRecord      = errors.New("vpnvalidator: invalid validator status record")
+	ErrStatusConflict           = errors.New("vpnvalidator: validator status conflict")
+	ErrEligibilityNotFound      = errors.New("vpnvalidator: validator eligibility not found")
+	ErrUnauthorizedStatusRecord = errors.New("vpnvalidator: unauthorized validator status record")
 )
 
 // SetValidatorEligibilityRequest captures an intent to create or replay validator eligibility.
@@ -88,11 +89,18 @@ func (s MsgServer) RecordValidatorStatus(req RecordValidatorStatusRequest) (Reco
 	}
 
 	if strings.TrimSpace(req.Record.ValidatorID) != "" {
-		if _, ok := s.keeper.GetEligibility(req.Record.ValidatorID); !ok {
+		eligibility, ok := s.keeper.GetEligibility(req.Record.ValidatorID)
+		if !ok {
 			return RecordValidatorStatusResponse{
 				Record:  req.Record,
 				Existed: existed,
 			}, fmt.Errorf("%w: validator_id=%s", ErrEligibilityNotFound, req.Record.ValidatorID)
+		}
+		if strings.TrimSpace(eligibility.OperatorAddress) == "" {
+			return RecordValidatorStatusResponse{
+				Record:  req.Record,
+				Existed: existed,
+			}, fmt.Errorf("%w: validator_id=%s has no operator subject", ErrUnauthorizedStatusRecord, req.Record.ValidatorID)
 		}
 	}
 

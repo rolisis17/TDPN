@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	ErrNilKeeper            = errors.New("vpnrewards: keeper is nil")
-	ErrInvalidAccrual       = errors.New("vpnrewards: invalid accrual")
-	ErrInvalidDistribution  = errors.New("vpnrewards: invalid distribution")
-	ErrAccrualConflict      = errors.New("vpnrewards: accrual conflict")
-	ErrDistributionConflict = errors.New("vpnrewards: distribution conflict")
-	ErrAccrualNotFound      = errors.New("vpnrewards: accrual not found")
+	ErrNilKeeper                = errors.New("vpnrewards: keeper is nil")
+	ErrInvalidAccrual           = errors.New("vpnrewards: invalid accrual")
+	ErrInvalidDistribution      = errors.New("vpnrewards: invalid distribution")
+	ErrAccrualConflict          = errors.New("vpnrewards: accrual conflict")
+	ErrDistributionConflict     = errors.New("vpnrewards: distribution conflict")
+	ErrAccrualNotFound          = errors.New("vpnrewards: accrual not found")
+	ErrUnauthorizedDistribution = errors.New("vpnrewards: unauthorized distribution")
 )
 
 // AccrueRewardRequest captures an intent to persist a reward accrual.
@@ -80,10 +81,30 @@ func (s MsgServer) DistributeReward(req DistributeRewardRequest) (DistributeRewa
 	if s.keeper == nil {
 		return DistributeRewardResponse{}, ErrNilKeeper
 	}
+	if err := req.Distribution.ValidateBasic(); err != nil {
+		return DistributeRewardResponse{}, fmt.Errorf("%w: %v", ErrInvalidDistribution, err)
+	}
 
 	existed := false
 	if req.Distribution.DistributionID != "" {
 		_, existed = s.keeper.GetDistribution(req.Distribution.DistributionID)
+	}
+	if strings.TrimSpace(req.Distribution.AccrualID) != "" {
+		accrual, ok := s.keeper.GetAccrual(req.Distribution.AccrualID)
+		if !ok {
+			return DistributeRewardResponse{
+				Distribution: req.Distribution,
+				Existed:      existed,
+				Idempotent:   false,
+			}, fmt.Errorf("%w: accrual_id=%s", ErrAccrualNotFound, req.Distribution.AccrualID)
+		}
+		if strings.TrimSpace(accrual.ProviderID) == "" {
+			return DistributeRewardResponse{
+				Distribution: req.Distribution,
+				Existed:      existed,
+				Idempotent:   false,
+			}, fmt.Errorf("%w: accrual_id=%s has no provider subject", ErrUnauthorizedDistribution, req.Distribution.AccrualID)
+		}
 	}
 
 	record, err := s.keeper.RecordDistribution(req.Distribution)

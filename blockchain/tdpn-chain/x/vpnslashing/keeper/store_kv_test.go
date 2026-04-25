@@ -74,6 +74,7 @@ func TestKVStoreRejectsKeyIDMismatchAndOrphanPenalties(t *testing.T) {
 
 	badEvidence := types.SlashEvidence{
 		EvidenceID:    "different-evidence-id",
+		SessionID:     "sess-bad",
 		ProviderID:    "provider-bad",
 		ViolationType: "double-sign",
 		Kind:          types.EvidenceKindObjective,
@@ -213,6 +214,7 @@ func TestNewKVStoreNilFallbackAndPrefixIsolation(t *testing.T) {
 
 	evidence := types.SlashEvidence{
 		EvidenceID:    "evidence-fallback",
+		SessionID:     "sess-fallback",
 		ProviderID:    "provider-fallback",
 		ViolationType: "double-sign",
 		Kind:          types.EvidenceKindObjective,

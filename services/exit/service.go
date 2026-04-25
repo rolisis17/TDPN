@@ -850,7 +850,7 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.strictModeParseErr != nil {
 		return s.strictModeParseErr
 	}
-	if s.enforcePathOpenExitIdentityBinding() && strings.TrimSpace(s.exitRelayID) == "" {
+	if s.strictPathOpenExitIdentityBinding() && strings.TrimSpace(s.exitRelayID) == "" {
 		return fmt.Errorf("strict exit identity binding requires EXIT_RELAY_ID")
 	}
 	if securehttp.Enabled() {
@@ -1876,6 +1876,10 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "transport must be policy-json in json mode"})
 		return
 	}
+	if s.dataMode == "opaque" && hasPortPolicyClaims(claims) {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "opaque mode cannot enforce port policy"})
+		return
+	}
 	if req.Transport == "wireguard-udp" && req.ClientInnerPub == "" {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "missing client_inner_pub"})
 		return
@@ -2014,6 +2018,13 @@ func (s *Service) handlePathClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) enforcePathOpenExitIdentityBinding() bool {
+	if s.strictPathOpenExitIdentityBinding() {
+		return true
+	}
+	return strings.TrimSpace(s.exitRelayID) != ""
+}
+
+func (s *Service) strictPathOpenExitIdentityBinding() bool {
 	return s.betaStrict || s.prodStrict
 }
 
@@ -2075,6 +2086,10 @@ func validatePathOpenClaims(claims crypto.CapabilityClaims, nowUnix int64) error
 		return errors.New("token subject required for tier>1")
 	}
 	return nil
+}
+
+func hasPortPolicyClaims(claims crypto.CapabilityClaims) bool {
+	return len(claims.AllowPorts) > 0 || len(claims.DenyPorts) > 0
 }
 
 func verifyPathOpenTokenProof(req proto.PathOpenRequest, claims crypto.CapabilityClaims) error {
@@ -2890,6 +2905,10 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 		}
 		s.issuerURLs = []string{normalizeHTTPURL(s.issuerURL)}
 	}
+	requiredOperators := s.issuerMinOperators
+	if requiredOperators < 1 {
+		requiredOperators = 1
+	}
 	updated := make(map[string]ed25519.PublicKey)
 	updatedIssuers := make(map[string]string)
 	updatedMinEpoch := make(map[string]int64)
@@ -2904,7 +2923,7 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 			continue
 		}
 		sourceOperator := strings.TrimSpace(bundle.issuerID)
-		if sourceOperator == "" && s.issuerRequireID {
+		if sourceOperator == "" && (s.issuerRequireID || requiredOperators > 1) {
 			lastErr = fmt.Errorf("issuer identity missing for source %s", normalizeHTTPURL(issuerURL))
 			continue
 		}
@@ -2946,10 +2965,6 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 	}
 	if successSources < requiredSources {
 		return fmt.Errorf("issuer source quorum not met: success=%d required=%d", successSources, requiredSources)
-	}
-	requiredOperators := s.issuerMinOperators
-	if requiredOperators < 1 {
-		requiredOperators = 1
 	}
 	if len(successOperators) < requiredOperators {
 		return fmt.Errorf("issuer operator quorum not met: operators=%d required=%d", len(successOperators), requiredOperators)

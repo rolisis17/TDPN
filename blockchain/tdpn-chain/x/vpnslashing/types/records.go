@@ -89,14 +89,22 @@ func (e SlashEvidence) ValidateBasic() error {
 	if len(evidenceID) > maxEvidenceIDLength {
 		return errors.New("evidence id exceeds 128 characters")
 	}
-	if providerID := strings.TrimSpace(e.ProviderID); providerID != "" && len(providerID) > maxProviderIDLength {
-		return errors.New("provider id exceeds 128 characters")
-	}
-	if sessionID := strings.TrimSpace(e.SessionID); sessionID != "" && len(sessionID) > maxSessionIDLength {
-		return errors.New("session id exceeds 128 characters")
-	}
 	if e.Kind != EvidenceKindObjective {
 		return errors.New("evidence kind must be objective")
+	}
+	providerID := strings.TrimSpace(e.ProviderID)
+	if providerID == "" {
+		return errors.New("provider id is required")
+	}
+	if len(providerID) > maxProviderIDLength {
+		return errors.New("provider id exceeds 128 characters")
+	}
+	sessionID := strings.TrimSpace(e.SessionID)
+	if sessionID == "" {
+		return errors.New("session id is required")
+	}
+	if len(sessionID) > maxSessionIDLength {
+		return errors.New("session id exceeds 128 characters")
 	}
 	proofHash := strings.TrimSpace(e.ProofHash)
 	if proofHash == "" {

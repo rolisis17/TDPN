@@ -732,8 +732,8 @@ func TestHandlePathOpenRejectsExitIdentityMismatchInEnforceMode(t *testing.T) {
 		ExitID:          "exit-remote-2",
 		MiddleRelayID:   "middle-local-1",
 		TokenProofNonce: "nonce-open-exit-id-mismatch",
-		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
-		Transport:       "policy-json",
+		ClientInnerPub:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		Transport:       "wireguard-udp",
 		RequestedMTU:    1280,
 		RequestedRegion: "local",
 		SessionID:       "sid-open-exit-id-mismatch",
@@ -910,6 +910,288 @@ func TestHandlePathOpenAcceptsMatchingExitIdentityInEnforceMode(t *testing.T) {
 	}
 	if resp.Transport != "policy-json" {
 		t.Fatalf("transport=%q want=policy-json", resp.Transport)
+	}
+	if _, exists := s.sessions[req.SessionID]; !exists {
+		t.Fatalf("expected accepted path-open to create session")
+	}
+}
+
+func TestHandlePathOpenRejectsExitIdentityMismatchWhenExitRelayConfigured(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-remote-2",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-exit-id-mismatch-configured",
+		ClientInnerPub:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		Transport:       "wireguard-udp",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-exit-id-mismatch-configured",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-exit-id-mismatch-configured",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "json",
+		exitRelayID:   "exit-local-1",
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected rejection for mismatched exit identity when EXIT_RELAY_ID is configured, got %+v", resp)
+	}
+	if resp.Reason != "exit identity mismatch" {
+		t.Fatalf("reason=%q want=exit identity mismatch", resp.Reason)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected rejected path-open to avoid creating session")
+	}
+}
+
+func TestHandlePathOpenAcceptsMatchingExitIdentityWhenExitRelayConfigured(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-exit-id-match-configured",
+		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-exit-id-match-configured",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-exit-id-match-configured",
+		ExitScope:  []string{"exit-alt-1", req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "json",
+		exitRelayID:   req.ExitID,
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Accepted {
+		t.Fatalf("expected successful path-open when exit identity matches configured EXIT_RELAY_ID, got %+v", resp)
+	}
+	if resp.SessionKeyID == "" {
+		t.Fatalf("expected session key id on success")
+	}
+	if resp.Transport != "policy-json" {
+		t.Fatalf("transport=%q want=policy-json", resp.Transport)
+	}
+	if _, exists := s.sessions[req.SessionID]; !exists {
+		t.Fatalf("expected accepted path-open to create session")
+	}
+}
+
+func TestHandlePathOpenRejectsOpaqueModeWhenPortPolicyClaimsPresent(t *testing.T) {
+	tests := []struct {
+		name       string
+		allowPorts []int
+		denyPorts  []int
+	}{
+		{
+			name:       "allow ports",
+			allowPorts: []int{443},
+		},
+		{
+			name:      "deny ports",
+			denyPorts: []int{25},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+			if err != nil {
+				t.Fatalf("issuer keygen: %v", err)
+			}
+			popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+			if err != nil {
+				t.Fatalf("pop keygen: %v", err)
+			}
+
+			req := proto.PathOpenRequest{
+				ExitID:          "exit-local-1",
+				MiddleRelayID:   "middle-local-1",
+				TokenProofNonce: "nonce-open-opaque-port-policy-reject",
+				ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+				Transport:       "wireguard-udp",
+				RequestedMTU:    1280,
+				RequestedRegion: "local",
+				SessionID:       "sid-open-opaque-port-policy-reject",
+			}
+			claims := crypto.CapabilityClaims{
+				Issuer:     "issuer-local",
+				Audience:   "exit",
+				TokenType:  crypto.TokenTypeClientAccess,
+				CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+				Tier:       1,
+				ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+				TokenID:    "jti-open-opaque-port-policy-reject",
+				ExitScope:  []string{req.ExitID},
+				AllowPorts: tc.allowPorts,
+				DenyPorts:  tc.denyPorts,
+			}
+			body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+			s := &Service{
+				dataMode:      "opaque",
+				exitRelayID:   req.ExitID,
+				issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+				issuerPub:     issuerPub,
+				sessions:      map[string]sessionInfo{},
+				enforcer:      policy.NewEnforcer(),
+				revokedJTI:    map[string]int64{},
+				minTokenEpoch: map[string]int64{},
+				wgManager:     wg.NewNoopManager(),
+			}
+			httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+			rr := httptest.NewRecorder()
+			s.handlePathOpen(rr, httpReq)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			var resp proto.PathOpenResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.Accepted {
+				t.Fatalf("expected opaque mode rejection when port policy claims are present, got %+v", resp)
+			}
+			if resp.Reason != "opaque mode cannot enforce port policy" {
+				t.Fatalf("reason=%q want=opaque mode cannot enforce port policy", resp.Reason)
+			}
+			if _, exists := s.sessions[req.SessionID]; exists {
+				t.Fatalf("expected rejected path-open to avoid creating session")
+			}
+		})
+	}
+}
+
+func TestHandlePathOpenAcceptsOpaqueModeWhenPortPolicyClaimsAbsent(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-opaque-port-policy-allow",
+		ClientInnerPub:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		Transport:       "wireguard-udp",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-opaque-port-policy-allow",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-opaque-port-policy-allow",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "opaque",
+		exitRelayID:   req.ExitID,
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+		wgManager:     wg.NewNoopManager(),
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Accepted {
+		t.Fatalf("expected opaque mode success when no port policy claims are present, got %+v", resp)
+	}
+	if resp.Transport != "wireguard-udp" {
+		t.Fatalf("transport=%q want=wireguard-udp", resp.Transport)
 	}
 	if _, exists := s.sessions[req.SessionID]; !exists {
 		t.Fatalf("expected accepted path-open to create session")
@@ -3049,6 +3331,20 @@ func TestValidateRuntimeConfigRejectsStrictModeWithEmptyExitRelayID(t *testing.T
 	}
 }
 
+func TestValidateRuntimeConfigAllowsNonStrictModeWithEmptyExitRelayID(t *testing.T) {
+	s := &Service{
+		dataMode:     "opaque",
+		wgBackend:    "command",
+		wgPrivateKey: "/tmp/wg-exit.key",
+		exitRelayID:  " ",
+		betaStrict:   false,
+		prodStrict:   false,
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected non-strict mode with empty EXIT_RELAY_ID to validate, got %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing.T) {
 	s := &Service{
 		betaStrict:            true,
@@ -3702,6 +3998,51 @@ func TestRefreshIssuerKeysRequiresOperatorQuorum(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "issuer operator quorum not met") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshIssuerKeysRequiresIssuerIdentityForOperatorQuorum(t *testing.T) {
+	srvMissing := newIssuerPubKeyServer(t, "")
+	defer srvMissing.Close()
+	srvKnown := newIssuerPubKeyServer(t, "issuer-known")
+	defer srvKnown.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srvMissing.URL, srvKnown.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 2,
+		httpClient:         &http.Client{Timeout: 100 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	err := s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected operator quorum failure when source lacks issuer identity")
+	}
+	if !strings.Contains(err.Error(), "issuer operator quorum not met") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshIssuerKeysSingleOperatorQuorumAllowsMissingIssuerIdentity(t *testing.T) {
+	srv := newIssuerPubKeyServer(t, "")
+	defer srv.Close()
+
+	s := &Service{
+		issuerURLs:         []string{srv.URL},
+		issuerMinSources:   1,
+		issuerMinOperators: 1,
+		httpClient:         &http.Client{Timeout: 100 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	if err := s.refreshIssuerKeys(context.Background()); err != nil {
+		t.Fatalf("expected refresh success with single-operator quorum, got %v", err)
+	}
+	if len(s.issuerPubs) == 0 {
+		t.Fatalf("expected issuer keys populated")
 	}
 }
 

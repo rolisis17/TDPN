@@ -29,7 +29,7 @@ func TestNewFileStoreRejectsEvidenceKeyIDMismatch(t *testing.T) {
 	t.Parallel()
 
 	storePath := filepath.Join(t.TempDir(), "vpnslashing.json")
-	payload := `{"evidence":{"evidence-key":{"EvidenceID":"different-id","ProviderID":"provider-1","Kind":"objective","ProofHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","ViolationType":"double-sign"}}}`
+	payload := `{"evidence":{"evidence-key":{"EvidenceID":"different-id","ProviderID":"provider-1","SessionID":"session-1","Kind":"objective","ProofHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","ViolationType":"double-sign"}}}`
 	if err := os.WriteFile(storePath, []byte(payload), 0o600); err != nil {
 		t.Fatalf("write seeded snapshot: %v", err)
 	}
@@ -52,6 +52,7 @@ func TestNewFileStoreRejectsPenaltyReferencingMissingEvidence(t *testing.T) {
     "evidence-1": {
       "EvidenceID":"evidence-1",
       "ProviderID":"provider-1",
+      "SessionID":"session-1",
       "Kind":"objective",
       "ProofHash":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       "ViolationType":"double-sign"

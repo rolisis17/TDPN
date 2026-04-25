@@ -294,6 +294,41 @@ func TestMsgServerRecordValidatorStatusEligibilityNotFoundPropagation(t *testing
 	}
 }
 
+func TestMsgServerRecordValidatorStatusFailsClosedWhenEligibilityHasNoOperatorSubject(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	k.UpsertEligibility(types.ValidatorEligibility{
+		ValidatorID: "val-no-operator-subject",
+		Eligible:    true,
+	})
+
+	resp, err := server.RecordValidatorStatus(RecordValidatorStatusRequest{
+		Record: types.ValidatorStatusRecord{
+			StatusID:        "status-no-operator-subject",
+			ValidatorID:     "val-no-operator-subject",
+			LifecycleStatus: types.ValidatorLifecycleActive,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed unauthorized validator status error")
+	}
+	if !errors.Is(err, ErrUnauthorizedStatusRecord) {
+		t.Fatalf("expected ErrUnauthorizedStatusRecord, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on unauthorized validator status")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on unauthorized validator status")
+	}
+	if _, ok := k.GetStatusRecord("status-no-operator-subject"); ok {
+		t.Fatal("expected no status write on unauthorized validator status")
+	}
+}
+
 func TestMsgServerNilKeeper(t *testing.T) {
 	t.Parallel()
 

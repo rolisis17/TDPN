@@ -52,6 +52,7 @@ func TestProtoMsgServerAdapterFinalizeUsage(t *testing.T) {
 	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-2",
+			SponsorId:     "sponsor-adapter-2",
 			SessionId:     "sess-2",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -95,6 +96,7 @@ func TestProtoMsgServerAdapterReserveCreditsIgnoresClientSuppliedStatus(t *testi
 	resp, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-status-1",
+			SponsorId:     "sponsor-adapter-status-1",
 			SessionId:     "sess-status-1",
 			Amount:        100,
 			Status:        pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
@@ -117,6 +119,7 @@ func TestProtoMsgServerAdapterFinalizeUsageIgnoresClientSuppliedStatus(t *testin
 	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-status-2",
+			SponsorId:     "sponsor-adapter-status-2",
 			SessionId:     "sess-status-2",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -152,6 +155,7 @@ func TestProtoMsgServerAdapterFinalizeUsageRejectsZeroBilledAmount(t *testing.T)
 	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-zero-amount",
+			SponsorId:     "sponsor-adapter-zero-amount",
 			SessionId:     "sess-zero-amount",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -330,6 +334,7 @@ func TestProtoMsgServerAdapterReserveCreditsConflict(t *testing.T) {
 	seed := &pb.MsgReserveCreditsRequest{
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-3",
+			SponsorId:     "sponsor-adapter-3",
 			SessionId:     "sess-3",
 			Amount:        100,
 		},
@@ -341,6 +346,7 @@ func TestProtoMsgServerAdapterReserveCreditsConflict(t *testing.T) {
 	resp, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
 		Reservation: &pb.CreditReservation{
 			ReservationId: "res-adapter-3",
+			SponsorId:     "sponsor-adapter-3",
 			SessionId:     "sess-3",
 			Amount:        101,
 		},

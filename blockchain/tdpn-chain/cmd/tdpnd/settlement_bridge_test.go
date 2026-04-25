@@ -712,6 +712,27 @@ func TestRunTDPNDSettlementHTTPAuthPrincipalBindsIdentityFields(t *testing.T) {
 	}
 	expectJSONStringField(t, payload, "accrual", "ProviderID", canonicalPrincipal)
 
+	slashingMismatchBody := `{"EvidenceID":"ev-principal-mismatch-1","SubjectID":"other-principal","SessionID":"sess-principal-5","ViolationType":"double-sign","EvidenceRef":"sha256:ab2607bc705f27357f7b1dd2089fbb6f9d33af74d05574f2d2f9c1ca4f31e22c","ObservedAt":"2026-01-01T00:00:05Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnslashing/evidence", slashingMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected slashing subject caller mismatch to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "SubjectID must match authenticated caller" {
+		t.Fatalf("expected slashing subject mismatch error, got %q", got)
+	}
+
+	slashingAutofillBody := `{"EvidenceID":"ev-principal-ok-1","SessionID":"sess-principal-6","ViolationType":"double-sign","EvidenceRef":"sha256:ce1ad56555311a8b138899bc99700d80aa1b55950daeab84a859a0c9f5fca6db","ObservedAt":"2026-01-01T00:00:06Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnslashing/evidence", slashingAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected slashing subject caller autofill to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnslashing/evidence/ev-principal-ok-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected slashing evidence by-id get to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "evidence", "ProviderID", canonicalPrincipal)
+
 	policyBody := `{"PolicyID":"policy-principal-1","Title":"auth-principal-policy","Description":"identity binding policy seed","Version":1,"ActivatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}`
 	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpngovernance/policies", policyBody, authHeaders)
 	if status != http.StatusOK {
@@ -759,6 +780,109 @@ func TestRunTDPNDSettlementHTTPAuthPrincipalBindsIdentityFields(t *testing.T) {
 		t.Fatalf("expected governance audit by-id get to return 200, got %d payload=%v", status, payload)
 	}
 	expectJSONStringField(t, payload, "action", "Actor", canonicalPrincipal)
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestRunTDPNDSettlementHTTPAuthPrincipalSettlementAndSlashEdgeCases(t *testing.T) {
+	const authToken = "bridge-edge-token"
+	const authPrincipal = "  Bridge-Edge-Principal  "
+	const canonicalPrincipal = "bridge-edge-principal"
+
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	scaffold := app.NewChainScaffold()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{
+				"--settlement-http-listen", "settlement-auth-principal-edge-test",
+				"--settlement-http-auth-token", authToken,
+				"--settlement-http-auth-principal", authPrincipal,
+			},
+			nil,
+			func() chainScaffold { return scaffold },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-auth-principal-edge-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+	authHeaders := map[string]string{"Authorization": "Bearer " + authToken}
+
+	seedBillingReservation(t, scaffold, "billing-res-edge-1", "sess-edge-1", canonicalPrincipal, "uusdc", 700)
+
+	settlementMismatchBody := `{"SettlementID":"settlement-edge-mismatch-1","ReservationID":"billing-res-edge-1","SessionID":"sess-edge-1","SubjectID":"  BRIDGE-EDGE-OTHER  ","ChargedMicros":700,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:00Z"}`
+	status, payload := doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnbilling/settlements", settlementMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected settlement subject mismatch edge case to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "SubjectID must match authenticated caller" {
+		t.Fatalf("expected settlement subject mismatch error, got %q", got)
+	}
+
+	settlementWhitespaceAutofillBody := `{"SettlementID":"settlement-edge-autofill-1","ReservationID":"billing-res-edge-1","SessionID":"sess-edge-1","SubjectID":"   ","ChargedMicros":700,"Currency":"uusdc","SettledAt":"2026-01-01T00:00:01Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnbilling/settlements", settlementWhitespaceAutofillBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected settlement whitespace subject autofill to return 200, got %d payload=%v", status, payload)
+	}
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnbilling/settlements/settlement-edge-autofill-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected settlement by-id get after whitespace autofill to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "settlement", "SettlementID", "settlement-edge-autofill-1")
+
+	slashingMismatchBody := `{"EvidenceID":"ev-edge-mismatch-1","SubjectID":"  BRIDGE-EDGE-OTHER  ","SessionID":"sess-edge-2","ViolationType":"double-sign","EvidenceRef":"sha256:ab2607bc705f27357f7b1dd2089fbb6f9d33af74d05574f2d2f9c1ca4f31e22c","ObservedAt":"2026-01-01T00:00:02Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnslashing/evidence", slashingMismatchBody, authHeaders)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected slashing subject mismatch edge case to return 403, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "SubjectID must match authenticated caller" {
+		t.Fatalf("expected slashing subject mismatch error, got %q", got)
+	}
+
+	slashingWhitespaceAutofillWithObjProofBody := `{"EvidenceID":"ev-edge-autofill-1","SubjectID":"   ","SessionID":"sess-edge-3","ViolationType":"  DOWNTIME-PROOF  ","EvidenceRef":"   obj://bridge/edge/proof-1   ","ObservedAt":"2026-01-01T00:00:03Z"}`
+	status, payload = doJSONRequest(t, http.MethodPost, baseURL+"/x/vpnslashing/evidence", slashingWhitespaceAutofillWithObjProofBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected slashing whitespace subject autofill with objective proof to return 200, got %d payload=%v", status, payload)
+	}
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnslashing/evidence/ev-edge-autofill-1", "", authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected slashing evidence by-id get after whitespace autofill to return 200, got %d payload=%v", status, payload)
+	}
+	expectJSONStringField(t, payload, "evidence", "ProviderID", canonicalPrincipal)
+	expectJSONStringField(t, payload, "evidence", "ProofHash", "obj://bridge/edge/proof-1")
+	expectJSONStringField(t, payload, "evidence", "ViolationType", "downtime-proof")
+	expectJSONStringField(t, payload, "evidence", "Kind", slashingtypes.EvidenceKindObjective)
 
 	cancel()
 	select {
@@ -2419,6 +2543,98 @@ func TestRunTDPNDGRPCAndSettlementHTTPTogether(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
+func TestBindIdentityFieldToAuthenticatedCallerEdgeCases(t *testing.T) {
+	tests := []struct {
+		name                   string
+		rawFieldValue          string
+		authenticatedPrincipal string
+		wantBoundValue         string
+		wantAllowed            bool
+	}{
+		{
+			name:                   "no authenticated principal returns trimmed field",
+			rawFieldValue:          "  Raw-Subject  ",
+			authenticatedPrincipal: "",
+			wantBoundValue:         "Raw-Subject",
+			wantAllowed:            true,
+		},
+		{
+			name:                   "empty field autofills canonical principal",
+			rawFieldValue:          "   ",
+			authenticatedPrincipal: "  Bridge-Subject-1  ",
+			wantBoundValue:         "bridge-subject-1",
+			wantAllowed:            true,
+		},
+		{
+			name:                   "case-insensitive principal match canonicalizes output",
+			rawFieldValue:          " BRIDGE-SUBJECT-1 ",
+			authenticatedPrincipal: " bridge-subject-1 ",
+			wantBoundValue:         "bridge-subject-1",
+			wantAllowed:            true,
+		},
+		{
+			name:                   "mismatched principal is rejected",
+			rawFieldValue:          "bridge-subject-2",
+			authenticatedPrincipal: "bridge-subject-1",
+			wantBoundValue:         "",
+			wantAllowed:            false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotBoundValue, gotAllowed := bindIdentityFieldToAuthenticatedCaller(tc.rawFieldValue, tc.authenticatedPrincipal)
+			if gotAllowed != tc.wantAllowed {
+				t.Fatalf("expected allowed=%t, got %t (boundValue=%q)", tc.wantAllowed, gotAllowed, gotBoundValue)
+			}
+			if gotBoundValue != tc.wantBoundValue {
+				t.Fatalf("expected bound value %q, got %q", tc.wantBoundValue, gotBoundValue)
+			}
+		})
+	}
+}
+
+func TestValidateBridgeSlashEvidenceRefEdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		proofHash string
+		wantErr   bool
+	}{
+		{
+			name:      "accepts sha256 objective proof",
+			proofHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			wantErr:   false,
+		},
+		{
+			name:      "accepts obj objective proof",
+			proofHash: "obj://bridge/edge/proof-2",
+			wantErr:   false,
+		},
+		{
+			name:      "rejects legacy proof format",
+			proofHash: "legacy-proof-format",
+			wantErr:   true,
+		},
+		{
+			name:      "rejects obj proof with whitespace in path",
+			proofHash: "obj://bridge/edge/proof with-space",
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateBridgeSlashEvidenceRef(tc.proofHash)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error for proof hash %q", tc.proofHash)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected no error for proof hash %q, got %v", tc.proofHash, err)
+			}
+		})
 	}
 }
 

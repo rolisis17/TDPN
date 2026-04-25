@@ -183,6 +183,7 @@ func TestMsgServerFinalizeUsageIdempotentReplay(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-6",
+			SponsorID:     "sponsor-6",
 			SessionID:     "sess-6",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -247,6 +248,7 @@ func TestMsgServerFinalizeUsageConflictPropagation(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-8",
+			SponsorID:     "sponsor-8",
 			SessionID:     "sess-8",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -308,6 +310,45 @@ func TestMsgServerFinalizeUsageMissingReservationPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerFinalizeUsageFailsClosedWhenReservationHasNoSponsorSubject(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	k.UpsertReservation(types.CreditReservation{
+		ReservationID: "res-no-sponsor-subject",
+		SessionID:     "sess-no-sponsor-subject",
+		AssetDenom:    "uusdc",
+		Amount:        50,
+	})
+
+	resp, err := server.FinalizeUsage(FinalizeUsageRequest{
+		Settlement: types.SettlementRecord{
+			SettlementID:  "set-no-sponsor-subject",
+			ReservationID: "res-no-sponsor-subject",
+			SessionID:     "sess-no-sponsor-subject",
+			BilledAmount:  25,
+			AssetDenom:    "uusdc",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed unauthorized settlement error")
+	}
+	if !errors.Is(err, ErrUnauthorizedSettlement) {
+		t.Fatalf("expected ErrUnauthorizedSettlement, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on unauthorized settlement")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on unauthorized settlement")
+	}
+	if _, ok := k.GetSettlement("set-no-sponsor-subject"); ok {
+		t.Fatal("expected no settlement write on unauthorized settlement")
+	}
+}
+
 func TestMsgServerFinalizeUsageSessionMismatchPropagation(t *testing.T) {
 	t.Parallel()
 
@@ -317,6 +358,7 @@ func TestMsgServerFinalizeUsageSessionMismatchPropagation(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-10",
+			SponsorID:     "sponsor-10",
 			SessionID:     "sess-10",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -351,6 +393,7 @@ func TestMsgServerFinalizeUsageNegativeUsageBytesPropagation(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-negative-usage-msg",
+			SponsorID:     "sponsor-negative-usage-msg",
 			SessionID:     "sess-negative-usage-msg",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -386,6 +429,7 @@ func TestMsgServerFinalizeUsageEmptyAssetDenomPropagation(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-empty-denom-msg",
+			SponsorID:     "sponsor-empty-denom-msg",
 			SessionID:     "sess-empty-denom-msg",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -420,6 +464,7 @@ func TestMsgServerFinalizeUsageAssetDenomMismatchPropagation(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-11",
+			SponsorID:     "sponsor-11",
 			SessionID:     "sess-11",
 			AssetDenom:    "uusdc",
 			Amount:        100,
@@ -454,6 +499,7 @@ func TestMsgServerFinalizeUsageOverchargePropagation(t *testing.T) {
 	if _, err := server.ReserveCredits(ReserveCreditsRequest{
 		Reservation: types.CreditReservation{
 			ReservationID: "res-12",
+			SponsorID:     "sponsor-12",
 			SessionID:     "sess-12",
 			AssetDenom:    "uusdc",
 			Amount:        100,

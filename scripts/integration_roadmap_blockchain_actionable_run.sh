@@ -5,8 +5,23 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 # Keep strict fail-closed scenarios hermetic from ambient shell env drift flags.
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_RECOMMENDED_GATE_DRIFT || true
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_REFRESH_EVIDENCE_COMMAND_DRIFT || true
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_UNSAFE_SHELL_COMMANDS
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_MAX_ACTIONS
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_READY_FILE
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRINT_SUMMARY_JSON
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_RECOMMENDED_ONLY
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_REPORTS_DIR
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_REPORT_MD
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SUMMARY_JSON
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_SUMMARY_JSON
 
 for cmd in bash jq mktemp chmod mkdir cat grep timeout date ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -644,9 +659,6 @@ fi
 
 if [[ "$SYMLINK_ESCAPE_MODE" == "symlink" ]]; then
   echo "[roadmap-blockchain-actionable-run] symlinked action path remains fail-closed"
-else
-  echo "[roadmap-blockchain-actionable-run] symlink unsupported; outside-scripts action path remains fail-closed"
-fi
 SUMMARY_SYMLINK_REJECT="$TMP_DIR/summary_symlink_reject.json"
 REPORTS_SYMLINK_REJECT="$TMP_DIR/reports_symlink_reject"
 rm -f "$SYMLINK_ESCAPE_MARKER"
@@ -784,6 +796,9 @@ if ! grep -F -- "validated_path_initial: $TOCTOU_SAFE_HELPER" "$TOCTOU_ACTION_LO
   cat "$TOCTOU_ACTION_LOG"
   cat "$TOCTOU_RUN_LOG"
   exit 1
+fi
+else
+  echo "[roadmap-blockchain-actionable-run] symlink and TOCTOU checks skipped (symlink unsupported in current environment)"
 fi
 
 echo "[roadmap-blockchain-actionable-run] refresh-evidence path"

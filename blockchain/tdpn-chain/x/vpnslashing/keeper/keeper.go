@@ -118,9 +118,13 @@ func (k *Keeper) UpsertPenalty(record types.PenaltyDecision) {
 }
 
 func (k *Keeper) UpsertPenaltyWithError(record types.PenaltyDecision) error {
+	record = normalizePenaltyForUpsert(record)
+	if err := record.ValidateBasic(); err != nil {
+		return err
+	}
+
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	record = normalizePenaltyForUpsert(record)
 	return k.upsertPenaltyLocked(record)
 }
 

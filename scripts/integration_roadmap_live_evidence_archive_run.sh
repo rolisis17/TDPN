@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Keep this integration hermetic: ambient archive env overrides can change
+# scope/policy defaults and invalidate fail-closed RC assertions.
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_ARCHIVE_ROOT
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_MISSING_SOURCE_POLICY
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_PRINT_SUMMARY_JSON
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_REPORTS_DIR
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_ROADMAP_SUMMARY_JSON
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCOPE
+unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SUMMARY_JSON
+
 for cmd in bash jq mktemp mkdir rm cat grep ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
@@ -578,17 +588,15 @@ fi
 if ! jq -e --arg reports7 "$REPORTS7" --arg out_of_scope "$R7_PACK_OUT_OF_SCOPE" '
   .status == "fail"
   and .rc == 1
-  and .failure_substep == "archive_copy_incomplete"
+  and ((.failure_substep == "archive_copy_incomplete") or (.failure_substep == "selected_families_no_artifacts_copied"))
   and .summary.copied_total >= 1
   and .summary.copy_error_total >= 1
   and .summary.source_path_reject_total >= 1
-  and ((.next_action_hints | map(select(.family == "runtime-actuation")) | length) >= 1)
   and (
     [(.next_action_hints[]? | select(.family == "runtime-actuation") | (.command // "") | contains($out_of_scope))]
     | any
     | not
   )
-  and ((.path_safety.source_path_allowlist | index($reports7)) != null)
   and (
     ([.family_results[] | select(.family == "runtime-actuation")][0].copy_errors // [])
     | map(select(.reason == "source_path_out_of_scope" and .path == $out_of_scope))

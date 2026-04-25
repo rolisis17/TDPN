@@ -339,6 +339,43 @@ func TestMsgServerDistributeRewardMissingAccrualPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerDistributeRewardFailsClosedWhenAccrualHasNoProviderSubject(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	k.UpsertAccrual(types.RewardAccrual{
+		AccrualID:  "acc-no-provider-subject",
+		SessionID:  "sess-no-provider-subject",
+		AssetDenom: "uusdc",
+		Amount:     10,
+	})
+
+	resp, err := server.DistributeReward(DistributeRewardRequest{
+		Distribution: types.DistributionRecord{
+			DistributionID: "dist-no-provider-subject",
+			AccrualID:      "acc-no-provider-subject",
+			PayoutRef:      "payout-no-provider-subject",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed unauthorized distribution error")
+	}
+	if !errors.Is(err, ErrUnauthorizedDistribution) {
+		t.Fatalf("expected ErrUnauthorizedDistribution, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on unauthorized distribution")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on unauthorized distribution")
+	}
+	if _, ok := k.GetDistribution("dist-no-provider-subject"); ok {
+		t.Fatal("expected no distribution write on unauthorized distribution")
+	}
+}
+
 func TestMsgServerNilKeeper(t *testing.T) {
 	t.Parallel()
 

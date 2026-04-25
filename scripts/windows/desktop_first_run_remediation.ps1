@@ -1,6 +1,7 @@
 param(
   [switch]$Compact,
   [switch]$Apply,
+  [switch]$DryRun,
   [switch]$FailOnIssues,
   [switch]$PrintSummaryJson
 )
@@ -41,6 +42,281 @@ function Get-CommandPath {
   return ""
 }
 
+function Normalize-NodeCommandPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$CommandName,
+    [AllowEmptyString()]
+    [string]$PathValue
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return ""
+  }
+
+  $normalizedCommand = $CommandName.Trim().ToLowerInvariant()
+  if ($normalizedCommand -notin @("npm", "npm.cmd", "npx", "npx.cmd")) {
+    return $PathValue
+  }
+
+  $leaf = [System.IO.Path]::GetFileName($PathValue)
+  $isNpmCommand = $normalizedCommand.StartsWith("npm")
+  $isNpxCommand = $normalizedCommand.StartsWith("npx")
+
+  $isPowerShellShim = $false
+  if ($isNpmCommand -and $leaf.Equals("npm.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $isPowerShellShim = $true
+  } elseif ($isNpxCommand -and $leaf.Equals("npx.ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $isPowerShellShim = $true
+  }
+
+  if (-not $isPowerShellShim) {
+    return $PathValue
+  }
+
+  $parent = Split-Path -Parent $PathValue
+  if ([string]::IsNullOrWhiteSpace($parent)) {
+    return ""
+  }
+
+  $siblingLeaf = if ($isNpmCommand) { "npm.cmd" } else { "npx.cmd" }
+  $siblingCmd = Join-Path $parent $siblingLeaf
+  if (Test-Path -LiteralPath $siblingCmd -PathType Leaf) {
+    return $siblingCmd
+  }
+
+  return ""
+}
+
+function Refresh-SessionPath {
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $segments = @()
+
+  if (-not [string]::IsNullOrWhiteSpace($machinePath)) {
+    $segments += $machinePath.Split(";")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($userPath)) {
+    $segments += $userPath.Split(";")
+  }
+
+  $seen = @{}
+  $normalized = @()
+  foreach ($segment in $segments) {
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      continue
+    }
+    $trimmed = $segment.Trim()
+    if ($trimmed.Length -eq 0) {
+      continue
+    }
+    $key = $trimmed.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $normalized += $trimmed
+  }
+
+  $env:Path = ($normalized -join ";")
+}
+
+function Get-CommonToolDirectories {
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $userProfile = [Environment]::GetFolderPath("UserProfile")
+  $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
+
+  $candidates = @(
+    (Join-Path $programFiles "Go\bin"),
+    (Join-Path $programFilesX86 "Go\bin"),
+    (Join-Path $systemDrive "Go\bin"),
+    (Join-Path $programFiles "nodejs"),
+    (Join-Path $programFilesX86 "nodejs"),
+    (Join-Path $systemDrive "nodejs"),
+    (Join-Path $userProfile ".cargo\bin"),
+    (Join-Path $programFiles "Git"),
+    (Join-Path $programFiles "Git\cmd"),
+    (Join-Path $programFiles "Git\bin"),
+    (Join-Path $programFiles "Git\usr\bin"),
+    (Join-Path $programFilesX86 "Git"),
+    (Join-Path $programFilesX86 "Git\cmd"),
+    (Join-Path $programFilesX86 "Git\bin"),
+    (Join-Path $programFilesX86 "Git\usr\bin")
+  )
+
+  $dirs = @()
+  $seen = @{}
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+      continue
+    }
+    $normalized = $candidate.TrimEnd("\")
+    $key = $normalized.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $dirs += $normalized
+  }
+
+  return $dirs
+}
+
+function Add-SessionPathSegments {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Segments
+  )
+
+  if ($Segments.Count -eq 0) {
+    return
+  }
+
+  $existing = @()
+  if (-not [string]::IsNullOrWhiteSpace($env:Path)) {
+    $existing = $env:Path.Split(";")
+  }
+
+  $seen = @{}
+  $normalized = @()
+  foreach ($segment in @($existing + $Segments)) {
+    if ([string]::IsNullOrWhiteSpace($segment)) {
+      continue
+    }
+    $trimmed = $segment.Trim().TrimEnd("\")
+    if ($trimmed.Length -eq 0) {
+      continue
+    }
+    $key = $trimmed.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) {
+      continue
+    }
+    $seen[$key] = $true
+    $normalized += $trimmed
+  }
+
+  $env:Path = ($normalized -join ";")
+}
+
+function Resolve-ToolPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+    [switch]$AllowWindowsAppsAlias
+  )
+
+  $nameLower = $Name.ToLowerInvariant()
+  $path = Get-CommandPath $Name
+  if ($nameLower -in @("npm", "npm.cmd", "npx", "npx.cmd")) {
+    $path = Normalize-NodeCommandPath -CommandName $nameLower -PathValue $path
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($path)) {
+    if ($AllowWindowsAppsAlias -or $path -notmatch '\\WindowsApps\\') {
+      return $path
+    }
+  }
+
+  $programFiles = [Environment]::GetFolderPath("ProgramFiles")
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+  $userProfile = [Environment]::GetFolderPath("UserProfile")
+  $systemDrive = [Environment]::GetEnvironmentVariable("SystemDrive", "Process")
+
+  $candidates = @()
+  switch ($nameLower) {
+    "winget" {
+      $candidates = @(
+        (Join-Path $localAppData "Microsoft\WindowsApps\winget.exe")
+      )
+    }
+    "go" {
+      $candidates = @(
+        (Join-Path $programFiles "Go\bin\go.exe"),
+        (Join-Path $programFilesX86 "Go\bin\go.exe"),
+        (Join-Path $systemDrive "Go\bin\go.exe")
+      )
+    }
+    "node" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\node.exe"),
+        (Join-Path $programFilesX86 "nodejs\node.exe"),
+        (Join-Path $systemDrive "nodejs\node.exe")
+      )
+    }
+    "npm" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "npm.cmd" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npm.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npm.cmd"),
+        (Join-Path $systemDrive "nodejs\npm.cmd")
+      )
+    }
+    "npx" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npx.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npx.cmd"),
+        (Join-Path $systemDrive "nodejs\npx.cmd")
+      )
+    }
+    "npx.cmd" {
+      $candidates = @(
+        (Join-Path $programFiles "nodejs\npx.cmd"),
+        (Join-Path $programFilesX86 "nodejs\npx.cmd"),
+        (Join-Path $systemDrive "nodejs\npx.cmd")
+      )
+    }
+    "rustc" {
+      $candidates = @(
+        (Join-Path $userProfile ".cargo\bin\rustc.exe")
+      )
+    }
+    "cargo" {
+      $candidates = @(
+        (Join-Path $userProfile ".cargo\bin\cargo.exe")
+      )
+    }
+    "bash.exe" {
+      $candidates = @(
+        (Join-Path $programFiles "Git\bin\bash.exe"),
+        (Join-Path $programFiles "Git\usr\bin\bash.exe"),
+        (Join-Path $programFilesX86 "Git\bin\bash.exe"),
+        (Join-Path $programFilesX86 "Git\usr\bin\bash.exe")
+      )
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      continue
+    }
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
+function Resolve-NpmCommandPath {
+  $npmCmd = Resolve-ToolPath -Name "npm.cmd"
+  if (-not [string]::IsNullOrWhiteSpace($npmCmd)) {
+    return $npmCmd
+  }
+
+  return (Resolve-ToolPath -Name "npm")
+}
+
 function Get-CommandPs1CmdSiblingStatus {
   param(
     [Parameter(Mandatory = $true)][string]$CommandName,
@@ -77,6 +353,7 @@ function Invoke-SessionCmdAliasRemediation {
   param(
     [Parameter(Mandatory = $true)][string]$CommandName,
     [Parameter(Mandatory = $true)][bool]$ApplyRequested,
+    [Parameter(Mandatory = $false)][bool]$DryRunMode = $false,
     [Parameter(Mandatory = $true)][bool]$ExecutionPolicyRisk,
     [Parameter(Mandatory = $true)][bool]$ResolvesToPs1,
     [Parameter(Mandatory = $false)][string]$CmdSiblingPath = ""
@@ -98,6 +375,11 @@ function Invoke-SessionCmdAliasRemediation {
   }
   if (-not $ApplyRequested) {
     $result.reason = "apply_not_requested"
+    return [pscustomobject]$result
+  }
+  if ($DryRunMode) {
+    $result.attempted = $true
+    $result.reason = "dry_run"
     return [pscustomobject]$result
   }
   if ([string]::IsNullOrWhiteSpace($CmdSiblingPath)) {
@@ -342,6 +624,68 @@ function Test-TauriBundleIconConfigured {
 
 function Get-TauriBundleIconRepairCommand {
   return 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg=''apps/desktop/src-tauri/tauri.conf.json''; $json=Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json; if($null -eq $json.bundle){$json | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{})}; $icons=@(); if($null -ne $json.bundle.icon){$icons=@($json.bundle.icon)}; if($icons -notcontains ''icons/icon.ico''){$json.bundle.icon=@($icons + ''icons/icon.ico'')}; $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $cfg -Encoding UTF8"'
+}
+
+function Ensure-TauriBundleIconResource {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$TauriConfigPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedIconRelativePath
+  )
+
+  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
+    throw "tauri config missing: $TauriConfigPath"
+  }
+
+  $config = Get-Content -Raw -LiteralPath $TauriConfigPath | ConvertFrom-Json -ErrorAction Stop
+  $changed = $false
+
+  if ($null -eq $config.bundle) {
+    $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{}) -Force
+    $changed = $true
+  }
+
+  $icons = @()
+  if ($null -ne $config.bundle.icon) {
+    foreach ($iconValue in @($config.bundle.icon)) {
+      if ($null -eq $iconValue) {
+        continue
+      }
+      $iconText = [string]$iconValue
+      if ([string]::IsNullOrWhiteSpace($iconText)) {
+        continue
+      }
+      $icons += $iconText.Trim()
+    }
+  }
+
+  $expectedNormalized = $ExpectedIconRelativePath.Replace("\", "/").Trim().ToLowerInvariant()
+  $hasExpected = $false
+  foreach ($icon in $icons) {
+    $normalized = [string]$icon
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+      continue
+    }
+    $normalized = $normalized.Trim().Replace("\", "/").ToLowerInvariant()
+    if ($normalized -eq $expectedNormalized) {
+      $hasExpected = $true
+      break
+    }
+  }
+
+  if (-not $hasExpected) {
+    $icons += $ExpectedIconRelativePath
+    $config.bundle | Add-Member -NotePropertyName icon -NotePropertyValue @($icons) -Force
+    $changed = $true
+  }
+
+  if ($changed) {
+    $jsonOut = $config | ConvertTo-Json -Depth 20
+    Set-Content -LiteralPath $TauriConfigPath -Value $jsonOut -Encoding UTF8
+  }
+
+  return $changed
 }
 
 function Get-DesktopAssetSnapshot {

@@ -855,6 +855,17 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 		return
 	}
 	subjectID := strings.TrimSpace(payload.SubjectID)
+	if authenticatedPrincipal := h.authenticatedPrincipal(); authenticatedPrincipal != "" {
+		boundSubjectID, ok := bindIdentityFieldToAuthenticatedCaller(subjectID, authenticatedPrincipal)
+		if !ok {
+			writeJSON(w, http.StatusForbidden, bridgeEnvelope{
+				OK:    false,
+				Error: "SubjectID must match authenticated caller",
+			})
+			return
+		}
+		subjectID = boundSubjectID
+	}
 	if subjectID == "" {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "subject_id is required"})
 		return
@@ -1588,12 +1599,10 @@ func normalizeEpochSelectionResult(result validatortypes.EpochSelectionResult) v
 }
 
 func validateBridgeSlashEvidenceRef(proofHash string) error {
-	return (slashingtypes.SlashEvidence{
-		EvidenceID:    "bridge-validation",
-		Kind:          slashingtypes.EvidenceKindObjective,
-		ViolationType: "double-sign",
-		ProofHash:     proofHash,
-	}).ValidateBasic()
+	if !chaintypes.IsObjectiveEvidenceFormat(proofHash) {
+		return errors.New("proof hash must use objective format (sha256:<value> or obj://<value>)")
+	}
+	return nil
 }
 
 var bridgeObjectiveViolationTypeSet = map[string]struct{}{

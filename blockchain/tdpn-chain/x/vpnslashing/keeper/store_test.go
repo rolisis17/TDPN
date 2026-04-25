@@ -152,6 +152,8 @@ func TestKeeperSubmitAndApplyUseCustomStoreWithEvidenceProgression(t *testing.T)
 
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-2",
+		ProviderID:    "provider-2",
+		SessionID:     "session-2",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-2"),
 		ViolationType: "double-sign",
@@ -200,6 +202,8 @@ func TestApplyPenaltyFileStorePersistsEvidenceAdvanceAndPenaltyAtomically(t *tes
 
 	evidence, err := k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-file-atomic-1",
+		ProviderID:    "provider-file-atomic-1",
+		SessionID:     "session-file-atomic-1",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-file-atomic-1"),
 		ViolationType: "double-sign",
@@ -244,6 +248,8 @@ func TestApplyPenaltyFileStoreAtomicPersistFailureLeavesDurableStateUnchanged(t 
 	evidenceID := "evidence-file-atomic-failure"
 	_, err = k.SubmitEvidence(types.SlashEvidence{
 		EvidenceID:    evidenceID,
+		ProviderID:    "provider-file-atomic-failure",
+		SessionID:     "session-file-atomic-failure",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-file-atomic-failure"),
 		ViolationType: "double-sign",
@@ -393,6 +399,7 @@ func TestFileStoreListEvidenceAndPenaltiesAcrossReopen(t *testing.T) {
 	evidenceA := types.SlashEvidence{
 		EvidenceID:    "evidence-file-a",
 		ProviderID:    "provider-a",
+		SessionID:     "session-a",
 		ViolationType: "double-sign",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-a"),
@@ -401,6 +408,7 @@ func TestFileStoreListEvidenceAndPenaltiesAcrossReopen(t *testing.T) {
 	evidenceB := types.SlashEvidence{
 		EvidenceID:    "evidence-file-b",
 		ProviderID:    "provider-b",
+		SessionID:     "session-b",
 		ViolationType: "downtime-proof",
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-b"),

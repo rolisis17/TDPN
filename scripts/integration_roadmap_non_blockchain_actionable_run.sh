@@ -4,6 +4,24 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Keep this integration hermetic: ambient ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_*
+# overrides can weaken fail-closed checks or alter selection/timeout behavior.
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_POLICY_NO_GO
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_UNSAFE_SHELL_COMMANDS
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_MAX_ACTIONS
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_PRINT_SUMMARY_JSON
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_RECOMMENDED_ONLY
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REPORTS_DIR
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_REPORT_MD
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SUMMARY_JSON
+unset ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_SUMMARY_JSON
+
 for cmd in bash jq mktemp chmod mkdir cat grep timeout ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
@@ -114,6 +132,10 @@ echo "parent symlink escape payload executed"
 EOF_PARENT_SYMLINK_ESCAPE_SCRIPT
 chmod +x "$PARENT_SYMLINK_ESCAPE_SCRIPT"
 ln -s "$PARENT_SYMLINK_ESCAPE_DIR_TARGET" "$PARENT_SYMLINK_ESCAPE_DIR_LINK"
+SYMLINK_TESTS_SUPPORTED="1"
+if [[ ! -L "$SYMLINK_ESCAPE_LINK" || ! -L "$PARENT_SYMLINK_ESCAPE_DIR_LINK" ]]; then
+  SYMLINK_TESTS_SUPPORTED="0"
+fi
 
 cat >"$TOCTOU_RACE_ACTION" <<'EOF_TOCTOU_RACE_ACTION'
 #!/usr/bin/env bash
@@ -539,6 +561,9 @@ if ! jq -e '
 fi
 
 echo "[roadmap-non-blockchain-actionable-run] symlinked action path remains fail-closed"
+if [[ "$SYMLINK_TESTS_SUPPORTED" != "1" ]]; then
+  echo "[roadmap-non-blockchain-actionable-run] symlink and TOCTOU checks skipped (symlink unsupported in current environment)"
+else
 SUMMARY_SYMLINK_REJECT="$TMP_DIR/summary_symlink_reject.json"
 REPORTS_SYMLINK_REJECT="$TMP_DIR/reports_symlink_reject"
 rm -f "$SYMLINK_ESCAPE_MARKER"
@@ -665,6 +690,7 @@ if ! grep -R -F "pre-exec validation mismatch" "$REPORTS_TOCTOU_REJECT" >/dev/nu
   echo "TOCTOU revalidation mismatch log marker missing"
   cat "$SUMMARY_TOCTOU_REJECT"
   exit 1
+fi
 fi
 
 echo "[roadmap-non-blockchain-actionable-run] recommended-only path"

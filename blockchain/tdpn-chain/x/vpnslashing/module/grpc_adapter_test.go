@@ -20,6 +20,8 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 	evidenceResp, err := adapter.SubmitEvidence(context.Background(), &pb.MsgSubmitEvidenceRequest{
 		Evidence: &pb.SlashEvidence{
 			EvidenceId:    "evidence-grpc-1",
+			ProviderId:    "provider-grpc-1",
+			SessionId:     "session-grpc-1",
 			ViolationType: "double-sign",
 			Kind:          modtypes.EvidenceKindObjective,
 			ProofHash:     testSHAProof("proof-grpc-1"),
@@ -67,6 +69,8 @@ func TestGRPCMsgAdapterCanonicalizesViolationTypeAcrossSubmitQueryAndList(t *tes
 	evidenceResp, err := msgAdapter.SubmitEvidence(context.Background(), &pb.MsgSubmitEvidenceRequest{
 		Evidence: &pb.SlashEvidence{
 			EvidenceId:    evidenceID,
+			ProviderId:    "provider-grpc-canonical-1",
+			SessionId:     "session-grpc-canonical-1",
 			ViolationType: inputViolationType,
 			Kind:          modtypes.EvidenceKindObjective,
 			ProofHash:     testSHAProof("proof-grpc-canonical-1"),
@@ -140,6 +144,8 @@ func TestGRPCMsgAdapterSubmitEvidenceHonorsCanceledContext(t *testing.T) {
 	_, err := adapter.SubmitEvidence(canceledCtx, &pb.MsgSubmitEvidenceRequest{
 		Evidence: &pb.SlashEvidence{
 			EvidenceId:    evidenceID,
+			ProviderId:    "provider-grpc-canceled-submit",
+			SessionId:     "session-grpc-canceled-submit",
 			ViolationType: "double-sign",
 			Kind:          modtypes.EvidenceKindObjective,
 			ProofHash:     testSHAProof("proof-grpc-canceled-submit"),

@@ -17,6 +17,8 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 
 	base := SlashEvidence{
 		EvidenceID:    "evidence-1",
+		ProviderID:    "provider-1",
+		SessionID:     "session-1",
 		Kind:          EvidenceKindObjective,
 		ProofHash:     validSHA256Lower,
 		ViolationType: "double-sign",
@@ -61,6 +63,21 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			name:    "provider id too long",
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, ProviderID: strings.Repeat("p", 129), Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
 			wantErr: "provider id exceeds 128 characters",
+		},
+		{
+			name:    "session id too long",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, ProviderID: base.ProviderID, SessionID: strings.Repeat("s", 129), Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
+			wantErr: "session id exceeds 128 characters",
+		},
+		{
+			name:    "missing provider id",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, ProviderID: " \t ", SessionID: base.SessionID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
+			wantErr: "provider id is required",
+		},
+		{
+			name:    "missing session id",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, ProviderID: base.ProviderID, SessionID: " \n ", Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
+			wantErr: "session id is required",
 		},
 		{
 			name:    "proof hash too long",
@@ -168,7 +185,15 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := tc.record.ValidateBasic()
+			record := tc.record
+			if record.ProviderID == "" {
+				record.ProviderID = base.ProviderID
+			}
+			if record.SessionID == "" {
+				record.SessionID = base.SessionID
+			}
+
+			err := record.ValidateBasic()
 			if tc.wantErr == "" && err != nil {
 				t.Fatalf("expected nil error, got %v", err)
 			}
@@ -270,6 +295,8 @@ func TestSlashEvidenceValidateBasicViolationType(t *testing.T) {
 
 	base := SlashEvidence{
 		EvidenceID:    "evidence-violation-type-1",
+		ProviderID:    "provider-violation-type-1",
+		SessionID:     "session-violation-type-1",
 		Kind:          EvidenceKindObjective,
 		ProofHash:     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		ViolationType: "double-sign",
@@ -356,6 +383,8 @@ func TestSlashEvidenceValidateBasicAllowsTerminalLifecycleStatuses(t *testing.T)
 			t.Parallel()
 			record := SlashEvidence{
 				EvidenceID:    "evidence-status-" + tc.name,
+				ProviderID:    "provider-status-" + tc.name,
+				SessionID:     "session-status-" + tc.name,
 				Kind:          EvidenceKindObjective,
 				ProofHash:     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 				ViolationType: "double-sign",

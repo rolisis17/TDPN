@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	ErrNilKeeper           = errors.New("vpnbilling: keeper is nil")
-	ErrInvalidReservation  = errors.New("vpnbilling: invalid reservation")
-	ErrInvalidSettlement   = errors.New("vpnbilling: invalid settlement")
-	ErrReservationConflict = errors.New("vpnbilling: reservation conflict")
-	ErrSettlementConflict  = errors.New("vpnbilling: settlement conflict")
-	ErrReservationNotFound = errors.New("vpnbilling: reservation not found")
+	ErrNilKeeper              = errors.New("vpnbilling: keeper is nil")
+	ErrInvalidReservation     = errors.New("vpnbilling: invalid reservation")
+	ErrInvalidSettlement      = errors.New("vpnbilling: invalid settlement")
+	ErrReservationConflict    = errors.New("vpnbilling: reservation conflict")
+	ErrSettlementConflict     = errors.New("vpnbilling: settlement conflict")
+	ErrReservationNotFound    = errors.New("vpnbilling: reservation not found")
+	ErrUnauthorizedSettlement = errors.New("vpnbilling: unauthorized settlement")
 )
 
 // ReserveCreditsRequest captures an intent to reserve prepaid credits for a session.
@@ -86,8 +87,12 @@ func (s MsgServer) FinalizeUsage(req FinalizeUsageRequest) (FinalizeUsageRespons
 	if strings.TrimSpace(req.Settlement.ReservationID) == "" {
 		return FinalizeUsageResponse{}, fmt.Errorf("%w: reservation id is required", ErrInvalidSettlement)
 	}
-	if _, ok := s.keeper.GetReservation(req.Settlement.ReservationID); !ok {
+	reservation, ok := s.keeper.GetReservation(req.Settlement.ReservationID)
+	if !ok {
 		return FinalizeUsageResponse{}, fmt.Errorf("%w: reservation_id=%s", ErrReservationNotFound, req.Settlement.ReservationID)
+	}
+	if strings.TrimSpace(reservation.SponsorID) == "" {
+		return FinalizeUsageResponse{}, fmt.Errorf("%w: reservation_id=%s has no sponsor subject", ErrUnauthorizedSettlement, req.Settlement.ReservationID)
 	}
 
 	existed := false
