@@ -1213,7 +1213,7 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 					if err := validateStrictExitControlRoute(cached.controlURL, cached.dataAddr); err == nil {
 						return cached, nil
 					}
-				} else {
+				} else if err := validateExitControlRouteBinding(cached.controlURL, cached.dataAddr); err == nil {
 					return cached, nil
 				}
 			}
@@ -1265,6 +1265,10 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 				operatorID: strings.TrimSpace(desc.OperatorID),
 				fetchedAt:  now,
 				validUntil: desc.ValidUntil,
+			}
+			if err := validateExitControlRouteBinding(route.controlURL, route.dataAddr); err != nil {
+				lastErr = err
+				continue
 			}
 			if strictMode {
 				if err := validateStrictExitControlRoute(route.controlURL, route.dataAddr); err != nil {
@@ -1996,6 +2000,31 @@ func validateStrictExitControlRoute(controlURL, dataAddr string) error {
 	}
 	if !strings.EqualFold(controlHost, dataHost) {
 		return fmt.Errorf("exit control url host must match exit data host")
+	}
+	return nil
+}
+
+func validateExitControlRouteBinding(controlURL, dataAddr string) error {
+	parsed, err := url.Parse(controlURL)
+	if err != nil {
+		return fmt.Errorf("invalid exit control url")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("invalid exit control url")
+	}
+	controlHost := normalizeHostForCompare(parsed.Hostname())
+	if controlHost == "" {
+		return fmt.Errorf("exit control url host missing")
+	}
+	dataHost := hostFromEndpoint(dataAddr)
+	if dataHost == "" {
+		return fmt.Errorf("exit data endpoint host is invalid")
+	}
+	controlIP := net.ParseIP(controlHost)
+	dataIP := net.ParseIP(dataHost)
+	if controlIP != nil && dataIP != nil && !controlIP.Equal(dataIP) {
+		return fmt.Errorf("exit control url IP host must match exit data IP host")
 	}
 	return nil
 }

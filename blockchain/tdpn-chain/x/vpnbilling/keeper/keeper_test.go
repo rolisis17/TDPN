@@ -609,6 +609,49 @@ func TestKeeperFinalizeSettlementAdvancesReservationStatus(t *testing.T) {
 	}
 }
 
+func TestKeeperFinalizeSettlementRejectsFailedReservationWithoutWritingSettlement(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-failed-state",
+		SponsorID:     "sponsor-failed-state",
+		SessionID:     "sess-failed-state",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        " FAILED ",
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	_, err = k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:  "set-failed-state",
+		ReservationID: reservation.ReservationID,
+		SessionID:     reservation.SessionID,
+		BilledAmount:  10,
+		AssetDenom:    reservation.AssetDenom,
+	})
+	if err == nil {
+		t.Fatal("expected failed reservation status to reject settlement finalization")
+	}
+	if !strings.Contains(err.Error(), `status "failed"`) {
+		t.Fatalf("expected failed reservation status error, got: %v", err)
+	}
+
+	if _, ok := k.GetSettlement("set-failed-state"); ok {
+		t.Fatal("expected settlement to remain absent when reservation status is failed")
+	}
+
+	after, ok := k.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatalf("expected reservation %q to remain available", reservation.ReservationID)
+	}
+	if after.Status != reservation.Status {
+		t.Fatalf("expected reservation status %q to remain unchanged, got %q", reservation.Status, after.Status)
+	}
+}
+
 func TestKeeperListReservationsDeterministicOrder(t *testing.T) {
 	t.Parallel()
 

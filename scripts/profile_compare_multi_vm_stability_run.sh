@@ -37,6 +37,9 @@ Notes:
     only when configured thresholds are satisfied.
   - vm-command-file preflight rejects conflicting duplicate VM_ID entries to
     keep command routing deterministic.
+  - Literal bootstrap placeholders such as VM_ID::COMMAND and
+    REPLACE_WITH_VM_COMMAND_FILE fail preflight; replace them with a concrete
+    entry such as: vm_a::ssh vm-a.example
   - When no VM command input is provided, reports-dir fallback discovery checks
     deterministic known candidates in this order: current reports-dir, then
     archive parent candidates (when reports-dir points to run/cycle archives),
@@ -123,6 +126,65 @@ render_command_line_from_argv_01() {
   printf '%s' "$rendered"
 }
 
+vm_command_value_has_unresolved_placeholder_01() {
+  local value=""
+  local angle_placeholder_re='<[A-Z0-9_:-]+>'
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  if [[ "$value" == "VM_ID" || "$value" == "COMMAND" || "$value" == *"REPLACE_WITH_"* ]]; then
+    return 0
+  fi
+  if [[ "$value" =~ $angle_placeholder_re ]]; then
+    return 0
+  fi
+  return 1
+}
+
+canonical_vm_command_file_write_command_01() {
+  local target="$1"
+  local target_dir=""
+  target_dir="$(dirname "$target")"
+  render_command_line_from_argv_01 bash -lc "mkdir -p $(printf '%q' "$target_dir") && printf 'vm_a::ssh vm-a.example\n' > $(printf '%q' "$target")"
+}
+
+validate_vm_command_spec_or_reason() {
+  local spec=""
+  local reason_scope="$2"
+  local vm_id=""
+  local vm_command=""
+  spec="$(trim "${1:-}")"
+  if [[ -z "$spec" ]]; then
+    printf '%s\n' "invalid_vm_command_spec_${reason_scope}_empty"
+    return 1
+  fi
+  if [[ "$spec" != *"::"* ]]; then
+    printf '%s\n' "invalid_vm_command_spec_${reason_scope}_missing_delimiter"
+    return 1
+  fi
+  vm_id="$(trim "${spec%%::*}")"
+  vm_command="$(trim "${spec#*::}")"
+  if [[ -z "$vm_id" || -z "$vm_command" ]]; then
+    printf '%s\n' "invalid_vm_command_spec_${reason_scope}_empty_vm_or_command"
+    return 1
+  fi
+  if [[ "$vm_id" =~ [[:space:]] ]]; then
+    printf '%s\n' "invalid_vm_command_spec_${reason_scope}_vm_id_contains_whitespace"
+    return 1
+  fi
+  if vm_command_value_has_unresolved_placeholder_01 "$vm_id"; then
+    printf '%s\n' "invalid_vm_command_spec_${reason_scope}_unresolved_placeholder_vm_id"
+    return 1
+  fi
+  if vm_command_value_has_unresolved_placeholder_01 "$vm_command"; then
+    printf '%s\n' "invalid_vm_command_spec_${reason_scope}_unresolved_placeholder_command"
+    return 1
+  fi
+  printf '%s\n' "ready"
+  return 0
+}
+
 validate_vm_command_file_or_reason() {
   local path="$1"
   local line=""
@@ -131,6 +193,7 @@ validate_vm_command_file_or_reason() {
   local vm_command=""
   local vm_id_key=""
   local vm_command_existing=""
+  local vm_command_spec_reason=""
   local runnable_specs=0
   declare -A vm_command_by_id=()
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -143,20 +206,12 @@ validate_vm_command_file_or_reason() {
     if [[ -z "$line" || "$line" == \#* ]]; then
       continue
     fi
-    if [[ "$line" != *"::"* ]]; then
-      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_missing_delimiter"
+    if ! vm_command_spec_reason="$(validate_vm_command_spec_or_reason "$line" "line_${line_number}")"; then
+      printf '%s\n' "$vm_command_spec_reason"
       return 1
     fi
     vm_id="$(trim "${line%%::*}")"
     vm_command="$(trim "${line#*::}")"
-    if [[ -z "$vm_id" || -z "$vm_command" ]]; then
-      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_empty_vm_or_command"
-      return 1
-    fi
-    if [[ "$vm_id" =~ [[:space:]] ]]; then
-      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_vm_id_contains_whitespace"
-      return 1
-    fi
     vm_id_key="$vm_id"
     if [[ -n "${vm_command_by_id["$vm_id_key"]+present}" ]]; then
       vm_command_existing="${vm_command_by_id["$vm_id_key"]}"
@@ -293,6 +348,7 @@ vm_command_fallback_file=""
 build_profile_compare_stability_run_command_01() {
   local vm_flag="$1"
   local vm_value="$2"
+  local include_existing_vm_inputs="${3:-1}"
   local cycle_arg=""
   local vm_spec=""
   local vm_file=""
@@ -319,12 +375,14 @@ build_profile_compare_stability_run_command_01() {
   if [[ -n "$sweep_command_timeout_sec" ]]; then
     cmd+=(--sweep-command-timeout-sec "$sweep_command_timeout_sec")
   fi
-  for vm_spec in "${vm_command_specs[@]}"; do
-    cmd+=(--vm-command "$vm_spec")
-  done
-  for vm_file in "${vm_command_files[@]}"; do
-    cmd+=(--vm-command-file "$vm_file")
-  done
+  if [[ "$include_existing_vm_inputs" == "1" ]]; then
+    for vm_spec in "${vm_command_specs[@]}"; do
+      cmd+=(--vm-command "$vm_spec")
+    done
+    for vm_file in "${vm_command_files[@]}"; do
+      cmd+=(--vm-command-file "$vm_file")
+    done
+  fi
   for cycle_arg in "${cycle_args[@]}"; do
     cmd+=(--cycle-arg "$cycle_arg")
   done
@@ -452,6 +510,10 @@ discover_vm_command_file_fallback() {
     if [[ -z "$explicit_value" ]]; then
       continue
     fi
+    if vm_command_value_has_unresolved_placeholder_01 "$explicit_value"; then
+      record_vm_command_fallback_diag "source=$explicit_source path=$explicit_value reason=unresolved_placeholder"
+      continue
+    fi
     explicit_path="$(abs_path "$explicit_value")"
     if [[ -z "$explicit_path" ]]; then
       record_vm_command_fallback_diag "source=$explicit_source reason=empty_path"
@@ -498,23 +560,56 @@ discover_vm_command_file_fallback() {
 fail_vm_command_file_preflight() {
   local reason="$1"
   local path="${2:-}"
-  local command_path_hint="REPLACE_WITH_VM_COMMAND_FILE"
+  local command_path_hint=""
   local rerun_command=""
   local canonical_write_target="$reports_dir/profile_compare_multi_vm_stability_vm_commands.txt"
   local canonical_write_command=""
-  if [[ -n "$path" ]]; then
+  command_path_hint="$canonical_write_target"
+  if [[ -n "$path" ]] && ! vm_command_value_has_unresolved_placeholder_01 "$path"; then
     command_path_hint="$path"
   fi
-  rerun_command="$(build_profile_compare_stability_run_command_01 --vm-command-file "$command_path_hint")"
-  canonical_write_command="$(render_command_line_from_argv_01 bash -lc "printf 'vm_a::ssh vm-a.example\n' > $(printf '%q' "$canonical_write_target")")"
+  rerun_command="$(build_profile_compare_stability_run_command_01 --vm-command-file "$command_path_hint" 0)"
+  canonical_write_command="$(canonical_vm_command_file_write_command_01 "$canonical_write_target")"
   echo "vm command file preflight failed: $reason"
   if [[ -n "$path" ]]; then
     echo "vm command file: $path"
   fi
   print_vm_command_preflight_diagnostics
   echo "operator_next_action: $rerun_command"
+  echo "operator_next_action: vm-command-file line format: vm_a::ssh vm-a.example"
+  echo "operator_next_action: vm-command-file placeholder format: --vm-command-file REPLACE_WITH_VM_COMMAND_FILE"
   echo "operator_next_action: $canonical_write_command"
   exit 2
+}
+
+fail_vm_command_preflight() {
+  local reason="$1"
+  local spec="${2:-}"
+  local rerun_command=""
+  rerun_command="$(build_profile_compare_stability_run_command_01 --vm-command "vm_a::ssh vm-a.example" 0)"
+  echo "vm command preflight failed: $reason"
+  if [[ -n "$spec" ]]; then
+    echo "vm command: $spec"
+  fi
+  print_vm_command_preflight_diagnostics
+  echo "operator_next_action: $rerun_command"
+  echo "operator_next_action: vm-command spec format: --vm-command VM_ID::COMMAND"
+  echo "operator_next_action: vm-command concrete example: --vm-command 'vm_a::ssh vm-a.example'"
+  exit 2
+}
+
+preflight_validate_vm_command_specs_or_die() {
+  local spec=""
+  local spec_index=0
+  local vm_command_spec_reason=""
+  for spec in "${vm_command_specs[@]}"; do
+    spec_index=$((spec_index + 1))
+    if ! vm_command_spec_reason="$(validate_vm_command_spec_or_reason "$spec" "arg_${spec_index}")"; then
+      record_vm_command_preflight_diag "source=vm-command index=$spec_index reason=$vm_command_spec_reason"
+      fail_vm_command_preflight "$vm_command_spec_reason" "$spec"
+    fi
+    record_vm_command_preflight_diag "source=vm-command index=$spec_index result=ready"
+  done
 }
 
 preflight_validate_vm_command_files_or_die() {
@@ -524,6 +619,10 @@ preflight_validate_vm_command_files_or_die() {
   local -a resolved_files=()
   declare -A seen_vm_command_files=()
   for raw_path in "${vm_command_files[@]}"; do
+    if vm_command_value_has_unresolved_placeholder_01 "$raw_path"; then
+      record_vm_command_preflight_diag "source=vm-command-file path=$raw_path reason=unresolved_placeholder"
+      fail_vm_command_file_preflight "unresolved_placeholder" "$raw_path"
+    fi
     resolved_path="$(abs_path "$raw_path")"
     if [[ -z "$resolved_path" ]]; then
       record_vm_command_preflight_diag "source=vm-command-file path=<empty> reason=empty_path"
@@ -557,11 +656,14 @@ fail_vm_command_inputs_missing() {
   echo "at least one --vm-command or --vm-command-file is required"
   echo "no usable VM command fallback was discovered (fail-closed)."
   print_vm_command_preflight_diagnostics
-  rerun_with_inline_command="$(build_profile_compare_stability_run_command_01 --vm-command "VM_ID::COMMAND")"
-  rerun_with_file_command="$(build_profile_compare_stability_run_command_01 --vm-command-file "REPLACE_WITH_VM_COMMAND_FILE")"
-  canonical_write_command="$(render_command_line_from_argv_01 bash -lc "printf 'vm_a::ssh vm-a.example\n' > $(printf '%q' "$canonical_write_target")")"
+  rerun_with_inline_command="$(build_profile_compare_stability_run_command_01 --vm-command "vm_a::ssh vm-a.example" 0)"
+  rerun_with_file_command="$(build_profile_compare_stability_run_command_01 --vm-command-file "$canonical_write_target" 0)"
+  canonical_write_command="$(canonical_vm_command_file_write_command_01 "$canonical_write_target")"
   echo "operator_next_action: $rerun_with_inline_command"
   echo "operator_next_action: $rerun_with_file_command"
+  echo "operator_next_action: vm-command spec format: --vm-command VM_ID::COMMAND"
+  echo "operator_next_action: vm-command-file line format: vm_a::ssh vm-a.example"
+  echo "operator_next_action: vm-command-file placeholder format: --vm-command-file REPLACE_WITH_VM_COMMAND_FILE"
   echo "operator_next_action: unresolved_placeholder REPLACE_WITH_VM_COMMAND_FILE must be replaced with a readable vm-command file path."
   echo "operator_next_action: $canonical_write_command"
   if (( ${#vm_command_fallback_artifact_candidates[@]} > 0 )); then
@@ -814,6 +916,7 @@ fi
 if [[ ${#vm_command_specs[@]} -eq 0 && ${#vm_command_files[@]} -eq 0 ]]; then
   fail_vm_command_inputs_missing
 fi
+preflight_validate_vm_command_specs_or_die
 preflight_validate_vm_command_files_or_die
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"

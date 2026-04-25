@@ -684,6 +684,96 @@ if ! grep -q 'profile_compare_multi_vm_stability_vm_commands.txt' /tmp/integrati
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-stability-run] explicit placeholder --vm-command fails closed during preflight"
+INLINE_PLACEHOLDER_REPORTS_DIR="$TMP_DIR/reports_inline_placeholder_vm_command"
+INLINE_PLACEHOLDER_SUMMARY="$TMP_DIR/inline_placeholder_vm_command_summary.json"
+INLINE_PLACEHOLDER_CAPTURE="$TMP_DIR/inline_placeholder_vm_command_capture.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/inline_placeholder_vm_command_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$INLINE_PLACEHOLDER_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$INLINE_PLACEHOLDER_REPORTS_DIR" \
+  --summary-json "$INLINE_PLACEHOLDER_SUMMARY" \
+  --vm-command "VM_ID::COMMAND" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log 2>&1
+inline_placeholder_vm_command_rc=$?
+set -e
+
+if [[ "$inline_placeholder_vm_command_rc" -eq 0 ]]; then
+  echo "expected inline placeholder vm-command preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
+  exit 1
+fi
+if ! grep -q 'vm command preflight failed: invalid_vm_command_spec_arg_1_unresolved_placeholder_vm_id' /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log; then
+  echo "expected inline placeholder vm-command preflight failure reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: vm-command concrete example: --vm-command' /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log; then
+  echo "expected concrete inline vm-command guidance"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
+  exit 1
+fi
+if ! grep -q 'preflight_diag: source=vm-command index=1 reason=invalid_vm_command_spec_arg_1_unresolved_placeholder_vm_id' /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log; then
+  echo "expected inline placeholder vm-command preflight diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
+  exit 1
+fi
+if [[ -f "$INLINE_PLACEHOLDER_CAPTURE" ]] && [[ -s "$INLINE_PLACEHOLDER_CAPTURE" ]]; then
+  echo "inline placeholder vm-command should fail before fake cycle invocation"
+  cat "$INLINE_PLACEHOLDER_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] explicit placeholder --vm-command-file path fails closed during preflight"
+FILE_PATH_PLACEHOLDER_REPORTS_DIR="$TMP_DIR/reports_file_path_placeholder"
+FILE_PATH_PLACEHOLDER_SUMMARY="$TMP_DIR/file_path_placeholder_summary.json"
+FILE_PATH_PLACEHOLDER_CAPTURE="$TMP_DIR/file_path_placeholder_capture.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/file_path_placeholder_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$FILE_PATH_PLACEHOLDER_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$FILE_PATH_PLACEHOLDER_REPORTS_DIR" \
+  --summary-json "$FILE_PATH_PLACEHOLDER_SUMMARY" \
+  --vm-command-file "REPLACE_WITH_VM_COMMAND_FILE" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log 2>&1
+file_path_placeholder_rc=$?
+set -e
+
+if [[ "$file_path_placeholder_rc" -eq 0 ]]; then
+  echo "expected placeholder vm-command-file path preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log
+  exit 1
+fi
+if ! grep -q 'vm command file preflight failed: unresolved_placeholder' /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log; then
+  echo "expected placeholder vm-command-file path preflight failure reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log
+  exit 1
+fi
+if ! grep -q 'preflight_diag: source=vm-command-file path=REPLACE_WITH_VM_COMMAND_FILE reason=unresolved_placeholder' /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log; then
+  echo "expected placeholder vm-command-file path diagnostics"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: vm-command-file line format: vm_a::ssh vm-a.example' /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log; then
+  echo "expected concrete vm-command-file line guidance"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_file_path_placeholder.log
+  exit 1
+fi
+if [[ -f "$FILE_PATH_PLACEHOLDER_CAPTURE" ]] && [[ -s "$FILE_PATH_PLACEHOLDER_CAPTURE" ]]; then
+  echo "placeholder vm-command-file path should fail before fake cycle invocation"
+  cat "$FILE_PATH_PLACEHOLDER_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-stability-run] malformed fallback vm-command-file fails closed during preflight"
 INVALID_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_invalid_fallback"
 INVALID_FALLBACK_SUMMARY="$TMP_DIR/invalid_fallback_summary.json"
@@ -784,6 +874,53 @@ fi
 if [[ -f "$EXPLICIT_INVALID_CAPTURE" ]] && [[ -s "$EXPLICIT_INVALID_CAPTURE" ]]; then
   echo "explicit invalid vm-command-file should fail before fake cycle invocation"
   cat "$EXPLICIT_INVALID_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-run] explicit placeholder content in --vm-command-file fails closed during preflight"
+EXPLICIT_PLACEHOLDER_CONTENT_REPORTS_DIR="$TMP_DIR/reports_explicit_placeholder_content_vm_file"
+EXPLICIT_PLACEHOLDER_CONTENT_SUMMARY="$TMP_DIR/explicit_placeholder_content_vm_file_summary.json"
+EXPLICIT_PLACEHOLDER_CONTENT_VM_FILE="$TMP_DIR/vm_commands_explicit_placeholder_content.txt"
+EXPLICIT_PLACEHOLDER_CONTENT_CAPTURE="$TMP_DIR/explicit_placeholder_content_vm_file_capture.log"
+printf 'vm_content_placeholder::COMMAND\n' >"$EXPLICIT_PLACEHOLDER_CONTENT_VM_FILE"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_CYCLE_SCRIPT="$FAKE_CYCLE" \
+FAKE_CYCLE_COUNTER_FILE="$TMP_DIR/explicit_placeholder_content_vm_file_counter.txt" \
+FAKE_CYCLE_SCENARIO="stable" \
+FAKE_CYCLE_CAPTURE_FILE="$EXPLICIT_PLACEHOLDER_CONTENT_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --runs 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$EXPLICIT_PLACEHOLDER_CONTENT_REPORTS_DIR" \
+  --summary-json "$EXPLICIT_PLACEHOLDER_CONTENT_SUMMARY" \
+  --vm-command-file "$EXPLICIT_PLACEHOLDER_CONTENT_VM_FILE" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log 2>&1
+explicit_placeholder_content_vm_file_rc=$?
+set -e
+
+if [[ "$explicit_placeholder_content_vm_file_rc" -eq 0 ]]; then
+  echo "expected explicit placeholder-content vm-command-file preflight path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log
+  exit 1
+fi
+if ! grep -q 'vm command file preflight failed: invalid_vm_command_spec_line_1_unresolved_placeholder_command' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log; then
+  echo "expected explicit placeholder-content vm-command-file preflight failure reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log
+  exit 1
+fi
+if ! grep -q 'operator_next_action: vm-command-file line format: vm_a::ssh vm-a.example' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log; then
+  echo "expected explicit placeholder-content vm-command-file concrete guidance"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log
+  exit 1
+fi
+if ! grep -q 'reason=invalid_vm_command_spec_line_1_unresolved_placeholder_command' /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log; then
+  echo "expected explicit placeholder-content vm-command-file diagnostics reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_explicit_placeholder_content_vm_file.log
+  exit 1
+fi
+if [[ -f "$EXPLICIT_PLACEHOLDER_CONTENT_CAPTURE" ]] && [[ -s "$EXPLICIT_PLACEHOLDER_CONTENT_CAPTURE" ]]; then
+  echo "explicit placeholder-content vm-command-file should fail before fake cycle invocation"
+  cat "$EXPLICIT_PLACEHOLDER_CONTENT_CAPTURE"
   exit 1
 fi
 

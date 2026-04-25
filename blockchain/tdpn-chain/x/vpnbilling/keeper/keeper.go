@@ -3,6 +3,7 @@ package keeper
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -198,6 +199,12 @@ func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.Settle
 			)
 		}
 	}
+	if !reservationCanAcceptSettlement(normalizedReservation) {
+		return types.SettlementRecord{}, reservationNotFinalizableError(
+			normalized.ReservationID,
+			canonicalReservationStatus(normalizedReservation.Status),
+		)
+	}
 
 	updatedReservation := reservationAfterSettlement(normalizedReservation)
 	if err := k.persistFinalizedSettlementLocked(normalized, normalizedReservation, updatedReservation); err != nil {
@@ -246,10 +253,24 @@ func (k *Keeper) ListSettlementsWithError() ([]types.SettlementRecord, error) {
 
 func reservationAfterSettlement(record types.CreditReservation) types.CreditReservation {
 	normalized := normalizeReservation(record)
-	if normalized.Status == chaintypes.ReconciliationPending || normalized.Status == chaintypes.ReconciliationSubmitted {
+	status := canonicalReservationStatus(normalized.Status)
+	if status == chaintypes.ReconciliationPending || status == chaintypes.ReconciliationSubmitted {
 		normalized.Status = chaintypes.ReconciliationConfirmed
 	}
 	return normalized
+}
+
+func reservationCanAcceptSettlement(record types.CreditReservation) bool {
+	switch canonicalReservationStatus(record.Status) {
+	case chaintypes.ReconciliationPending, chaintypes.ReconciliationSubmitted:
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalReservationStatus(status chaintypes.ReconciliationStatus) chaintypes.ReconciliationStatus {
+	return chaintypes.ReconciliationStatus(strings.ToLower(strings.TrimSpace(string(status))))
 }
 
 func (k *Keeper) upsertReservationLocked(record types.CreditReservation) error {
@@ -378,6 +399,10 @@ func assetDenomMismatchError(settlementAssetDenom, reservationAssetDenom string)
 
 func overchargeError(billedAmount, reservedAmount int64) error {
 	return fmt.Errorf("billed amount %d exceeds reserved amount %d", billedAmount, reservedAmount)
+}
+
+func reservationNotFinalizableError(reservationID string, status chaintypes.ReconciliationStatus) error {
+	return fmt.Errorf("reservation %q has status %q and cannot be settled", reservationID, status)
 }
 
 func reservationAlreadySettledError(reservationID, settlementID string) error {

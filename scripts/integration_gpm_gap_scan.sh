@@ -47,6 +47,7 @@ HELP_OUTPUT_FILE="$TMP_DIR/help.txt"
 bash "$SCRIPT_UNDER_TEST" --help >"$HELP_OUTPUT_FILE"
 for token in \
   "--status-doc PATH" \
+  "--roadmap-summary-json PATH" \
   "--summary-json PATH" \
   "--reports-dir DIR" \
   "--print-summary-json [0|1]"; do
@@ -106,6 +107,68 @@ assert_file_contains "$PRIMARY_SUMMARY_JSON" '"severity": "p2"' "summary JSON mi
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"severity": "p1"' "summary JSON missing expected missing/next severity classification"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"recommended_action": "' "summary JSON missing recommended_action field"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"top_actionable_item_ids": [' "summary JSON missing top_actionable_item_ids field"
+
+echo "[gpm-gap-scan] optional roadmap summary contributes machine-readable blockers"
+ROADMAP_STATUS_DOC="$TMP_DIR/roadmap_status.md"
+ROADMAP_SUMMARY_INPUT="$TMP_DIR/roadmap_input_summary.json"
+ROADMAP_SUMMARY_JSON="$TMP_DIR/roadmap_scan_summary.json"
+ROADMAP_STDOUT="$TMP_DIR/roadmap_stdout.md"
+
+cat >"$ROADMAP_STATUS_DOC" <<'EOF_ROADMAP_STATUS'
+# Roadmap-Aware Fixture
+
+## In-Progress
+- Roadmap-aware in-progress item.
+
+## Missing / Next
+- Roadmap-aware missing item.
+EOF_ROADMAP_STATUS
+
+cat >"$ROADMAP_SUMMARY_INPUT" <<'EOF_ROADMAP_SUMMARY'
+{
+  "vpn_track": {
+    "profile_default_gate": {
+      "unresolved_placeholders": true,
+      "unresolved_placeholder_keys": ["invite_key"]
+    },
+    "profile_compare_multi_vm_stability": {
+      "vm_command_source_ready": false,
+      "next_command_actionable": false
+    },
+    "runtime_actuation_promotion": {
+      "status": "fail",
+      "decision": "NO-GO"
+    },
+    "profile_default_gate_evidence_pack": {
+      "status": "stale",
+      "needs_attention": true
+    },
+    "runtime_actuation_promotion_evidence_pack": {
+      "status": "fail",
+      "needs_attention": true
+    },
+    "profile_compare_multi_vm_stability_promotion_evidence_pack": {
+      "status": "missing",
+      "needs_attention": true
+    }
+  }
+}
+EOF_ROADMAP_SUMMARY
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ROADMAP_STATUS_DOC" \
+  --roadmap-summary-json "$ROADMAP_SUMMARY_INPUT" \
+  --summary-json "$ROADMAP_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ROADMAP_STDOUT"
+
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"roadmap_summary_json": "' "roadmap-aware summary missing roadmap summary input path"
+assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*7' "roadmap-aware missing_next count mismatch"
+assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"total"[[:space:]]*:[[:space:]]*8' "roadmap-aware total count mismatch"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap profile-default gate next action has unresolved placeholders (invite_key)' "roadmap-aware summary missing profile placeholder blocker"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap multi-VM stability command source is not actionable' "roadmap-aware summary missing multi-vm blocker"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap runtime-actuation promotion is not green' "roadmap-aware summary missing runtime promotion blocker"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap evidence pack profile_default_gate_evidence_pack needs attention' "roadmap-aware summary missing profile evidence-pack blocker"
+assert_file_contains "$ROADMAP_STDOUT" "## Missing / Next (7)" "roadmap-aware markdown missing expanded missing/next count"
 
 echo "[gpm-gap-scan] helper naming extraction remains deterministic"
 HELPER_STATUS_DOC="$TMP_DIR/helper_status.md"

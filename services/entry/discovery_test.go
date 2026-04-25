@@ -946,6 +946,89 @@ func TestResolveExitRouteRejectsMissingDescriptorRouteFieldsNonStrict(t *testing
 	}
 }
 
+func TestResolveExitRouteRejectsControlEndpointIPMismatchNonStrict(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-a",
+			Role:       "exit",
+			Endpoint:   "198.51.100.20:51821",
+			ControlURL: "https://198.51.100.21:8084",
+		},
+	})
+
+	s := &Service{
+		exitControlURL:      "https://198.51.100.10:8084",
+		exitDataAddr:        "198.51.100.10:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	_, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err == nil {
+		t.Fatalf("expected non-strict mode to reject mismatched control_url and endpoint IP hosts")
+	}
+	if !strings.Contains(err.Error(), "IP host must match") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveExitRouteNonStrictBypassesCachedIPHostMismatch(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-a",
+			Role:       "exit",
+			Endpoint:   "198.51.100.20:51821",
+			ControlURL: "https://198.51.100.20:8084",
+		},
+	})
+
+	calls := 0
+	origRelays := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		calls++
+		return origRelays(req)
+	}
+
+	s := &Service{
+		exitControlURL:      "https://198.51.100.10:8084",
+		exitDataAddr:        "198.51.100.10:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache: map[string]exitRoute{
+			"exit-a": {
+				controlURL: "https://198.51.100.99:8084",
+				dataAddr:   "198.51.100.10:51821",
+				fetchedAt:  time.Now(),
+				validUntil: time.Now().Add(time.Minute),
+			},
+		},
+	}
+
+	route, err := s.resolveExitRoute(context.Background(), "exit-a")
+	if err != nil {
+		t.Fatalf("resolve route failed: %v", err)
+	}
+	if route.controlURL != "https://198.51.100.20:8084" {
+		t.Fatalf("expected cached mismatch to be bypassed, got control url: %s", route.controlURL)
+	}
+	if route.dataAddr != "198.51.100.20:51821" {
+		t.Fatalf("unexpected data addr: %s", route.dataAddr)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one relays fetch after cached host mismatch, got %d", calls)
+	}
+}
+
 func TestEnforceDirectoryTrustSetRejectsAdditionalUntrustedKeys(t *testing.T) {
 	keyA, _, err := nodecrypto.GenerateEd25519Keypair()
 	if err != nil {

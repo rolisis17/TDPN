@@ -9,16 +9,20 @@ usage() {
 Usage:
   ./scripts/gpm_gap_scan.sh \
     [--status-doc PATH] \
+    [--roadmap-summary-json PATH] \
     [--summary-json PATH] \
     [--reports-dir DIR] \
     [--print-summary-json [0|1]]
 
 Description:
   Scans docs/gpm-productization-status.md and emits a deterministic markdown
-  summary focused on In-Progress and Missing / Next roadmap gaps.
+  summary focused on In-Progress and Missing / Next roadmap gaps. When a
+  roadmap summary JSON is provided, adds selected machine-readable blockers
+  from the live roadmap artifact.
 
 Defaults:
   --status-doc docs/gpm-productization-status.md
+  --roadmap-summary-json unset
   --reports-dir .easy-node-logs
   --summary-json <reports-dir>/gpm_gap_scan_summary.json
   --print-summary-json 0
@@ -139,6 +143,7 @@ need_cmd mv
 need_cmd cat
 
 status_doc="${GPM_GAP_SCAN_STATUS_DOC:-$ROOT_DIR/docs/gpm-productization-status.md}"
+roadmap_summary_json="${GPM_GAP_SCAN_ROADMAP_SUMMARY_JSON:-}"
 reports_dir="${GPM_GAP_SCAN_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 summary_json="${GPM_GAP_SCAN_SUMMARY_JSON:-}"
 summary_json_set_by_flag="0"
@@ -156,6 +161,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --status-doc=*)
       status_doc="${1#*=}"
+      shift
+      ;;
+    --roadmap-summary-json)
+      require_value_or_die "$1" "${2:-}"
+      roadmap_summary_json="${2:-}"
+      shift 2
+      ;;
+    --roadmap-summary-json=*)
+      roadmap_summary_json="${1#*=}"
       shift
       ;;
     --summary-json)
@@ -206,6 +220,9 @@ done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
 status_doc="$(abs_path "$status_doc")"
+if [[ -n "$roadmap_summary_json" ]]; then
+  roadmap_summary_json="$(abs_path "$roadmap_summary_json")"
+fi
 reports_dir="$(abs_path "$reports_dir")"
 if [[ -z "$summary_json" ]]; then
   summary_json="$reports_dir/gpm_gap_scan_summary.json"
@@ -213,6 +230,12 @@ fi
 summary_json="$(abs_path "$summary_json")"
 
 [[ -f "$status_doc" ]] || fail_closed "status doc missing: $status_doc"
+if [[ -n "$roadmap_summary_json" && ! -f "$roadmap_summary_json" ]]; then
+  fail_closed "roadmap summary JSON missing: $roadmap_summary_json"
+fi
+if [[ -n "$roadmap_summary_json" ]]; then
+  need_cmd jq
+fi
 
 declare -a ITEM_SECTIONS=()
 declare -a ITEM_TEXTS=()
@@ -248,6 +271,27 @@ flush_pending_item() {
   fi
   pending_section=""
   pending_text=""
+}
+
+append_gap_item() {
+  local section="$1"
+  local item_clean="$2"
+  local item_normalized=""
+  item_clean="$(collapse_whitespace "$item_clean")"
+  if [[ -z "$section" || -z "$item_clean" ]]; then
+    return 0
+  fi
+  ITEM_SECTIONS+=("$section")
+  ITEM_TEXTS+=("$item_clean")
+  item_normalized="$(normalize_item_text "$item_clean")"
+  ITEM_NORMALIZED_TEXTS+=("$item_normalized")
+  ITEM_SEVERITIES+=("$(infer_item_severity "$section" "$item_normalized")")
+  ITEM_RECOMMENDED_ACTIONS+=("$(infer_item_recommended_action "$section" "$item_normalized")")
+  if [[ "$section" == "in_progress" ]]; then
+    in_progress_count=$((in_progress_count + 1))
+  elif [[ "$section" == "missing_next" ]]; then
+    missing_next_count=$((missing_next_count + 1))
+  fi
 }
 
 infer_item_severity() {
@@ -367,6 +411,45 @@ if [[ "$saw_missing_next" != "1" ]]; then
   fail_closed "required heading not found: Missing / Next"
 fi
 
+if [[ -n "$roadmap_summary_json" ]]; then
+  if ! jq -e 'type == "object"' "$roadmap_summary_json" >/dev/null 2>&1; then
+    fail_closed "roadmap summary JSON is malformed: $roadmap_summary_json"
+  fi
+
+  profile_unresolved_placeholders="$(jq -r '.vpn_track.profile_default_gate.unresolved_placeholders // false' "$roadmap_summary_json")"
+  if [[ "$profile_unresolved_placeholders" == "true" ]]; then
+    profile_placeholder_keys="$(jq -r '[.vpn_track.profile_default_gate.unresolved_placeholder_keys[]?] | join(",")' "$roadmap_summary_json")"
+    if [[ -z "$profile_placeholder_keys" ]]; then
+      profile_placeholder_keys="unknown"
+    fi
+    append_gap_item "missing_next" "Roadmap profile-default gate next action has unresolved placeholders (${profile_placeholder_keys}); run gpm-endpoint-posture-remediate or export A_HOST/B_HOST/CAMPAIGN_SUBJECT before the live stability cycle."
+  fi
+
+  multi_vm_source_ready="$(jq -r '(.vpn_track.profile_compare_multi_vm_stability.vm_command_source_ready | if . == null then true else . end)' "$roadmap_summary_json")"
+  multi_vm_actionable="$(jq -r '(.vpn_track.profile_compare_multi_vm_stability.next_command_actionable | if . == null then true else . end)' "$roadmap_summary_json")"
+  if [[ "$multi_vm_source_ready" == "false" || "$multi_vm_actionable" == "false" ]]; then
+    append_gap_item "missing_next" "Roadmap multi-VM stability command source is not actionable; generate a VM command file or pass --vm-command VM_ID::COMMAND before running the M5 stability cycle."
+  fi
+
+  runtime_status="$(jq -r '.vpn_track.runtime_actuation_promotion.status // ""' "$roadmap_summary_json")"
+  runtime_decision="$(jq -r '.vpn_track.runtime_actuation_promotion.decision // ""' "$roadmap_summary_json")"
+  if [[ "$runtime_status" == "fail" || "$runtime_decision" == "NO-GO" ]]; then
+    append_gap_item "missing_next" "Roadmap runtime-actuation promotion is not green (status=${runtime_status:-unknown}, decision=${runtime_decision:-unknown}); rerun promotion cycle until thresholds pass, then publish evidence pack."
+  fi
+
+  for evidence_path in \
+    '.vpn_track.profile_default_gate_evidence_pack' \
+    '.vpn_track.runtime_actuation_promotion_evidence_pack' \
+    '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack'; do
+    evidence_status="$(jq -r "${evidence_path}.status // \"\"" "$roadmap_summary_json")"
+    evidence_needs_attention="$(jq -r "${evidence_path}.needs_attention // false" "$roadmap_summary_json")"
+    if [[ "$evidence_needs_attention" == "true" || "$evidence_status" == "missing" || "$evidence_status" == "invalid" || "$evidence_status" == "stale" || "$evidence_status" == "fail" ]]; then
+      evidence_id="${evidence_path##*.}"
+      append_gap_item "missing_next" "Roadmap evidence pack ${evidence_id} needs attention (status=${evidence_status:-unknown}); refresh source artifacts and rerun the corresponding evidence-pack helper."
+    fi
+  done
+fi
+
 mkdir -p "$reports_dir" "$(dirname "$summary_json")"
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -406,6 +489,12 @@ done
   printf '  "status": "ok",\n'
   printf '  "inputs": {\n'
   printf '    "status_doc": "%s",\n' "$(json_escape "$status_doc")"
+  printf '    "roadmap_summary_json": '
+  if [[ -n "$roadmap_summary_json" ]]; then
+    printf '"%s",\n' "$(json_escape "$roadmap_summary_json")"
+  else
+    printf 'null,\n'
+  fi
   printf '    "reports_dir": "%s",\n' "$(json_escape "$reports_dir")"
   printf '    "summary_json": "%s"\n' "$(json_escape "$summary_json")"
   printf '  },\n'

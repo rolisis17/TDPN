@@ -33,6 +33,8 @@ run_step "release policy gate" ./scripts/integration_release_policy_gate.sh
 run_step "runtime doctor" ./scripts/integration_runtime_doctor.sh
 run_step "manual validation status" ./scripts/integration_manual_validation_status.sh
 run_step "manual validation report" ./scripts/integration_manual_validation_report.sh
+run_step "gpm gap scan" ./scripts/integration_gpm_gap_scan.sh
+run_step "easy-node gpm gap scan" ./scripts/integration_easy_node_gpm_gap_scan.sh
 run_step "roadmap progress report" ./scripts/integration_roadmap_progress_report.sh
 run_step "roadmap progress resilience handoff" ./scripts/integration_roadmap_progress_resilience_handoff.sh
 run_step "roadmap progress phase-2 handoff" ./scripts/integration_roadmap_progress_phase2_handoff.sh

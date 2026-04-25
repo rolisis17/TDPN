@@ -938,6 +938,7 @@ if ! jq -e \
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == true
   and (.next_actions | length) >= 1
+  and ((.next_actions_remediation // []) | type) == "array"
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
   and (
     if .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true then
@@ -961,6 +962,8 @@ if ! jq -e \
   and (.vpn_track.profile_default_gate | has("runtime_actuation_status"))
   and (.vpn_track.profile_default_gate | has("runtime_actuation_reason"))
   and (.vpn_track.profile_default_gate | has("next_command_reason"))
+  and (.vpn_track.profile_default_gate | has("next_command_actionable"))
+  and (.vpn_track.profile_default_gate | has("next_command_sudo_actionable"))
   and (.vpn_track.profile_default_gate | has("next_command_has_unresolved_placeholders"))
   and (.vpn_track.profile_default_gate | has("next_command_sudo_has_unresolved_placeholders"))
   and (.vpn_track.profile_default_gate | has("next_command_unresolved_placeholder_keys"))
@@ -968,6 +971,9 @@ if ! jq -e \
   and (.vpn_track.profile_default_gate | has("unresolved_placeholders"))
   and (.vpn_track.profile_default_gate | has("unresolved_placeholder_keys"))
   and (.vpn_track.profile_default_gate | has("unresolved_placeholder_reason"))
+  and (.vpn_track.profile_default_gate | has("placeholder_remediation_available"))
+  and (.vpn_track.profile_default_gate | has("placeholder_remediation_command"))
+  and (.vpn_track.profile_default_gate | has("placeholder_remediation_reason"))
   and (
     (.vpn_track.profile_default_gate.selection_policy_evidence_present == null)
     or ((.vpn_track.profile_default_gate.selection_policy_evidence_present | type) == "boolean")
@@ -995,6 +1001,8 @@ if ! jq -e \
     (.vpn_track.profile_default_gate.next_command_reason == null)
     or ((.vpn_track.profile_default_gate.next_command_reason | type) == "string")
   )
+  and ((.vpn_track.profile_default_gate.next_command_actionable | type) == "boolean")
+  and ((.vpn_track.profile_default_gate.next_command_sudo_actionable | type) == "boolean")
   and ((.vpn_track.profile_default_gate.next_command_has_unresolved_placeholders | type) == "boolean")
   and ((.vpn_track.profile_default_gate.next_command_sudo_has_unresolved_placeholders | type) == "boolean")
   and ((.vpn_track.profile_default_gate.next_command_unresolved_placeholder_keys | type) == "array")
@@ -1004,6 +1012,15 @@ if ! jq -e \
   and (
     (.vpn_track.profile_default_gate.unresolved_placeholder_reason == null)
     or ((.vpn_track.profile_default_gate.unresolved_placeholder_reason | type) == "string")
+  )
+  and ((.vpn_track.profile_default_gate.placeholder_remediation_available | type) == "boolean")
+  and (
+    (.vpn_track.profile_default_gate.placeholder_remediation_command == null)
+    or ((.vpn_track.profile_default_gate.placeholder_remediation_command | type) == "string")
+  )
+  and (
+    (.vpn_track.profile_default_gate.placeholder_remediation_reason == null)
+    or ((.vpn_track.profile_default_gate.placeholder_remediation_reason | type) == "string")
   )
   and (
     (.vpn_track.profile_default_gate.runtime_actuation_ready == true and .vpn_track.profile_default_gate.runtime_actuation_status == "pass" and .vpn_track.profile_default_gate.runtime_actuation_reason == "")
@@ -3868,8 +3885,26 @@ if ! jq -e '
   and has_key(.vpn_track.profile_default_gate.unresolved_placeholder_keys; "invite_key")
   and (.vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true)
   and (.vpn_track.profile_default_gate.next_command_sudo_has_unresolved_placeholders == true)
+  and (.vpn_track.profile_default_gate.next_command_actionable == false)
+  and (.vpn_track.profile_default_gate.next_command_sudo_actionable == false)
   and ((.vpn_track.profile_default_gate.next_command_reason // "") | test("unresolved placeholders"; "i"))
   and ((.vpn_track.profile_default_gate.unresolved_placeholder_reason // "") | test("A_HOST/B_HOST"; "i"))
+  and (.vpn_track.profile_default_gate.placeholder_remediation_available == true)
+  and ((.vpn_track.profile_default_gate.placeholder_remediation_command // "") | test("^\\./scripts/easy_node\\.sh gpm-endpoint-posture-remediate( |$)"))
+  and (((.vpn_track.profile_default_gate.placeholder_remediation_command // "") | test("A_HOST|B_HOST|INVITE_KEY")) | not)
+  and ((.vpn_track.profile_default_gate.placeholder_remediation_reason // "") | test("endpoint posture remediation helper"; "i"))
+  and (.next_actions_summary.profile_default_placeholder_remediation_available == true)
+  and (.next_actions_summary.profile_default_placeholder_remediation_emitted == true)
+  and (.next_actions_summary.profile_default_placeholder_remediation_count == 1)
+  and ((.next_actions_remediation // []) | any(
+    .id == "profile_default_gate_placeholder_remediation"
+    and ((.remediation_command // "") | test("^\\./scripts/easy_node\\.sh gpm-endpoint-posture-remediate( |$)"))
+    and (.next_command_actionable == false)
+    and (.placeholder_unresolved == true)
+    and has_key(.placeholder_keys; "host_a")
+    and has_key(.placeholder_keys; "host_b")
+    and has_key(.placeholder_keys; "invite_key")
+  ))
   and ((.next_actions // [])
     | map(select((.id // "") == "profile_default_gate"))
     | if length == 0 then true else all(.[]; 
@@ -3888,6 +3923,16 @@ fi
 if ! grep -Eq '\[roadmap-progress-report\] profile_default_gate_next_command_reason=.*unresolved placeholders' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_unresolved_placeholder.log; then
   echo "expected unresolved placeholder guidance log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_default_unresolved_placeholder.log
+  exit 1
+fi
+if ! grep -Fq 'Profile gate next command actionable: false' "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_report.md"; then
+  echo "report markdown missing explicit non-actionable profile-default next command"
+  cat "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_report.md"
+  exit 1
+fi
+if ! grep -Fq 'gpm-endpoint-posture-remediate' "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_report.md"; then
+  echo "report markdown missing profile-default placeholder remediation command"
+  cat "$TMP_DIR/roadmap_progress_profile_default_unresolved_placeholder_report.md"
   exit 1
 fi
 

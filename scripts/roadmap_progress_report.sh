@@ -2240,6 +2240,36 @@ profile_default_gate_unresolved_placeholder_reason_text() {
   printf '%s' "profile-default next command contains unresolved placeholders (${keys_csv}); set A_HOST/B_HOST and INVITE_KEY (or pass --campaign-subject) before running"
 }
 
+profile_default_gate_placeholder_remediation_command() {
+  local summary_json_path
+  local minimum_timeout_sec
+  local summary_json_arg
+  local minimum_timeout_sec_arg
+
+  summary_json_path="$(trim "${1:-}")"
+  minimum_timeout_sec="$(trim "${2:-}")"
+  if [[ -z "$summary_json_path" ]]; then
+    summary_json_path=".easy-node-logs/profile_compare_campaign_signoff_summary.json"
+  fi
+  if [[ -z "$minimum_timeout_sec" || ! "$minimum_timeout_sec" =~ ^[0-9]+$ ]]; then
+    minimum_timeout_sec="900"
+  fi
+
+  printf -v summary_json_arg '%q' "$summary_json_path"
+  printf -v minimum_timeout_sec_arg '%q' "$minimum_timeout_sec"
+  printf '%s' "./scripts/easy_node.sh gpm-endpoint-posture-remediate --mode report --summary-json $summary_json_arg --minimum-campaign-timeout-sec $minimum_timeout_sec_arg"
+}
+
+profile_default_gate_placeholder_remediation_reason_text() {
+  local unresolved_reason
+  unresolved_reason="$(trim "${1:-}")"
+  if [[ -z "$unresolved_reason" ]]; then
+    printf '%s' ""
+    return
+  fi
+  printf '%s' "$unresolved_reason; run the endpoint posture remediation helper to print concrete export/apply steps before rerunning profile-default evidence"
+}
+
 command_string_to_argv() {
   local command_text="${1:-}"
   COMMAND_STRING_ARGV=()
@@ -10679,9 +10709,37 @@ profile_default_gate_unresolved_placeholders_json="$(jq -nr \
 profile_default_gate_unresolved_placeholder_reason="$(
   profile_default_gate_unresolved_placeholder_reason_text "$profile_default_gate_unresolved_placeholder_keys_json"
 )"
+profile_default_gate_next_command_actionable_json="false"
+if [[ -n "$profile_default_gate_next_command" ]] \
+   && [[ "$profile_default_gate_next_command_has_unresolved_placeholders_json" != "true" ]]; then
+  profile_default_gate_next_command_actionable_json="true"
+fi
+profile_default_gate_next_command_sudo_actionable_json="false"
+if [[ -n "$profile_default_gate_next_command_sudo" ]] \
+   && [[ "$profile_default_gate_next_command_sudo_has_unresolved_placeholders_json" != "true" ]]; then
+  profile_default_gate_next_command_sudo_actionable_json="true"
+fi
+profile_default_gate_placeholder_remediation_available_json="false"
+profile_default_gate_placeholder_remediation_command=""
+profile_default_gate_placeholder_remediation_reason=""
 if [[ "$profile_default_gate_unresolved_placeholders_json" == "true" ]] \
    && [[ -n "$profile_default_gate_unresolved_placeholder_reason" ]]; then
   profile_default_gate_next_command_reason="$profile_default_gate_unresolved_placeholder_reason"
+  profile_default_gate_placeholder_remediation_summary_json="$(trim "$profile_compare_signoff_summary_json")"
+  if [[ -z "$profile_default_gate_placeholder_remediation_summary_json" ]]; then
+    profile_default_gate_placeholder_remediation_summary_json="$(trim "$profile_default_gate_summary_json_manual")"
+  fi
+  profile_default_gate_placeholder_remediation_command="$(
+    profile_default_gate_placeholder_remediation_command \
+      "$profile_default_gate_placeholder_remediation_summary_json" \
+      "$profile_default_gate_fallback_campaign_timeout_sec"
+  )"
+  profile_default_gate_placeholder_remediation_reason="$(
+    profile_default_gate_placeholder_remediation_reason_text "$profile_default_gate_unresolved_placeholder_reason"
+  )"
+  if [[ -n "$profile_default_gate_placeholder_remediation_command" ]]; then
+    profile_default_gate_placeholder_remediation_available_json="true"
+  fi
   if [[ "$profile_default_gate_notes" != *"$profile_default_gate_unresolved_placeholder_reason"* ]]; then
     if [[ -n "$profile_default_gate_notes" ]]; then
       profile_default_gate_notes="$profile_default_gate_notes; $profile_default_gate_unresolved_placeholder_reason"
@@ -11358,6 +11416,28 @@ next_actions_json="$(printf '%s\n' "$next_actions_candidate_json" | jq -c --argj
     .
   end
 ')"
+next_actions_remediation_json="$(
+  jq -nc \
+    --argjson profile_default_gate_placeholder_remediation_available "$profile_default_gate_placeholder_remediation_available_json" \
+    --arg profile_default_gate_placeholder_remediation_command "$profile_default_gate_placeholder_remediation_command" \
+    --arg profile_default_gate_placeholder_remediation_reason "$profile_default_gate_placeholder_remediation_reason" \
+    --argjson profile_default_gate_next_command_actionable "$profile_default_gate_next_command_actionable_json" \
+    --argjson profile_default_gate_unresolved_placeholder_keys "$profile_default_gate_unresolved_placeholder_keys_json" \
+    '
+    [
+      (if ($profile_default_gate_placeholder_remediation_available == true and ($profile_default_gate_placeholder_remediation_command // "") != "") then {
+        id: "profile_default_gate_placeholder_remediation",
+        label: "Profile default placeholder remediation",
+        remediation_command: $profile_default_gate_placeholder_remediation_command,
+        reason: (if ($profile_default_gate_placeholder_remediation_reason // "") != "" then $profile_default_gate_placeholder_remediation_reason else "profile-default next command is blocked by unresolved placeholders" end),
+        remediates: "vpn_track.profile_default_gate.next_command",
+        next_command_actionable: $profile_default_gate_next_command_actionable,
+        placeholder_unresolved: true,
+        placeholder_keys: $profile_default_gate_unresolved_placeholder_keys
+      } else empty end)
+    ]
+    '
+)"
 next_actions_live_evidence_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")')"
 next_actions_live_evidence_cycle_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")')"
 next_actions_live_evidence_cycle_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_evidence_cycle_batch_run")] | length')"
@@ -11816,6 +11896,8 @@ summary_payload_jq_args=(
   --arg profile_default_gate_next_command_sudo "$profile_default_gate_next_command_sudo" \
   --arg profile_default_gate_next_command_reason "$profile_default_gate_next_command_reason" \
   --arg profile_default_gate_next_command_source "$profile_default_gate_next_command_source" \
+  --argjson profile_default_gate_next_command_actionable "$profile_default_gate_next_command_actionable_json" \
+  --argjson profile_default_gate_next_command_sudo_actionable "$profile_default_gate_next_command_sudo_actionable_json" \
   --argjson profile_default_gate_next_command_has_unresolved_placeholders "$profile_default_gate_next_command_has_unresolved_placeholders_json" \
   --argjson profile_default_gate_next_command_sudo_has_unresolved_placeholders "$profile_default_gate_next_command_sudo_has_unresolved_placeholders_json" \
   --argjson profile_default_gate_next_command_unresolved_placeholder_keys "$profile_default_gate_next_command_unresolved_placeholder_keys_json" \
@@ -11823,6 +11905,9 @@ summary_payload_jq_args=(
   --argjson profile_default_gate_unresolved_placeholders "$profile_default_gate_unresolved_placeholders_json" \
   --argjson profile_default_gate_unresolved_placeholder_keys "$profile_default_gate_unresolved_placeholder_keys_json" \
   --arg profile_default_gate_unresolved_placeholder_reason "$profile_default_gate_unresolved_placeholder_reason" \
+  --argjson profile_default_gate_placeholder_remediation_available "$profile_default_gate_placeholder_remediation_available_json" \
+  --arg profile_default_gate_placeholder_remediation_command "$profile_default_gate_placeholder_remediation_command" \
+  --arg profile_default_gate_placeholder_remediation_reason "$profile_default_gate_placeholder_remediation_reason" \
   --arg profile_default_gate_notes "$profile_default_gate_notes" \
   --arg profile_default_gate_decision "$profile_default_gate_decision" \
   --arg profile_default_gate_recommended_profile "$profile_default_gate_recommended_profile" \
@@ -12028,6 +12113,7 @@ summary_payload_jq_args=(
   --argjson refresh_single_machine_summary_restored_from_snapshot "$single_machine_summary_restored" \
   --argjson refresh_single_machine_non_blocking_transient "$single_machine_refresh_non_blocking_transient" \
   --arg refresh_single_machine_non_blocking_reason "$single_machine_refresh_non_blocking_reason" \
+  --argjson next_actions_remediation "$next_actions_remediation_json" \
   --arg manual_validation_summary_json "$manual_validation_summary_json" \
   --arg manual_validation_report_md "$manual_validation_report_md" \
   --arg profile_compare_signoff_summary_json "$profile_compare_signoff_summary_json" \
@@ -12214,6 +12300,8 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
         next_command_sudo: (if $profile_default_gate_next_command_sudo == "" then null else $profile_default_gate_next_command_sudo end),
         next_command_reason: (if $profile_default_gate_next_command_reason == "" then null else $profile_default_gate_next_command_reason end),
         next_command_source: (if $profile_default_gate_next_command_source == "" then null else $profile_default_gate_next_command_source end),
+        next_command_actionable: $profile_default_gate_next_command_actionable,
+        next_command_sudo_actionable: $profile_default_gate_next_command_sudo_actionable,
         next_command_has_unresolved_placeholders: $profile_default_gate_next_command_has_unresolved_placeholders,
         next_command_sudo_has_unresolved_placeholders: $profile_default_gate_next_command_sudo_has_unresolved_placeholders,
         next_command_unresolved_placeholder_keys: $profile_default_gate_next_command_unresolved_placeholder_keys,
@@ -12223,6 +12311,17 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
         unresolved_placeholder_reason: (
           if $profile_default_gate_unresolved_placeholder_reason == "" then null
           else $profile_default_gate_unresolved_placeholder_reason
+          end
+        ),
+        placeholder_remediation_available: $profile_default_gate_placeholder_remediation_available,
+        placeholder_remediation_command: (
+          if $profile_default_gate_placeholder_remediation_command == "" then null
+          else $profile_default_gate_placeholder_remediation_command
+          end
+        ),
+        placeholder_remediation_reason: (
+          if $profile_default_gate_placeholder_remediation_reason == "" then null
+          else $profile_default_gate_placeholder_remediation_reason
           end
         ),
         notes: (if $profile_default_gate_notes == "" then null else $profile_default_gate_notes end),
@@ -12573,6 +12672,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       }
     },
     next_actions: $next_actions,
+    next_actions_remediation: $next_actions_remediation,
     next_actions_summary: {
       live_evidence_batch_helper_emitted: $next_actions_live_evidence_batch_helper_emitted,
       live_evidence_cycle_batch_helper_emitted: $next_actions_live_evidence_cycle_batch_helper_emitted,
@@ -12603,7 +12703,14 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       live_and_pack_batch_helper_emitted: $next_actions_live_and_pack_batch_helper_emitted,
       live_and_pack_batch_helper_count: $next_actions_live_and_pack_batch_helper_count,
       live_evidence_individual_suppression_mode: $next_actions_live_evidence_individual_suppression_mode,
-      live_evidence_individual_suppression_applied: $next_actions_live_evidence_individual_suppression_applied
+      live_evidence_individual_suppression_applied: $next_actions_live_evidence_individual_suppression_applied,
+      profile_default_placeholder_remediation_available: $profile_default_gate_placeholder_remediation_available,
+      profile_default_placeholder_remediation_emitted: (
+        ($next_actions_remediation | map(select((.id // "") == "profile_default_gate_placeholder_remediation")) | length) > 0
+      ),
+      profile_default_placeholder_remediation_count: (
+        $next_actions_remediation | map(select((.id // "") == "profile_default_gate_placeholder_remediation")) | length
+      )
     },
     artifacts: {
       manual_validation_summary_json: $manual_validation_summary_json,
@@ -12650,6 +12757,7 @@ printf '%s\n' "$summary_payload" >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
 
 next_actions_md="$(printf '%s\n' "$next_actions_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.command)` (\(.reason))" end')"
+next_actions_remediation_md="$(printf '%s\n' "$next_actions_remediation_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.remediation_command)` (\(.reason))" end')"
 non_blockchain_actionable_no_sudo_or_github_md="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.command)` (\(.reason))" end')"
 pending_real_host_checks_md="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r '
   if length == 0 then
@@ -12781,9 +12889,14 @@ cat >"$report_tmp" <<EOF_MD
 - Profile gate sudo fallback: $(jq -r '.vpn_track.profile_default_gate.next_command_sudo // "none"' "$summary_json")
 - Profile gate next command reason: $(jq -r '.vpn_track.profile_default_gate.next_command_reason // "none"' "$summary_json")
 - Profile gate command source: $(jq -r '.vpn_track.profile_default_gate.next_command_source // "none"' "$summary_json")
+- Profile gate next command actionable: $(jq -r '.vpn_track.profile_default_gate.next_command_actionable | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate sudo fallback actionable: $(jq -r '.vpn_track.profile_default_gate.next_command_sudo_actionable | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate unresolved placeholders: $(jq -r '.vpn_track.profile_default_gate.unresolved_placeholders | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate unresolved placeholder keys: $(jq -r '.vpn_track.profile_default_gate.unresolved_placeholder_keys | if . == null or length == 0 then "none" else join(",") end' "$summary_json")
 - Profile gate unresolved placeholder reason: $(jq -r '.vpn_track.profile_default_gate.unresolved_placeholder_reason // "none"' "$summary_json")
+- Profile gate placeholder remediation available: $(jq -r '.vpn_track.profile_default_gate.placeholder_remediation_available | if . == null then "null" else tostring end' "$summary_json")
+- Profile gate placeholder remediation command: $(jq -r '.vpn_track.profile_default_gate.placeholder_remediation_command // "none"' "$summary_json")
+- Profile gate placeholder remediation reason: $(jq -r '.vpn_track.profile_default_gate.placeholder_remediation_reason // "none"' "$summary_json")
 - Profile gate docker hint available: $(jq -r '.vpn_track.profile_default_gate.docker_hint_available | if . == null then "null" else tostring end' "$summary_json")
 - Profile gate docker hint source: $(jq -r '.vpn_track.profile_default_gate.docker_hint_source // "none"' "$summary_json")
 - Profile gate campaign-check summary (resolved): $(jq -r '.vpn_track.profile_default_gate.campaign_check_summary_json_resolved // "none"' "$summary_json")
@@ -12967,6 +13080,10 @@ $pending_real_host_checks_md
 
 $next_actions_md
 
+## Blocked Next-Action Remediation
+
+$next_actions_remediation_md
+
 ## Non-Blockchain Actionable Gates (No sudo/GitHub)
 
 $non_blockchain_actionable_no_sudo_or_github_md
@@ -13057,7 +13174,7 @@ echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_ac
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command=${blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command:-}"
 echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json summary_generated_at=${blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json:-} summary_stale=${blockchain_bootstrap_governance_graduation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
-echo "[roadmap-progress-report] profile_default_gate_next_command_reason=${profile_default_gate_next_command_reason:-} next_command_has_unresolved_placeholders=$profile_default_gate_next_command_has_unresolved_placeholders_json next_command_sudo_has_unresolved_placeholders=$profile_default_gate_next_command_sudo_has_unresolved_placeholders_json unresolved_placeholders=$profile_default_gate_unresolved_placeholders_json unresolved_placeholder_keys=${profile_default_gate_unresolved_placeholder_keys_json:-[]} unresolved_placeholder_reason=${profile_default_gate_unresolved_placeholder_reason:-}"
+echo "[roadmap-progress-report] profile_default_gate_next_command_reason=${profile_default_gate_next_command_reason:-} next_command_actionable=$profile_default_gate_next_command_actionable_json next_command_sudo_actionable=$profile_default_gate_next_command_sudo_actionable_json next_command_has_unresolved_placeholders=$profile_default_gate_next_command_has_unresolved_placeholders_json next_command_sudo_has_unresolved_placeholders=$profile_default_gate_next_command_sudo_has_unresolved_placeholders_json unresolved_placeholders=$profile_default_gate_unresolved_placeholders_json unresolved_placeholder_keys=${profile_default_gate_unresolved_placeholder_keys_json:-[]} unresolved_placeholder_reason=${profile_default_gate_unresolved_placeholder_reason:-} placeholder_remediation_available=$profile_default_gate_placeholder_remediation_available_json placeholder_remediation_command=${profile_default_gate_placeholder_remediation_command:-}"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_selection_policy_evidence_present=$profile_default_gate_selection_policy_evidence_present_json selection_policy_evidence_valid=$profile_default_gate_selection_policy_evidence_valid_json selection_policy_evidence_note=${profile_default_gate_selection_policy_evidence_note:-}"
 echo "[roadmap-progress-report] profile_default_gate_micro_relay_evidence_available=$profile_default_gate_micro_relay_evidence_available_json micro_relay_quality_status_pass=$profile_default_gate_micro_relay_quality_status_pass_json micro_relay_demotion_policy_present=$profile_default_gate_micro_relay_demotion_policy_present_json micro_relay_promotion_policy_present=$profile_default_gate_micro_relay_promotion_policy_present_json trust_tier_port_unlock_policy_present=$profile_default_gate_trust_tier_port_unlock_policy_present_json micro_relay_evidence_note=${profile_default_gate_micro_relay_evidence_note:-}"
