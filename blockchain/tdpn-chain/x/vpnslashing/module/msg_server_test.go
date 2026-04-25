@@ -277,6 +277,54 @@ func TestMsgServerSubmitSlashEvidenceReplayThenConflictOnProofHashChange(t *test
 	}
 }
 
+func TestMsgServerSubmitSlashEvidenceDuplicateObjectiveIncidentClassifiedAsConflict(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	first := SubmitSlashEvidenceRequest{
+		Evidence: types.SlashEvidence{
+			EvidenceID:    "evidence-msg-duplicate-incident-a",
+			ProviderID:    "provider-msg-duplicate-incident",
+			SessionID:     "session-msg-duplicate-incident",
+			Kind:          types.EvidenceKindObjective,
+			ViolationType: "double-sign",
+			ProofHash:     testSHAProof("proof-msg-duplicate-incident"),
+		},
+	}
+	if _, err := server.SubmitSlashEvidence(first); err != nil {
+		t.Fatalf("first submit failed: %v", err)
+	}
+
+	second := SubmitSlashEvidenceRequest{
+		Evidence: types.SlashEvidence{
+			EvidenceID:    "evidence-msg-duplicate-incident-b",
+			ProviderID:    "provider-msg-duplicate-incident",
+			SessionID:     "session-msg-duplicate-incident",
+			Kind:          types.EvidenceKindObjective,
+			ViolationType: "double-sign",
+			ProofHash:     testSHAProof("proof-msg-duplicate-incident"),
+		},
+	}
+	resp, err := server.SubmitSlashEvidence(second)
+	if err == nil {
+		t.Fatal("expected duplicate objective incident to fail")
+	}
+	if !errors.Is(err, ErrEvidenceConflict) {
+		t.Fatalf("expected ErrEvidenceConflict, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false for duplicate incident with different evidence id")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false for duplicate incident")
+	}
+	if len(k.ListEvidence()) != 1 {
+		t.Fatalf("expected one evidence record after duplicate incident rejection, got %d", len(k.ListEvidence()))
+	}
+}
+
 func TestMsgServerApplyPenaltyHappyPath(t *testing.T) {
 	t.Parallel()
 

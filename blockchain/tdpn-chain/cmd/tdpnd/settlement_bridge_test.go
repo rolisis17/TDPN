@@ -1125,6 +1125,84 @@ func TestRunTDPNDSettlementHTTPSlashEvidenceValidatesViolationTypesAndRequiredFi
 	}
 }
 
+func TestRunTDPNDSettlementHTTPSlashEvidenceDuplicateIncidentReturnsConflict(t *testing.T) {
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen http: %v", err)
+	}
+	defer httpListener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runTDPND(
+			ctx,
+			[]string{"--settlement-http-listen", "settlement-duplicate-incident-test"},
+			nil,
+			func() chainScaffold { return app.NewChainScaffold() },
+			runtimeDeps{
+				Listen: func(_, _ string) (net.Listener, error) {
+					return nil, errors.New("grpc listener should not be used")
+				},
+				ListenHTTP: func(_, address string) (net.Listener, error) {
+					if address != "settlement-duplicate-incident-test" {
+						return nil, errors.New("unexpected settlement listen address")
+					}
+					return httpListener, nil
+				},
+				NewGRPCServer: func(opts ...grpc.ServerOption) grpcRuntimeServer {
+					return grpc.NewServer(opts...)
+				},
+			},
+		)
+	}()
+
+	baseURL := "http://" + httpListener.Addr().String()
+	waitForHTTPReady(t, baseURL+"/health")
+
+	status, payload := doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnslashing/evidence",
+		`{"EvidenceID":"ev-dup-incident-a","SubjectID":"provider-dup-incident-1","SessionID":"sess-dup-incident-1","ViolationType":"double-sign","EvidenceRef":"sha256:7e70f58fa8f4eb44ef6ceb8fd9b3550a8fd2fb208f5baf5f4f3fd95f078aaafd","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("expected first slashing evidence POST to return 200, got %d payload=%v", status, payload)
+	}
+
+	status, payload = doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnslashing/evidence",
+		`{"EvidenceID":"ev-dup-incident-b","SubjectID":"provider-dup-incident-1","SessionID":"sess-dup-incident-1","ViolationType":"double-sign","EvidenceRef":"sha256:7e70f58fa8f4eb44ef6ceb8fd9b3550a8fd2fb208f5baf5f4f3fd95f078aaafd","ObservedAt":"2026-01-01T00:00:00Z"}`,
+		nil,
+	)
+	if status != http.StatusConflict {
+		t.Fatalf("expected duplicate objective incident POST to return 409, got %d payload=%v", status, payload)
+	}
+	if errText, _ := payload["error"].(string); !strings.Contains(errText, "duplicates already-recorded evidence") {
+		t.Fatalf("expected duplicate evidence conflict details, got %q", errText)
+	}
+
+	status, payload = doJSONRequest(t, http.MethodGet, baseURL+"/x/vpnslashing/evidence/ev-dup-incident-b", "", nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("expected duplicate evidence id lookup to return 404 after conflict, got %d payload=%v", status, payload)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime shutdown")
+	}
+}
+
 func TestRunTDPNDSettlementHTTPValidatorStatusRejectsInvalidObjectiveEvidenceRef(t *testing.T) {
 	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

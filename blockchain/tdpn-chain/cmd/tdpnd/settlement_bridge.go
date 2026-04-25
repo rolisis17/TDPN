@@ -18,6 +18,7 @@ import (
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 	governancetypes "github.com/tdpn/tdpn-chain/x/vpngovernance/types"
 	rewardtypes "github.com/tdpn/tdpn-chain/x/vpnrewards/types"
+	slashingmodule "github.com/tdpn/tdpn-chain/x/vpnslashing/module"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
 	sponsormodule "github.com/tdpn/tdpn-chain/x/vpnsponsor/module"
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
@@ -904,6 +905,10 @@ func (h *settlementBridgeHandler) handleSlashEvidence(w http.ResponseWriter, r *
 		},
 	})
 	if err != nil {
+		if errors.Is(err, slashingmodule.ErrEvidenceConflict) {
+			writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: err.Error()})
+			return
+		}
 		writeBridgeError(w, err)
 		return
 	}

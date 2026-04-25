@@ -70,7 +70,8 @@ func (s MsgServer) SubmitSlashEvidence(req SubmitSlashEvidenceRequest) (SubmitSl
 		Idempotent: existed && err == nil,
 	}
 	if err != nil {
-		if strings.Contains(err.Error(), "conflicting fields") {
+		if strings.Contains(err.Error(), "conflicting fields") ||
+			strings.Contains(err.Error(), "duplicates already-recorded evidence") {
 			return resp, fmt.Errorf("%w: %v", ErrEvidenceConflict, err)
 		}
 		return resp, fmt.Errorf("%w: %v", ErrInvalidEvidence, err)
