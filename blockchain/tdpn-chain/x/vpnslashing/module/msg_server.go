@@ -10,13 +10,14 @@ import (
 )
 
 var (
-	ErrNilKeeper        = errors.New("vpnslashing: keeper is nil")
-	ErrInvalidEvidence  = errors.New("vpnslashing: invalid evidence")
-	ErrEvidenceConflict = errors.New("vpnslashing: evidence conflict")
-	ErrInvalidPenalty   = errors.New("vpnslashing: invalid penalty")
-	ErrPenaltyConflict  = errors.New("vpnslashing: penalty conflict")
-	ErrPenaltyStoreRead = errors.New("vpnslashing: penalty store read failed")
-	ErrEvidenceNotFound = errors.New("vpnslashing: evidence not found")
+	ErrNilKeeper           = errors.New("vpnslashing: keeper is nil")
+	ErrInvalidEvidence     = errors.New("vpnslashing: invalid evidence")
+	ErrEvidenceConflict    = errors.New("vpnslashing: evidence conflict")
+	ErrInvalidPenalty      = errors.New("vpnslashing: invalid penalty")
+	ErrPenaltyConflict     = errors.New("vpnslashing: penalty conflict")
+	ErrPenaltyStoreRead    = errors.New("vpnslashing: penalty store read failed")
+	ErrEvidenceNotFound    = errors.New("vpnslashing: evidence not found")
+	ErrUnauthorizedPenalty = errors.New("vpnslashing: unauthorized penalty")
 )
 
 // SubmitSlashEvidenceRequest captures objective evidence input for deterministic slashing.
@@ -85,13 +86,32 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 	if err := req.Penalty.ValidateBasic(); err != nil {
 		return ApplyPenaltyResponse{}, fmt.Errorf("%w: %v", ErrInvalidPenalty, err)
 	}
-
-	existed := false
-	if req.Penalty.PenaltyID != "" {
-		_, existed = s.keeper.GetPenalty(req.Penalty.PenaltyID)
+	normalizedEvidenceID := types.NormalizeEvidenceID(req.Penalty.EvidenceID)
+	normalizedPenaltyID := types.NormalizePenaltyID(req.Penalty.PenaltyID)
+	if normalizedEvidenceID != "" {
+		evidence, ok := s.keeper.GetEvidence(normalizedEvidenceID)
+		if !ok {
+			return ApplyPenaltyResponse{
+				Penalty:    req.Penalty,
+				Existed:    false,
+				Idempotent: false,
+			}, fmt.Errorf("%w: evidence_id=%s", ErrEvidenceNotFound, normalizedEvidenceID)
+		}
+		if strings.TrimSpace(evidence.ProviderID) == "" {
+			return ApplyPenaltyResponse{
+				Penalty:    req.Penalty,
+				Existed:    false,
+				Idempotent: false,
+			}, fmt.Errorf("%w: evidence_id=%s has no provider subject", ErrUnauthorizedPenalty, normalizedEvidenceID)
+		}
 	}
 
-	evidencePenaltyExists, samePenaltyID, evidencePenaltyConflict, err := s.penaltyForEvidence(req.Penalty.EvidenceID, req.Penalty.PenaltyID)
+	existed := false
+	if normalizedPenaltyID != "" {
+		_, existed = s.keeper.GetPenalty(normalizedPenaltyID)
+	}
+
+	evidencePenaltyExists, samePenaltyID, evidencePenaltyConflict, err := s.penaltyForEvidence(normalizedEvidenceID, normalizedPenaltyID)
 	if err != nil {
 		return ApplyPenaltyResponse{
 			Penalty:    req.Penalty,
@@ -104,7 +124,7 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 			Penalty:    req.Penalty,
 			Existed:    true,
 			Idempotent: false,
-		}, fmt.Errorf("%w: evidence %q already has a penalty", ErrPenaltyConflict, req.Penalty.EvidenceID)
+		}, fmt.Errorf("%w: evidence %q already has a penalty", ErrPenaltyConflict, normalizedEvidenceID)
 	}
 
 	record, err := s.keeper.ApplyPenalty(req.Penalty)
@@ -126,6 +146,8 @@ func (s MsgServer) ApplyPenalty(req ApplyPenaltyRequest) (ApplyPenaltyResponse, 
 }
 
 func (s MsgServer) penaltyForEvidence(evidenceID string, penaltyID string) (bool, bool, bool, error) {
+	evidenceID = types.NormalizeEvidenceID(evidenceID)
+	penaltyID = types.NormalizePenaltyID(penaltyID)
 	if s.keeper == nil || evidenceID == "" {
 		return false, false, false, nil
 	}
@@ -138,11 +160,11 @@ func (s MsgServer) penaltyForEvidence(evidenceID string, penaltyID string) (bool
 	found := false
 	samePenaltyID := false
 	for _, penalty := range penalties {
-		if penalty.EvidenceID != evidenceID {
+		if types.NormalizeEvidenceID(penalty.EvidenceID) != evidenceID {
 			continue
 		}
 		found = true
-		if penalty.PenaltyID == penaltyID {
+		if types.NormalizePenaltyID(penalty.PenaltyID) == penaltyID {
 			samePenaltyID = true
 		}
 	}

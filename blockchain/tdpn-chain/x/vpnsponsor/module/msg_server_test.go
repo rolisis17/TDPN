@@ -216,6 +216,56 @@ func TestMsgServerDelegateCreditIdempotentReplay(t *testing.T) {
 	}
 }
 
+func TestMsgServerDelegateCreditReplayIgnoresLaterAuthorizationSubjectDrift(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	_, err := server.AuthorizeSponsor(AuthorizeSponsorRequest{
+		Authorization: types.SponsorAuthorization{
+			AuthorizationID: "auth-5b",
+			SponsorID:       "sponsor-5b",
+			AppID:           "app-5b",
+			MaxCredits:      200,
+		},
+	})
+	if err != nil {
+		t.Fatalf("authorize failed: %v", err)
+	}
+
+	req := DelegateCreditRequest{
+		Delegation: types.DelegatedSessionCredit{
+			ReservationID:   "res-5b",
+			AuthorizationID: "auth-5b",
+			SponsorID:       "sponsor-5b",
+			AppID:           "app-5b",
+			SessionID:       "sess-5b",
+			Credits:         50,
+		},
+	}
+	if _, err := server.DelegateCredit(req); err != nil {
+		t.Fatalf("first delegate failed: %v", err)
+	}
+
+	// Simulate legacy/corrupt linked authorization data after the delegation is persisted.
+	k.UpsertAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-5b",
+		MaxCredits:      200,
+	})
+
+	resp, err := server.DelegateCredit(req)
+	if err != nil {
+		t.Fatalf("expected replay to stay idempotent, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true for replayed delegation")
+	}
+	if !resp.Idempotent {
+		t.Fatal("expected idempotent=true for replayed delegation")
+	}
+}
+
 func TestMsgServerDelegateCreditConflictPropagation(t *testing.T) {
 	t.Parallel()
 
@@ -308,6 +358,44 @@ func TestMsgServerDelegateCreditMissingAuthorizationPropagation(t *testing.T) {
 	}
 	if !errors.Is(err, ErrAuthorizationNotFound) {
 		t.Fatalf("expected ErrAuthorizationNotFound, got %v", err)
+	}
+}
+
+func TestMsgServerDelegateCreditFailsClosedWhenAuthorizationHasNoSubject(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	k.UpsertAuthorization(types.SponsorAuthorization{
+		AuthorizationID: "auth-no-subject",
+		MaxCredits:      100,
+	})
+
+	resp, err := server.DelegateCredit(DelegateCreditRequest{
+		Delegation: types.DelegatedSessionCredit{
+			ReservationID:   "res-no-subject",
+			AuthorizationID: "auth-no-subject",
+			SponsorID:       "sponsor-no-subject",
+			AppID:           "app-no-subject",
+			SessionID:       "sess-no-subject",
+			Credits:         10,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed unauthorized delegation error")
+	}
+	if !errors.Is(err, ErrUnauthorizedDelegation) {
+		t.Fatalf("expected ErrUnauthorizedDelegation, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on unauthorized delegation")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on unauthorized delegation")
+	}
+	if _, ok := k.GetDelegation("res-no-subject"); ok {
+		t.Fatal("expected no delegation write on unauthorized delegation")
 	}
 }
 

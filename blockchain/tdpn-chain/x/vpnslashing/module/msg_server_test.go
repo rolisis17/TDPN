@@ -38,6 +38,8 @@ func TestMsgServerSubmitSlashEvidenceHappyPath(t *testing.T) {
 	req := SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-1",
+			ProviderID:    "provider-msg-1",
+			SessionID:     "session-msg-1",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-1"),
@@ -68,6 +70,8 @@ func TestMsgServerSubmitSlashEvidenceIdempotentReplay(t *testing.T) {
 	req := SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-2",
+			ProviderID:    "provider-msg-2",
+			SessionID:     "session-msg-2",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-2"),
@@ -98,6 +102,8 @@ func TestMsgServerSubmitSlashEvidenceConflictPropagation(t *testing.T) {
 	base := SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-3",
+			ProviderID:    "provider-msg-3",
+			SessionID:     "session-msg-3",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-3"),
@@ -133,6 +139,8 @@ func TestMsgServerSubmitSlashEvidenceInvalidPropagation(t *testing.T) {
 	_, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "",
+			ProviderID:    "provider-msg-invalid",
+			SessionID:     "session-msg-invalid",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-invalid"),
@@ -155,6 +163,8 @@ func TestMsgServerSubmitSlashEvidenceInvalidProofFormatPropagation(t *testing.T)
 	_, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-invalid-proof",
+			ProviderID:    "provider-msg-invalid-proof",
+			SessionID:     "session-msg-invalid-proof",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     "legacy-proof",
@@ -195,6 +205,8 @@ func TestMsgServerSubmitSlashEvidenceInvalidProofFormatsPropagation(t *testing.T
 			resp, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 				Evidence: types.SlashEvidence{
 					EvidenceID:    tc.evidence,
+					ProviderID:    "provider-msg-invalid-proof",
+					SessionID:     "session-msg-invalid-proof",
 					Kind:          types.EvidenceKindObjective,
 					ViolationType: "double-sign",
 					ProofHash:     tc.proofHash,
@@ -225,6 +237,8 @@ func TestMsgServerSubmitSlashEvidenceReplayThenConflictOnProofHashChange(t *test
 	base := SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-replay-conflict",
+			ProviderID:    "provider-msg-replay-conflict",
+			SessionID:     "session-msg-replay-conflict",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     "obj://bucket/replay-conflict",
@@ -272,6 +286,8 @@ func TestMsgServerApplyPenaltyHappyPath(t *testing.T) {
 	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-4",
+			ProviderID:    "provider-msg-4",
+			SessionID:     "session-msg-4",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-4"),
@@ -310,6 +326,8 @@ func TestMsgServerApplyPenaltyIdempotentReplay(t *testing.T) {
 	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-5",
+			ProviderID:    "provider-msg-5",
+			SessionID:     "session-msg-5",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-5"),
@@ -350,6 +368,8 @@ func TestMsgServerApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) 
 	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-5b",
+			ProviderID:    "provider-msg-5b",
+			SessionID:     "session-msg-5b",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-5b"),
@@ -394,6 +414,59 @@ func TestMsgServerApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) 
 	}
 }
 
+func TestMsgServerApplyPenaltyCanonicalEvidenceIDConflictClassification(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
+		Evidence: types.SlashEvidence{
+			EvidenceID:    "evidence-msg-canonical-conflict",
+			ProviderID:    "provider-msg-canonical-conflict",
+			SessionID:     "session-msg-canonical-conflict",
+			Kind:          types.EvidenceKindObjective,
+			ViolationType: "double-sign",
+			ProofHash:     testSHAProof("proof-msg-canonical-conflict"),
+		},
+	}); err != nil {
+		t.Fatalf("submit evidence failed: %v", err)
+	}
+
+	if _, err := server.ApplyPenalty(ApplyPenaltyRequest{
+		Penalty: types.PenaltyDecision{
+			PenaltyID:       "penalty-msg-canonical-conflict-a",
+			EvidenceID:      "evidence-msg-canonical-conflict",
+			SlashBasisPoint: 50,
+		},
+	}); err != nil {
+		t.Fatalf("first apply failed: %v", err)
+	}
+
+	resp, err := server.ApplyPenalty(ApplyPenaltyRequest{
+		Penalty: types.PenaltyDecision{
+			PenaltyID:       "penalty-msg-canonical-conflict-b",
+			EvidenceID:      "  EVIDENCE-MSG-CANONICAL-CONFLICT  ",
+			SlashBasisPoint: 51,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected canonical evidence-id conflict to fail")
+	}
+	if !errors.Is(err, ErrPenaltyConflict) {
+		t.Fatalf("expected ErrPenaltyConflict, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true for canonical conflict")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false for canonical conflict")
+	}
+	if len(k.ListPenalties()) != 1 {
+		t.Fatalf("expected only one penalty after canonical conflict, got %d", len(k.ListPenalties()))
+	}
+}
+
 func TestMsgServerApplyPenaltyConflictPropagation(t *testing.T) {
 	t.Parallel()
 
@@ -403,6 +476,8 @@ func TestMsgServerApplyPenaltyConflictPropagation(t *testing.T) {
 	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-6",
+			ProviderID:    "provider-msg-6",
+			SessionID:     "session-msg-6",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-6"),
@@ -469,6 +544,8 @@ func TestMsgServerApplyPenaltyNoOpPropagation(t *testing.T) {
 	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-noop",
+			ProviderID:    "provider-msg-noop",
+			SessionID:     "session-msg-noop",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-noop"),
@@ -518,12 +595,52 @@ func TestMsgServerApplyPenaltyMissingEvidencePropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerApplyPenaltyFailsClosedWhenEvidenceHasNoProviderSubject(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-msg-no-provider-subject",
+		SessionID:     "session-msg-no-provider-subject",
+		Kind:          types.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     testSHAProof("proof-msg-no-provider-subject"),
+	})
+
+	resp, err := server.ApplyPenalty(ApplyPenaltyRequest{
+		Penalty: types.PenaltyDecision{
+			PenaltyID:       "penalty-msg-no-provider-subject",
+			EvidenceID:      "evidence-msg-no-provider-subject",
+			SlashBasisPoint: 10,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed unauthorized penalty error")
+	}
+	if !errors.Is(err, ErrUnauthorizedPenalty) {
+		t.Fatalf("expected ErrUnauthorizedPenalty, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on unauthorized penalty")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on unauthorized penalty")
+	}
+	if _, ok := k.GetPenalty("penalty-msg-no-provider-subject"); ok {
+		t.Fatal("expected no penalty write on unauthorized penalty")
+	}
+}
+
 func TestMsgServerApplyPenaltyFailsClosedWhenPenaltyListReadFails(t *testing.T) {
 	t.Parallel()
 
 	store := newMsgReadErrorPenaltyStore()
 	store.UpsertEvidence(types.SlashEvidence{
 		EvidenceID:    "evidence-msg-read-fail-closed",
+		ProviderID:    "provider-msg-read-fail-closed",
+		SessionID:     "session-msg-read-fail-closed",
 		Kind:          types.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     testSHAProof("proof-msg-read-fail-closed"),
@@ -566,6 +683,8 @@ func TestMsgServerNilKeeper(t *testing.T) {
 	_, evidenceErr := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
 		Evidence: types.SlashEvidence{
 			EvidenceID:    "evidence-msg-nil",
+			ProviderID:    "provider-msg-nil",
+			SessionID:     "session-msg-nil",
 			Kind:          types.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     testSHAProof("proof-msg-nil"),

@@ -12,12 +12,13 @@ import (
 )
 
 var (
-	ErrNilKeeper             = errors.New("vpnsponsor: keeper is nil")
-	ErrInvalidAuthorization  = errors.New("vpnsponsor: invalid authorization")
-	ErrInvalidDelegation     = errors.New("vpnsponsor: invalid delegation")
-	ErrAuthorizationConflict = errors.New("vpnsponsor: authorization conflict")
-	ErrDelegationConflict    = errors.New("vpnsponsor: delegation conflict")
-	ErrAuthorizationNotFound = errors.New("vpnsponsor: authorization not found")
+	ErrNilKeeper              = errors.New("vpnsponsor: keeper is nil")
+	ErrInvalidAuthorization   = errors.New("vpnsponsor: invalid authorization")
+	ErrInvalidDelegation      = errors.New("vpnsponsor: invalid delegation")
+	ErrAuthorizationConflict  = errors.New("vpnsponsor: authorization conflict")
+	ErrDelegationConflict     = errors.New("vpnsponsor: delegation conflict")
+	ErrAuthorizationNotFound  = errors.New("vpnsponsor: authorization not found")
+	ErrUnauthorizedDelegation = errors.New("vpnsponsor: unauthorized delegation")
 )
 
 // AuthorizeSponsorRequest captures an intent to create or replay sponsor authorization.
@@ -113,12 +114,21 @@ func (s MsgServer) DelegateCredit(req DelegateCreditRequest) (DelegateCreditResp
 		_, existed = s.keeper.GetDelegation(req.Delegation.ReservationID)
 	}
 
-	if strings.TrimSpace(req.Delegation.AuthorizationID) != "" {
-		if _, ok := s.keeper.GetAuthorization(req.Delegation.AuthorizationID); !ok {
+	// Preserve keeper-level replay semantics: only enforce linked authorization
+	// subject checks for new delegations.
+	if !existed && strings.TrimSpace(req.Delegation.AuthorizationID) != "" {
+		authorization, ok := s.keeper.GetAuthorization(req.Delegation.AuthorizationID)
+		if !ok {
 			return DelegateCreditResponse{
 				Delegation: req.Delegation,
 				Existed:    existed,
 			}, fmt.Errorf("%w: authorization_id=%s", ErrAuthorizationNotFound, req.Delegation.AuthorizationID)
+		}
+		if strings.TrimSpace(authorization.SponsorID) == "" || strings.TrimSpace(authorization.AppID) == "" {
+			return DelegateCreditResponse{
+				Delegation: req.Delegation,
+				Existed:    existed,
+			}, fmt.Errorf("%w: authorization_id=%s has no sponsor/app subject", ErrUnauthorizedDelegation, req.Delegation.AuthorizationID)
 		}
 	}
 
