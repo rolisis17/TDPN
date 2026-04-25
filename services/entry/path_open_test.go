@@ -1574,6 +1574,67 @@ func TestHandlePathOpenRejectsMiddleRelayEqualsExit(t *testing.T) {
 	}
 }
 
+func TestHandlePathOpenRejectsMiddleRelayPathCollisionCaseInsensitiveHost(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "middle-collision-host-case",
+			Role:       "middle",
+			OperatorID: "op-middle",
+			Endpoint:   "exit.example.invalid:51821",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+	})
+
+	exitCalls := 0
+	handlers["http://exit.local/v1/path/open"] = func(_ *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{Accepted: true, SessionExp: time.Now().Add(5 * time.Minute).Unix()})(nil)
+	}
+
+	s := &Service{
+		dataAddr:       "127.0.0.1:51820",
+		operatorID:     "op-entry",
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "EXIT.EXAMPLE.INVALID:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		directoryURLs:  []string{durl},
+		routeTTL:       time.Minute,
+		buckets:        map[string]rateBucket{},
+		abuse:          map[string]abuseState{},
+		openRPS:        100,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:        "exit-b",
+		MiddleRelayID: "middle-collision-host-case",
+		Transport:     "wireguard-udp",
+		TokenProof:    "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41002"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open when middle relay endpoint collides with exit endpoint")
+	}
+	if out.Reason != "middle-relay-path-collision" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit, got %d", exitCalls)
+	}
+}
+
 func TestHandlePathOpenRejectsMiddleExitOperatorCollision(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
@@ -1696,6 +1757,90 @@ func TestHandlePathOpenAllowsValidMiddleRelayAndForwards(t *testing.T) {
 	}
 	if exitCalls != 1 {
 		t.Fatalf("expected one call to exit, got %d", exitCalls)
+	}
+	if strings.TrimSpace(out.SessionID) == "" {
+		t.Fatal("expected accepted response to include session id")
+	}
+	s.mu.RLock()
+	state, ok := s.sessions[out.SessionID]
+	s.mu.RUnlock()
+	if !ok {
+		t.Fatalf("expected session %q to be committed", out.SessionID)
+	}
+	if !state.enforceMiddle {
+		t.Fatal("expected committed session to enforce middle relay runtime routing")
+	}
+	if state.middleRelayID != "middle-ok" {
+		t.Fatalf("expected committed middle relay id middle-ok, got %q", state.middleRelayID)
+	}
+	if state.middleDataAddr != "127.0.0.1:51822" {
+		t.Fatalf("expected committed middle relay data addr 127.0.0.1:51822, got %q", state.middleDataAddr)
+	}
+}
+
+func TestHandlePathOpenRejectsMiddleRelayMissingRuntimeEndpoint(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "middle-missing-endpoint",
+			Role:       "middle",
+			HopRoles:   []string{"middle"},
+			OperatorID: "op-middle",
+			Endpoint:   "",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+	})
+
+	exitCalls := 0
+	handlers["http://exit.local/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{
+			Accepted:   true,
+			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
+			Transport:  "wireguard-udp",
+		})(req)
+	}
+
+	s := &Service{
+		dataAddr:       "127.0.0.1:51820",
+		operatorID:     "op-entry",
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		directoryURLs:  []string{durl},
+		routeTTL:       time.Minute,
+		buckets:        map[string]rateBucket{},
+		abuse:          map[string]abuseState{},
+		openRPS:        100,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:        "exit-b",
+		MiddleRelayID: "middle-missing-endpoint",
+		Transport:     "wireguard-udp",
+		TokenProof:    "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41004"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected denied open when middle relay endpoint metadata is missing")
+	}
+	if out.Reason != "middle-relay-endpoint-missing" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit when middle relay endpoint is missing, got %d", exitCalls)
 	}
 }
 

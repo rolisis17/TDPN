@@ -106,12 +106,85 @@ func TestRoutePacketTargetRejectsClientRebindBeforeThreshold(t *testing.T) {
 	}
 }
 
+func TestRoutePacketTargetRelayEnforcedClientToMiddle(t *testing.T) {
+	state := sessionState{
+		exitDataAddr:   "127.0.0.1:51821",
+		middleDataAddr: "127.0.0.1:51822",
+		enforceMiddle:  true,
+	}
+	next, target, ok := routePacketTarget(state, "127.0.0.1:40000", 100, 0)
+	if !ok {
+		t.Fatalf("expected packet to route through middle relay")
+	}
+	if target != "127.0.0.1:51822" {
+		t.Fatalf("expected middle relay target, got %s", target)
+	}
+	if next.clientDataAddr != "127.0.0.1:40000" {
+		t.Fatalf("expected client addr learned, got %s", next.clientDataAddr)
+	}
+}
+
+func TestRoutePacketTargetRelayEnforcedMiddleToClient(t *testing.T) {
+	state := sessionState{
+		exitDataAddr:   "127.0.0.1:51821",
+		middleDataAddr: "127.0.0.1:51822",
+		enforceMiddle:  true,
+		clientDataAddr: "127.0.0.1:40000",
+	}
+	next, target, ok := routePacketTarget(state, "127.0.0.1:51822", 120, 0)
+	if !ok {
+		t.Fatalf("expected packet from middle relay to route")
+	}
+	if target != "127.0.0.1:40000" {
+		t.Fatalf("expected client target, got %s", target)
+	}
+	if next.clientDataAddr != "127.0.0.1:40000" {
+		t.Fatalf("expected client addr unchanged, got %s", next.clientDataAddr)
+	}
+}
+
+func TestRoutePacketTargetRelayEnforcedRejectsExitSource(t *testing.T) {
+	state := sessionState{
+		exitDataAddr:   "127.0.0.1:51821",
+		middleDataAddr: "127.0.0.1:51822",
+		enforceMiddle:  true,
+		clientDataAddr: "127.0.0.1:40000",
+	}
+	_, target, ok := routePacketTarget(state, "127.0.0.1:51821", 120, 0)
+	if ok {
+		t.Fatalf("expected direct exit source to be blocked when middle relay is enforced")
+	}
+	if target != "" {
+		t.Fatalf("expected empty target for blocked direct exit source, got %s", target)
+	}
+}
+
+func TestRoutePacketTargetRelayEnforcedRejectsMissingMiddleAddr(t *testing.T) {
+	state := sessionState{
+		exitDataAddr:  "127.0.0.1:51821",
+		enforceMiddle: true,
+	}
+	_, target, ok := routePacketTarget(state, "127.0.0.1:40000", 120, 0)
+	if ok {
+		t.Fatalf("expected fail-closed drop when middle relay addr is missing")
+	}
+	if target != "" {
+		t.Fatalf("expected empty target for missing middle relay addr, got %s", target)
+	}
+}
+
 func TestSameUDPAddrLocalhostEquivalent(t *testing.T) {
 	if !sameUDPAddr("localhost:1234", "127.0.0.1:1234") {
 		t.Fatalf("expected localhost and 127.0.0.1 to match")
 	}
 	if sameUDPAddr("127.0.0.1:1234", "127.0.0.1:1235") {
 		t.Fatalf("expected different ports to not match")
+	}
+}
+
+func TestSameUDPAddrHostnameCaseInsensitiveWithoutDNS(t *testing.T) {
+	if !sameUDPAddr("EXIT.example.invalid:1234", "exit.example.invalid:1234") {
+		t.Fatalf("expected hostname comparison to be case-insensitive when DNS resolution is unavailable")
 	}
 }
 

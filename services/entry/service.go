@@ -40,6 +40,9 @@ type sessionState struct {
 	transport      string
 	clientDataAddr string
 	clientLastSeen int64
+	middleRelayID  string
+	middleDataAddr string
+	enforceMiddle  bool
 }
 
 type exitRoute struct {
@@ -58,6 +61,11 @@ type routeCandidate struct {
 type relayDescriptorCandidate struct {
 	desc  proto.RelayDescriptor
 	votes int
+}
+
+type middleRelayRuntime struct {
+	relayID  string
+	dataAddr string
 }
 
 type cachedRelayDescriptor struct {
@@ -598,7 +606,8 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if reason := s.validateMiddleRelayRequest(r.Context(), &req, route); reason != "" {
+	middleRelayRuntime, reason := s.validateMiddleRelayRequest(r.Context(), &req, route)
+	if reason != "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: reason})
 		return
@@ -642,6 +651,9 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			sessionKeyID:   strings.TrimSpace(resp.SessionKeyID),
 			expiresUnix:    expires,
 			transport:      transport,
+			middleRelayID:  middleRelayRuntime.relayID,
+			middleDataAddr: middleRelayRuntime.dataAddr,
+			enforceMiddle:  middleRelayRuntime.relayID != "",
 		})
 		releaseReservation = false
 		resp.SessionID = sessionID
@@ -883,7 +895,22 @@ func remoteIP(remoteAddr string) string {
 }
 
 func routePacketTarget(state sessionState, sourceAddr string, nowUnix int64, rebindAfterSec int64) (sessionState, string, bool) {
-	if sameUDPAddr(sourceAddr, state.exitDataAddr) {
+	upstreamDataAddr := strings.TrimSpace(state.exitDataAddr)
+	if state.enforceMiddle {
+		middleDataAddr := strings.TrimSpace(state.middleDataAddr)
+		if middleDataAddr == "" {
+			return state, "", false
+		}
+		if sameUDPAddr(sourceAddr, state.exitDataAddr) {
+			return state, "", false
+		}
+		upstreamDataAddr = middleDataAddr
+	}
+	if upstreamDataAddr == "" {
+		return state, "", false
+	}
+
+	if sameUDPAddr(sourceAddr, upstreamDataAddr) {
 		if strings.TrimSpace(state.clientDataAddr) == "" {
 			return state, "", false
 		}
@@ -892,18 +919,18 @@ func routePacketTarget(state sessionState, sourceAddr string, nowUnix int64, reb
 	if strings.TrimSpace(state.clientDataAddr) == "" {
 		state.clientDataAddr = sourceAddr
 		state.clientLastSeen = nowUnix
-		return state, state.exitDataAddr, true
+		return state, upstreamDataAddr, true
 	}
 	if sameUDPAddr(sourceAddr, state.clientDataAddr) {
 		state.clientLastSeen = nowUnix
-		return state, state.exitDataAddr, true
+		return state, upstreamDataAddr, true
 	}
 	if rebindAfterSec > 0 {
 		lastSeen := state.clientLastSeen
 		if lastSeen == 0 || nowUnix-lastSeen >= rebindAfterSec {
 			state.clientDataAddr = sourceAddr
 			state.clientLastSeen = nowUnix
-			return state, state.exitDataAddr, true
+			return state, upstreamDataAddr, true
 		}
 	}
 	return state, "", false
@@ -913,7 +940,7 @@ func sameUDPAddr(a, b string) bool {
 	aa, errA := net.ResolveUDPAddr("udp", a)
 	bb, errB := net.ResolveUDPAddr("udp", b)
 	if errA != nil || errB != nil {
-		return a == b
+		return sameUDPAddrWithoutResolution(a, b)
 	}
 	if aa.Port != bb.Port {
 		return false
@@ -922,6 +949,23 @@ func sameUDPAddr(a, b string) bool {
 		return aa.IP.String() == bb.IP.String()
 	}
 	return aa.IP.Equal(bb.IP)
+}
+
+func sameUDPAddrWithoutResolution(a, b string) bool {
+	aHost, aPort, errA := net.SplitHostPort(strings.TrimSpace(a))
+	bHost, bPort, errB := net.SplitHostPort(strings.TrimSpace(b))
+	if errA != nil || errB != nil {
+		return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+	}
+	if aPort != bPort {
+		return false
+	}
+	aIP := net.ParseIP(strings.Trim(aHost, "[]"))
+	bIP := net.ParseIP(strings.Trim(bHost, "[]"))
+	if aIP != nil && bIP != nil {
+		return aIP.Equal(bIP)
+	}
+	return strings.EqualFold(strings.TrimSpace(aHost), strings.TrimSpace(bHost))
 }
 
 func (s *Service) forwardPathOpen(ctx context.Context, exitControlURL string, in proto.PathOpenRequest) (proto.PathOpenResponse, error) {
@@ -1274,35 +1318,72 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 	return best, nil
 }
 
-func (s *Service) validateMiddleRelayRequest(ctx context.Context, req *proto.PathOpenRequest, route exitRoute) string {
+func (s *Service) validateMiddleRelayRequest(ctx context.Context, req *proto.PathOpenRequest, route exitRoute) (middleRelayRuntime, string) {
 	middleRelayID := strings.TrimSpace(req.MiddleRelayID)
 	exitID := strings.TrimSpace(req.ExitID)
 	if middleRelayID == "" {
 		if !s.requireMiddleRelay {
-			return ""
+			return middleRelayRuntime{}, ""
 		}
 		selected, err := s.selectMiddleRelayDescriptor(ctx, route, exitID)
 		if err != nil {
 			log.Printf("entry middle relay auto-selection failed exit=%s err=%v", strings.TrimSpace(req.ExitID), err)
-			return "middle-relay-required"
+			return middleRelayRuntime{}, "middle-relay-required"
 		}
 		selectedRelayID := strings.TrimSpace(selected.RelayID)
 		if selectedRelayID == "" {
 			log.Printf("entry middle relay auto-selection returned empty relay id exit=%s", strings.TrimSpace(req.ExitID))
-			return "middle-relay-required"
+			return middleRelayRuntime{}, "middle-relay-required"
+		}
+		runtime, reason := middleRelayRuntimeForSession(selectedRelayID, selected, route)
+		if reason != "" {
+			log.Printf("entry middle relay runtime metadata missing relay=%s reason=%s", selectedRelayID, reason)
+			return middleRelayRuntime{}, reason
 		}
 		req.MiddleRelayID = selectedRelayID
-		return ""
+		return runtime, ""
 	}
 	if exitID != "" && middleRelayID == exitID {
-		return "middle-relay-equals-exit"
+		return middleRelayRuntime{}, "middle-relay-equals-exit"
 	}
 	useCache := !(s.betaStrict || s.prodStrict || s.requireDistinctExitOp || s.requireMiddleRelay)
 	desc, err := s.resolveRelayDescriptorWithCachePolicy(ctx, middleRelayID, useCache)
 	if err != nil {
-		return "unknown-middle-relay"
+		return middleRelayRuntime{}, "unknown-middle-relay"
 	}
-	return s.validateMiddleRelayDescriptor(desc, route)
+	if reason := s.validateMiddleRelayDescriptor(desc, route); reason != "" {
+		return middleRelayRuntime{}, reason
+	}
+	runtime, reason := middleRelayRuntimeForSession(middleRelayID, desc, route)
+	if reason != "" {
+		log.Printf("entry middle relay runtime metadata missing relay=%s reason=%s", middleRelayID, reason)
+		return middleRelayRuntime{}, reason
+	}
+	req.MiddleRelayID = middleRelayID
+	return runtime, ""
+}
+
+func middleRelayRuntimeForSession(relayID string, desc proto.RelayDescriptor, route exitRoute) (middleRelayRuntime, string) {
+	relayID = strings.TrimSpace(relayID)
+	if relayID == "" {
+		return middleRelayRuntime{}, "middle-relay-runtime-metadata-missing"
+	}
+	dataAddr := strings.TrimSpace(desc.Endpoint)
+	if dataAddr == "" {
+		return middleRelayRuntime{}, "middle-relay-endpoint-missing"
+	}
+	host, port, err := net.SplitHostPort(dataAddr)
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return middleRelayRuntime{}, "middle-relay-endpoint-invalid"
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 1 || portNum > 65535 {
+		return middleRelayRuntime{}, "middle-relay-endpoint-invalid"
+	}
+	if routeDataAddr := strings.TrimSpace(route.dataAddr); routeDataAddr != "" && sameUDPAddr(dataAddr, routeDataAddr) {
+		return middleRelayRuntime{}, "middle-relay-path-collision"
+	}
+	return middleRelayRuntime{relayID: relayID, dataAddr: dataAddr}, ""
 }
 
 func (s *Service) validateMiddleRelayDescriptor(desc proto.RelayDescriptor, route exitRoute) string {
