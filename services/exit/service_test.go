@@ -4069,6 +4069,60 @@ func TestRefreshIssuerKeysWithSourceAndOperatorQuorum(t *testing.T) {
 	}
 }
 
+func TestRefreshIssuerKeysRejectsConflictingIssuerIdentityForSameKey(t *testing.T) {
+	existingPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("existing keygen: %v", err)
+	}
+	sharedPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("shared keygen: %v", err)
+	}
+	sharedPubB64 := base64.RawURLEncoding.EncodeToString(sharedPub)
+
+	newPubKeyServer := func(issuerID string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/pubkeys" {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(proto.IssuerPubKeysResponse{
+				PubKeys: []string{sharedPubB64},
+				Issuer:  issuerID,
+			})
+		}))
+	}
+
+	srvA := newPubKeyServer("issuer-a")
+	defer srvA.Close()
+	srvB := newPubKeyServer("issuer-b")
+	defer srvB.Close()
+
+	existingKeyID := issuerKeyID(existingPub)
+	s := &Service{
+		issuerURLs:         []string{srvA.URL, srvB.URL},
+		issuerMinSources:   2,
+		issuerMinOperators: 2,
+		httpClient:         &http.Client{Timeout: 100 * time.Millisecond},
+		issuerPubs:         map[string]ed25519.PublicKey{existingKeyID: existingPub},
+		issuerKeyIssuer:    map[string]string{},
+		minTokenEpoch:      map[string]int64{},
+	}
+	err = s.refreshIssuerKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected issuer identity conflict to be rejected")
+	}
+	if !strings.Contains(err.Error(), "issuer identity conflict for key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(s.issuerPubs) != 1 {
+		t.Fatalf("expected existing issuer keyset unchanged on conflict, got %d keys", len(s.issuerPubs))
+	}
+	if _, ok := s.issuerPubs[existingKeyID]; !ok {
+		t.Fatalf("expected existing trusted key retained after conflict")
+	}
+}
+
 func TestRefreshIssuerKeysRejectsDisjointKeysetByDefault(t *testing.T) {
 	existingPub, _, err := crypto.GenerateEd25519Keypair()
 	if err != nil {

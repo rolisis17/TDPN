@@ -2944,6 +2944,9 @@ func (s *Service) refreshIssuerKeys(ctx context.Context) error {
 			}
 			voters[sourceOperator] = struct{}{}
 			if issuerID := strings.TrimSpace(bundle.issuerID); issuerID != "" {
+				if existingIssuerID, exists := updatedIssuers[keyID]; exists && existingIssuerID != issuerID {
+					return fmt.Errorf("issuer identity conflict for key %s: %s vs %s", keyID, existingIssuerID, issuerID)
+				}
 				updatedIssuers[keyID] = issuerID
 			}
 		}
