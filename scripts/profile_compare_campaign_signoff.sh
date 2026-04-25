@@ -45,8 +45,8 @@ Usage:
     [--campaign-issuer-url URL] \
     [--campaign-entry-url URL] \
     [--campaign-exit-url URL] \
-    [--campaign-subject ID | --campaign-anon-cred TOKEN] \
-    [--subject ID | --key ID | --invite-key ID | --anon-cred TOKEN] \
+    [--campaign-subject ID | --subject ID | --campaign-anon-cred TOKEN] \
+    [--key ID | --invite-key ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
     [--campaign-timeout-sec N] \
     [--campaign-endpoint-preflight-timeout-sec N] \
@@ -67,6 +67,8 @@ Notes:
   - --subject is a legacy alias of --campaign-subject.
   - --key and --invite-key are aliases of --campaign-subject.
   - --anon-cred remains an alias of --campaign-anon-cred.
+  - If both --campaign-subject and --subject are provided, values must match;
+    --campaign-subject remains canonical.
   - Subject/anon alias flags accept both `--flag value` and `--flag=value`.
   - In invite-key workflows, prefer --campaign-subject (or --subject/--key/
     --invite-key) with an actual invite key value instead of placeholder text.
@@ -593,6 +595,7 @@ subject_alias=""
 subject_alias_flag=""
 anon_cred_alias=""
 campaign_subject_cli_provided="0"
+campaign_subject_canonical_cli_provided="0"
 campaign_subject_source=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
 original_args=("$@")
@@ -857,11 +860,13 @@ while [[ $# -gt 0 ]]; do
       require_flag_value_or_die "$1" "${2:-}"
       campaign_subject="$(require_non_empty_value_or_die "$1" "${2:-}")"
       campaign_subject_cli_provided="1"
+      campaign_subject_canonical_cli_provided="1"
       shift 2
       ;;
     --campaign-subject=*)
       campaign_subject="$(require_non_empty_value_or_die "--campaign-subject" "${1#--campaign-subject=}")"
       campaign_subject_cli_provided="1"
+      campaign_subject_canonical_cli_provided="1"
       shift
       ;;
     --campaign-anon-cred)
@@ -1045,7 +1050,7 @@ if [[ -n "$anon_cred_alias" && -n "$campaign_anon_cred" && "$anon_cred_alias" !=
   echo "conflicting anon credential values: --anon-cred and --campaign-anon-cred must match when both are provided"
   exit 2
 fi
-if [[ -n "$subject_alias" ]]; then
+if [[ -n "$subject_alias" && "$campaign_subject_canonical_cli_provided" != "1" ]]; then
   campaign_subject="$subject_alias"
 fi
 if [[ -n "$anon_cred_alias" ]]; then

@@ -27,10 +27,13 @@ assert_marker_present() {
 }
 
 assert_marker_present "function Assert-WindowsNativeNonWsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "function Assert-PolicySafeNodeRunnerScript" "$SCRIPT_UNDER_TEST"
 assert_marker_present "execution_model=windows-native-non-wsl" "$SCRIPT_UNDER_TEST"
 assert_marker_present "wsl_required=false" "$SCRIPT_UNDER_TEST"
 assert_marker_present "is Windows-native and must run outside WSL." "$SCRIPT_UNDER_TEST"
 assert_marker_present "scripts\\windows\\wsl2_easy.cmd bootstrap" "$SCRIPT_UNDER_TEST"
+assert_marker_present "policy-safe npm runner marker 'npm.cmd'" "$SCRIPT_UNDER_TEST"
+assert_marker_present "policy-safe npx runner marker" "$SCRIPT_UNDER_TEST"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -137,6 +140,7 @@ run_expect_fail_regex() {
 
 FIX_MODE_REGEX='\[desktop-doctor\] mode=fix'
 CHECK_MODE_REGEX='\[desktop-doctor\] mode=check'
+POLICY_SAFE_MARKER_REGEX="policy-safe npm runner marker 'npm\\.cmd'|policy-safe npx runner marker"
 
 echo "[windows-desktop-one-click-guardrails] WSL sessions fail fast with actionable non-WSL guidance"
 run_expect_fail_regex \
@@ -144,6 +148,35 @@ run_expect_fail_regex \
   "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd bootstrap" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & $SCRIPT_UNDER_TEST_PS_Q '-DryRun'"
+
+echo "[windows-desktop-one-click-guardrails] unsafe doctor/bootstrap delegates fail fast with npm/npx policy-safe guidance"
+FAKE_SCRIPT_DIR="$TMP_DIR/fake-desktop-one-click"
+mkdir -p "$FAKE_SCRIPT_DIR"
+cp "$SCRIPT_UNDER_TEST" "$FAKE_SCRIPT_DIR/desktop_one_click.ps1"
+cat >"$FAKE_SCRIPT_DIR/desktop_doctor.ps1" <<'EOF'
+param(
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$Args
+)
+
+Write-Host "[desktop-doctor] mode=check"
+exit 0
+EOF
+cat >"$FAKE_SCRIPT_DIR/desktop_native_bootstrap.ps1" <<'EOF'
+param(
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$Args
+)
+
+Write-Host "[desktop-native-bootstrap] mode=run-full"
+exit 0
+EOF
+FAKE_SCRIPT_UNDER_TEST_PS="$(to_powershell_path "$FAKE_SCRIPT_DIR/desktop_one_click.ps1")"
+run_expect_fail_regex \
+  "unsafe_delegate_marker_fail_fast" \
+  "$POLICY_SAFE_MARKER_REGEX" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & $(ps_single_quote "$FAKE_SCRIPT_UNDER_TEST_PS") '-DryRun'"
 
 echo "[windows-desktop-one-click-guardrails] default dry-run auto-enables install remediation"
 run_expect_output_regex \

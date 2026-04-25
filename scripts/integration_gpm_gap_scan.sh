@@ -102,6 +102,10 @@ assert_file_contains "$PRIMARY_SUMMARY_JSON" '"id": "missing_next_02"' "summary 
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"section": "in_progress"' "summary JSON missing in_progress section key"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"section": "missing_next"' "summary JSON missing missing_next section key"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"text": "In progress two with continuation context."' "summary JSON missing normalized wrapped text"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"severity": "p2"' "summary JSON missing expected in-progress severity classification"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"severity": "p1"' "summary JSON missing expected missing/next severity classification"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"recommended_action": "' "summary JSON missing recommended_action field"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"top_actionable_item_ids": [' "summary JSON missing top_actionable_item_ids field"
 
 echo "[gpm-gap-scan] helper naming extraction remains deterministic"
 HELPER_STATUS_DOC="$TMP_DIR/helper_status.md"

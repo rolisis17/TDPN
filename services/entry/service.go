@@ -1321,6 +1321,10 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 func (s *Service) validateMiddleRelayRequest(ctx context.Context, req *proto.PathOpenRequest, route exitRoute) (middleRelayRuntime, string) {
 	middleRelayID := strings.TrimSpace(req.MiddleRelayID)
 	exitID := strings.TrimSpace(req.ExitID)
+	if s.requireMiddleRelay && strings.TrimSpace(route.operatorID) == "" {
+		log.Printf("entry middle relay admission denied due to missing exit operator metadata exit=%s", exitID)
+		return middleRelayRuntime{}, "exit-operator-missing"
+	}
 	if middleRelayID == "" {
 		if !s.requireMiddleRelay {
 			return middleRelayRuntime{}, ""

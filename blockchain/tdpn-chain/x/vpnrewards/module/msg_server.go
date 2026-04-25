@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 )
@@ -104,6 +105,18 @@ func (s MsgServer) DistributeReward(req DistributeRewardRequest) (DistributeRewa
 				Existed:      existed,
 				Idempotent:   false,
 			}, fmt.Errorf("%w: accrual_id=%s has no provider subject", ErrUnauthorizedDistribution, req.Distribution.AccrualID)
+		}
+		if !existed && accrual.OperationState == chaintypes.ReconciliationFailed {
+			return DistributeRewardResponse{
+				Distribution: req.Distribution,
+				Existed:      existed,
+				Idempotent:   false,
+			}, fmt.Errorf(
+				"%w: accrual_id=%s has operation_state=%s",
+				ErrInvalidDistribution,
+				accrual.AccrualID,
+				accrual.OperationState,
+			)
 		}
 	}
 

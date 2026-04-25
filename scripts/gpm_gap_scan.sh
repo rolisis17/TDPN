@@ -131,6 +131,7 @@ fail_closed() {
 
 need_cmd sed
 need_cmd tr
+need_cmd grep
 need_cmd date
 need_cmd mkdir
 need_cmd mktemp
@@ -216,6 +217,8 @@ summary_json="$(abs_path "$summary_json")"
 declare -a ITEM_SECTIONS=()
 declare -a ITEM_TEXTS=()
 declare -a ITEM_NORMALIZED_TEXTS=()
+declare -a ITEM_SEVERITIES=()
+declare -a ITEM_RECOMMENDED_ACTIONS=()
 
 in_progress_count=0
 missing_next_count=0
@@ -235,6 +238,8 @@ flush_pending_item() {
     ITEM_TEXTS+=("$item_clean")
     item_normalized="$(normalize_item_text "$item_clean")"
     ITEM_NORMALIZED_TEXTS+=("$item_normalized")
+    ITEM_SEVERITIES+=("$(infer_item_severity "$pending_section" "$item_normalized")")
+    ITEM_RECOMMENDED_ACTIONS+=("$(infer_item_recommended_action "$pending_section" "$item_normalized")")
     if [[ "$pending_section" == "in_progress" ]]; then
       in_progress_count=$((in_progress_count + 1))
     elif [[ "$pending_section" == "missing_next" ]]; then
@@ -243,6 +248,65 @@ flush_pending_item() {
   fi
   pending_section=""
   pending_text=""
+}
+
+infer_item_severity() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  if [[ "$normalized_text" == *"blocked"* \
+     || "$normalized_text" == *"blocker"* \
+     || "$normalized_text" == *"no-go"* \
+     || "$normalized_text" == *"unresolved"* \
+     || "$normalized_text" == *"cannot"* \
+     || "$normalized_text" == *"failed"* \
+     || "$normalized_text" == *"missing"* ]]; then
+    printf '%s' "p1"
+    return
+  fi
+  if [[ "$normalized_text" == *"validation debt"* \
+     || "$normalized_text" == *"partial"* \
+     || "$normalized_text" == *"in progress"* \
+     || "$section" == "missing_next" ]]; then
+    printf '%s' "p2"
+    return
+  fi
+  printf '%s' "p3"
+}
+
+infer_item_recommended_action() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  if [[ "$normalized_text" == *"invite_key"* \
+     || "$normalized_text" == *"campaign-subject"* \
+     || "$normalized_text" == *"subject"* ]]; then
+    printf '%s' "Populate A_HOST/B_HOST and campaign subject, then rerun profile-default gate cycle."
+    return
+  fi
+  if [[ "$normalized_text" == *"vm command"* \
+     || "$normalized_text" == *"--vm-command"* \
+     || "$normalized_text" == *"multi-vm"* ]]; then
+    printf '%s' "Set --vm-command/--vm-command-file and rerun multi-VM stability cycle + promotion evidence pack."
+    return
+  fi
+  if [[ "$normalized_text" == *"runtime-actuation"* \
+     || "$normalized_text" == *"promotion"* ]]; then
+    printf '%s' "Rerun runtime-actuation promotion cycle until thresholds pass, then publish evidence pack."
+    return
+  fi
+  if [[ "$normalized_text" == *"evidence pack"* \
+     || "$normalized_text" == *"publish"* ]]; then
+    printf '%s' "Generate and publish deterministic evidence-pack artifacts with fail-closed checks."
+    return
+  fi
+  if [[ "$normalized_text" == *"real-host"* ]]; then
+    printf '%s' "Capture real-host validation artifacts and attach them to the promoted summary path."
+    return
+  fi
+  if [[ "$section" == "missing_next" ]]; then
+    printf '%s' "Close this missing/next gap with one deterministic command and summary artifact."
+    return
+  fi
+  printf '%s' "Continue implementation and refresh summary artifacts for this in-progress item."
 }
 
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -312,6 +376,23 @@ item_count="${#ITEM_TEXTS[@]}"
 summary_tmp="$(mktemp "$reports_dir/gpm_gap_scan_summary.tmp.XXXXXX")"
 in_progress_ordinal=0
 missing_next_ordinal=0
+declare -a sorted_actionable_ids=()
+for wanted_severity in p1 p2 p3; do
+  for idx in "${!ITEM_TEXTS[@]}"; do
+    if [[ "${ITEM_SEVERITIES[$idx]:-}" != "$wanted_severity" ]]; then
+      continue
+    fi
+    section="${ITEM_SECTIONS[$idx]}"
+    if [[ "$section" == "in_progress" ]]; then
+      ordinal=$((idx + 1))
+      item_id="$(printf 'in_progress_%02d' "$(( $(printf '%s\n' "${ITEM_SECTIONS[@]:0:$idx}" | grep -c '^in_progress$' 2>/dev/null || true) + 1 ))")"
+    else
+      ordinal=$((idx + 1))
+      item_id="$(printf 'missing_next_%02d' "$(( $(printf '%s\n' "${ITEM_SECTIONS[@]:0:$idx}" | grep -c '^missing_next$' 2>/dev/null || true) + 1 ))")"
+    fi
+    sorted_actionable_ids+=("$item_id")
+  done
+done
 
 {
   printf '{\n'
@@ -339,6 +420,8 @@ missing_next_ordinal=0
       section="${ITEM_SECTIONS[$idx]}"
       text="${ITEM_TEXTS[$idx]}"
       normalized_text="${ITEM_NORMALIZED_TEXTS[$idx]}"
+      severity="${ITEM_SEVERITIES[$idx]}"
+      recommended_action="${ITEM_RECOMMENDED_ACTIONS[$idx]}"
       if [[ "$section" == "in_progress" ]]; then
         in_progress_ordinal=$((in_progress_ordinal + 1))
         ordinal="$in_progress_ordinal"
@@ -356,8 +439,21 @@ missing_next_ordinal=0
       printf '      "section": "%s",\n' "$(json_escape "$section")"
       printf '      "ordinal": %d,\n' "$ordinal"
       printf '      "text": "%s",\n' "$(json_escape "$text")"
-      printf '      "normalized_text": "%s"\n' "$(json_escape "$normalized_text")"
+      printf '      "normalized_text": "%s",\n' "$(json_escape "$normalized_text")"
+      printf '      "severity": "%s",\n' "$(json_escape "$severity")"
+      printf '      "recommended_action": "%s"\n' "$(json_escape "$recommended_action")"
       printf '    }'
+    done
+    printf '\n'
+  fi
+  printf '  ],\n'
+  printf '  "top_actionable_item_ids": [\n'
+  if (( ${#sorted_actionable_ids[@]} > 0 )); then
+    for idx in "${!sorted_actionable_ids[@]}"; do
+      if (( idx > 0 )); then
+        printf ',\n'
+      fi
+      printf '    "%s"' "$(json_escape "${sorted_actionable_ids[$idx]}")"
     done
     printf '\n'
   fi

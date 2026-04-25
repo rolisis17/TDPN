@@ -23,6 +23,7 @@ run_step() {
 
 run_step "unit tests" go test ./...
 run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh
+run_step "openai model policy guard" ./scripts/integration_openai_model_policy_guard.sh
 run_step "security baseline" ./scripts/integration_security_baseline.sh
 run_step "github repo security baseline" ./scripts/integration_github_repo_security_baseline.sh
 run_step "release integrity" ./scripts/integration_release_integrity.sh

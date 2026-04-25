@@ -164,6 +164,20 @@ exit "${FAKE_CHECK_RC:-0}"
 EOF_FAKE_CHECK
 chmod +x "$FAKE_CHECK"
 
+echo "[profile-compare-campaign-signoff] help text advertises canonical + legacy subject flags"
+./scripts/profile_compare_campaign_signoff.sh --help >/tmp/integration_profile_compare_campaign_signoff_help.log 2>&1
+if ! grep -F -- '--campaign-subject ID | --subject ID | --campaign-anon-cred TOKEN' /tmp/integration_profile_compare_campaign_signoff_help.log >/dev/null; then
+  echo "expected signoff help to include canonical + legacy subject usage"
+  cat /tmp/integration_profile_compare_campaign_signoff_help.log
+  exit 1
+fi
+./scripts/easy_node.sh --help --expert >/tmp/integration_profile_compare_campaign_signoff_easy_node_help.log 2>&1
+if ! grep -F -- '[--campaign-subject ID|--subject ID|--campaign-anon-cred TOKEN]' /tmp/integration_profile_compare_campaign_signoff_easy_node_help.log >/dev/null; then
+  echo "expected easy_node help to include canonical + legacy subject usage"
+  cat /tmp/integration_profile_compare_campaign_signoff_easy_node_help.log
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] success path"
 : >"$SIGNOFF_CAPTURE"
 SUCCESS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_success.json"
@@ -604,6 +618,39 @@ fi
 if ! jq -e '.inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$EXPLICIT_SUBJECT_SUMMARY" >/dev/null 2>&1; then
   echo "expected explicit subject_source summary fields missing"
   cat "$EXPLICIT_SUBJECT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] canonical and alias subject flags with same value succeed"
+: >"$SIGNOFF_CAPTURE"
+CANONICAL_ALIAS_MATCH_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_canonical_alias_match_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_canonical_alias_match" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --campaign-subject "inv-canonical-match" \
+  --subject "inv-canonical-match" \
+  --summary-json "$CANONICAL_ALIAS_MATCH_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_canonical_alias_match.log 2>&1
+
+if ! rg -q '\[profile-compare-campaign-signoff\] status=ok final_rc=0 decision=GO' /tmp/integration_profile_compare_campaign_signoff_canonical_alias_match.log; then
+  echo "expected canonical/alias same-value status line not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_canonical_alias_match.log
+  exit 1
+fi
+if ! rg -q -- '--subject inv-canonical-match' "$SIGNOFF_CAPTURE"; then
+  echo "expected canonical/alias same-value subject forwarding flag missing"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.subject_source == "explicit" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides_effective.subject_configured == true' "$CANONICAL_ALIAS_MATCH_SUMMARY" >/dev/null 2>&1; then
+  echo "canonical/alias same-value summary JSON missing expected fields"
+  cat "$CANONICAL_ALIAS_MATCH_SUMMARY"
   exit 1
 fi
 

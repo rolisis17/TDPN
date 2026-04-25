@@ -11,6 +11,43 @@ function Write-Step {
   Write-Host "[desktop-one-click] $Message"
 }
 
+function Assert-PolicySafeNodeRunnerScript {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptLabel
+  )
+
+  if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+    throw "missing $ScriptLabel script: $ScriptPath"
+  }
+
+  $contents = ""
+  try {
+    $contents = [string](Get-Content -Raw -LiteralPath $ScriptPath -ErrorAction Stop)
+  } catch {
+    throw "failed to inspect $ScriptLabel script for npm/npx policy guardrails: $ScriptPath"
+  }
+
+  if (-not $contents.Contains("npm.cmd")) {
+    throw @"
+$ScriptLabel script is missing policy-safe npm runner marker 'npm.cmd': $ScriptPath
+To avoid npm.ps1/npx.ps1 execution-policy failures, update that script to use npm.cmd/npx.cmd (or desktop_node.cmd / desktop_shell.cmd).
+"@
+  }
+
+  $npxPolicySafe = $contents.Contains("npx.cmd") -or
+    $contents.Contains("desktop_node.cmd npx") -or
+    $contents.Contains("desktop_shell.cmd npx")
+  if ($contents -match '(?i)\bnpx\b' -and -not $npxPolicySafe) {
+    throw @"
+$ScriptLabel script references npx but is missing a policy-safe npx runner marker: $ScriptPath
+Use npx.cmd directly or route npx through desktop_node.cmd / desktop_shell.cmd to avoid npm.ps1/npx.ps1 execution-policy failures.
+"@
+  }
+}
+
 function Test-IsWslSession {
   $wslDistro = [Environment]::GetEnvironmentVariable("WSL_DISTRO_NAME", "Process")
   if (-not [string]::IsNullOrWhiteSpace($wslDistro)) {
@@ -280,13 +317,18 @@ $doctorScript = Join-Path $scriptDir "desktop_doctor.ps1"
 if (-not (Test-Path -LiteralPath $doctorScript -PathType Leaf)) {
   throw "missing doctor script: $doctorScript"
 }
+Assert-PolicySafeNodeRunnerScript -ScriptPath $doctorScript -ScriptLabel "desktop doctor"
 
 $bootstrapScript = Join-Path $scriptDir "desktop_native_bootstrap.ps1"
 if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
   throw "missing bootstrap script: $bootstrapScript"
 }
+Assert-PolicySafeNodeRunnerScript -ScriptPath $bootstrapScript -ScriptLabel "desktop bootstrap"
 
 $firstRunRemediationScript = Join-Path $scriptDir "desktop_first_run_remediation.ps1"
+if (Test-Path -LiteralPath $firstRunRemediationScript -PathType Leaf) {
+  Assert-PolicySafeNodeRunnerScript -ScriptPath $firstRunRemediationScript -ScriptLabel "desktop first-run blocker helper"
+}
 
 Show-ExecutionPolicyStatus
 

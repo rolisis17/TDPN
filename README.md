@@ -488,6 +488,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/exit-node-safety-baseline-v1.md` (minimum safety controls for hardened exit operators)
 - `docs/exit-node-safety-guide.md` (operator-facing practical exit safety workflow)
 - `docs/client-safety-guide.md` (client-side safety defaults and profile tradeoff guidance)
+- `docs/openai-gpt-5.5-migration.md` (OpenAI model migration baseline and `gpt-5.5` default for future integrations)
 - `./scripts/easy_node.sh manual-validation-status --show-json 1` (current real-host readiness state: runtime hygiene + recorded manual checks, now including direct pointers to the latest failed incident bundle when a recorded smoke/signoff run captured one)
 - `./scripts/easy_node.sh manual-validation-report --print-report 1 --print-summary-json 1` (generate one shareable markdown + JSON readiness handoff artifact from the current real-host validation state, with latest failed incident pointers when present and direct bundle attachment paths for refreshed readiness-report artifacts when a failed run captured them)
 - `./scripts/easy_node.sh roadmap-progress-report --refresh-manual-validation 1 --print-report 1 --print-summary-json 1` (one-command roadmap execution snapshot for regular team handoffs, including the VPN RC-done phase signal, explicit pending real-host checks, current VPN gate stage, and deferred blockchain-track policy note)

@@ -376,6 +376,45 @@ func TestMsgServerDistributeRewardFailsClosedWhenAccrualHasNoProviderSubject(t *
 	}
 }
 
+func TestMsgServerDistributeRewardFailsClosedWhenAccrualOperationStateFailed(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	k.UpsertAccrual(types.RewardAccrual{
+		AccrualID:      "acc-failed-state",
+		SessionID:      "sess-failed-state",
+		ProviderID:     "provider-failed-state",
+		AssetDenom:     "uusdc",
+		Amount:         10,
+		OperationState: chaintypes.ReconciliationFailed,
+	})
+
+	resp, err := server.DistributeReward(DistributeRewardRequest{
+		Distribution: types.DistributionRecord{
+			DistributionID: "dist-failed-state",
+			AccrualID:      "acc-failed-state",
+			PayoutRef:      "payout-failed-state",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed invalid distribution error for failed accrual state")
+	}
+	if !errors.Is(err, ErrInvalidDistribution) {
+		t.Fatalf("expected ErrInvalidDistribution, got %v", err)
+	}
+	if resp.Existed {
+		t.Fatal("expected existed=false on failed accrual state rejection")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on failed accrual state rejection")
+	}
+	if _, ok := k.GetDistribution("dist-failed-state"); ok {
+		t.Fatal("expected no distribution write when accrual state is failed")
+	}
+}
+
 func TestMsgServerNilKeeper(t *testing.T) {
 	t.Parallel()
 

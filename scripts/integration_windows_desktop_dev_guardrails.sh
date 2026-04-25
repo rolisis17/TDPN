@@ -33,10 +33,13 @@ assert_marker_present() {
 }
 
 assert_marker_present "function Assert-WindowsNativeNonWsl" "$SCRIPT_UNDER_TEST"
+assert_marker_present "function Assert-PolicySafeNodeRunnerScript" "$SCRIPT_UNDER_TEST"
 assert_marker_present "execution_model=windows-native-non-wsl" "$SCRIPT_UNDER_TEST"
 assert_marker_present "wsl_required=false" "$SCRIPT_UNDER_TEST"
 assert_marker_present "is Windows-native and must run outside WSL." "$SCRIPT_UNDER_TEST"
 assert_marker_present "scripts\\windows\\wsl2_easy.cmd bootstrap" "$SCRIPT_UNDER_TEST"
+assert_marker_present "policy-safe npm runner marker 'npm.cmd'" "$SCRIPT_UNDER_TEST"
+assert_marker_present "policy-safe npx runner marker" "$SCRIPT_UNDER_TEST"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -144,6 +147,7 @@ run_expect_fail_regex() {
 INSTALL_ON_REGEX='rerun (with|in this shell with) process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -InstallMissing -DryRun -ApiAddr'
 INSTALL_OFF_REGEX='rerun (with|in this shell with) process-scope bypass: .*desktop_native_bootstrap\.ps1.*-DesktopLaunchStrategy '\''dev'\'' -DryRun -ApiAddr'
 CONFLICT_REGEX='conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing'
+POLICY_SAFE_MARKER_REGEX="policy-safe npm runner marker 'npm\\.cmd'|policy-safe npx runner marker"
 PACKAGE_PRETAURI_REGEX='"pretauri"[[:space:]]*:[[:space:]]*"npm run generate:windows-icon"'
 ICON_HELPER_DRY_RUN_REGEX='desktop icon prebuild: would generate .*icon\.ico .*icon\.svg|manual command -> cd apps/desktop && npm run generate:windows-icon'
 ICON_HELPER_GENERATED_REGEX='desktop icon prebuild: generated .*icon\.ico from .*icon\.svg'
@@ -179,6 +183,26 @@ run_expect_fail_regex \
   "Windows-native and must run outside WSL|non-WSL|wsl2_easy\\.cmd bootstrap" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
     "\$ErrorActionPreference='Stop'; \$env:WSL_DISTRO_NAME='Ubuntu-guardrail'; & $SCRIPT_UNDER_TEST_PS_Q -DryRun"
+
+echo "[windows-desktop-dev-guardrails] unsafe bootstrap delegate fails fast with npm/npx policy-safe guidance"
+FAKE_SCRIPT_DIR="$TMP_DIR/fake-desktop-dev"
+mkdir -p "$FAKE_SCRIPT_DIR"
+cp "$SCRIPT_UNDER_TEST" "$FAKE_SCRIPT_DIR/desktop_dev.ps1"
+cat >"$FAKE_SCRIPT_DIR/desktop_native_bootstrap.ps1" <<'EOF'
+param(
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$Args
+)
+
+Write-Host "[fake-bootstrap] invoked"
+exit 0
+EOF
+FAKE_SCRIPT_UNDER_TEST_PS="$(to_powershell_path "$FAKE_SCRIPT_DIR/desktop_dev.ps1")"
+run_expect_fail_regex \
+  "unsafe_bootstrap_delegate_fails_fast" \
+  "$POLICY_SAFE_MARKER_REGEX" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & $(ps_single_quote "$FAKE_SCRIPT_UNDER_TEST_PS") -DryRun"
 
 TMP_ICON_DIR="$TMP_DIR/windows-icon-test"
 mkdir -p "$TMP_ICON_DIR"

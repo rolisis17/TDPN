@@ -2637,6 +2637,83 @@ func TestHandlePathOpenRequireMiddleRelayRejectsMiddleRelayWithoutOperatorID(t *
 	}
 }
 
+func TestHandlePathOpenRequireMiddleRelayRejectsMissingExitOperatorMetadata(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:      "middle-collide-missing-exit-op",
+			Role:         "micro-relay",
+			OperatorID:   "op-exit",
+			Reputation:   0.9,
+			Uptime:       0.9,
+			Capacity:     0.9,
+			AbusePenalty: 0.1,
+			Endpoint:     "127.0.0.1:51822",
+			ValidUntil:   time.Now().Add(time.Minute),
+		},
+	})
+
+	exitCalls := 0
+	handlers["http://exit.local/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{
+			Accepted:   true,
+			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
+			Transport:  "wireguard-udp",
+		})(req)
+	}
+
+	s := &Service{
+		dataAddr:           "127.0.0.1:51820",
+		requireMiddleRelay: true,
+		httpClient:         &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:           map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{
+			"exit-b": {
+				controlURL: "http://exit.local",
+				dataAddr:   "127.0.0.1:51821",
+				operatorID: "",
+				fetchedAt:  time.Now(),
+				validUntil: time.Now().Add(time.Minute),
+			},
+		},
+		directoryURLs: []string{durl},
+		routeTTL:      time.Minute,
+		buckets:       map[string]rateBucket{},
+		abuse:         map[string]abuseState{},
+		openRPS:       100,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:        "exit-b",
+		MiddleRelayID: "middle-collide-missing-exit-op",
+		Transport:     "wireguard-udp",
+		TokenProof:    "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41049"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected require-middle-relay mode to reject missing exit operator metadata")
+	}
+	if out.Reason != "exit-operator-missing" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit, got %d", exitCalls)
+	}
+}
+
 func TestHandlePathOpenNonStrictAllowsMiddleRelayWithoutOperatorID(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
