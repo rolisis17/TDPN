@@ -118,6 +118,12 @@ if [[ "$scenario" == "missing_no_write" ]]; then
   exit 0
 fi
 
+if [[ "$scenario" == "runner_nonzero_vm_log_not_found" ]]; then
+  echo "vm command file preflight failed: not_found" >&2
+  echo "preflight_diag: source=vm-command-file path=/tmp/does_not_exist_vm_commands.txt reason=not_found" >&2
+  exit "${FAKE_M5_PROMOTION_CYCLE_RC:-7}"
+fi
+
 mkdir -p "$(dirname "$summary_json")"
 
 if [[ "$scenario" == "invalid_json" ]]; then
@@ -407,6 +413,103 @@ assert_jq "$UNSAFE_SUMMARY" '
   and .rc == 0
   and ((.next_command // "") | contains("rm -rf") | not)
   and ((.next_command // "") | test("profile_compare_multi_vm_stability_promotion_cycle\\.sh|profile_compare_multi_vm_stability_promotion_live_archive_and_pack\\.sh"))
+'
+
+echo "[promotion-live-archive-and-pack] unresolved placeholder env VM command source is classified fail-closed"
+VM_PLACEHOLDER_SUMMARY="$TMP_DIR/vm_placeholder_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="REPLACE_WITH_VM_COMMAND_FILE" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_CYCLE_SCRIPT="$FAKE_PROMOTION_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_M5_PROMOTION_CYCLE_SCENARIO="runner_nonzero_with_summary" \
+FAKE_M5_PROMOTION_CYCLE_RC="7" \
+FAKE_M5_PACK_SCENARIO="pass" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/vm_placeholder_reports" \
+  --cycles 2 \
+  --fail-on-no-go 1 \
+  --summary-json "$VM_PLACEHOLDER_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_vm_placeholder.log 2>&1
+vm_placeholder_rc=$?
+set -e
+
+if [[ "$vm_placeholder_rc" -eq 0 ]]; then
+  echo "expected unresolved placeholder VM source path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_vm_placeholder.log
+  exit 1
+fi
+assert_jq "$VM_PLACEHOLDER_SUMMARY" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_reason_code == "vm_command_source_unresolved_placeholder"
+  and .failure_substep == "vm_command_source_unresolved_placeholder"
+  and .inputs.vm_command_source_preflight.ready == false
+  and .inputs.vm_command_source_preflight.explicit_env_seen == true
+  and .inputs.vm_command_source_preflight.primary_reason == "placeholder_value"
+  and (.inputs.vm_command_source_preflight.diagnostics | map(test("placeholder_value")) | any)
+'
+
+echo "[promotion-live-archive-and-pack] unsafe env VM command source path is classified fail-closed"
+VM_UNSAFE_SUMMARY="$TMP_DIR/vm_unsafe_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="unsafe;path" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_CYCLE_SCRIPT="$FAKE_PROMOTION_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_M5_PROMOTION_CYCLE_SCENARIO="runner_nonzero_with_summary" \
+FAKE_M5_PROMOTION_CYCLE_RC="7" \
+FAKE_M5_PACK_SCENARIO="pass" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/vm_unsafe_reports" \
+  --cycles 2 \
+  --fail-on-no-go 1 \
+  --summary-json "$VM_UNSAFE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_vm_unsafe.log 2>&1
+vm_unsafe_rc=$?
+set -e
+
+if [[ "$vm_unsafe_rc" -eq 0 ]]; then
+  echo "expected unsafe VM source path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_vm_unsafe.log
+  exit 1
+fi
+assert_jq "$VM_UNSAFE_SUMMARY" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_reason_code == "vm_command_source_unsafe_path"
+  and .failure_substep == "vm_command_source_unsafe_path"
+  and .inputs.vm_command_source_preflight.ready == false
+  and .inputs.vm_command_source_preflight.explicit_env_seen == true
+  and .inputs.vm_command_source_preflight.primary_reason == "unsafe_path_value"
+  and (.inputs.vm_command_source_preflight.diagnostics | map(test("unsafe_path_value")) | any)
+'
+
+echo "[promotion-live-archive-and-pack] VM command-file not-found failure in logs is classified fail-closed"
+VM_LOG_NOT_FOUND_SUMMARY="$TMP_DIR/vm_log_not_found_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_CYCLE_SCRIPT="$FAKE_PROMOTION_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_M5_PROMOTION_CYCLE_SCENARIO="runner_nonzero_vm_log_not_found" \
+FAKE_M5_PROMOTION_CYCLE_RC="7" \
+FAKE_M5_PACK_SCENARIO="pass" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/vm_log_not_found_reports" \
+  --cycles 2 \
+  --fail-on-no-go 1 \
+  --summary-json "$VM_LOG_NOT_FOUND_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_vm_log_not_found.log 2>&1
+vm_log_not_found_rc=$?
+set -e
+
+if [[ "$vm_log_not_found_rc" -eq 0 ]]; then
+  echo "expected VM command-file not-found log scenario rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_vm_log_not_found.log
+  exit 1
+fi
+assert_jq "$VM_LOG_NOT_FOUND_SUMMARY" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_reason_code == "vm_command_source_unresolved"
+  and .failure_substep == "vm_command_source_unresolved"
 '
 
 echo "[promotion-live-archive-and-pack] promotion-cycle runner nonzero with summary fail-closed"

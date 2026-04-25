@@ -252,6 +252,355 @@ first_non_empty_line_01() {
   printf '%s' ""
 }
 
+array_to_json() {
+  if (( $# == 0 )); then
+    printf '%s' "[]"
+  else
+    printf '%s\n' "$@" | jq -R . | jq -s '.'
+  fi
+}
+
+string_has_unsafe_shell_chars_01() {
+  local value=""
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  if [[ "$value" == *";"* ]] || [[ "$value" == *"&&"* ]] || [[ "$value" == *"||"* ]] || [[ "$value" == *"|"* ]] || [[ "$value" == *'$('* ]] || [[ "$value" == *'`'* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+validate_vm_command_file_or_reason() {
+  local path="$1"
+  local line=""
+  local line_number=0
+  local vm_id=""
+  local vm_command=""
+  local vm_id_key=""
+  local vm_command_existing=""
+  local runnable_specs=0
+  declare -A vm_command_by_id=()
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '%s\n' "not_found"
+    return 1
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_number=$((line_number + 1))
+    line="$(trim "$line")"
+    if [[ -z "$line" || "$line" == \#* ]]; then
+      continue
+    fi
+    if [[ "$line" != *"::"* ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_missing_delimiter"
+      return 1
+    fi
+    vm_id="$(trim "${line%%::*}")"
+    vm_command="$(trim "${line#*::}")"
+    if [[ -z "$vm_id" || -z "$vm_command" ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_empty_vm_or_command"
+      return 1
+    fi
+    if [[ "$vm_id" =~ [[:space:]] ]]; then
+      printf '%s\n' "invalid_vm_command_spec_line_${line_number}_vm_id_contains_whitespace"
+      return 1
+    fi
+    vm_id_key="$vm_id"
+    if [[ -n "${vm_command_by_id["$vm_id_key"]+present}" ]]; then
+      vm_command_existing="${vm_command_by_id["$vm_id_key"]}"
+      if [[ "$vm_command_existing" != "$vm_command" ]]; then
+        printf '%s\n' "invalid_vm_command_spec_line_${line_number}_duplicate_vm_id_conflict"
+        return 1
+      fi
+      continue
+    fi
+    vm_command_by_id["$vm_id_key"]="$vm_command"
+    runnable_specs=$((runnable_specs + 1))
+  done <"$path"
+  if (( runnable_specs < 1 )); then
+    printf '%s\n' "no_runnable_specs"
+    return 1
+  fi
+  printf '%s\n' "ready"
+  return 0
+}
+
+record_vm_command_source_preflight_diag_01() {
+  vm_command_source_preflight_diagnostics+=("$1")
+}
+
+vm_command_source_reason_priority_01() {
+  local reason=""
+  reason="$(trim "${1:-}")"
+  case "$reason" in
+    placeholder_value|unsafe_path_value)
+      printf '%s' "1"
+      ;;
+    invalid_vm_command_spec*|no_runnable_specs)
+      printf '%s' "2"
+      ;;
+    *)
+      printf '%s' "3"
+      ;;
+  esac
+}
+
+set_vm_command_source_primary_issue_01() {
+  local reason=""
+  local source=""
+  local path=""
+  local priority=99
+  local current_priority=99
+  reason="$(trim "${1:-}")"
+  source="$(trim "${2:-}")"
+  path="$(trim "${3:-}")"
+  if [[ -z "$reason" ]]; then
+    return
+  fi
+  priority="$(vm_command_source_reason_priority_01 "$reason")"
+  current_priority="${vm_command_source_preflight_primary_reason_priority:-99}"
+  if [[ -z "$current_priority" ]] || ! [[ "$current_priority" =~ ^[0-9]+$ ]]; then
+    current_priority=99
+  fi
+  if [[ -z "$vm_command_source_preflight_primary_reason" || "$priority" -lt "$current_priority" ]]; then
+    vm_command_source_preflight_primary_reason="$reason"
+    vm_command_source_preflight_primary_source="$source"
+    vm_command_source_preflight_primary_path="$path"
+    vm_command_source_preflight_primary_reason_priority="$priority"
+  fi
+}
+
+discover_vm_command_source_preflight_01() {
+  local reports_path=""
+  local candidate_path=""
+  local candidate_source=""
+  local reason=""
+  local env_var=""
+  local env_raw_value=""
+  local env_path=""
+  local artifact_name=""
+  local -a env_fallback_vars=(
+    "PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE"
+    "PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE"
+    "PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE"
+  )
+  local -a legacy_artifact_names=(
+    "profile_compare_multi_vm_vm_commands.txt"
+    "vm_commands.txt"
+  )
+
+  reports_path="$(abs_path "$reports_dir")"
+
+  candidate_path="$(abs_path "$reports_path/profile_compare_multi_vm_stability_vm_commands.txt")"
+  candidate_source="reports-dir-canonical"
+  if [[ ! -f "$candidate_path" ]]; then
+    record_vm_command_source_preflight_diag_01 "source=$candidate_source path=$candidate_path reason=not_found"
+  elif ! reason="$(validate_vm_command_file_or_reason "$candidate_path")"; then
+    record_vm_command_source_preflight_diag_01 "source=$candidate_source path=$candidate_path reason=$reason"
+    set_vm_command_source_primary_issue_01 "$reason" "$candidate_source" "$candidate_path"
+  else
+    vm_command_source_preflight_ready="true"
+    vm_command_source_preflight_selected_source="$candidate_source"
+    vm_command_source_preflight_selected_path="$candidate_path"
+    record_vm_command_source_preflight_diag_01 "source=$candidate_source path=$candidate_path result=selected"
+    return
+  fi
+
+  for env_var in "${env_fallback_vars[@]}"; do
+    env_raw_value="$(trim "${!env_var:-}")"
+    if [[ -z "$env_raw_value" ]]; then
+      continue
+    fi
+
+    vm_command_source_preflight_explicit_env_seen="true"
+    env_raw_value="$(strip_optional_wrapping_quotes_01 "$env_raw_value")"
+    env_raw_value="$(trim "$env_raw_value")"
+
+    if [[ -z "$env_raw_value" ]]; then
+      record_vm_command_source_preflight_diag_01 "source=$env_var reason=empty_path"
+      set_vm_command_source_primary_issue_01 "empty_path" "env:$env_var" ""
+      continue
+    fi
+    if is_placeholder_like_text_01 "$env_raw_value"; then
+      record_vm_command_source_preflight_diag_01 "source=$env_var value=$env_raw_value reason=placeholder_value"
+      set_vm_command_source_primary_issue_01 "placeholder_value" "env:$env_var" "$env_raw_value"
+      continue
+    fi
+    if string_has_unsafe_shell_chars_01 "$env_raw_value"; then
+      record_vm_command_source_preflight_diag_01 "source=$env_var value=$env_raw_value reason=unsafe_path_value"
+      set_vm_command_source_primary_issue_01 "unsafe_path_value" "env:$env_var" "$env_raw_value"
+      continue
+    fi
+
+    env_path="$(abs_path "$env_raw_value")"
+    if [[ -z "$env_path" ]]; then
+      record_vm_command_source_preflight_diag_01 "source=$env_var reason=empty_path"
+      set_vm_command_source_primary_issue_01 "empty_path" "env:$env_var" ""
+      continue
+    fi
+    if [[ ! -f "$env_path" ]]; then
+      record_vm_command_source_preflight_diag_01 "source=$env_var path=$env_path reason=not_found"
+      set_vm_command_source_primary_issue_01 "not_found" "env:$env_var" "$env_path"
+      continue
+    fi
+    if ! reason="$(validate_vm_command_file_or_reason "$env_path")"; then
+      record_vm_command_source_preflight_diag_01 "source=$env_var path=$env_path reason=$reason"
+      set_vm_command_source_primary_issue_01 "$reason" "env:$env_var" "$env_path"
+      continue
+    fi
+
+    vm_command_source_preflight_ready="true"
+    vm_command_source_preflight_selected_source="env:$env_var"
+    vm_command_source_preflight_selected_path="$env_path"
+    record_vm_command_source_preflight_diag_01 "source=$env_var path=$env_path result=selected"
+    return
+  done
+
+  for artifact_name in "${legacy_artifact_names[@]}"; do
+    candidate_source="reports-dir-legacy"
+    candidate_path="$(abs_path "$reports_path/$artifact_name")"
+    if [[ ! -f "$candidate_path" ]]; then
+      record_vm_command_source_preflight_diag_01 "source=$candidate_source path=$candidate_path reason=not_found"
+      continue
+    fi
+    if ! reason="$(validate_vm_command_file_or_reason "$candidate_path")"; then
+      record_vm_command_source_preflight_diag_01 "source=$candidate_source path=$candidate_path reason=$reason"
+      set_vm_command_source_primary_issue_01 "$reason" "$candidate_source" "$candidate_path"
+      continue
+    fi
+    vm_command_source_preflight_ready="true"
+    vm_command_source_preflight_selected_source="$candidate_source"
+    vm_command_source_preflight_selected_path="$candidate_path"
+    record_vm_command_source_preflight_diag_01 "source=$candidate_source path=$candidate_path result=selected"
+    return
+  done
+}
+
+extract_vm_command_source_reason_from_log_01() {
+  local log_path="$1"
+  local line=""
+  if [[ -z "$log_path" || ! -f "$log_path" ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  line="$(grep -Eim1 'operator_next_action: unresolved_placeholder .*REPLACE_WITH_VM_COMMAND_FILE' "$log_path" 2>/dev/null || true)"
+  if [[ -n "$line" ]]; then
+    printf '%s' "placeholder_value"
+    return
+  fi
+
+  line="$(grep -Eim1 'vm command file preflight failed:' "$log_path" 2>/dev/null || true)"
+  if [[ -n "$line" ]]; then
+    line="$(trim "${line#*:}")"
+    printf '%s' "$line"
+    return
+  fi
+
+  line="$(grep -Eim1 'reason=[A-Za-z0-9_:-]+' "$log_path" 2>/dev/null || true)"
+  if [[ -n "$line" && "$line" =~ reason=([A-Za-z0-9_:-]+) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return
+  fi
+
+  if grep -Eiq 'at least one --vm-command or --vm-command-file is required' "$log_path" 2>/dev/null; then
+    printf '%s' "missing_required_input"
+    return
+  fi
+  if grep -Eiq 'no usable VM command fallback was discovered' "$log_path" 2>/dev/null; then
+    printf '%s' "missing_required_input"
+    return
+  fi
+
+  printf '%s' ""
+}
+
+map_vm_command_source_failure_code_01() {
+  local reason=""
+  reason="$(trim "${1:-}")"
+  case "$reason" in
+    placeholder_value|*REPLACE_WITH_VM_COMMAND_FILE*|*placeholder*)
+      printf '%s' "vm_command_source_unresolved_placeholder"
+      ;;
+    unsafe_path_value|unsafe_path*)
+      printf '%s' "vm_command_source_unsafe_path"
+      ;;
+    invalid_vm_command_spec*|no_runnable_specs)
+      printf '%s' "vm_command_source_invalid_command_file"
+      ;;
+    missing_required_input|not_found|empty_path)
+      printf '%s' "vm_command_source_unresolved"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+classify_vm_command_source_failure_01() {
+  local promotion_cycle_log_path="$1"
+  local reason_from_log=""
+  local code=""
+  vm_command_source_failure_code=""
+  vm_command_source_failure_reason=""
+  vm_command_source_failure_reason_detail=""
+  vm_command_source_failure_next_command_reason=""
+  vm_command_source_failure_next_operator_action=""
+
+  reason_from_log="$(extract_vm_command_source_reason_from_log_01 "$promotion_cycle_log_path")"
+  if [[ -n "$reason_from_log" ]]; then
+    code="$(map_vm_command_source_failure_code_01 "$reason_from_log")"
+    if [[ -n "$code" ]]; then
+      vm_command_source_failure_reason_detail="$reason_from_log"
+      vm_command_source_failure_code="$code"
+    fi
+  fi
+
+  if [[ -z "$vm_command_source_failure_code" \
+    && "$vm_command_source_preflight_ready" != "true" \
+    && "$vm_command_source_preflight_explicit_env_seen" == "true" \
+    && -n "$vm_command_source_preflight_primary_reason" ]]; then
+    code="$(map_vm_command_source_failure_code_01 "$vm_command_source_preflight_primary_reason")"
+    if [[ -n "$code" ]]; then
+      vm_command_source_failure_reason_detail="$vm_command_source_preflight_primary_reason"
+      vm_command_source_failure_code="$code"
+    fi
+  fi
+
+  if [[ -z "$vm_command_source_failure_code" ]]; then
+    return
+  fi
+
+  case "$vm_command_source_failure_code" in
+    vm_command_source_unresolved_placeholder)
+      vm_command_source_failure_reason="VM command source contains unresolved placeholder input."
+      vm_command_source_failure_next_command_reason="VM command source includes placeholder text; replace placeholder values with a concrete vm-command file path before rerunning promotion cycle."
+      vm_command_source_failure_next_operator_action="Replace placeholder VM command source values with a concrete vm-command file path and rerun this helper."
+      ;;
+    vm_command_source_unsafe_path)
+      vm_command_source_failure_reason="VM command source path is unsafe."
+      vm_command_source_failure_next_command_reason="VM command source path contains unsafe shell metacharacters; provide a plain readable vm-command file path and rerun promotion cycle."
+      vm_command_source_failure_next_operator_action="Provide a safe vm-command file path (no shell metacharacters) and rerun this helper."
+      ;;
+    vm_command_source_invalid_command_file)
+      vm_command_source_failure_reason="VM command source file failed preflight validation."
+      vm_command_source_failure_next_command_reason="VM command source file is invalid; fix VM_ID::COMMAND lines (no conflicting duplicate VM IDs) and rerun promotion cycle."
+      vm_command_source_failure_next_operator_action="Fix vm-command file formatting/entries and rerun this helper."
+      ;;
+    vm_command_source_unresolved)
+      vm_command_source_failure_reason="VM command source could not be resolved."
+      vm_command_source_failure_next_command_reason="No usable VM command source was resolved from env/report artifacts; provide a readable vm-command file path and rerun promotion cycle."
+      vm_command_source_failure_next_operator_action="Provide a usable vm-command source (env file path or reports-dir command file) and rerun this helper."
+      ;;
+    *)
+      vm_command_source_failure_reason="VM command source preflight failed."
+      vm_command_source_failure_next_command_reason="Resolve VM command source inputs and rerun promotion cycle."
+      vm_command_source_failure_next_operator_action="Resolve VM command source inputs and rerun this helper."
+      ;;
+  esac
+}
+
 evaluate_stage_summary_json() {
   local summary_path="$1"
   local expected_schema_id="$2"
@@ -507,7 +856,29 @@ promotion_cycle_rerun_command="$(trim "$promotion_cycle_rerun_command")"
 promotion_evidence_pack_rerun_command="$(render_command bash ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh --reports-dir "$reports_dir" --promotion-cycle-summary-json "$promotion_cycle_summary_json" --fail-on-no-go "$fail_on_no_go" --summary-json "$promotion_evidence_pack_summary_json" --report-md "$promotion_evidence_pack_report_md" --print-summary-json 1)"
 promotion_evidence_pack_rerun_command="$(trim "$promotion_evidence_pack_rerun_command")"
 
+declare -a vm_command_source_preflight_diagnostics=()
+vm_command_source_preflight_ready="false"
+vm_command_source_preflight_selected_source=""
+vm_command_source_preflight_selected_path=""
+vm_command_source_preflight_primary_reason=""
+vm_command_source_preflight_primary_source=""
+vm_command_source_preflight_primary_path=""
+vm_command_source_preflight_primary_reason_priority="99"
+vm_command_source_preflight_explicit_env_seen="false"
+vm_command_source_failure_code=""
+vm_command_source_failure_reason=""
+vm_command_source_failure_reason_detail=""
+vm_command_source_failure_next_command_reason=""
+vm_command_source_failure_next_operator_action=""
+discover_vm_command_source_preflight_01
+vm_command_source_preflight_diagnostics_json="$(array_to_json "${vm_command_source_preflight_diagnostics[@]}")"
+
 echo "[profile-compare-multi-vm-stability-promotion-live-archive-and-pack] $(timestamp_utc) start reports_dir=$reports_dir cycles=$cycles fail_on_no_go=$fail_on_no_go"
+if (( ${#vm_command_source_preflight_diagnostics[@]} > 0 )); then
+  for vm_diag in "${vm_command_source_preflight_diagnostics[@]}"; do
+    echo "[profile-compare-multi-vm-stability-promotion-live-archive-and-pack] $(timestamp_utc) vm-command-source-preflight $vm_diag"
+  done
+fi
 
 promotion_cycle_stage_attempted="true"
 promotion_cycle_stage_rc=0
@@ -608,19 +979,45 @@ promotion_cycle_next_command_hint="$(sanitize_action_command_01 "$(jq -r '.next_
 promotion_evidence_pack_next_command_hint="$(sanitize_action_command_01 "$(jq -r '.next_command_hint // ""' <<<"$promotion_evidence_pack_eval_json")")"
 
 if [[ "$promotion_cycle_stage_rc" -ne 0 ]]; then
-  failure_substep="promotion_cycle_runner_nonzero"
-  failure_reason_code="$failure_substep"
-  failure_reason="promotion cycle command failed (rc=$promotion_cycle_stage_rc)"
-  next_command="$promotion_cycle_rerun_command"
-  next_command_reason="promotion-cycle command failed; inspect stage log and rerun promotion cycle."
-  next_operator_action="$(first_non_empty_line_01 "$promotion_cycle_next_action_hint" "Regenerate promotion-cycle live archive evidence and rerun this helper.")"
+  classify_vm_command_source_failure_01 "$promotion_cycle_log"
+  if [[ -n "$vm_command_source_failure_code" ]]; then
+    failure_substep="$vm_command_source_failure_code"
+    failure_reason_code="$vm_command_source_failure_code"
+    failure_reason="$vm_command_source_failure_reason"
+    if [[ -n "$vm_command_source_failure_reason_detail" ]]; then
+      failure_reason="$failure_reason (reason=$vm_command_source_failure_reason_detail)"
+    fi
+    next_command="$promotion_cycle_rerun_command"
+    next_command_reason="$vm_command_source_failure_next_command_reason"
+    next_operator_action="$(first_non_empty_line_01 "$promotion_cycle_next_action_hint" "$vm_command_source_failure_next_operator_action")"
+  else
+    failure_substep="promotion_cycle_runner_nonzero"
+    failure_reason_code="$failure_substep"
+    failure_reason="promotion cycle command failed (rc=$promotion_cycle_stage_rc)"
+    next_command="$promotion_cycle_rerun_command"
+    next_command_reason="promotion-cycle command failed; inspect stage log and rerun promotion cycle."
+    next_operator_action="$(first_non_empty_line_01 "$promotion_cycle_next_action_hint" "Regenerate promotion-cycle live archive evidence and rerun this helper.")"
+  fi
 elif [[ "$(jq -r '.usable' <<<"$promotion_cycle_eval_json")" != "true" ]]; then
-  failure_substep="promotion_cycle_summary_missing_or_stale"
-  failure_reason_code="$failure_substep"
-  failure_reason="promotion cycle summary artifact is missing, invalid, or stale"
-  next_command="$promotion_cycle_rerun_command"
-  next_command_reason="promotion-cycle summary artifact is missing or stale; rerun promotion cycle before evidence-pack stage."
-  next_operator_action="$(first_non_empty_line_01 "$promotion_cycle_next_action_hint" "Regenerate promotion-cycle live archive evidence and rerun this helper.")"
+  classify_vm_command_source_failure_01 "$promotion_cycle_log"
+  if [[ -n "$vm_command_source_failure_code" ]]; then
+    failure_substep="$vm_command_source_failure_code"
+    failure_reason_code="$vm_command_source_failure_code"
+    failure_reason="$vm_command_source_failure_reason"
+    if [[ -n "$vm_command_source_failure_reason_detail" ]]; then
+      failure_reason="$failure_reason (reason=$vm_command_source_failure_reason_detail)"
+    fi
+    next_command="$promotion_cycle_rerun_command"
+    next_command_reason="$vm_command_source_failure_next_command_reason"
+    next_operator_action="$(first_non_empty_line_01 "$promotion_cycle_next_action_hint" "$vm_command_source_failure_next_operator_action")"
+  else
+    failure_substep="promotion_cycle_summary_missing_or_stale"
+    failure_reason_code="$failure_substep"
+    failure_reason="promotion cycle summary artifact is missing, invalid, or stale"
+    next_command="$promotion_cycle_rerun_command"
+    next_command_reason="promotion-cycle summary artifact is missing or stale; rerun promotion cycle before evidence-pack stage."
+    next_operator_action="$(first_non_empty_line_01 "$promotion_cycle_next_action_hint" "Regenerate promotion-cycle live archive evidence and rerun this helper.")"
+  fi
 elif [[ "$promotion_evidence_pack_stage_attempted" == "true" && "$promotion_evidence_pack_stage_rc" -ne 0 ]]; then
   failure_substep="promotion_evidence_pack_runner_nonzero"
   failure_reason_code="$failure_substep"
@@ -731,9 +1128,17 @@ summary_payload="$(jq -n \
   --arg promotion_cycle_archive_root "$promotion_cycle_archive_root" \
   --arg promotion_evidence_pack_summary_json "$promotion_evidence_pack_summary_json" \
   --arg promotion_evidence_pack_report_md "$promotion_evidence_pack_report_md" \
+  --arg vm_command_source_preflight_ready "$vm_command_source_preflight_ready" \
+  --arg vm_command_source_preflight_selected_source "$vm_command_source_preflight_selected_source" \
+  --arg vm_command_source_preflight_selected_path "$vm_command_source_preflight_selected_path" \
+  --arg vm_command_source_preflight_primary_reason "$vm_command_source_preflight_primary_reason" \
+  --arg vm_command_source_preflight_primary_source "$vm_command_source_preflight_primary_source" \
+  --arg vm_command_source_preflight_primary_path "$vm_command_source_preflight_primary_path" \
+  --arg vm_command_source_preflight_explicit_env_seen "$vm_command_source_preflight_explicit_env_seen" \
   --argjson rc "$final_rc" \
   --argjson cycles "$cycles" \
   --argjson fail_on_no_go "$fail_on_no_go" \
+  --argjson vm_command_source_preflight_diagnostics "$vm_command_source_preflight_diagnostics_json" \
   --argjson promotion_cycle_stage_rc "$promotion_cycle_stage_rc" \
   --argjson promotion_evidence_pack_stage_attempted "$promotion_evidence_pack_stage_attempted" \
   --argjson promotion_evidence_pack_stage_rc "$promotion_evidence_pack_stage_rc" \
@@ -758,7 +1163,37 @@ summary_payload="$(jq -n \
     inputs: {
       reports_dir: $reports_dir,
       cycles: $cycles,
-      fail_on_no_go: ($fail_on_no_go == 1)
+      fail_on_no_go: ($fail_on_no_go == 1),
+      vm_command_source_preflight: {
+        ready: ($vm_command_source_preflight_ready == "true"),
+        selected_source: (
+          if $vm_command_source_preflight_selected_source == "" then null
+          else $vm_command_source_preflight_selected_source
+          end
+        ),
+        selected_path: (
+          if $vm_command_source_preflight_selected_path == "" then null
+          else $vm_command_source_preflight_selected_path
+          end
+        ),
+        explicit_env_seen: ($vm_command_source_preflight_explicit_env_seen == "true"),
+        primary_reason: (
+          if $vm_command_source_preflight_primary_reason == "" then null
+          else $vm_command_source_preflight_primary_reason
+          end
+        ),
+        primary_source: (
+          if $vm_command_source_preflight_primary_source == "" then null
+          else $vm_command_source_preflight_primary_source
+          end
+        ),
+        primary_path: (
+          if $vm_command_source_preflight_primary_path == "" then null
+          else $vm_command_source_preflight_primary_path
+          end
+        ),
+        diagnostics: $vm_command_source_preflight_diagnostics
+      }
     },
     stages: {
       promotion_cycle_live_archive: {
@@ -842,6 +1277,9 @@ printf '%s\n' "$summary_payload" >"$summary_json"
   printf -- '- Next operator action: %s\n' "$(jq -r '.next_operator_action // "none"' "$summary_json")"
   printf -- '- Next command: %s\n' "$(jq -r '.next_command // "none"' "$summary_json")"
   printf -- '- Next command reason: %s\n' "$(jq -r '.next_command_reason // "none"' "$summary_json")"
+  printf -- '- VM command source preflight ready: %s\n' "$(jq -r '.inputs.vm_command_source_preflight.ready | tostring' "$summary_json")"
+  printf -- '- VM command source selected: %s\n' "$(jq -r '.inputs.vm_command_source_preflight.selected_source // "none"' "$summary_json")"
+  printf -- '- VM command source primary reason: %s\n' "$(jq -r '.inputs.vm_command_source_preflight.primary_reason // "none"' "$summary_json")"
   printf '\n'
   printf '## Stage: Promotion Cycle (Live Archive)\n\n'
   printf -- '- Attempted: %s\n' "$(jq -r '.stages.promotion_cycle_live_archive.attempted | tostring' "$summary_json")"
