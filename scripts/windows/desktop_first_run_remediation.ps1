@@ -317,6 +317,17 @@ function Resolve-NpmCommandPath {
   return (Resolve-ToolPath -Name "npm")
 }
 
+function Resolve-ToolchainPaths {
+  return [pscustomobject]@{
+    go = (Resolve-ToolPath -Name "go")
+    node = (Resolve-ToolPath -Name "node")
+    npm = (Resolve-NpmCommandPath)
+    npx = (Resolve-ToolPath -Name "npx")
+    rustc = (Resolve-ToolPath -Name "rustc")
+    cargo = (Resolve-ToolPath -Name "cargo")
+  }
+}
+
 function Get-CommandPs1CmdSiblingStatus {
   param(
     [Parameter(Mandatory = $true)][string]$CommandName,
@@ -728,7 +739,10 @@ $applyFailedActions = New-Object System.Collections.Generic.List[string]
 $executionPolicyBefore = Get-ExecutionPolicySnapshot
 $executionPolicyRiskBefore = $executionPolicyBefore.effective -notin @("Bypass", "Unrestricted", "RemoteSigned")
 
-if ($Apply -and $executionPolicyRiskBefore) {
+$applyRequested = [bool]$Apply
+$effectiveApplyRequested = [bool]($applyRequested -and -not [bool]$DryRun)
+
+if ($effectiveApplyRequested -and $executionPolicyRiskBefore) {
   try {
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
     $appliedActions.Add("Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force") | Out-Null
@@ -740,12 +754,98 @@ if ($Apply -and $executionPolicyRiskBefore) {
 $executionPolicySnapshot = Get-ExecutionPolicySnapshot
 $executionPolicyRisk = $executionPolicySnapshot.effective -notin @("Bypass", "Unrestricted", "RemoteSigned")
 
-$goPath = Get-CommandPath "go"
-$nodePath = Get-CommandPath "node"
-$npmPath = Get-CommandPath "npm"
-$npxPath = Get-CommandPath "npx"
-$rustcPath = Get-CommandPath "rustc"
-$cargoPath = Get-CommandPath "cargo"
+$sessionPathRefreshAttempted = $false
+$sessionPathRefreshSucceeded = $false
+$sessionPathRefreshError = ""
+$sessionPathBeforeRefresh = [string]$env:Path
+$sessionPathAfterRefresh = [string]$env:Path
+$sessionPathAugmentAttempted = $false
+$sessionPathAugmentApplied = $false
+$sessionPathAugmentError = ""
+$sessionPathCandidates = @()
+$sessionPathAppended = @()
+$sessionPathBeforeAugment = [string]$env:Path
+$sessionPathAfterAugment = [string]$env:Path
+$toolResolutionPass = "initial"
+
+$sessionPathRefreshAttempted = $true
+try {
+  Refresh-SessionPath
+  $sessionPathRefreshSucceeded = $true
+} catch {
+  $sessionPathRefreshSucceeded = $false
+  $sessionPathRefreshError = $_.Exception.Message
+}
+$sessionPathAfterRefresh = [string]$env:Path
+
+$toolPaths = Resolve-ToolchainPaths
+$goPath = [string]$toolPaths.go
+$nodePath = [string]$toolPaths.node
+$npmPath = [string]$toolPaths.npm
+$npxPath = [string]$toolPaths.npx
+$rustcPath = [string]$toolPaths.rustc
+$cargoPath = [string]$toolPaths.cargo
+$toolResolutionPass = "post_refresh"
+
+$missingAfterRefresh = @()
+if ([string]::IsNullOrWhiteSpace($goPath)) { $missingAfterRefresh += "go" }
+if ([string]::IsNullOrWhiteSpace($nodePath)) { $missingAfterRefresh += "node" }
+if ([string]::IsNullOrWhiteSpace($npmPath)) { $missingAfterRefresh += "npm" }
+if ([string]::IsNullOrWhiteSpace($npxPath)) { $missingAfterRefresh += "npx" }
+if ([string]::IsNullOrWhiteSpace($rustcPath)) { $missingAfterRefresh += "rustc" }
+if ([string]::IsNullOrWhiteSpace($cargoPath)) { $missingAfterRefresh += "cargo" }
+
+if ($missingAfterRefresh.Count -gt 0) {
+  $sessionPathAugmentAttempted = $true
+  $sessionPathBeforeAugment = [string]$env:Path
+  try {
+    $commonToolDirectories = @(Get-CommonToolDirectories)
+    $sessionPathCandidates = @($commonToolDirectories)
+
+    if ($commonToolDirectories.Count -gt 0) {
+      $beforeKeys = @{}
+      foreach ($segment in ($sessionPathBeforeAugment -split ";")) {
+        if ([string]::IsNullOrWhiteSpace($segment)) { continue }
+        $key = $segment.Trim().TrimEnd("\").ToLowerInvariant()
+        if ($key.Length -eq 0) { continue }
+        $beforeKeys[$key] = $true
+      }
+
+      Add-SessionPathSegments -Segments $commonToolDirectories
+      $sessionPathAfterAugment = [string]$env:Path
+
+      foreach ($candidate in $commonToolDirectories) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $candidateKey = $candidate.Trim().TrimEnd("\").ToLowerInvariant()
+        if ($candidateKey.Length -eq 0) { continue }
+        if (-not $beforeKeys.ContainsKey($candidateKey)) {
+          $sessionPathAppended += $candidate.Trim().TrimEnd("\")
+        }
+      }
+      if ($sessionPathAppended.Count -gt 0) {
+        $sessionPathAugmentApplied = $true
+      }
+    } else {
+      $sessionPathAfterAugment = [string]$env:Path
+    }
+  } catch {
+    $sessionPathAugmentError = $_.Exception.Message
+    $sessionPathAfterAugment = [string]$env:Path
+  }
+
+  $toolPaths = Resolve-ToolchainPaths
+  $goPath = [string]$toolPaths.go
+  $nodePath = [string]$toolPaths.node
+  $npmPath = [string]$toolPaths.npm
+  $npxPath = [string]$toolPaths.npx
+  $rustcPath = [string]$toolPaths.rustc
+  $cargoPath = [string]$toolPaths.cargo
+  $toolResolutionPass = "post_refresh_plus_common_dirs"
+} else {
+  $sessionPathBeforeAugment = $sessionPathAfterRefresh
+  $sessionPathAfterAugment = [string]$env:Path
+}
+
 $gitBashSnapshot = Get-GitBashSnapshot
 
 $goAvailable = -not [string]::IsNullOrWhiteSpace($goPath)
@@ -769,14 +869,16 @@ $npxCmdSiblingAvailable = [bool]$npxResolverStatus.cmd_sibling_available
 
 $npmAliasRemediation = Invoke-SessionCmdAliasRemediation `
   -CommandName "npm" `
-  -ApplyRequested ([bool]$Apply) `
+  -ApplyRequested ([bool]$applyRequested) `
+  -DryRunMode ([bool]$DryRun) `
   -ExecutionPolicyRisk ([bool]$executionPolicyRisk) `
   -ResolvesToPs1 ([bool]$npmResolvesToPs1) `
   -CmdSiblingPath $npmCmdSiblingPath
 
 $npxAliasRemediation = Invoke-SessionCmdAliasRemediation `
   -CommandName "npx" `
-  -ApplyRequested ([bool]$Apply) `
+  -ApplyRequested ([bool]$applyRequested) `
+  -DryRunMode ([bool]$DryRun) `
   -ExecutionPolicyRisk ([bool]$executionPolicyRisk) `
   -ResolvesToPs1 ([bool]$npxResolvesToPs1) `
   -CmdSiblingPath $npxCmdSiblingPath
@@ -787,10 +889,10 @@ if ([bool]$npmAliasRemediation.applied) {
 if ([bool]$npxAliasRemediation.applied) {
   $appliedActions.Add(("Set-Alias -Name npx -Value `"{0}`" -Scope Global -Force" -f $npxCmdSiblingPath)) | Out-Null
 }
-if ([bool]$npmAliasRemediation.attempted -and -not [bool]$npmAliasRemediation.applied) {
+if ([bool]$npmAliasRemediation.attempted -and -not [bool]$npmAliasRemediation.applied -and [string]$npmAliasRemediation.reason -eq "set_alias_failed") {
   $applyFailedActions.Add(("Set-Alias -Name npm failed :: {0}" -f $npmAliasRemediation.error)) | Out-Null
 }
-if ([bool]$npxAliasRemediation.attempted -and -not [bool]$npxAliasRemediation.applied) {
+if ([bool]$npxAliasRemediation.attempted -and -not [bool]$npxAliasRemediation.applied -and [string]$npxAliasRemediation.reason -eq "set_alias_failed") {
   $applyFailedActions.Add(("Set-Alias -Name npx failed :: {0}" -f $npxAliasRemediation.error)) | Out-Null
 }
 
@@ -805,6 +907,8 @@ $tauriBundleIconConfigured = [bool]$desktopAssets.tauri_bundle_icon.configured
 
 $issues = New-Object System.Collections.Generic.List[string]
 if ($executionPolicyRisk) { $issues.Add("execution_policy_risk") | Out-Null }
+if (-not $sessionPathRefreshSucceeded) { $issues.Add("session_path_refresh_failed") | Out-Null }
+if (-not [string]::IsNullOrWhiteSpace($sessionPathAugmentError)) { $issues.Add("session_path_augment_failed") | Out-Null }
 if (-not $goAvailable) { $issues.Add("go_missing") | Out-Null }
 if (-not $nodeAvailable) { $issues.Add("node_missing") | Out-Null }
 if (-not $npmAvailable) { $issues.Add("npm_missing") | Out-Null }
@@ -820,8 +924,8 @@ if ($npxPs1ShimIssue) { $issues.Add("npx_ps1_without_npx_cmd") | Out-Null }
 if (-not $sourceIconAvailable) { $issues.Add("desktop_icon_source_missing") | Out-Null }
 if (-not $generatedIconValid) { $issues.Add("desktop_icon_missing_or_invalid") | Out-Null }
 if (-not $tauriBundleIconConfigured) { $issues.Add("desktop_tauri_bundle_icon_resource_missing") | Out-Null }
-if ([bool]$Apply -and [bool]$npmAliasRemediation.eligible -and -not [bool]$npmAliasRemediation.applied) { $issues.Add("npm_session_alias_apply_failed") | Out-Null }
-if ([bool]$Apply -and [bool]$npxAliasRemediation.eligible -and -not [bool]$npxAliasRemediation.applied) { $issues.Add("npx_session_alias_apply_failed") | Out-Null }
+if ([bool]$effectiveApplyRequested -and [bool]$npmAliasRemediation.eligible -and -not [bool]$npmAliasRemediation.applied) { $issues.Add("npm_session_alias_apply_failed") | Out-Null }
+if ([bool]$effectiveApplyRequested -and [bool]$npxAliasRemediation.eligible -and -not [bool]$npxAliasRemediation.applied) { $issues.Add("npx_session_alias_apply_failed") | Out-Null }
 if ($applyFailedActions.Count -gt 0) { $issues.Add("execution_policy_apply_failed") | Out-Null }
 
 $safeHints = New-Object System.Collections.Generic.List[string]
@@ -865,6 +969,8 @@ if ($issues.Count -gt 0) {
 
 $checkResults = [ordered]@{
   execution_policy_unblocked = [bool](-not $executionPolicyRisk)
+  session_path_refresh_safe = [bool]$sessionPathRefreshSucceeded
+  session_path_augment_safe = [bool][string]::IsNullOrWhiteSpace($sessionPathAugmentError)
   go_available = [bool]$goAvailable
   node_available = [bool]$nodeAvailable
   npm_available = [bool]$npmAvailable
@@ -898,8 +1004,8 @@ $statusLabel = if ($issues.Count -eq 0) { "PASS" } else { "FAIL" }
 
 if ($Compact) {
   Write-Step ("summary: pass={0} fail={1} status={2}" -f $passCount, $failCount, $statusLabel)
-  if ($Apply) {
-    Write-Step ("apply: requested=true applied={0} failed={1}" -f $appliedActions.Count, $applyFailedActions.Count)
+  if ($applyRequested -or [bool]$DryRun) {
+    Write-Step ("apply: requested={0} effective_apply={1} dry_run={2} applied={3} failed={4}" -f $applyRequested.ToString().ToLowerInvariant(), $effectiveApplyRequested.ToString().ToLowerInvariant(), ([bool]$DryRun).ToString().ToLowerInvariant(), $appliedActions.Count, $applyFailedActions.Count)
   }
   if ($issues.Count -gt 0) {
     Write-Step ("issues: {0}" -f ($issues -join ", "))
@@ -928,16 +1034,16 @@ if ($Compact) {
   }
   if ([bool]$npmAliasRemediation.applied) {
     Write-Step ("session alias remediation applied: npm -> {0}" -f $npmAliasRemediation.alias_definition)
-  } elseif ([bool]$npmAliasRemediation.eligible -and -not [bool]$Apply) {
+  } elseif ([bool]$npmAliasRemediation.eligible -and -not [bool]$applyRequested) {
     Write-Step "session alias remediation available for npm; rerun with -Apply to force npm.cmd for this shell only"
   }
   if ([bool]$npxAliasRemediation.applied) {
     Write-Step ("session alias remediation applied: npx -> {0}" -f $npxAliasRemediation.alias_definition)
-  } elseif ([bool]$npxAliasRemediation.eligible -and -not [bool]$Apply) {
+  } elseif ([bool]$npxAliasRemediation.eligible -and -not [bool]$applyRequested) {
     Write-Step "session alias remediation available for npx; rerun with -Apply to force npx.cmd for this shell only"
   }
-  if ($Apply) {
-    Write-Step ("apply requested=true applied={0} failed={1}" -f $appliedActions.Count, $applyFailedActions.Count)
+  if ($applyRequested -or [bool]$DryRun) {
+    Write-Step ("apply requested={0} effective_apply={1} dry_run={2} applied={3} failed={4}" -f $applyRequested.ToString().ToLowerInvariant(), $effectiveApplyRequested.ToString().ToLowerInvariant(), ([bool]$DryRun).ToString().ToLowerInvariant(), $appliedActions.Count, $applyFailedActions.Count)
     foreach ($failedAction in $applyFailedActions) {
       Write-Step ("apply failure: {0}" -f $failedAction)
     }
@@ -960,7 +1066,9 @@ $summary = [ordered]@{
   issues_detected = [int]$issues.Count
   issues = @($issues)
   apply = [ordered]@{
-    requested = [bool]$Apply
+    requested = [bool]$applyRequested
+    dry_run_requested = [bool]$DryRun
+    effective_apply_requested = [bool]$effectiveApplyRequested
     execution_policy_risk_before = [bool]$executionPolicyRiskBefore
     execution_policy_effective_before = $executionPolicyBefore.effective
     execution_policy_effective_after = $executionPolicySnapshot.effective
@@ -976,6 +1084,21 @@ $summary = [ordered]@{
       current_user = $executionPolicySnapshot.scopes.CurrentUser
       local_machine = $executionPolicySnapshot.scopes.LocalMachine
       risk_detected = [bool]$executionPolicyRisk
+    }
+    session_path = [ordered]@{
+      refresh_attempted = [bool]$sessionPathRefreshAttempted
+      refresh_succeeded = [bool]$sessionPathRefreshSucceeded
+      refresh_error = [string]$sessionPathRefreshError
+      path_before_refresh = [string]$sessionPathBeforeRefresh
+      path_after_refresh = [string]$sessionPathAfterRefresh
+      augment_attempted = [bool]$sessionPathAugmentAttempted
+      augment_applied = [bool]$sessionPathAugmentApplied
+      augment_error = [string]$sessionPathAugmentError
+      candidate_directories = @($sessionPathCandidates)
+      appended_directories = @($sessionPathAppended)
+      path_before_augment = [string]$sessionPathBeforeAugment
+      path_after_augment = [string]$sessionPathAfterAugment
+      tool_resolution_pass = [string]$toolResolutionPass
     }
     toolchain = [ordered]@{
       go_available = [bool]$goAvailable
@@ -994,6 +1117,7 @@ $summary = [ordered]@{
     }
     npm = [ordered]@{
       resolver_path = $npmPath
+      npm_cmd_resolver_path = (Resolve-NpmCommandPath)
       resolves_to_npm_ps1 = [bool]$npmResolvesToPs1
       npm_cmd_sibling_available = [bool]$npmCmdSiblingAvailable
       npm_cmd_sibling_path = $npmCmdSiblingPath
