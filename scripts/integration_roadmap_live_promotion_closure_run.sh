@@ -23,6 +23,7 @@ STUB_DIR="$(mktemp -d "$ROOT_DIR/scripts/.integration_roadmap_live_promotion_clo
 trap 'rm -rf "$TMP_DIR" "$STUB_DIR"' EXIT
 
 CAPTURE_LOG="$TMP_DIR/helper_capture.tsv"
+VM_COMMAND_FILE_REAL="$TMP_DIR/profile_compare_multi_vm_stability_vm_commands.txt"
 
 assert_token() {
   local haystack="$1"
@@ -34,6 +35,11 @@ assert_token() {
     exit 1
   fi
 }
+
+cat >"$VM_COMMAND_FILE_REAL" <<'EOF_VM_COMMANDS'
+vm-a::echo vm-a
+vm-b::echo vm-b
+EOF_VM_COMMANDS
 
 FAKE_M2_SCRIPT="$STUB_DIR/fake_m2_profile_default_gate_stability_live_archive_and_pack.sh"
 cat >"$FAKE_M2_SCRIPT" <<'EOF_FAKE_M2'
@@ -341,8 +347,118 @@ if ! bash "$SCRIPT_UNDER_TEST" --help | grep -F -- "--campaign-subject ID" >/dev
   echo "help output missing --campaign-subject ID"
   exit 1
 fi
+if ! bash "$SCRIPT_UNDER_TEST" --help | grep -F -- "--vm-command-file PATH" >/dev/null; then
+  echo "help output missing --vm-command-file PATH"
+  exit 1
+fi
 if ! bash "$SCRIPT_UNDER_TEST" --help | grep -F -- "--print-summary-json [0|1]" >/dev/null; then
   echo "help output missing --print-summary-json [0|1]"
+  exit 1
+fi
+
+echo "[roadmap-live-promotion-closure-run] runtime-input preflight missing is fail-closed"
+SUMMARY_RUNTIME_MISSING="$TMP_DIR/summary_runtime_missing.json"
+: >"$CAPTURE_LOG"
+set +e
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$FAKE_M4_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
+FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
+FAKE_M2_BEHAVIOR=pass \
+FAKE_M4_BEHAVIOR=pass \
+FAKE_M5_BEHAVIOR=pass \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_runtime_missing" \
+  --summary-json "$SUMMARY_RUNTIME_MISSING" \
+  --print-summary-json 0
+runtime_missing_rc=$?
+set -e
+
+if [[ "$runtime_missing_rc" != "2" ]]; then
+  echo "expected runtime-missing fail-closed rc=2, got rc=$runtime_missing_rc"
+  cat "$SUMMARY_RUNTIME_MISSING"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .failure_substep == "preflight:runtime_inputs_unresolved_or_placeholder"
+  and .summary.preflight_ok == false
+  and .summary.helper_preflight_ok == true
+  and .summary.runtime_input_preflight_ok == false
+  and .summary.total_tracks == 3
+  and .summary.executed_tracks == 0
+  and .summary.pass_tracks == 0
+  and .summary.fail_tracks == 2
+  and .summary.skipped_tracks == 1
+  and .summary.unresolved_runtime_input_track_count == 2
+  and .summary.unresolved_runtime_input_count == 4
+  and .preflight.runtime_inputs_ok == false
+  and (.preflight.runtime_input_failures | length == 2)
+  and ([.tracks[].status] == ["fail","fail","skipped"])
+  and ([.tracks[].runtime_preflight.ok] == [false,false,true])
+' "$SUMMARY_RUNTIME_MISSING" >/dev/null; then
+  echo "runtime-missing fail-closed summary mismatch"
+  cat "$SUMMARY_RUNTIME_MISSING"
+  exit 1
+fi
+
+if [[ -s "$CAPTURE_LOG" ]]; then
+  echo "helper scripts should not run when runtime-input preflight fails"
+  cat "$CAPTURE_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-promotion-closure-run] runtime-input placeholder detection is fail-closed"
+SUMMARY_RUNTIME_PLACEHOLDER="$TMP_DIR/summary_runtime_placeholder.json"
+: >"$CAPTURE_LOG"
+set +e
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$FAKE_M4_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
+FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
+FAKE_M2_BEHAVIOR=pass \
+FAKE_M4_BEHAVIOR=pass \
+FAKE_M5_BEHAVIOR=pass \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_runtime_placeholder" \
+  --summary-json "$SUMMARY_RUNTIME_PLACEHOLDER" \
+  --host-a HOST_A \
+  --host-b REPLACE_WITH_HOST_B \
+  --campaign-subject INVITE_KEY \
+  --vm-command-file REPLACE_WITH_VM_COMMAND_FILE \
+  --print-summary-json 0
+runtime_placeholder_rc=$?
+set -e
+
+if [[ "$runtime_placeholder_rc" != "2" ]]; then
+  echo "expected runtime-placeholder fail-closed rc=2, got rc=$runtime_placeholder_rc"
+  cat "$SUMMARY_RUNTIME_PLACEHOLDER"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .failure_substep == "preflight:runtime_inputs_unresolved_or_placeholder"
+  and .summary.runtime_input_preflight_ok == false
+  and .tracks[0].runtime_preflight.required_runtime_inputs[0].state == "placeholder_unresolved"
+  and .tracks[0].runtime_preflight.required_runtime_inputs[1].state == "placeholder_unresolved"
+  and .tracks[0].runtime_preflight.required_runtime_inputs[2].state == "placeholder_unresolved"
+  and .tracks[1].runtime_preflight.required_runtime_inputs[0].state == "placeholder_unresolved"
+  and .tracks[2].runtime_preflight.required_runtime_inputs[0].state == "placeholder_unresolved"
+' "$SUMMARY_RUNTIME_PLACEHOLDER" >/dev/null; then
+  echo "runtime-placeholder fail-closed summary mismatch"
+  cat "$SUMMARY_RUNTIME_PLACEHOLDER"
+  exit 1
+fi
+
+if [[ -s "$CAPTURE_LOG" ]]; then
+  echo "helper scripts should not run when runtime-input placeholders are unresolved"
+  cat "$CAPTURE_LOG"
   exit 1
 fi
 
@@ -352,6 +468,7 @@ SUMMARY_SUCCESS="$TMP_DIR/summary_success.json"
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$FAKE_M4_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
 FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
 FAKE_M2_BEHAVIOR=pass \
 FAKE_M4_BEHAVIOR=pass \
@@ -421,6 +538,7 @@ set +e
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$FAKE_M4_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
 FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
 FAKE_M2_BEHAVIOR=pass \
 FAKE_M4_BEHAVIOR=fail \
@@ -482,6 +600,7 @@ set +e
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$FAKE_M4_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
 FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
 FAKE_M2_BEHAVIOR=pass \
 FAKE_M4_BEHAVIOR=pass_exit_nonzero \
@@ -490,6 +609,9 @@ FAKE_M5_BEHAVIOR=pass \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$TMP_DIR/reports_nonzero_pass" \
   --summary-json "$SUMMARY_NONZERO_PASS" \
+  --host-a 198.51.100.20 \
+  --host-b 198.51.100.21 \
+  --campaign-subject inv-real-003 \
   --print-summary-json 0
 nonzero_pass_rc=$?
 set -e
@@ -524,6 +646,7 @@ set +e
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$FAKE_M4_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
 FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
 FAKE_M2_BEHAVIOR=pass \
 FAKE_M4_BEHAVIOR=summary_fail_exit_zero \
@@ -532,6 +655,9 @@ FAKE_M5_BEHAVIOR=pass \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$TMP_DIR/reports_mismatch" \
   --summary-json "$SUMMARY_MISMATCH" \
+  --host-a 198.51.100.30 \
+  --host-b 198.51.100.31 \
+  --campaign-subject inv-real-004 \
   --print-summary-json 0
 mismatch_rc=$?
 set -e
@@ -567,12 +693,16 @@ set +e
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M2_SCRIPT="$FAKE_M2_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M4_SCRIPT="$MISSING_M4_SCRIPT" \
 ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_SCRIPT="$FAKE_M5_SCRIPT" \
+ROADMAP_LIVE_PROMOTION_CLOSURE_RUN_M5_VM_COMMAND_FILE="$VM_COMMAND_FILE_REAL" \
 FAKE_CAPTURE_FILE="$CAPTURE_LOG" \
 FAKE_M2_BEHAVIOR=pass \
 FAKE_M5_BEHAVIOR=pass \
 bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$TMP_DIR/reports_missing_helper" \
   --summary-json "$SUMMARY_MISSING_HELPER" \
+  --host-a 198.51.100.40 \
+  --host-b 198.51.100.41 \
+  --campaign-subject inv-real-005 \
   --print-summary-json 0
 missing_helper_rc=$?
 set -e
